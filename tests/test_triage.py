@@ -519,12 +519,12 @@ class TestBuildCommand:
         assert cmd[model_idx + 1] == "sonnet"
 
     def test_command_includes_max_turns(self, event_bus: EventBus) -> None:
-        config = ConfigFactory.create()
+        config = ConfigFactory.create(triage_max_turns=3)
         runner = TriageRunner(config, event_bus)
         cmd = runner._build_command()
         assert "--max-turns" in cmd
         turns_idx = cmd.index("--max-turns")
-        assert cmd[turns_idx + 1] == "1"
+        assert cmd[turns_idx + 1] == "3"
 
     def test_command_includes_bypass_permissions(self, event_bus: EventBus) -> None:
         config = ConfigFactory.create()
@@ -871,3 +871,73 @@ class TestTriageSentryBreadcrumbs:
             b for b in fake_obs.breadcrumbs if b["category"] == "triage.parse_failed"
         ]
         assert len(parse_bcs) == 1
+
+
+class TestCurrencyPromptCriteria:
+    def test_prompt_contains_currency_criterion(self, config, event_bus) -> None:
+        issue = TaskFactory.create(id=1)
+        runner = TriageRunner(config, event_bus)
+        prompt, _ = runner._build_prompt_with_stats(issue)
+        assert "Currency" in prompt
+
+    def test_prompt_contains_verifiable_claim_criterion(
+        self, config, event_bus
+    ) -> None:
+        issue = TaskFactory.create(id=1)
+        runner = TriageRunner(config, event_bus)
+        prompt, _ = runner._build_prompt_with_stats(issue)
+        assert "Verifiable claim" in prompt or "already implemented" in prompt.lower()
+
+    def test_prompt_response_schema_includes_already_addressed(
+        self, config, event_bus
+    ) -> None:
+        issue = TaskFactory.create(id=1)
+        runner = TriageRunner(config, event_bus)
+        prompt, _ = runner._build_prompt_with_stats(issue)
+        assert "already_addressed" in prompt
+
+    def test_prompt_response_schema_includes_claim_verified(
+        self, config, event_bus
+    ) -> None:
+        issue = TaskFactory.create(id=1)
+        runner = TriageRunner(config, event_bus)
+        prompt, _ = runner._build_prompt_with_stats(issue)
+        assert "claim_verified" in prompt
+
+
+class TestAlreadyAddressedVerdict:
+    def test_parse_verdict_extracts_already_addressed_true(self) -> None:
+        transcript = json.dumps(
+            {
+                "ready": False,
+                "reasons": [
+                    "Claim not reproducible: function is present at src/foo.py:42"
+                ],
+                "issue_type": "feature",
+                "clarity_score": 8,
+                "needs_discovery": False,
+                "enrichment": "",
+                "already_addressed": True,
+                "claim_verified": False,
+            }
+        )
+        result = TriageRunner._parse_verdict(transcript, 1)
+        assert result is not None
+        assert result.already_addressed is True
+        assert result.claim_verified is False
+
+    def test_parse_verdict_already_addressed_defaults_false(self) -> None:
+        transcript = json.dumps(
+            {
+                "ready": True,
+                "reasons": [],
+                "issue_type": "feature",
+                "clarity_score": 9,
+                "needs_discovery": False,
+                "enrichment": "",
+            }
+        )
+        result = TriageRunner._parse_verdict(transcript, 1)
+        assert result is not None
+        assert result.already_addressed is False
+        assert result.claim_verified is None

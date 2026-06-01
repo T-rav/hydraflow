@@ -7,9 +7,10 @@ Two modes:
   ``docs/arch/generated/``, exit 1 if any artifact is stale.
 
 Both modes share the same ``_compute_artifacts()`` core. The runner replaces
-the ``{{ARCH_FOOTER}}`` sentinel with a per-artifact regen footer (commit
-SHA + UTC timestamp) so the body of every emitted file is byte-stable up
-to the timestamp line.
+the ``{{ARCH_FOOTER}}`` sentinel with a stable ``<!-- arch:generated -->``
+HTML comment so the body of every emitted file is byte-stable across
+branches. The live stamp (commit SHA + UTC timestamp + freshness badge)
+lives exclusively in ``.meta.json``.
 """
 
 from __future__ import annotations
@@ -53,6 +54,8 @@ _ARTIFACT_FILES = [
     "changelog.md",
     "functional_areas.md",
     "coverage_matrix.md",
+    "ubiquitous-language.md",
+    "ubiquitous-language-context-map.md",
 ]
 
 
@@ -176,23 +179,18 @@ def _compute_artifacts(repo_root: Path) -> dict[str, str]:
 
 
 def _stamp_footer(body: str, sha: str, source_sha: str) -> str:
-    """Replace the {{ARCH_FOOTER}} sentinel with a per-page regen footer.
+    """Replace {{ARCH_FOOTER}} with a stable placeholder.
 
-    The footer is rendered visible italic text (not an HTML comment) so MkDocs
-    Material surfaces it to readers. The runner always writes FRESH because
-    emit() is what generates the artifact in the first place; the read-side
-    helper `compute_badge()` describes a stale artifact's state relative to
-    later source SHAs.
+    `sha`/`source_sha` are kept in the signature because they still drive the
+    `.meta.json` stamp written by `emit()`; they are intentionally NOT embedded
+    in the committed artifact body. The live stamp (sha, timestamp, badge)
+    lives exclusively in `.meta.json` so committed artifact bodies are
+    byte-stable across branches — eliminating an entire class of
+    footer-only merge conflict (the MergeStateWatcher recovery cost). The
+    MkDocs site re-emits fresh artifacts on every Pages deploy and reads the
+    live stamp from `.meta.json`, so readers still see current data.
     """
-    from arch.freshness import FreshnessBadge, render_badge
-
-    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-    badge = render_badge(FreshnessBadge.FRESH)
-    footer = (
-        f"_Regenerated from commit `{sha[:7]}` on {now}. "
-        f"Source last changed at `{source_sha[:7]}`. {badge}._"
-    )
-    return body.replace("{{ARCH_FOOTER}}", footer)
+    return body.replace("{{ARCH_FOOTER}}", "<!-- arch:generated -->")
 
 
 def emit(*, repo_root: Path, out_dir: Path) -> None:
@@ -217,15 +215,14 @@ def emit(*, repo_root: Path, out_dir: Path) -> None:
 
 
 def _strip_footer(text: str) -> str:
-    """Remove the trailing `_Regenerated from commit..._` line for diff purposes.
+    """Remove the stable `<!-- arch:generated -->` placeholder line for diffs.
 
-    The line is italicized markdown — `_Regenerated from commit ..._` — and may
-    be preceded by leading whitespace from the `_FOOTER` joining. Match
-    anywhere on the line, not just the start, so any future leading-character
-    tweak doesn't silently break the strip.
+    The footer is now a branch-agnostic HTML comment rather than a live
+    SHA+timestamp line, so `check()` strips it before diffing to keep the
+    no-sha contract: two emits of the same source must compare equal.
     """
     lines = text.splitlines()
-    out = [line for line in lines if "_Regenerated from commit" not in line]
+    out = [line for line in lines if "<!-- arch:generated -->" not in line]
     return "\n".join(out)
 
 

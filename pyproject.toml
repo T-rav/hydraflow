@@ -168,13 +168,14 @@ asyncio_mode = "auto"
 addopts = [
     "-q",
     "--tb=short",
-    "-m", "not soak and not docker and not scenario_loops and not scenario_browser",
+    "-m", "not soak and not docker and not evals and not scenario_loops and not scenario_browser",
 ]
 markers = [
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
     "soak: marks tests as soak/long-running tests (excluded from default runs)",
     "docker: marks tests requiring a running Docker daemon",
+    "evals: marks tests that call live LLM/model eval infrastructure",
     "scenario: scenario tests with MockWorld (full pipeline, deterministic)",
     "scenario_loops: scenario tests exercising background loops (Tier B)",
     "scenario_browser: scenario tests driving the real dashboard via Playwright (Tier C)",

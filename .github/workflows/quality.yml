@@ -143,17 +143,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-      - name: Quality Lite
-        if: needs.changes.outputs.code == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "${{ matrix.project_dir }}"
-          if [ -f Makefile ] || [ -f makefile ] || [ -f GNUmakefile ]; then
-            make quality-lite
-            exit 0
-          fi
-          echo "No Makefile in ${{ matrix.project_dir }}; skipping make quality-lite."
       - name: Quality Full
         if: needs.changes.outputs.code == 'true'
         shell: bash

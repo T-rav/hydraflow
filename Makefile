@@ -78,6 +78,8 @@ help:
 	@echo "  make deps           Sync dependencies via uv"
 	@echo "  make docker-build   Build Hydra agent Docker image"
 	@echo "  make docker-test    Build + smoke-test the agent image"
+	@echo "  make arch-regen-stage  Regenerate arch artifacts and git-add them (pre-commit fix)"
+	@echo "  make rebase-onto PARENT_TIP=<sha>  Rebase stacked branch past merged parent (see gotchas.md)"
 	@echo ""
 	@echo "$(GREEN)Options (make run):$(RESET)"
 	@echo "  PORT             Dashboard port (default: 5555)"
@@ -332,10 +334,13 @@ init:
 		$(ARGS)
 
 
+# Lint runs first, serially — ensures a failing lint aborts quality before
+# spending time on tests, and guarantees the same verdict as `make lint-check`.
+# pyright, bandit, and pytest are parallelised after lint passes.
 quality: deps lint-ul
 	@echo "$(BLUE)Running quality checks in parallel...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && $(UV) ruff check . && $(UV) ruff format . --check && echo "[lint OK]"
 	@cd $(HYDRAFLOW_DIR) && ( \
-		$(UV) ruff check . && $(UV) ruff format . --check && echo "[lint OK]" & \
 		$(UV) pyright && echo "[typecheck OK]" & \
 		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
 		PYTHONPATH=src $(UV) pytest tests/ && echo "[tests OK]" & \
@@ -586,13 +591,30 @@ docker-test: docker-build
 audit-prompts: ## Render all prompt fixtures, score against the rubric, regenerate the prompt-audit report.
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/audit_prompts.py
 
-.PHONY: arch-regen arch-check arch-serve arch-validate
+.PHONY: arch-regen arch-check arch-serve arch-validate arch-regen-stage rebase-onto
 
 ## arch-regen — regenerate docs/arch/generated/ from source
 arch-regen:
 	@echo "$(BLUE)Regenerating architecture knowledge artifacts...$(RESET)"
 	@$(UV) python -m arch.runner --emit --repo-root $(HYDRAFLOW_DIR)
 	@echo "$(GREEN)docs/arch/generated/ refreshed$(RESET)"
+
+## arch-regen-stage — regenerate AND stage all arch artifacts (use before commit)
+arch-regen-stage:
+	@echo "$(BLUE)Regenerating and staging architecture artifacts...$(RESET)"
+	@$(UV) python -m arch.runner --emit --repo-root $(HYDRAFLOW_DIR)
+	@git -C $(HYDRAFLOW_DIR) add docs/arch/generated docs/arch/.meta.json
+	@echo "$(GREEN)docs/arch/ refreshed and staged$(RESET)"
+
+## rebase-onto — rebase current branch onto origin/<base> past PARENT_TIP
+##   Usage: make rebase-onto PARENT_TIP=<sha-of-parent-branch-tip>
+##   Resolves arch/generated conflicts automatically via 'theirs' then re-stamps.
+rebase-onto:
+	@test -n "$(PARENT_TIP)" || { echo "Usage: make rebase-onto PARENT_TIP=<sha>"; exit 1; }
+	$(eval BASE_BRANCH := $(shell $(UV) python -c "from config import HydraFlowConfig; print(HydraFlowConfig().base_branch())" 2>/dev/null || echo staging))
+	@echo "$(BLUE)Rebasing onto origin/$(BASE_BRANCH) past $(PARENT_TIP)...$(RESET)"
+	@git rebase --onto origin/$(BASE_BRANCH) $(PARENT_TIP)
+	@echo "$(GREEN)Rebase complete. If arch/generated conflicts occurred, run: make arch-regen-stage$(RESET)"
 
 ## arch-check — dry-run regen; fail if generated/ is stale
 arch-check:

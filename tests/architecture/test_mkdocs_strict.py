@@ -14,8 +14,7 @@ def test_mkdocs_build_strict_succeeds(real_repo_root: Path):
     emitting a relative link to a page that doesn't exist (e.g. an ADR
     file path that's been deleted).
     """
-    if shutil.which("mkdocs") is None:
-        pytest.skip("mkdocs not installed; run: pip install -e '.[docs]'")
+    assert shutil.which("mkdocs") is not None, "mkdocs must be installed"
     res = subprocess.run(
         ["mkdocs", "build", "--strict"],
         cwd=real_repo_root,

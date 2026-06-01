@@ -47,7 +47,7 @@ REPRO_END = "REPRO_END"
 
 # Each transcript carries one Outcome line plus optional payload lines.
 _OUTCOME_RE = re.compile(
-    r"^\s*Outcome\s*:\s*(?P<outcome>success|partial|unable)\s*$",
+    r"^\s*Outcome\s*:\s*(?P<outcome>success|partial|unable|not_present)\s*$",
     re.IGNORECASE,
 )
 _TEST_PATH_RE = re.compile(
@@ -218,12 +218,16 @@ class BugReproducer(BaseRunner):
             f"- **partial**: agent could reproduce manually but not "
             f"automate — produce a `repro.sh`-style script\n"
             f"- **unable**: could not reproduce at all — escalate to "
-            f"a human\n\n"
+            f"a human\n"
+            f"- **not_present**: the described symptom does not exist in the "
+            f"current codebase — state this explicitly with evidence (file "
+            f"path, line number) rather than attempting to write a test for a "
+            f"non-existent problem\n\n"
             f"## Output format\n\n"
             f"Emit your result between {REPRO_START} and {REPRO_END} "
             f"markers using these key/value lines (one per line):\n"
             f"```\n"
-            f"Outcome: success | partial | unable\n"
+            f"Outcome: success | partial | unable | not_present\n"
             f"Test_path: tests/regressions/test_issue_{task.id}.py\n"
             f"Confidence: 0.0..1.0\n"
             f"Failing_output: <one-line summary of the failing assertion>\n"
