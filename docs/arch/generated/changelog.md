@@ -4,14 +4,32 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W23
+
+- `d2dc597` — merge: reconcile main into staging (resolve onboarding divergence) *(2026-06-01)*
+- `83f8fdf` — test(trust-fleet): close spec drift gaps *(2026-06-01)*
+
 ## 2026-W22
 
-- `ea70758` — feat(dashboard): push coalesced pipeline-snapshot deltas over WS (WS-RT PR3, backend) *(2026-05-30)*
+- `bd2167c` — test(ws-rt): browser e2e for live progression + reconnect re-sync (WS-RT PR6) (#9111) (#9111) *(2026-05-31)*
+- `1b97d49` — fix(ws-rt): reconnect resilience + ephemeral snapshots + repo-scoped /api/events (WS-RT PR5) (#9110) (#9110) *(2026-05-31)*
+- `53dc462` — refactor(ui): remove optimistic pipeline layer — snapshot push is authoritative (WS-RT PR4) (#9109) (#9109) *(2026-05-31)*
+- `1d9ade8` — feat(dashboard): real-time workstream via coalesced WS pipeline-snapshot push (WS-RT PR3) (#9108) (#9108) *(2026-05-31)*
+- `6c280b8` — Merge pull request #9132 from T-rav/arch/knowledge-bead-reconcile *(2026-05-31)*
+- `1b5c442` — feat(ci): arch freshness-stamp → .meta.json + DiagramLoop base fix + gate hygiene (factory refinements) (#9131) (#9131) *(2026-05-31)*
+- `3751706` — docs(arch): reconcile Plan A labels guard wording *(2026-05-31)*
+- `c7610ed` — test: enforce active coverage standards *(2026-05-31)*
+- `57bf27f` — review: enforce test value standards *(2026-05-31)*
+- `afda157` — test(mockworld): assert side effects through fake state (#9124) (#9124) *(2026-05-31)*
+- `1e5ce26` — test(mockworld): count real scenario key invocations (#9121) (#9121) *(2026-05-30)*
+- `347cc9e` — test(mockworld): close loop coverage matrix gaps (#9119) (#9119) *(2026-05-30)*
+- `932dc1d` — fix(mockworld): include FakeHoneycomb in generated map (#9116) (#9116) *(2026-05-30)*
 - `5ada680` — test: harden MockWorld side-effect coverage (#9104) (#9104) *(2026-05-30)*
 - `1ff6c54` — feat(security): scrub secrets on the canonical audit-write path (WS-4, ADR-0085) *(2026-05-30)*
 - `2abc16a` — merge prompt trust boundary into credit telemetry integrity *(2026-05-30)*
 - `40473a4` — merge staging into credit telemetry integrity *(2026-05-30)*
 - `038bf38` — merge staging into prompt injection trust boundary *(2026-05-30)*
+- `f3f34e5` — merge main into rc promotion *(2026-05-30)*
 - `febc4e7` — chore(arch): regenerate architecture artifacts after credit fixes *(2026-05-29)*
 - `a62f093` — fix(security): harden untrusted-text fence + restrict auto-agent (WS-7 fixes) *(2026-05-29)*
 - `ed8c682` — merge staging into no-ignored sandbox gates *(2026-05-29)*
@@ -25,6 +43,31 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
+- `1d9c95f` — Fixes #8931: stream onboarding activity in dashboard *(2026-05-23)*
+- `9dc0a8d` — Refs #8933: validate third-domain onboarding dashboard flow *(2026-05-23)*
+- `01b5854` — docs: refresh architecture artifacts *(2026-05-23)*
+- `66a1b1f` — Refs #8932: stream onboarding design chat *(2026-05-23)*
+- `8728fc2` — Refs #8932: persist wizard spec edits *(2026-05-23)*
+- `9362727` — Refs #8932: harden design chat extraction *(2026-05-23)*
+- `72eae73` — Refs #8933: add repo metrics dashboard payload *(2026-05-23)*
+- `43b1e0a` — Refs #8933: wire onboarding format upgrade *(2026-05-23)*
+- `bab9837` — Fixes #8933: wire onboarding continue plan *(2026-05-23)*
+- `553bd1d` — Refs #8932: add Claude design provider fallback *(2026-05-23)*
+- `adbcc6a` — Refs #8931: add onboarding push endpoint *(2026-05-23)*
+- `f4915b8` — Refs #8933: add onboarding dashboard repo slice *(2026-05-22)*
+- `6b74497` — Refs #8932: add onboarding design chat slice *(2026-05-22)*
+- `091f166` — Refs #8931: add onboarding wizard UI slice *(2026-05-22)*
+- `e439049` — Refs #8930: add onboarding materialize API slice *(2026-05-22)*
+- `e5e3dbd` — Refs #8930: add onboarding draft API foundation *(2026-05-22)*
+- `52784fb` — Fixes #8368: resolve dashboard a11y violations *(2026-05-22)*
+- `3381e36` — Refs #8475: preserve managed repo config models *(2026-05-22)*
+- `22b8cee` — Fixes #8617: expose repo pipeline enabled state *(2026-05-22)*
+- `90279ad` — Fixes #8651: collapse crowded pipeline dots *(2026-05-22)*
+- `1e94520` — Fixes #8674: refresh arch artifacts before bot push *(2026-05-22)*
+- `700bc6b` — Fixes #8658: update Opus 4.7 pricing *(2026-05-22)*
+- `72fea53` — Fixes #8979: fold epic sweep into monitor *(2026-05-22)*
+- `527bea0` — Fixes #8928: make issue creation failure explicit *(2026-05-22)*
+- `e7d4296` — Fixes #8481: register caretaker escalation labels *(2026-05-22)*
 - `60d07b4` — feat(mockworld): FakeDocker bd-CLI emulation for bead lifecycle coverage (closes #8367) (#9053) (#9053) *(2026-05-21)*
 - `4afc722` — chore(arch): regen post-rebase against staging *(2026-05-20)*
 - `2efdbb1` — chore(arch): regen post-rebase against staging *(2026-05-20)*

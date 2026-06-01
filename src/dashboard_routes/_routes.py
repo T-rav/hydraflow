@@ -1856,6 +1856,11 @@ def create_router(
 
     _register_reports(router, ctx)
 
+    # --- Headless onboarding draft routes (merged from main) ---
+    from dashboard_routes._onboarding_routes import register as _register_onboarding
+
+    _register_onboarding(router, ctx)
+
     @router.get("/api/sessions")
     async def get_sessions(
         repo: RepoSlugParam = None,
