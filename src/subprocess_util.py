@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
+    from circuit_breaker import CircuitBreaker
     from execution import SubprocessRunner
 
 logger = logging.getLogger("hydraflow.subprocess")
@@ -119,6 +120,49 @@ _RATE_LIMIT_POLL_INTERVAL: float = 1.0
 # and _rate_limit_until so concurrent callers cannot corrupt the backoff.
 _rate_limit_lock: threading.Lock = threading.Lock()
 
+# Global circuit breaker for the gh/git subprocess boundary. Opens after
+# ``max_failures`` consecutive non-rate-limit failures (GitHub/network down) so
+# callers fail fast instead of hammering a dead API; it auto-probes (HALF_OPEN)
+# after ``reset_timeout`` so it can never halt the factory permanently. When
+# disabled, every call is allowed — the live kill-switch, toggled via
+# ``PATCH /api/config`` → ``set_gh_circuit_breaker_enabled``. The breaker's
+# methods are synchronous and never await, so the single asyncio loop runs each
+# atomically; no extra lock is needed (unlike the cross-thread rate-limit state).
+_gh_circuit_breaker: CircuitBreaker | None = None
+_gh_circuit_breaker_enabled: bool = False
+
+
+def configure_gh_circuit_breaker(
+    enabled: bool, max_failures: int = 10, reset_timeout: float = 60.0
+) -> None:
+    """Configure the gh/git circuit breaker. Call once during startup."""
+    global _gh_circuit_breaker, _gh_circuit_breaker_enabled  # noqa: PLW0603
+    from circuit_breaker import CircuitBreaker  # noqa: PLC0415
+
+    _gh_circuit_breaker = CircuitBreaker(
+        "gh-subprocess", max_failures=max_failures, reset_timeout=reset_timeout
+    )
+    _gh_circuit_breaker_enabled = enabled
+    logger.info(
+        "gh circuit breaker configured (enabled=%s, max_failures=%d, "
+        "reset_timeout=%.0fs)",
+        enabled,
+        max_failures,
+        reset_timeout,
+    )
+
+
+def set_gh_circuit_breaker_enabled(enabled: bool) -> None:
+    """Enable/disable the gh circuit breaker at runtime — the live kill-switch.
+
+    Toggled via ``PATCH /api/config`` (``gh_circuit_breaker_enabled``) so an
+    operator can disable a misbehaving breaker without a restart. When disabled
+    the breaker never blocks a call (outcomes are simply not consulted).
+    """
+    global _gh_circuit_breaker_enabled  # noqa: PLW0603
+    _gh_circuit_breaker_enabled = enabled
+    logger.info("gh circuit breaker enabled=%s (runtime toggle)", enabled)
+
 
 def configure_gh_concurrency(limit: int) -> None:
     """Set the global GitHub API concurrency limit.
@@ -150,6 +194,41 @@ def _is_rate_limited(stderr: str) -> bool:
     """Check if stderr indicates a GitHub API rate limit (403)."""
     lower = stderr.lower()
     return "rate limit" in lower and ("403" in lower or "http 403" in lower)
+
+
+# Infrastructure/outage failure signatures — GitHub or the network is unhealthy.
+# ONLY these count toward the circuit breaker. A 4xx (404 "not found", 422,
+# "label does not exist", "cannot approve your own pull request", etc.) means
+# GitHub is UP and answered with a client error — that's normal control flow,
+# not an outage, and must never trip the process-global breaker.
+_GH_OUTAGE_PATTERNS = (
+    "http 5",  # any 5xx
+    "internal server error",
+    "bad gateway",
+    "service unavailable",
+    "gateway timeout",
+    "could not resolve",
+    "could not connect",
+    "connection refused",
+    "connection reset",
+    "network is unreachable",
+    "timed out",
+    "timeout",
+    "i/o timeout",
+    "tls handshake",
+)
+
+
+def _is_gh_outage_error(stderr: str) -> bool:
+    """True when a failed gh call looks like a GitHub/network outage.
+
+    Used to decide whether a failure counts toward the circuit breaker. Client
+    errors (4xx) and business-logic non-zero exits are excluded — they are not
+    outage signals, so they must not accumulate toward an OPEN that would halt
+    all gh calls factory-wide.
+    """
+    low = stderr.lower()
+    return any(p in low for p in _GH_OUTAGE_PATTERNS)
 
 
 def _trigger_rate_limit_cooldown() -> None:
@@ -209,6 +288,16 @@ class AuthenticationError(RuntimeError):
 
 class SubprocessTimeoutError(RuntimeError):
     """Raised when a subprocess exceeds its allowed execution time."""
+
+
+class CircuitBreakerOpenError(RuntimeError):
+    """Raised when the gh/git circuit breaker is OPEN and short-circuits a call.
+
+    Distinct from a transient failure: recent gh/git calls failed repeatedly
+    (likely GitHub or the network is down), so we fail fast instead of piling
+    on. The message contains none of ``_RETRYABLE_PATTERNS`` so
+    ``run_subprocess_with_retry`` will not retry it.
+    """
 
 
 class CreditExhaustedError(RuntimeError):
@@ -529,6 +618,18 @@ async def run_subprocess(
     resolved_runner = runner if runner is not None else get_default_runner()
 
     use_semaphore = bool(cmd) and cmd[0] in _GH_COMMANDS
+    # The circuit breaker guards the GitHub API (``gh``) specifically — NOT local
+    # ``git``. A repeated ``git`` failure (merge conflict, "nothing to commit", a
+    # corrupted worktree) is not a GitHub-down signal, and counting it could trip
+    # this PROCESS-GLOBAL breaker and halt all gh/git factory-wide on a purely
+    # local problem. ``gh`` failures are the clean outage signal. Enabled state
+    # (the live kill-switch) is re-read here each call, so a runtime toggle takes
+    # effect on the next subprocess.
+    breaker = (
+        _gh_circuit_breaker
+        if bool(cmd) and cmd[0] == "gh" and _gh_circuit_breaker_enabled
+        else None
+    )
 
     async def _exec() -> str:
         try:
@@ -539,6 +640,8 @@ async def run_subprocess(
                 timeout=timeout,
             )
         except TimeoutError as exc:
+            if breaker is not None:
+                breaker.record_failure()
             raise SubprocessTimeoutError(
                 f"Command {cmd!r} timed out after {timeout}s"
             ) from exc
@@ -555,15 +658,38 @@ async def run_subprocess(
                 stderr=result.stderr,
             )
             if _is_auth_error(result.stderr):
+                # Auth failure = bad/again-rejected credentials, not an outage;
+                # opening the breaker wouldn't help (the token is still bad after
+                # the reset window), so it must not count toward it.
                 raise AuthenticationError(msg) from cause
             if _is_rate_limited(result.stderr):
                 _trigger_rate_limit_cooldown()
+                # A rate limit has its own global cooldown and is not a
+                # GitHub-down signal, so it must NOT count toward the breaker.
+                raise RuntimeError(msg) from cause
+            # Count toward the breaker ONLY genuine GitHub/network outages — a
+            # 4xx / business-logic non-zero exit (404, "label does not exist",
+            # "cannot approve your own pull request", …) is normal control flow
+            # and must not accumulate toward an OPEN that halts the factory.
+            if breaker is not None and _is_gh_outage_error(result.stderr):
+                breaker.record_failure()
             raise RuntimeError(msg) from cause
         _reset_rate_limit_backoff()
+        if breaker is not None:
+            breaker.record_success()
         _maybe_sample_shadow(cmd, result.returncode, result.stdout, result.stderr)
         return result.stdout
 
     if use_semaphore:
+        if breaker is not None and not breaker.allow_request():
+            # Fail fast: recent gh/git calls failed repeatedly (likely GitHub or
+            # the network is down). The message intentionally avoids retryable
+            # keywords so run_subprocess_with_retry won't retry it.
+            raise CircuitBreakerOpenError(
+                f"gh/git circuit breaker OPEN ({breaker.max_failures}+ "
+                "consecutive failures); failing fast instead of hammering a "
+                "likely-down GitHub. Recovers after the reset window."
+            )
         await _wait_for_rate_limit_cooldown()
         async with _get_gh_semaphore():
             return await _exec()
@@ -620,7 +746,10 @@ async def run_subprocess_with_retry(
                 *cmd, cwd=cwd, gh_token=gh_token, timeout=timeout, runner=runner
             )
         except RuntimeError as exc:
-            if isinstance(exc, AuthenticationError | CreditExhaustedError):
+            if isinstance(
+                exc,
+                AuthenticationError | CreditExhaustedError | CircuitBreakerOpenError,
+            ):
                 raise
             last_error = exc
             error_msg = str(exc)

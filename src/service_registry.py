@@ -303,9 +303,14 @@ def build_services(
 
     # Configure global GitHub API concurrency limiter (startup config
     # belongs in the composition root, not the orchestrator).
-    from subprocess_util import configure_gh_concurrency
+    from subprocess_util import configure_gh_circuit_breaker, configure_gh_concurrency
 
     configure_gh_concurrency(config.gh_api_concurrency)
+    configure_gh_circuit_breaker(
+        enabled=config.gh_circuit_breaker_enabled,
+        max_failures=config.gh_circuit_breaker_max_failures,
+        reset_timeout=config.gh_circuit_breaker_reset_timeout_s,
+    )
 
     # Shadow corpus (#8786). Every gh/git/docker/claude subprocess call
     # feeds the bounded, normalized, PII-scrubbed corpus that

@@ -125,6 +125,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_review_diff_chars", "HYDRAFLOW_MAX_REVIEW_DIFF_CHARS", 15_000),
     ("gh_max_retries", "HYDRAFLOW_GH_MAX_RETRIES", 3),
     ("gh_api_concurrency", "HYDRAFLOW_GH_API_CONCURRENCY", 5),
+    (
+        "gh_circuit_breaker_max_failures",
+        "HYDRAFLOW_GH_CIRCUIT_BREAKER_MAX_FAILURES",
+        10,
+    ),
     ("max_issue_attempts", "HYDRAFLOW_MAX_ISSUE_ATTEMPTS", 3),
     ("memory_sync_interval", "HYDRAFLOW_MEMORY_SYNC_INTERVAL", 3600),
     ("max_merge_conflict_fix_attempts", "HYDRAFLOW_MAX_MERGE_CONFLICT_FIX_ATTEMPTS", 3),
@@ -313,6 +318,11 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
         2.0,
     ),
     ("loop_anomaly_cost_spike_ratio", "HYDRAFLOW_LOOP_ANOMALY_COST_SPIKE_RATIO", 5.0),
+    (
+        "gh_circuit_breaker_reset_timeout_s",
+        "HYDRAFLOW_GH_CIRCUIT_BREAKER_RESET_TIMEOUT_S",
+        60.0,
+    ),
 ]
 
 # Optional floats — `None` when env var is missing/empty/invalid.
@@ -337,6 +347,7 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
     ("sensor_enrichment_enabled", "HYDRAFLOW_SENSOR_ENRICHMENT_ENABLED", True),
+    ("gh_circuit_breaker_enabled", "HYDRAFLOW_GH_CIRCUIT_BREAKER_ENABLED", True),
     ("issue_cache_enabled", "HYDRAFLOW_ISSUE_CACHE_ENABLED", True),
     (
         "caching_issue_store_enabled",
@@ -812,6 +823,31 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=50,
         description="Max concurrent gh/git subprocess calls (prevents API rate limiting)",
+    )
+    gh_circuit_breaker_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable the gh/git circuit breaker (fails fast when GitHub is down). "
+            "Runtime-tunable via PATCH /api/config — the live kill-switch."
+        ),
+    )
+    gh_circuit_breaker_max_failures: int = Field(
+        default=10,
+        ge=1,
+        le=1000,
+        description=(
+            "Consecutive gh/git failures before the circuit breaker OPENs "
+            "(conservative — only trips on a sustained outage)"
+        ),
+    )
+    gh_circuit_breaker_reset_timeout_s: float = Field(
+        default=60.0,
+        ge=1.0,
+        le=3600.0,
+        description=(
+            "Seconds the gh/git circuit breaker stays OPEN before probing "
+            "(HALF_OPEN); it auto-recovers so it can't halt the factory forever"
+        ),
     )
 
     # Task source
