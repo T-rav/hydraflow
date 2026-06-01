@@ -332,10 +332,13 @@ init:
 		$(ARGS)
 
 
+# Lint runs first, serially — ensures a failing lint aborts quality before
+# spending time on tests, and guarantees the same verdict as `make lint-check`.
+# pyright, bandit, and pytest are parallelised after lint passes.
 quality: deps lint-ul
 	@echo "$(BLUE)Running quality checks in parallel...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && $(UV) ruff check . && $(UV) ruff format . --check && echo "[lint OK]"
 	@cd $(HYDRAFLOW_DIR) && ( \
-		$(UV) ruff check . && $(UV) ruff format . --check && echo "[lint OK]" & \
 		$(UV) pyright && echo "[typecheck OK]" & \
 		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
 		PYTHONPATH=src $(UV) pytest tests/ && echo "[tests OK]" & \
