@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W23
 
+- `85e9c95` — refactor(review): retire vestigial max_veto_retries; derive retry cap from authority (#9136) (#9136) *(2026-06-01)*
+- `650e8a9` — reconcile: staging-canonical resolution + onboarding re-integration *(2026-06-01)*
 - `d2dc597` — merge: reconcile main into staging (resolve onboarding divergence) *(2026-06-01)*
 - `83f8fdf` — test(trust-fleet): close spec drift gaps *(2026-06-01)*
 

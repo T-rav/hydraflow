@@ -59,6 +59,14 @@ def test_index_real_workflows_includes_test_job() -> None:
     assert ("ci.yml", "test") in index
 
 
+def test_index_matches_both_yml_and_yaml(tmp_path: Path) -> None:
+    (tmp_path / "a.yml").write_text("on: [push]\njobs:\n  alpha:\n    runs-on: x\n")
+    (tmp_path / "b.yaml").write_text("on: [push]\njobs:\n  beta:\n    runs-on: x\n")
+    index = index_workflow_jobs(tmp_path)
+    assert ("a.yml", "alpha") in index
+    assert ("b.yaml", "beta") in index
+
+
 def test_real_contract_has_no_orphans() -> None:
     # End-to-end: the committed gates.toml must not declare any orphan producer.
     contract = load_gates(Path("docs/standards/branch_protection/gates.toml"))
