@@ -229,6 +229,30 @@ class TestDiagnosticRunner:
         assert result.affected_files == ["src/app.py"]
 
     @pytest.mark.asyncio
+    async def test_diagnose_mockworld_bypass_returns_unfixable_without_subprocess(
+        self, runner, monkeypatch
+    ) -> None:
+        # ADR-0063 sentinel: with a fake LLM attached (sandbox), diagnose must
+        # NOT spawn a real subprocess (it hangs air-gapped). It returns a
+        # not-fixable diagnosis so the diagnostic loop escalates to HITL (s05).
+        ctx = EscalationContext(cause="CI failed", origin_phase="review")
+
+        async def boom(*_a, **_kw):
+            raise AssertionError("_execute must not be called in MockWorld mode")
+
+        monkeypatch.setattr(runner, "_execute", boom)
+        fake_llm = MagicMock()
+        fake_llm._is_fake_adapter = True
+        runner._mockworld_fake_llm = fake_llm
+
+        result = await runner.diagnose(
+            issue_number=7, issue_title="t", issue_body="b", context=ctx
+        )
+
+        assert isinstance(result, DiagnosisResult)
+        assert result.fixable is False
+
+    @pytest.mark.asyncio
     async def test_diagnose_returns_unfixable_on_parse_error(
         self, runner, monkeypatch
     ) -> None:

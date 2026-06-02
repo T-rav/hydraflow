@@ -2839,6 +2839,55 @@ class PRManager:
 
         return prs
 
+    async def list_all_open_prs(self) -> list[PRListItem]:
+        """Fetch ALL open PRs regardless of label, including author login.
+
+        Unlike :meth:`list_open_prs` (label-filtered for the dashboard/cache),
+        this returns the complete open-PR set so consumers that key on author
+        — notably :class:`DependabotMergeLoop` — can see bot PRs that carry
+        only GitHub-native labels (e.g. ``dependencies``) and would otherwise
+        be invisible to the label-filtered cache.
+
+        Returns ``[]`` in dry-run mode or when the ``gh`` query fails.
+        """
+        if self._config.dry_run:
+            return []
+        self._assert_repo()
+        try:
+            output = await self._run_gh(
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                self._repo,
+                "--state",
+                "open",
+                "--json",
+                "number,headRefName,url,isDraft,title,author",
+                "--limit",
+                "200",
+            )
+            raw_items = json.loads(output)
+        except (RuntimeError, json.JSONDecodeError):
+            logger.warning("list_all_open_prs failed", exc_info=True)
+            return []
+
+        prs: list[PRListItem] = []
+        for item in raw_items:
+            branch = str(item.get("headRefName", ""))
+            prs.append(
+                PRListItem(
+                    pr=int(item.get("number", 0)),
+                    issue=self._issue_number_from_branch(branch),
+                    branch=branch,
+                    url=str(item.get("url", "")),
+                    draft=bool(item.get("isDraft", False)),
+                    title=str(item.get("title", "")),
+                    author=str((item.get("author") or {}).get("login", "")),
+                )
+            )
+        return prs
+
     async def _fetch_hitl_raw_issues(
         self, hitl_labels: list[str]
     ) -> list[dict[str, Any]]:

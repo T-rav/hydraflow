@@ -46,6 +46,7 @@ def _make_cache(
     tmp_path: Path,
     *,
     open_prs: list[PRListItem] | None = None,
+    all_open_prs: list[PRListItem] | None = None,
     hitl_items: list[HITLItem] | None = None,
     label_counts: LabelCounts | None = None,
     collaborators: set[str] | None = None,
@@ -65,11 +66,15 @@ def _make_cache(
     prs = MagicMock()
     if prs_error is not None:
         prs.list_open_prs = AsyncMock(side_effect=prs_error)
+        prs.list_all_open_prs = AsyncMock(side_effect=prs_error)
         prs.list_hitl_items = AsyncMock(side_effect=hitl_error or prs_error)
         prs.get_label_counts = AsyncMock(side_effect=label_error or prs_error)
     else:
         prs.list_open_prs = AsyncMock(
             return_value=open_prs if open_prs is not None else []
+        )
+        prs.list_all_open_prs = AsyncMock(
+            return_value=all_open_prs if all_open_prs is not None else []
         )
         prs.list_hitl_items = (
             AsyncMock(
@@ -262,6 +267,71 @@ class TestGitHubDataCachePoll:
         assert "hitl_items" in stats
         assert "label_counts" in stats
         assert "collaborators" in stats
+
+
+# ===========================================================================
+# GitHubDataCache — all-open-PRs snapshot (label-agnostic; s09)
+# ===========================================================================
+
+
+class TestGitHubDataCacheAllOpenPrs:
+    @pytest.mark.asyncio
+    async def test_get_all_open_prs_empty_before_poll(self, tmp_path: Path) -> None:
+        cache, _, _ = _make_cache(tmp_path)
+        assert cache.get_all_open_prs() == []
+
+    @pytest.mark.asyncio
+    async def test_poll_populates_all_open_prs(self, tmp_path: Path) -> None:
+        all_prs = [_make_pr(1), _make_pr(2), _make_pr(3)]
+        cache, _, _ = _make_cache(tmp_path, all_open_prs=all_prs)
+
+        stats = await cache.poll()
+
+        assert cache.get_all_open_prs() == all_prs
+        assert stats["all_open_prs"] == 3
+
+    @pytest.mark.asyncio
+    async def test_all_open_prs_includes_bot_pr_excluded_from_label_filter(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression (s09): a dependabot PR carries only the GitHub-native
+        ``dependencies`` label, so it is absent from the workflow-label-filtered
+        ``get_open_prs`` snapshot. DependabotMergeLoop reads ``get_all_open_prs``
+        and filters by author — that snapshot MUST include the bot PR, else the
+        loop never merges anything in production.
+        """
+        from unittest.mock import AsyncMock, MagicMock
+
+        from mockworld.fakes.fake_github import FakeGitHub
+        from tests.helpers import ConfigFactory
+
+        gh = FakeGitHub()
+        gh.add_pr(
+            number=100,
+            issue_number=0,
+            branch="dependabot/npm/foo-1.2.3",
+            author="dependabot[bot]",
+        )
+        gh.add_pr_label(100, "dependencies")
+
+        fetcher = MagicMock()
+        fetcher._get_collaborators = AsyncMock(return_value=set())
+        config = ConfigFactory.create(repo_root=tmp_path / "repo")
+        cache = GitHubDataCache(
+            config=config,
+            pr_manager=gh,
+            fetcher=fetcher,
+            cache_dir=tmp_path / "cache",
+        )
+
+        await cache.poll()
+
+        # Label-filtered snapshot excludes the bot PR (documents the gap):
+        assert 100 not in [p.pr for p in cache.get_open_prs()]
+        # Label-agnostic snapshot includes it, with author preserved (the fix):
+        all_open = cache.get_all_open_prs()
+        assert [p.pr for p in all_open] == [100]
+        assert all_open[0].author == "dependabot[bot]"
 
 
 # ===========================================================================
