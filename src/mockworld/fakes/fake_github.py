@@ -63,6 +63,9 @@ class FakePR:
     reviews: list[tuple[str, str]] = field(default_factory=list)
     checks: list[tuple[str, str]] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)
+    # PR author login (e.g. "dependabot[bot]"). Drives DependabotMergeLoop's
+    # bot-PR eligibility (it matches pr.author against the configured bots).
+    author: str = "fake-author"
     # Commit count used by ``find_label_drift`` (ADR-0056) to distinguish
     # zero-commit PRs from real ones. Defaults to 1 so seeded PRs look
     # "real" without explicit setup.
@@ -119,6 +122,7 @@ class FakeGitHub:
                 branch=pr_dict["branch"],
                 ci_status=pr_dict.get("ci_status", "pass"),
                 merged=pr_dict.get("merged", False),
+                author=pr_dict.get("author", "fake-author"),
             )
             for label in pr_dict.get("labels", []):
                 gh.add_pr_label(pr_dict["number"], label)
@@ -152,6 +156,7 @@ class FakeGitHub:
         branch: str,
         ci_status: str = "pass",
         merged: bool = False,
+        author: str = "fake-author",
     ) -> None:
         """Directly insert a PR record (sync helper for test seeding).
 
@@ -165,6 +170,7 @@ class FakeGitHub:
             branch=branch,
             merged=merged,
             ci_status=ci_status,
+            author=author,
         )
 
     def add_pr_label(self, pr_number: int, label: str) -> None:
@@ -904,10 +910,37 @@ class FakeGitHub:
                     draft=pr.draft,
                     title="",
                     merged=pr.merged,
-                    author="fake-author",
+                    author=pr.author,
                 )
             )
         return out
+
+    async def list_all_open_prs(self) -> list[Any]:
+        """Return ALL open PRs regardless of label, including author login.
+
+        Mirrors ``PRManager.list_all_open_prs``. Used by ``GitHubCacheLoop``
+        to warm the all-open-PRs snapshot that ``DependabotMergeLoop`` reads
+        (it filters by author). Bot PRs carry only GitHub-native labels like
+        ``dependencies`` and are invisible to the label-filtered
+        ``list_open_prs`` cache — this method does not filter by label.
+        """
+        self._maybe_rate_limit()
+        from models import PRListItem
+
+        return [
+            PRListItem(
+                pr=pr.number,
+                issue=pr.issue_number,
+                branch=pr.branch,
+                url=pr.url or "",
+                draft=pr.draft,
+                title="",
+                merged=pr.merged,
+                author=pr.author,
+            )
+            for pr in self._prs.values()
+            if not pr.merged
+        ]
 
     async def _run_gh(self, *cmd: str, cwd: Any = None) -> str:
         """Generic ``gh`` CLI passthrough — returns minimal-shape JSON.

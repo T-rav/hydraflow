@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W23
 
+- `7caa4bb` — docs(memory): add critical workflow feedback (#9140) (#9140) *(2026-06-01)*
+- `5f59fb2` — docs(adr): promote ADR-0049 + ADR-0045 to Accepted; fix stale port-conformance ref (WS-6) (#9112) (#9112) *(2026-06-01)*
+- `3639644` — feat(gates): GateActivatorLoop — propose activating planned gates as surfaces land (ADR-0082 Slice 4) (#9138) (#9138) *(2026-06-01)*
 - `85e9c95` — refactor(review): retire vestigial max_veto_retries; derive retry cap from authority (#9136) (#9136) *(2026-06-01)*
 - `650e8a9` — reconcile: staging-canonical resolution + onboarding re-integration *(2026-06-01)*
 - `d2dc597` — merge: reconcile main into staging (resolve onboarding divergence) *(2026-06-01)*

@@ -73,6 +73,7 @@ class GitHubDataCache:
 
         # In-memory snapshots
         self._open_prs = CacheSnapshot()
+        self._all_open_prs = CacheSnapshot()
         self._hitl_items = CacheSnapshot()
         self._label_counts = CacheSnapshot()
         self._collaborators = CacheSnapshot()
@@ -85,6 +86,16 @@ class GitHubDataCache:
     def get_open_prs(self) -> list[PRListItem]:
         """Return cached open PRs, or empty list if not yet fetched."""
         return self._open_prs.data or []
+
+    def get_all_open_prs(self) -> list[PRListItem]:
+        """Return ALL cached open PRs (label-agnostic), or empty if unfetched.
+
+        Distinct from :meth:`get_open_prs`, which is filtered to workflow
+        labels. ``DependabotMergeLoop`` reads this so it can see bot PRs that
+        carry only GitHub-native labels (e.g. ``dependencies``) and would
+        otherwise be excluded from the label-filtered snapshot.
+        """
+        return self._all_open_prs.data or []
 
     def get_hitl_items(self) -> list[HITLItem]:
         """Return cached HITL items, or empty list if not yet fetched."""
@@ -134,6 +145,19 @@ class GitHubDataCache:
                 reraise_on_credit_or_bug(exc)
                 logger.warning("Cache poll failed for open_prs", exc_info=True)
 
+            # All open PRs (label-agnostic) — consumed by DependabotMergeLoop,
+            # which filters by author. Bot PRs carry only GitHub-native labels
+            # (e.g. ``dependencies``) and are absent from the label-filtered
+            # ``open_prs`` snapshot above. Without this, dependabot_merge never
+            # sees a bot PR and merges nothing (the s09 production bug).
+            try:
+                all_open = await self._prs.list_all_open_prs()
+                self._all_open_prs = CacheSnapshot(data=all_open, fetched_at=now)
+                stats["all_open_prs"] = len(all_open)
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning("Cache poll failed for all_open_prs", exc_info=True)
+
             # HITL items
             try:
                 hitl_labels = list(
@@ -177,7 +201,13 @@ class GitHubDataCache:
         targets = (
             [f"_{dataset}"]
             if dataset
-            else ["_open_prs", "_hitl_items", "_label_counts", "_collaborators"]
+            else [
+                "_open_prs",
+                "_all_open_prs",
+                "_hitl_items",
+                "_label_counts",
+                "_collaborators",
+            ]
         )
         for attr in targets:
             snap = getattr(self, attr, None)
@@ -195,6 +225,11 @@ class GitHubDataCache:
                 data["open_prs"] = [
                     p.model_dump() if hasattr(p, "model_dump") else p
                     for p in self._open_prs.data
+                ]
+            if self._all_open_prs.data is not None:
+                data["all_open_prs"] = [
+                    p.model_dump() if hasattr(p, "model_dump") else p
+                    for p in self._all_open_prs.data
                 ]
             if self._hitl_items.data is not None:
                 data["hitl_items"] = [
@@ -229,6 +264,16 @@ class GitHubDataCache:
                     data=[
                         PRListItem.model_validate(p) if isinstance(p, dict) else p
                         for p in raw["open_prs"]
+                    ],
+                    fetched_at=fetched_at,
+                )
+            if "all_open_prs" in raw:
+                from models import PRListItem  # noqa: PLC0415
+
+                self._all_open_prs = CacheSnapshot(
+                    data=[
+                        PRListItem.model_validate(p) if isinstance(p, dict) else p
+                        for p in raw["all_open_prs"]
                     ],
                     fetched_at=fetched_at,
                 )

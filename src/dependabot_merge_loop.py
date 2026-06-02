@@ -46,7 +46,11 @@ class DependabotMergeLoop(BaseBackgroundLoop):
         processed = self._state.get_dependabot_merge_processed()
         bot_authors = {a.lower() for a in settings.authors}
 
-        open_prs = self._cache.get_open_prs()
+        # Read the label-agnostic snapshot: bot PRs carry only GitHub-native
+        # labels (e.g. ``dependencies``) and are absent from the workflow-label
+        # filtered ``get_open_prs`` snapshot, so filtering that by author would
+        # always be empty in production (the s09 bug).
+        open_prs = self._cache.get_all_open_prs()
         bot_prs = [
             pr
             for pr in open_prs
