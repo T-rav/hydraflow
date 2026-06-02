@@ -716,15 +716,30 @@ class HydraFlowOrchestrator:
         )
 
     async def _pipeline_stats_loop(self) -> None:
-        """Emit pipeline stats every ~10 seconds."""
-        interval = self.get_bg_worker_interval("pipeline_poller")
+        """Emit pipeline stats each cycle as the ``pipeline_poller`` worker.
+
+        Honors the System-tab worker controls the same way the other
+        background workers do: it skips a cycle when the worker is disabled,
+        re-reads its interval each cycle so operator edits take effect without
+        an orchestrator restart, and publishes a per-cycle heartbeat so the
+        dashboard renders an ``ok``/``error`` status instead of a permanently
+        stale row.
+        """
         stats_failures = 0
         while not self._stop_event.is_set():
+            if not self.is_bg_worker_enabled("pipeline_poller"):
+                await self._sleep_or_stop(
+                    self.get_bg_worker_interval("pipeline_poller")
+                )
+                continue
+            interval = self.get_bg_worker_interval("pipeline_poller")
             try:
                 await self.emit_pipeline_stats()
                 stats_failures = 0
+                self.update_bg_worker_status("pipeline_poller", "ok")
             except Exception as exc:
                 stats_failures += 1
+                self.update_bg_worker_status("pipeline_poller", "error")
                 if is_likely_bug(exc) or stats_failures >= 5:
                     logger.critical(
                         "Pipeline stats emission failed (%s, %d consecutive)",
@@ -998,7 +1013,7 @@ class HydraFlowOrchestrator:
             ("stale_issue", self._svc.stale_issue_loop.run),
             ("sentry_ingest", self._svc.sentry_loop.run),
             ("github_cache", self._svc.github_cache_loop.run),
-            ("pipeline_stats", self._pipeline_stats_loop),
+            ("pipeline_poller", self._pipeline_stats_loop),
             ("diagnostic", self._svc.diagnostic_loop.run),
             ("ci_monitor", self._svc.ci_monitor_loop.run),
             (

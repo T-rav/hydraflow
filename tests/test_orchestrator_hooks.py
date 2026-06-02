@@ -1308,13 +1308,85 @@ class TestPipelineStatsEmission:
         json_str = json.dumps(data)
         assert isinstance(json_str, str)
 
-    def test_pipeline_stats_loop_in_supervise_factories(
+    def test_pipeline_poller_registered_in_loop_factories(
         self, config: HydraFlowConfig
     ) -> None:
-        """pipeline_stats loop is registered in _supervise_loops."""
+        """The stats loop is started under the 'pipeline_poller' task name.
+
+        The supervised task name must match the worker identity used by the
+        interval/UI/enable controls (``pipeline_poller``); a divergent task
+        name (the old ``pipeline_stats``) breaks the disabled-flag prune and
+        the trigger/control routes.
+        """
+        import inspect
+
         from orchestrator import HydraFlowOrchestrator
 
         orch = HydraFlowOrchestrator(config)
-        # Verify the method exists
-        assert hasattr(orch, "_pipeline_stats_loop")
         assert callable(orch._pipeline_stats_loop)
+        src = inspect.getsource(HydraFlowOrchestrator._supervise_loops)
+        assert '("pipeline_poller", self._pipeline_stats_loop)' in src
+
+    @pytest.mark.asyncio
+    async def test_pipeline_poller_publishes_heartbeat(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Each cycle records an 'ok' heartbeat under the 'pipeline_poller' worker."""
+        orch = HydraFlowOrchestrator(config, event_bus=EventBus())
+
+        async def _emit_then_stop() -> None:
+            orch._stop_event.set()
+
+        orch.emit_pipeline_stats = _emit_then_stop  # type: ignore[method-assign]
+        await orch._pipeline_stats_loop()
+
+        states = orch.get_bg_worker_states()
+        assert states["pipeline_poller"]["status"] == "ok"
+        assert states["pipeline_poller"]["last_run"] is not None
+
+    @pytest.mark.asyncio
+    async def test_pipeline_poller_skips_emit_when_disabled(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A disabled pipeline_poller does not emit stats (toggle is honored)."""
+        orch = HydraFlowOrchestrator(config, event_bus=EventBus())
+        orch.set_bg_worker_enabled("pipeline_poller", False)
+
+        emit = AsyncMock()
+        orch.emit_pipeline_stats = emit  # type: ignore[method-assign]
+
+        async def _sleep_then_stop(_seconds: float) -> None:
+            orch._stop_event.set()
+
+        orch._sleep_or_stop = _sleep_then_stop  # type: ignore[method-assign]
+        await orch._pipeline_stats_loop()
+
+        emit.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_pipeline_poller_rereads_interval_each_cycle(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Interval edits take effect live (re-read each cycle, not once at start)."""
+        orch = HydraFlowOrchestrator(config, event_bus=EventBus())
+        orch.set_bg_worker_interval("pipeline_poller", 99)
+        slept: list[float] = []
+        cycles = {"n": 0}
+
+        async def _emit() -> None:
+            cycles["n"] += 1
+            if cycles["n"] == 1:
+                orch.set_bg_worker_interval("pipeline_poller", 7)
+            if cycles["n"] >= 2:
+                orch._stop_event.set()
+
+        async def _capture_sleep(seconds: float) -> None:
+            slept.append(seconds)
+
+        orch.emit_pipeline_stats = _emit  # type: ignore[method-assign]
+        orch._sleep_or_stop = _capture_sleep  # type: ignore[method-assign]
+        await orch._pipeline_stats_loop()
+
+        # First cycle slept 99; after the mid-run edit the second cycle slept 7.
+        assert slept[0] == 99
+        assert slept[1] == 7
