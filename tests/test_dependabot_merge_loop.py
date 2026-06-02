@@ -67,7 +67,10 @@ def _make_loop(
     )
 
     cache = MagicMock()
+    # DependabotMergeLoop reads the label-agnostic snapshot (get_all_open_prs);
+    # get_open_prs is kept in sync for any incidental reads.
     cache.get_open_prs.return_value = open_prs or []
+    cache.get_all_open_prs.return_value = open_prs or []
 
     prs = MagicMock()
     prs.wait_for_ci = AsyncMock(return_value=ci_result)

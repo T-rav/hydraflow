@@ -38,6 +38,7 @@ def _make_cache(tmp_path: Path) -> GitHubDataCache:
 
     pr_manager = MagicMock()
     pr_manager.list_open_prs = AsyncMock(return_value=[])
+    pr_manager.list_all_open_prs = AsyncMock(return_value=[])
     pr_manager.list_hitl_items = AsyncMock(return_value=[])
     pr_manager.get_label_counts = AsyncMock(return_value=None)
 
@@ -64,6 +65,21 @@ class TestAuthenticationErrorNotSwallowed:
         """
         cache = _make_cache(tmp_path)
         cache._prs.list_open_prs = AsyncMock(
+            side_effect=AuthenticationError("Bad credentials"),
+        )
+
+        with pytest.raises(AuthenticationError, match="Bad credentials"):
+            await cache.poll()
+
+    @pytest.mark.asyncio
+    async def test_all_open_prs_auth_error_propagates(self, tmp_path: Path) -> None:
+        """When list_all_open_prs raises AuthenticationError, poll() must
+        re-raise it instead of logging a warning and continuing (same
+        guarantee as the other datasets — added with the label-agnostic
+        all-open-PRs snapshot).
+        """
+        cache = _make_cache(tmp_path)
+        cache._prs.list_all_open_prs = AsyncMock(
             side_effect=AuthenticationError("Bad credentials"),
         )
 

@@ -269,7 +269,11 @@ class TestL7DependabotMergeAutoMerges:
 
         # Initialize loop to get cache/state mock refs, then configure
         await world.run_with_loops(["dependabot_merge"], cycles=1)
+        # DependabotMergeLoop reads the label-agnostic snapshot (get_all_open_prs);
+        # bot PRs carry only the GitHub-native "dependencies" label and are absent
+        # from the workflow-label-filtered get_open_prs snapshot (s09).
         world._dependabot_cache.get_open_prs.return_value = [bot_pr]
+        world._dependabot_cache.get_all_open_prs.return_value = [bot_pr]
 
         stats = await world.run_with_loops(["dependabot_merge"], cycles=1)
 
@@ -308,7 +312,11 @@ class TestL8DependabotMergeSkipsOnFailure:
 
         # Initialize and configure
         await world.run_with_loops(["dependabot_merge"], cycles=1)
+        # DependabotMergeLoop reads the label-agnostic snapshot (get_all_open_prs);
+        # bot PRs carry only the GitHub-native "dependencies" label and are absent
+        # from the workflow-label-filtered get_open_prs snapshot (s09).
         world._dependabot_cache.get_open_prs.return_value = [bot_pr]
+        world._dependabot_cache.get_all_open_prs.return_value = [bot_pr]
 
         stats = await world.run_with_loops(["dependabot_merge"], cycles=1)
 
