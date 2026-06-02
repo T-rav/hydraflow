@@ -170,6 +170,7 @@ class HydraFlowOrchestrator:
             "staging_bisect": svc.staging_bisect_loop,
             "stale_issue": svc.stale_issue_loop,
             "sentry_ingest": svc.sentry_loop,
+            "github_cache": svc.github_cache_loop,
             "stale_issue_gc": svc.stale_issue_gc_loop,
             "ci_monitor": svc.ci_monitor_loop,
             "branch_protection_auditor": svc.branch_protection_auditor_loop,
