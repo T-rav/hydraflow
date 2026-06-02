@@ -44,9 +44,9 @@ def test_committed_corpus_is_all_green() -> None:
 
 
 def test_evaluate_real_catcher_case() -> None:
+    # Committed corpus fixture — a catcher case the diff-sanity skill must flag.
     case = CASES_DIR / "missing-import"
-    if not case.is_dir():
-        pytest.skip("missing-import case not present")
+    assert case.is_dir(), "committed corpus case 'missing-import' is missing"
     result = evaluate_case(case, strict=False)
     assert result["expected_catcher"] == "diff-sanity"
     assert result["skill"] == "diff-sanity"
@@ -54,9 +54,9 @@ def test_evaluate_real_catcher_case() -> None:
 
 
 def test_evaluate_real_sentinel_case() -> None:
+    # Committed corpus fixture — a benign 'none' sentinel no skill may flag.
     case = CASES_DIR / "benign-rename-sentinel"
-    if not case.is_dir():
-        pytest.skip("benign-rename-sentinel case not present")
+    assert case.is_dir(), "committed corpus case 'benign-rename-sentinel' is missing"
     result = evaluate_case(case, strict=False)
     assert result["expected_catcher"] == "none"
     assert result["status"] == "PASS"
