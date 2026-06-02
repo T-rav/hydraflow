@@ -171,6 +171,32 @@ class TestBgWorkerDefsParity:
             f"{sorted(missing)}"
         )
 
+    def test_no_orphan_bg_worker_defs(self) -> None:
+        """Reverse parity: every _bg_worker_defs entry is either a registry loop
+        or one of the explicit pipeline/non-loop UI workers.
+
+        Without this, a typo'd def key (e.g. ``github_cahce``) would render a
+        dead System-tab row pointing at a non-existent worker, and the
+        forward parity test above would stay green.
+        """
+        # Pipeline phases + the non-loop UI workers that legitimately appear in
+        # _bg_worker_defs without a BaseBackgroundLoop behind them.
+        allowed_non_registry = {
+            "triage",
+            "plan",
+            "implement",
+            "review",
+            "review_insights",
+            "pipeline_poller",
+        }
+        orphans = (
+            _parse_bg_worker_defs() - _parse_bg_loop_registry() - allowed_non_registry
+        )
+        assert not orphans, (
+            "_bg_worker_defs entries that are neither a registry loop nor a known "
+            f"pipeline/non-loop worker (typo'd or stale def?): {sorted(orphans)}"
+        )
+
 
 class TestServiceRegistryFields:
     """Each loop class must be declared as a field in ServiceRegistry."""

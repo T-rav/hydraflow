@@ -706,6 +706,15 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                     interval = 5
             elif name in _PIPELINE_WORKERS:
                 interval = _cfg.poll_interval
+            elif orch and name in _INTERVAL_BOUNDS:
+                # Registry-backed loops surfaced in _bg_worker_defs but absent
+                # from the curated _INTERVAL_WORKERS set: resolve the live
+                # interval (incl. any operator override) straight from the
+                # orchestrator so the System tab shows a real cadence + next_run
+                # and interval edits round-trip. _INTERVAL_BOUNDS is the
+                # editable-interval set, so this covers exactly the controllable
+                # loops without inventing intervals for event-driven ones.
+                interval = orch.get_bg_worker_interval(name)
 
             entry = bg_states.get(name) or persisted_states.get(name)
             if entry:

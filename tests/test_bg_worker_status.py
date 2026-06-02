@@ -645,11 +645,34 @@ class TestSystemWorkersEndpointIntervals:
         response = await endpoint()
         data = json.loads(response.body)
 
-        retro = next(w for w in data["workers"] if w["name"] == "retrospective")
-        assert retro["interval_seconds"] is None
-
+        # review_insights is a derived/event-driven worker — not a registry loop
+        # and not in _INTERVAL_BOUNDS — so it has no schedulable interval.
         ri = next(w for w in data["workers"] if w["name"] == "review_insights")
         assert ri["interval_seconds"] is None
+
+    @pytest.mark.asyncio
+    async def test_registry_loops_report_their_interval(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """Registry-backed loops surfaced in _bg_worker_defs and editable via
+        _INTERVAL_BOUNDS must report their live interval. Worker-fleet audit:
+        the System tab previously left interval/next_run blank for all of them
+        because the endpoint only resolved intervals for the curated
+        _INTERVAL_WORKERS set.
+        """
+        from orchestrator import HydraFlowOrchestrator
+
+        orch = HydraFlowOrchestrator(config, event_bus=event_bus)
+        router = self._make_router(config, event_bus, tmp_path, orch=orch)
+        endpoint = self._find_endpoint(router, "/api/system/workers")
+        response = await endpoint()
+        data = json.loads(response.body)
+
+        by_name = {w["name"]: w for w in data["workers"]}
+        for name in ("ci_monitor", "retrospective", "github_cache", "workspace_gc"):
+            assert by_name[name]["interval_seconds"] is not None, (
+                f"{name} should report a live interval (worker-fleet visibility)"
+            )
 
     @pytest.mark.asyncio
     async def test_next_run_none_when_no_last_run(
