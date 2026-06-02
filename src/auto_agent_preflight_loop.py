@@ -15,6 +15,7 @@ from typing import Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from exception_classify import reraise_on_credit_or_bug
 
 logger = logging.getLogger("hydraflow.auto_agent_preflight")
 
@@ -281,6 +282,9 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             created = await self._workspaces.create(issue_number, branch)
             return str(created)
         except Exception as exc:
+            # Credit-exhaustion / likely-bug signals must propagate, not be
+            # swallowed by the broad guard (ADR-0049 / dark-factory mandate).
+            reraise_on_credit_or_bug(exc)
             # Workspace creation can fail (concurrent worktree, branch
             # collision, disk pressure). Degrade to repo_root so the
             # agent still gets a valid cwd; the agent itself can handle

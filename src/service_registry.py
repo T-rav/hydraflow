@@ -1274,6 +1274,7 @@ def build_services(
         deps=loop_deps,
         prs=prs,
         runner=sandbox_failure_fixer_runner,
+        workspaces=workspaces,
     )
 
     # Term-Proposer (ADR-0054). Production adapters wire the loop to:

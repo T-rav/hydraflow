@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W23
 
+- `27e956c` — fix(sandbox): repair s05 diagnose→HITL flow (fake fidelity + diagnostic runner bypass) *(2026-06-02)*
 - `7caa4bb` — docs(memory): add critical workflow feedback (#9140) (#9140) *(2026-06-01)*
 - `5f59fb2` — docs(adr): promote ADR-0049 + ADR-0045 to Accepted; fix stale port-conformance ref (WS-6) (#9112) (#9112) *(2026-06-01)*
 - `3639644` — feat(gates): GateActivatorLoop — propose activating planned gates as surfaces land (ADR-0082 Slice 4) (#9138) (#9138) *(2026-06-01)*
