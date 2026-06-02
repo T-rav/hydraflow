@@ -167,6 +167,159 @@ _bg_worker_defs = [
         "Cost Budget Watcher",
         "Polls rolling-24h LLM spend; disables caretaker loops when daily cap exceeded. Default unlimited.",
     ),
+    # --- Background loops surfaced in the System tab (parity with bg_loop_registry;
+    # enforced by tests/test_loop_wiring_completeness.py). Labels/descriptions mirror
+    # ui/src/constants.js BACKGROUND_WORKERS. ---
+    (
+        "adr_touchpoint_auditor",
+        "ADR Touchpoint Auditor",
+        "Scans recently-merged PRs for ADR drift — cited src/ modules changed without the ADR being updated. Replaces the synchronous touchpoint gate. See ADR-0056.",
+    ),
+    (
+        "auto_agent_preflight",
+        "Auto-Agent Pre-Flight",
+        "Intercepts hitl-escalation issues; runs an emulated-engineer subprocess to attempt autonomous resolution before the issue surfaces to a human (spec §1–§11; ADR-0050).",
+    ),
+    (
+        "branch_protection_auditor",
+        "Branch Protection Auditor",
+        "Audits live GitHub branch protection against the canonical rulesets generated from gates.toml; files an issue on drift. See ADR-0082.",
+    ),
+    (
+        "ci_monitor",
+        "CI Monitor",
+        "Detects failing CI on main and files/auto-closes issues.",
+    ),
+    (
+        "dependabot_merge",
+        "Dependabot Merge",
+        "Auto-merges dependency update PRs from configured bots after CI passes.",
+    ),
+    (
+        "diagnostic",
+        "Diagnostic Agent",
+        "Analyzes escalated issues, classifies severity, and attempts targeted fixes before HITL.",
+    ),
+    (
+        "diagram_loop",
+        "Diagram Loop (L24)",
+        "Self-documenting architecture caretaker. Walks src/, tests/, docs/adr/ every 4h; emits regenerated docs/arch/generated/ markdown + opens a PR when the live truth has drifted. Per ADR-0029 (caretaker pattern) and the Architecture Knowledge System spec.",
+    ),
+    (
+        "edge_proposer",
+        "Edge Proposer",
+        "Caretaker that proposes depends_on + implements edges between existing UL terms based on import graph + class inheritance. See ADR-0058.",
+    ),
+    (
+        "entry_evidence",
+        "Entry Evidence",
+        "Caretaker that links wiki entries to UL terms via LLM matching, populating Term.evidence so the Atlas Domain view can render entry leaves under their term parents. See ADR-0062.",
+    ),
+    (
+        "epic_monitor",
+        "Epic Monitor",
+        "Detects stale epics and refreshes progress cache so the dashboard shows accurate sub-issue rollups.",
+    ),
+    (
+        "epic_sweeper",
+        "Epic Sweeper",
+        "Periodically sweeps open epics and auto-closes those with all sub-issues resolved.",
+    ),
+    (
+        "gate_activator",
+        "Gate Activator",
+        "Proposes activating planned gates in gates.toml once the surface each protects exists (producing job + make target present, profile matches); files a reviewed issue. See ADR-0082.",
+    ),
+    (
+        "github_cache",
+        "GitHub Cache",
+        "Single-poller cache for GitHub data; serves all dashboard + loop consumers from one shared snapshot to avoid rate-limit fan-out.",
+    ),
+    (
+        "health_monitor",
+        "Health Monitor",
+        "Analyzes pipeline trends, auto-tunes parameters, detects knowledge gaps, and ingests log patterns.",
+    ),
+    (
+        "label_drift_watcher",
+        "Label Drift Watcher",
+        "Periodic scan for cross-entity issue/PR label drift (e.g., issue at hydraflow-ready while linked PR at hydraflow-review with commits); reconciles via per-entity swap_pipeline_labels. See ADR-0056.",
+    ),
+    (
+        "live_corpus_replay",
+        "Live Corpus Replay",
+        "Diffs fresh shadow-corpus samples against fake-adapter outputs to catch value-level drift between real and fake adapters; files one hydraflow-find issue per unique drift signature. See #8786 / ADR-0045.",
+    ),
+    (
+        "memory_backlog",
+        "Memory Backlog",
+        "Files hydraflow-find issues for pending entries in docs/wiki/memory-feedback/.",
+    ),
+    (
+        "merge_state_watcher",
+        "Merge State Watcher",
+        "Auto-rebases or HITL-escalates open PRs flagged mergeable=CONFLICTING (RC, dependabot, agent).",
+    ),
+    (
+        "repo_wiki",
+        "Repo Wiki",
+        "Lints and maintains per-repo knowledge wikis compiled from plan/implement/review cycles.",
+    ),
+    (
+        "runs_gc",
+        "Runs GC",
+        "Purges expired pipeline run artifacts per TTL and size-cap config; keeps the runs store from growing unbounded.",
+    ),
+    (
+        "sandbox_failure_fixer",
+        "Sandbox Failure Fixer",
+        "Auto-fixes promotion PRs failing sandbox CI by dispatching the auto-agent",
+    ),
+    (
+        "security_patch",
+        "Security Patch",
+        "Polls Dependabot alerts and files issues for fixable vulnerabilities.",
+    ),
+    (
+        "sentry_ingest",
+        "Sentry Ingest",
+        "Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline.",
+    ),
+    (
+        "staging_promotion",
+        "Staging Promotion",
+        "Cuts release-candidate snapshots from staging and auto-promotes them to main on green CI. See ADR-0042.",
+    ),
+    (
+        "stale_issue",
+        "Stale General Issue Cleanup",
+        "Auto-closes stale general issues (excludes HydraFlow lifecycle labels). Per-tag thresholds, configurable. Distinct from Stale Issue GC, which handles HITL escalations.",
+    ),
+    (
+        "stale_issue_gc",
+        "Stale HITL Issue GC",
+        "Auto-closes stale HITL escalation issues — posts a farewell comment, capped at 10/cycle. Distinct from Stale General Issue Cleanup, which excludes HF lifecycle labels.",
+    ),
+    (
+        "term_proposer",
+        "Term Proposer",
+        "Caretaker that grows the ubiquitous-language glossary by detecting load-bearing classes without terms (S1+S2+S5 signals), drafting them via LLM, and opening auto-merging bot PRs as `confidence: proposed`. See ADR-0054.",
+    ),
+    (
+        "term_pruner",
+        "Term Pruner",
+        "Caretaker that deprecates UL terms whose code_anchor no longer resolves in src/. Companion to TermProposerLoop. See ADR-0057.",
+    ),
+    (
+        "triage_retry",
+        "Triage Retry",
+        "Re-runs parked-issue triage every 24h with the original parking reason as context. Caps at 3 retries before escalating to HITL with the triage-retry-exhausted sub-label. Closes the only factory phase with no autonomous re-entry path. See ADR-0063 W2.",
+    ),
+    (
+        "workspace_gc",
+        "Workspace GC",
+        "Garbage-collects stale workspaces and orphaned branches.",
+    ),
 ]
 
 # Workers that have independent configurable intervals

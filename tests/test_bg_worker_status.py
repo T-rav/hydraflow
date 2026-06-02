@@ -291,9 +291,9 @@ class TestSystemWorkersEndpoint:
 
         response = await endpoint()
         data = json.loads(response.body)
-        assert len(data["workers"]) == 22
         names = [w["name"] for w in data["workers"]]
-        assert names == [
+        # Stable pipeline-phase prefix.
+        assert names[:7] == [
             "triage",
             "plan",
             "implement",
@@ -301,24 +301,46 @@ class TestSystemWorkersEndpoint:
             "retrospective",
             "review_insights",
             "pipeline_poller",
-            "pr_unsticker",
-            "report_issue",
-            "adr_reviewer",
-            # Trust fleet (ADR-0045)
-            "corpus_learning",
-            "contract_refresh",
-            "staging_bisect",
-            "principles_audit",
-            "flake_tracker",
-            "skill_prompt_eval",
-            "fake_coverage_auditor",
-            "rc_budget",
-            "wiki_rot_detector",
-            "trust_fleet_sanity",
-            # Caretaking — daily upstream pricing refresh
-            "pricing_refresh",
-            "cost_budget_watcher",
         ]
+        # 2026-06-02 worker-fleet visibility audit: 30 background loops were absent
+        # from _bg_worker_defs and therefore invisible in the System tab even though
+        # they ran. Assert the full background fleet is now surfaced (not a frozen
+        # count — the wiring-completeness test enforces registry<->defs parity).
+        for worker in (
+            "github_cache",
+            "workspace_gc",
+            "runs_gc",
+            "epic_monitor",
+            "epic_sweeper",
+            "health_monitor",
+            "gate_activator",
+            "branch_protection_auditor",
+            "diagnostic",
+            "merge_state_watcher",
+            "ci_monitor",
+            "sentry_ingest",
+            "staging_promotion",
+            "stale_issue",
+            "stale_issue_gc",
+            "repo_wiki",
+            "security_patch",
+            "dependabot_merge",
+            "label_drift_watcher",
+            "memory_backlog",
+            "triage_retry",
+            "sandbox_failure_fixer",
+            "auto_agent_preflight",
+            "adr_touchpoint_auditor",
+            "term_proposer",
+            "term_pruner",
+            "edge_proposer",
+            "entry_evidence",
+            "live_corpus_replay",
+            "diagram_loop",
+        ):
+            assert worker in names, f"{worker} missing from System-tab worker catalog"
+        assert len(names) == len(set(names)), "duplicate worker names in catalog"
+        assert len(data["workers"]) >= 45
         assert all(
             isinstance(w["description"], str) and w["description"]
             for w in data["workers"]
