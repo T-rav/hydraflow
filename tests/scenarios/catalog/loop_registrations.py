@@ -106,7 +106,19 @@ def _build_workspace_gc(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_runs_gc(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from runs_gc_loop import RunsGCLoop  # noqa: PLC0415
 
-    run_recorder = ports.get("run_recorder") or MagicMock()
+    run_recorder = ports.get("run_recorder")
+    if run_recorder is None:
+        # Faithful idle fake: a bare MagicMock returns MagicMocks from the
+        # purge calls, which breaks RunsGCLoop's `total_purged > 0` arithmetic.
+        # Return real ints (nothing to purge) + empty storage stats.
+        run_recorder = MagicMock()
+        run_recorder.purge_expired.return_value = 0
+        run_recorder.purge_oversized.return_value = 0
+        run_recorder.get_storage_stats.return_value = {
+            "total_runs": 0,
+            "total_mb": 0.0,
+            "issues": [],
+        }
     ports.setdefault("run_recorder", run_recorder)
     return RunsGCLoop(config=config, run_recorder=run_recorder, deps=deps)
 
