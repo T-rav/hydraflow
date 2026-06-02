@@ -289,6 +289,11 @@ class FakeGitHub:
             "review": "hydraflow-review",
             "done": "hydraflow-done",
             "hitl": "hydraflow-hitl",
+            # Mirrors PRManager.transition._STAGE_LABEL. Without this, a
+            # "diagnose" transition (review-fix-cap escalation) labels the
+            # issue bare "diagnose"; the DiagnosticLoop scans for
+            # "hydraflow-diagnose" and never sees it, so HITL never forms (s05).
+            "diagnose": "hydraflow-diagnose",
         }
         new_label = stage_label_map.get(new_stage, new_stage)
         if issue_number in self._issues:

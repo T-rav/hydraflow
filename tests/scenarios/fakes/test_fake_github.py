@@ -69,6 +69,41 @@ class TestFakeGitHubMutations:
         await gh.transition(1, "plan")
         assert gh.issue(1).labels == ["hydraflow-plan"]
 
+    @pytest.mark.parametrize(
+        ("stage", "expected_label"),
+        [
+            ("find", "hydraflow-find"),
+            ("discover", "hydraflow-discover"),
+            ("shape", "hydraflow-shape"),
+            ("plan", "hydraflow-plan"),
+            ("ready", "hydraflow-ready"),
+            ("review", "hydraflow-review"),
+            ("hitl", "hydraflow-hitl"),
+            ("diagnose", "hydraflow-diagnose"),
+        ],
+    )
+    async def test_transition_applies_canonical_stage_label(
+        self, stage: str, expected_label: str
+    ) -> None:
+        # Mirrors PRManager.transition._STAGE_LABEL — the fake must route every
+        # production stage to its hydraflow-* label. A missing entry silently
+        # labels the issue with the bare stage name, stranding it from the loop
+        # that scans for the canonical label (the s05 diagnose-hop failure).
+        gh = FakeGitHub()
+        gh.add_issue(1, "t", "b", labels=["hydraflow-review"])
+        await gh.transition(1, stage)
+        assert gh.issue(1).labels == [expected_label]
+
+    async def test_transition_diagnose_visible_to_diagnostic_loop(self) -> None:
+        # The DiagnosticLoop polls list_issues_by_label("hydraflow-diagnose").
+        # Review-fix-cap escalation transitions the issue to "diagnose"; if the
+        # fake mislabels it, the loop never sees it and HITL never forms (s05).
+        gh = FakeGitHub()
+        gh.add_issue(1, "t", "b", labels=["hydraflow-review"])
+        await gh.transition(1, "diagnose")
+        found = await gh.list_issues_by_label("hydraflow-diagnose")
+        assert [issue["number"] for issue in found] == [1]
+
     async def test_swap_pipeline_labels_removes_existing(self):
         gh = FakeGitHub()
         gh.add_issue(1, "t", "b", labels=["hydraflow-find", "bug"])

@@ -282,6 +282,12 @@ async def main() -> None:
     spec_reviewer = getattr(svc.implementer, "_spec_reviewer", None)
     if spec_reviewer is not None:
         spec_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    # DiagnosticRunner.diagnose spawns a real ``claude`` subprocess that hangs
+    # in the air-gapped sandbox; the sentinel routes it to a not-fixable
+    # diagnosis so review-fix-cap escalations reach HITL (s05).
+    diagnostic_runner = getattr(svc.diagnostic_loop, "_runner", None)
+    if diagnostic_runner is not None:
+        diagnostic_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
 
     orch = HydraFlowOrchestrator(
         config,

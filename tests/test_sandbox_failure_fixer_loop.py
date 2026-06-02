@@ -26,6 +26,7 @@ def _make_loop(
     prs: object | None = None,
     runner: object | None = None,
     state: object | None = None,
+    workspaces: object | None = None,
     **config_overrides,
 ):
     # Default to static-config-enabled here so each behavioral test exercises
@@ -39,6 +40,7 @@ def _make_loop(
         prs=prs,
         runner=runner,
         deps=deps.loop_deps,
+        workspaces=workspaces,
     )
     return loop, state
 
@@ -327,3 +329,69 @@ async def test_build_prompt_degrades_gracefully_on_fetch_error(
     # Template placeholders must not leak into the prompt.
     assert "{CI_FAILURE_LOG}" not in prompt_used
     assert "{RECENT_COMMIT_DIFFS}" not in prompt_used
+
+
+@pytest.mark.asyncio
+async def test_dispatch_resolves_worktree_path_not_branch_name(
+    tmp_path: Path,
+) -> None:
+    """runner.run must receive a real worktree PATH (subprocess cwd), not the
+    PR's git branch name. Regression for the dispatch that passed pr.branch."""
+    pr_port = MagicMock()
+    pr_port.list_prs_by_label = AsyncMock(
+        return_value=[
+            SimpleNamespace(number=100, branch="rc/2026-04-26", labels=[]),
+        ]
+    )
+    pr_port.add_pr_labels = AsyncMock()
+    pr_port.remove_pr_label = AsyncMock()
+    runner = MagicMock()
+    runner.run = AsyncMock(
+        return_value=SimpleNamespace(crashed=False, output_text="OK")
+    )
+    state = _make_state_with_attempts()
+
+    resolved = tmp_path / "worktrees" / "issue-100"
+    resolved.mkdir(parents=True)
+    workspaces = MagicMock()
+    workspaces.create = AsyncMock(return_value=resolved)
+
+    loop, _ = _make_loop(
+        tmp_path, prs=pr_port, runner=runner, state=state, workspaces=workspaces
+    )
+    await loop._do_work()
+
+    runner.run.assert_called_once()
+    kwargs = runner.run.call_args.kwargs
+    assert kwargs["worktree_path"] == str(resolved)
+    assert kwargs["worktree_path"] != "rc/2026-04-26"
+    workspaces.create.assert_awaited_once_with(100, "rc/2026-04-26")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_falls_back_to_repo_root_without_workspace_port(
+    tmp_path: Path,
+) -> None:
+    """With no WorkspacePort wired the cwd degrades to repo_root — still a real
+    directory, never the branch name."""
+    pr_port = MagicMock()
+    pr_port.list_prs_by_label = AsyncMock(
+        return_value=[
+            SimpleNamespace(number=100, branch="rc/2026-04-26", labels=[]),
+        ]
+    )
+    pr_port.add_pr_labels = AsyncMock()
+    pr_port.remove_pr_label = AsyncMock()
+    runner = MagicMock()
+    runner.run = AsyncMock(
+        return_value=SimpleNamespace(crashed=False, output_text="OK")
+    )
+    state = _make_state_with_attempts()
+
+    loop, _ = _make_loop(tmp_path, prs=pr_port, runner=runner, state=state)
+    await loop._do_work()
+
+    runner.run.assert_called_once()
+    kwargs = runner.run.call_args.kwargs
+    assert kwargs["worktree_path"] == str(loop._config.repo_root)
+    assert kwargs["worktree_path"] != "rc/2026-04-26"
