@@ -102,6 +102,29 @@ class DiagnosticRunner(BaseRunner):
             model=self._config.model,
         )
 
+    def _mockworld_diagnosis(self) -> DiagnosisResult | None:
+        """MockWorld bypass for the air-gapped sandbox (ADR-0063 pattern).
+
+        When a ``_mockworld_fake_llm`` sentinel is attached (set by
+        ``sandbox_main`` on the diagnostic runner), Stage-1 diagnosis must
+        not spawn a real ``claude`` subprocess — the sandbox is
+        ``internal: true`` and the call would hang on api-retry backoff,
+        stranding the issue in ``hydraflow-diagnose`` until the scenario
+        times out (s05). Return a not-fixable diagnosis so the loop
+        escalates straight to HITL — the path s05 exercises. Returns
+        ``None`` in production so the real subprocess path runs.
+        """
+        fake_llm = getattr(self, "_mockworld_fake_llm", None)
+        if fake_llm is None or not getattr(fake_llm, "_is_fake_adapter", False):
+            return None
+        return DiagnosisResult(
+            root_cause="MockWorld sandbox diagnosis (no real agent)",
+            severity=Severity.P2_FUNCTIONAL,
+            fixable=False,
+            fix_plan="",
+            human_guidance="Sandbox diagnostic bypass — escalating to human review.",
+        )
+
     async def diagnose(
         self,
         issue_number: int,
@@ -110,6 +133,9 @@ class DiagnosticRunner(BaseRunner):
         context: EscalationContext,
     ) -> DiagnosisResult:
         """Stage 1: Read-only diagnosis against repo root. Returns structured result."""
+        bypass = self._mockworld_diagnosis()
+        if bypass is not None:
+            return bypass
         prompt = _build_diagnosis_prompt(issue_number, issue_title, issue_body, context)
         try:
             cmd = self._build_command()
