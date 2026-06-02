@@ -198,12 +198,26 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         """
         sandbox_dir = self._config.repo_root / _GIT_SANDBOX_RELPATH
 
+        # The git recorder is local (a fixture dir + local git) and always
+        # runs. The github/docker/claude recorders reach external services
+        # (contracts-sandbox repo, an alpine image pull, api.anthropic.com)
+        # and each blocks up to the 120s subprocess timeout when those are
+        # unreachable — e.g. the air-gapped sandbox. ``contract_refresh_
+        # external_enabled=False`` skips them so the loop still completes and
+        # emits its worker-status event promptly (s30). Skipped recorders
+        # report ``[]``, which the diff layer already treats as no-signal.
+        external = self._config.contract_refresh_external_enabled
+
         recorded: dict[str, list[Path]] = {}
-        recorded["github"] = await self._record_with_trace(
-            "contract_recording.record_github",
-            record_github,
-            _SANDBOX_GITHUB_REPO,
-            tmp_root / "github",
+        recorded["github"] = (
+            await self._record_with_trace(
+                "contract_recording.record_github",
+                record_github,
+                _SANDBOX_GITHUB_REPO,
+                tmp_root / "github",
+            )
+            if external
+            else []
         )
         recorded["git"] = await self._record_with_trace(
             "contract_recording.record_git",
@@ -211,15 +225,23 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             sandbox_dir,
             tmp_root / "git",
         )
-        recorded["docker"] = await self._record_with_trace(
-            "contract_recording.record_docker",
-            record_docker,
-            tmp_root / "docker",
+        recorded["docker"] = (
+            await self._record_with_trace(
+                "contract_recording.record_docker",
+                record_docker,
+                tmp_root / "docker",
+            )
+            if external
+            else []
         )
-        recorded["claude"] = await self._record_with_trace(
-            "contract_recording.record_claude_stream",
-            record_claude_stream,
-            tmp_root / "claude",
+        recorded["claude"] = (
+            await self._record_with_trace(
+                "contract_recording.record_claude_stream",
+                record_claude_stream,
+                tmp_root / "claude",
+            )
+            if external
+            else []
         )
         return recorded
 
