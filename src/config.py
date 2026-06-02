@@ -2409,6 +2409,17 @@ class HydraFlowConfig(BaseModel):
             "(spec §8). Override if the sandbox org is renamed."
         ),
     )
+    contract_refresh_external_enabled: bool = Field(
+        default=True,
+        description=(
+            "Run ContractRefreshLoop's external recorders (github → "
+            "contracts-sandbox repo, claude → api.anthropic.com, docker → "
+            "alpine image pull). Disabling skips them so the loop completes "
+            "fast in the air-gapped sandbox (only the local git recorder "
+            "runs); each external recorder otherwise blocks up to the 120s "
+            "subprocess timeout. Production defaults to True."
+        ),
+    )
 
     # Trust fleet — TrustFleetSanityLoop (spec §12.1)
     trust_fleet_sanity_interval: int = Field(

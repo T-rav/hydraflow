@@ -818,3 +818,58 @@ async def test_escalation_resets_after_clean_tick(
     assert post_count == pre_count + 1, (
         "Escalation should re-fire after an adapter goes clean then drifts again"
     )
+
+
+# ---------------------------------------------------------------------------
+# External-recorder skip (s30 — air-gapped sandbox)
+# ---------------------------------------------------------------------------
+
+
+def _track_recorders(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Replace each ``record_*`` with a tracker that records its adapter name."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        crl_module, "record_github", lambda *_a, **_k: calls.append("github") or []
+    )
+    monkeypatch.setattr(
+        crl_module, "record_git", lambda *_a, **_k: calls.append("git") or []
+    )
+    monkeypatch.setattr(
+        crl_module, "record_docker", lambda *_a, **_k: calls.append("docker") or []
+    )
+    monkeypatch.setattr(
+        crl_module,
+        "record_claude_stream",
+        lambda *_a, **_k: calls.append("claude") or [],
+    )
+    return calls
+
+
+def test_record_all_skips_external_recorders_when_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # contract_refresh_external_enabled=False (the sandbox setting): the three
+    # network/daemon recorders must NOT run (they block on the air-gapped
+    # network up to the 120s subprocess timeout); only the local git recorder
+    # runs. Skipped adapters report [] (no-signal to the diff layer).
+    calls = _track_recorders(monkeypatch)
+    loop = _loop(tmp_path, contract_refresh_external_enabled=False)
+
+    recorded = asyncio.run(loop._record_all(tmp_path / "rec"))
+
+    assert calls == ["git"]
+    assert recorded["github"] == []
+    assert recorded["docker"] == []
+    assert recorded["claude"] == []
+
+
+def test_record_all_runs_all_recorders_when_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Production default (external_enabled=True): every adapter is recorded.
+    calls = _track_recorders(monkeypatch)
+    loop = _loop(tmp_path, contract_refresh_external_enabled=True)
+
+    asyncio.run(loop._record_all(tmp_path / "rec"))
+
+    assert set(calls) == {"github", "git", "docker", "claude"}

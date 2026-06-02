@@ -159,6 +159,13 @@ async def main() -> None:
     #   this flag (see src/plan_phase.py).
     config.transcript_summarization_enabled = False  # type: ignore[misc]
     config.research_enabled = False  # type: ignore[misc]
+    # ContractRefreshLoop's github/claude/docker recorders reach external
+    # services (contracts-sandbox repo, api.anthropic.com, alpine pull) that
+    # are unreachable on the internal sandbox network; each blocks up to the
+    # 120s subprocess timeout, so the loop never emits its worker-status event
+    # within a scenario's window (s30). Skip them — only the local git
+    # recorder runs.
+    config.contract_refresh_external_enabled = False  # type: ignore[misc]
     seed = _load_seed()
     event_bus = EventBus()
     state = build_state_tracker(config)
