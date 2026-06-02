@@ -45,7 +45,7 @@ class _PRPort(Protocol):
 # previously-failed-then-re-submitted issue (operator manually reset state)
 # doesn't stay in the human queue after a successful auto-fix.
 _LABEL_MAP: dict[str, tuple[list[str], list[str]]] = {
-    "resolved": ([], ["human-required"]),
+    "resolved": ([], ["hitl-escalation", "human-required"]),
     "needs_human": (["human-required"], []),
     "fatal": (["human-required", "auto-agent-fatal"], []),
     "pr_failed": (["human-required", "auto-agent-pr-failed"], []),
@@ -62,15 +62,12 @@ async def apply_decision(
     pr_port: _PRPort,
     state: Any,
     max_attempts: int,
-    hitl_escalation_label: str = "hydraflow-hitl-escalation",
 ) -> dict[str, Any]:
     """Apply labels + comment for a single attempt's result."""
     # Race-detection: re-read attempts to ensure no concurrent bumper.
     current_attempts = state.get_auto_agent_attempts(issue_number)
 
     add, remove = _LABEL_MAP.get(result.status, _LABEL_MAP["needs_human"])
-    if result.status == "resolved":
-        remove = [hitl_escalation_label, *remove]
 
     # Spec §3 (state transitions, line 119): a successful resolve also removes
     # the sub-label so the issue doesn't carry an orphaned routing tag in the

@@ -191,8 +191,8 @@ async def test_do_work_files_escalation_on_issues_per_hour_breach(loop_env) -> N
     assert "ci_monitor" in title
     assert "issues_per_hour" in title
     labels = pr.create_issue.await_args.args[2]
-    assert "hydraflow-hitl-escalation" in labels
-    assert "hydraflow-trust-loop-anomaly" in labels
+    assert "hitl-escalation" in labels
+    assert "trust-loop-anomaly" in labels
 
 
 async def test_do_work_skips_filing_when_dedup_key_present(loop_env) -> None:

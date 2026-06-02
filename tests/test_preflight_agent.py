@@ -15,7 +15,7 @@ from preflight.agent import (
 from preflight.context import PreflightContext
 
 
-def _ctx(sub_label: str = "hydraflow-flaky-test-stuck") -> PreflightContext:
+def _ctx(sub_label: str = "flaky-test-stuck") -> PreflightContext:
     return PreflightContext(
         issue_number=42,
         issue_body="body",

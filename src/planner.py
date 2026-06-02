@@ -331,7 +331,7 @@ class PlannerRunner(BaseRunner):
         body_raw = issue.body or ""
         body = self._truncate_text(
             issue.body or "",
-            max(0, self._config.max_issue_body_chars - 256),
+            self._config.max_issue_body_chars,
             self._config.max_planner_line_chars,
         )
         builder.record_context("Issue body", body_raw, body)
@@ -488,6 +488,10 @@ Use semantic tools first (before grep):
    - **Hexagonal Ports:** new GitHub / git / worktree / subprocess calls must go through `PRPort`, `IssueStorePort`, or `WorkspacePort`. If your plan introduces a direct `subprocess.run`, `gh`, or `git` call in a non-adapter file, route it through the existing Port (or extend the Port) instead.
    - **One responsibility per file:** if you're adding ≥~200 lines to an already-big file, split by responsibility in the plan. Don't bolt unrelated concerns onto a mega-file just because the imports are handy.
    - **3As tests:** every test in the plan's test specs should map cleanly to Arrange / Act / Assert with one logical assertion per test. List tests in the plan at the behaviour level — the implementer will write each one red-first.
+   - **ADR-0049 kill-switch (new loops/runners only):** a plan adding a new
+     `BaseBackgroundLoop` subclass or subprocess-spawning runner MUST include the
+     ADR-0049 kill-switch (`HYDRAFLOW_DISABLE_<WORKER>_LOOP` env + in-body
+     `enabled_cb` gate); `run_phase_gates` rejects plans that omit it.
 9. **Audit the plan against `docs/wiki/gotchas.md`.** Every code snippet,
    test fixture, and cross-module import in your plan must avoid the anti-patterns
    listed there. Specifically check: symbols imported across modules do not start

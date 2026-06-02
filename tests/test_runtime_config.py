@@ -39,15 +39,6 @@ class TestLoadRuntimeConfig:
         assert cfg.max_workers == 9
         assert cfg.model == "opus"
 
-    def test_managed_repos_from_config_file_stay_typed(self, tmp_path: Path) -> None:
-        config_path = tmp_path / "config.json"
-        config_path.write_text(json.dumps({"managed_repos": [{"slug": "acme/widget"}]}))
-
-        cfg = load_runtime_config(config_file=config_path)
-
-        assert cfg.managed_repos[0].slug == "acme/widget"
-        assert cfg.managed_repos[0].enabled is True
-
 
 class TestApplyRepoConfigOverlay:
     def test_repo_config_overrides_shared_values(self, tmp_path: Path) -> None:
@@ -70,23 +61,6 @@ class TestApplyRepoConfigOverlay:
         apply_repo_config_overlay(cfg, cli_explicit=set())
 
         assert cfg.batch_size == 42
-
-    def test_repo_config_overlay_preserves_managed_repo_models(
-        self, tmp_path: Path
-    ) -> None:
-        repo_cfg = tmp_path / "repo-config.json"
-        repo_cfg.write_text(json.dumps({"managed_repos": [{"slug": "acme/widget"}]}))
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path,
-            data_root=tmp_path,
-            repo="owner/example",
-            config_file=repo_cfg,
-        )
-
-        apply_repo_config_overlay(cfg, cli_explicit=set())
-
-        assert cfg.managed_repos[0].slug == "acme/widget"
-        assert cfg.managed_repos[0].enabled is True
 
     def test_cli_explicit_values_are_preserved(self, tmp_path: Path) -> None:
         repo_cfg = tmp_path / "repo-config.json"

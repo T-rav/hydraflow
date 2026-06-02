@@ -40,6 +40,16 @@ def test_plan_stuck_playbook_specialises() -> None:
     assert "touchpoint" in pb.persona.lower() or "adr" in pb.persona.lower()
 
 
+def test_prefixed_escalation_label_routes_to_specialist() -> None:
+    # Mechanism check: removeprefix routes a `hydraflow-`-prefixed label to its
+    # (unprefixed) registry specialist. plan-stuck is produced UNPREFIXED in
+    # practice; this guards the defensive prefix-strip so a prefixed config-default
+    # label (or a future prefixed producer) does not silently fall to `_default`.
+    assert get_playbook("hydraflow-plan-stuck").name == "plan-stuck"
+    assert get_playbook("hydraflow-plan-stuck").name == get_playbook("plan-stuck").name
+    assert get_playbook("hydraflow-plan-stuck").persona != DEFAULT_PERSONA
+
+
 def test_implement_stuck_playbook_specialises() -> None:
     pb = get_playbook("implement-stuck")
     assert pb.name == "implement-stuck"

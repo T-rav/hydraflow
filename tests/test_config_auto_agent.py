@@ -13,10 +13,7 @@ def test_defaults() -> None:
     assert c.auto_agent_preflight_enabled is True
     assert c.auto_agent_preflight_interval == 120
     assert c.auto_agent_max_attempts == 3
-    assert c.auto_agent_skip_sublabels == [
-        "hydraflow-principles-stuck",
-        "hydraflow-cultural-check",
-    ]
+    assert c.auto_agent_skip_sublabels == ["principles-stuck", "cultural-check"]
     assert c.auto_agent_cost_cap_usd is None
     assert c.auto_agent_wall_clock_cap_s is None
     assert c.auto_agent_daily_budget_usd is None

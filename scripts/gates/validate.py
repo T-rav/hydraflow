@@ -15,6 +15,15 @@ from scripts.gates.contract import Contract
 _MAKE_TARGET = re.compile(r"^([A-Za-z0-9_.-]+):")
 
 
+def makefile_targets(makefile_text: str) -> set[str]:
+    """The set of target names declared in ``makefile_text``."""
+    return {
+        m.group(1)
+        for line in makefile_text.splitlines()
+        if (m := _MAKE_TARGET.match(line))
+    }
+
+
 def validate_make_targets(contract: Contract, makefile_text: str) -> list[str]:
     """Every active gate's (non-empty) make_target must be a real Makefile target.
 
@@ -22,11 +31,7 @@ def validate_make_targets(contract: Contract, makefile_text: str) -> list[str]:
     (local == CI == pre-commit). A gate pointing at a deleted or misspelled
     target is a silent local/CI divergence; this turns that into a CI failure.
     """
-    targets = {
-        m.group(1)
-        for line in makefile_text.splitlines()
-        if (m := _MAKE_TARGET.match(line))
-    }
+    targets = makefile_targets(makefile_text)
     return [
         f"gate {g.name!r} make_target {g.make_target!r} is not a Makefile target"
         for g in contract.gates

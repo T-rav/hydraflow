@@ -43,6 +43,15 @@ return empty lists. Severity guide:
   HIGH: assumption affects buildability or test design and is unverified.
   MEDIUM: assumption is plausible but worth documenting.
   LOW: assumption is minor.
+
+Mechanism assumption rule (ALWAYS apply):
+  Any assumption about a specific subprocess command, external tool exit code,
+  OS path behavior, or git command flag (e.g. "git config --unset succeeds
+  when core.worktree is set", "gh api returns 404 for missing resources")
+  MUST be marked severity HIGH with must_address_by set to "planner" and a
+  note: "validate in a scratch repo or minimal spike before committing to
+  this mechanism in the plan." These assumptions are load-bearing and
+  frequently wrong — do not mark them MEDIUM or LOW.
 """
 
 

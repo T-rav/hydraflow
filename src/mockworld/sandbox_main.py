@@ -15,14 +15,11 @@ import os
 import signal
 import sys
 from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
-from types import MethodType
 from typing import cast
 
 from dashboard import HydraFlowDashboard
 from events import EventBus
-from github_cache_loop import CacheSnapshot
 from mockworld.fakes import (
     FakeGitHub,
     FakeIssueFetcher,
@@ -35,7 +32,6 @@ from mockworld.fakes.fake_subprocess_runner import FakeSubprocessRunner
 from mockworld.seed import MockWorldSeed
 from orchestrator import HydraFlowOrchestrator
 from ports import IssueFetcherPort, IssueStorePort, PRPort, WorkspacePort
-from repo_store import RepoRecord, RepoRegistryStore
 from runtime_config import load_runtime_config
 from service_registry import (
     WorkerRegistryCallbacks,
@@ -116,9 +112,8 @@ def _build_caretaker_enabled_cb(
 
     Semantics of ``MockWorldSeed.loops_enabled``:
 
-    - ``None`` — no caretaker loops enabled. Sandbox scenarios must opt into
-      cadence-driven loops explicitly so phase-flow scenarios do not start
-      unrelated GitHub/uv/docker workers inside the isolated container.
+    - ``None`` — all caretaker loops enabled (production default; scenario
+      didn't opt into a subset).
     - ``[]`` — no caretaker loops enabled (universal kill-switch — proves
       ADR-0049 wiring; phase orchestrators are unaffected because they
       consult ``BGWorkerManager.is_enabled`` via the orchestrator's own
@@ -139,30 +134,13 @@ def _build_caretaker_enabled_cb(
     cadence-driven loops, not work-driven phase orchestrators.
     """
     if loops_enabled is None:
-        return lambda *_a, **_kw: False
+        return lambda *_a, **_kw: True
     allowed = frozenset(loops_enabled)
     return lambda name, *_a, **_kw: name in allowed
 
 
-def _build_seed_repo_store(seed: MockWorldSeed, data_root: Path) -> RepoRegistryStore:
-    """Populate the sandbox repo registry from ``MockWorldSeed.repos``."""
-    repo_store = RepoRegistryStore(data_root)
-    for slug, path in seed.repos:
-        repo_store.upsert(RepoRecord(slug=slug, repo=slug, path=path))
-    return repo_store
-
-
 async def main() -> None:
-    sandbox_repo_root = Path(
-        os.environ.get("HYDRAFLOW_SANDBOX_REPO_ROOT", "/opt/hydraflow")
-    )
-    config = load_runtime_config(
-        overrides={
-            "repo_root": sandbox_repo_root,
-            "data_root": Path("/workspace/.hydraflow"),
-            "workspace_base": Path("/workspace/worktrees"),
-        }
-    )
+    config = load_runtime_config()
     # Sandbox-specific config overrides — disable downstream code paths
     # that spawn real `claude` subprocesses. The sandbox is `internal: true`
     # per docker-compose.sandbox.yml, so these subprocesses hang for ~30s
@@ -182,7 +160,6 @@ async def main() -> None:
     config.transcript_summarization_enabled = False  # type: ignore[misc]
     config.research_enabled = False  # type: ignore[misc]
     seed = _load_seed()
-    repo_store = _build_seed_repo_store(seed, config.data_root)
     event_bus = EventBus()
     state = build_state_tracker(config)
     stop_event = asyncio.Event()
@@ -245,7 +222,7 @@ async def main() -> None:
     callbacks = WorkerRegistryCallbacks(
         update_status=lambda *_a, **_kw: None,
         is_enabled=_build_caretaker_enabled_cb(seed.loops_enabled),
-        get_interval=lambda *_a, **_kw: 1,
+        get_interval=lambda *_a, **_kw: 60,
     )
 
     # FakeSubprocessRunner short-circuits every remaining shell-out to
@@ -272,21 +249,6 @@ async def main() -> None:
         runners=fake_llm,
         subprocess_runner=fake_subprocess_runner,
     )
-
-    async def _mock_contract_recordings(
-        _self: object, _tmp_root: Path
-    ) -> dict[str, list[Path]]:
-        return {}
-
-    svc.contract_refresh_loop._record_all = MethodType(  # type: ignore[method-assign]
-        _mock_contract_recordings,
-        svc.contract_refresh_loop,
-    )
-    if seed.prs:
-        svc.github_cache._open_prs = CacheSnapshot(  # type: ignore[attr-defined]
-            data=await shared_github.list_open_prs([]),
-            fetched_at=datetime.now(UTC),
-        )
 
     # Attach the advisor-routing sentinel — mirrors
     # tests/scenarios/fakes/mock_world.py::_wire_targets so
@@ -333,8 +295,6 @@ async def main() -> None:
         event_bus=event_bus,
         state=state,
         orchestrator=orch,
-        repo_store=repo_store,
-        list_repos_cb=repo_store.list,
     )
     await dashboard.start()
 

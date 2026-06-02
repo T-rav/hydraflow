@@ -169,6 +169,8 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
                 "audit trail).",
                 "",
                 "_Filed by `adr_touchpoint_auditor` per ADR-0056 (per-ADR rollup, #8987)._",
+                "",
+                "<!-- [hydraflow-auditor: source=ADRTouchpointAuditorLoop] -->",
             ]
         )
         return "\n".join(lines)
@@ -187,12 +189,11 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
     ) -> int:
         title = self._rollup_title(adr, len(pr_entries))
         body = self._rollup_body(adr, pr_entries)
-        issue_number = await self._pr.create_issue(
+        return await self._pr.create_issue(
             title,
             body,
             [*self._config.find_label, *self._config.adr_drift_label],
         )
-        return int(issue_number or 0)
 
     async def _update_drift_rollup(
         self,
@@ -210,7 +211,7 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             f"{attempts} times without closure. Human review needed.\n\n"
             f"_Closing this issue clears the dedup key (ADR-0056)._"
         )
-        issue_number = await self._pr.create_issue(
+        return await self._pr.create_issue(
             title,
             body,
             [
@@ -218,7 +219,6 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
                 *self._config.adr_drift_stuck_label,
             ],
         )
-        return int(issue_number or 0)
 
     async def _reconcile_closed_escalations(self) -> None:
         """Clear dedup keys + attempt counters for closed drift escalations."""

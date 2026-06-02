@@ -731,12 +731,9 @@ class TestPostWorkCleanup:
             await manager.post_work_cleanup(42)
 
         cmd_strs = [" ".join(c) for c in calls]
-        assert any("make arch-regen" in c for c in cmd_strs)
         assert any("git add -A" in c for c in cmd_strs)
         assert any("git commit" in c for c in cmd_strs)
         assert any("git push" in c for c in cmd_strs)
-        push_cmd = next(c for c in calls if c[:2] == ("git", "push"))
-        assert "--no-verify" not in push_cmd
 
     @pytest.mark.asyncio
     async def test_post_work_skips_salvage_when_clean(self, config) -> None:

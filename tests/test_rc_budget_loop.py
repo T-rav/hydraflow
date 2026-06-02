@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -157,7 +158,7 @@ async def test_do_work_files_issue_on_median_signal(loop_env) -> None:
     title = pr.create_issue.await_args.args[0]
     assert "RC gate duration regression" in title
     labels = pr.create_issue.await_args.args[2]
-    assert "hydraflow-find" in labels and "hydraflow-rc-duration-regression" in labels
+    assert "hydraflow-find" in labels and "rc-duration-regression" in labels
 
 
 async def test_do_work_skips_when_dedup_key_present(loop_env) -> None:
@@ -204,8 +205,7 @@ async def test_escalation_fires_after_three_attempts(loop_env) -> None:
     stats = await loop._do_work()
     assert stats["escalated"] >= 1
     assert any(
-        "hydraflow-hitl-escalation" in call.args[2]
-        and "hydraflow-rc-duration-stuck" in call.args[2]
+        "hitl-escalation" in call.args[2] and "rc-duration-stuck" in call.args[2]
         for call in pr.create_issue.await_args_list
     )
 
@@ -235,6 +235,109 @@ async def test_reconcile_closed_escalations_clears_dedup(loop_env, monkeypatch) 
     assert "rc_budget:median" not in remaining
     assert "rc_budget:spike" in remaining
     state.clear_rc_budget_attempts.assert_called_once_with("median")
+
+
+async def test_fetch_job_breakdown_sorts_and_caps_slowest_jobs(
+    loop_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loop = _loop(loop_env)
+    jobs = [
+        {
+            "name": f"job-{idx}",
+            "startedAt": "2026-04-20T00:00:00Z",
+            "completedAt": f"2026-04-20T00:{idx:02d}:00Z",
+        }
+        for idx in range(1, 13)
+    ]
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self):
+            return (json.dumps({"jobs": jobs}).encode(), b"")
+
+    async def fake_subproc(*args, **kwargs):
+        assert args[:4] == ("gh", "run", "view", "123")
+        return _Proc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+
+    result = await loop._fetch_job_breakdown({"databaseId": 123})
+
+    assert [job["name"] for job in result[:3]] == ["job-12", "job-11", "job-10"]
+    assert len(result) == 10
+    assert result[0]["duration_s"] == 720
+
+
+async def test_fetch_junit_tests_parses_and_caps_slowest_tests(
+    loop_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loop = _loop(loop_env)
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"", b"")
+
+    async def fake_subproc(*args, **kwargs):
+        assert args[:4] == ("gh", "run", "download", "123")
+        out_dir = Path(args[args.index("--dir") + 1])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        cases = "\n".join(
+            f'<testcase classname="pkg.TestSuite" name="test_{idx}" time="{idx / 10}" />'
+            for idx in range(1, 13)
+        )
+        (out_dir / "junit.xml").write_text(f"<testsuite>{cases}</testsuite>")
+        return _Proc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+
+    result = await loop._fetch_junit_tests({"databaseId": 123})
+
+    assert result[:3] == [
+        ("pkg.TestSuite.test_12", 1.2),
+        ("pkg.TestSuite.test_11", 1.1),
+        ("pkg.TestSuite.test_10", 1.0),
+    ]
+    assert len(result) == 10
+
+
+async def test_regression_issue_body_includes_enrichment(loop_env) -> None:
+    loop = _loop(loop_env)
+    current = {
+        "databaseId": 99,
+        "duration_s": 900,
+        "createdAt": "2026-04-20T00:00:00Z",
+        "conclusion": "success",
+        "url": "https://example/run/99",
+    }
+    previous_5 = [
+        {
+            "databaseId": 90,
+            "duration_s": 300,
+            "createdAt": "2026-04-19T00:00:00Z",
+        }
+    ]
+
+    await loop._file_regression_issue(
+        kind="spike",
+        current=current,
+        baseline_s=300,
+        baselines={"rolling_median": 300, "recent_max": 300},
+        previous_5=previous_5,
+        jobs=[{"name": "scenario-loop", "duration_s": 420}],
+        junit_tests=[("tests.scenarios.test_rc_budget.test_spike", 12.345)],
+    )
+
+    _, _, pr, _ = loop_env
+    title, body, labels = pr.create_issue.await_args.args
+    assert title == "RC gate duration regression: 900s vs 300s (spike)"
+    assert labels == ["hydraflow-find", "rc-duration-regression"]
+    assert "Run [99](https://example/run/99) took **900s**" in body
+    assert "- `scenario-loop` — 420s" in body
+    assert "- `tests.scenarios.test_rc_budget.test_spike` — 12.35s" in body
+    assert "- run 90 (2026-04-19T00:00:00Z) — 300s" in body
 
 
 async def test_kill_switch_short_circuits_run(loop_env) -> None:

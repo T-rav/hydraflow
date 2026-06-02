@@ -47,8 +47,14 @@ class TestScanBase64ForSecrets:
         assert "Anthropic API key" in result
 
     def test_openai_api_key_detected(self) -> None:
-        """An OpenAI API key is detected."""
-        payload = "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZabcd more"
+        """A realistic 48-char OpenAI API key is detected.
+
+        The shared pattern (secret_scrub) is anchored + length-tightened to
+        avoid mid-token-corrupting legitimate identifiers when scrubbing the
+        audit stream (ADR-0085); real OpenAI keys are 48 chars, so detection of
+        a genuine key is unaffected.
+        """
+        payload = "sk-" + "A1B2C3D4E5" * 4 + "ABCDEFGH more"  # sk- + 48 chars
         result = scan_base64_for_secrets(payload)
         assert "OpenAI API key" in result
 

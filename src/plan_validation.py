@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from plan_constants import (
@@ -277,6 +278,62 @@ def run_phase_gates(
                     )
         except OSError:
             logger.warning("Could not read constitution.md")
+
+    # --- Kill-switch gate: block new loops/runners without ADR-0049 kill-switch ---
+    _NEW_LOOP_RE = re.compile(
+        r"BaseBackgroundLoop|(\b\w+Loop\b.*create\b|\bcreate\b.*\b\w+Loop\b)",
+        re.IGNORECASE,
+    )
+    _KILLSWITCH_PRESENT_RE = re.compile(
+        r"(ADR-0049|kill.?switch|HYDRAFLOW_DISABLE_\w+|enabled_cb)",
+        re.IGNORECASE,
+    )
+    # Search Task Graph Files: lines for new loop class introductions
+    task_graph_section = re.search(
+        r"## Task Graph\s*\n(.*?)(?=\n## |\Z)", plan, re.DOTALL | re.IGNORECASE
+    )
+    if task_graph_section:
+        tg_body = task_graph_section.group(1)
+        if _NEW_LOOP_RE.search(tg_body) and not _KILLSWITCH_PRESENT_RE.search(plan):
+            blocking.append(
+                "Kill-switch gate: plan introduces a new loop or subprocess-spawning "
+                "runner but includes no ADR-0049 kill-switch "
+                "(HYDRAFLOW_DISABLE_<WORKER>_LOOP=1 env + enabled_cb body check). "
+                "Add the kill-switch before this plan advances to implementation."
+            )
+
+    # --- Duplicate enforcement-test gate: warn if proposed test file matches a known invariant ---
+    _ENFORCEMENT_INVENTORY = {
+        "test_loop_wiring_completeness": "loop registry/service/UI/interval parity",
+        "test_config_consistency": "config field/env-override/interval-bounds parity",
+        "test_event_type_reducer_parity": "EventType↔JSX reducer parity",
+        "test_mock_spec_discipline": "AsyncMock spec= ratchet",
+        "test_audit_prompts": "prompt structure",
+    }
+    _ENFORCEMENT_KEYWORDS = {"wiring", "parity", "consistency", "discipline"}
+    proposed_test_files = re.findall(r"tests/test_[\w_]+\.py", plan)
+    for proposed in proposed_test_files:
+        stem = Path(proposed).stem  # e.g. "test_loop_wiring_completeness_v2"
+        # Check against known inventory names
+        for canonical, description in _ENFORCEMENT_INVENTORY.items():
+            if canonical in stem:
+                warnings.append(
+                    f"Duplicate enforcement-test gate: proposed {proposed!r} overlaps "
+                    f"with existing {canonical}.py ({description}). "
+                    f"Extend the existing file rather than creating a new one."
+                )
+                break
+        else:
+            # Check for keyword overlap
+            stem_lower = stem.lower()
+            matched_kw = _ENFORCEMENT_KEYWORDS & set(stem_lower.split("_"))
+            if matched_kw:
+                warnings.append(
+                    f"Duplicate enforcement-test gate: proposed {proposed!r} contains "
+                    f"enforcement keyword(s) {matched_kw}. Verify no existing "
+                    f"enforcement test already covers this invariant "
+                    f"(see: {', '.join(sorted(_ENFORCEMENT_INVENTORY))}). "
+                )
 
     # Log warnings
     for w in warnings:

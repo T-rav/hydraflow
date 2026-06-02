@@ -73,11 +73,12 @@ def _write_entry(
 
 
 def _make_loop(repo_root: Path):
-    """Build a MemoryBacklogLoop with a real config + mocked PRManager."""
+    """Build a MemoryBacklogLoop with a real config + FakeGitHub PRManager."""
     from base_background_loop import LoopDeps  # noqa: PLC0415
     from dedup_store import DedupStore  # noqa: PLC0415
     from events import EventBus  # noqa: PLC0415
     from memory_backlog_loop import MemoryBacklogLoop  # noqa: PLC0415
+    from mockworld.fakes.fake_github import FakeGitHub  # noqa: PLC0415
     from tests.helpers import ConfigFactory  # noqa: PLC0415
 
     config = ConfigFactory.create(repo_root=repo_root)
@@ -100,13 +101,12 @@ def _make_loop(repo_root: Path):
     dedup_path.parent.mkdir(parents=True, exist_ok=True)
     dedup = DedupStore("memory_backlog", dedup_path)
 
-    pr_manager = MagicMock()
-    pr_manager.create_issue = AsyncMock(return_value=4242)
+    github = FakeGitHub()
 
     loop = MemoryBacklogLoop(
-        config=config, state=state, pr_manager=pr_manager, dedup=dedup, deps=deps
+        config=config, state=state, pr_manager=github, dedup=dedup, deps=deps
     )
-    return loop, pr_manager
+    return loop, github
 
 
 class TestMemoryBacklogScenario:
@@ -114,12 +114,14 @@ class TestMemoryBacklogScenario:
         """Happy path: a single pending entry yields one create_issue call."""
         repo = _make_repo_with_mirror(tmp_path)
         _write_entry(repo / "docs" / "wiki" / "memory-feedback", "feedback-alpha")
-        loop, pr_manager = _make_loop(repo)
+        loop, github = _make_loop(repo)
 
         result = await loop._do_work()
 
         assert result == {"status": "ok", "filed": 1, "skipped": 0, "escalated": 0}
-        pr_manager.create_issue.assert_awaited_once()
+        assert len(github._issues) == 1
+        issue = next(iter(github._issues.values()))
+        assert "feedback-alpha" in issue.title
 
     async def test_malformed_yaml_does_not_crash_loop(self, tmp_path: Path) -> None:
         """A malformed mirror entry must not crash the loop — the good entries
@@ -139,10 +141,10 @@ class TestMemoryBacklogScenario:
             "status: pending\n"
             "---\n\nbody\n"
         )
-        loop, pr_manager = _make_loop(repo)
+        loop, github = _make_loop(repo)
 
         result = await loop._do_work()
 
         assert result["status"] == "ok"
         assert result["filed"] == 1
-        pr_manager.create_issue.assert_awaited_once()
+        assert len(github._issues) == 1

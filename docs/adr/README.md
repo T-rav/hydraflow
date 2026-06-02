@@ -76,11 +76,11 @@ ADR and that named test files actually exist.
 | [0042](0042-two-tier-branch-release-promotion.md) | Two-tier branch model with automated release-candidate promotion | Accepted |
 | [0043](0043-prompt-structure-standard.md) | Prompt structure standard (XML tags, 8-criterion rubric, mechanical scoring) | Proposed |
 | [0044](0044-hydraflow-principles.md) | HydraFlow Principles — the audit contract for new and existing repos | Proposed |
-| [0045](0045-trust-architecture-hardening.md) | Trust Architecture Hardening — Lights-Off Trust Fleet (10 loops + 2 non-loop subsystems) | Proposed |
+| [0045](0045-trust-architecture-hardening.md) | Trust Architecture Hardening — Lights-Off Trust Fleet (10 loops + 2 non-loop subsystems) | Accepted |
 | [0046](0046-meta-observability-bounded-recursion.md) | Meta-observability with bounded recursion — one layer of meta, no more | Proposed |
 | [0047](0047-fake-adapter-contract-testing-cassettes.md) | Fake-adapter contract testing via cassette record/replay | Proposed |
 | [0048](0048-auto-revert-on-rc-red.md) | Auto-revert on RC red (extends ADR-0042) | Proposed |
-| [0049](0049-trust-loop-kill-switch-convention.md) | Trust-loop kill-switch convention (`enabled_cb` only, no config-only) | Proposed |
+| [0049](0049-trust-loop-kill-switch-convention.md) | Trust-loop kill-switch convention (`enabled_cb` only, no config-only) | Accepted |
 | [0050](0050-auto-agent-hitl-preflight.md) | Auto-Agent HITL Pre-Flight Loop | Accepted |
 | [0051](0051-iterative-production-readiness-review.md) | Iterative production-readiness review | Accepted |
 | [0052](0052-sandbox-tier-scenarios.md) | Sandbox-tier scenario testing | Accepted |
@@ -113,6 +113,10 @@ ADR and that named test files actually exist.
 | [0080](0080-epic-monitor-loop.md) | EpicMonitorLoop: Autonomous Stale-Epic Detection and Progress Refresh | Proposed |
 | [0081](0081-epic-sweeper-loop.md) | EpicSweeperLoop: Autonomous Completion-Based Epic Auto-Close | Proposed |
 | [0082](0082-declarative-gate-contract.md) | Declarative Gate Contract for Branch Protection | Proposed |
+| [0083](0083-no-ignored-test-gates.md) | No ignored automated test gates | Accepted |
+| [0084](0084-untrusted-text-trust-boundary.md) | Untrusted-text trust boundary for agent prompts | Accepted |
+| [0085](0085-secrets-never-persist-in-audit-stream.md) | Secrets never persist in the canonical audit stream | Accepted |
+| [0086](0086-live-corpus-replay-loop.md) | LiveCorpusReplayLoop: Shadow-Corpus Drift Detection | Proposed |
 
 ## Adding a new ADR
 

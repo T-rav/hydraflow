@@ -48,6 +48,90 @@ def _make_repo(base: Path, name: str = "repo") -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Worktree core.worktree corruption healing (WS-8)
+# ---------------------------------------------------------------------------
+
+
+class TestWorktreeConfigHealing:
+    """WS-8: a docker container can write a stale ``core.worktree`` into a
+    worktree's git config; host-side git then fails with "not a work tree".
+    The salvage path must heal that before its status check, or it silently
+    aborts and loses the uncommitted work it exists to protect."""
+
+    def _make_manager(self, tmp_path: Path, repo: Path):
+        from tests.helpers import ConfigFactory
+        from workspace import WorkspaceManager
+
+        config = ConfigFactory.create(
+            repo_root=repo,
+            workspace_base=tmp_path / "worktrees",
+            execution_mode="host",
+        )
+        return WorkspaceManager(config)
+
+    @pytest.mark.asyncio
+    async def test_heal_unsets_stale_core_worktree(self, tmp_path: Path) -> None:
+        repo = _make_repo(tmp_path, "repo")
+        config_file = repo / ".git" / "config"
+        # Simulate a container having corrupted the worktree config. Setting the
+        # key works; reading it back via git does NOT (see below), so assert on
+        # the config file contents directly.
+        _git(repo, "config", "core.worktree", "/nonexistent/workspace")
+        assert "/nonexistent/workspace" in config_file.read_text()
+        # The corruption makes host git refuse to run in the worktree at all.
+        broken = subprocess.run(
+            ["git", "status", "--porcelain"],
+            check=False,
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        assert broken.returncode != 0
+
+        mgr = self._make_manager(tmp_path, repo)
+        await mgr._heal_worktree_config(repo, "")
+
+        # Healed: the stale path is gone from the config and host git works.
+        assert "/nonexistent/workspace" not in config_file.read_text()
+        assert _git(repo, "status", "--porcelain") == ""
+
+    @pytest.mark.asyncio
+    async def test_heal_is_noop_when_core_worktree_absent(self, tmp_path: Path) -> None:
+        repo = _make_repo(tmp_path, "repo")
+        mgr = self._make_manager(tmp_path, repo)
+        # Must not raise when there is nothing to unset; git still works.
+        await mgr._heal_worktree_config(repo, "")
+        assert _git(repo, "status", "--porcelain") == ""
+
+    @pytest.mark.asyncio
+    async def test_salvage_heals_corruption_then_commits(self, tmp_path: Path) -> None:
+        repo = _make_repo(tmp_path, "repo")
+        mgr = self._make_manager(tmp_path, repo)
+
+        # Build a worktree-like clone at the issue's workspace path with
+        # committed history + an uncommitted change.
+        wt = mgr._config.workspace_path_for_issue(7)
+        _make_repo(wt.parent, wt.name)
+        # run_subprocess uses a clean env (no global git identity in CI), so
+        # persist a repo-local identity for the salvage commit to succeed.
+        _git(wt, "config", "user.email", "test@test.com")
+        _git(wt, "config", "user.name", "Test")
+        (wt / "work.txt").write_text("uncommitted work\n")
+
+        # A container corrupted the worktree config.
+        _git(wt, "config", "core.worktree", "/nonexistent/workspace")
+
+        # Salvage must heal first; the push fails (no origin) and is caught,
+        # but the local commit — which a "not a work tree" abort would have
+        # skipped, silently losing the work — must have happened.
+        await mgr._salvage_uncommitted(7)
+
+        assert "/nonexistent/workspace" not in (wt / ".git" / "config").read_text()
+        log = _git(wt, "log", "--oneline")
+        assert "salvage uncommitted changes for issue #7" in log
+
+
+# ---------------------------------------------------------------------------
 # Setup helpers (_setup_dotenv, _setup_claude_settings, _setup_node_modules)
 # ---------------------------------------------------------------------------
 

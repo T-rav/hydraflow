@@ -93,7 +93,11 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0079 | `src.adr_reviewer`, `src.adr_reviewer_loop` |
 | ADR-0080 | `src.epic`, `src.epic_monitor_loop` |
 | ADR-0081 | `src.epic`, `src.epic_sweeper_loop` |
-| ADR-0082 | `src.branch_protection_audit`, `src.branch_protection_auditor_loop` |
+| ADR-0082 | `src.branch_protection_audit`, `src.branch_protection_auditor_loop`, `src.gate_activation_check`, `src.gate_activator_loop` |
+| ADR-0083 | — |
+| ADR-0084 | `src.agent`, `src.preflight.runner`, `src.untrusted_text` |
+| ADR-0085 | `src.secret_scrub` |
+| ADR-0086 | `src.contracts.shadow`, `src.live_corpus_replay_loop` |
 
 ## Module → ADRs
 
@@ -106,7 +110,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.adr_touchpoint_auditor_loop` | ADR-0056 |
 | `src.adversarial_labels` | ADR-0064 |
 | `src.adversarial_retry_loop` | ADR-0064 |
-| `src.agent` | ADR-0024, ADR-0027, ADR-0066 |
+| `src.agent` | ADR-0024, ADR-0027, ADR-0066, ADR-0084 |
 | `src.agent_cli` | ADR-0004 |
 | `src.assumption_surfacer` | ADR-0064 |
 | `src.auto_agent_preflight_loop` | ADR-0050, ADR-0063 |
@@ -123,6 +127,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.contract_diff` | ADR-0047, ADR-0052 |
 | `src.contract_recording` | ADR-0047, ADR-0052 |
 | `src.contract_refresh_loop` | ADR-0045, ADR-0047 |
+| `src.contracts.shadow` | ADR-0086 |
 | `src.corpus_learning_loop` | ADR-0045 |
 | `src.dashboard` | ADR-0007, ADR-0008, ADR-0038 |
 | `src.dashboard_routes` | ADR-0007, ADR-0008, ADR-0013, ADR-0019, ADR-0038 |
@@ -146,6 +151,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.fake_coverage_auditor_loop` | ADR-0045 |
 | `src.file_util` | ADR-0021 |
 | `src.flake_tracker_loop` | ADR-0045 |
+| `src.gate_activation_check` | ADR-0082 |
+| `src.gate_activator_loop` | ADR-0082 |
 | `src.github_cache_loop` | ADR-0076 |
 | `src.health_monitor_loop` | ADR-0045, ADR-0046 |
 | `src.hf_cli.__main__` | ADR-0036 |
@@ -157,6 +164,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.issue_fetcher` | ADR-0019, ADR-0067 |
 | `src.issue_store` | ADR-0006, ADR-0022, ADR-0041 |
 | `src.label_drift_watcher_loop` | ADR-0056 |
+| `src.live_corpus_replay_loop` | ADR-0086 |
 | `src.memory_backlog_loop` | ADR-0057 |
 | `src.memory_backlog_mirror` | ADR-0057 |
 | `src.merge_state_watcher` | ADR-0075 |
@@ -184,7 +192,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.preflight.auto_agent_runner` | ADR-0050 |
 | `src.preflight.context` | ADR-0050 |
 | `src.preflight.decision` | ADR-0050 |
-| `src.preflight.runner` | ADR-0050 |
+| `src.preflight.runner` | ADR-0050, ADR-0084 |
 | `src.pricing_refresh_diff` | ADR-0078 |
 | `src.pricing_refresh_loop` | ADR-0078 |
 | `src.principles_audit_loop` | ADR-0045 |
@@ -207,6 +215,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.run_recorder` | ADR-0073 |
 | `src.runs_gc_loop` | ADR-0073 |
 | `src.screenshot_scanner` | ADR-0018 |
+| `src.secret_scrub` | ADR-0085 |
 | `src.sentry.reverse_lookup` | ADR-0050 |
 | `src.server` | ADR-0038, ADR-0055 |
 | `src.service_registry` | ADR-0045 |
@@ -237,6 +246,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.triage_phase` | ADR-0014, ADR-0017, ADR-0031, ADR-0039, ADR-0063 |
 | `src.trust_fleet_sanity_loop` | ADR-0045, ADR-0046 |
 | `src.ubiquitous_language` | ADR-0054, ADR-0057, ADR-0058, ADR-0059 |
+| `src.untrusted_text` | ADR-0084 |
 | `src.visual_validation` | ADR-0015 |
 | `src.wiki_carryover` | ADR-0064 |
 | `src.wiki_compiler` | ADR-0032 |
@@ -245,4 +255,4 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.workspace_gc_loop` | ADR-0069 |
 | `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
 
-_Regenerated from commit `3242dd2` on 2026-05-30 06:45 UTC. Source last changed at `3242dd2`. Status: 🟢 fresh._
+<!-- arch:generated -->

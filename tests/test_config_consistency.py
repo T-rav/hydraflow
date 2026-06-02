@@ -27,6 +27,7 @@ _INTERVAL_BOUNDS_SKIP: set[str] = {
     "dependabot_merge_interval",
     "report_issue_interval",
     "epic_monitor_interval",
+    "epic_sweep_interval",
     "workspace_gc_interval",
     "runs_gc_interval",
     "health_monitor_interval",
@@ -139,7 +140,6 @@ class TestIntervalFieldsHaveBounds:
             "stale_issue_gc_interval": "stale_issue_gc",
             "ci_monitor_interval": "ci_monitor",
             "security_patch_interval": "security_patch",
-            "epic_sweep_interval": "epic_sweeper",
         }
 
         missing = set()

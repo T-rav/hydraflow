@@ -133,16 +133,22 @@ def _build_retrospective(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_adr_reviewer(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from adr_reviewer_loop import ADRReviewerLoop  # noqa: PLC0415
 
-    adr_reviewer = ports.get("adr_reviewer") or MagicMock()
-    ports.setdefault("adr_reviewer", adr_reviewer)
+    adr_reviewer = ports.get("adr_reviewer")
+    if adr_reviewer is None:
+        adr_reviewer = MagicMock()
+        adr_reviewer.review_proposed_adrs = AsyncMock(return_value={"reviewed": 0})
+        ports["adr_reviewer"] = adr_reviewer
     return ADRReviewerLoop(config=config, adr_reviewer=adr_reviewer, deps=deps)
 
 
 def _build_github_cache(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from github_cache_loop import GitHubCacheLoop  # noqa: PLC0415
 
-    cache = ports.get("github_cache") or MagicMock()
-    ports.setdefault("github_cache", cache)
+    cache = ports.get("github_cache")
+    if cache is None:
+        cache = MagicMock()
+        cache.poll = AsyncMock(return_value={"status": "idle"})
+        ports["github_cache"] = cache
     return GitHubCacheLoop(config=config, cache=cache, deps=deps)
 
 
@@ -158,6 +164,32 @@ def _build_sentry_ingest(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from sentry_loop import SentryLoop  # noqa: PLC0415
 
     return SentryLoop(config=config, prs=ports["github"], deps=deps)
+
+
+def _build_live_corpus_replay(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    from contracts.shadow import ShadowCorpus  # noqa: PLC0415
+    from dedup_store import DedupStore  # noqa: PLC0415
+    from live_corpus_replay_loop import LiveCorpusReplayLoop  # noqa: PLC0415
+
+    corpus = ports.get("shadow_corpus")
+    if corpus is None:
+        corpus = ShadowCorpus(config.data_root / "contract_shadow")
+        ports["shadow_corpus"] = corpus
+    dedup = ports.get("live_corpus_dedup")
+    if dedup is None:
+        dedup = DedupStore(
+            "live_corpus_replay",
+            config.data_root / "dedup" / "live_corpus_replay.json",
+        )
+        ports["live_corpus_dedup"] = dedup
+    return LiveCorpusReplayLoop(
+        config=config,
+        corpus=corpus,
+        pr_manager=ports["github"],
+        dedup=dedup,
+        state=ports.get("state"),
+        deps=deps,
+    )
 
 
 def _build_diagnostic(ports: dict[str, Any], config: Any, deps: Any) -> Any:
@@ -197,6 +229,29 @@ def _build_report_issue(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
+def _build_epic_sweeper(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    from epic_sweeper_loop import EpicSweeperLoop  # noqa: PLC0415
+
+    fetcher = ports.get("issue_fetcher")
+    if fetcher is None:
+        fetcher = MagicMock()
+        fetcher.fetch_issues_by_labels = AsyncMock(return_value=[])
+        fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
+        ports["issue_fetcher"] = fetcher
+    state = ports.get("epic_sweeper_state")
+    if state is None:
+        state = MagicMock()
+        state.get_epic_state.return_value = None
+        ports["epic_sweeper_state"] = state
+    return EpicSweeperLoop(
+        config=config,
+        fetcher=fetcher,
+        prs=ports["github"],
+        state=state,
+        deps=deps,
+    )
+
+
 def _build_security_patch(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from security_patch_loop import SecurityPatchLoop  # noqa: PLC0415
 
@@ -225,12 +280,9 @@ def _build_epic_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     if epic_manager is None:
         epic_manager = MagicMock()
         epic_manager.check_stale_epics = AsyncMock(return_value=[])
-        epic_manager.sweep_completed_epics = AsyncMock(
-            return_value={"checked": 0, "swept": 0, "total_open_epics": 0}
-        )
         epic_manager.refresh_cache = AsyncMock(return_value=None)
-        epic_manager.get_all_progress.return_value = []
-    ports.setdefault("epic_manager", epic_manager)
+        epic_manager.get_all_progress.return_value = {}
+        ports["epic_manager"] = epic_manager
     return EpicMonitorLoop(config=config, epic_manager=epic_manager, deps=deps)
 
 
@@ -621,6 +673,41 @@ def _build_branch_protection_auditor(
         dedup=dedup,
         deps=deps,
         auditor=auditor,
+    )
+
+
+def _build_gate_activator(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build GateActivatorLoop for scenarios (ADR-0082, Slice 4).
+
+    Tests pre-seed:
+    * ``gate_activation_detect`` → an async detector returning a
+      ``list[ActivationProposal]`` (replaces the contract/workflow/Makefile
+      read). Defaults to ``[]`` (steady state: nothing to activate).
+
+    ``dedup`` defaults to a clean-slate MagicMock; override via
+    ``gate_activator_dedup``.
+    """
+    from gate_activator_loop import GateActivatorLoop  # noqa: PLC0415
+
+    dedup = ports.get("gate_activator_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["gate_activator_dedup"] = dedup
+
+    detector = ports.get("gate_activation_detect")
+    if detector is None:
+        detector = AsyncMock(return_value=[])
+        ports["gate_activation_detect"] = detector
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return GateActivatorLoop(
+        config=config,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        deps=deps,
+        detector=detector,
     )
 
 
@@ -1289,6 +1376,7 @@ _BUILDERS: dict[str, Any] = {
     # phase 1
     "ci_monitor": _build_ci_monitor,
     "branch_protection_auditor": _build_branch_protection_auditor,
+    "gate_activator": _build_gate_activator,
     "stale_issue_gc": _build_stale_issue_gc,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,
@@ -1302,8 +1390,10 @@ _BUILDERS: dict[str, Any] = {
     "github_cache": _build_github_cache,
     "repo_wiki": _build_repo_wiki,
     "sentry_ingest": _build_sentry_ingest,
+    "live_corpus_replay": _build_live_corpus_replay,
     "diagnostic": _build_diagnostic,
     "report_issue": _build_report_issue,
+    "epic_sweeper": _build_epic_sweeper,
     "security_patch": _build_security_patch,
     "stale_issue": _build_stale_issue,
     "epic_monitor": _build_epic_monitor,

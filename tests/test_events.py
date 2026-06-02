@@ -35,6 +35,7 @@ _EVENT_STRING_CASES: list[tuple[EventType, str]] = [
     (EventType.METRICS_UPDATE, "metrics_update"),
     (EventType.BACKGROUND_WORKER_STATUS, "background_worker_status"),
     (EventType.QUEUE_UPDATE, "queue_update"),
+    (EventType.PIPELINE_SNAPSHOT, "pipeline_snapshot"),
     (EventType.SYSTEM_ALERT, "system_alert"),
     (EventType.VERIFICATION_JUDGE, "verification_judge"),
     (EventType.TRANSCRIPT_SUMMARY, "transcript_summary"),
@@ -82,6 +83,7 @@ class TestEventTypeEnum:
             "METRICS_UPDATE",
             "BACKGROUND_WORKER_STATUS",
             "QUEUE_UPDATE",
+            "PIPELINE_SNAPSHOT",
             "SYSTEM_ALERT",
             "VERIFICATION_JUDGE",
             "TRANSCRIPT_SUMMARY",
@@ -464,6 +466,132 @@ class TestEventBusHistory:
     def test_empty_history_on_new_bus(self) -> None:
         bus = EventBus()
         assert bus.get_history() == []
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral events (PR5: live-only PIPELINE_SNAPSHOT, no persist/replay)
+# ---------------------------------------------------------------------------
+
+
+class TestEphemeralEvents:
+    """PIPELINE_SNAPSHOT is live-delivery-only: fanned out to connected
+    subscribers but never retained in ``get_history()`` nor persisted to the
+    on-disk log. This removes the stale-snapshot-clobber vector — a historical
+    snapshot replayed on WS reconnect can no longer overwrite fresh board
+    state — while the full snapshot remains reconstructable via GET /api/pipeline.
+    """
+
+    @pytest.mark.asyncio
+    async def test_pipeline_snapshot_fanned_out_to_subscribers(self) -> None:
+        bus = EventBus()
+        queue = bus.subscribe()
+
+        event = EventFactory.create(type=EventType.PIPELINE_SNAPSHOT, data={"seq": 1})
+        await bus.publish(event)
+
+        delivered = queue.get_nowait()
+        assert delivered is event
+
+    @pytest.mark.asyncio
+    async def test_pipeline_snapshot_not_in_history(self) -> None:
+        bus = EventBus()
+        await bus.publish(
+            EventFactory.create(type=EventType.PIPELINE_SNAPSHOT, data={"seq": 1})
+        )
+        assert bus.get_history() == []
+
+    @pytest.mark.asyncio
+    async def test_non_ephemeral_event_still_retained_in_history(self) -> None:
+        bus = EventBus()
+        event = EventFactory.create(type=EventType.WORKER_UPDATE, data={"n": 1})
+        await bus.publish(event)
+        assert bus.get_history() == [event]
+
+    @pytest.mark.asyncio
+    async def test_mixed_publish_history_excludes_only_snapshots(self) -> None:
+        bus = EventBus()
+        worker = EventFactory.create(type=EventType.WORKER_UPDATE, data={"n": 1})
+        await bus.publish(worker)
+        await bus.publish(
+            EventFactory.create(type=EventType.PIPELINE_SNAPSHOT, data={"seq": 1})
+        )
+        phase = EventFactory.create(type=EventType.PHASE_CHANGE, data={"batch": 1})
+        await bus.publish(phase)
+
+        history = bus.get_history()
+        assert history == [worker, phase]
+        assert all(e.type != EventType.PIPELINE_SNAPSHOT for e in history)
+
+    @pytest.mark.asyncio
+    async def test_pipeline_snapshot_not_persisted_to_disk(
+        self, tmp_path: Path
+    ) -> None:
+        log_path = tmp_path / "events.jsonl"
+        bus = EventBus(event_log=EventLog(log_path))
+
+        await bus.publish(
+            EventFactory.create(type=EventType.PIPELINE_SNAPSHOT, data={"seq": 1})
+        )
+        await bus.flush_persists()
+
+        # No persist task was scheduled at all → file never created.
+        assert not log_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_non_ephemeral_event_still_persisted_to_disk(
+        self, tmp_path: Path
+    ) -> None:
+        log_path = tmp_path / "events.jsonl"
+        bus = EventBus(event_log=EventLog(log_path))
+
+        await bus.publish(EventFactory.create(type=EventType.WORKER_UPDATE, data={}))
+        await bus.flush_persists()
+
+        assert log_path.exists()
+        assert log_path.read_text().strip() != ""
+
+    @pytest.mark.asyncio
+    async def test_snapshot_between_persisted_events_excluded_from_log(
+        self, tmp_path: Path
+    ) -> None:
+        log_path = tmp_path / "events.jsonl"
+        bus = EventBus(event_log=EventLog(log_path))
+
+        await bus.publish(EventFactory.create(type=EventType.WORKER_UPDATE, data={}))
+        await bus.publish(
+            EventFactory.create(type=EventType.PIPELINE_SNAPSHOT, data={"seq": 1})
+        )
+        await bus.publish(EventFactory.create(type=EventType.PHASE_CHANGE, data={}))
+        await bus.flush_persists()
+
+        lines = log_path.read_text().strip().splitlines()
+        types = [HydraFlowEvent.model_validate_json(raw).type for raw in lines]
+        assert EventType.PIPELINE_SNAPSHOT not in types
+        assert len(lines) == 2
+
+    @pytest.mark.asyncio
+    async def test_legacy_persisted_snapshot_excluded_on_disk_load(
+        self, tmp_path: Path
+    ) -> None:
+        # A log written by a pre-PR5 build can contain PIPELINE_SNAPSHOT lines.
+        # load_history_from_disk must filter them so a legacy snapshot never
+        # re-enters history (and thus never reaches the WS reconnect replay) —
+        # the ephemeral invariant must hold on load, not only at publish time.
+        log_path = tmp_path / "events.jsonl"
+        worker = EventFactory.create(type=EventType.WORKER_UPDATE, data={"n": 1})
+        legacy_snapshot = EventFactory.create(
+            type=EventType.PIPELINE_SNAPSHOT, data={"seq": 1}
+        )
+        log_path.write_text(
+            worker.model_dump_json() + "\n" + legacy_snapshot.model_dump_json() + "\n"
+        )
+
+        bus = EventBus(event_log=EventLog(log_path))
+        await bus.load_history_from_disk()
+
+        history = bus.get_history()
+        assert [e.type for e in history] == [EventType.WORKER_UPDATE]
+        assert all(e.type != EventType.PIPELINE_SNAPSHOT for e in history)
 
 
 # ---------------------------------------------------------------------------

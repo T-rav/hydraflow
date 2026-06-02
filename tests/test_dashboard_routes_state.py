@@ -354,6 +354,100 @@ class TestRequestChangesEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# Multi-repo ACTION route scoping (WS-8): /api/request-changes and /api/intent
+# must write to the SELECTED repo (its pr_manager / state / event bus), not the
+# closure-captured default — otherwise a HITL escalation or new issue lands in
+# the wrong repo in a multi-repo deployment.
+# ---------------------------------------------------------------------------
+
+
+class TestMultiRepoActionRouteScoping:
+    def _registry_for(self, repo_b_cfg, repo_b_state, repo_b_bus):
+        rt = SimpleNamespace(
+            config=repo_b_cfg,
+            state=repo_b_state,
+            event_bus=repo_b_bus,
+            orchestrator=None,
+        )
+        registry = MagicMock()
+        registry.get.return_value = rt
+        return registry
+
+    @pytest.mark.asyncio
+    async def test_request_changes_routes_write_to_selected_repo(
+        self, monkeypatch, config, event_bus, state, tmp_path
+    ) -> None:
+        from tests.helpers import ConfigFactory
+
+        repo_b_cfg = ConfigFactory.create(repo="owner/repo-b")
+        repo_b_state = MagicMock()
+        repo_b_bus = EventBus()
+        registry = self._registry_for(repo_b_cfg, repo_b_state, repo_b_bus)
+
+        router, default_pm = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=registry
+        )
+        default_pm.swap_pipeline_labels = AsyncMock()
+        # repo-b's pr_manager is constructed via PRManager(repo_b_cfg, repo_b_bus)
+        # (different config than default) — mock the class so no real gh runs.
+        repo_b_pm = AsyncMock()
+        monkeypatch.setattr(
+            "dashboard_routes._routes.PRManager", lambda cfg, bus: repo_b_pm
+        )
+
+        queue = repo_b_bus.subscribe()
+        endpoint = find_endpoint(router, "/api/request-changes")
+        resp = await endpoint(
+            {"issue_number": 5, "feedback": "redo it", "stage": "implement"},
+            repo="repo-b",
+        )
+        assert json.loads(resp.body)["status"] == "ok"
+
+        # Write went to repo-b's pr_manager + state + bus; default untouched.
+        repo_b_pm.swap_pipeline_labels.assert_awaited_once_with(
+            5, repo_b_cfg.hitl_label[0]
+        )
+        default_pm.swap_pipeline_labels.assert_not_called()
+        repo_b_state.set_hitl_cause.assert_called_once_with(5, "redo it")
+        event = queue.get_nowait()
+        assert event.type == "hitl_escalation"
+        assert event.data["issue"] == 5
+
+    @pytest.mark.asyncio
+    async def test_intent_creates_issue_in_selected_repo(
+        self, monkeypatch, config, event_bus, state, tmp_path
+    ) -> None:
+        from models import IntentRequest
+        from tests.helpers import ConfigFactory
+
+        repo_b_cfg = ConfigFactory.create(repo="owner/repo-b")
+        repo_b_state = MagicMock()
+        repo_b_bus = EventBus()
+        registry = self._registry_for(repo_b_cfg, repo_b_state, repo_b_bus)
+
+        router, default_pm = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=registry
+        )
+        default_pm.create_issue = AsyncMock(return_value=999)
+        repo_b_pm = AsyncMock()
+        repo_b_pm.create_issue = AsyncMock(return_value=314)
+        monkeypatch.setattr(
+            "dashboard_routes._routes.PRManager", lambda cfg, bus: repo_b_pm
+        )
+
+        endpoint = find_endpoint(router, "/api/intent")
+        resp = await endpoint(IntentRequest(text="add a thing"), repo="repo-b")
+        data = json.loads(resp.body)
+
+        # Issue created in repo-b (its create_issue, its repo in the URL); the
+        # default pr_manager was not touched.
+        repo_b_pm.create_issue.assert_awaited_once()
+        default_pm.create_issue.assert_not_called()
+        assert data["issue_number"] == 314
+        assert "owner/repo-b" in data["url"]
+
+
+# ---------------------------------------------------------------------------
 # /api/runs endpoints
 # ---------------------------------------------------------------------------
 
@@ -624,7 +718,7 @@ class TestGetEventsEndpoint:
     ) -> None:
         router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
         endpoint = find_endpoint(router, "/api/events")
-        response = await endpoint(since=None, repo=None)
+        response = await endpoint(since=None)
         data = json.loads(response.body)
         assert data == []
 
@@ -637,7 +731,7 @@ class TestGetEventsEndpoint:
         await event_bus.publish(EventFactory.create(data={"msg": "hello"}))
         router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
         endpoint = find_endpoint(router, "/api/events")
-        response = await endpoint(since=None, repo=None)
+        response = await endpoint(since=None)
         data = json.loads(response.body)
         assert len(data) >= 1
 
@@ -647,41 +741,90 @@ class TestGetEventsEndpoint:
     ) -> None:
         router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
         endpoint = find_endpoint(router, "/api/events")
-        response = await endpoint(since="not-a-date", repo=None)
+        response = await endpoint(since="not-a-date")
         data = json.loads(response.body)
         assert isinstance(data, list)
 
     @pytest.mark.asyncio
-    async def test_repo_query_uses_repo_runtime_event_bus(
-        self, config, event_bus, state, tmp_path
+    async def test_events_scoped_to_requested_repo_bus(
+        self, config, state, tmp_path
     ) -> None:
-        from unittest.mock import MagicMock
-
-        from events import EventBus
+        """/api/events?repo=X must resolve repo X's per-repo bus, not the
+        module-level default bus. In a multi-repo deployment the reconnect
+        backfill otherwise returns the wrong repo's events."""
         from tests.conftest import EventFactory
 
+        default_bus = EventBus()
         repo_bus = EventBus()
-        await event_bus.publish(EventFactory.create(data={"msg": "default"}))
-        await repo_bus.publish(EventFactory.create(data={"msg": "selected"}))
-        runtime = MagicMock()
-        runtime.config = config
-        runtime.state = state
-        runtime.event_bus = repo_bus
-        runtime.orchestrator = None
+        await default_bus.publish(EventFactory.create(data={"repo": "default"}))
+        await repo_bus.publish(EventFactory.create(data={"repo": "other"}))
+
+        runtime = SimpleNamespace(
+            config=config.model_copy(),
+            event_bus=repo_bus,
+            state=MagicMock(),
+            orchestrator=None,
+        )
         registry = MagicMock()
         registry.get.return_value = runtime
+        router, _ = make_dashboard_router(
+            config, default_bus, state, tmp_path, registry=registry
+        )
+        endpoint = next(
+            r for r in router.routes if getattr(r, "path", "") == "/api/events"
+        )
+
+        response = await endpoint.endpoint(since=None, repo="org-other")
+        data = json.loads(response.body)
+        assert len(data) == 1
+        assert data[0]["data"]["repo"] == "other"
+
+
+# ---------------------------------------------------------------------------
+# Multi-repo route scoping (WS-8): read-only routes must resolve the per-repo
+# runtime via _resolve_runtime(repo), not the closure-captured default bus, so
+# one repo's data never bleeds into another's view in a multi-repo deployment.
+# ---------------------------------------------------------------------------
+
+
+class TestMultiRepoReadOnlyRouteScoping:
+    @pytest.mark.asyncio
+    async def test_timeline_scoped_to_requested_repo_bus(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        from events import EventType
+        from tests.conftest import EventFactory
+
+        # repo-b carries issue #42's lifecycle on its OWN bus; the default
+        # (closure) bus the router was built with is empty.
+        repo_b_bus = EventBus()
+        await repo_b_bus.publish(
+            EventFactory.create(
+                type=EventType.TRIAGE_UPDATE,
+                data={"issue": 42, "status": "done"},
+            )
+        )
+        rt = MagicMock()
+        rt.config = config
+        rt.state = state
+        rt.event_bus = repo_b_bus
+        rt.orchestrator = None
+        registry = MagicMock()
+        registry.get.return_value = rt
 
         router, _ = make_dashboard_router(
-            config,
-            event_bus,
-            state,
-            tmp_path,
-            registry=registry,
+            config, event_bus, state, tmp_path, registry=registry
         )
-        endpoint = find_endpoint(router, "/api/events")
-        response = await endpoint(since=None, repo="acme/widgets")
-        data = json.loads(response.body)
-        assert [item["data"]["msg"] for item in data] == ["selected"]
+        endpoint = find_endpoint(router, "/api/timeline")
+
+        # repo-scoped request resolves repo-b's bus → sees issue #42.
+        scoped = json.loads((await endpoint(repo="repo-b")).body)
+        registry.get.assert_called_with("repo-b")
+        assert any(t["issue_number"] == 42 for t in scoped)
+
+        # no repo → the default empty bus, NOT repo-b's: no #42 bleed.
+        default = json.loads((await endpoint(repo=None)).body)
+        assert not any(t.get("issue_number") == 42 for t in default)
 
 
 # ---------------------------------------------------------------------------

@@ -91,7 +91,7 @@ Two methods, clear names (`fetch_issue_by_number`, `fetch_issues_by_labels`). De
 
 **Consumer coverage: ✅ covered**
 
-`HitlPhase` and `PrUnsticker` all consume via the port. 2 scenario test files exercise the fake directly; `FakeIssueFetcher` is also used in the orchestrator integration tests (via `sandbox_main.py`).
+`HitlPhase`, `EpicSweeperLoop`, `PrUnsticker` all consume via the port. 2 scenario test files exercise the fake directly; `FakeIssueFetcher` is also used in the orchestrator integration tests (via `sandbox_main.py`).
 
 **Wiki/ADR currency: ✅ documented**
 

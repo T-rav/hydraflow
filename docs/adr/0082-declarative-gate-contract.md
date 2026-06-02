@@ -50,4 +50,6 @@ Subsequent slices, sequenced in the implementing plan, extend the contract witho
 - `.github/workflows/gates-drift.yml` — drift check on every PR
 - `src/branch_protection_auditor_loop.py:BranchProtectionAuditorLoop` — the caretaker loop that audits live protection against the contract and files an issue on drift
 - `src/branch_protection_audit.py:audit_repo` — shared live-vs-canonical audit core (used by the loop and the `setup_branch_protection.py` CLI)
-- `scripts/gates/bootstrap.py` — init-time gate bootstrap (detect profile, resolve, plan section)
+- `scripts/gates/bootstrap.py` — init-time gate bootstrap (detect profile, resolve, plan section), consumed by `scripts/hydraflow_init` to emit a gates section in the adoption plan
+- `scripts/gates/activation.py:activatable_gates` — detector for planned gates whose protected surface now exists (producing job + make target present, profile matches)
+- `src/gate_activator_loop.py:GateActivatorLoop` — the caretaker loop that proposes activating those gates via a reviewed issue (the growth half: gates start planned and activate as the repo grows); `src/gate_activation_check.py:check_gate_activation` is its repo-path bridge to the detector

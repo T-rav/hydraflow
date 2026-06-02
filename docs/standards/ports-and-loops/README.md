@@ -80,6 +80,7 @@ Rows below capture the canonical standard status. Full coverage detail
 | `GitHubCacheLoop` | (none) | [github-cache-loop.md](../../wiki/terms/github-cache-loop.md) | Caretaker loop |
 | `HealthMonitorLoop` | [0045, 0046] | testing.md | Caretaker loop |
 | `LabelDriftWatcherLoop` | [0056] | (none) | Caretaker loop |
+| `LiveCorpusReplayLoop` | [0086](../../adr/0086-live-corpus-replay-loop.md) | [live-corpus-replay-loop.md](../../wiki/terms/live-corpus-replay-loop.md) | Trust fleet |
 | `MemoryBacklogLoop` | [0057] | README.md | Caretaker loop |
 | `MergeStateWatcherLoop` | (none) | [merge-state-watcher-loop.md](../../wiki/terms/merge-state-watcher-loop.md) | Caretaker loop |
 | `PRUnstickerLoop` | (none) | [pr-unsticker-loop.md](../../wiki/terms/pr-unsticker-loop.md) | Caretaker loop |

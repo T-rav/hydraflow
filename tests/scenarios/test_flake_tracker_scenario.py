@@ -4,7 +4,7 @@ Two scenarios over a 20-RC-run window:
 
 * ``test_files_issue_when_threshold_crossed`` — a single test fails on 4 of
   the 20 simulated RC promotion runs (above the default threshold of 3).
-  FlakeTrackerLoop must file exactly one ``hydraflow-flaky-test`` +
+  FlakeTrackerLoop must file exactly one ``flaky-test`` +
   ``hydraflow-find`` issue.
 * ``test_no_file_below_threshold`` — a test fails on only 2 runs (below
   threshold). The loop must NOT file an issue.
@@ -33,10 +33,8 @@ class TestFlakeTracker:
     """§4.5 — flake detector MockWorld scenarios."""
 
     async def test_files_issue_when_threshold_crossed(self, tmp_path) -> None:
-        """20 RC runs with one test failing on 4 → one hydraflow-flaky-test issue filed."""
+        """20 RC runs with one test failing on 4 → one flaky-test issue filed."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=101)
 
         # 20 runs; test_flaky fails on runs 0, 3, 7, 14 → flake count = 4.
         def make_run_results(i: int) -> dict[str, str]:
@@ -62,7 +60,6 @@ class TestFlakeTracker:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             flake_fetch_runs=fake_fetch,
             flake_download_junit=fake_download,
             flake_reconcile_closed=fake_reconcile,
@@ -70,13 +67,13 @@ class TestFlakeTracker:
 
         await world.run_with_loops(["flake_tracker"], cycles=1)
 
-        assert fake_pr.create_issue.await_count == 1
-        args = fake_pr.create_issue.await_args.args
-        title, _body, labels = args[0], args[1], args[2]
-        assert "test_flaky" in title
-        assert "flake rate: 4/20" in title
-        assert "hydraflow-flaky-test" in labels
-        assert "hydraflow-find" in labels
+        issues = await world.github.list_issues_by_label("flaky-test")
+        assert len(issues) == 1
+        issue = world.github.issue(issues[0]["number"])
+        assert "test_flaky" in issue.title
+        assert "flake rate: 4/20" in issue.title
+        assert "flaky-test" in issue.labels
+        assert "hydraflow-find" in issue.labels
         fake_fetch.assert_awaited_once()
         # _download_junit called once per run
         assert fake_download.await_count == 20
@@ -85,8 +82,6 @@ class TestFlakeTracker:
     async def test_no_file_below_threshold(self, tmp_path) -> None:
         """20 RC runs with 2 failures (< threshold=3) → no issue filed."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=0)
 
         # Only 2 fails — below default threshold 3.
         def make_run_results(i: int) -> dict[str, str]:
@@ -101,7 +96,6 @@ class TestFlakeTracker:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             flake_fetch_runs=AsyncMock(return_value=fake_runs),
             flake_download_junit=AsyncMock(
                 side_effect=lambda r: make_run_results(r["databaseId"])
@@ -110,4 +104,4 @@ class TestFlakeTracker:
         )
 
         await world.run_with_loops(["flake_tracker"], cycles=1)
-        assert fake_pr.create_issue.await_count == 0
+        assert await world.github.list_issues_by_label("flaky-test") == []

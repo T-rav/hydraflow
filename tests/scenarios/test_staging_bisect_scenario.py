@@ -34,8 +34,6 @@ class TestStagingBisectScenario:
     async def test_no_red_sha(self, tmp_path) -> None:
         """No red SHA → no-op, no PR call."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=0)
 
         state = MagicMock()
         state.get_last_rc_red_sha.return_value = ""
@@ -43,20 +41,17 @@ class TestStagingBisectScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             staging_bisect_state=state,
         )
 
         stats = await world.run_with_loops(["staging_bisect"], cycles=1)
 
         assert stats["staging_bisect"]["status"] == "no_red", stats
-        fake_pr.create_issue.assert_not_awaited()
+        assert await world.github.list_issues_by_label("hitl-escalation") == []
 
     async def test_flake_dismissed(self, tmp_path) -> None:
         """Red SHA seeded, probe passes on retry → flake-dismissed, no file."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=0)
 
         state = MagicMock()
         state.get_last_rc_red_sha.return_value = "redshaflake"
@@ -68,7 +63,6 @@ class TestStagingBisectScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             staging_bisect_state=state,
             staging_bisect_run_probe=probe,
         )
@@ -79,13 +73,11 @@ class TestStagingBisectScenario:
         assert stats["staging_bisect"]["sha"] == "redshaflake"
         probe.assert_awaited_once_with("redshaflake")
         state.increment_flake_reruns_total.assert_called_once()
-        fake_pr.create_issue.assert_not_awaited()
+        assert await world.github.list_issues_by_label("hitl-escalation") == []
 
     async def test_already_processed(self, tmp_path) -> None:
         """Red SHA already in dedup → skip without running the probe."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=0)
 
         state = MagicMock()
         state.get_last_rc_red_sha.return_value = "redshadup1234"
@@ -97,7 +89,6 @@ class TestStagingBisectScenario:
         probe_prime = AsyncMock(return_value=(True, ""))
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             staging_bisect_state=state,
             staging_bisect_run_probe=probe_prime,
         )
@@ -112,14 +103,12 @@ class TestStagingBisectScenario:
 
         assert stats["staging_bisect"]["status"] == "already_processed", stats
         probe_after.assert_not_awaited()
-        fake_pr.create_issue.assert_not_awaited()
+        assert await world.github.list_issues_by_label("hitl-escalation") == []
 
     async def test_guardrail_escalation(self, tmp_path) -> None:
         """Red SHA seeded, bisect pipeline returns guardrail_escalated → no
         revert PR, hitl-escalation issue filed with rc-red-attribution-unsafe."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=777)
 
         state = MagicMock()
         state.get_last_rc_red_sha.return_value = "redguardr4il"
@@ -134,7 +123,6 @@ class TestStagingBisectScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             staging_bisect_state=state,
             staging_bisect_run_probe=probe,
             staging_bisect_run_pipeline=pipeline,
@@ -149,8 +137,6 @@ class TestStagingBisectScenario:
         """Red SHA, bisect pipeline returns reverted → revert PR recorded
         and the pipeline short-circuits the flake + already-processed paths."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=0)
 
         state = MagicMock()
         state.get_last_rc_red_sha.return_value = "redrevert01"
@@ -168,7 +154,6 @@ class TestStagingBisectScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             staging_bisect_state=state,
             staging_bisect_run_probe=probe,
             staging_bisect_run_pipeline=pipeline,
@@ -183,8 +168,6 @@ class TestStagingBisectScenario:
     async def test_no_green_anchor(self, tmp_path) -> None:
         """Red SHA seeded but no last_green_rc_sha → pipeline refuses to bisect."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=0)
 
         state = MagicMock()
         state.get_last_rc_red_sha.return_value = "redorphan1"
@@ -197,7 +180,6 @@ class TestStagingBisectScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             staging_bisect_state=state,
             staging_bisect_run_probe=probe,
             staging_bisect_run_pipeline=pipeline,
@@ -207,7 +189,7 @@ class TestStagingBisectScenario:
 
         assert stats["staging_bisect"]["status"] == "no_green_anchor", stats
         pipeline.assert_awaited_once()
-        fake_pr.create_issue.assert_not_awaited()
+        assert await world.github.list_issues_by_label("hitl-escalation") == []
 
     async def test_watchdog_escalates_after_stuck_bisect(self, tmp_path) -> None:
         """Watchdog fires with 'still_red' when a new red arrives in a later cycle
@@ -220,8 +202,6 @@ class TestStagingBisectScenario:
         hitl-escalation issue tagged 'rc-red-post-revert-red'.
         """
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=911)
 
         state = MagicMock()
         # Simulate: auto-revert was filed during cycle 2 for red_A.
@@ -233,7 +213,6 @@ class TestStagingBisectScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             staging_bisect_state=state,
             staging_bisect_pending_watchdog={
                 "red_sha_at_revert": "red_A_original",
@@ -245,8 +224,65 @@ class TestStagingBisectScenario:
         stats = await world.run_with_loops(["staging_bisect"], cycles=1)
 
         assert stats["staging_bisect"]["status"] == "watchdog_still_red", stats
-        assert stats["staging_bisect"]["escalation_issue"] == 911
-        fake_pr.create_issue.assert_awaited_once()
-        labels = fake_pr.create_issue.await_args.args[2]
-        assert "hydraflow-hitl-escalation" in labels
-        assert "hydraflow-rc-red-post-revert-red" in labels
+        issues = await world.github.list_issues_by_label("rc-red-post-revert-red")
+        assert len(issues) == 1
+        issue = world.github.issue(issues[0]["number"])
+        assert stats["staging_bisect"]["escalation_issue"] == issue.number
+        assert "hitl-escalation" in issue.labels
+        assert "rc-red-post-revert-red" in issue.labels
+
+    async def test_watchdog_resolves_green_after_revert(self, tmp_path) -> None:
+        """Watchdog clears when a later RC goes green after the revert."""
+        world = MockWorld(tmp_path)
+
+        state = MagicMock()
+        state.get_last_green_rc_sha.return_value = "green_after_revert"
+        state.get_last_rc_red_sha.return_value = "red_A_original"
+        state.get_rc_cycle_id.return_value = 3
+        state.get_auto_reverts_in_cycle.return_value = 0
+
+        _seed_ports(
+            world,
+            staging_bisect_state=state,
+            staging_bisect_pending_watchdog={
+                "red_sha_at_revert": "red_A_original",
+                "rc_cycle_at_revert": 2,
+                "deadline_ts": 9_999_999_999.0,
+            },
+        )
+
+        stats = await world.run_with_loops(["staging_bisect"], cycles=1)
+
+        assert stats["staging_bisect"]["status"] == "watchdog_green", stats
+        state.increment_auto_reverts_successful.assert_called_once()
+        assert await world.github.list_issues_by_label("hitl-escalation") == []
+
+    async def test_watchdog_escalates_on_timeout(self, tmp_path) -> None:
+        """Watchdog files timeout escalation when no new RC resolves it."""
+        world = MockWorld(tmp_path)
+
+        state = MagicMock()
+        state.get_last_green_rc_sha.return_value = ""
+        state.get_last_rc_red_sha.return_value = "red_A_original"
+        state.get_rc_cycle_id.return_value = 2
+        state.get_auto_reverts_in_cycle.return_value = 1
+
+        _seed_ports(
+            world,
+            staging_bisect_state=state,
+            staging_bisect_pending_watchdog={
+                "red_sha_at_revert": "red_A_original",
+                "rc_cycle_at_revert": 2,
+                "deadline_ts": 0.0,
+            },
+        )
+
+        stats = await world.run_with_loops(["staging_bisect"], cycles=1)
+
+        assert stats["staging_bisect"]["status"] == "watchdog_timeout", stats
+        issues = await world.github.list_issues_by_label("rc-red-verify-timeout")
+        assert len(issues) == 1
+        issue = world.github.issue(issues[0]["number"])
+        assert stats["staging_bisect"]["escalation_issue"] == issue.number
+        assert "hitl-escalation" in issue.labels
+        assert "rc-red-verify-timeout" in issue.labels

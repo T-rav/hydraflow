@@ -337,6 +337,25 @@ class TestReviewStateMixin:
         t.clear_last_reviewed_sha(1)
         assert t.get_last_reviewed_sha(1) is None
 
+    def test_review_blast_radius_round_trip(self, tmp_path: Path) -> None:
+        t = make_tracker(tmp_path)
+        assert t.get_review_blast_radius(1) is None
+        t.set_review_blast_radius(1, "high")
+        assert t.get_review_blast_radius(1) == "high"
+
+        # Reload from disk — the field must survive serialization.
+        t2 = make_tracker(tmp_path)
+        assert t2.get_review_blast_radius(1) == "high"
+
+    def test_min_review_passes_required_defaults_to_low(self, tmp_path: Path) -> None:
+        t = make_tracker(tmp_path)
+        # No radius recorded yet -> low tier -> 1 pass.
+        assert t.min_review_passes_required(1) == 1
+        t.set_review_blast_radius(1, "high")
+        assert t.min_review_passes_required(1) == 3
+        t.set_review_blast_radius(1, "medium")
+        assert t.min_review_passes_required(1) == 2
+
 
 class TestEpicStateMixin:
     def test_epic_lifecycle(self, tmp_path: Path) -> None:
@@ -460,6 +479,11 @@ class TestWorkerStateMixin:
         t = make_tracker(tmp_path)
         t.set_disabled_workers({"loop_a", "loop_b"})
         assert t.get_disabled_workers() == {"loop_a", "loop_b"}
+
+    def test_default_disabled_workers_seeded(self, tmp_path: Path) -> None:
+        t = make_tracker(tmp_path)
+        t.set_default_disabled_workers_seeded({"principles_audit"})
+        assert t.get_default_disabled_workers_seeded() == {"principles_audit"}
 
     def test_worker_heartbeat(self, tmp_path: Path) -> None:
         t = make_tracker(tmp_path)

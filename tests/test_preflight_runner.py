@@ -12,7 +12,7 @@ from preflight.runner import (
 
 def test_persona_and_fields_substituted() -> None:
     out = render_prompt(
-        sub_label="hydraflow-flaky-test-stuck",
+        sub_label="flaky-test-stuck",
         persona="Travis",
         issue_number=42,
         repo_slug="acme/widget",
@@ -47,6 +47,56 @@ def test_default_fallback_for_unknown_sub_label() -> None:
         prior_attempts_block="x",
     )
     assert "Default Playbook" in out
+
+
+def test_prefixed_sublabel_routes_to_specialist_file() -> None:
+    # Real escalation labels are prefixed (e.g. ``hydraflow-flaky-test-stuck``)
+    # but the prompt files are unprefixed. Before the fix the prefixed label
+    # missed ``flaky-test-stuck.md`` and fell through to ``_default.md``, silently
+    # killing every file-based specialist playbook.
+    fields = {
+        "persona": "x",
+        "issue_number": 1,
+        "repo_slug": "r/s",
+        "worktree_path": "/tmp",
+        "issue_body": "b",
+        "issue_comments_block": "x",
+        "escalation_context_block": "x",
+        "wiki_excerpts_block": "x",
+        "sentry_events_block": "x",
+        "recent_commits_block": "x",
+        "prior_attempts_block": "x",
+    }
+    prefixed = render_prompt(sub_label="hydraflow-flaky-test-stuck", **fields)
+    # Routed to flaky-test-stuck.md, NOT the generic default playbook (the
+    # "Default Playbook" marker lives only in _default.md).
+    assert "Default Playbook" not in prefixed
+    # And a genuinely unknown prefixed label still falls through to _default.
+    unknown = render_prompt(sub_label="hydraflow-no-such-playbook", **fields)
+    assert "Default Playbook" in unknown
+
+
+def test_prefixed_config_default_label_routes_to_specialist_file() -> None:
+    # The real production case this PR fixes: ``fake_coverage_stuck_label``
+    # defaults to the PREFIXED ``hydraflow-fake-coverage-stuck`` (config.py) and
+    # ``fake-coverage-stuck.md`` exists. The file-fallback prefix-strip routes it
+    # to that specialist file; before the fix it fell through to ``_default.md``.
+    fields = {
+        "persona": "x",
+        "issue_number": 1,
+        "repo_slug": "r/s",
+        "worktree_path": "/tmp",
+        "issue_body": "b",
+        "issue_comments_block": "x",
+        "escalation_context_block": "x",
+        "wiki_excerpts_block": "x",
+        "sentry_events_block": "x",
+        "recent_commits_block": "x",
+        "prior_attempts_block": "x",
+    }
+    out = render_prompt(sub_label="hydraflow-fake-coverage-stuck", **fields)
+    assert "Default Playbook" not in out
+    assert "fake-coverage" in out
 
 
 def test_explicit_prompt_template_overrides_sub_label_lookup() -> None:

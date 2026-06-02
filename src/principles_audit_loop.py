@@ -41,6 +41,11 @@ _STUCK_TITLE_RE = re.compile(
 )
 
 
+def _audit_iso_now() -> str:
+    """Return the current UTC time as a second-precision ISO-8601 string."""
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
 class PrinciplesAuditLoop(BaseBackgroundLoop):
     """Weekly audit against ADR-0044 + onboarding trigger (spec §4.4)."""
 
@@ -68,8 +73,6 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         """One audit cycle: onboarding reconcile, HydraFlow-self, managed repos."""
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
-        if not self._config.principles_audit_loop_enabled:
-            return {"status": "config_disabled"}
 
         stats: dict[str, Any] = {
             "onboarded": 0,
@@ -302,15 +305,16 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             f"**Last-green status:** {last_status}\n"
             f"**Current status:** {finding.get('status', 'FAIL')}\n"
             f"**Audit message:** {finding.get('message', '')}\n\n"
-            f"Filed by PrinciplesAuditLoop (spec §4.4)."
+            f"Filed by PrinciplesAuditLoop (spec §4.4).\n\n"
+            f"<!-- [hydraflow-auditor: source=PrinciplesAuditLoop, "
+            f"check_id={check_id}, filed_at={_audit_iso_now()}, slug={slug}] -->"
         )
         labels = [
             "hydraflow-find",
             "principles-drift",
             f"check-{check_id}",
         ]
-        issue_number = await self._pr.create_issue(title, body, labels)
-        return int(issue_number or 0)
+        return await self._pr.create_issue(title, body, labels)
 
     async def _maybe_escalate(self, slug: str, check_id: str, severity: str) -> bool:
         """Fire exactly one hitl-escalation when the attempt counter reaches threshold.
@@ -453,12 +457,11 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             f"reports all P1–P5 as PASS. Run `make audit DIR=<checkout>` "
             f"locally to reproduce."
         )
-        issue_number = await self._pr.create_issue(
+        return await self._pr.create_issue(
             title,
             body,
             labels=["hydraflow-find", "onboarding-blocked"],
         )
-        return int(issue_number or 0)
 
     async def _reconcile_onboarding(self) -> int:
         """For every managed_repos entry, ensure onboarding status is set."""

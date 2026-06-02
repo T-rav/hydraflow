@@ -160,6 +160,7 @@ class HydraFlowOrchestrator:
             "merge_state_watcher": svc.merge_state_watcher_loop,
             "report_issue": svc.report_issue_loop,
             "epic_monitor": svc.epic_monitor_loop,
+            "epic_sweeper": svc.epic_sweeper_loop,
             "workspace_gc": svc.workspace_gc_loop,
             "runs_gc": svc.runs_gc_loop,
             "adr_reviewer": svc.adr_reviewer_loop,
@@ -172,6 +173,7 @@ class HydraFlowOrchestrator:
             "stale_issue_gc": svc.stale_issue_gc_loop,
             "ci_monitor": svc.ci_monitor_loop,
             "branch_protection_auditor": svc.branch_protection_auditor_loop,
+            "gate_activator": svc.gate_activator_loop,
             "security_patch": svc.security_patch_loop,
             "repo_wiki": svc.repo_wiki_loop,
             "diagnostic": svc.diagnostic_loop,
@@ -187,7 +189,6 @@ class HydraFlowOrchestrator:
             "trust_fleet_sanity": svc.trust_fleet_sanity_loop,
             "label_drift_watcher": svc.label_drift_watcher_loop,
             "contract_refresh": svc.contract_refresh_loop,
-            "entry_evidence": svc.entry_evidence_loop,
             "corpus_learning": svc.corpus_learning_loop,
             "auto_agent_preflight": svc.auto_agent_preflight_loop,
             "sandbox_failure_fixer": svc.sandbox_failure_fixer_loop,
@@ -199,6 +200,7 @@ class HydraFlowOrchestrator:
             "edge_proposer": svc.edge_proposer_loop,
             "live_corpus_replay": svc.live_corpus_replay_loop,
             "triage_retry": svc.triage_retry_loop,
+            "entry_evidence": svc.entry_evidence_loop,
         }
         self._bg_workers = BGWorkerManager(config, self._state, bg_loop_registry)
         # Loops that need a reference to BGWorkerManager cannot take one
@@ -985,6 +987,7 @@ class HydraFlowOrchestrator:
             ("merge_state_watcher", self._svc.merge_state_watcher_loop.run),
             ("report_issue", self._svc.report_issue_loop.run),
             ("epic_monitor", self._svc.epic_monitor_loop.run),
+            ("epic_sweeper", self._svc.epic_sweeper_loop.run),
             ("workspace_gc", self._svc.workspace_gc_loop.run),
             ("runs_gc", self._svc.runs_gc_loop.run),
             ("adr_reviewer", self._svc.adr_reviewer_loop.run),
@@ -1002,6 +1005,7 @@ class HydraFlowOrchestrator:
                 "branch_protection_auditor",
                 self._svc.branch_protection_auditor_loop.run,
             ),
+            ("gate_activator", self._svc.gate_activator_loop.run),
             ("repo_wiki", self._svc.repo_wiki_loop.run),
             ("security_patch", self._svc.security_patch_loop.run),
             ("stale_issue_gc", self._svc.stale_issue_gc_loop.run),
@@ -1017,7 +1021,6 @@ class HydraFlowOrchestrator:
             ("trust_fleet_sanity", self._svc.trust_fleet_sanity_loop.run),
             ("label_drift_watcher", self._svc.label_drift_watcher_loop.run),
             ("contract_refresh", self._svc.contract_refresh_loop.run),
-            ("entry_evidence", self._svc.entry_evidence_loop.run),
             ("corpus_learning", self._svc.corpus_learning_loop.run),
             ("auto_agent_preflight", self._svc.auto_agent_preflight_loop.run),
             ("sandbox_failure_fixer", self._svc.sandbox_failure_fixer_loop.run),
@@ -1029,6 +1032,7 @@ class HydraFlowOrchestrator:
             ("edge_proposer", self._svc.edge_proposer_loop.run),
             ("live_corpus_replay", self._svc.live_corpus_replay_loop.run),
             ("triage_retry", self._svc.triage_retry_loop.run),
+            ("entry_evidence", self._svc.entry_evidence_loop.run),
         ]
 
         # Hindsight WAL replay loop removed in Phase 3 cutover — the wiki

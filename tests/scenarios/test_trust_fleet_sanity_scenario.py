@@ -10,12 +10,14 @@ Two existing scenarios (class TestTrustFleetSanityScenario):
   one ``hitl-escalation`` + ``trust-loop-anomaly`` issue with labels
   that include the breached detector kind.
 
-New breach-path scenario (class TestTrustFleetSanityBreachScenario):
+New breach-path scenarios (class TestTrustFleetSanityBreachScenario):
 
 * ``test_issues_per_hour_breach_files_escalation`` — rc_budget filing
   many issues within the hour window. Exercises the issues_per_hour
   breach path end-to-end through MockWorld without requiring
   BGWorkerManager (staleness skipped; metrics seeded via EventBus stub).
+* ``test_repair_ratio_breach_files_escalation`` — rc_budget reports a high
+  failed/repaired ratio. Exercises the repair_ratio breach path end-to-end.
 
 The loop's external surface (``_collect_window_metrics`` via the
 EventBus, ``_load_cost_reader``, ``_reconcile_closed_escalations``) is
@@ -25,7 +27,7 @@ stubbed via pre-seeded port keys.
 from __future__ import annotations
 
 import datetime as _dt
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -58,24 +60,12 @@ def _healthy_heartbeats(now: _dt.datetime) -> dict[str, dict[str, object]]:
     }
 
 
-def _empty_event_bus() -> EventBus:
-    bus = EventBus()
-
-    async def _load_events_since(_since: _dt.datetime) -> list[HydraFlowEvent]:
-        return []
-
-    bus.load_events_since = _load_events_since  # type: ignore[method-assign]
-    return bus
-
-
 class TestTrustFleetSanityScenario:
     """§12.1 — meta-observability MockWorld scenarios."""
 
     async def test_no_anomaly_no_file(self, tmp_path) -> None:
         """Healthy fleet → loop runs, finds nothing, files nothing."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=0)
 
         now = _dt.datetime.now(_dt.UTC)
         state = MagicMock()
@@ -86,22 +76,19 @@ class TestTrustFleetSanityScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             trust_fleet_sanity_state=state,
-            event_bus=_empty_event_bus(),
+            event_bus=EventBus(),
         )
 
         stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
 
         assert stats["trust_fleet_sanity"]["status"] == "ok", stats
         assert stats["trust_fleet_sanity"].get("filed", 0) == 0, stats
-        fake_pr.create_issue.assert_not_awaited()
+        assert world.github._issues == {}
 
     async def test_staleness_breach_files_escalation(self, tmp_path) -> None:
         """One watched loop silent far beyond its interval → escalation filed."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=4242)
 
         now = _dt.datetime.now(_dt.UTC)
         heartbeats = _healthy_heartbeats(now)
@@ -127,21 +114,20 @@ class TestTrustFleetSanityScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             trust_fleet_sanity_state=state,
             trust_fleet_sanity_bg_workers=bg_workers,
-            event_bus=_empty_event_bus(),
+            event_bus=EventBus(),
         )
 
         stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
 
         assert stats["trust_fleet_sanity"]["status"] == "ok", stats
         assert stats["trust_fleet_sanity"].get("filed", 0) >= 1, stats
-        assert fake_pr.create_issue.await_count >= 1
 
-        labels = fake_pr.create_issue.await_args.args[2]
-        assert "hydraflow-hitl-escalation" in labels
-        assert "hydraflow-trust-loop-anomaly" in labels
+        issue = next(iter(world.github._issues.values()))
+        labels = issue.labels
+        assert "hitl-escalation" in labels
+        assert "trust-loop-anomaly" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -165,8 +151,6 @@ class TestTrustFleetSanityBreachScenario:
         dedup set update.
         """
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=9001)
 
         now = _dt.datetime.now(_dt.UTC)
 
@@ -198,7 +182,6 @@ class TestTrustFleetSanityBreachScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             trust_fleet_sanity_state=state,
             event_bus=seeded_bus,
         )
@@ -207,15 +190,14 @@ class TestTrustFleetSanityBreachScenario:
 
         assert stats["trust_fleet_sanity"]["status"] == "ok", stats
         assert stats["trust_fleet_sanity"].get("filed", 0) >= 1, stats
-        assert fake_pr.create_issue.await_count >= 1
 
-        title = fake_pr.create_issue.await_args.args[0]
-        assert "rc_budget" in title
-        assert "issues_per_hour" in title
+        issue = next(iter(world.github._issues.values()))
+        assert "rc_budget" in issue.title
+        assert "issues_per_hour" in issue.title
 
-        labels = fake_pr.create_issue.await_args.args[2]
-        assert "hydraflow-hitl-escalation" in labels
-        assert "hydraflow-trust-loop-anomaly" in labels
+        labels = issue.labels
+        assert "hitl-escalation" in labels
+        assert "trust-loop-anomaly" in labels
 
     async def test_tick_error_ratio_breach_files_escalation(self, tmp_path) -> None:
         """corpus_learning with 80% errored ticks -> tick_error_ratio escalation.
@@ -224,8 +206,6 @@ class TestTrustFleetSanityBreachScenario:
         Verifies a second distinct breach kind reaches the issue-filing path.
         """
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=9002)
 
         now = _dt.datetime.now(_dt.UTC)
         seeded_bus = EventBus()
@@ -259,7 +239,6 @@ class TestTrustFleetSanityBreachScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             trust_fleet_sanity_state=state,
             event_bus=seeded_bus,
         )
@@ -268,7 +247,51 @@ class TestTrustFleetSanityBreachScenario:
 
         assert stats["trust_fleet_sanity"]["status"] == "ok", stats
         assert stats["trust_fleet_sanity"].get("filed", 0) >= 1, stats
-        assert fake_pr.create_issue.await_count >= 1
 
-        titles = [call.args[0] for call in fake_pr.create_issue.await_args_list]
+        titles = [issue.title for issue in world.github._issues.values()]
         assert any("tick_error_ratio" in t and "corpus_learning" in t for t in titles)
+
+    async def test_repair_ratio_breach_files_escalation(self, tmp_path) -> None:
+        """rc_budget with failed repairs dominating successes -> escalation."""
+        world = MockWorld(tmp_path)
+
+        now = _dt.datetime.now(_dt.UTC)
+        seeded_bus = EventBus()
+        ts_recent = (now - _dt.timedelta(seconds=900)).isoformat()
+        breach_event = HydraFlowEvent(
+            type=EventType.BACKGROUND_WORKER_STATUS,
+            timestamp=ts_recent,
+            data={
+                "worker": "rc_budget",
+                "status": "ok",
+                "details": {"filed": 0, "repaired": 1, "failed": 10},
+            },
+        )
+
+        async def _preloaded_load(since: _dt.datetime) -> list[HydraFlowEvent]:
+            return [breach_event] if breach_event.timestamp >= since.isoformat() else []
+
+        seeded_bus.load_events_since = _preloaded_load  # type: ignore[method-assign]
+
+        state = MagicMock()
+        state.get_worker_heartbeats.return_value = {}
+        state.get_trust_fleet_sanity_attempts.return_value = 0
+        state.inc_trust_fleet_sanity_attempts.return_value = 1
+        state.get_trust_fleet_sanity_last_seen_counts.return_value = {}
+
+        _seed_ports(
+            world,
+            trust_fleet_sanity_state=state,
+            event_bus=seeded_bus,
+        )
+
+        stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
+
+        assert stats["trust_fleet_sanity"]["status"] == "ok", stats
+        assert stats["trust_fleet_sanity"].get("filed", 0) >= 1, stats
+
+        issue = next(iter(world.github._issues.values()))
+        assert "rc_budget" in issue.title
+        assert "repair_ratio" in issue.title
+        assert "hitl-escalation" in issue.labels
+        assert "trust-loop-anomaly" in issue.labels

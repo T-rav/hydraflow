@@ -207,6 +207,14 @@ class TestBgWorkerEnabled:
         orch = HydraFlowOrchestrator(config, event_bus=event_bus)
         assert orch.is_bg_worker_enabled("memory_sync") is True
 
+    def test_principles_audit_defaults_disabled(
+        self, config, event_bus: EventBus
+    ) -> None:
+        from orchestrator import HydraFlowOrchestrator
+
+        orch = HydraFlowOrchestrator(config, event_bus=event_bus)
+        assert orch.is_bg_worker_enabled("principles_audit") is False
+
     def test_set_bg_worker_enabled_false(self, config, event_bus: EventBus) -> None:
         from orchestrator import HydraFlowOrchestrator
 
@@ -327,6 +335,20 @@ class TestSystemWorkersEndpoint:
         for w in data["workers"]:
             assert w["status"] == "disabled"
             assert w["last_run"] is None
+
+    @pytest.mark.asyncio
+    async def test_returns_persisted_enabled_flag_when_no_orchestrator(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        state.set_disabled_workers({"principles_audit"})
+        router = self._make_router(config, event_bus, state, tmp_path, orch=None)
+        endpoint = self._find_endpoint(router, "/api/system/workers")
+
+        response = await endpoint()
+        data = json.loads(response.body)
+
+        worker = next(w for w in data["workers"] if w["name"] == "principles_audit")
+        assert worker["enabled"] is False
 
     @pytest.mark.asyncio
     async def test_returns_tracked_state(
@@ -784,6 +806,24 @@ class TestDisabledWorkerPersistenceAcrossRestart:
         orch2._restore_state()
 
         assert orch2.is_bg_worker_enabled("memory_sync") is True
+
+    def test_default_disabled_principles_audit_enable_persists_across_restore(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """UI-enabling a default-disabled worker should survive restart."""
+        from orchestrator import HydraFlowOrchestrator
+
+        state_path = tmp_path / "state.json"
+        state1 = StateTracker(state_path)
+        orch1 = HydraFlowOrchestrator(config, event_bus=event_bus, state=state1)
+        assert orch1.is_bg_worker_enabled("principles_audit") is False
+        orch1.set_bg_worker_enabled("principles_audit", True)
+
+        state2 = StateTracker(state_path)
+        orch2 = HydraFlowOrchestrator(config, event_bus=event_bus, state=state2)
+        orch2._restore_state()
+
+        assert orch2.is_bg_worker_enabled("principles_audit") is True
 
     def test_multiple_disabled_workers_persist(
         self, config, event_bus: EventBus, tmp_path: Path

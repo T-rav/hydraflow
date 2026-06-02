@@ -204,6 +204,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
 
     # Mutable fields that can be changed at runtime via PATCH
     _MUTABLE_FIELDS = {
+        "gh_circuit_breaker_enabled",
         "max_triagers",
         "max_workers",
         "max_planners",
@@ -494,6 +495,16 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             object.__setattr__(_cfg, key, validated_value)
             applied[key] = validated_value
 
+        # The circuit breaker lives in the process-global subprocess layer, so
+        # apply its enable/disable toggle live (the kill-switch). patch_config
+        # otherwise only mutates the config object, which the breaker can't see.
+        if "gh_circuit_breaker_enabled" in applied:
+            from subprocess_util import (  # noqa: PLC0415
+                set_gh_circuit_breaker_enabled,
+            )
+
+            set_gh_circuit_breaker_enabled(bool(applied["gh_circuit_breaker_enabled"]))
+
         if applied:
             if repo and ctx.repo_store is not None:
                 ctx.repo_store.update_overrides(repo, applied)
@@ -517,9 +528,19 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Failed to load persisted bg worker states")
         inference_by_worker = _build_system_worker_inference_stats()
+        disabled_workers: set[str] = set()
+        if not orch:
+            try:
+                disabled_workers = _state.get_disabled_workers()
+            except Exception:  # pragma: no cover - defensive guard
+                logger.exception("Failed to load persisted disabled workers")
         workers = []
         for name, label, description in _bg_worker_defs:
-            enabled = orch.is_bg_worker_enabled(name) if orch else True
+            enabled = (
+                orch.is_bg_worker_enabled(name)
+                if orch
+                else name not in disabled_workers
+            )
 
             # Determine interval for this worker
             interval: int | None = None

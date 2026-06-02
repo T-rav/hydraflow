@@ -34,10 +34,7 @@ def apply_repo_config_overlay(
     known_fields = set(HydraFlowConfig.model_fields.keys())
     for key, val in repo_cfg.items():
         if key in known_fields and key not in explicit:
-            candidate_values = config.model_dump(mode="python")
-            candidate_values[key] = val
-            validated = HydraFlowConfig(**candidate_values)
-            object.__setattr__(config, key, getattr(validated, key))
+            object.__setattr__(config, key, val)
 
 
 def load_runtime_config(

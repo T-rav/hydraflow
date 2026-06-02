@@ -62,7 +62,16 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         cap = self._config.auto_agent_daily_budget_usd
         if cap is not None:
             today = datetime.now(UTC).date().isoformat()
-            spend = self._state.get_auto_agent_daily_spend(today)
+            # Use the durable audit log as a floor for today's spend. The state
+            # cache (add_auto_agent_daily_spend) is updated only AFTER the costly
+            # run_preflight returns, so a crash in between loses the increment and
+            # the gate would undercount → overspend past the cap. The audit entry
+            # is appended BEFORE that cache update, so it never loses a completed
+            # attempt; max() tolerates either being momentarily ahead.
+            spend = max(
+                self._state.get_auto_agent_daily_spend(today),
+                self._audit_store.daily_spend(today),
+            )
             if spend >= cap:
                 return {"status": "budget_exceeded", "spend_usd": spend, "cap_usd": cap}
 
@@ -92,7 +101,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         """
         try:
             closed = await self._prs.list_closed_issues_by_label(
-                self._config.hitl_escalation_label[0],
+                "hitl-escalation",
                 limit=200,
             )
         except Exception as exc:
@@ -109,9 +118,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
     async def _poll_eligible_issues(self) -> list[dict[str, Any]]:
         """Return open hitl-escalation issues lacking human-required."""
         try:
-            raw = await self._prs.list_issues_by_label(
-                self._config.hitl_escalation_label[0]
-            )
+            raw = await self._prs.list_issues_by_label("hitl-escalation")
         except Exception as exc:
             logger.warning("Eligible-issue poll failed: %s", exc)
             return []
@@ -136,13 +143,29 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         # in CPython, so an issue with multiple sub-labels would otherwise pick
         # a random playbook each tick (and randomly skip the deny-list). Sort
         # alphabetically so the same issue always routes to the same playbook.
-        sub_labels = sorted(labels - {self._config.hitl_escalation_label[0]})
+        sub_labels = sorted(labels - {"hitl-escalation"})
         sub_label = sub_labels[0] if sub_labels else "_default"
 
-        # Sub-label deny-list.
-        if sub_label in self._config.auto_agent_skip_sublabels:
+        # Sub-label deny-list (recursion safety, dark-factory §2.7). The real gap:
+        # producers file the deny-listed label ALONGSIDE others — e.g.
+        # principles_audit_loop files ["principles-stuck", "check-<id>"], and
+        # "check-<id>" sorts first, so the old sub_labels[0]-only check missed the
+        # deny-listed label and the auto-agent acted on a principles escalation it
+        # must defer to a human. Check EVERY sub-label. removeprefix is defensive
+        # for the config-default labels that carry the `hydraflow-` prefix (the
+        # skip-list is unprefixed); it's a no-op for the unprefixed producers.
+        denied = next(
+            (
+                s
+                for s in sub_labels
+                if s.removeprefix("hydraflow-")
+                in self._config.auto_agent_skip_sublabels
+            ),
+            None,
+        )
+        if denied is not None:
             await self._prs.add_labels(issue_number, ["human-required"])
-            self._audit_store.append(_skip_audit(issue_number, sub_label, "deny_list"))
+            self._audit_store.append(_skip_audit(issue_number, denied, "deny_list"))
             return {"status": "skipped_deny_list"}
 
         # Attempt-cap check.
@@ -192,7 +215,6 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             pr_port=self._prs,
             state=self._state,
             max_attempts=self._config.auto_agent_max_attempts,
-            hitl_escalation_label=self._config.hitl_escalation_label[0],
         )
 
         # Append audit.

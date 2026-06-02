@@ -8,37 +8,9 @@ rendered as visible text in the dashboard UI.
 
 from __future__ import annotations
 
-import re
-
-# Patterns that match common secret/token formats.
-# Each tuple: (label, compiled regex)
-_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("GitHub PAT (classic)", re.compile(r"ghp_[A-Za-z0-9]{36,}")),
-    ("GitHub PAT (fine-grained)", re.compile(r"github_pat_[A-Za-z0-9_]{40,}")),
-    ("GitHub OAuth token", re.compile(r"gho_[A-Za-z0-9]{36,}")),
-    ("GitHub App token", re.compile(r"ghu_[A-Za-z0-9]{36,}")),
-    ("GitHub App installation", re.compile(r"ghs_[A-Za-z0-9]{36,}")),
-    ("GitHub refresh token", re.compile(r"ghr_[A-Za-z0-9]{36,}")),
-    ("AWS access key", re.compile(r"AKIA[0-9A-Z]{16}")),
-    (
-        "AWS secret key",
-        re.compile(r"(?:aws_secret_access_key|secret_key)\s*[:=]\s*\S{20,}"),
-    ),
-    ("Slack token", re.compile(r"xox[bporas]-[A-Za-z0-9\-]+")),
-    ("Anthropic API key", re.compile(r"sk-ant-[A-Za-z0-9\-]{20,}")),
-    ("OpenAI API key", re.compile(r"sk-[A-Za-z0-9]{20,}")),
-    (
-        "Generic private key",
-        re.compile(r"-----BEGIN\s+(RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"),
-    ),
-    (
-        "Generic secret assignment",
-        re.compile(
-            r"(?:secret|password|token|api_key)\s*[:=]\s*['\"][^'\"]{8,}['\"]",
-            re.IGNORECASE,
-        ),
-    ),
-]
+# Canonical secret patterns live in ``secret_scrub`` (the single source of truth
+# shared with the audit-stream scrubber, ADR-0085 / SEC-AUDIT-003).
+from secret_scrub import SECRET_PATTERNS as _SECRET_PATTERNS
 
 
 def scan_base64_for_secrets(png_base64: str) -> list[str]:

@@ -7,7 +7,7 @@ subclasses via ``run_with_loops()``, and asserts on the world's final state.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -88,8 +88,8 @@ class TestL2WorkspaceGCCleansStale:
 
         state = MagicMock()
         state.get_active_workspaces.return_value = {
-            100: str(tmp_path / "issue-100"),
-            200: str(tmp_path / "issue-200"),
+            100: "agent/issue-100",
+            200: "agent/issue-200",
         }
         state.get_active_issue_numbers.return_value = {200}
         state.get_active_branches.return_value = {}
@@ -97,17 +97,11 @@ class TestL2WorkspaceGCCleansStale:
         state.get_issue_attempts.return_value = 0
         _seed_ports(world, workspace_gc_state=state)
 
-        # Run workspace_gc — it should GC issue 100's worktree but not 200's
-        async def _fake_run_subprocess(*args, **kwargs):  # noqa: ANN002, ANN003
-            if args[:3] == ("gh", "api", "repos/test-org/test-repo/issues/100"):
-                return "closed"
-            if args[:3] == ("git", "branch", "--list"):
-                return ""
-            return ""
+        run_subprocess = AsyncMock(return_value="")
+        run_subprocess.side_effect = ["closed", ""]
 
-        with patch(
-            "workspace_gc_loop.run_subprocess", side_effect=_fake_run_subprocess
-        ):
+        # Run workspace_gc — it should GC issue 100's worktree but not 200's
+        with patch("workspace_gc_loop.run_subprocess", run_subprocess):
             await world.run_with_loops(["workspace_gc"], cycles=1)
 
         # After GC: issue 100 destroyed, 200 still active

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
+from exception_classify import reraise_on_credit_or_bug
 
 if TYPE_CHECKING:
     from models import EscalationContext
@@ -120,7 +121,8 @@ class DiagnosticRunner(BaseRunner):
             )
         except (PermissionError, KeyboardInterrupt, SystemExit, MemoryError):
             raise
-        except Exception:
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
             logger.exception("Diagnostic agent failed for issue #%d", issue_number)
             return DiagnosisResult(
                 root_cause="Diagnostic agent crashed",
@@ -194,6 +196,7 @@ class DiagnosticRunner(BaseRunner):
             return verify.passed, transcript
         except (PermissionError, KeyboardInterrupt, SystemExit, MemoryError):
             raise
-        except Exception:
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
             logger.exception("Diagnostic fix failed for issue #%d", issue_number)
             return False, "Fix agent crashed"

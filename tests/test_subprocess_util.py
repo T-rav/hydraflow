@@ -926,6 +926,36 @@ class TestRateLimitCooldown:
         assert subprocess_util._rate_limit_until is not None
 
     @pytest.mark.asyncio
+    async def test_rate_limit_429_triggers_global_cooldown(self) -> None:
+        """An HTTP 429 rate-limit response should set _rate_limit_until too.
+
+        GitHub returns 429 for the primary/abuse limit (vs 403 for the
+        secondary limit). Without the 429 case in _is_rate_limited, a 429
+        skips the global cooldown and falls to the per-call retry path, which
+        either fails outright or retries too fast — amplifying the limit
+        across concurrent agents instead of pausing.
+        """
+        import subprocess_util
+        from execution import SimpleResult
+
+        configure_gh_concurrency(5)
+
+        async def rate_limit_429(cmd: list[str], **_kwargs: object) -> SimpleResult:
+            return SimpleResult(
+                stdout="",
+                stderr="gh: API rate limit exceeded (HTTP 429)",
+                returncode=1,
+            )
+
+        runner = MagicMock()
+        runner.run_simple = rate_limit_429
+
+        with pytest.raises(RuntimeError, match="rate limit"):
+            await run_subprocess("gh", "api", "test", runner=runner)
+
+        assert subprocess_util._rate_limit_until is not None
+
+    @pytest.mark.asyncio
     async def test_cooldown_delays_subsequent_calls(self) -> None:
         """When cooldown is active, gh calls should wait before executing."""
         from datetime import UTC, datetime, timedelta
@@ -983,6 +1013,152 @@ class TestRateLimitCooldown:
             await run_subprocess("gh", "api", "test", runner=runner)
 
         assert subprocess_util._rate_limit_until is None
+
+
+class TestGhCircuitBreaker:
+    @pytest.fixture(autouse=True)
+    def _reset_state(self) -> None:
+        import subprocess_util
+
+        subprocess_util._gh_semaphore = None
+        subprocess_util._rate_limit_until = None
+        subprocess_util._gh_circuit_breaker = None
+        subprocess_util._gh_circuit_breaker_enabled = False
+
+    @staticmethod
+    def _runner(stderr: str = "", returncode: int = 0, stdout: str = "done"):
+        from execution import SimpleResult
+
+        async def _run(cmd: list[str], **_kwargs: object) -> SimpleResult:
+            return SimpleResult(stdout=stdout, stderr=stderr, returncode=returncode)
+
+        runner = MagicMock()
+        runner.run_simple = _run
+        return runner
+
+    @pytest.mark.asyncio
+    async def test_opens_after_max_consecutive_failures_then_fails_fast(self) -> None:
+        from subprocess_util import (
+            CircuitBreakerOpenError,
+            configure_gh_circuit_breaker,
+        )
+
+        configure_gh_concurrency(5)
+        configure_gh_circuit_breaker(enabled=True, max_failures=3, reset_timeout=60.0)
+        fail = self._runner(stderr="fatal: unable to access (HTTP 500)", returncode=1)
+
+        # Three real command failures trip the breaker.
+        for _ in range(3):
+            with pytest.raises(RuntimeError) as ei:
+                await run_subprocess("gh", "api", "x", runner=fail)
+            assert not isinstance(ei.value, CircuitBreakerOpenError)
+
+        # Now OPEN: the next call short-circuits without running the command.
+        with pytest.raises(CircuitBreakerOpenError):
+            await run_subprocess("gh", "api", "x", runner=fail)
+
+    @pytest.mark.asyncio
+    async def test_half_open_probe_success_closes_breaker(self) -> None:
+        import subprocess_util
+        from subprocess_util import configure_gh_circuit_breaker
+
+        configure_gh_concurrency(5)
+        # reset_timeout=0 → OPEN transitions to HALF_OPEN immediately on next check.
+        configure_gh_circuit_breaker(enabled=True, max_failures=2, reset_timeout=0.0)
+        fail = self._runner(stderr="fatal: unable to access (HTTP 500)", returncode=1)
+        for _ in range(2):
+            with pytest.raises(RuntimeError):
+                await run_subprocess("gh", "api", "x", runner=fail)
+
+        # HALF_OPEN allows a probe; a success closes the breaker.
+        out = await run_subprocess("gh", "api", "x", runner=self._runner())
+        assert out == "done"
+        assert subprocess_util._gh_circuit_breaker.state == "closed"
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_failure_does_not_count_toward_breaker(self) -> None:
+        import subprocess_util
+        from subprocess_util import configure_gh_circuit_breaker
+
+        configure_gh_concurrency(5)
+        configure_gh_circuit_breaker(enabled=True, max_failures=3, reset_timeout=60.0)
+
+        rl = self._runner(stderr="API rate limit exceeded (HTTP 403)", returncode=1)
+        with pytest.raises(RuntimeError):
+            await run_subprocess("gh", "api", "x", runner=rl)
+        # Rate-limit has its own cooldown — it must NOT increment the breaker.
+        assert subprocess_util._gh_circuit_breaker._failure_count == 0
+
+        # A genuine outage failure DOES count. (Clear the cooldown the rl call
+        # set so this call doesn't wait on it.)
+        subprocess_util._rate_limit_until = None
+        with pytest.raises(RuntimeError):
+            await run_subprocess(
+                "gh",
+                "api",
+                "x",
+                runner=self._runner(
+                    stderr="HTTP 503 Service Unavailable", returncode=1
+                ),
+            )
+        assert subprocess_util._gh_circuit_breaker._failure_count == 1
+
+    @pytest.mark.asyncio
+    async def test_benign_4xx_gh_failures_do_not_count_toward_breaker(self) -> None:
+        import subprocess_util
+        from subprocess_util import (
+            CircuitBreakerOpenError,
+            configure_gh_circuit_breaker,
+        )
+
+        configure_gh_concurrency(5)
+        configure_gh_circuit_breaker(enabled=True, max_failures=3, reset_timeout=60.0)
+        # GitHub is UP and answering with client errors — normal control flow
+        # (e.g. removing a label that isn't present). These must NOT trip the
+        # outage breaker no matter how many occur in a row.
+        benign = self._runner(
+            stderr="HTTP 404: Not Found (label does not exist)", returncode=1
+        )
+        for _ in range(10):
+            with pytest.raises(RuntimeError) as ei:
+                await run_subprocess("gh", "api", "x", runner=benign)
+            assert not isinstance(ei.value, CircuitBreakerOpenError)
+        assert subprocess_util._gh_circuit_breaker._failure_count == 0
+
+    @pytest.mark.asyncio
+    async def test_local_git_failures_do_not_count_toward_breaker(self) -> None:
+        import subprocess_util
+        from subprocess_util import (
+            CircuitBreakerOpenError,
+            configure_gh_circuit_breaker,
+        )
+
+        configure_gh_concurrency(5)
+        configure_gh_circuit_breaker(enabled=True, max_failures=2, reset_timeout=60.0)
+        # Local git failures (e.g. a corrupted worktree) must not trip the
+        # process-global breaker — it guards the GitHub API (gh), not local git.
+        git_fail = self._runner(stderr="fatal: not a work tree", returncode=1)
+        for _ in range(5):
+            with pytest.raises(RuntimeError) as ei:
+                await run_subprocess("git", "status", runner=git_fail)
+            assert not isinstance(ei.value, CircuitBreakerOpenError)
+        assert subprocess_util._gh_circuit_breaker._failure_count == 0
+
+    @pytest.mark.asyncio
+    async def test_disabled_breaker_never_blocks(self) -> None:
+        from subprocess_util import (
+            CircuitBreakerOpenError,
+            configure_gh_circuit_breaker,
+        )
+
+        configure_gh_concurrency(5)
+        # The live kill-switch: disabled => never short-circuits, even past cap.
+        configure_gh_circuit_breaker(enabled=False, max_failures=1, reset_timeout=60.0)
+        fail = self._runner(stderr="fatal: unable to access (HTTP 500)", returncode=1)
+        for _ in range(5):
+            with pytest.raises(RuntimeError) as ei:
+                await run_subprocess("gh", "api", "x", runner=fail)
+            assert not isinstance(ei.value, CircuitBreakerOpenError)
 
 
 # ---------------------------------------------------------------------------

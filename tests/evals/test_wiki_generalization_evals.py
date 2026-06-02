@@ -1,7 +1,6 @@
 """Measure WikiCompiler.generalize_pair accuracy on a curated corpus.
 
-Runs real LLM calls. Gated by conftest.py — skipped unless
-``--run-evals`` or ``HYDRAFLOW_RUN_EVALS=1``.
+Runs real LLM calls. Excluded from the default suite by the ``evals`` marker.
 
 Decides the deferred audit question: "Is haiku accurate enough for
 cross-repo semantic-equivalence judgments, or should we upgrade to
@@ -18,6 +17,7 @@ from pathlib import Path
 import pytest
 
 CORPUS_ROOT = Path(__file__).parent / "corpus" / "generalization"
+pytestmark = pytest.mark.evals
 
 
 @dataclass(frozen=True)
@@ -149,10 +149,8 @@ async def test_generalization_accuracy(wiki_compiler, wiki_entry_cls) -> None:
     )
 
 
-def test_conftest_skips_evals_by_default(pytestconfig) -> None:
-    """Smoke: without --run-evals or HYDRAFLOW_RUN_EVALS, this file's
-    other tests must be skipped. This test itself runs to prove
-    collection works and the corpus is readable."""
+def test_eval_corpus_has_same_and_different_cases(pytestconfig) -> None:
+    """The eval corpus must include both positive and negative examples."""
     cases = _load_cases()
     assert len(cases) >= 5, "corpus should hold at least 5 cases"
     same = [c for c in cases if c.expected_same_principle]

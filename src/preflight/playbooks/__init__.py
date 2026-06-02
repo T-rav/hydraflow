@@ -165,18 +165,26 @@ _REGISTRY: dict[str, PreflightPlaybook] = {
 }
 
 
+# Escalation sub-labels are a MIX: most producer loops file *unprefixed*
+# sub-labels (e.g. ``principles-stuck``, ``discover-stuck`` — strip is a no-op),
+# but the config-default escalation labels (``fake_coverage_stuck_label`` =
+# ``hydraflow-fake-coverage-stuck``, ``adr_drift_stuck_label``,
+# ``memory_backlog_stuck_label``) carry the prefix.
+_LABEL_PREFIX = "hydraflow-"
+
+
 def get_playbook(sub_label: str) -> PreflightPlaybook:
     """Return the playbook for ``sub_label`` (falls back to ``_default``).
 
-    Backwards-compatible: any sub-label the registry doesn't specialise gets
-    the generic lead-engineer playbook, which renders the existing
-    ``prompts/auto_agent/_default.md`` (or a sub-label-specific prompt file
-    if one exists, via the runner's existing lookup) with the default persona.
+    The ``hydraflow-`` prefix is stripped before lookup so a prefixed
+    config-default escalation label can still match an (unprefixed) registry
+    key. This is defensive today — no currently-prefixed escalation label has a
+    registry specialist, so the live prefix benefit is in ``render_prompt``'s
+    file fallback — but it keeps the registry path correct if one is added.
+    Backwards-compatible: any sub-label the registry doesn't specialise still
+    gets the generic lead-engineer playbook.
     """
-    return _REGISTRY.get(
-        sub_label,
-        _REGISTRY.get(sub_label.removeprefix("hydraflow-"), _DEFAULT_PLAYBOOK),
-    )
+    return _REGISTRY.get(sub_label.removeprefix(_LABEL_PREFIX), _DEFAULT_PLAYBOOK)
 
 
 def iter_playbooks() -> tuple[PreflightPlaybook, ...]:

@@ -36,12 +36,20 @@ def _grep_workflows(ctx: CheckContext, needle: str) -> bool:
 
 @register("P5.2")
 def _workflow_runs_quality_lite(ctx: CheckContext) -> Finding:
-    if _grep_workflows(ctx, "quality-lite") or _grep_workflows(ctx, "quality_lite"):
+    # The principle is "a workflow runs a quality gate" — `quality-lite` OR the
+    # unified full `make quality` (a strict superset) both satisfy it. CI was
+    # unified onto `make quality` (no separate lite stage), so accept either.
+    # `make quality` as a substring also covers `make quality-lite`/`_lite`.
+    if (
+        _grep_workflows(ctx, "make quality")
+        or _grep_workflows(ctx, "quality-lite")
+        or _grep_workflows(ctx, "quality_lite")
+    ):
         return finding("P5.2", Status.PASS)
     return finding(
         "P5.2",
         Status.FAIL,
-        "no workflow references `quality-lite` (or `quality_lite`)",
+        "no workflow references `make quality` (or `quality-lite`)",
     )
 
 

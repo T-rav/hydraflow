@@ -156,7 +156,7 @@ class TestSubmitIntentEndpoint:
         from models import IntentRequest
 
         router, pr_mgr = make_dashboard_router(config, event_bus, state, tmp_path)
-        pr_mgr.create_issue = AsyncMock(return_value=None)  # type: ignore[method-assign]
+        pr_mgr.create_issue = AsyncMock(return_value=0)  # type: ignore[method-assign]
         endpoint = find_endpoint(router, "/api/intent")
         request = IntentRequest(text="Add something")
         response = await endpoint(request)

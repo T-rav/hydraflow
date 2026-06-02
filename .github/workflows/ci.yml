@@ -17,6 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       python: ${{ steps.filter.outputs.python }}
+      core_python: ${{ steps.filter.outputs.core_python }}
+      arch: ${{ steps.filter.outputs.arch }}
+      scenario_tests: ${{ steps.filter.outputs.scenario_tests }}
+      regression_tests: ${{ steps.filter.outputs.regression_tests }}
       ui: ${{ steps.filter.outputs.ui }}
       ci: ${{ steps.filter.outputs.ci }}
       service_registry: ${{ steps.filter.outputs.service_registry }}
@@ -36,6 +40,28 @@ jobs:
               - 'tests/**'
               - 'pyproject.toml'
               - 'uv.lock'
+            core_python:
+              - 'src/**/*.py'
+              - '!src/arch/**'
+              - 'tests/**'
+              - '!tests/architecture/**'
+              - '!tests/regressions/**'
+              - '!tests/scenarios/**'
+              - '!tests/sandbox_scenarios/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+            arch:
+              - 'src/arch/**'
+              - 'tests/architecture/**'
+              - 'docs/arch/**'
+              - 'docs/adr/**'
+              - 'docs/wiki/**'
+              - 'Makefile'
+            scenario_tests:
+              - 'tests/scenarios/**'
+              - 'tests/sandbox_scenarios/**'
+            regression_tests:
+              - 'tests/regressions/**'
             ui:
               - 'src/ui/**'
             ci:
@@ -112,10 +138,36 @@ jobs:
       - name: Bandit security scan
         run: uv run bandit -c pyproject.toml -r . --severity-level medium
 
+  arch:
+    name: Architecture Check
+    needs: changes
+    if: needs.changes.outputs.arch == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Validate functional_areas.yml
+        run: |
+          uv run python -c "from arch._functional_areas_schema import load_functional_areas; from pathlib import Path; load_functional_areas(Path('docs/arch/functional_areas.yml')); print('functional_areas.yml: schema OK')"
+      - name: Drift check
+        run: make arch-check
+      - name: Architecture tests
+        run: uv run pytest tests/architecture -x --tb=short
+
   test:
     name: Tests
     needs: changes
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.core_python == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -143,7 +195,7 @@ jobs:
   smoke:
     name: Smoke Tests
     needs: changes
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.core_python == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -170,7 +222,7 @@ jobs:
   scenario:
     name: Scenario Tests
     needs: changes
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.core_python == 'true' || needs.changes.outputs.scenario_tests == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -191,7 +243,7 @@ jobs:
   regression:
     name: Regression Tests
     needs: changes
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.core_python == 'true' || needs.changes.outputs.regression_tests == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -210,7 +262,7 @@ jobs:
   audit:
     name: Principles Audit
     needs: changes
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.core_python == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -279,9 +331,9 @@ jobs:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
       - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
-      - name: Run fast subset (runnable sandbox smoke)
+      - name: Run fast subset (s01, s06)
         run: |
-          for s in s01_happy_single_issue s08_pr_unsticker_revives_stuck_pr s09_dependabot_auto_merge; do
+          for s in s01_happy_single_issue s06_kill_switch_via_ui; do
             python scripts/sandbox_scenario.py run $s || exit 1
           done
       - if: failure()
@@ -361,7 +413,7 @@ jobs:
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
-    needs: [changes, lint, typecheck, security, test, smoke, scenario, regression, audit, ui-build]
+    needs: [changes, lint, typecheck, security, arch, test, smoke, scenario, regression, audit, ui-build]
     if: always()
     steps:
       - name: Require all CI jobs to have passed or been skipped

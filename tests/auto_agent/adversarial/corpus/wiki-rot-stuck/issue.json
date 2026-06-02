@@ -2,5 +2,5 @@
   "number": 9050,
   "title": "[Wiki] Stale entry: architecture.md#StateTracker references removed field",
   "body": "RepoWikiLoop flagged architecture.md entry for StateTracker: references `pending_issues` field removed in PR #8901. Entry has been stale for 14 days.",
-  "labels": [{"name": "hydraflow-hitl-escalation"}, {"name": "hydraflow-wiki-rot-stuck"}]
+  "labels": [{"name": "hitl-escalation"}, {"name": "wiki-rot-stuck"}]
 }

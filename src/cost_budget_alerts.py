@@ -89,8 +89,8 @@ async def check_daily_budget(
     except Exception:
         logger.warning("Failed to file daily-budget alert", exc_info=True)
         return
-    if issue_number is None:
-        logger.warning("create_issue failed; not marking dedup for %s", day_key)
+    if issue_number <= 0:
+        logger.warning("create_issue returned %d; not marking dedup", issue_number)
         return
     try:
         dedup.add(day_key)
@@ -164,7 +164,7 @@ async def check_issue_cost(
     except Exception:
         logger.warning("Failed to file issue-cost alert", exc_info=True)
         return
-    if filed is None:
+    if filed <= 0:
         return
     try:
         dedup.add(key)

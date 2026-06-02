@@ -59,8 +59,8 @@ async def test_flaky_test_resolved(tmp_path: Path) -> None:
                 "number": 1,
                 "body": "x",
                 "labels": [
-                    {"name": "hydraflow-hitl-escalation"},
-                    {"name": "hydraflow-flaky-test-stuck"},
+                    {"name": "hitl-escalation"},
+                    {"name": "flaky-test-stuck"},
                 ],
             },
         ]
@@ -71,11 +71,11 @@ async def test_flaky_test_resolved(tmp_path: Path) -> None:
     )
     result = await loop._do_work()
     assert result["result_status"] == "resolved"
-    # `resolved` removes hydraflow-hitl-escalation + human-required + sub-label
+    # `resolved` removes hitl-escalation + human-required + sub-label
     # (singular remove_label called once per label).
-    pr.remove_label.assert_any_await(1, "hydraflow-hitl-escalation")
+    pr.remove_label.assert_any_await(1, "hitl-escalation")
     pr.remove_label.assert_any_await(1, "human-required")
-    pr.remove_label.assert_any_await(1, "hydraflow-flaky-test-stuck")
+    pr.remove_label.assert_any_await(1, "flaky-test-stuck")
 
 
 @pytest.mark.asyncio
@@ -87,8 +87,8 @@ async def test_subprocess_fatal(tmp_path: Path) -> None:
                 "number": 1,
                 "body": "x",
                 "labels": [
-                    {"name": "hydraflow-hitl-escalation"},
-                    {"name": "hydraflow-flaky-test-stuck"},
+                    {"name": "hitl-escalation"},
+                    {"name": "flaky-test-stuck"},
                 ],
             },
         ]
@@ -108,8 +108,8 @@ async def test_resolved_without_pr_url_demotes_to_pr_failed(tmp_path: Path) -> N
                 "number": 1,
                 "body": "x",
                 "labels": [
-                    {"name": "hydraflow-hitl-escalation"},
-                    {"name": "hydraflow-flaky-test-stuck"},
+                    {"name": "hitl-escalation"},
+                    {"name": "flaky-test-stuck"},
                 ],
             },
         ]
@@ -136,8 +136,8 @@ async def test_third_attempt_marks_exhausted(tmp_path: Path) -> None:
                 "number": 1,
                 "body": "x",
                 "labels": [
-                    {"name": "hydraflow-hitl-escalation"},
-                    {"name": "hydraflow-flaky-test-stuck"},
+                    {"name": "hitl-escalation"},
+                    {"name": "flaky-test-stuck"},
                 ],
             },
         ]
@@ -156,8 +156,8 @@ async def test_principles_stuck_bypassed(tmp_path: Path) -> None:
                 "number": 1,
                 "body": "x",
                 "labels": [
-                    {"name": "hydraflow-hitl-escalation"},
-                    {"name": "hydraflow-principles-stuck"},
+                    {"name": "hitl-escalation"},
+                    {"name": "principles-stuck"},
                 ],
             },
         ]

@@ -12,10 +12,12 @@ from typing import TYPE_CHECKING
 
 from adr_pre_validator import ADRPreValidator, ADRValidationResult
 from adr_utils import ADR_FILE_RE
-from agent_cli import build_lightweight_command
 from file_util import append_jsonl
 from models import ADRCouncilResult, CouncilVerdict, CouncilVote
-from subprocess_util import make_clean_env
+from subprocess_util import (
+    AuthenticationError,
+    CreditExhaustedError,
+)
 
 if TYPE_CHECKING:
     from config import Credentials, HydraFlowConfig
@@ -167,6 +169,14 @@ class ADRCouncilReviewer:
                 stats["reviewed"] += 1
                 stats["rounds_total"] += result.rounds_needed
                 await self._route_result(result, adr_path, adr_dir, stats)
+            except (AuthenticationError, CreditExhaustedError):
+                # Dark-factory contract: a fatal billing/auth signal raised
+                # mid-review must propagate out of review_proposed_adrs so
+                # BaseBackgroundLoop._execute_cycle's dedicated handler can
+                # pause the loop on the signal. (Ordinary per-item failures —
+                # routing bugs, parse errors — are still swallowed below so one
+                # bad ADR does not halt the whole batch.)
+                raise
             except Exception:
                 logger.exception(
                     "ADR-%04d: per-item review failed, continuing", adr_number
@@ -477,34 +487,41 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
 
     async def _execute_orchestrator(self, prompt: str) -> str | None:
         """Call the configured CLI backend to run the council session."""
-        cmd, cmd_input = build_lightweight_command(
-            tool=self._config.adr_review_tool,
-            model=self._config.adr_review_model,
-            prompt=prompt,
-        )
+        from runner_utils import run_lightweight_agent  # noqa: PLC0415
 
-        env = make_clean_env(self._credentials.gh_token)
+        # run_lightweight_agent builds the command, runs run_simple, raises
+        # CreditExhaustedError on credit-out (exception OR stdout/stderr text)
+        # so it reaches the loop's dedicated credit handler instead of
+        # degrading to None and burning attempt budget, propagates likely-bug
+        # exceptions, collapses transient failures (timeouts, OSError, etc.) to
+        # SimpleResult(returncode=-1), and records PromptTelemetry.
         try:
-            result = await self._runner.run_simple(
-                cmd,
-                env=env,
-                input=cmd_input,
+            result = await run_lightweight_agent(
+                runner=self._runner,
+                config=self._config,
+                tool=self._config.adr_review_tool,
+                model=self._config.adr_review_model,
+                prompt=prompt,
+                source="adr_reviewer",
                 timeout=self._config.agent_timeout,
+                gh_token=self._credentials.gh_token,
             )
-            if result.returncode != 0:
-                logger.warning(
-                    "ADR council orchestrator failed (rc=%d): %s",
-                    result.returncode,
-                    result.stderr[:200],
-                )
-                return None
-            return result.stdout if result.stdout else None
-        except TimeoutError:
-            logger.warning("ADR council orchestrator timed out")
-            return None
-        except (OSError, FileNotFoundError, NotImplementedError) as exc:
+        except (TimeoutError, OSError, FileNotFoundError, NotImplementedError) as exc:
+            # Graceful-degradation parity with the sibling lightweight spawners
+            # (transcript_summarizer/wiki_compiler): an unavailable or
+            # unimplemented backend yields None -> NO_CONSENSUS, not a skipped
+            # ADR. NotImplementedError is the live case -- DockerRunner.run_simple
+            # raises it for >100KB stdin prompts (WS-2.2 self-review S1).
             logger.warning("ADR council orchestrator unavailable: %s", exc)
             return None
+        if result.returncode != 0:
+            logger.warning(
+                "ADR council orchestrator failed (rc=%d): %s",
+                result.returncode,
+                result.stderr[:200],
+            )
+            return None
+        return result.stdout if result.stdout else None
 
     async def _route_pre_validation_failure(
         self,

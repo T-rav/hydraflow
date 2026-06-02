@@ -152,7 +152,7 @@ class DiagramLoop(BaseBackgroundLoop):
             files=files_to_commit,
             pr_title=pr_title,
             pr_body=pr_body,
-            base="main",
+            base=self._config.base_branch(),
             auto_merge=True,
             labels=["hydraflow-ready", "arch-regen"],
             raise_on_failure=False,

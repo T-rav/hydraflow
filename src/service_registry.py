@@ -39,10 +39,13 @@ from edge_proposer_loop import EdgeProposerLoop
 from entry_evidence_loop import EntryEvidenceLoop
 from epic import EpicCompletionChecker, EpicManager
 from epic_monitor_loop import EpicMonitorLoop
+from epic_sweeper_loop import EpicSweeperLoop
 from events import EventBus
 from execution import SubprocessRunner
 from fake_coverage_auditor_loop import FakeCoverageAuditorLoop
 from flake_tracker_loop import FlakeTrackerLoop
+from gate_activation_check import check_gate_activation
+from gate_activator_loop import GateActivatorLoop  # noqa: TCH001
 from github_cache_loop import GitHubCacheLoop, GitHubDataCache
 from harness_insights import HarnessInsightStore
 from health_monitor_loop import HealthMonitorLoop
@@ -119,6 +122,8 @@ from workspace import WorkspaceManager
 from workspace_gc_loop import WorkspaceGCLoop
 
 if TYPE_CHECKING:
+    from scripts.gates.activation import ActivationProposal
+
     from metrics_manager import MetricsManager
 
 logger = logging.getLogger("hydraflow.service_registry")
@@ -180,6 +185,7 @@ class ServiceRegistry:
     merge_state_watcher_loop: MergeStateWatcherLoop
     report_issue_loop: ReportIssueLoop
     epic_monitor_loop: EpicMonitorLoop
+    epic_sweeper_loop: EpicSweeperLoop
     workspace_gc_loop: WorkspaceGCLoop
     runs_gc_loop: RunsGCLoop
     adr_reviewer_loop: ADRReviewerLoop
@@ -192,6 +198,7 @@ class ServiceRegistry:
     stale_issue_gc_loop: StaleIssueGCLoop
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
+    gate_activator_loop: GateActivatorLoop
     security_patch_loop: SecurityPatchLoop
     repo_wiki_store: RepoWikiStore
     repo_wiki_loop: RepoWikiLoop
@@ -296,9 +303,14 @@ def build_services(
 
     # Configure global GitHub API concurrency limiter (startup config
     # belongs in the composition root, not the orchestrator).
-    from subprocess_util import configure_gh_concurrency
+    from subprocess_util import configure_gh_circuit_breaker, configure_gh_concurrency
 
     configure_gh_concurrency(config.gh_api_concurrency)
+    configure_gh_circuit_breaker(
+        enabled=config.gh_circuit_breaker_enabled,
+        max_failures=config.gh_circuit_breaker_max_failures,
+        reset_timeout=config.gh_circuit_breaker_reset_timeout_s,
+    )
 
     # Shadow corpus (#8786). Every gh/git/docker/claude subprocess call
     # feeds the bounded, normalized, PII-scrubbed corpus that
@@ -900,6 +912,13 @@ def build_services(
     epic_monitor_loop = EpicMonitorLoop(
         config=config, epic_manager=epic_manager, deps=loop_deps
     )
+    epic_sweeper_loop = EpicSweeperLoop(
+        config=config,
+        fetcher=fetcher,
+        prs=prs,
+        state=state,
+        deps=loop_deps,
+    )
     # ``is_in_pipeline`` is internal IssueStore plumbing not part of
     # IssueStorePort. Sandbox stores (FakeIssueStore) don't implement it
     # — fall back to a never-in-pipeline lambda so loop construction
@@ -1111,6 +1130,23 @@ def build_services(
         dedup=branch_protection_auditor_dedup,
         deps=loop_deps,
         auditor=_branch_protection_audit,
+    )
+
+    gate_activator_dedup = DedupStore(
+        "gate_activator",
+        config.data_root / "dedup" / "gate_activator.json",
+    )
+
+    async def _detect_gate_activations() -> list[ActivationProposal]:
+        # Offload the contract parse + workflow/Makefile reads off the loop.
+        return await asyncio.to_thread(check_gate_activation, config.repo_root)
+
+    gate_activator_loop = GateActivatorLoop(  # noqa: F841
+        config=config,
+        pr_manager=prs,
+        dedup=gate_activator_dedup,
+        deps=loop_deps,
+        detector=_detect_gate_activations,
     )
 
     memory_backlog_dedup = DedupStore(
@@ -1347,6 +1383,7 @@ def build_services(
         merge_state_watcher_loop=merge_state_watcher_loop,
         report_issue_loop=report_issue_loop,
         epic_monitor_loop=epic_monitor_loop,
+        epic_sweeper_loop=epic_sweeper_loop,
         workspace_gc_loop=workspace_gc_loop,
         runs_gc_loop=runs_gc_loop,
         adr_reviewer_loop=adr_reviewer_loop,
@@ -1361,6 +1398,7 @@ def build_services(
         stale_issue_gc_loop=stale_issue_gc_loop,
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,
+        gate_activator_loop=gate_activator_loop,
         security_patch_loop=security_patch_loop,
         repo_wiki_store=repo_wiki_store,
         repo_wiki_loop=repo_wiki_loop,

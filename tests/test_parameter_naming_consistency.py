@@ -113,6 +113,7 @@ class TestNoIssueNumVariables:
             "harness_insights",
             "epic",
             "changelog",
+            "epic_sweeper_loop",
             "orchestrator",
             "workspace_gc_loop",
             "timeline",

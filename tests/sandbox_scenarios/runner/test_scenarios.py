@@ -12,12 +12,11 @@ import pytest
 
 from tests.sandbox_scenarios.runner.loader import load_all_scenarios
 
-# Filter out s00_smoke — that's parity-only (no assert_outcome). When the
-# harness selects one scenario, filter parametrization before collection so
-# pytest does not report the rest of the catalog as skipped tests.
-_ALL_SCENARIOS = [s for s in load_all_scenarios() if hasattr(s, "assert_outcome")]
+# Filter out s00_smoke — that's parity-only (no assert_outcome).
+_SCENARIOS = [s for s in load_all_scenarios() if hasattr(s, "assert_outcome")]
 _ONLY = os.environ.get("SCENARIO_NAME")
-_SCENARIOS = [s for s in _ALL_SCENARIOS if not _ONLY or s.NAME == _ONLY]
+if _ONLY:
+    _SCENARIOS = [s for s in _SCENARIOS if s.NAME == _ONLY]
 
 
 if _SCENARIOS:
@@ -30,8 +29,8 @@ if _SCENARIOS:
 
 else:
 
-    def test_scenario_catalog_selection_is_valid() -> None:
-        """Fail loudly when the sandbox catalog or SCENARIO_NAME is empty."""
+    def test_no_scenarios_registered_fails_closed() -> None:
+        """Fail closed when the requested runnable scenario does not exist."""
         if _ONLY:
-            raise AssertionError(f"SCENARIO_NAME={_ONLY!r} did not match any scenario")
-        raise AssertionError("No Tier-2 scenarios with assert_outcome were discovered")
+            pytest.fail(f"SCENARIO_NAME={_ONLY!r} has no runnable scenario")
+        pytest.fail("No Tier-2 scenarios with assert_outcome are registered")

@@ -60,6 +60,7 @@ class ClaudeCLIClient:
         """
         del schema
         from agent_cli import build_lightweight_command  # noqa: PLC0415
+        from runner_utils import raise_if_credit_exhausted  # noqa: PLC0415
 
         cmd, cmd_input = build_lightweight_command(
             tool=self._tool, model=self._model, prompt=prompt
@@ -67,6 +68,10 @@ class ClaudeCLIClient:
         result = await self._runner.run_simple(
             cmd, input=cmd_input, timeout=self._timeout
         )
+        # run_simple surfaces credit-out as rc!=0 text (it never raises), so
+        # scan and convert to CreditExhaustedError — otherwise the billing
+        # signal is misclassified as a generic CLI failure and burns budget.
+        raise_if_credit_exhausted(result.stdout, result.stderr, self._tool)
         if result.returncode != 0:
             raise RuntimeError(
                 f"{self._tool} CLI failed (rc={result.returncode}): "

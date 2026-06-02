@@ -73,7 +73,7 @@ def _issue(sub_label: str, number: int = 1) -> dict:
         "number": number,
         "body": "x",
         "labels": [
-            {"name": "hydraflow-hitl-escalation"},
+            {"name": "hitl-escalation"},
             {"name": sub_label},
         ],
     }
@@ -84,20 +84,12 @@ def _issue(sub_label: str, number: int = 1) -> dict:
 # that won't appear in the generic envelope/default copy; the header substring
 # proves render_prompt picked the playbook's prompt_template.
 _W1_ROUTING_CASES = [
-    ("hydraflow-plan-stuck", "planning specialist", "plan-stuck Playbook"),
+    ("plan-stuck", "planning specialist", "plan-stuck Playbook"),
+    ("implement-stuck", "implementation specialist", "implement-stuck Playbook"),
+    ("review-stuck", "review-recovery specialist", "review-stuck Playbook"),
+    ("triage-stuck", "triage specialist", "triage-stuck Playbook"),
     (
-        "hydraflow-implement-stuck",
-        "implementation specialist",
-        "implement-stuck Playbook",
-    ),
-    (
-        "hydraflow-review-stuck",
-        "review-recovery specialist",
-        "review-stuck Playbook",
-    ),
-    ("hydraflow-triage-stuck", "triage specialist", "triage-stuck Playbook"),
-    (
-        "hydraflow-discover-stuck",
+        "discover-stuck",
         "discovery / research specialist",
         "discover-stuck Playbook",
     ),
@@ -140,9 +132,7 @@ async def test_unspecialised_sublabel_uses_default_persona(tmp_path: Path) -> No
     loop, _state, pr, _audit = _make_loop(
         tmp_path, auto_agent_persona="CUSTOM_OPERATOR_PERSONA"
     )
-    pr.list_issues_by_label = AsyncMock(
-        return_value=[_issue("hydraflow-flaky-test-stuck")]
-    )
+    pr.list_issues_by_label = AsyncMock(return_value=[_issue("flaky-test-stuck")])
     prompts = _capture_spawn(loop)
 
     await loop._do_work()
@@ -159,9 +149,7 @@ async def test_unknown_sublabel_falls_back_to_default_prompt(tmp_path: Path) -> 
     """A completely unknown sub-label uses the operator persona AND the
     generic _default.md prompt (the runner's existing fallback path)."""
     loop, _state, pr, _audit = _make_loop(tmp_path, auto_agent_persona="OPERATOR_X")
-    pr.list_issues_by_label = AsyncMock(
-        return_value=[_issue("hydraflow-totally-novel-stuck")]
-    )
+    pr.list_issues_by_label = AsyncMock(return_value=[_issue("totally-novel-stuck")])
     prompts = _capture_spawn(loop)
 
     await loop._do_work()
@@ -178,7 +166,7 @@ def test_w1_routing_table_matches_registry() -> None:
     updates."""
     from preflight.playbooks import iter_playbooks
 
-    table_names = {sub.removeprefix("hydraflow-") for sub, _, _ in _W1_ROUTING_CASES}
+    table_names = {sub for sub, _, _ in _W1_ROUTING_CASES}
     registry_names = {pb.name for pb in iter_playbooks()}
     assert table_names == registry_names, (
         f"W1 routing-table specialists {table_names} do not match registry "

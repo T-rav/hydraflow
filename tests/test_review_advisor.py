@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from mockworld.fakes import FakeLLM
 from review_advisor import (
+    BLAST_RADIUS_RETRIES,
     CRITICAL_PATHS,
     SURFACE_ADVISOR_CONFIGS,
     AlwaysTrigger,
@@ -23,7 +24,10 @@ from review_advisor import (
     PreFlightInput,
     ReviewPlan,
     build_surface_config,
+    compute_blast_radius,
     is_advisor_enabled,
+    min_review_passes_for_blast_radius,
+    post_verify_retry_budget,
     resolve_model,
     should_pre_flight,
 )
@@ -237,7 +241,6 @@ class TestSurfaceConfigs:
         assert c.mid_flight_enabled is True
         assert c.post_verify_enabled is True
         assert c.post_verify_authority == "veto"
-        assert c.max_veto_retries == 2
         assert isinstance(c.pre_flight_trigger, CompositeTrigger)
 
     def test_pre_merge_spec_check_no_preflight(self):
@@ -262,7 +265,6 @@ class TestSurfaceConfigs:
         assert c.mid_flight_enabled is False
         assert c.post_verify_enabled is True
         assert c.post_verify_authority == "veto"
-        assert c.max_veto_retries == 1
 
     def test_wiki_ingest_advisory_only(self):
         c = SURFACE_ADVISOR_CONFIGS["wiki_ingest"]
@@ -270,7 +272,6 @@ class TestSurfaceConfigs:
         assert c.mid_flight_enabled is False
         assert c.post_verify_enabled is True
         assert c.post_verify_authority == "advisory"
-        assert c.max_veto_retries == 0
 
     def test_build_resolves_models_from_env(self, monkeypatch):
         monkeypatch.setenv("HYDRAFLOW_PR_REVIEW_EXECUTOR_MODEL", "haiku")
@@ -1904,3 +1905,100 @@ class TestSelfModificationGuard:
             )
         )
         assert result.verdict == "APPROVE"  # downgraded
+
+
+class TestBlastRadius:
+    def test_critical_path_exact_is_high(self):
+        stats = DiffStats(changed_paths=["src/orchestrator.py"], lines_changed=5)
+        assert compute_blast_radius(stats) == "high"
+
+    def test_critical_path_glob_loop_is_high(self):
+        stats = DiffStats(changed_paths=["src/edge_proposer_loop.py"], lines_changed=5)
+        assert compute_blast_radius(stats) == "high"
+
+    def test_large_src_change_is_medium(self):
+        stats = DiffStats(changed_paths=["src/some_util.py"], lines_changed=250)
+        assert compute_blast_radius(stats) == "medium"
+
+    def test_small_src_change_is_low(self):
+        stats = DiffStats(changed_paths=["src/some_util.py"], lines_changed=50)
+        assert compute_blast_radius(stats) == "low"
+
+    def test_docs_only_is_low(self):
+        stats = DiffStats(changed_paths=["docs/adr/0001.md"], lines_changed=500)
+        assert compute_blast_radius(stats) == "low"
+
+    def test_empty_diff_is_low(self):
+        stats = DiffStats(changed_paths=[], lines_changed=0)
+        assert compute_blast_radius(stats) == "low"
+
+
+class TestBlastRadiusRetryBudget:
+    def test_BLAST_RADIUS_RETRIES_table_covers_all_tiers(self):
+        assert BLAST_RADIUS_RETRIES == {"low": 1, "medium": 2, "high": 3}
+
+    def test_veto_authority_budget_matches_blast_tier(self):
+        # Veto-authority surfaces (pr_review, pre_merge_spec_check): budget is
+        # purely blast-driven (low=1/medium=2/high=3) — no separate cap.
+        assert post_verify_retry_budget("low", "veto") == 1
+        assert post_verify_retry_budget("medium", "veto") == 2
+        assert post_verify_retry_budget("high", "veto") == 3
+
+    def test_advisory_authority_hard_caps_every_tier_to_zero(self):
+        # Advisory surfaces (wiki_ingest) must NEVER gain a retry budget from
+        # blast radius — they stay at 0 and never block a merge, regardless of
+        # how risky the diff is. The cap derives from post_verify_authority.
+        assert post_verify_retry_budget("low", "advisory") == 0
+        assert post_verify_retry_budget("medium", "advisory") == 0
+        assert post_verify_retry_budget("high", "advisory") == 0
+
+
+class TestSecondOrderFailureProbe:
+    def _make_advisor(self):
+        from unittest.mock import AsyncMock
+
+        runner = AsyncMock()
+        cfg = build_surface_config("pr_review")
+        return PostVerifyAdvisor(runner=runner, surface_config=cfg)
+
+    def test_critical_path_diff_includes_second_order_section(self):
+        advisor = self._make_advisor()
+        inp = PostVerifyInput(
+            surface="pr_review",
+            diff="diff --git a/src/orchestrator.py b/src/orchestrator.py\n+++ b/src/orchestrator.py\n+x = 1",
+            executor_verdict_summary="looks good",
+        )
+        prompt = advisor._build_prompt(inp)
+        assert "Second-order failure check" in prompt
+        assert "failure mode if THIS fix itself fails" in prompt
+
+    def test_non_critical_path_diff_excludes_second_order_section(self):
+        advisor = self._make_advisor()
+        inp = PostVerifyInput(
+            surface="pr_review",
+            diff="diff --git a/src/some_util.py b/src/some_util.py\n+++ b/src/some_util.py\n+x = 1",
+            executor_verdict_summary="looks good",
+        )
+        prompt = advisor._build_prompt(inp)
+        assert "Second-order failure check" not in prompt
+
+    def test_critical_glob_diff_includes_second_order_section(self):
+        advisor = self._make_advisor()
+        inp = PostVerifyInput(
+            surface="pr_review",
+            diff="diff --git a/src/persistence/store.py b/src/persistence/store.py\n+++ b/src/persistence/store.py\n+x = 1",
+            executor_verdict_summary="looks good",
+        )
+        prompt = advisor._build_prompt(inp)
+        assert "Second-order failure check" in prompt
+
+
+class TestReviewBlastRadiusState:
+    def test_min_review_passes_low(self):
+        assert min_review_passes_for_blast_radius("low") == 1
+
+    def test_min_review_passes_medium(self):
+        assert min_review_passes_for_blast_radius("medium") == 2
+
+    def test_min_review_passes_high(self):
+        assert min_review_passes_for_blast_radius("high") == 3

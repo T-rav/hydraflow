@@ -35,6 +35,23 @@ architecture, and the spec at
    Builds the compose stack, boots, runs your assertions, tears down.
    Returns 0 on PASS, 1 on scenario failure, 2 on infra failure.
 
+## MockWorld fidelity rules
+
+MockWorld scenarios should exercise production ports through fake adapters
+whenever the adapter exists. For GitHub side effects, prefer the default
+`FakeGitHub` wired into `MockWorld` and assert on stored issues, labels,
+comments, PRs, and CI scripts. Do not replace `pr_manager.create_issue`,
+`post_comment`, or `add_labels` with a raw `AsyncMock` just to count calls; that
+misses the fake-adapter contract and can hide title/body/label drift.
+
+Patch only the true external boundary that MockWorld cannot yet model, such as
+`gh run download`, `git bisect`, or an LLM/subprocess corpus runner. When a loop
+has enrichment logic behind that boundary, add focused unit coverage for the
+parser/formatter as well as the scenario. The RC budget loop is the reference
+pattern: the MockWorld scenario asserts issue creation through `FakeGitHub`,
+while unit tests cover job-breakdown parsing, JUnit parsing, and issue-body
+enrichment without creating live GitHub issues.
+
 ## Existing scenarios
 
 | Name | What it tests |
@@ -45,15 +62,16 @@ architecture, and the spec at
 | s03_review_retry_then_pass | Review fails attempt 1, passes attempt 2 |
 | s04_ci_red_then_fixed | PR with red CI → ci-fix runner → green CI → merged |
 | s05_hitl_after_review_exhaustion | 3 review failures → HITL surfaces |
+| s06_kill_switch_via_ui | UI toggle disables loop → no further ticks |
 | s08_pr_unsticker_revives_stuck_pr | Stale PR → auto-resync triggers |
 | s09_dependabot_auto_merge | Dependabot PR + green CI → auto-merged |
 | s12_trust_fleet_three_repos_independent | 3 repos process independently |
-| s15-s41 | Additional runnable loop-specific smoke and recovery scenarios |
-| s_advisor_full_loop | Advisor full-loop sandbox scenario |
+| s15_ci_monitor_main_branch_red | Main-branch CI failure is detected and surfaced |
+| s_advisor_full_loop | Advisor loop runs through full review feedback flow |
 
 ## CI
 
-The sandbox-{fast,full,nightly} CI jobs run only executable scenarios:
-- **fast** (PR→staging): s01, s08, s09
-- **full** (rc/* promotion PR): every discovered scenario module
-- **nightly** (03:00 UTC schedule): every discovered scenario module, opens hydraflow-find issue on failure
+The sandbox-{fast,full,nightly} CI jobs run scenarios at 3 cadences:
+- **fast** (PR→staging): s01, s06 only
+- **full** (rc/* promotion PR): all scenarios, with auto-fix label routing on failure
+- **nightly** (03:00 UTC schedule): all scenarios, opens hydraflow-find issue on failure

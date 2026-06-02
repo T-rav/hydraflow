@@ -89,6 +89,15 @@ class WorkerStateMixin:
         self._data.disabled_workers = sorted(names)
         self.save()
 
+    def get_default_disabled_workers_seeded(self) -> set[str]:
+        """Return default-disabled worker names already seeded into state."""
+        return set(self._data.default_disabled_workers_seeded)
+
+    def set_default_disabled_workers_seeded(self, names: set[str]) -> None:
+        """Persist default-disabled worker names that have been seeded."""
+        self._data.default_disabled_workers_seeded = sorted(names)
+        self.save()
+
     def get_cost_budget_killed_workers(self) -> set[str]:
         """Return workers killed by CostBudgetWatcherLoop (distinct from operator-disabled)."""
         return set(self._data.cost_budget_killed_workers)

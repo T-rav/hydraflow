@@ -34,6 +34,7 @@ Cell vocabulary: ✅ / ⚠️ / ❌ / N/A
 | EdgeProposerLoop | ✅ | ✅ | N/A | N/A | ⚠️ | See §EdgeProposerLoop |
 | EntryEvidenceLoop | N/A | N/A | N/A | N/A | N/A | Not on staging yet; ADR-0062 only |
 | EpicMonitorLoop | ✅ | ⚠️ | N/A | N/A | ❌ | See §EpicMonitorLoop |
+| EpicSweeperLoop | ✅ | ✅ | N/A | N/A | ❌ | See §EpicSweeperLoop |
 | GitHubCacheLoop | ✅ | ❌ | N/A | ✅ | ⚠️ | See §GitHubCacheLoop |
 | HealthMonitorLoop | ⚠️ | ⚠️ | N/A | N/A | ⚠️ | See §HealthMonitorLoop |
 | MergeStateWatcherLoop | ✅ | ✅ | N/A | N/A | ⚠️ | See §MergeStateWatcherLoop |
@@ -144,6 +145,16 @@ Cell vocabulary: ✅ / ⚠️ / ❌ / N/A
 - **MockWorld N/A.**
 - **Safety N/A.**
 - **Docs ❌:** Zero wiki or ADR entries specific to `EpicMonitorLoop`. The generated loops registry is the only mention. Stale epic detection and the cache refresh cadence are undocumented.
+
+---
+
+### EpicSweeperLoop
+
+- **Code quality ✅:** 122 lines. The 50-issue truncation warning is a good canary.
+- **Tests ✅:** 271 lines, covers all sub-paths.
+- **MockWorld N/A.**
+- **Safety N/A.**
+- **Docs ❌:** Zero wiki entries. The distinction from `EpicMonitorLoop` (stale vs. completion sweeping) and the sub-issue resolution logic are undocumented.
 
 ---
 
@@ -354,6 +365,7 @@ Five random ❌ cells re-verified against source:
 
 3. **EpicMonitorLoop / Docs ❌** — Verified: `grep -rn "EpicMonitorLoop\|epic_monitor_loop" docs/wiki/` returns 0 results. `docs/arch/generated/loops.md` has a stub row with no tick interval, kill-switch, or ADR filled in. Confirmed ❌.
 
+4. **EpicSweeperLoop / Docs ❌** — Verified: `grep -rn "EpicSweeperLoop\|epic_sweeper_loop" docs/wiki/` returns 0 results. Confirmed ❌.
 
 5. **SkillPromptEvalLoop / Safety ❌** — Verified: `src/skill_prompt_eval_loop.py:87–105` calls `asyncio.create_subprocess_exec(*["make", "trust-adversarial", "FORMAT=json"], ...)`. Lines 95–101 check `returncode not in (0, 1)` and return `[]`. No `reraise_on_credit_or_bug` in the file. Confirmed ❌.
 
@@ -385,7 +397,7 @@ The loop underpins every consumer that reads cached GitHub data (`DependabotMerg
 
 ### 3. Six loops are undocumented (❌ Docs)
 
-`EpicMonitorLoop`, `RetrospectiveLoop`, `RunsGCLoop`, `SecurityPatchLoop`, and the distinction of `StaleIssueLoop` vs `StaleIssueGCLoop` scope — none have wiki entries. A new contributor cannot understand what these loops do without reading the source.
+`EpicMonitorLoop`, `EpicSweeperLoop`, `RetrospectiveLoop`, `RunsGCLoop`, `SecurityPatchLoop`, and the distinction of `StaleIssueLoop` vs `StaleIssueGCLoop` scope — none have wiki entries. A new contributor cannot understand what these loops do without reading the source.
 
 ### 4. `HealthMonitorLoop` (1,198 lines) lacks a core `_do_work` unit test
 
@@ -407,6 +419,7 @@ The following beads were filed (see bead issue numbers once created):
 - `area-review-gap / github_cache_loop tests`: GitHubCacheLoop missing unit tests
 - `area-review-gap / health_monitor_loop tests`: HealthMonitorLoop missing _do_work unit tests
 - `area-review-gap / epic_monitor_loop docs`: EpicMonitorLoop undocumented
+- `area-review-gap / epic_sweeper_loop docs`: EpicSweeperLoop undocumented
 - `area-review-gap / retrospective_loop docs`: RetrospectiveLoop undocumented
 - `area-review-gap / runs_gc_loop docs`: RunsGCLoop undocumented
 - `area-review-gap / security_patch_loop docs`: SecurityPatchLoop undocumented

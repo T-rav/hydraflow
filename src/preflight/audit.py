@@ -91,6 +91,19 @@ class PreflightAuditStore:
     def entries_for_issue(self, issue: int) -> list[PreflightAuditEntry]:
         return [e for e in self._read_all() if e.issue == issue]
 
+    def daily_spend(self, date_iso: str) -> float:
+        """Total cost (USD) recorded for the given UTC calendar date (YYYY-MM-DD).
+
+        Computed from this durable append-only log so the daily-budget gate can't
+        undercount: the separate state spend cache is updated only AFTER the
+        costly ``run_preflight`` returns, so a crash in between loses the
+        increment. Each audit entry carries the same ``cost_usd`` and is appended
+        BEFORE that cache update, so it is the reliable source of truth. Entry
+        timestamps are UTC ISO (``...Z``), so the ``YYYY-MM-DD`` prefix is the
+        UTC date — no parsing needed.
+        """
+        return sum(e.cost_usd for e in self._read_all() if e.ts[:10] == date_iso)
+
 
 def _percentile(sorted_values: list[float], p: float) -> float:
     if not sorted_values:

@@ -14,6 +14,7 @@ flowchart LR
         caretaking_EdgeProposerLoop([EdgeProposerLoop])
         caretaking_EntryEvidenceLoop([EntryEvidenceLoop])
         caretaking_EpicMonitorLoop([EpicMonitorLoop])
+        caretaking_EpicSweeperLoop([EpicSweeperLoop])
         caretaking_GitHubCacheLoop([GitHubCacheLoop])
         caretaking_HealthMonitorLoop([HealthMonitorLoop])
         caretaking_LabelDriftWatcherLoop([LabelDriftWatcherLoop])
@@ -39,6 +40,7 @@ flowchart LR
     subgraph quality_gates["Quality Gates"]
         quality_gates_BranchProtectionAuditorLoop([BranchProtectionAuditorLoop])
         quality_gates_CIMonitorLoop([CIMonitorLoop])
+        quality_gates_GateActivatorLoop([GateActivatorLoop])
     end
     subgraph trust_fleet["Trust Fleet"]
         trust_fleet_AdrTouchpointAuditorLoop([AdrTouchpointAuditorLoop])
@@ -97,6 +99,7 @@ Autonomous background loops that maintain the system without human input — wik
 - `EdgeProposerLoop` — `src.edge_proposer_loop`
 - `EntryEvidenceLoop` — `src.entry_evidence_loop`
 - `EpicMonitorLoop` — `src.epic_monitor_loop`
+- `EpicSweeperLoop` — `src.epic_sweeper_loop`
 - `GitHubCacheLoop` — `src.github_cache_loop`
 - `HealthMonitorLoop` — `src.health_monitor_loop`
 - `LabelDriftWatcherLoop` — `src.label_drift_watcher_loop`
@@ -130,6 +133,7 @@ Runtime CI/test monitoring loops that catch regressions and watch external check
 
 - `BranchProtectionAuditorLoop` — `src.branch_protection_auditor_loop`
 - `CIMonitorLoop` — `src.ci_monitor_loop`
+- `GateActivatorLoop` — `src.gate_activator_loop`
 
 **Related ADRs:** `ADR-0023`, `ADR-0035`, `ADR-0044`, `ADR-0082`
 
@@ -277,4 +281,4 @@ The plan→implement→review pipeline driving each issue from hydraflow-ready t
 **Related ADRs:** `ADR-0001`, `ADR-0004`, `ADR-0011`, `ADR-0012`, `ADR-0029`
 
 
-_Regenerated from commit `3242dd2` on 2026-05-30 06:45 UTC. Source last changed at `3242dd2`. Status: 🟢 fresh._
+<!-- arch:generated -->

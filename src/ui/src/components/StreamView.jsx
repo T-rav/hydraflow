@@ -2,12 +2,7 @@ import React, { useMemo, useCallback, useState } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { StreamCard } from './StreamCard'
-import {
-  PIPELINE_FLOW_COLLAPSE_THRESHOLD,
-  PIPELINE_STAGES,
-  PRODUCT_TRACK_KEYS,
-  PULSE_ANIMATION,
-} from '../constants'
+import { PIPELINE_STAGES, PRODUCT_TRACK_KEYS, PULSE_ANIMATION } from '../constants'
 import { STAGE_KEYS } from '../hooks/useTimeline'
 import {
   sectionHeaderStyles,
@@ -16,6 +11,19 @@ import {
   sectionLabelBase,
   WORKSTREAM_SIDE_INSET_PX,
 } from '../styles/sectionStyles'
+
+// No-role stages (role: null) share the worker-less rendering branches, but each
+// carries its own semantics. 'merged' is success (green, "{N} merged"); 'hitl' is
+// an escalation bucket (yellow, "{N} needs human") and must NOT read as success.
+// Keyed by stage.key so adding a no-role stage is one map entry, not a conditional.
+const NO_ROLE_COUNT_LABELS = {
+  merged: 'merged',
+  hitl: 'needs human',
+}
+const NO_ROLE_DOT_COLORS = {
+  merged: theme.green,
+  hitl: theme.yellow,
+}
 
 function PendingIntentCard({ intent }) {
   return (
@@ -38,26 +46,12 @@ function PipelineFlow({ stageGroups }) {
     return { mergedCount: merged, failedCount: failed }
   }, [stageGroups])
 
-  const renderFlowIssueCount = (group) => {
-    const activeCount = group.issues.filter(issue => issue.overallStatus === 'active').length
-    const displayCount = activeCount || group.issues.length
-    return (
-      <span
-        style={flowCountBadgeStyles[group.stage.key]}
-        title={`${group.issues.length} issues in ${group.stage.label}, ${activeCount} active`}
-        data-testid={`flow-count-${group.stage.key}`}
-      >
-        {displayCount}
-      </span>
-    )
-  }
-
   const renderFlowStage = (group) => (
     <div style={styles.flowStage} key={group.stage.key}>
       <span style={flowLabelStyles[group.stage.key]}>{group.stage.label}</span>
       {group.issues.length > 0 && (
         <div style={styles.flowDots}>
-          {group.issues.length > PIPELINE_FLOW_COLLAPSE_THRESHOLD ? renderFlowIssueCount(group) : group.issues.map(issue => {
+          {group.issues.map(issue => {
             const isEpic = issue.isEpicChild || issue.epicNumber > 0
             const dotStyles = isEpic ? epicFlowDotStyleMap : regularFlowDotStyleMap
             const dotStyle =
@@ -179,7 +173,7 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
               </span>
             </>
           ) : (
-            <span>{issues.length} merged</span>
+            <span>{issues.length} {NO_ROLE_COUNT_LABELS[stage.key] ?? 'merged'}</span>
           )}
         </span>
         <span
@@ -504,7 +498,7 @@ export function StreamView({ intents, expandedStages, onToggleStage, onRequestCh
         const workerCap = stage.role ? (stageStatus.workerCaps?.[stage.key] ?? null) : null
         let dotColor
         if (!stage.role) {
-          dotColor = theme.green
+          dotColor = NO_ROLE_DOT_COLORS[stage.key] ?? theme.green
         } else if (!enabled) {
           dotColor = theme.red
         } else if (workerCount > 0) {
@@ -581,29 +575,6 @@ const flowDotFailedStyles = Object.fromEntries(
 
 const flowDotHitlStyles = Object.fromEntries(
   PIPELINE_STAGES.map(s => [s.key, { ...flowDotBase, background: theme.yellow }])
-)
-
-const flowCountBadgeBase = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  minWidth: 24,
-  height: 16,
-  padding: '0 6px',
-  borderRadius: 8,
-  border: '1px solid currentColor',
-  flexShrink: 0,
-  fontSize: 10,
-  fontWeight: 700,
-  lineHeight: 1,
-}
-
-const flowCountBadgeStyles = Object.fromEntries(
-  PIPELINE_STAGES.map(s => [s.key, {
-    ...flowCountBadgeBase,
-    color: s.color,
-    background: s.subtleColor,
-  }])
 )
 
 // Epic dot styles — 12px circles with centered "e" text

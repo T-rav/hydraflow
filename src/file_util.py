@@ -12,6 +12,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from secret_scrub import scrub_secrets
+
 logger = logging.getLogger("hydraflow.file_util")
 
 
@@ -41,14 +43,16 @@ def atomic_write(path: Path, data: str) -> None:
 
 
 def append_jsonl(path: Path, data: str) -> None:
-    """Append *data* as a single line to *path* with crash-safe fsync.
+    """Append *data* as a single scrubbed line to *path* with crash-safe fsync.
 
-    Creates parent directories if needed.  Calls ``flush`` + ``fsync``
-    to ensure the record reaches stable storage before returning.
+    Creates parent directories if needed.  Secrets are redacted (ADR-0085) so a
+    leaked credential never persists in the canonical audit/transcript/event
+    stream, then ``flush`` + ``fsync`` ensure the record reaches stable storage
+    before returning.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
-        f.write(data + "\n")
+        f.write(scrub_secrets(data) + "\n")
         f.flush()
         os.fsync(f.fileno())
 

@@ -4,9 +4,9 @@ import { PIPELINE_STAGES } from '../constants'
 /** Canonical stage keys in lifecycle order. */
 export const STAGE_KEYS = PIPELINE_STAGES.map(s => s.key)
 
-/** Map stage key → { color, subtleColor, label }. */
+/** Map stage key → { color, subtleColor, label, role }. */
 export const STAGE_META = Object.fromEntries(
-  PIPELINE_STAGES.map(s => [s.key, { color: s.color, subtleColor: s.subtleColor, label: s.label }])
+  PIPELINE_STAGES.map(s => [s.key, { color: s.color, subtleColor: s.subtleColor, label: s.label, role: s.role }])
 )
 
 /**
@@ -273,13 +273,23 @@ export function deriveIssueTimelines(events, workers, prs) {
     }
 
     // Current stage: prefer the actively running stage, otherwise
-    // advance to the next stage after the last completed one
+    // advance to the next *processing* stage after the last completed one.
+    // Skip terminal/no-role stages (role === null, e.g. 'hitl') when
+    // computing the natural next stage — 'hitl' is only the currentStage
+    // when the issue is genuinely escalated (handled via overallStatus/the
+    // hitl bucket), never as the implicit successor of 'review'.
     if (activeStage) {
       entry.currentStage = activeStage
-    } else if (lastDoneIndex >= 0 && lastDoneIndex < STAGE_KEYS.length - 1) {
-      entry.currentStage = STAGE_KEYS[lastDoneIndex + 1]
-    } else if (lastDoneIndex === STAGE_KEYS.length - 1) {
-      entry.currentStage = STAGE_KEYS[lastDoneIndex] // merged
+    } else if (lastDoneIndex >= 0) {
+      let nextIndex = lastDoneIndex + 1
+      // Advance past any no-role stage (e.g. 'hitl') so 'review' → 'merged'.
+      while (
+        nextIndex < STAGE_KEYS.length - 1 &&
+        STAGE_META[STAGE_KEYS[nextIndex]]?.role == null
+      ) {
+        nextIndex += 1
+      }
+      entry.currentStage = STAGE_KEYS[Math.min(nextIndex, STAGE_KEYS.length - 1)]
     } else {
       entry.currentStage = 'triage'
     }

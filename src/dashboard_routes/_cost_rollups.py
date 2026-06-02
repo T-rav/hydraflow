@@ -124,17 +124,34 @@ def iter_priced_inferences(
                 ts = _parse_iso(rec.get("timestamp"))
                 if ts is None or ts < since or ts >= until:
                     continue
+                input_tok = int(rec.get("input_tokens", 0) or 0)
+                output_tok = int(rec.get("output_tokens", 0) or 0)
                 cost = pricing.estimate_cost(
                     str(rec.get("model", "")),
-                    input_tokens=int(rec.get("input_tokens", 0) or 0),
-                    output_tokens=int(rec.get("output_tokens", 0) or 0),
+                    input_tokens=input_tok,
+                    output_tokens=output_tok,
                     cache_write_tokens=int(
                         rec.get("cache_creation_input_tokens", 0) or 0
                     ),
                     cache_read_tokens=int(rec.get("cache_read_input_tokens", 0) or 0),
                 )
+                priced = round(cost, 6) if cost is not None else 0.0
+                # Rows whose actual token usage was unavailable at record time
+                # (token_source=estimated) re-price to 0 from tokens. This is
+                # dominated by heavy pipeline runners (planner/researcher/
+                # implementer/reviewer/...), not just the lightweight run_simple
+                # path. Fall back to the stored char-based estimate so that spend
+                # still counts toward the daily cost cap (WS-2.2 self-review S2).
+                if priced == 0.0 and input_tok == 0 and output_tok == 0:
+                    stored = rec.get("estimated_cost_usd")
+                    if (
+                        isinstance(stored, int | float)
+                        and not isinstance(stored, bool)
+                        and stored > 0
+                    ):
+                        priced = round(float(stored), 6)
                 rec["ts"] = ts
-                rec["cost_usd"] = round(cost, 6) if cost is not None else 0.0
+                rec["cost_usd"] = priced
                 rec["phase"] = _phase_for_source(str(rec.get("source", "")))
                 yield rec
     except OSError:

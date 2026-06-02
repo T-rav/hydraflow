@@ -228,9 +228,10 @@ async def test_build_review_prompt_skips_local_tests_when_ci_enabled(
 
 @pytest.mark.asyncio
 async def test_build_review_prompt_runs_local_tests_when_ci_disabled(
-    config, event_bus, pr_info, task
+    event_bus, pr_info, task
 ):
-    runner = _make_runner(config, event_bus)
+    cfg = ConfigFactory.create(max_ci_fix_attempts=0, use_quality_gate_in_review=False)
+    runner = _make_runner(cfg, event_bus)
     prompt, _ = await runner._build_review_prompt_with_stats(pr_info, task, "diff")
 
     assert "Run `make lint` and `make test`" in prompt
@@ -250,9 +251,10 @@ async def test_build_review_prompt_fix_section_skips_tests_when_ci_enabled(
 
 @pytest.mark.asyncio
 async def test_build_review_prompt_fix_section_runs_tests_when_ci_disabled(
-    config, event_bus, pr_info, task
+    event_bus, pr_info, task
 ):
-    runner = _make_runner(config, event_bus)
+    cfg = ConfigFactory.create(max_ci_fix_attempts=0, use_quality_gate_in_review=False)
+    runner = _make_runner(cfg, event_bus)
     prompt, _ = await runner._build_review_prompt_with_stats(pr_info, task, "diff")
 
     assert "`make test`" in prompt
@@ -1328,7 +1330,9 @@ def test_build_ci_fix_prompt_includes_pr_and_issue_context(
 
 def test_build_ci_fix_prompt_uses_configured_test_command(event_bus, pr_info, task):
     """CI fix prompt should use the configured test_command."""
-    cfg = ConfigFactory.create(test_command="npm test")
+    cfg = ConfigFactory.create(
+        test_command="npm test", use_quality_gate_in_review=False
+    )
     runner = _make_runner(cfg, event_bus)
     prompt, _stats = runner._build_ci_fix_prompt(pr_info, task, "CI failed", 1)
 
@@ -1610,7 +1614,11 @@ async def test_build_review_prompt_uses_configured_test_command(
     event_bus, pr_info, task
 ):
     """Reviewer prompt should use the configured test_command."""
-    cfg = ConfigFactory.create(test_command="npm test", max_ci_fix_attempts=0)
+    cfg = ConfigFactory.create(
+        test_command="npm test",
+        max_ci_fix_attempts=0,
+        use_quality_gate_in_review=False,
+    )
     runner = _make_runner(cfg, event_bus)
     prompt, _ = await runner._build_review_prompt_with_stats(pr_info, task, "diff")
 
@@ -1640,6 +1648,21 @@ async def test_build_review_prompt_includes_test_coverage_audit(
     assert "dead code" in prompt
     assert "Failure and error paths" in prompt
     assert "New branches/conditions" in prompt
+
+
+@pytest.mark.asyncio
+async def test_build_review_prompt_enforces_test_value_standards(
+    config, event_bus, pr_info, task
+):
+    """Reviewer prompt should enforce the documented test-value standard."""
+    runner = _make_runner(config, event_bus)
+    prompt, _ = await runner._build_review_prompt_with_stats(pr_info, task, "diff")
+
+    assert "Test-value standards" in prompt
+    assert "Skipped, xfailed, commented-out, or placeholder tests" in prompt
+    assert "world-building helpers" in prompt
+    assert "Integration tests should wire real business logic" in prompt
+    assert "world.<fake>" in prompt
 
 
 @pytest.mark.asyncio
@@ -2392,6 +2415,123 @@ def test_build_ci_fix_prompt_includes_stat_verification(
     assert "verify your commit" in lower
     assert "intended file appears" in lower
     assert "after each commit" in lower
+
+
+# ---------------------------------------------------------------------------
+# Self-review-before-push (refinement R-4)
+# ---------------------------------------------------------------------------
+
+
+class TestSelfReviewStep:
+    @pytest.mark.asyncio
+    async def test_review_prompt_contains_self_review_step(
+        self, config, event_bus, pr_info, task
+    ):
+        runner = _make_runner(config, event_bus)
+        prompt, _ = await runner._build_review_prompt_with_stats(pr_info, task, "diff")
+        assert "git diff HEAD~" in prompt
+        assert "no unintended files" in prompt
+
+    def test_fix_prompt_contains_self_review_step(
+        self, config, event_bus, pr_info, task
+    ):
+        runner = _make_runner(config, event_bus)
+        prompt = runner._build_review_fix_prompt(pr_info, task, "Some feedback")
+        assert "git diff HEAD~" in prompt
+        assert "failure mode" in prompt
+
+
+# ---------------------------------------------------------------------------
+# make quality in fix prompts when ci_enabled=False (refinement R-5)
+# ---------------------------------------------------------------------------
+
+
+class TestQualityGateInFixPrompt:
+    @pytest.mark.asyncio
+    async def test_ci_disabled_uses_make_quality_by_default(
+        self, event_bus, pr_info, task
+    ):
+        cfg = ConfigFactory.create(
+            max_ci_fix_attempts=0, use_quality_gate_in_review=True
+        )
+        runner = _make_runner(cfg, event_bus)
+        prompt, _ = await runner._build_review_prompt_with_stats(pr_info, task, "diff")
+        assert "make quality" in prompt
+        assert "make lint" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_ci_disabled_falls_back_when_flag_false(
+        self, event_bus, pr_info, task
+    ):
+        cfg = ConfigFactory.create(
+            max_ci_fix_attempts=0, use_quality_gate_in_review=False
+        )
+        runner = _make_runner(cfg, event_bus)
+        prompt, _ = await runner._build_review_prompt_with_stats(pr_info, task, "diff")
+        assert "make lint" in prompt
+
+    @pytest.mark.asyncio
+    async def test_ci_enabled_never_uses_make_quality_locally(
+        self, event_bus, pr_info, task
+    ):
+        cfg = ConfigFactory.create(max_ci_fix_attempts=2)
+        runner = _make_runner(cfg, event_bus)
+        prompt, _ = await runner._build_review_prompt_with_stats(pr_info, task, "diff")
+        # CI-enabled branch instructs the executor NOT to run make quality.
+        assert "Do NOT run `make lint`, `make test`, or `make quality`" in prompt
+
+    def test_fix_prompt_ci_disabled_uses_make_quality_by_default(
+        self, event_bus, pr_info, task
+    ):
+        cfg = ConfigFactory.create(
+            max_ci_fix_attempts=0, use_quality_gate_in_review=True
+        )
+        runner = _make_runner(cfg, event_bus)
+        prompt = runner._build_review_fix_prompt(pr_info, task, "Some feedback")
+        assert "make quality" in prompt
+        assert "make lint" not in prompt
+
+    def test_fix_prompt_ci_disabled_falls_back_when_flag_false(
+        self, event_bus, pr_info, task
+    ):
+        cfg = ConfigFactory.create(
+            max_ci_fix_attempts=0, use_quality_gate_in_review=False
+        )
+        runner = _make_runner(cfg, event_bus)
+        prompt = runner._build_review_fix_prompt(pr_info, task, "Some feedback")
+        assert "make lint" in prompt
+
+    def test_ci_fix_prompt_uses_make_quality_by_default(self, event_bus, pr_info, task):
+        cfg = ConfigFactory.create(use_quality_gate_in_review=True)
+        runner = _make_runner(cfg, event_bus)
+        prompt, _ = runner._build_ci_fix_prompt(pr_info, task, "CI failed", 1)
+        assert "make quality" in prompt
+        assert "make lint" not in prompt
+
+    def test_ci_fix_prompt_falls_back_when_flag_false(self, event_bus, pr_info, task):
+        cfg = ConfigFactory.create(use_quality_gate_in_review=False)
+        runner = _make_runner(cfg, event_bus)
+        prompt, _ = runner._build_ci_fix_prompt(pr_info, task, "CI failed", 1)
+        assert "make lint" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Verify-against-live-code step (refinement R-6)
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyAgainstLiveCode:
+    @pytest.mark.asyncio
+    async def test_review_prompt_contains_verify_against_live_step(
+        self, config, event_bus, pr_info, task
+    ):
+        runner = _make_runner(config, event_bus)
+        prompt, _ = await runner._build_review_prompt_with_stats(pr_info, task, "diff")
+        lower = prompt.lower()
+        assert (
+            "verify findings against live code" in lower
+            or "grep or read the relevant live file" in lower
+        )
 
 
 # ---------------------------------------------------------------------------

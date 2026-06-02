@@ -56,6 +56,7 @@ _TARGET_WORKERS = (
     "stale_issue_gc",
     "pr_unsticker",
     "epic_monitor",
+    "epic_sweeper",
     "principles_audit",
     "repo_wiki",
     "wiki_rot_detector",

@@ -6,7 +6,7 @@ Golden path for the CI health monitor:
    is created.
 
 Asserts:
-- A ``background_worker_status`` event with ``worker=ci_monitor``,
+- A ``BACKGROUND_WORKER_STATUS`` event with ``worker=ci_monitor``,
   ``details.status=red``, and ``details.issue_created`` set appears
   after the first tick.
 - After two ticks the same event stream contains exactly one
@@ -47,7 +47,7 @@ async def assert_outcome(api, page) -> None:
         timeout=180.0,
     )
 
-    # Collect all ci_monitor background_worker_status events.
+    # Collect all ci_monitor BACKGROUND_WORKER_STATUS events.
     ci_events = [
         e
         for e in events_payload

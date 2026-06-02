@@ -604,6 +604,7 @@ class _MinimalConfig:
         self.plans_dir = self.data_root / "plans"
         self.memory_dir = self.data_root / "memory"
         self.min_review_findings = 3
+        self.use_quality_gate_in_review = True
         self.max_ci_fix_attempts = 3
         self.repo = "owner/repo"
         self.review_insight_window = 50
