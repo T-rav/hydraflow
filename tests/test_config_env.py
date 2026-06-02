@@ -473,7 +473,21 @@ class TestEnvVarOverrideTable:
 
 
 class TestOtelConfigFields:
-    def test_config_otel_defaults(self, tmp_path: Path) -> None:
+    def test_config_otel_defaults(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Hermetic: the repo .env sets HF_ENV=dev and HYDRAFLOW_OTEL_ENABLED=true.
+        # Under pytest-xdist, a sibling test that loads .env into os.environ can
+        # leak those into this worker and flip the asserted defaults (the
+        # historical "assert 'dev' == 'local'" flake). Clear the backing env vars
+        # so we assert the true compile-time defaults regardless of leakage.
+        for _var in (
+            "HYDRAFLOW_OTEL_ENABLED",
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_SERVICE_NAME",
+            "HF_ENV",
+        ):
+            monkeypatch.delenv(_var, raising=False)
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             workspace_base=tmp_path / "wt",
