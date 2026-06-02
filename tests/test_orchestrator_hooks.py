@@ -1341,6 +1341,7 @@ class TestPipelineStatsEmission:
         await orch._pipeline_stats_loop()
 
         states = orch.get_bg_worker_states()
+        assert "pipeline_poller" in states, "no heartbeat published for pipeline_poller"
         assert states["pipeline_poller"]["status"] == "ok"
         assert states["pipeline_poller"]["last_run"] is not None
 

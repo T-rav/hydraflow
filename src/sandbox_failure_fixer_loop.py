@@ -86,6 +86,10 @@ class SandboxFailureFixerLoop(BaseBackgroundLoop):
         """
         if self._workspaces is None:
             return str(self._config.repo_root)
+        # NOTE: PR and issue numbers share one namespace, so a pre-existing
+        # workspace at this path could belong to an unrelated same-number issue.
+        # We reuse it as-is (matches AutoAgentPreflightLoop); WorkspacePort.create
+        # is only invoked when no workspace exists yet.
         wt_path = self._config.workspace_path_for_issue(int(pr.number))
         if wt_path.exists():
             return str(wt_path)
