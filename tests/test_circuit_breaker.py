@@ -45,11 +45,13 @@ class TestOpenToHalfOpen:
         cb.record_failure()
         assert cb.state == CircuitBreaker.OPEN
 
-        # Simulate time passing beyond reset_timeout
-        with patch(
-            "circuit_breaker.time.monotonic", return_value=cb._last_failure_time + 10.0
-        ):
-            assert cb.state == CircuitBreaker.HALF_OPEN
+        # Backdate the failure beyond reset_timeout so the elapsed-time check
+        # passes against the *real* monotonic clock — no time-module patch.
+        # Patching circuit_breaker.time.monotonic (which IS the global time
+        # module) to the exact boundary was flaky on CI under coverage/xdist;
+        # backdating is patch-free and deterministic.
+        cb._last_failure_time -= cb.reset_timeout + 1.0
+        assert cb.state == CircuitBreaker.HALF_OPEN
 
     def test_stays_open_before_timeout(self) -> None:
         cb = CircuitBreaker("test", max_failures=1, reset_timeout=10.0)
@@ -113,11 +115,11 @@ class TestAllowRequest:
         cb.record_failure()
         assert cb.allow_request() is False
 
-        with patch(
-            "circuit_breaker.time.monotonic", return_value=cb._last_failure_time + 5.0
-        ):
-            assert cb.allow_request() is True
-            assert cb.state == CircuitBreaker.HALF_OPEN
+        # Backdate beyond reset_timeout (patch-free, real clock) — see
+        # test_transitions_after_timeout for why the time-module patch was flaky.
+        cb._last_failure_time -= cb.reset_timeout + 1.0
+        assert cb.allow_request() is True
+        assert cb.state == CircuitBreaker.HALF_OPEN
 
 
 class TestReset:
