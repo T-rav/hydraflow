@@ -237,9 +237,13 @@ scenario-browser: deps
 	@echo "$(GREEN)Browser scenario tests passed$(RESET)"
 
 trust-adversarial: deps
+ifeq ($(FORMAT),json)
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python tests/trust/adversarial/corpus_runner.py --json
+else
 	@echo "$(BLUE)Running adversarial skill corpus...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/trust/adversarial/ -v
 	@echo "$(GREEN)Adversarial corpus passed$(RESET)"
+endif
 
 trust-contracts: deps
 	@echo "$(BLUE)Running fake contract tests...$(RESET)"

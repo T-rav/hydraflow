@@ -19,7 +19,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `CorpusLearningLoop` | ✅ [0045] | ✅ [corpus-learning-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_corpus_learning_loop.py` | ✅ in catalog | ✅ `s22_corpus_learning_no_escape_issues.py` |
 | `CostBudgetWatcherLoop` | ✅ [0054] | ✅ [architecture.md] | ✅ loops.md | ✅ README.md | ✅ `test_cost_budget_watcher_loop.py` | ✅ in catalog | ✅ `s26_cost_budget_watcher_unlimited.py` |
 | `DependabotMergeLoop` | ✅ [0054, 0057, 0058] | ✅ [dependabot-merge-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_dependabot_merge_loop.py` | ✅ in catalog | ✅ `s09_dependabot_auto_merge.py` |
-| `DiagnosticLoop` | ✅ [0050] | ✅ [diagnostic-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_diagnostic_loop.py` | ✅ in catalog | ✅ `s32_diagnostic_no_failures.py` |
+| `DiagnosticLoop` | ✅ [0050] | ✅ [diagnostic-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_diagnostic_loop.py` | ✅ in catalog | ✅ `s05_hitl_after_review_exhaustion.py` |
 | `DiagramLoop` | ✅ [0001] | ✅ [diagram-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_diagram_loop.py` | ✅ in catalog | ✅ `s34_diagram_loop_no_changes.py` |
 | `EdgeProposerLoop` | ✅ [0058, 0060, 0062] | ✅ [edge-proposer-loop.md, entry-evidence-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_edge_proposer_loop.py` | ✅ in catalog | ✅ `s28_edge_proposer_no_proposals.py` |
 | `EntryEvidenceLoop` | ✅ [0062, 0078] | ✅ [edge-proposer-loop.md, entry-evidence-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_entry_evidence_loop.py` | ✅ in catalog | ✅ `s24_entry_evidence_no_terms.py` |
@@ -29,11 +29,11 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `FlakeTrackerLoop` | ✅ [0045, 0056, 0057, 0065] | ✅ [flake-tracker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_flake_tracker_loop.py` | ✅ in catalog | ❌ |
 | `GateActivatorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_gate_activator_loop.py` | ✅ in catalog | ✅ `s45_gate_activator_no_proposals.py` |
 | `GitHubCacheLoop` | ✅ [0076] | ✅ [github-cache-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_github_cache_loop.py` | ✅ in catalog | ✅ `s44_github_cache_idle_poll.py` |
-| `HealthMonitorLoop` | ✅ [0045, 0046] | ✅ [testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_health_monitor_loop_primary_cycle.py` | ✅ in catalog | ❌ |
+| `HealthMonitorLoop` | ✅ [0045, 0046] | ✅ [testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_health_monitor_loop_primary_cycle.py` | ✅ in catalog | ✅ `s48_health_monitor_idle_poll.py` |
 | `LabelDriftWatcherLoop` | ✅ [0056] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_label_drift_watcher_loop.py` | ✅ in catalog | ❌ |
 | `LiveCorpusReplayLoop` | ✅ [0086] | ✅ [live-corpus-replay-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_live_corpus_replay_loop.py` | ✅ in catalog | ✅ `s43_live_corpus_replay_idle.py` |
 | `MemoryBacklogLoop` | ✅ [0057] | ✅ [README.md] | ✅ loops.md | ✅ README.md | ✅ `test_memory_backlog_loop.py` | ✅ in catalog | ❌ |
-| `MergeStateWatcherLoop` | ✅ [0075, 0077] | ✅ [merge-state-watcher-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_merge_state_watcher_loop.py` | ✅ in catalog | ❌ |
+| `MergeStateWatcherLoop` | ✅ [0075, 0077] | ✅ [merge-state-watcher-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_merge_state_watcher_loop.py` | ✅ in catalog | ✅ `s49_merge_state_watcher_idle_poll.py` |
 | `PRUnstickerLoop` | ✅ [0075, 0077] | ✅ [pr-unsticker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_pr_unsticker_loop.py` | ✅ in catalog | ✅ `s08_pr_unsticker_revives_stuck_pr.py` |
 | `PricingRefreshLoop` | ✅ [0078] | ✅ [pricing-refresh-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_pricing_refresh_loop_scenario.py` | ✅ in catalog | ❌ |
 | `PrinciplesAuditLoop` | ✅ [0045, 0056] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_principles_audit_loop.py` | ✅ in catalog | ❌ |
@@ -41,7 +41,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `RepoWikiLoop` | ✅ [0032, 0053, 0061, 0062, 0064] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_repo_wiki_loop.py` | ✅ in catalog | ❌ |
 | `ReportIssueLoop` | ✅ [0013, 0018, 0028] | ✅ [report-issue-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_report_issue_loop.py` | ✅ in catalog | ✅ `s19_report_issue_empty_queue.py` |
 | `RetrospectiveLoop` | ✅ [0074] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_retrospective_loop.py` | ✅ in catalog | ✅ `s18_retrospective_empty_queue.py` |
-| `RunsGCLoop` | ✅ [0073] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_runs_gc_loop.py` | ✅ in catalog | ❌ |
+| `RunsGCLoop` | ✅ [0073] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_runs_gc_loop.py` | ✅ in catalog | ✅ `s47_runs_gc_idle_poll.py` |
 | `SandboxFailureFixerLoop` | ✅ [0052, 0063] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_sandbox_failure_fixer_loop.py` | ✅ in catalog | ✅ `s38_sandbox_fixer_richer_context.py` |
 | `SecurityPatchLoop` | ✅ [0029, 0065] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_security_patch_loop.py` | ✅ in catalog | ✅ `s21_security_patch_no_alerts.py` |
 | `SentryLoop` | ✅ [0055] | ✅ [sentry-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_sentry_loop.py` | ✅ in catalog | ✅ `s42_sentry_ingest_no_credentials.py` |
@@ -49,13 +49,13 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `StagingBisectLoop` | ✅ [0045, 0048, 0063] | ✅ [architecture.md] | ✅ loops.md | ✅ README.md | ✅ `test_staging_bisect_loop.py` | ✅ in catalog | ❌ |
 | `StagingPromotionLoop` | ✅ [0042] | ✅ [patterns.md] | ✅ loops.md | ✅ README.md | ✅ `test_staging_promotion_loop.py` | ✅ in catalog | ❌ |
 | `StaleIssueGCLoop` | ✅ [0029, 0072] | ✅ [gotchas.md, stale-issue-gc-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_stale_issue_gc_loop.py` | ✅ in catalog | ❌ |
-| `StaleIssueLoop` | ✅ [0072] | ✅ [gotchas.md, stale-issue-gc-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_stale_issue_loop.py` | ✅ in catalog | ✅ `s16_stale_issue_scan.py` |
+| `StaleIssueLoop` | ✅ [0072] | ✅ [gotchas.md, stale-issue-gc-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_stale_issue_loop.py` | ✅ in catalog | ✅ `s05_hitl_after_review_exhaustion.py` |
 | `TermProposerLoop` | ✅ [0054, 0057, 0060, 0061, 0062, 0068] | ✅ [bot-pr-port.md, entry-evidence-loop.md, task.md, term-pruner-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_term_proposer_loop.py` | ✅ in catalog | ❌ |
 | `TermPrunerLoop` | ✅ [0057, 0060, 0062, 0068] | ✅ [term-pruner-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_term_pruner_loop.py` | ✅ in catalog | ❌ |
 | `TriageRetryLoop` | ✅ [0063] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_triage_retry_loop.py` | ✅ in catalog | ❌ |
 | `TrustFleetSanityLoop` | ✅ [0045, 0046] | ✅ [testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_trust_fleet_sanity_loop.py` | ✅ in catalog | ❌ |
 | `WikiRotDetectorLoop` | ✅ [0045, 0056, 0057] | ✅ [wiki-rot-detector-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_wiki_rot_detector_loop.py` | ✅ in catalog | ❌ |
-| `WorkspaceGCLoop` | ✅ [0069] | ✅ [workspace-gc-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_workspace_gc_loop.py` | ✅ in catalog | ❌ |
+| `WorkspaceGCLoop` | ✅ [0069] | ✅ [workspace-gc-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_workspace_gc_loop.py` | ✅ in catalog | ✅ `s46_workspace_gc_idle_poll.py` |
 ## Section 2: Ports
 
 Cassette and Contract columns are N/A for all ports (ADR-0047 contracts are

@@ -16,7 +16,7 @@ const CATEGORY_COLORS = {
   quality_gate: theme.orange,
   review_rejection: theme.red,
   ci_failure: theme.red,
-  hitl_escalation: theme.yellow,
+  hitl_escalation: theme.red,
   implementation_error: theme.red,
 }
 

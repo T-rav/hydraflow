@@ -51,7 +51,7 @@ export const PIPELINE_STAGES = [
   { key: 'plan',      label: 'Plan',      color: theme.purple,      subtleColor: theme.purpleSubtle,  role: 'planner',     configKey: 'max_planners', track: 'junction' },
   { key: 'implement', label: 'Implement', color: theme.accent,      subtleColor: theme.accentSubtle,  role: 'implementer', configKey: 'max_workers',  track: 'engineering' },
   { key: 'review',    label: 'Review',    color: theme.orange,      subtleColor: theme.orangeSubtle,  role: 'reviewer',    configKey: 'max_reviewers', track: 'engineering' },
-  { key: 'hitl',      label: 'Needs Human', color: theme.yellow,    subtleColor: theme.yellowSubtle,  role: null,           configKey: null,           track: 'engineering' },
+  { key: 'hitl',      label: 'Needs Human', color: theme.red,       subtleColor: theme.redSubtle,     role: null,           configKey: null,           track: 'engineering' },
   { key: 'merged',    label: 'Merged',    color: theme.green,       subtleColor: theme.greenSubtle,   role: null,           configKey: null,           track: 'engineering' },
 ]
 
@@ -257,7 +257,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -269,7 +269,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   pr_unsticker: 3600,
   merge_state_watcher: 600,
   report_issue: 30,
-  worktree_gc: 1800,
+  workspace_gc: 1800,
   adr_reviewer: 86400,
   epic_sweeper: 3600,
   dependabot_merge: 3600,

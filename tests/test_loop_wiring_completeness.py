@@ -27,23 +27,18 @@ SRC = Path(__file__).resolve().parent.parent / "src"
 # These are either non-caretaker pipeline workers, or workers whose intervals
 # are managed through a different mechanism (e.g. not dashboard-editable).
 # ---------------------------------------------------------------------------
-_INTERVAL_BOUNDS_SKIP: set[str] = {
-    "github_cache",
-}
+# NOTE (2026-06-02, worker-fleet visibility audit): these skip-lists previously
+# whitelisted github_cache / epic_monitor / runs_gc — the exact loops operators
+# reported as "not running" because they were absent from the dashboard catalogs.
+# They are now fully wired, so the skips are removed and the guard enforces parity.
+_INTERVAL_BOUNDS_SKIP: set[str] = set()
 
-# Loops that intentionally aren't in the orchestrator bg_loop_registry
-# (e.g. GitHubCacheLoop is started separately).
-_ORCHESTRATOR_SKIP: set[str] = {
-    "github_cache",
-}
+# Loops that intentionally aren't in the orchestrator bg_loop_registry.
+_ORCHESTRATOR_SKIP: set[str] = set()
 
 # Loops that intentionally aren't in BACKGROUND_WORKERS in constants.js
 # (e.g. internal loops not shown in the dashboard).
-_CONSTANTS_JS_SKIP: set[str] = {
-    "github_cache",
-    "epic_monitor",
-    "runs_gc",
-}
+_CONSTANTS_JS_SKIP: set[str] = set()
 
 
 def _discover_loops() -> dict[str, str]:
@@ -82,6 +77,21 @@ def _parse_bg_loop_registry() -> set[str]:
     text = (SRC / "orchestrator.py").read_text()
     # Match lines like:  "memory_sync": svc.memory_sync_bg,
     return set(re.findall(r'"(\w+)"\s*:\s*svc\.', text))
+
+
+def _parse_bg_worker_defs() -> set[str]:
+    """Extract worker names from _bg_worker_defs in dashboard_routes/_control_routes.py.
+
+    ``_bg_worker_defs`` is the *sole* iteration source of the
+    ``GET /api/system/workers`` REST response (``_control_routes.py`` builds the
+    System-tab worker list by walking only this list). A registry loop missing
+    from it renders no row / a permanently-blank row in the dashboard even though
+    the loop runs and heartbeats — the "not running" symptom this guard prevents.
+    """
+    text = (SRC / "dashboard_routes" / "_control_routes.py").read_text()
+    block = re.search(r"_bg_worker_defs\s*=\s*\[(.*?)\n\]", text, re.S)
+    assert block, "_bg_worker_defs list not found in _control_routes.py"
+    return set(re.findall(r'\(\s*"(\w+)"', block.group(1)))
 
 
 def _parse_service_registry_fields() -> set[str]:
@@ -138,6 +148,53 @@ class TestOrchestratorRegistry:
         }
         assert not missing, (
             f"Loops missing from orchestrator bg_loop_registry: {sorted(missing)}"
+        )
+
+
+class TestBgWorkerDefsParity:
+    """Every bg_loop_registry loop must appear in the dashboard's _bg_worker_defs.
+
+    The System tab's ``GET /api/system/workers`` endpoint enumerates *only*
+    ``_bg_worker_defs`` (``_control_routes.py``). A loop registered + started but
+    missing from this catalog runs headless and is invisible/uncontrollable in the
+    dashboard. This is the exact regression class behind the 2026-06-02 worker-fleet
+    audit, where 30 of 45 loops were absent from ``_bg_worker_defs``.
+    """
+
+    def test_all_registry_loops_in_bg_worker_defs(self) -> None:
+        registry_keys = _parse_bg_loop_registry()
+        defs_keys = _parse_bg_worker_defs()
+        missing = registry_keys - defs_keys
+        assert not missing, (
+            "Loops in bg_loop_registry but missing from _bg_worker_defs "
+            "(invisible in the System tab even though they run): "
+            f"{sorted(missing)}"
+        )
+
+    def test_no_orphan_bg_worker_defs(self) -> None:
+        """Reverse parity: every _bg_worker_defs entry is either a registry loop
+        or one of the explicit pipeline/non-loop UI workers.
+
+        Without this, a typo'd def key (e.g. ``github_cahce``) would render a
+        dead System-tab row pointing at a non-existent worker, and the
+        forward parity test above would stay green.
+        """
+        # Pipeline phases + the non-loop UI workers that legitimately appear in
+        # _bg_worker_defs without a BaseBackgroundLoop behind them.
+        allowed_non_registry = {
+            "triage",
+            "plan",
+            "implement",
+            "review",
+            "review_insights",
+            "pipeline_poller",
+        }
+        orphans = (
+            _parse_bg_worker_defs() - _parse_bg_loop_registry() - allowed_non_registry
+        )
+        assert not orphans, (
+            "_bg_worker_defs entries that are neither a registry loop nor a known "
+            f"pipeline/non-loop worker (typo'd or stale def?): {sorted(orphans)}"
         )
 
 
@@ -215,7 +272,7 @@ class TestLoopFactories:
     hydraflow-diagnose (gh-TBD).
     """
 
-    def test_all_registry_loops_in_factories(self, loops: dict[str, str]) -> None:
+    def test_all_registry_loops_in_factories(self) -> None:
         registry_keys = _parse_bg_loop_registry()
         factory_keys = _parse_loop_factories()
         missing = {

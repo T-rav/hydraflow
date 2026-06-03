@@ -64,6 +64,7 @@ STAGE_READY = "ready"
 STAGE_REVIEW = "review"
 STAGE_HITL = "hitl"
 STAGE_MERGED = "merged"
+STAGE_DIAGNOSE = "diagnose"
 
 _LABEL_TO_STAGE: dict[str, str] = {
     "hydraflow-find": STAGE_FIND,
@@ -73,6 +74,11 @@ _LABEL_TO_STAGE: dict[str, str] = {
     "hydraflow-ready": STAGE_READY,
     "hydraflow-review": STAGE_REVIEW,
     "hydraflow-hitl": STAGE_HITL,
+    # Review-fix-cap escalation routes through the diagnostic loop:
+    # enqueue_transition(task, "diagnose") must map to hydraflow-diagnose,
+    # else the transition is silently dropped and the issue never reaches
+    # the DiagnosticLoop (which polls hydraflow-diagnose). See s05.
+    "hydraflow-diagnose": STAGE_DIAGNOSE,
 }
 
 

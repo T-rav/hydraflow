@@ -24,7 +24,7 @@ from config import HydraFlowConfig
 from exception_classify import reraise_on_credit_or_bug
 
 if TYPE_CHECKING:
-    from ports import PRPort
+    from ports import PRPort, WorkspacePort
     from preflight.auto_agent_runner import AutoAgentRunner
     from state import StateTracker
 
@@ -58,6 +58,7 @@ class SandboxFailureFixerLoop(BaseBackgroundLoop):
         deps: LoopDeps,
         prs: PRPort | Any | None = None,
         runner: AutoAgentRunner | Any | None = None,
+        workspaces: WorkspacePort | Any | None = None,
     ) -> None:
         super().__init__(
             worker_name="sandbox_failure_fixer",
@@ -68,9 +69,43 @@ class SandboxFailureFixerLoop(BaseBackgroundLoop):
         self._state = state
         self._prs = prs
         self._runner = runner
+        self._workspaces = workspaces
 
     def _get_default_interval(self) -> int:
         return self._config.sandbox_failure_fixer_interval
+
+    async def _resolve_worktree(self, pr: Any) -> str:
+        """Return a filesystem worktree path for *pr* (never its branch name).
+
+        The auto-agent runner uses ``worktree_path`` directly as the subprocess
+        cwd, so it must be a real directory. Mirrors AutoAgentPreflightLoop:
+        reuse the conventional per-issue workspace if present, otherwise create
+        one on the PR's branch (``WorkspacePort.create`` checks out an existing
+        branch so the fix resumes the PR's work). Falls back to ``repo_root``
+        when no ``WorkspacePort`` is wired (test fixtures / dry-run).
+        """
+        if self._workspaces is None:
+            return str(self._config.repo_root)
+        # NOTE: PR and issue numbers share one namespace, so a pre-existing
+        # workspace at this path could belong to an unrelated same-number issue.
+        # We reuse it as-is (matches AutoAgentPreflightLoop); WorkspacePort.create
+        # is only invoked when no workspace exists yet.
+        wt_path = self._config.workspace_path_for_issue(int(pr.number))
+        if wt_path.exists():
+            return str(wt_path)
+        branch = str(getattr(pr, "branch", "") or f"agent/sandbox-fix-{pr.number}")
+        try:
+            created = await self._workspaces.create(int(pr.number), branch)
+            return str(created)
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "sandbox-fix worktree creation failed for PR #%d: %s — "
+                "falling back to repo_root",
+                pr.number,
+                exc,
+            )
+            return str(self._config.repo_root)
 
     async def _do_work(self) -> dict[str, Any] | None:
         # ADR-0049 in-body kill-switch (universal mandate).
@@ -132,7 +167,7 @@ class SandboxFailureFixerLoop(BaseBackgroundLoop):
             try:
                 outcome = await runner.run(
                     prompt=await self._build_prompt(pr),
-                    worktree_path=str(getattr(pr, "branch", "")),
+                    worktree_path=await self._resolve_worktree(pr),
                     issue_number=int(pr.number),
                 )
             except Exception as exc:

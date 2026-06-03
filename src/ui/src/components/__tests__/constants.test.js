@@ -56,7 +56,7 @@ describe('PIPELINE_STAGES', () => {
       plan: theme.purple,
       implement: theme.accent,
       review: theme.orange,
-      hitl: theme.yellow,
+      hitl: theme.red,
       merged: theme.green,
     })
   })
@@ -98,7 +98,7 @@ describe('PIPELINE_STAGES', () => {
       plan: theme.purpleSubtle,
       implement: theme.accentSubtle,
       review: theme.orangeSubtle,
-      hitl: theme.yellowSubtle,
+      hitl: theme.redSubtle,
       merged: theme.greenSubtle,
     })
   })
