@@ -356,6 +356,10 @@ async def test_l7_dependabot_merge_merges_green_pr(world, page) -> None:
     # --- Step 2: first run to initialize loop cache/state mock refs ---
     await world.run_with_loops(["dependabot_merge"], cycles=1)
     world._dependabot_cache.get_open_prs.return_value = [bot_pr]
+    # DependabotMergeLoop reads the label-agnostic snapshot (get_all_open_prs),
+    # not the workflow-label-filtered get_open_prs (s09 fix, #9151). Seed both so
+    # the loop's bot-PR scan finds the seeded PR.
+    world._dependabot_cache.get_all_open_prs.return_value = [bot_pr]
 
     # --- Step 3: second run with configured cache ---
     stats = await world.run_with_loops(["dependabot_merge"], cycles=1)
@@ -406,6 +410,10 @@ async def test_l8_dependabot_merge_skips_red_pr(world, page) -> None:
     # --- Step 2: first run to initialize loop cache/state mock refs ---
     await world.run_with_loops(["dependabot_merge"], cycles=1)
     world._dependabot_cache.get_open_prs.return_value = [bot_pr]
+    # DependabotMergeLoop reads the label-agnostic snapshot (get_all_open_prs),
+    # not the workflow-label-filtered get_open_prs (s09 fix, #9151). Seed both so
+    # the loop's bot-PR scan finds the seeded PR.
+    world._dependabot_cache.get_all_open_prs.return_value = [bot_pr]
 
     # --- Step 3: second run with configured cache ---
     stats = await world.run_with_loops(["dependabot_merge"], cycles=1)
