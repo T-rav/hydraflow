@@ -298,7 +298,7 @@ export const dotStyles = {
   },
   done: { fontSize: 11, fontWeight: 700, color: theme.green },
   failed: { fontSize: 11, fontWeight: 700, color: theme.red },
-  hitl: { fontSize: 11, fontWeight: 700, color: theme.yellow },
+  hitl: { fontSize: 11, fontWeight: 700, color: theme.red },
   queued: {
     display: 'inline-block',
     width: 8,
@@ -327,7 +327,7 @@ export const badgeStyleMap = {
   active: { ...badgeBase, background: theme.accentSubtle, color: theme.accent },
   done: { ...badgeBase, background: theme.greenSubtle, color: theme.green },
   failed: { ...badgeBase, background: theme.redSubtle, color: theme.red },
-  hitl: { ...badgeBase, background: theme.yellowSubtle, color: theme.yellow },
+  hitl: { ...badgeBase, background: theme.redSubtle, color: theme.red },
   pending: { ...badgeBase, background: theme.mutedSubtle, color: theme.textMuted },
 }
 
