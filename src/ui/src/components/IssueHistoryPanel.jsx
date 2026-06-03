@@ -62,7 +62,7 @@ function statusStyle(status) {
   }
   if (status === 'merged') return { ...common, background: theme.greenSubtle || theme.surface, color: theme.green }
   if (status === 'failed') return { ...common, background: theme.redSubtle || theme.surface, color: theme.red }
-  if (status === 'hitl') return { ...common, background: theme.yellowSubtle || theme.surface, color: theme.yellow }
+  if (status === 'hitl') return { ...common, background: theme.redSubtle || theme.surface, color: theme.red }
   if (status === 'active') return { ...common, background: theme.accentSubtle || theme.surface, color: theme.accent }
   return { ...common, background: theme.surfaceInset, color: theme.textMuted }
 }

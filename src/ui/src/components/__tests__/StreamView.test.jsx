@@ -76,7 +76,7 @@ describe('HITL issues are rendered in the workstream (WS-RT)', () => {
     expect(screen.getByText('Escalated issue')).toBeTruthy()
   })
 
-  it('labels the hitl bucket as needs-human, not merged, with a yellow dot', () => {
+  it('labels the hitl bucket as needs-human, not merged, with a red dot', () => {
     // The hitl stage has role:null like merged, so it shares the worker-less
     // rendering branches. Those branches must stay stage-aware: a "Needs Human"
     // escalation bucket reading "merged" + green (success) is a mislabel.
@@ -93,7 +93,7 @@ describe('HITL issues are rendered in the workstream (WS-RT)', () => {
 
     const dot = screen.getByTestId('stage-dot-hitl')
     expect(dot.style.background).not.toBe('var(--green)')
-    expect(dot.style.background).toBe('var(--yellow)')
+    expect(dot.style.background).toBe('var(--red)')
   })
 })
 
@@ -747,7 +747,7 @@ describe('PipelineFlow failed and hitl dots', () => {
     expect(dot.style.animation).toBe('')
   })
 
-  it('renders hitl dots with yellow background and no animation', () => {
+  it('renders hitl dots with red background and no animation', () => {
     mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
       pipelineIssues: {
         triage: [],
@@ -761,7 +761,7 @@ describe('PipelineFlow failed and hitl dots', () => {
     render(<StreamView {...defaultProps} />)
     const dot = screen.getByTestId('flow-dot-2')
     expect(dot).toBeInTheDocument()
-    expect(dot.style.background).toBe('var(--yellow)')
+    expect(dot.style.background).toBe('var(--red)')
     expect(dot.style.animation).toBe('')
   })
 
@@ -805,9 +805,9 @@ describe('PipelineFlow failed and hitl dots', () => {
     const failedDot = screen.getByTestId('flow-dot-11')
     expect(failedDot.style.background).toBe('var(--red)')
     expect(failedDot.style.animation).toBe('')
-    // HITL: yellow, no animation
+    // HITL: red, no animation (shares Failed's hue in the glyph-less flow view)
     const hitlDot = screen.getByTestId('flow-dot-12')
-    expect(hitlDot.style.background).toBe('var(--yellow)')
+    expect(hitlDot.style.background).toBe('var(--red)')
     expect(hitlDot.style.animation).toBe('')
     // Queued: subtle stage color (accent), no animation
     const queuedDot = screen.getByTestId('flow-dot-13')

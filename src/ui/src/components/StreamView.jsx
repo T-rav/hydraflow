@@ -14,7 +14,7 @@ import {
 
 // No-role stages (role: null) share the worker-less rendering branches, but each
 // carries its own semantics. 'merged' is success (green, "{N} merged"); 'hitl' is
-// an escalation bucket (yellow, "{N} needs human") and must NOT read as success.
+// an escalation bucket (red, "{N} needs human") and must NOT read as success.
 // Keyed by stage.key so adding a no-role stage is one map entry, not a conditional.
 const NO_ROLE_COUNT_LABELS = {
   merged: 'merged',
@@ -22,7 +22,7 @@ const NO_ROLE_COUNT_LABELS = {
 }
 const NO_ROLE_DOT_COLORS = {
   merged: theme.green,
-  hitl: theme.yellow,
+  hitl: theme.red,
 }
 
 function PendingIntentCard({ intent }) {
@@ -574,7 +574,7 @@ const flowDotFailedStyles = Object.fromEntries(
 )
 
 const flowDotHitlStyles = Object.fromEntries(
-  PIPELINE_STAGES.map(s => [s.key, { ...flowDotBase, background: theme.yellow }])
+  PIPELINE_STAGES.map(s => [s.key, { ...flowDotBase, background: theme.red }])
 )
 
 // Epic dot styles — 12px circles with centered "e" text
@@ -609,7 +609,7 @@ const epicFlowDotFailedStyles = Object.fromEntries(
   PIPELINE_STAGES.map(s => [s.key, { ...epicDotBase, background: theme.red }])
 )
 const epicFlowDotHitlStyles = Object.fromEntries(
-  PIPELINE_STAGES.map(s => [s.key, { ...epicDotBase, background: theme.yellow }])
+  PIPELINE_STAGES.map(s => [s.key, { ...epicDotBase, background: theme.red }])
 )
 
 // Grouped style maps for quick lookup in render
