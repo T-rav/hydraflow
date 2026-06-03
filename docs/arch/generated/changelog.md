@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W23
 
+- `6c586f9` — chore(arch): regen generated artifacts for sandbox e2e batch 1 scenarios *(2026-06-02)*
 - `04dc3a6` — fix(workers): surface all 45 background loops in System tab + register github_cache (#9153) (#9153) *(2026-06-02)*
 - `7caa4bb` — docs(memory): add critical workflow feedback (#9140) (#9140) *(2026-06-01)*
 - `5f59fb2` — docs(adr): promote ADR-0049 + ADR-0045 to Accepted; fix stale port-conformance ref (WS-6) (#9112) (#9112) *(2026-06-01)*

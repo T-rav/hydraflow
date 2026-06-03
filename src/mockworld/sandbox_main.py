@@ -159,6 +159,13 @@ async def main() -> None:
     #   this flag (see src/plan_phase.py).
     config.transcript_summarization_enabled = False  # type: ignore[misc]
     config.research_enabled = False  # type: ignore[misc]
+    # ContractRefreshLoop's github/claude/docker recorders reach external
+    # services (contracts-sandbox repo, api.anthropic.com, alpine pull) that
+    # are unreachable on the internal sandbox network; each blocks up to the
+    # 120s subprocess timeout, so the loop never emits its worker-status event
+    # within a scenario's window (s30). Skip them — only the local git
+    # recorder runs.
+    config.contract_refresh_external_enabled = False  # type: ignore[misc]
     seed = _load_seed()
     event_bus = EventBus()
     state = build_state_tracker(config)
@@ -282,6 +289,12 @@ async def main() -> None:
     spec_reviewer = getattr(svc.implementer, "_spec_reviewer", None)
     if spec_reviewer is not None:
         spec_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    # DiagnosticRunner.diagnose spawns a real ``claude`` subprocess that hangs
+    # in the air-gapped sandbox; the sentinel routes it to a not-fixable
+    # diagnosis so review-fix-cap escalations reach HITL (s05).
+    diagnostic_runner = getattr(svc.diagnostic_loop, "_runner", None)
+    if diagnostic_runner is not None:
+        diagnostic_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
 
     orch = HydraFlowOrchestrator(
         config,

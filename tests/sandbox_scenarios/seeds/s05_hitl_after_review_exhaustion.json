@@ -1,0 +1,76 @@
+{
+  "repos": [],
+  "issues": [
+    {
+      "number": 1,
+      "title": "t",
+      "body": "b",
+      "labels": [
+        "hydraflow-ready"
+      ]
+    }
+  ],
+  "prs": [],
+  "scripts": {
+    "plan": {
+      "1": [
+        {
+          "success": true
+        }
+      ]
+    },
+    "implement": {
+      "1": [
+        {
+          "success": true,
+          "branch": "hf/issue-1"
+        },
+        {
+          "success": true,
+          "branch": "hf/issue-1"
+        },
+        {
+          "success": true,
+          "branch": "hf/issue-1"
+        },
+        {
+          "success": true,
+          "branch": "hf/issue-1"
+        }
+      ]
+    },
+    "review": {
+      "1": [
+        {
+          "verdict": "request-changes",
+          "comments": [
+            "bad 1"
+          ]
+        },
+        {
+          "verdict": "request-changes",
+          "comments": [
+            "bad 2"
+          ]
+        },
+        {
+          "verdict": "request-changes",
+          "comments": [
+            "bad 3"
+          ]
+        }
+      ]
+    }
+  },
+  "advisor_scripts": {},
+  "phase_scripts": {},
+  "cycles_to_run": 10,
+  "loops_enabled": [
+    "diagnostic",
+    "github_cache"
+  ],
+  "main_branch_ci_status": [
+    "success",
+    ""
+  ]
+}
