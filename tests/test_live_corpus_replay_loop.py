@@ -203,6 +203,40 @@ async def test_identical_drift_dedups_across_ticks(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_issue_zero_sentinel_does_not_dedup(tmp_path: Path) -> None:
+    """create_issue's 0 sentinel must not add the dedup key.
+
+    Regression for issue #9241: a failed gh call returns 0; adding the
+    dedup key would suppress re-filing forever without a real issue. The
+    next tick must re-attempt (create_issue awaited twice).
+    """
+    pr = MagicMock()
+    pr.create_issue = AsyncMock(return_value=0)
+    loop, corpus, _pr, _state = _build_loop(tmp_path, pr_manager=pr)
+    corpus.record(
+        adapter="github",
+        command="gh",
+        args=["pr", "view", "42"],
+        stdout='{"state":"MERGED"}\n',
+        stderr="",
+        exit_code=0,
+    )
+
+    async def stale_fake(_sample):  # noqa: ANN001
+        return {"state": "OPEN"}
+
+    loop.register("github", "gh", stale_fake)
+    first = await loop._do_work()
+    second = await loop._do_work()
+
+    assert first["drifted"] == 1
+    assert first["filed_issue"] == 0  # sentinel surfaced in status, not tracked
+    # Second tick re-attempts because the dedup key was never added.
+    assert second["drifted"] == 1
+    assert pr.create_issue.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_dispatcher_raising_is_caught(tmp_path: Path) -> None:
     loop, corpus, pr, _state = _build_loop(tmp_path)
     corpus.record(

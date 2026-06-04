@@ -455,12 +455,24 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
                 escalated += 1
             else:
                 issue_number = await self._file_drift_rollup(entry.adr, new_pr_entries)
-                if issue_number:
-                    self._state.set_adr_rollup(
+                if issue_number == 0:
+                    # create_issue's documented 0-sentinel: the gh call
+                    # failed. Don't record the rollup or add the dedup key —
+                    # that would suppress re-filing forever without a real
+                    # issue (next tick's `dedup_key in dedup` would skip).
+                    # Retry next cycle.
+                    logger.warning(
+                        "adr_touchpoint_auditor: create_issue returned 0 "
+                        "(sentinel) for %s rollup; skipping record/dedup, "
+                        "will retry next cycle",
                         rollup_key,
-                        issue_number=issue_number,
-                        pr_numbers=sorted(new_pr_numbers),
                     )
+                    continue
+                self._state.set_adr_rollup(
+                    rollup_key,
+                    issue_number=issue_number,
+                    pr_numbers=sorted(new_pr_numbers),
+                )
                 filed += 1
             dedup.add(dedup_key)
             self._dedup.set_all(dedup)

@@ -56,6 +56,16 @@ HYDRAFLOW_LABELS: tuple[tuple[str, str, str], ...] = (
         "b60205",
         "ADR drift unresolved after retries",
     ),
+    (
+        "memory_backlog_label",
+        "fef2c0",
+        "Session-memory feedback promoted to the find queue (MemoryBacklogLoop)",
+    ),
+    (
+        "memory_backlog_stuck_label",
+        "b60205",
+        "Memory-backlog entry unresolved after retries",
+    ),
 )
 
 
