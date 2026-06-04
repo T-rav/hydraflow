@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventType, HydraFlowEvent
-from exception_classify import reraise_on_credit_or_bug
+from exception_classify import exc_detail, reraise_on_credit_or_bug
 from models import (
     CICheckPayload,
     CodeScanningAlert,
@@ -240,8 +240,9 @@ class ReviewRunner(BaseRunner):
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
             result.verdict = ReviewVerdict.COMMENT
-            result.summary = f"Review failed: {exc}"
-            logger.error("Review failed for PR #%d: %s", pr.number, exc)
+            detail = exc_detail(exc)
+            result.summary = f"Review failed: {detail}"
+            logger.error("Review failed for PR #%d: %s", pr.number, detail)
 
         result.duration_seconds = time.monotonic() - start
 
@@ -338,8 +339,9 @@ class ReviewRunner(BaseRunner):
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
             result.verdict = ReviewVerdict.REQUEST_CHANGES
-            result.summary = f"CI fix failed: {exc}"
-            logger.error("CI fix failed for PR #%d: %s", pr.number, exc)
+            detail = exc_detail(exc)
+            result.summary = f"CI fix failed: {detail}"
+            logger.error("CI fix failed for PR #%d: %s", pr.number, detail)
 
         await self._bus.publish(
             HydraFlowEvent(
@@ -449,8 +451,9 @@ class ReviewRunner(BaseRunner):
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
             result.verdict = ReviewVerdict.REQUEST_CHANGES
-            result.summary = f"Review fix failed: {exc}"
-            logger.error("Review fix failed for PR #%d: %s", pr.number, exc)
+            detail = exc_detail(exc)
+            result.summary = f"Review fix failed: {detail}"
+            logger.error("Review fix failed for PR #%d: %s", pr.number, detail)
 
         result.duration_seconds = time.monotonic() - start
 

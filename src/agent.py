@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventBus, EventType, HydraFlowEvent
-from exception_classify import is_likely_bug, reraise_on_credit_or_bug
+from exception_classify import exc_detail, is_likely_bug, reraise_on_credit_or_bug
 from models import LoopResult, Task, WorkerResult, WorkerStatus, WorkerUpdatePayload
 from plugin_skill_registry import (
     discover_plugin_skills,
@@ -300,7 +300,7 @@ Run through this checklist before your final commit:
             logger.exception(
                 "Agent failed for issue #%d: %s",
                 task.id,
-                exc,
+                exc_detail(exc),
                 extra={"issue": task.id},
             )
             await self._emit_status(task.id, worker_id, WorkerStatus.FAILED)
