@@ -199,7 +199,13 @@ class TermProposerLoop(BaseBackgroundLoop):
             except (ValueError, RuntimeError) as e:
                 # No dedup on failure — the candidate falls through to natural
                 # re-detection on the next tick (Fix C1; see ADR-0054 I2).
-                logger.warning(
+                #
+                # INFO, not WARNING: when the LLM client adapter is in its
+                # documented intentional-incomplete state (ADR-0054), draft()
+                # raises on every candidate, flooding the WARNING channel
+                # (~470 occ.). This is an expected pending-adapter signal, not an
+                # error, so it belongs at INFO (WS-05 log-hygiene).
+                logger.info(
                     "term_proposer: LLM draft failed for %s: %s", candidate.name, e
                 )
                 dropped_drafts += 1

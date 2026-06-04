@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -123,7 +124,9 @@ class TestTermProposerLoopFlow:
         assert result["opened_pr"] is True
 
     @pytest.mark.asyncio
-    async def test_invalid_draft_from_llm_dropped(self, synthetic_repo: Path) -> None:
+    async def test_invalid_draft_from_llm_dropped(
+        self, synthetic_repo: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """LLM returns a payload with an out-of-vocabulary ``kind`` → Pydantic
         validation in ``TermDraft`` raises → counted under ``dropped_drafts``
         via the LLM-failure branch.
@@ -131,6 +134,10 @@ class TestTermProposerLoopFlow:
         This exercises the LLM-failure path (Pydantic enum coercion fails),
         NOT the F1 ``validate_draft`` path. For real F1 coverage see
         ``test_validation_rejects_unresolvable_depends_on``.
+
+        The draft-failed line must emit at INFO, not WARNING: when the client
+        adapter is in its documented intentional-incomplete state (ADR-0054) it
+        raises on every candidate and floods the WARNING channel (~470 occ.).
         """
         loop, _, port = _build_loop(
             synthetic_repo,
@@ -144,11 +151,21 @@ class TestTermProposerLoopFlow:
                 "depends_on_anchors": [],
             },
         )
-        result = await loop._do_work()
+        with caplog.at_level(logging.INFO, logger="hydraflow.term_proposer_loop"):
+            result = await loop._do_work()
         assert port.calls == []
         assert result["drafted"] == 0  # LLM call failed before counting
         assert result["validated"] == 0
         assert result["dropped_drafts"] >= 1
+
+        draft_failed = [
+            r
+            for r in caplog.records
+            if "term_proposer: LLM draft failed" in r.getMessage()
+        ]
+        assert draft_failed, "expected a draft-failed log line"
+        assert all(r.levelno == logging.INFO for r in draft_failed)
+        assert all(r.levelno != logging.WARNING for r in draft_failed)
 
     @pytest.mark.asyncio
     async def test_llm_skip_judgment_drops_candidate_with_no_pr(
