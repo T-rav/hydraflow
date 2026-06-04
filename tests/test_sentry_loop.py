@@ -512,6 +512,212 @@ class TestSentryStateMixin:
         assert tracker2.get_sentry_creation_attempts("12345") == 2
 
 
+class TestSentryLoopCooldown:
+    """Per-Sentry-issue cooldown: files once, suppresses re-files in-window."""
+
+    def _loop_with_state(self, config, prs, deps, tmp_path: Path):
+        from state import StateTracker
+
+        loop = _make_loop(config, prs, deps)
+        loop._state = StateTracker(tmp_path / "state.json")
+        return loop
+
+    @pytest.mark.asyncio
+    async def test_config_has_cooldown_default(self, tmp_path: Path) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path)
+        assert hasattr(config, "sentry_signal_cooldown_hours")
+        assert config.sentry_signal_cooldown_hours == 24
+
+    @pytest.mark.asyncio
+    async def test_files_on_first_observation(self, tmp_path: Path) -> None:
+        """First qualifying observation files (cooldown empty -> no suppression)."""
+        config = ConfigFactory.create(repo_root=tmp_path)
+        deps = _make_deps()
+        prs = MagicMock()
+        prs._run_gh = AsyncMock(return_value="0")
+
+        loop = self._loop_with_state(config, prs, deps, tmp_path)
+
+        issue = _make_sentry_issue(issue_id="cool-1")
+        with (
+            patch.object(loop, "_list_projects", return_value=[{"slug": "p"}]),
+            patch.object(loop, "_fetch_unresolved", return_value=[issue]),
+            patch.object(loop, "_create_github_issue", return_value=True),
+            patch.object(loop, "_resolve_sentry_issue", new_callable=AsyncMock),
+        ):
+            result = await loop._do_work()
+
+        assert result is not None
+        assert result["issues_created"] == 1
+        # Cooldown stamp recorded for the filed id.
+        assert loop._state.get_sentry_cooldown_stamp("cool-1") != ""
+
+    @pytest.mark.asyncio
+    async def test_suppressed_within_cooldown_after_failed_file(
+        self, tmp_path: Path
+    ) -> None:
+        """A no-URL filing attempt stamps cooldown; next poll is suppressed.
+
+        This is the core anti-noise behavior: a flapping error whose agent run
+        did not produce a parseable issue URL must NOT re-invoke the agent on
+        the very next poll.
+        """
+        config = ConfigFactory.create(repo_root=tmp_path)
+        deps = _make_deps()
+        prs = MagicMock()
+        prs._run_gh = AsyncMock(return_value="0")
+
+        loop = self._loop_with_state(config, prs, deps, tmp_path)
+
+        issue = _make_sentry_issue(issue_id="flap-1")
+        with (
+            patch.object(loop, "_list_projects", return_value=[{"slug": "p"}]),
+            patch.object(loop, "_fetch_unresolved", return_value=[issue]),
+            patch.object(
+                loop, "_create_github_issue", return_value=False
+            ) as mock_create,
+        ):
+            # First poll: attempt fails to detect a URL -> stamps cooldown.
+            await loop._do_work()
+            assert mock_create.call_count == 1
+            # Second poll within the cooldown window: must be suppressed.
+            result = await loop._do_work()
+
+        assert result is not None
+        assert result["issues_skipped"] == 1
+        assert mock_create.call_count == 1  # not re-invoked
+
+    @pytest.mark.asyncio
+    async def test_refiles_after_cooldown_elapses(self, tmp_path: Path) -> None:
+        """Once the cooldown window passes, the same id can be re-attempted."""
+        config = ConfigFactory.create(repo_root=tmp_path)
+        deps = _make_deps()
+        prs = MagicMock()
+        prs._run_gh = AsyncMock(return_value="0")
+        object.__setattr__(config, "sentry_signal_cooldown_hours", 1)
+
+        loop = self._loop_with_state(config, prs, deps, tmp_path)
+
+        issue = _make_sentry_issue(issue_id="elapse-1")
+        with (
+            patch.object(loop, "_list_projects", return_value=[{"slug": "p"}]),
+            patch.object(loop, "_fetch_unresolved", return_value=[issue]),
+            patch.object(
+                loop, "_create_github_issue", return_value=False
+            ) as mock_create,
+        ):
+            await loop._do_work()
+            assert mock_create.call_count == 1
+            # Backdate the cooldown stamp beyond the 1-hour window.
+            from datetime import UTC, datetime, timedelta
+
+            old = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+            loop._state._data.sentry_signal_cooldown["elapse-1"] = old
+
+            result = await loop._do_work()
+
+        assert result is not None
+        assert mock_create.call_count == 2  # re-attempted after cooldown
+
+    @pytest.mark.asyncio
+    async def test_cooldown_no_op_without_state(self, tmp_path: Path) -> None:
+        """Without a StateTracker, cooldown gating is inert (no crash)."""
+        config = ConfigFactory.create(repo_root=tmp_path)
+        deps = _make_deps()
+        prs = MagicMock()
+        prs._run_gh = AsyncMock(return_value="0")
+
+        loop = _make_loop(config, prs, deps)  # no state wired
+        assert loop._state is None
+        assert loop._in_cooldown("anything") is False
+
+    @pytest.mark.asyncio
+    async def test_cooldown_persists_across_instances(self, tmp_path: Path) -> None:
+        """Cooldown stamp survives loop recreation via StateTracker persistence."""
+        from config import Credentials
+        from sentry_loop import SentryLoop
+        from state import StateTracker
+
+        config = ConfigFactory.create(repo_root=tmp_path)
+        object.__setattr__(config, "sentry_org", "test-org")
+        deps = _make_deps()
+        prs = MagicMock()
+        prs._run_gh = AsyncMock(return_value="0")
+        creds = Credentials(sentry_auth_token="sntryu_test")
+        state1 = StateTracker(tmp_path / "state.json")
+
+        loop1 = SentryLoop(
+            config=config, prs=prs, deps=deps, credentials=creds, state=state1
+        )
+
+        issue = _make_sentry_issue(issue_id="persist-cool")
+        with (
+            patch.object(loop1, "_list_projects", return_value=[{"slug": "p"}]),
+            patch.object(loop1, "_fetch_unresolved", return_value=[issue]),
+            patch.object(loop1, "_create_github_issue", return_value=False),
+        ):
+            await loop1._do_work()
+
+        # Fresh state instance reading the same on-disk file.
+        state2 = StateTracker(tmp_path / "state.json")
+        assert state2.get_sentry_cooldown_stamp("persist-cool") != ""
+
+        loop2 = SentryLoop(
+            config=config, prs=prs, deps=deps, credentials=creds, state=state2
+        )
+        with (
+            patch.object(loop2, "_list_projects", return_value=[{"slug": "p"}]),
+            patch.object(loop2, "_fetch_unresolved", return_value=[issue]),
+            patch.object(
+                loop2, "_create_github_issue", return_value=False
+            ) as mock_create,
+        ):
+            result = await loop2._do_work()
+
+        assert result is not None
+        assert mock_create.call_count == 0  # suppressed by persisted cooldown
+
+
+class TestSentryResolveGating:
+    """Upstream Sentry 'resolve' mutation is config-gated (default on)."""
+
+    @pytest.mark.asyncio
+    async def test_resolves_upstream_by_default(self, tmp_path: Path) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path)
+        deps = _make_deps()
+        prs = MagicMock()
+
+        loop = _make_loop(config, prs, deps)
+        assert config.sentry_resolve_upstream_enabled is True
+
+        with patch("sentry_loop.httpx.AsyncClient") as mock_client_cls:
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_client = MagicMock(put=AsyncMock(return_value=mock_resp))
+            mock_ctx = AsyncMock()
+            mock_ctx.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_ctx.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_ctx
+
+            await loop._resolve_sentry_issue("res-1")
+
+            mock_client.put.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_resolve_suppressed_when_disabled(self, tmp_path: Path) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path)
+        object.__setattr__(config, "sentry_resolve_upstream_enabled", False)
+        deps = _make_deps()
+        prs = MagicMock()
+
+        loop = _make_loop(config, prs, deps)
+
+        with patch("sentry_loop.httpx.AsyncClient") as mock_client_cls:
+            await loop._resolve_sentry_issue("res-2")
+            # No HTTP client constructed at all -> no upstream mutation.
+            mock_client_cls.assert_not_called()
+
+
 class TestSentryLoopWiring:
     def test_interval_bounds_includes_sentry_ingest(self) -> None:
         from dashboard_routes._common import _INTERVAL_BOUNDS

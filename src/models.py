@@ -1904,6 +1904,10 @@ class StateData(BaseModel):
     diagnostic_attempts: dict[str, list[AttemptRecord]] = Field(default_factory=dict)
     diagnosis_severities: dict[str, str] = Field(default_factory=dict)
     sentry_creation_attempts: dict[str, int] = Field(default_factory=dict)
+    # Per-Sentry-issue cooldown stamps (id -> ISO timestamp of last filing
+    # attempt). Suppresses re-filing a flapping error every poll within
+    # ``sentry_signal_cooldown_hours``. See sentry_loop.SentryLoop.
+    sentry_signal_cooldown: dict[str, str] = Field(default_factory=dict)
     trace_runs: TraceRunsContainer = Field(default_factory=TraceRunsContainer)
     # StagingBisectLoop state (spec §4.3 + §8). Written by StagingPromotionLoop
     # on each promotion outcome; polled + mutated by StagingBisectLoop.

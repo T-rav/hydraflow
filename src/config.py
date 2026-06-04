@@ -225,6 +225,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("sentry_poll_interval", "SENTRY_POLL_INTERVAL", 600),
     ("sentry_min_events", "SENTRY_MIN_EVENTS", 2),
     ("sentry_max_creation_attempts", "SENTRY_MAX_CREATION_ATTEMPTS", 3),
+    ("sentry_signal_cooldown_hours", "SENTRY_SIGNAL_COOLDOWN_HOURS", 24),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
     ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
@@ -462,6 +463,13 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("runs_gc_loop_enabled", "HYDRAFLOW_RUNS_GC_LOOP_ENABLED", True),
     ("security_patch_loop_enabled", "HYDRAFLOW_SECURITY_PATCH_LOOP_ENABLED", True),
     ("sentry_loop_enabled", "HYDRAFLOW_SENTRY_LOOP_ENABLED", True),
+    # Gate the upstream Sentry "resolve" mutation. Default True = current
+    # behavior. Set False to never mutate the operator's Sentry issues.
+    (
+        "sentry_resolve_upstream_enabled",
+        "HYDRAFLOW_SENTRY_RESOLVE_UPSTREAM_ENABLED",
+        True,
+    ),
     (
         "skill_prompt_eval_loop_enabled",
         "HYDRAFLOW_SKILL_PROMPT_EVAL_LOOP_ENABLED",
@@ -1381,6 +1389,26 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=10,
         description="Max times to retry filing a GitHub issue for a Sentry error before parking",
+    )
+    sentry_signal_cooldown_hours: int = Field(
+        default=24,
+        ge=1,
+        le=720,
+        description=(
+            "Per-Sentry-issue cooldown (hours) after a filing attempt before "
+            "the same Sentry issue id may be re-filed. Stops a flapping error "
+            "re-filing every poll."
+        ),
+    )
+    sentry_resolve_upstream_enabled: bool = Field(
+        default=True,
+        description=(
+            "When True (current behavior), mark a Sentry issue 'resolved' "
+            "upstream after we file its GitHub issue, so it leaves the "
+            "unresolved feed (Sentry auto-reopens on recurrence). Set False to "
+            "leave the operator's Sentry issues untouched and rely solely on "
+            "local dedup + cooldown."
+        ),
     )
 
     # OpenTelemetry / Honeycomb instrumentation
