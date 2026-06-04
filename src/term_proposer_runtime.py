@@ -88,6 +88,61 @@ class ClaudeCLIClient:
         return json.loads(match.group(0))
 
 
+# Generated arch artifacts that derive from docs/wiki/terms/ (ADR-0053).
+# When a proposer adds/edits a term file, these two views go stale and the
+# pre-push `make arch-check` drift guard rejects the push — so they MUST be
+# regenerated and staged into the same bot-PR commit. See ADR-0053 / ADR-0058.
+_TERMS_REL_DIR = "docs/wiki/terms"
+_UL_GLOSSARY_REL = "docs/arch/generated/ubiquitous-language.md"
+_UL_CONTEXT_MAP_REL = "docs/arch/generated/ubiquitous-language-context-map.md"
+
+
+def regenerate_ubiquitous_language_artifacts(repo_root: Path) -> list[Path]:
+    """Re-render the term-derived arch artifacts from on-disk term files.
+
+    Term-proposer / edge-proposer bot-PRs mutate ``docs/wiki/terms/`` but the
+    generated ubiquitous-language views in ``docs/arch/generated/`` derive from
+    those term files. Committing the term change without refreshing the views
+    leaves ``make arch-check`` (run by the pre-push hook) detecting drift, which
+    rejects the push and the proposer PR never lands. Regenerating here — after
+    the new term files are written under ``repo_root`` — keeps the views in sync
+    so the same commit passes the drift guard.
+
+    Returns the absolute paths of the regenerated artifacts (for staging). When
+    no terms directory exists, returns an empty list (nothing to regenerate).
+    """
+    from ubiquitous_language import (  # noqa: PLC0415
+        TermStore,
+        render_context_map,
+        render_glossary,
+    )
+
+    terms_dir = repo_root / _TERMS_REL_DIR
+    if not terms_dir.is_dir():
+        return []
+
+    try:
+        terms = TermStore(terms_dir).list()
+    except (ValueError, OSError) as exc:
+        # A malformed term file shouldn't crash the PR-open. Degrade to the
+        # prior behavior (no regen) — the pre-push arch-check still guards
+        # correctness; we just don't pre-stage the refreshed views.
+        logger.warning(
+            "ubiquitous-language regen skipped — could not load terms: %s", exc
+        )
+        return []
+    regenerated: list[Path] = []
+    for rel_path, body in (
+        (_UL_GLOSSARY_REL, render_glossary(terms)),
+        (_UL_CONTEXT_MAP_REL, render_context_map(terms)),
+    ):
+        abs_path = repo_root / rel_path
+        abs_path.parent.mkdir(parents=True, exist_ok=True)
+        abs_path.write_text(body, encoding="utf-8")
+        regenerated.append(abs_path)
+    return regenerated
+
+
 class OpenAutoPRBotPRPort:
     """BotPRPort adapter wrapping auto_pr.open_automated_pr_async.
 
@@ -114,11 +169,22 @@ class OpenAutoPRBotPRPort:
         from auto_pr import open_automated_pr_async  # noqa: PLC0415
 
         written_paths: list[Path] = []
+        wrote_term_file = False
         for rel_path, content in files.items():
             abs_path = self._repo_root / rel_path
             abs_path.parent.mkdir(parents=True, exist_ok=True)
             abs_path.write_text(content, encoding="utf-8")
             written_paths.append(abs_path)
+            if Path(rel_path).is_relative_to(_TERMS_REL_DIR):
+                wrote_term_file = True
+
+        # Term changes make the generated ubiquitous-language views stale; the
+        # pre-push arch-check drift guard rejects the push unless the refreshed
+        # views ride along in the SAME commit. Regenerate + stage them here.
+        if wrote_term_file:
+            written_paths.extend(
+                regenerate_ubiquitous_language_artifacts(self._repo_root)
+            )
 
         result = await open_automated_pr_async(
             repo_root=self._repo_root,
