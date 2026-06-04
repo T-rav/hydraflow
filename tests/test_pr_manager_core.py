@@ -1731,6 +1731,8 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         "hydraflow-fake-coverage-stuck",
         "hydraflow-adr-drift",
         "hydraflow-adr-drift-stuck",
+        "hydraflow-memory-backlog",
+        "hydraflow-memory-backlog-stuck",
     }
 
 
