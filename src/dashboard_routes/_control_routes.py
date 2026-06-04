@@ -286,6 +286,11 @@ _bg_worker_defs = [
         "Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline.",
     ),
     (
+        "log_ingest",
+        "Log Ingest",
+        "Clusters and dedups recurring errors/warnings in HydraFlow's own server log and files them as fix-issues for the pipeline.",
+    ),
+    (
         "staging_promotion",
         "Staging Promotion",
         "Cuts release-candidate snapshots from staging and auto-promotes them to main on green CI. See ADR-0042.",

@@ -98,6 +98,7 @@ class TestInitialization:
             "diagnostic_attempts",
             "diagnosis_severities",
             "sentry_creation_attempts",
+            "log_ingest_cursor",
             "sentry_signal_cooldown",
             "trace_runs",
             "route_back_counts",

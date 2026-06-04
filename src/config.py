@@ -225,6 +225,9 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("sentry_poll_interval", "SENTRY_POLL_INTERVAL", 600),
     ("sentry_min_events", "SENTRY_MIN_EVENTS", 2),
     ("sentry_max_creation_attempts", "SENTRY_MAX_CREATION_ATTEMPTS", 3),
+    ("log_ingest_interval", "LOG_INGEST_INTERVAL", 14400),
+    ("log_ingest_warning_min_count", "LOG_INGEST_WARNING_MIN_COUNT", 50),
+    ("log_ingest_max_issues_per_run", "LOG_INGEST_MAX_ISSUES_PER_RUN", 3),
     ("sentry_signal_cooldown_hours", "SENTRY_SIGNAL_COOLDOWN_HOURS", 24),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
@@ -300,6 +303,16 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("repos_workspace_dir", "HYDRAFLOW_REPOS_WORKSPACE_DIR", "~/.hydra/repos"),
     ("sentry_org", "SENTRY_ORG", ""),
     ("sentry_project_filter", "SENTRY_PROJECT_FILTER", ""),
+    ("log_ingest_label", "HYDRAFLOW_LOG_INGEST_LABEL", "hydraflow-log-ingest"),
+    (
+        "log_ingest_benign_patterns",
+        "HYDRAFLOW_LOG_INGEST_BENIGN_PATTERNS",
+        (
+            "adapter pending,auth failed,authentication failed,"
+            "repository not found,credit,creditexhausted,hydraflow.log_ingest"
+        ),
+    ),
+    ("log_ingest_log_files", "HYDRAFLOW_LOG_INGEST_LOG_FILES", "logs/hydraflow.log"),
     ("dashboard_url", "HYDRAFLOW_DASHBOARD_URL", "http://localhost:5555"),
     ("otel_endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT", "https://api.honeycomb.io"),
     ("otel_service_name", "OTEL_SERVICE_NAME", "hydraflow"),
@@ -463,6 +476,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("runs_gc_loop_enabled", "HYDRAFLOW_RUNS_GC_LOOP_ENABLED", True),
     ("security_patch_loop_enabled", "HYDRAFLOW_SECURITY_PATCH_LOOP_ENABLED", True),
     ("sentry_loop_enabled", "HYDRAFLOW_SENTRY_LOOP_ENABLED", True),
+    ("log_ingest_loop_enabled", "HYDRAFLOW_LOG_INGEST_LOOP_ENABLED", True),
     # Gate the upstream Sentry "resolve" mutation. Default True = current
     # behavior. Set False to never mutate the operator's Sentry issues.
     (
@@ -1408,6 +1422,55 @@ class HydraFlowConfig(BaseModel):
             "unresolved feed (Sentry auto-reopens on recurrence). Set False to "
             "leave the operator's Sentry issues untouched and rely solely on "
             "local dedup + cooldown."
+        ),
+    )
+
+    # LogIngestLoop — scans HydraFlow's own server log, clusters/dedups
+    # ERROR + WARNING lines, and files GitHub issues into the pipeline.
+    log_ingest_interval: int = Field(
+        default=14400,
+        ge=300,
+        le=86400,
+        description="Seconds between LogIngestLoop scans (default 4h).",
+    )
+    log_ingest_warning_min_count: int = Field(
+        default=50,
+        ge=1,
+        le=100000,
+        description=(
+            "Minimum occurrence count for a WARNING cluster to become an "
+            "issue candidate. ERROR clusters are always candidates."
+        ),
+    )
+    log_ingest_max_issues_per_run: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Hard cap on issues filed per LogIngestLoop cycle "
+            "(ERROR-first, then count-descending)."
+        ),
+    )
+    log_ingest_benign_patterns: str = Field(
+        default=(
+            "adapter pending,auth failed,authentication failed,"
+            "repository not found,credit,creditexhausted,hydraflow.log_ingest"
+        ),
+        description=(
+            "Comma-separated case-insensitive substrings; any cluster whose "
+            "representative message or logger matches is dropped (known-benign "
+            "allowlist). Avoids filing transient/expected noise."
+        ),
+    )
+    log_ingest_label: str = Field(
+        default="hydraflow-log-ingest",
+        description="Label applied to issues filed by LogIngestLoop (alongside find_label).",
+    )
+    log_ingest_log_files: str = Field(
+        default="logs/hydraflow.log",
+        description=(
+            "Comma-separated log file paths LogIngestLoop scans. Relative paths "
+            "resolve against data_root; absolute paths are used as-is."
         ),
     )
 
@@ -2831,6 +2894,10 @@ class HydraFlowConfig(BaseModel):
     sentry_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for SentryLoop.",
+    )
+    log_ingest_loop_enabled: bool = Field(
+        default=True,
+        description="Deploy-time kill-switch for LogIngestLoop.",
     )
     skill_prompt_eval_loop_enabled: bool = Field(
         default=True,
