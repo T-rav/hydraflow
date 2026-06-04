@@ -1074,6 +1074,50 @@ class TestPostStreamResult:
         )
         assert "good output" in transcript
 
+    def test_successful_run_mentioning_auth_terms_does_not_raise(self) -> None:
+        """A successful run (exit 0) is never an auth failure, even when its
+        output contains auth phrases — e.g. an agent reviewing/fixing auth code
+        that emits 'AuthenticationError' and the structured token. Regression for
+        the false-positive that killed valid runs and retried 3x."""
+        transcript = _post_stream_result(
+            raw_lines=[
+                "Reviewing AuthenticationError handling…",
+                '{"error": "authentication_failed"}',
+            ],
+            accumulated_text="review complete\n",
+            result_text="review complete",
+            early_killed=False,
+            returncode=0,
+            stderr_text="",
+            parser=self._make_parser_with_snapshot(),
+            config=StreamConfig(),
+            logger=logging.getLogger("test"),
+        )
+        assert transcript == "review complete"
+
+    def test_failed_run_with_auth_class_name_in_stdout_prose_does_not_raise(
+        self,
+    ) -> None:
+        """A failed run whose STDOUT prose mentions the class name
+        'AuthenticationError' (but no structured token, clean stderr) is not an
+        auth failure — broad patterns are stderr-only."""
+        from runner_utils import AuthenticationRetryError
+
+        try:
+            _post_stream_result(
+                raw_lines=["Traceback … AuthenticationError: bad creds in the PR"],
+                accumulated_text="",
+                result_text="output",
+                early_killed=False,
+                returncode=1,
+                stderr_text="",
+                parser=self._make_parser_with_snapshot(),
+                config=StreamConfig(),
+                logger=logging.getLogger("test"),
+            )
+        except AuthenticationRetryError:  # pragma: no cover - fails the test
+            pytest.fail("stdout prose 'AuthenticationError' must not raise auth error")
+
     def test_raises_credit_error_when_exhausted(self) -> None:
         """Credit exhaustion in combined output raises CreditExhaustedError."""
         from subprocess_util import CreditExhaustedError
