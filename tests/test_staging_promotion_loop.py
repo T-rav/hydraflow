@@ -39,6 +39,7 @@ def _make_loop(
     open_promotion: PRInfo | None = None,
     ci_result: tuple[bool, str] = (True, "ok"),
     merge_result: bool = True,
+    rc_has_diff: bool = True,
 ) -> tuple[StagingPromotionLoop, MagicMock]:
     monkeypatch.setenv(
         "HYDRAFLOW_STAGING_ENABLED", "true" if staging_enabled else "false"
@@ -66,6 +67,7 @@ def _make_loop(
     prs.post_comment = AsyncMock()
     prs.close_issue = AsyncMock()
     prs.create_rc_branch = AsyncMock(return_value="sha123")
+    prs.branch_has_diff_from_main = AsyncMock(return_value=rc_has_diff)
     prs.create_promotion_pr = AsyncMock(return_value=42)
     prs.push_synthetic_commit = AsyncMock(return_value="synthetic-sha-rc")
     prs.create_issue = AsyncMock(return_value=1234)
@@ -172,6 +174,60 @@ class TestRecordOnCreate:
         result = await loop._do_work()
         assert result["status"] == "rc_branch_failed"
         assert not loop._cadence_path().exists()
+
+
+class TestEmptyRcNoOp:
+    @pytest.mark.asyncio
+    async def test_skips_pr_when_rc_has_no_commits_ahead(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = _make_loop(tmp_path, monkeypatch, rc_has_diff=False)
+        result = await loop._do_work()
+        assert result["status"] == "no_commits"
+        assert result["rc_branch"].startswith("rc/")
+        prs.branch_has_diff_from_main.assert_called_once()
+        # No promotion PR is opened and no synthetic commit is pushed —
+        # avoids the "No commits between main and <rc>" GraphQL hard-fail.
+        prs.create_promotion_pr.assert_not_called()
+        prs.push_synthetic_commit.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_empty_rc_logs_info_not_error(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        loop, _ = _make_loop(tmp_path, monkeypatch, rc_has_diff=False)
+        with caplog.at_level("INFO", logger="hydraflow.staging_promotion_loop"):
+            await loop._do_work()
+        assert not any(r.levelname == "ERROR" for r in caplog.records)
+        assert any(
+            "no commits ahead" in r.getMessage() and r.levelname == "INFO"
+            for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_rc_records_cadence_to_avoid_immediate_recut(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _ = _make_loop(tmp_path, monkeypatch, rc_has_diff=False)
+        assert not loop._cadence_path().exists()
+        await loop._do_work()
+        # Recording the timestamp prevents re-cutting an identical RC on the
+        # very next poll tick during quiet periods.
+        assert loop._cadence_path().exists()
+
+    @pytest.mark.asyncio
+    async def test_opens_pr_when_rc_has_commits_ahead(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = _make_loop(tmp_path, monkeypatch, rc_has_diff=True)
+        result = await loop._do_work()
+        assert result["status"] == "opened"
+        assert result["pr"] == 42
+        prs.create_promotion_pr.assert_called_once()
+        prs.push_synthetic_commit.assert_called_once()
 
 
 class TestOpenPromotionPassing:

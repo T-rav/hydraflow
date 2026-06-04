@@ -153,6 +153,20 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             logger.exception("Failed to create RC branch %s", rc_branch)
             return {"status": "rc_branch_failed"}
 
+        # Pre-check: skip when staging is already identical to main. Opening a
+        # promotion PR with zero commits ahead hard-fails on GitHub with
+        # "GraphQL: No commits between main and <rc> (createPullRequest)" — a
+        # recurring ERROR on every cadence tick during quiet periods. Treat the
+        # empty-RC case as a clean no-op instead.
+        if not await self._prs.branch_has_diff_from_main(rc_branch):
+            self._record_last_rc(now)
+            logger.info(
+                "RC branch %s has no commits ahead of %s; skipping promotion PR",
+                rc_branch,
+                self._config.main_branch,
+            )
+            return {"status": "no_commits", "rc_branch": rc_branch}
+
         title = f"Promote {rc_branch} → {self._config.main_branch}"
         body = (
             f"Automated release-candidate promotion PR.\n\n"
