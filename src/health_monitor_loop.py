@@ -585,9 +585,10 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             records = insight_store.load_recent(50)
             stale = verify_proposals(insight_store, records)
             for category in stale:
-                logger.warning(
-                    "HITL recommendation: stale review insight '%s'", category
-                )
+                # Informational HITL-recommendation status, not a warning — this
+                # line floods the WARNING channel in production (~195 occ.) with
+                # benign tuning-recommendation output (WS-05 log-hygiene).
+                logger.info("HITL recommendation: stale review insight '%s'", category)
         except ImportError:
             pass
         except Exception:  # noqa: BLE001
@@ -897,7 +898,10 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                         rec_path.parent.mkdir(parents=True, exist_ok=True)
                         with rec_path.open("a") as f:
                             f.write(json.dumps(rec) + "\n")
-                        logger.warning("HITL recommendation: %s", title)
+                        # Informational status (a recommendation was filed), not a
+                        # warning — downgraded from WARNING to stop flooding the
+                        # production WARNING channel (WS-05 log-hygiene).
+                        logger.info("HITL recommendation: %s", title)
                     except OSError:
                         logger.debug(
                             "Failed to write HITL recommendation", exc_info=True

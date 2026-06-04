@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -376,6 +377,32 @@ class TestFileHitlRecommendations:
         rec = json.loads(lines[0])
         assert rec["type"] == "recommendation"
         assert "surprise_rate" in rec["title"]
+
+    async def test_recommendation_status_logs_at_info_not_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The 'HITL recommendation: ...' filed-status line is informational and
+        must emit at INFO, never WARNING — it floods the production WARNING
+        channel (~195 occ.) otherwise (WS-05 log-hygiene)."""
+        loop = _make_loop(tmp_path)
+        metrics = TrendMetrics(
+            first_pass_rate=0.5,
+            avg_memory_score=0.7,
+            surprise_rate=_SURPRISE_HIGH + 0.05,
+            hitl_escalation_rate=0.0,
+            stale_item_count=0,
+            total_outcomes=10,
+        )
+        with caplog.at_level(logging.INFO, logger="hydraflow.health_monitor_loop"):
+            await loop._file_hitl_recommendations(metrics)
+        rec_records = [
+            r
+            for r in caplog.records
+            if r.getMessage().startswith("HITL recommendation:")
+        ]
+        assert rec_records, "expected a 'HITL recommendation:' status log line"
+        assert all(r.levelno == logging.INFO for r in rec_records)
+        assert all(r.levelno != logging.WARNING for r in rec_records)
 
     async def test_high_hitl_rate_writes_recommendation(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
