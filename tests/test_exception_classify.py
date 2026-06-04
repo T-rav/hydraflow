@@ -13,9 +13,38 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from exception_classify import (
     LIKELY_BUG_EXCEPTIONS,
     capture_if_bug,
+    exc_detail,
     is_likely_bug,
     reraise_on_credit_or_bug,
 )
+
+
+class TestExcDetail:
+    def test_returns_message_when_present(self) -> None:
+        assert exc_detail(RuntimeError("boom")) == "boom"
+
+    def test_strips_surrounding_whitespace(self) -> None:
+        assert exc_detail(RuntimeError("  boom  ")) == "boom"
+
+    def test_falls_back_to_repr_when_str_empty(self) -> None:
+        detail = exc_detail(RuntimeError())
+        assert detail != ""
+        assert detail == "RuntimeError()"
+
+    def test_falls_back_to_repr_when_str_blank(self) -> None:
+        detail = exc_detail(RuntimeError("   "))
+        assert detail.strip() != ""
+        assert "RuntimeError" in detail
+
+    def test_falls_back_to_type_name_when_repr_blank(self) -> None:
+        class _SilentError(Exception):
+            def __str__(self) -> str:
+                return ""
+
+            def __repr__(self) -> str:
+                return "   "
+
+        assert exc_detail(_SilentError()) == "_SilentError"
 
 
 class TestIsLikelyBug:
