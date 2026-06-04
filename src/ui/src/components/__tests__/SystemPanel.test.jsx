@@ -113,22 +113,28 @@ describe('SystemPanel', () => {
       expect(dot.style.background).toBe('var(--red)')
     })
 
-    it('shows "idle" (yellow) for enabled non-system workers and "stopped" (red) for system workers when orchestrator not running', () => {
+    it('shows "not running" (yellow) for all loops — system and non-system — when orchestrator not running', () => {
       render(<SystemPanel backgroundWorkers={[]} />)
-      const nonSystem = BACKGROUND_WORKERS.filter(w => !w.system)
-      const systemWorkers = BACKGROUND_WORKERS.filter(w => w.system)
-      const idleTexts = screen.getAllByText('idle')
-      expect(idleTexts.length).toBe(nonSystem.length)
-      for (const def of nonSystem) {
+      // A stopped factory is not an outage: no loop is red just because the
+      // orchestrator is idle. Every loop reads "not running" in neutral yellow.
+      const notRunningTexts = screen.getAllByText('not running')
+      expect(notRunningTexts.length).toBe(BACKGROUND_WORKERS.length)
+      for (const def of BACKGROUND_WORKERS) {
         const dot = screen.getByTestId(`dot-${def.key}`)
         expect(dot.style.background).toBe('var(--yellow)')
       }
-      const stoppedTexts = screen.getAllByText('stopped')
-      expect(stoppedTexts.length).toBe(systemWorkers.length)
-      for (const def of systemWorkers) {
-        const dot = screen.getByTestId(`dot-${def.key}`)
-        expect(dot.style.background).toBe('var(--red)')
-      }
+      // Red is reserved for genuine errors — none should appear while idle.
+      expect(screen.queryByText('stopped')).toBeNull()
+    })
+
+    it('shows neutral "off" (never red) for explicitly disabled loops when orchestrator not running', () => {
+      const disabledWorkers = [
+        { name: 'retrospective', status: 'ok', enabled: false, last_run: null, details: {} },
+      ]
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({ backgroundWorkers: disabledWorkers }))
+      render(<SystemPanel backgroundWorkers={disabledWorkers} />)
+      const dot = screen.getByTestId('dot-retrospective')
+      expect(dot.style.background).toBe('var(--text-inactive)')
     })
 
     it('shows ok/error status when orchestrator is running', () => {
@@ -332,20 +338,20 @@ describe('SystemPanel', () => {
       expect(dot.style.background).toBe('var(--green)')
     })
 
-    it('shows red stopped when orchestrator is not running even if poller has lastRun', () => {
+    it('shows "not running" (yellow, never red) when orchestrator is not running even if poller has lastRun', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({
         pipelinePollerLastRun: '2026-02-20T10:00:00Z',
         orchestratorStatus: 'idle',
       }))
       render(<SystemPanel backgroundWorkers={[]} />)
       const dot = screen.getByTestId('dot-pipeline_poller')
-      expect(dot.style.background).toBe('var(--red)')
+      expect(dot.style.background).toBe('var(--yellow)')
     })
 
-    it('shows red stopped when pipeline poller has not run', () => {
+    it('shows "not running" (yellow) when orchestrator not running and poller has not run', () => {
       render(<SystemPanel backgroundWorkers={[]} />)
       const dot = screen.getByTestId('dot-pipeline_poller')
-      expect(dot.style.background).toBe('var(--red)')
+      expect(dot.style.background).toBe('var(--yellow)')
     })
 
     it('does not show pipeline stage counts as details when orchestrator running (log stream only)', () => {
