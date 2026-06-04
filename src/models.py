@@ -2224,8 +2224,17 @@ class TrackedReport(BaseModel):
 
         Appends a :class:`ReportHistoryEntry` and updates ``updated_at``.
 
-        Raises :class:`ValueError` if the transition is not allowed.
+        A self-transition (``new_status == self.status``) is a semantic no-op:
+        it leaves the report unchanged and returns without raising.  This keeps
+        idempotent re-marks (e.g. ``report_issue_loop`` re-marking an already
+        ``in-progress`` report every tick) from raising ``ValueError`` — the
+        highest-volume production ERROR before this fix.
+
+        Raises :class:`ValueError` if the transition is to a *distinct*,
+        disallowed state.
         """
+        if new_status == self.status:
+            return
         allowed = self._VALID_TRANSITIONS.get(self.status, set())
         if new_status not in allowed:
             msg = f"Invalid transition: {self.status} -> {new_status}"

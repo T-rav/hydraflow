@@ -184,6 +184,27 @@ class TestTrackedReportTransition:
         report.transition("in-progress", action="processing")
         assert report.history[0].detail == ""
 
+    def test_self_transition_is_noop(self) -> None:
+        report = self._make_report("in-progress")
+        old_updated = report.updated_at
+        report.transition("in-progress", action="processing", detail="again")
+        assert report.status == "in-progress"
+        assert report.history == []
+        assert report.updated_at == old_updated
+
+    def test_self_transition_terminal_state_is_noop(self) -> None:
+        report = self._make_report("closed")
+        report.transition("closed", action="confirm_fixed")
+        assert report.status == "closed"
+        assert report.history == []
+
+    def test_invalid_distinct_transition_still_raises_after_noop_guard(self) -> None:
+        report = self._make_report("in-progress")
+        with pytest.raises(
+            ValueError, match="Invalid transition: in-progress -> fixed"
+        ):
+            report.transition("fixed", action="fixed")
+
 
 # ---------------------------------------------------------------------------
 # StateTracker.record_successful_merge
