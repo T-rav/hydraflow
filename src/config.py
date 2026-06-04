@@ -43,6 +43,14 @@ class Credentials(BaseModel):
         default="",
         description="Sentry API auth token for reading issues",
     )
+    honeycomb_mgmt_api_key: str = Field(
+        default="",
+        description=(
+            "Honeycomb Management API key for the inbound SLO/burn-alert "
+            "ingestion loop. DISTINCT from the outbound OTel ingest key "
+            "(HONEYCOMB_API_KEY in telemetry/otel.py). Empty => loop no-ops."
+        ),
+    )
     whatsapp_token: str = Field(
         default="",
         description="WhatsApp Business API access token",
@@ -225,6 +233,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("sentry_poll_interval", "SENTRY_POLL_INTERVAL", 600),
     ("sentry_min_events", "SENTRY_MIN_EVENTS", 2),
     ("sentry_max_creation_attempts", "SENTRY_MAX_CREATION_ATTEMPTS", 3),
+    ("honeycomb_poll_interval", "HONEYCOMB_POLL_INTERVAL", 900),
+    ("honeycomb_min_sustained_polls", "HONEYCOMB_MIN_SUSTAINED_POLLS", 2),
+    ("honeycomb_trigger_sustained_polls", "HONEYCOMB_TRIGGER_SUSTAINED_POLLS", 3),
+    ("honeycomb_signal_cooldown_hours", "HONEYCOMB_SIGNAL_COOLDOWN_HOURS", 24),
+    ("honeycomb_max_creation_attempts", "HONEYCOMB_MAX_CREATION_ATTEMPTS", 3),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
     ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
@@ -299,6 +312,9 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("repos_workspace_dir", "HYDRAFLOW_REPOS_WORKSPACE_DIR", "~/.hydra/repos"),
     ("sentry_org", "SENTRY_ORG", ""),
     ("sentry_project_filter", "SENTRY_PROJECT_FILTER", ""),
+    ("honeycomb_datasets", "HONEYCOMB_DATASETS", ""),
+    ("honeycomb_environment", "HONEYCOMB_ENVIRONMENT", ""),
+    ("honeycomb_api_base", "HONEYCOMB_API_BASE", "https://api.honeycomb.io"),
     ("dashboard_url", "HYDRAFLOW_DASHBOARD_URL", "http://localhost:5555"),
     ("otel_endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT", "https://api.honeycomb.io"),
     ("otel_service_name", "OTEL_SERVICE_NAME", "hydraflow"),
@@ -318,6 +334,11 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
         2.0,
     ),
     ("loop_anomaly_cost_spike_ratio", "HYDRAFLOW_LOOP_ANOMALY_COST_SPIKE_RATIO", 5.0),
+    (
+        "honeycomb_slo_budget_threshold_pct",
+        "HONEYCOMB_SLO_BUDGET_THRESHOLD_PCT",
+        0.0,
+    ),
     (
         "gh_circuit_breaker_reset_timeout_s",
         "HYDRAFLOW_GH_CIRCUIT_BREAKER_RESET_TIMEOUT_S",
@@ -346,6 +367,14 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
 
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
+    # Honeycomb per-trigger ingestion: noisier signal class, opt-in only.
+    (
+        "honeycomb_trigger_ingest_enabled",
+        "HYDRAFLOW_HONEYCOMB_TRIGGER_INGEST_ENABLED",
+        False,
+    ),
+    # Auto-close our filed issue when the SLO recovers / burn alert clears.
+    ("honeycomb_auto_close_enabled", "HYDRAFLOW_HONEYCOMB_AUTO_CLOSE_ENABLED", True),
     ("sensor_enrichment_enabled", "HYDRAFLOW_SENSOR_ENRICHMENT_ENABLED", True),
     ("gh_circuit_breaker_enabled", "HYDRAFLOW_GH_CIRCUIT_BREAKER_ENABLED", True),
     ("issue_cache_enabled", "HYDRAFLOW_ISSUE_CACHE_ENABLED", True),
@@ -441,6 +470,9 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("flake_tracker_loop_enabled", "HYDRAFLOW_FLAKE_TRACKER_LOOP_ENABLED", True),
     ("github_cache_loop_enabled", "HYDRAFLOW_GITHUB_CACHE_LOOP_ENABLED", True),
+    # Honeycomb inbound ingestion ships DEFAULT-DISABLED: no inbound mgmt key
+    # exists yet, and the loop is opt-in low-noise reliability ingestion.
+    ("honeycomb_ingest_loop_enabled", "HYDRAFLOW_HONEYCOMB_LOOP_ENABLED", False),
     ("health_monitor_loop_enabled", "HYDRAFLOW_HEALTH_MONITOR_LOOP_ENABLED", True),
     (
         "label_drift_watcher_loop_enabled",
@@ -561,6 +593,7 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
     ),
     ("HYDRAFLOW_WIKI_COMPILATION", "wiki_compilation_tool", "wiki_compilation_model"),
     ("HYDRAFLOW_SENTRY", "sentry_tool", "sentry_model"),
+    ("HYDRAFLOW_HONEYCOMB", "honeycomb_tool", "honeycomb_model"),
     ("HYDRAFLOW_ADR_REVIEW", "adr_review_tool", "adr_review_model"),
     ("HYDRAFLOW_REPORT_ISSUE", "report_issue_tool", "report_issue_model"),
 ]
@@ -1383,6 +1416,86 @@ class HydraFlowConfig(BaseModel):
         description="Max times to retry filing a GitHub issue for a Sentry error before parking",
     )
 
+    # Honeycomb inbound ingestion (HoneycombIngestLoop) — low-noise SLO /
+    # burn-alert reliability ingestion. DEFAULT-DISABLED; distinct from the
+    # outbound OTel instrumentation knobs below.
+    honeycomb_datasets: str = Field(
+        default="",
+        description=(
+            "Comma-separated Honeycomb dataset slugs to poll for SLOs / "
+            "burn alerts (empty = all accessible datasets)."
+        ),
+    )
+    honeycomb_environment: str = Field(
+        default="",
+        description="Honeycomb environment slug to scope the mgmt-API key (empty = key default)",
+    )
+    honeycomb_poll_interval: int = Field(
+        default=900,
+        ge=300,
+        le=86400,
+        description="Seconds between Honeycomb SLO / burn-alert polls",
+    )
+    honeycomb_slo_budget_threshold_pct: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=100.0,
+        description=(
+            "File an issue when an SLO's remaining error budget percent is "
+            "<= this value. 0 = only on full budget exhaustion (most "
+            "conservative / lowest noise)."
+        ),
+    )
+    honeycomb_min_sustained_polls: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description=(
+            "Number of CONSECUTIVE polls an SLO breach must persist before "
+            "filing. Resets the moment the signal clears. Core noise control: "
+            "never file on first observation."
+        ),
+    )
+    honeycomb_trigger_ingest_enabled: bool = Field(
+        default=False,
+        description=(
+            "Opt-in for the noisier per-trigger / burn-alert-only ingestion "
+            "class. Default off — only budget-backed SLO breaches file."
+        ),
+    )
+    honeycomb_trigger_sustained_polls: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description=(
+            "Consecutive-poll sustained gate for the per-trigger class "
+            "(hardest gate; >= honeycomb_min_sustained_polls by convention)."
+        ),
+    )
+    honeycomb_signal_cooldown_hours: int = Field(
+        default=24,
+        ge=1,
+        le=720,
+        description="Per-signal cooldown (hours) after filing or auto-closing before re-filing",
+    )
+    honeycomb_max_creation_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Max times to retry filing a GitHub issue for a Honeycomb signal before parking",
+    )
+    honeycomb_auto_close_enabled: bool = Field(
+        default=True,
+        description=(
+            "Resolution-sync: auto-close our filed GitHub issue (with a "
+            "'recovered' comment) when the SLO recovers / burn alert clears."
+        ),
+    )
+    honeycomb_api_base: str = Field(
+        default="https://api.honeycomb.io",
+        description="Base URL for the Honeycomb Management API",
+    )
+
     # OpenTelemetry / Honeycomb instrumentation
     otel_enabled: bool = Field(
         default=False,
@@ -1769,6 +1882,14 @@ class HydraFlowConfig(BaseModel):
     sentry_model: str = Field(
         default="sonnet",
         description="Model for sentry_loop ingestion worker (issue triage + filing from Sentry events) — sonnet is sufficient; the task is stack-trace parsing + issue filing, not deep reasoning. Opus was 4-5× the cost for no measurable quality win.",
+    )
+    honeycomb_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+        default="claude",
+        description="CLI backend for the honeycomb_loop ingestion worker",
+    )
+    honeycomb_model: str = Field(
+        default="sonnet",
+        description="Model for the honeycomb_loop ingestion worker (structured SLO / burn-alert summarization + issue filing) — sonnet is sufficient.",
     )
     report_issue_interval: int = Field(
         default=30,
@@ -2738,6 +2859,14 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for GitHubCacheLoop.",
     )
+    honeycomb_ingest_loop_enabled: bool = Field(
+        default=False,
+        description=(
+            "Deploy-time kill-switch for HoneycombIngestLoop. DEFAULT-DISABLED "
+            "— ships off until an operator provisions HONEYCOMB_MGMT_API_KEY "
+            "and selects datasets/signals."
+        ),
+    )
     health_monitor_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for HealthMonitorLoop.",
@@ -3026,6 +3155,7 @@ def build_credentials(config: HydraFlowConfig) -> Credentials:
     return Credentials(
         gh_token=gh_token,
         sentry_auth_token=os.environ.get("SENTRY_AUTH_TOKEN", ""),
+        honeycomb_mgmt_api_key=os.environ.get("HONEYCOMB_MGMT_API_KEY", ""),
         whatsapp_token=os.environ.get("HYDRAFLOW_WHATSAPP_TOKEN", ""),
         whatsapp_phone_id=os.environ.get("HYDRAFLOW_WHATSAPP_PHONE_ID", ""),
         whatsapp_recipient=os.environ.get("HYDRAFLOW_WHATSAPP_RECIPIENT", ""),
@@ -3075,6 +3205,7 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             "transcript_summary_tool",
             "report_issue_tool",
             "sentry_tool",
+            "honeycomb_tool",
             "adr_review_tool",
         ):
             _apply_if_default(field, config.background_tool)
@@ -3085,6 +3216,7 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             "transcript_summary_model",
             "report_issue_model",
             "sentry_model",
+            "honeycomb_model",
             "adr_review_model",
         ):
             _apply_if_default(field, config.background_model)
@@ -3159,6 +3291,7 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
         ),
         ("report_issue", config.report_issue_tool, config.report_issue_model),
         ("sentry", config.sentry_tool, config.sentry_model),
+        ("honeycomb", config.honeycomb_tool, config.honeycomb_model),
         ("adr_review", config.adr_review_tool, config.adr_review_model),
     ]
 
