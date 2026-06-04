@@ -1,6 +1,6 @@
 # ADR-0071 — RouteBackCounterPort: Testable Counter for Precondition Route-Backs
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-05-19
 **Enforced by:** `tests/test_route_back.py`
 
