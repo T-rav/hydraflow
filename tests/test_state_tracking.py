@@ -99,6 +99,7 @@ class TestInitialization:
             "diagnosis_severities",
             "sentry_creation_attempts",
             "log_ingest_cursor",
+            "sentry_signal_cooldown",
             "trace_runs",
             "route_back_counts",
             # Trust-arch-hardening mixins (spec §4.1–§4.9 + §12.1)

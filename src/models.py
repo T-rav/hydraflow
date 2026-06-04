@@ -1909,6 +1909,10 @@ class StateData(BaseModel):
     # On the first run for a file the cursor is primed to current EOF (no
     # filing) so historical errors are not back-filled / re-filed.
     log_ingest_cursor: dict[str, int] = Field(default_factory=dict)
+    # Per-Sentry-issue cooldown stamps (id -> ISO timestamp of last filing
+    # attempt). Suppresses re-filing a flapping error every poll within
+    # ``sentry_signal_cooldown_hours``. See sentry_loop.SentryLoop.
+    sentry_signal_cooldown: dict[str, str] = Field(default_factory=dict)
     trace_runs: TraceRunsContainer = Field(default_factory=TraceRunsContainer)
     # StagingBisectLoop state (spec §4.3 + §8). Written by StagingPromotionLoop
     # on each promotion outcome; polled + mutated by StagingBisectLoop.

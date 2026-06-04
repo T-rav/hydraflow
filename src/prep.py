@@ -61,6 +61,16 @@ HYDRAFLOW_LABELS: tuple[tuple[str, str, str], ...] = (
         "d4c5f9",
         "Recurring log error/warning clustered + filed by LogIngestLoop",
     ),
+    (
+        "memory_backlog_label",
+        "fef2c0",
+        "Session-memory feedback promoted to the find queue (MemoryBacklogLoop)",
+    ),
+    (
+        "memory_backlog_stuck_label",
+        "b60205",
+        "Memory-backlog entry unresolved after retries",
+    ),
 )
 
 
