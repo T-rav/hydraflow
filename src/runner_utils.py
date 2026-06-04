@@ -192,7 +192,10 @@ async def _stream_and_collect(
             and config.on_output(accumulated_text)
         ):
             early_killed = True
-            proc.kill()
+            # The process may have already exited between the last read and
+            # this kill; suppress ProcessLookupError so it does not escape.
+            with contextlib.suppress(ProcessLookupError, OSError):
+                proc.kill()
             break
 
         # Emit structured activity event (additive — does not replace TRANSCRIPT_LINE)
@@ -212,7 +215,10 @@ async def _stream_and_collect(
 
     # --- Post-stream validation and result assembly ---
     stderr_bytes = await stderr_task
-    await proc.wait()
+    # After an early kill the process may already be reaped, so waiting on it can
+    # raise ProcessLookupError; suppress it so cleanup never escapes.
+    with contextlib.suppress(ProcessLookupError, OSError):
+        await proc.wait()
     stderr_text = stderr_bytes.decode(errors="replace").strip()
 
     return _post_stream_result(
@@ -321,11 +327,18 @@ async def stream_claude_process(
             timeout=config.timeout,
         )
     except TimeoutError as exc:
-        proc.kill()
-        await proc.wait()
+        # The process may already be dead/reaped; killing/waiting on a gone
+        # process raises ProcessLookupError out of the cleanup path. Mirror the
+        # guard in terminate_processes().
+        with contextlib.suppress(ProcessLookupError, OSError):
+            proc.kill()
+            await proc.wait()
         raise RuntimeError(f"Agent process timed out after {config.timeout}s") from exc
     except asyncio.CancelledError:
-        proc.kill()
+        # On cancellation the process may already have exited; suppress
+        # ProcessLookupError so it does not escape the cancel path.
+        with contextlib.suppress(ProcessLookupError, OSError):
+            proc.kill()
         raise
     finally:
         if stderr_task is not None and not stderr_task.done():
