@@ -291,6 +291,30 @@ class TestEnsureLabels:
         assert len(result.existed) == len(HYDRAFLOW_LABELS)
         assert len(result.failed) == 0
 
+    @pytest.mark.asyncio
+    async def test_provisions_memory_backlog_labels(self) -> None:
+        """MemoryBacklogLoop's labels are provisioned by ensure_labels.
+
+        Root-cause for the recurring `create_issue`-returns-0 / phantom
+        `issue #0` filings: `gh issue create --label <X>` fails when label
+        X is absent from the repo, so create_issue's except returns the
+        0 sentinel every cycle. The memory-backlog labels were missing
+        from HYDRAFLOW_LABELS, so ensure_labels never created them.
+        """
+        config = ConfigFactory.create()
+        created: list[str] = []
+
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_label_side_effect("[]", capture=created),
+        ):
+            await ensure_labels(config)
+
+        for name in config.memory_backlog_label:
+            assert name in created
+        for name in config.memory_backlog_stuck_label:
+            assert name in created
+
 
 # ---------------------------------------------------------------------------
 # AuditResult model tests

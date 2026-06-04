@@ -97,10 +97,24 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
             attempts = self._state.inc_memory_backlog_attempts(key)
             try:
                 if attempts >= _MAX_ATTEMPTS:
-                    await self._file_escalation(entry, attempts)
+                    issue_num = await self._file_escalation(entry, attempts)
+                    if issue_num == 0:
+                        logger.warning(
+                            "memory_backlog: create_issue returned 0 (sentinel) "
+                            "for escalation of %s; skipping, will retry next cycle",
+                            entry.slug,
+                        )
+                        continue
                     escalated += 1
                 else:
                     issue_num = await self._file_backlog_issue(entry)
+                    if issue_num == 0:
+                        logger.warning(
+                            "memory_backlog: create_issue returned 0 (sentinel) "
+                            "for %s; skipping record/commit, will retry next cycle",
+                            entry.slug,
+                        )
+                        continue
                     update_status(entry.path, status="issue-open", issue=issue_num)
                     filed += 1
                     filed_issue_numbers.append(issue_num)

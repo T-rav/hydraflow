@@ -160,6 +160,51 @@ async def test_drift_files_one_rollup_per_adr(loop_env, monkeypatch) -> None:
     assert call_kwargs["issue_number"] == 42
 
 
+async def test_rollup_zero_sentinel_does_not_record_or_dedup(
+    loop_env, monkeypatch
+) -> None:
+    """create_issue's 0 sentinel must not record a rollup or add the dedup key.
+
+    Regression for issue #9241: a failed gh call returns 0; recording
+    ``issue_number=0`` or adding the dedup key would suppress re-filing
+    forever (next tick's ``dedup_key in dedup`` skips) without a real issue.
+    """
+    cfg, state, pr, dedup, idx = loop_env
+    pr.create_issue = AsyncMock(return_value=0)  # gh failed → sentinel
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+
+    async def fake_list(_cursor):
+        return [
+            {
+                "number": 8473,
+                "mergedAt": "2026-05-06T20:00:00Z",
+                "title": "feat: tweak",
+                "files": [{"path": "src/agent.py"}],
+            }
+        ]
+
+    async def fake_reconcile():
+        return None
+
+    monkeypatch.setattr(loop, "_list_recent_merged_prs", fake_list)
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+
+    stats = await loop._do_work()
+
+    pr.create_issue.assert_awaited()  # it tried
+    assert stats["filed"] == 0  # but recorded nothing
+    state.set_adr_rollup.assert_not_called()
+    dedup.set_all.assert_not_called()  # no dedup add — retries next cycle
+
+
 async def test_one_pr_drifting_8_adrs_files_8_issues(loop_env, monkeypatch) -> None:
     """A single PR drifting 8 ADRs files 8 issues (one per ADR)."""
     cfg, state, pr, dedup, idx = loop_env
