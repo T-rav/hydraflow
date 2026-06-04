@@ -128,6 +128,36 @@ class StateRestorer:
             self._bg_workers._remove_enabled_entry(name)
         self._state.set_disabled_workers(disabled - stale)
 
+    def prune_stale_worker_states(self, known_names: set[str]) -> None:
+        """Remove persisted heartbeat entries for workers that no longer exist.
+
+        Mirror of :meth:`prune_stale_disabled_workers` but for the
+        ``bg_worker_states`` heartbeat cache.  Orphan keys accumulate when a
+        worker is renamed (e.g. ``diagram-loop`` -> ``diagram_loop``) or removed
+        between releases (``verify_monitor``, ``manifest_refresh``,
+        ``worktree_gc``, ``metrics``, ``memory_sync``, ``code_grooming``); the
+        old key lingers in ``state.json`` forever and can confuse the dashboard.
+
+        Called after loop factories are defined so we know the full set of valid
+        worker names.  Only entries whose name is not in *known_names* are
+        dropped — a live worker's heartbeat is never removed.
+        """
+        if not known_names:
+            return
+        persisted = set(self._state.get_bg_worker_states())
+        stale = persisted - known_names
+        if not stale:
+            return
+        logger.info(
+            "Pruning %d stale bg_worker_state heartbeat entr%s from state: %s",
+            len(stale),
+            "ies" if len(stale) != 1 else "y",
+            sorted(stale),
+        )
+        for name in stale:
+            self._bg_workers._remove_worker_state_entry(name)
+            self._state.remove_bg_worker_state(name)
+
     def _restore_bg_worker_states(self) -> None:
         """Hydrate background worker heartbeat cache from persisted state."""
         persisted = self._state.get_bg_worker_states()

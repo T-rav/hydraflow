@@ -133,6 +133,10 @@ class BGWorkerManager:
         """Return the set of worker names that have heartbeat state."""
         return set(self._bg_worker_states)
 
+    def _remove_worker_state_entry(self, name: str) -> None:
+        """Remove an in-memory heartbeat entry entirely (for stale worker pruning)."""
+        self._bg_worker_states.pop(name, None)
+
     def set_interval(self, name: str, seconds: int) -> None:
         """Set a dynamic interval override for a background worker."""
         self._bg_worker_intervals[name] = seconds

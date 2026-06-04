@@ -1053,9 +1053,9 @@ class HydraFlowOrchestrator:
 
         # Hindsight WAL replay loop removed in Phase 3 cutover — the wiki
         # pipeline doesn't need a replay loop.
-        self._state_restorer.prune_stale_disabled_workers(
-            {n for n, _ in loop_factories}
-        )
+        known_worker_names = {n for n, _ in loop_factories}
+        self._state_restorer.prune_stale_disabled_workers(known_worker_names)
+        self._state_restorer.prune_stale_worker_states(known_worker_names)
         tasks: dict[str, asyncio.Task[None]] = {}
         for name, factory in loop_factories:
             tasks[name] = asyncio.create_task(factory(), name=f"hydraflow-{name}")
