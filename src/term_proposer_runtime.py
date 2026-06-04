@@ -42,7 +42,7 @@ class ClaudeCLIClient:
         runner: SubprocessRunner,
         *,
         tool: AgentTool = "claude",
-        model: str = "claude-sonnet-4-5",
+        model: str = "claude-sonnet-4-6",
         timeout: int = 180,
     ) -> None:
         self._runner = runner
