@@ -13,7 +13,13 @@ import pytest
 
 from admin_tasks import _seed_context_assets
 from models import AuditCheckStatus
-from prep import HYDRAFLOW_LABELS, PrepResult, _list_existing_labels, ensure_labels
+from prep import (
+    HYDRAFLOW_LABELS,
+    PrepResult,
+    _label_names,
+    _list_existing_labels,
+    ensure_labels,
+)
 from tests.conftest import SubprocessMockBuilder
 from tests.helpers import (
     AuditCheckFactory,
@@ -278,7 +284,7 @@ class TestEnsureLabels:
         # Build the list of all default label names
         all_names = []
         for cfg_field, _, _ in HYDRAFLOW_LABELS:
-            all_names.extend(getattr(config, cfg_field))
+            all_names.extend(_label_names(getattr(config, cfg_field)))
         existing_json = json.dumps([{"name": n} for n in all_names])
 
         with patch(

@@ -56,7 +56,25 @@ HYDRAFLOW_LABELS: tuple[tuple[str, str, str], ...] = (
         "b60205",
         "ADR drift unresolved after retries",
     ),
+    (
+        "log_ingest_label",
+        "d4c5f9",
+        "Recurring log error/warning clustered + filed by LogIngestLoop",
+    ),
 )
+
+
+def _label_names(value: object) -> list[str]:
+    """Normalise a label config field to a list of label names.
+
+    Most label fields are ``list[str]`` (OR-logic labels), but some — like
+    ``log_ingest_label`` — are a plain ``str``. Iterating a raw ``str`` would
+    create one label per character, so coerce a ``str`` into a single-item
+    list here.
+    """
+    if isinstance(value, str):
+        return [value]
+    return list(value)  # type: ignore[arg-type]
 
 
 @dataclass
@@ -121,7 +139,7 @@ async def ensure_labels(
 
     if config.dry_run:
         for cfg_field, _color, _desc in HYDRAFLOW_LABELS:
-            for name in getattr(config, cfg_field):
+            for name in _label_names(getattr(config, cfg_field)):
                 result.created.append(name)
         logger.info("[dry-run] Would create labels: %s", result.created)
         return result
@@ -129,7 +147,7 @@ async def ensure_labels(
     existing = await _list_existing_labels(config, credentials=credentials)
 
     for cfg_field, color, description in HYDRAFLOW_LABELS:
-        label_names: list[str] = getattr(config, cfg_field)
+        label_names: list[str] = _label_names(getattr(config, cfg_field))
         for label_name in label_names:
             try:
                 await run_subprocess_with_retry(

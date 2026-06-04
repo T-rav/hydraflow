@@ -18,6 +18,7 @@ flowchart LR
         caretaking_GitHubCacheLoop([GitHubCacheLoop])
         caretaking_HealthMonitorLoop([HealthMonitorLoop])
         caretaking_LabelDriftWatcherLoop([LabelDriftWatcherLoop])
+        caretaking_LogIngestLoop([LogIngestLoop])
         caretaking_MemoryBacklogLoop([MemoryBacklogLoop])
         caretaking_MergeStateWatcherLoop([MergeStateWatcherLoop])
         caretaking_PRUnstickerLoop([PRUnstickerLoop])
@@ -103,6 +104,7 @@ Autonomous background loops that maintain the system without human input — wik
 - `GitHubCacheLoop` — `src.github_cache_loop`
 - `HealthMonitorLoop` — `src.health_monitor_loop`
 - `LabelDriftWatcherLoop` — `src.label_drift_watcher_loop`
+- `LogIngestLoop` — `src.log_ingest_loop`
 - `MemoryBacklogLoop` — `src.memory_backlog_loop`
 - `MergeStateWatcherLoop` — `src.merge_state_watcher_loop`
 - `PRUnstickerLoop` — `src.pr_unsticker_loop`

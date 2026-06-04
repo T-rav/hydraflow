@@ -1904,6 +1904,11 @@ class StateData(BaseModel):
     diagnostic_attempts: dict[str, list[AttemptRecord]] = Field(default_factory=dict)
     diagnosis_severities: dict[str, str] = Field(default_factory=dict)
     sentry_creation_attempts: dict[str, int] = Field(default_factory=dict)
+    # LogIngestLoop — per-log-file byte-offset cursor (cursor-from-now). Keyed
+    # by the resolved log file path; value is the last-scanned EOF byte offset.
+    # On the first run for a file the cursor is primed to current EOF (no
+    # filing) so historical errors are not back-filled / re-filed.
+    log_ingest_cursor: dict[str, int] = Field(default_factory=dict)
     trace_runs: TraceRunsContainer = Field(default_factory=TraceRunsContainer)
     # StagingBisectLoop state (spec §4.3 + §8). Written by StagingPromotionLoop
     # on each promotion outcome; polled + mutated by StagingBisectLoop.
