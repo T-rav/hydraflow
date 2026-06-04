@@ -1,7 +1,8 @@
-"""Sentry ingestion state — creation attempt tracking."""
+"""Sentry ingestion state — creation attempt + per-issue cooldown tracking."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -30,4 +31,24 @@ class SentryStateMixin:
     def clear_sentry_creation_attempts(self, sentry_id: str) -> None:
         """Clear creation attempt tracking for a Sentry issue."""
         self._data.sentry_creation_attempts.pop(sentry_id, None)
+        self.save()
+
+    # ------------------------------------------------------------- cooldown
+    def stamp_sentry_cooldown(self, sentry_id: str) -> None:
+        """Record now() as the last filing-attempt time for a Sentry issue.
+
+        Persisted in ``StateData`` so the cooldown survives restarts. Used to
+        suppress re-filing the same Sentry issue every poll while a recently
+        attempted/filed error is still flapping in the unresolved feed.
+        """
+        self._data.sentry_signal_cooldown[sentry_id] = datetime.now(UTC).isoformat()
+        self.save()
+
+    def get_sentry_cooldown_stamp(self, sentry_id: str) -> str:
+        """Return the ISO timestamp of the last filing attempt, or '' if none."""
+        return self._data.sentry_signal_cooldown.get(sentry_id, "")
+
+    def clear_sentry_cooldown(self, sentry_id: str) -> None:
+        """Clear the cooldown stamp for a Sentry issue."""
+        self._data.sentry_signal_cooldown.pop(sentry_id, None)
         self.save()

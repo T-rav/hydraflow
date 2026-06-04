@@ -82,18 +82,20 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
   let dotColor, statusText, lastRun, details
 
   if (!orchRunning) {
-    // Orchestrator not running — system workers stopped, non-system show toggle state
+    // Orchestrator not running is an orchestrator-level fact, not a per-loop
+    // health signal: no loop is "errored" just because the factory is stopped.
+    // So nothing here is red — red is reserved for status === 'error' (a loop
+    // that actually ran and failed). Every loop (system and non-system alike)
+    // reads "not running"; only loops the operator explicitly toggled off show
+    // a neutral "off". This keeps a stopped factory from looking like an outage.
     lastRun = isPipelinePoller ? (pipelinePollerLastRun || null) : (state?.last_run || null)
     details = state?.details || {}
-    if (isSystem) {
-      dotColor = theme.red
-      statusText = 'stopped'
-    } else if (state?.enabled === false) {
-      dotColor = theme.red
+    if (state?.enabled === false) {
+      dotColor = theme.textInactive
       statusText = 'off'
     } else {
       dotColor = theme.yellow
-      statusText = 'idle'
+      statusText = 'not running'
     }
   } else if (isPipelinePoller) {
     // Pipeline poller is frontend-only — derive details from pipeline snapshot
@@ -125,7 +127,7 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
     lastRun = null
     details = {}
   } else if (state.enabled === false) {
-    dotColor = theme.red
+    dotColor = theme.textInactive
     statusText = 'off'
     lastRun = state.last_run || null
     details = state.details || {}
@@ -155,7 +157,7 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
   const effectiveInterval = state?.interval_seconds ?? SYSTEM_WORKER_INTERVALS[def.key] ?? null
   const enabled = !isSystem && (state ? state.enabled !== false : true)
   const showToggle = onToggleBgWorker && !isSystem
-  const isError = statusText === 'error' || statusText === 'stopped'
+  const isError = statusText === 'error'
   const hasDetails = Object.keys(details).length > 0
   const description = state?.description || def.description || ''
   return (

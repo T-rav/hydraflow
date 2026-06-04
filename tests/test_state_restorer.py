@@ -134,6 +134,59 @@ class TestPruneStaleDisabledWorkers:
         assert bg_workers.worker_enabled == {}
 
 
+class TestPruneStaleWorkerStates:
+    @staticmethod
+    def _seed(state: Any, name: str) -> None:
+        state.set_bg_worker_state(
+            name,
+            {
+                "name": name,
+                "status": "ok",
+                "last_run": "2026-01-01T00:00:00Z",
+                "details": {},
+            },
+        )
+
+    def test_prunes_orphan_heartbeats(
+        self,
+        restorer: StateRestorer,
+        state: Any,
+        bg_workers: BGWorkerManager,
+    ) -> None:
+        # Orphan keys: renamed (diagram-loop) and removed (verify_monitor) workers
+        self._seed(state, "diagram-loop")
+        self._seed(state, "verify_monitor")
+        # Valid keys for live workers
+        self._seed(state, "triage")
+        self._seed(state, "review")
+        # Hydrate the in-memory cache the way startup recovery would
+        restorer.restore_all(set(), set(), set(), set())
+
+        restorer.prune_stale_worker_states({"triage", "review"})
+
+        # Only live workers survive in persisted state...
+        persisted = set(state.get_bg_worker_states())
+        assert persisted == {"triage", "review"}
+        # ...and in the in-memory heartbeat cache.
+        assert "diagram-loop" not in bg_workers.worker_states
+        assert "verify_monitor" not in bg_workers.worker_states
+        assert "triage" in bg_workers.worker_states
+        assert "review" in bg_workers.worker_states
+
+    def test_noop_when_no_stale(self, restorer: StateRestorer, state: Any) -> None:
+        self._seed(state, "triage")
+        restorer.restore_all(set(), set(), set(), set())
+        restorer.prune_stale_worker_states({"triage", "review"})
+        assert set(state.get_bg_worker_states()) == {"triage"}
+
+    def test_noop_when_no_known(self, restorer: StateRestorer, state: Any) -> None:
+        self._seed(state, "diagram-loop")
+        restorer.restore_all(set(), set(), set(), set())
+        # Empty known set must never drop a live worker's state defensively
+        restorer.prune_stale_worker_states(set())
+        assert set(state.get_bg_worker_states()) == {"diagram-loop"}
+
+
 class TestBackfillFromEvents:
     @pytest.mark.asyncio
     async def test_backfills_from_event_history(

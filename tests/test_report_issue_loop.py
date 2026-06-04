@@ -458,6 +458,41 @@ class TestReportStatusTransitions:
 
         assert "in-progress" in captured_status
 
+    @pytest.mark.asyncio
+    async def test_already_in_progress_report_remark_does_not_raise(
+        self, tmp_path: Path
+    ) -> None:
+        """Re-marking an already 'in-progress' report is idempotent.
+
+        Regression for the highest-volume production ERROR (31 occurrences):
+        ``ValueError: Invalid transition: in-progress -> in-progress`` raised
+        every tick because the report was already in-progress.  The self-
+        transition is now a no-op.
+        """
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        report = PendingReport(description="Loop re-mark", reporter_id="u1")
+        state.enqueue_report(report)
+        state.add_tracked_report(
+            TrackedReport(
+                id=report.id,
+                reporter_id="u1",
+                description=report.description,
+                status="in-progress",
+            )
+        )
+
+        with patch(
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.return_value = "https://github.com/acme/repo/issues/77"
+            result = await loop._do_work()
+
+        assert result is not None
+        assert result["processed"] == 1
+        tracked = state.get_tracked_report(report.id)
+        assert tracked is not None
+        assert tracked.status == "filed"
+
 
 class TestReportRetryAndEscalation:
     @pytest.mark.asyncio

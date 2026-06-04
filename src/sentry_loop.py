@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
@@ -82,6 +83,29 @@ class SentryLoop(BaseBackgroundLoop):
         self._filed.add(sentry_id)
         if self._dedup:
             self._dedup.add(sentry_id)
+
+    def _in_cooldown(self, sentry_id: str) -> bool:
+        """Whether this Sentry id was attempted within the cooldown window.
+
+        Noise control: after any filing *attempt* (success or a transient
+        no-URL failure) we stamp a timestamp; for ``sentry_signal_cooldown_hours``
+        the same Sentry id is suppressed so a flapping unresolved error does not
+        re-invoke the agent every poll. Persisted via ``StateTracker`` so the
+        cooldown survives restarts. No-op when state tracking is absent.
+        """
+        if self._state is None:
+            return False
+        stamp = self._state.get_sentry_cooldown_stamp(sentry_id)
+        if not stamp:
+            return False
+        try:
+            last = datetime.fromisoformat(stamp)
+        except ValueError:
+            return False
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=UTC)
+        elapsed_h = (datetime.now(UTC) - last).total_seconds() / 3600.0
+        return elapsed_h < self._config.sentry_signal_cooldown_hours
 
     async def _do_work(self) -> dict[str, Any] | None:
         if not self._enabled_cb(self._worker_name):
@@ -172,6 +196,15 @@ class SentryLoop(BaseBackgroundLoop):
             self._mark_filed(sentry_id)
             return 0, 1
 
+        # Per-issue cooldown: suppress re-filing a recently attempted Sentry
+        # issue. Stops a flapping unresolved error re-invoking the agent every
+        # poll. Checked after the free dedup gates, before the expensive agent.
+        if self._in_cooldown(sentry_id):
+            logger.debug(
+                "Sentry %s within filing cooldown — skipping this poll", sentry_id
+            )
+            return 0, 1
+
         if self._state:
             attempts = self._state.get_sentry_creation_attempts(sentry_id)
             if attempts >= self._config.sentry_max_creation_attempts:
@@ -184,6 +217,10 @@ class SentryLoop(BaseBackgroundLoop):
                 return 0, 1
 
         created = await self._create_github_issue(issue, project_slug)
+        # Stamp the cooldown on every attempt (success or transient no-URL
+        # failure) so the same id is not retried until the window elapses.
+        if self._state:
+            self._state.stamp_sentry_cooldown(sentry_id)
         if created:
             await self._resolve_sentry_issue(sentry_id)
             self._mark_filed(sentry_id)
@@ -240,7 +277,18 @@ class SentryLoop(BaseBackgroundLoop):
 
         If the bug recurs, Sentry auto-reopens it as a new unresolved issue
         and the next poll cycle will pick it up again.
+
+        This is an upstream mutation of the operator's Sentry data and is
+        gated behind ``sentry_resolve_upstream_enabled`` (default True =
+        current behavior). When disabled, local dedup + the per-issue cooldown
+        keep the unresolved feed from re-filing.
         """
+        if not self._config.sentry_resolve_upstream_enabled:
+            logger.debug(
+                "sentry_resolve_upstream_enabled is off — not resolving %s upstream",
+                issue_id,
+            )
+            return
         url = f"{_SENTRY_API}/issues/{issue_id}/"
         try:
             async with httpx.AsyncClient(timeout=30) as client:

@@ -12,6 +12,7 @@ real LLM backend.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -19,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from repo_wiki import (
+    RepoWikiStore,
     WikiEntry,
     _load_tracked_active_entries,
     _mark_tracked_entry_superseded,
@@ -94,6 +96,96 @@ class TestLoadTrackedActiveEntries:
         topic_dir.mkdir()
         (topic_dir / "0001-issue-1-x.md").write_text("# no frontmatter\n")
         assert _load_tracked_active_entries(topic_dir) == []
+
+
+class TestMalformedTrackedEntryLogging:
+    """Malformed tracked entries must not produce a per-entry WARNING storm.
+
+    A non-numeric ``source_issue`` makes ``int(...)`` raise inside
+    ``_load_tracked_topic_entries_with_paths``. The parser re-reads the same
+    files every loop tick, so per-entry WARNINGs self-amplified to ~7,663
+    lines/run in prod. The fix downgrades each skip to DEBUG (with the
+    offending id) and emits exactly one aggregated WARNING per topic dir.
+    """
+
+    def _write_topic(self, tmp_path: Path) -> Path:
+        topic_dir = tmp_path / "patterns"
+        # One good entry plus two malformed (non-numeric source_issue).
+        _write_entry_file(
+            topic_dir / "0001-issue-1-good.md",
+            entry_id="0001",
+            topic="patterns",
+            source_issue=1,
+            title="Good",
+        )
+        _write_entry_file(
+            topic_dir / "0002-issue-bad-b.md",
+            entry_id="0002",
+            topic="patterns",
+            source_issue="not-a-number",
+            title="Bad B",
+        )
+        _write_entry_file(
+            topic_dir / "0003-issue-bad-c.md",
+            entry_id="0003",
+            topic="patterns",
+            source_issue="also-bad",
+            title="Bad C",
+        )
+        return topic_dir
+
+    def test_per_entry_skip_logs_at_debug_with_id(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        topic_dir = self._write_topic(tmp_path)
+        store = RepoWikiStore(tmp_path / "wikiroot")
+
+        with caplog.at_level(logging.DEBUG, logger="hydraflow.repo_wiki"):
+            pairs = store._load_tracked_topic_entries_with_paths(topic_dir)
+
+        # Good entry still parses; malformed ones are dropped (behavior intact).
+        assert [entry.id for entry, _ in pairs] == ["0001"]
+
+        debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
+        debug_msgs = [r.getMessage() for r in debug_records]
+        assert any("0002" in m for m in debug_msgs)
+        assert any("0003" in m for m in debug_msgs)
+        assert all("malformed tracked entry" in m for m in debug_msgs)
+
+    def test_emits_exactly_one_aggregated_warning_with_count_and_ids(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        topic_dir = self._write_topic(tmp_path)
+        store = RepoWikiStore(tmp_path / "wikiroot")
+
+        with caplog.at_level(logging.DEBUG, logger="hydraflow.repo_wiki"):
+            store._load_tracked_topic_entries_with_paths(topic_dir)
+
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        msg = warnings[0].getMessage()
+        assert "skipped 2 malformed entries" in msg
+        assert str(topic_dir) in msg
+        assert "0002" in msg and "0003" in msg
+
+    def test_no_warning_when_all_entries_well_formed(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        topic_dir = tmp_path / "patterns"
+        _write_entry_file(
+            topic_dir / "0001-issue-1-good.md",
+            entry_id="0001",
+            topic="patterns",
+            source_issue=1,
+            title="Good",
+        )
+        store = RepoWikiStore(tmp_path / "wikiroot")
+
+        with caplog.at_level(logging.DEBUG, logger="hydraflow.repo_wiki"):
+            pairs = store._load_tracked_topic_entries_with_paths(topic_dir)
+
+        assert [entry.id for entry, _ in pairs] == ["0001"]
+        assert [r for r in caplog.records if r.levelno == logging.WARNING] == []
 
 
 class TestWriteTrackedSynthesisEntry:

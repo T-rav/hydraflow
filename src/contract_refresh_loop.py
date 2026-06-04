@@ -611,6 +611,16 @@ class ContractRefreshLoop(BaseBackgroundLoop):
                 )
                 continue
             issue_num = await self._file_escalation_issue(adapter, attempts)
+            if issue_num == 0:
+                # create_issue's documented 0-sentinel: the gh call failed.
+                # Don't add the escalation-dedup key — that would suppress
+                # re-escalation forever without a real issue. Retry next tick.
+                logger.warning(
+                    "contract_refresh: create_issue returned 0 (sentinel) for "
+                    "%s escalation; skipping, will retry next cycle",
+                    adapter,
+                )
+                continue
             self._escalation_dedup.add(adapter)
             escalated[adapter] = issue_num
             logger.warning(

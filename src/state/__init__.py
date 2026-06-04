@@ -37,6 +37,7 @@ from ._hitl import HITLStateMixin
 from ._issue import IssueStateMixin
 from ._lifetime import LifetimeStatsMixin
 from ._live_corpus_replay import LiveCorpusReplayStateMixin
+from ._log_ingest import LogIngestStateMixin
 from ._memory_backlog import MemoryBacklogStateMixin
 from ._onboarding import OnboardingStateMixin
 from ._principles_audit import PrinciplesAuditStateMixin
@@ -87,6 +88,7 @@ class StateTracker(
     CIMonitorStateMixin,
     DiagnosticStateMixin,
     SentryStateMixin,
+    LogIngestStateMixin,
     TraceRunsMixin,
     FlakeTrackerStateMixin,
     SkillPromptEvalStateMixin,

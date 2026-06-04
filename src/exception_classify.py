@@ -38,6 +38,21 @@ def is_likely_bug(exc: BaseException) -> bool:
     return isinstance(exc, LIKELY_BUG_EXCEPTIONS)
 
 
+def exc_detail(exc: BaseException) -> str:
+    """Return a non-empty, human-readable detail string for *exc*.
+
+    Many exceptions carry an empty ``str()`` — e.g. a subprocess error raised
+    with empty stderr, or a bare ``RuntimeError()`` — which produces useless
+    log lines like ``"Review failed for PR #8672: "`` (nothing after the
+    colon). This helper guarantees a diagnostic remains by falling back to
+    ``repr(exc)`` and finally the exception's type name.
+
+    Use it anywhere ``str(exc)`` is interpolated into a log message without
+    ``exc_info=True`` to back-stop the empty-message case.
+    """
+    return str(exc).strip() or repr(exc).strip() or type(exc).__name__
+
+
 def capture_if_bug(
     exc: Exception,
     obs: ObservabilityPort | None = None,

@@ -59,6 +59,7 @@ from label_drift_watcher_loop import LabelDriftWatcherLoop
 from live_corpus_replay_loop import (
     LiveCorpusReplayLoop,  # noqa: TCH001 — dataclass annotation
 )
+from log_ingest_loop import LogIngestLoop  # noqa: TCH001 — used in dataclass field
 from memory_backlog_loop import MemoryBacklogLoop
 from merge_conflict_resolver import MergeConflictResolver
 from merge_state_watcher_loop import MergeStateWatcherLoop
@@ -195,6 +196,7 @@ class ServiceRegistry:
     staging_bisect_loop: StagingBisectLoop
     stale_issue_loop: StaleIssueLoop
     sentry_loop: SentryLoop
+    log_ingest_loop: LogIngestLoop
     stale_issue_gc_loop: StaleIssueGCLoop
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
@@ -999,6 +1001,17 @@ def build_services(
         dedup=sentry_dedup,
         state=state,
     )
+    log_ingest_dedup = DedupStore(
+        "log_ingest_filed_sighashes",
+        config.data_root / "dedup" / "log_ingest_filed.json",
+    )
+    log_ingest_loop = LogIngestLoop(
+        config=config,
+        prs=prs,
+        deps=loop_deps,
+        dedup=log_ingest_dedup,
+        state=state,
+    )
     stale_issue_gc_loop = StaleIssueGCLoop(  # noqa: F841
         config=config,
         pr_manager=prs,
@@ -1396,6 +1409,7 @@ def build_services(
         github_cache=gh_cache,
         github_cache_loop=gh_cache_loop,
         sentry_loop=sentry_loop,
+        log_ingest_loop=log_ingest_loop,
         stale_issue_gc_loop=stale_issue_gc_loop,
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,

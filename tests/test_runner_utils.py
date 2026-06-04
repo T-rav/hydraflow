@@ -606,6 +606,93 @@ class TestStreamClaudeProcessLifecycle:
         mock_proc.kill.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_timeout_suppresses_process_lookup_error_on_kill(
+        self, event_bus
+    ) -> None:
+        """A dead process on the timeout path must not leak ProcessLookupError.
+
+        If the agent process already exited/was reaped, ``proc.kill()`` raises
+        ProcessLookupError. The timeout handler must swallow it and still raise
+        the timeout RuntimeError, not the bare ProcessLookupError.
+        """
+
+        class HangingIter:
+            def __aiter__(self):  # noqa: ANN204
+                return self
+
+            async def __anext__(self) -> bytes:
+                await asyncio.sleep(3600)
+                return b""
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = None
+        mock_proc.stdin = MagicMock()
+        mock_proc.stdin.drain = AsyncMock()
+        mock_proc.stdout = HangingIter()
+        mock_proc.stderr = AsyncMock()
+        mock_proc.stderr.read = AsyncMock(return_value=b"")
+        mock_proc.kill = MagicMock(side_effect=ProcessLookupError)
+        mock_proc.wait = AsyncMock(side_effect=ProcessLookupError)
+
+        mock_create = AsyncMock(return_value=mock_proc)
+        active_procs: set[asyncio.subprocess.Process] = set()
+
+        with (
+            patch("asyncio.create_subprocess_exec", mock_create),
+            pytest.raises(RuntimeError, match="timed out"),
+        ):
+            await stream_claude_process(
+                **_default_kwargs(event_bus, active_procs=active_procs),
+                config=StreamConfig(timeout=0.01),
+            )
+
+        mock_proc.kill.assert_called_once()
+        assert mock_proc not in active_procs
+
+    @pytest.mark.asyncio
+    async def test_cancellation_suppresses_process_lookup_error_on_kill(
+        self, event_bus
+    ) -> None:
+        """A dead process on the cancel path must not leak ProcessLookupError.
+
+        Reproduces the production crash: ``ProcessLookupError`` at
+        base_subprocess.py:142 during ``proc.kill()`` in runner_utils.py after
+        ``asyncio.CancelledError``. The handler must re-raise CancelledError,
+        never the bare ProcessLookupError.
+        """
+
+        class CancellingIter:
+            def __aiter__(self):  # noqa: ANN204
+                return self
+
+            async def __anext__(self) -> bytes:
+                raise asyncio.CancelledError
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.stdin = MagicMock()
+        mock_proc.stdin.drain = AsyncMock()
+        mock_proc.stdout = CancellingIter()
+        mock_proc.stderr = AsyncMock()
+        mock_proc.stderr.read = AsyncMock(return_value=b"")
+        mock_proc.kill = MagicMock(side_effect=ProcessLookupError)
+        mock_proc.wait = AsyncMock()
+
+        mock_create = AsyncMock(return_value=mock_proc)
+        active_procs: set[asyncio.subprocess.Process] = set()
+
+        with (
+            patch("asyncio.create_subprocess_exec", mock_create),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await stream_claude_process(
+                **_default_kwargs(event_bus, active_procs=active_procs)
+            )
+
+        mock_proc.kill.assert_called_once()
+        assert mock_proc not in active_procs
+
+    @pytest.mark.asyncio
     async def test_tracks_process_in_active_set(self, event_bus) -> None:
         """Process should be in active_procs during execution and removed after."""
         active_procs: set[asyncio.subprocess.Process] = set()
@@ -986,6 +1073,51 @@ class TestPostStreamResult:
             logger=logging.getLogger("test"),
         )
         assert "good output" in transcript
+
+    def test_run_mentioning_auth_terms_in_prose_does_not_raise(self) -> None:
+        """An agent reviewing/fixing auth code emits the class name
+        'AuthenticationError' and the words 'authentication failed' in its
+        stdout response — that PROSE is not an auth failure (only the structured
+        stream-json token is). Regression for the false-positive that killed
+        valid runs and retried 3x. (stderr is clean; exit code is irrelevant.)"""
+        transcript = _post_stream_result(
+            raw_lines=[
+                "Reviewing the AuthenticationError handler; the authentication "
+                "failed branch looks correct.",
+            ],
+            accumulated_text="review complete\n",
+            result_text="review complete",
+            early_killed=False,
+            returncode=1,
+            stderr_text="",
+            parser=self._make_parser_with_snapshot(),
+            config=StreamConfig(),
+            logger=logging.getLogger("test"),
+        )
+        assert transcript == "review complete"
+
+    def test_failed_run_with_auth_class_name_in_stdout_prose_does_not_raise(
+        self,
+    ) -> None:
+        """A failed run whose STDOUT prose mentions the class name
+        'AuthenticationError' (but no structured token, clean stderr) is not an
+        auth failure — broad patterns are stderr-only."""
+        from runner_utils import AuthenticationRetryError
+
+        try:
+            _post_stream_result(
+                raw_lines=["Traceback … AuthenticationError: bad creds in the PR"],
+                accumulated_text="",
+                result_text="output",
+                early_killed=False,
+                returncode=1,
+                stderr_text="",
+                parser=self._make_parser_with_snapshot(),
+                config=StreamConfig(),
+                logger=logging.getLogger("test"),
+            )
+        except AuthenticationRetryError:  # pragma: no cover - fails the test
+            pytest.fail("stdout prose 'AuthenticationError' must not raise auth error")
 
     def test_raises_credit_error_when_exhausted(self) -> None:
         """Credit exhaustion in combined output raises CreditExhaustedError."""

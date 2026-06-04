@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -523,6 +524,39 @@ async def test_review_failure_path_on_exception(
     assert result.verdict == ReviewVerdict.COMMENT
     assert "Review failed" in result.summary
     assert "subprocess crashed" in result.summary
+
+
+@pytest.mark.asyncio
+async def test_review_failure_logs_non_empty_detail_for_empty_str_exception(
+    config, event_bus, pr_info, task, tmp_path, caplog
+):
+    # A subprocess error with empty stderr / a bare exception has an empty
+    # str(), which previously produced a log line ending in a bare colon
+    # ("Review failed for PR #N: ") with zero diagnostic detail.
+    runner = _make_runner(config, event_bus)
+
+    mock_execute = AsyncMock(side_effect=RuntimeError())
+
+    with (
+        caplog.at_level(logging.ERROR, logger="hydraflow.reviewer"),
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", mock_execute),
+    ):
+        result = await runner.review(pr_info, task, tmp_path, "some diff")
+
+    review_errors = [
+        rec.getMessage()
+        for rec in caplog.records
+        if rec.getMessage().startswith("Review failed for PR")
+    ]
+    assert review_errors, "expected a 'Review failed for PR' error log line"
+    message = review_errors[0]
+    # The message must carry a non-empty detail after the colon.
+    detail = message.split(":", 1)[1].strip()
+    assert detail, f"log message had empty detail: {message!r}"
+    assert "RuntimeError" in detail
+    # The result summary must also carry the detail (not a bare "Review failed:").
+    assert result.summary.split(":", 1)[1].strip()
 
 
 # ---------------------------------------------------------------------------

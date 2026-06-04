@@ -165,8 +165,18 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
             seen = self._dedup.get()
             if dedup_key not in seen:
                 filed_issue = await self._file_drift_issue(drifted)
-                seen.add(dedup_key)
-                self._dedup.set_all(seen)
+                if filed_issue == 0:
+                    # create_issue's documented 0-sentinel: the gh call
+                    # failed. Don't add the dedup key — that would suppress
+                    # re-filing forever without a real issue. Retry next tick.
+                    logger.warning(
+                        "live_corpus_replay: create_issue returned 0 "
+                        "(sentinel) for drift issue; skipping dedup, will "
+                        "retry next cycle",
+                    )
+                else:
+                    seen.add(dedup_key)
+                    self._dedup.set_all(seen)
 
             # If any signature reached the threshold, file an escalation
             # issue routed to the auto-agent preflight loop via the
