@@ -65,7 +65,6 @@ SNAKE_OVERRIDES: dict[str, str] = {
 SCENARIO_KEY_ALIASES: dict[str, list[str]] = {
     "GitHubCacheLoop": ["github_cache"],
     "SentryLoop": ["sentry_ingest"],
-    "HoneycombIngestLoop": ["honeycomb_ingest"],
 }
 
 #: Mapping from functional-area standard-category keyword to the phrase that
