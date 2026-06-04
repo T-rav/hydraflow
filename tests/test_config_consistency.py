@@ -32,9 +32,6 @@ _INTERVAL_BOUNDS_SKIP: set[str] = {
     "runs_gc_interval",
     "health_monitor_interval",
     "sentry_poll_interval",
-    # honeycomb_poll_interval strips to ``honeycomb_poll``; the dashboard
-    # bounds key is the worker name ``honeycomb_ingest`` (mirrors sentry).
-    "honeycomb_poll_interval",
     # Dark-launched; the StagingPromotionLoop is not yet wired (flag-gated).
     "staging_promotion_interval",
     # Retained-but-inert: the memory_sync worker was removed from the UI/control

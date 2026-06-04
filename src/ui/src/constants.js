@@ -240,14 +240,6 @@ const SENTRY_INGEST_PRESETS = [
   { label: '8h', seconds: 28800 },
 ]
 
-const HONEYCOMB_INGEST_PRESETS = [
-  { label: '15m', seconds: 900 },
-  { label: '30m', seconds: 1800 },
-  { label: '1h', seconds: 3600 },
-  { label: '4h', seconds: 14400 },
-  { label: '12h', seconds: 43200 },
-]
-
 /**
  * Per-worker preset overrides. Workers not listed here use INTERVAL_PRESETS.
  */
@@ -260,13 +252,12 @@ export const WORKER_PRESETS = {
   security_patch: SECURITY_PATCH_PRESETS,
   ci_monitor: CI_MONITOR_PRESETS,
   sentry_ingest: SENTRY_INGEST_PRESETS,
-  honeycomb_ingest: HONEYCOMB_INGEST_PRESETS,
 }
 
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'honeycomb_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -287,7 +278,6 @@ export const SYSTEM_WORKER_INTERVALS = {
   stale_issue: 86400,
   security_patch: 21600,
   ci_monitor: 1800,
-  honeycomb_ingest: 900,
   retrospective: 1800,
   principles_audit: 604800,
   flake_tracker: 14400,
@@ -345,7 +335,6 @@ export const BACKGROUND_WORKERS = [
   { key: 'health_monitor', label: 'Health Monitor', description: 'Analyzes pipeline trends, auto-tunes parameters, detects knowledge gaps, and ingests log patterns.', color: theme.green, system: true, group: 'meta_observability', tags: ['monitoring'] },
   { key: 'stale_issue', label: 'Stale General Issue Cleanup', description: 'Auto-closes stale general issues (excludes HydraFlow lifecycle labels). Per-tag thresholds, configurable. Distinct from Stale Issue GC, which handles HITL escalations.', color: theme.orange, group: 'repo_health', tags: ['hygiene'] },
   { key: 'sentry_ingest', label: 'Sentry Ingest', description: 'Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline.', color: theme.red, group: 'intake', tags: ['errors'] },
-  { key: 'honeycomb_ingest', label: 'Honeycomb Ingest', description: 'Low-noise inbound: polls Honeycomb SLOs / burn alerts and files an issue only for sustained, budget-backed reliability breaches. Default-disabled until a mgmt API key is provisioned.', color: theme.red, group: 'intake', tags: ['errors'] },
   { key: 'stale_issue_gc', label: 'Stale HITL Issue GC', description: 'Auto-closes stale HITL escalation issues — posts a farewell comment, capped at 10/cycle. Distinct from Stale General Issue Cleanup, which excludes HF lifecycle labels.', color: theme.textMuted, group: 'repo_health', tags: ['hygiene'] },
   { key: 'ci_monitor', label: 'CI Monitor', description: 'Detects failing CI on main and files/auto-closes issues.', color: theme.yellow, group: 'repo_health', tags: ['quality'] },
   { key: 'branch_protection_auditor', label: 'Branch Protection Auditor', description: 'Audits live GitHub branch protection against the canonical rulesets generated from gates.toml; files an issue on drift. See ADR-0082.', color: theme.purple, system: true, group: 'governance', tags: ['audit', 'drift'] },

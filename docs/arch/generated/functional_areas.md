@@ -17,7 +17,6 @@ flowchart LR
         caretaking_EpicSweeperLoop([EpicSweeperLoop])
         caretaking_GitHubCacheLoop([GitHubCacheLoop])
         caretaking_HealthMonitorLoop([HealthMonitorLoop])
-        caretaking_HoneycombIngestLoop([HoneycombIngestLoop])
         caretaking_LabelDriftWatcherLoop([LabelDriftWatcherLoop])
         caretaking_MemoryBacklogLoop([MemoryBacklogLoop])
         caretaking_MergeStateWatcherLoop([MergeStateWatcherLoop])
@@ -103,7 +102,6 @@ Autonomous background loops that maintain the system without human input — wik
 - `EpicSweeperLoop` — `src.epic_sweeper_loop`
 - `GitHubCacheLoop` — `src.github_cache_loop`
 - `HealthMonitorLoop` — `src.health_monitor_loop`
-- `HoneycombIngestLoop` — `src.honeycomb_loop`
 - `LabelDriftWatcherLoop` — `src.label_drift_watcher_loop`
 - `MemoryBacklogLoop` — `src.memory_backlog_loop`
 - `MergeStateWatcherLoop` — `src.merge_state_watcher_loop`
