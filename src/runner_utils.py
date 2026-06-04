@@ -41,18 +41,37 @@ class AuthenticationRetryError(RuntimeError):
     """
 
 
-# Backend-specific auth-failure signatures. Keep these conservative —
-# false positives turn real agent output into spurious retries.
+# Backend-specific auth-failure signatures. Keep these conservative — false
+# positives turn real agent output into spurious retries. These broad patterns
+# are matched ONLY in the CLI's stderr (its own error channel). An agent that
+# reviews or fixes auth code legitimately emits "AuthenticationError" /
+# "authentication failed" in its STDOUT response, and matching that text (with
+# no exit-code gate) killed valid runs as bogus "auth failures" that retried 3x
+# then failed.
 _AUTH_FAILURE_PATTERNS = (
     "authentication_failed",  # claude-code stream-json
     "Please set an Auth method",  # gemini-cli startup
-    "AuthenticationError",  # generic SDK exceptions
+    "AuthenticationError",  # SDK exception traceback
 )
+# Matched in stdout (the agent's own output) — confined to JUST the claude
+# stream-json error token so the agent's prose mentions of the broad patterns
+# above (e.g. the class name "AuthenticationError") do not trip it.
+_AUTH_FAILURE_STDOUT_PATTERNS = ("authentication_failed",)
 
 
-def _is_auth_failure(text: str) -> bool:
-    """Check if *text* indicates a retryable authentication failure."""
-    return any(pattern in text for pattern in _AUTH_FAILURE_PATTERNS)
+def _is_auth_failure(stderr: str, stdout: str) -> bool:
+    """Return True if the CLI itself reported a retryable auth failure.
+
+    Broad patterns (incl. the class name ``AuthenticationError``) match only in
+    *stderr* — the CLI's own error channel. *stdout* (the agent's response, where
+    a reviewer/triage run legitimately mentions those words) is matched only on
+    claude's structured stream-json error token ``authentication_failed``.
+    Exit code is deliberately NOT gated on: claude reports auth failures in-band
+    via stream-json and can still exit 0.
+    """
+    if any(pattern in stderr for pattern in _AUTH_FAILURE_PATTERNS):
+        return True
+    return any(pattern in stdout for pattern in _AUTH_FAILURE_STDOUT_PATTERNS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,8 +143,12 @@ def _post_stream_result(
     # Skip auth/credit checks when early_killed — killing the process can cause
     # in-flight API requests to fail with spurious errors.
     raw_output = "\n".join(raw_lines)
-    combined_for_auth = f"{stderr_text}\n{raw_output}"
-    if not early_killed and _is_auth_failure(combined_for_auth):
+    # Detect auth failure from the CLI's OWN signal — the broad patterns in
+    # stderr, or claude's structured stream-json token in stdout — NOT from the
+    # agent's prose. Scanning the whole transcript for "AuthenticationError"
+    # killed reviewer/triage runs that merely mentioned auth as a bogus "auth
+    # failure" (retried 3x then failed).
+    if not early_killed and _is_auth_failure(stderr_text, raw_output):
         raise AuthenticationRetryError(
             "Agent CLI authentication failed — check the provider's auth "
             "(ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / GEMINI_API_KEY / "
