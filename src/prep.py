@@ -73,6 +73,85 @@ HYDRAFLOW_LABELS: tuple[tuple[str, str, str], ...] = (
     ),
 )
 
+# Ad-hoc string-literal labels that loops pass directly to ``create_issue`` /
+# ``add_labels`` without going through a ``HydraFlowConfig`` field. They are NOT
+# resolvable via ``getattr(config, ...)``, so ``ensure_labels`` must create them
+# from these literal ``(label_name, color, description)`` rows. Without this, the
+# first ``gh issue create --label <X>`` for an uncreated label fails and the
+# consumer falls back to the ``0`` sentinel (PR #9242 guards that path; this row
+# table is what makes the labels actually exist). Colors are grouped by family:
+#   b60205/d93f0b reddish  -> escalation / rc-red / revert (operator-urgent)
+#   e99695 amber           -> ``*-stuck`` exhausted-retry escalations
+#   5319e7 purple          -> ``*-drift`` / ``*-anomaly`` detector findings
+#   e4e669 yellow          -> find-queue ad-hoc signal labels
+HYDRAFLOW_LITERAL_LABELS: tuple[tuple[str, str, str], ...] = (
+    # --- escalation root (bare literal; config field resolves to the
+    #     hydraflow-prefixed variant, so this bare name is never created by it) ---
+    ("hitl-escalation", "b60205", "Stuck-loop HITL escalation (bare literal label)"),
+    # --- rc-red / RC-duration / revert family (operator-urgent, reddish) ---
+    ("rc-red-attribution", "b60205", "Auto-revert culprit attribution for a red RC"),
+    ("rc-red-bisect-exhausted", "b60205", "RC bisect exhausted without a culprit"),
+    ("rc-red-post-revert-red", "b60205", "RC still red after auto-revert landed"),
+    ("rc-red-retry", "d93f0b", "RC red — retry the staging-bisect attempt"),
+    ("rc-red-verify-timeout", "b60205", "RC red verify step timed out"),
+    ("rc-duration-stuck", "e99695", "RC gate duration regression unresolved"),
+    ("rc-duration-regression", "d93f0b", "RC gate duration regressed past budget"),
+    ("revert-conflict", "d93f0b", "Auto-revert hit a merge conflict — needs a human"),
+    ("retry-lineage-exhausted", "d93f0b", "Retry lineage exhausted on a red RC"),
+    ("auto-revert", "d93f0b", "Issue/PR tied to an automated revert"),
+    # --- *-stuck exhausted-retry escalations (amber) ---
+    ("shadow-drift-stuck", "e99695", "Shadow drift unresolved after retries"),
+    ("fake-repair-stuck", "e99695", "Fake-adapter repair unresolved after retries"),
+    ("flaky-test-stuck", "e99695", "Flaky test unresolved after repair attempts"),
+    ("principles-stuck", "e99695", "Principles drift unresolved after retries"),
+    (
+        "corpus-learning-stuck",
+        "e99695",
+        "Corpus-learning case unresolved after retries",
+    ),
+    ("skill-prompt-stuck", "e99695", "Skill-prompt drift unresolved after retries"),
+    ("wiki-rot-stuck", "e99695", "Wiki rot unresolved after retries"),
+    ("triage-retry-exhausted", "e99695", "Triage retry budget exhausted for an issue"),
+    ("auto-agent-exhausted", "e99695", "Auto-agent attempt budget exhausted"),
+    # --- *-drift / *-anomaly detector findings (purple) ---
+    ("trust-loop-anomaly", "5319e7", "Trust-fleet sanity loop detected an anomaly"),
+    ("shadow-drift", "5319e7", "Shadow drift between fake output and live samples"),
+    ("fake-drift", "5319e7", "Fake-adapter output drifted from contract"),
+    ("principles-drift", "5319e7", "Principles/ADR-0044 cultural drift detected"),
+    ("skill-prompt-drift", "5319e7", "Skill-prompt eval drift detected"),
+    ("wiki-rot", "5319e7", "Repo wiki entry has rotted / gone stale"),
+    # --- find-queue ad-hoc signal labels (yellow) ---
+    ("flaky-test", "e4e669", "Flaky test detected by the flake_tracker loop"),
+    ("corpus-case-weak", "e4e669", "Weak corpus case bypassed its expected catcher"),
+    ("cost-budget", "e4e669", "Cost-budget watcher finding"),
+    ("cost-budget-exceeded", "e4e669", "Daily cost budget exceeded"),
+    ("issue-cost-spike", "e4e669", "Per-issue cost spike detected"),
+    ("arch-knowledge", "e4e669", "Architecture-knowledge coverage gap"),
+    ("sanity-loop-stalled", "e4e669", "Sanity loop stalled (dead-man switch)"),
+    ("wiki-stale", "e4e669", "Wiki freshness dead-man switch fired"),
+    ("onboarding-blocked", "e4e669", "Onboarding/auto-agent preflight blocked"),
+    ("cultural-check", "e4e669", "Principles cultural-check audit label"),
+    ("pricing-refresh", "e4e669", "Pricing-refresh loop signal"),
+    ("security", "d93f0b", "Security patch loop finding"),
+    ("adr-draft", "c5def5", "ADR draft opened for review"),
+    ("hydraflow-ci-failure", "d93f0b", "CI failure issue filed by ci_monitor"),
+    (
+        "hydraflow-branch-protection-drift",
+        "5319e7",
+        "Branch-protection ruleset drift detected",
+    ),
+    (
+        "hydraflow-gate-activation",
+        "e4e669",
+        "Planned gates ready to activate (gate_activator)",
+    ),
+    (
+        "human-required",
+        "d93f0b",
+        "Autonomous attempts exhausted — human action required",
+    ),
+)
+
 
 def _label_names(value: object) -> list[str]:
     """Normalise a label config field to a list of label names.
@@ -151,40 +230,50 @@ async def ensure_labels(
         for cfg_field, _color, _desc in HYDRAFLOW_LABELS:
             for name in _label_names(getattr(config, cfg_field)):
                 result.created.append(name)
+        for literal_name, _color, _desc in HYDRAFLOW_LITERAL_LABELS:
+            result.created.append(literal_name)
         logger.info("[dry-run] Would create labels: %s", result.created)
         return result
 
     existing = await _list_existing_labels(config, credentials=credentials)
 
+    # Config-field-backed lifecycle labels: name resolved via getattr(config, ...).
+    config_label_rows: list[tuple[str, str, str]] = []
     for cfg_field, color, description in HYDRAFLOW_LABELS:
-        label_names: list[str] = _label_names(getattr(config, cfg_field))
-        for label_name in label_names:
-            try:
-                await run_subprocess_with_retry(
-                    "gh",
-                    "label",
-                    "create",
-                    label_name,
-                    "--repo",
-                    config.repo,
-                    "--color",
-                    color,
-                    "--description",
-                    description,
-                    "--force",
-                    cwd=config.repo_root,
-                    gh_token=credentials.gh_token,
-                    max_retries=config.gh_max_retries,
-                )
-                if label_name in existing:
-                    result.existed.append(label_name)
-                    logger.debug("Label %r already existed (updated)", label_name)
-                else:
-                    result.created.append(label_name)
-                    logger.info("Created label %r", label_name)
-            except RuntimeError as exc:
-                result.failed.append(label_name)
-                logger.warning("Could not create label %r: %s", label_name, exc)
+        for label_name in _label_names(getattr(config, cfg_field)):
+            config_label_rows.append((label_name, color, description))
+
+    # Config-backed rows + ad-hoc literal rows (already literal names — no getattr).
+    for label_name, color, description in (
+        *config_label_rows,
+        *HYDRAFLOW_LITERAL_LABELS,
+    ):
+        try:
+            await run_subprocess_with_retry(
+                "gh",
+                "label",
+                "create",
+                label_name,
+                "--repo",
+                config.repo,
+                "--color",
+                color,
+                "--description",
+                description,
+                "--force",
+                cwd=config.repo_root,
+                gh_token=credentials.gh_token,
+                max_retries=config.gh_max_retries,
+            )
+            if label_name in existing:
+                result.existed.append(label_name)
+                logger.debug("Label %r already existed (updated)", label_name)
+            else:
+                result.created.append(label_name)
+                logger.info("Created label %r", label_name)
+        except RuntimeError as exc:
+            result.failed.append(label_name)
+            logger.warning("Could not create label %r: %s", label_name, exc)
 
     return result
 

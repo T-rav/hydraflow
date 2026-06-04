@@ -1649,12 +1649,15 @@ async def test_ensure_labels_exist_creates_all_hydraflow_labels(config, event_bu
     with patch("asyncio.create_subprocess_exec", mock_create):
         await mgr.ensure_labels_exist()
 
-    # 1 list call + 1 create per label
-    assert mock_create.call_count == 1 + len(PRManager._HYDRAFLOW_LABELS)
+    # 1 list call + 1 create per config-backed label + 1 per literal label
+    expected_creates = len(PRManager._HYDRAFLOW_LABELS) + len(
+        PRManager._HYDRAFLOW_LITERAL_LABELS
+    )
+    assert mock_create.call_count == 1 + expected_creates
 
     # Verify create calls use gh label create --force
     create_calls = [c for c in mock_create.call_args_list if "create" in c[0]]
-    assert len(create_calls) == len(PRManager._HYDRAFLOW_LABELS)
+    assert len(create_calls) == expected_creates
     for call in create_calls:
         args = call[0]
         assert args[0] == "gh"
@@ -1734,7 +1737,63 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         "hydraflow-log-ingest",
         "hydraflow-memory-backlog",
         "hydraflow-memory-backlog-stuck",
+        # Ad-hoc literal labels loops pass to create_issue / add_labels — these
+        # are NOT config-field-backed and are created from HYDRAFLOW_LITERAL_LABELS.
+        # escalation root
+        "hitl-escalation",
+        # rc-red / RC-duration / revert family
+        "rc-red-attribution",
+        "rc-red-bisect-exhausted",
+        "rc-red-post-revert-red",
+        "rc-red-retry",
+        "rc-red-verify-timeout",
+        "rc-duration-stuck",
+        "rc-duration-regression",
+        "revert-conflict",
+        "retry-lineage-exhausted",
+        "auto-revert",
+        # *-stuck exhausted-retry escalations
+        "shadow-drift-stuck",
+        "fake-repair-stuck",
+        "flaky-test-stuck",
+        "principles-stuck",
+        "corpus-learning-stuck",
+        "skill-prompt-stuck",
+        "wiki-rot-stuck",
+        "triage-retry-exhausted",
+        "auto-agent-exhausted",
+        # *-drift / *-anomaly detector findings
+        "trust-loop-anomaly",
+        "shadow-drift",
+        "fake-drift",
+        "principles-drift",
+        "skill-prompt-drift",
+        "wiki-rot",
+        # find-queue ad-hoc signal labels
+        "flaky-test",
+        "corpus-case-weak",
+        "cost-budget",
+        "cost-budget-exceeded",
+        "issue-cost-spike",
+        "arch-knowledge",
+        "sanity-loop-stalled",
+        "wiki-stale",
+        "onboarding-blocked",
+        "cultural-check",
+        "pricing-refresh",
+        "security",
+        "adr-draft",
+        "hydraflow-ci-failure",
+        "hydraflow-branch-protection-drift",
+        "hydraflow-gate-activation",
+        "human-required",
     }
+    # The literal-label set must be a subset of what ensure_labels created,
+    # so every ad-hoc label a loop passes to create_issue / add_labels exists.
+    literal_names = {
+        name for name, _color, _desc in PRManager._HYDRAFLOW_LITERAL_LABELS
+    }
+    assert literal_names <= created_labels
 
 
 @pytest.mark.asyncio
@@ -1781,7 +1840,9 @@ async def test_ensure_labels_exist_handles_individual_failures(config, event_bus
         await mgr.ensure_labels_exist()
 
     # All labels should be attempted even though first one failed
-    assert create_count == len(PRManager._HYDRAFLOW_LABELS)
+    assert create_count == len(PRManager._HYDRAFLOW_LABELS) + len(
+        PRManager._HYDRAFLOW_LITERAL_LABELS
+    )
 
 
 def test_makefile_ensure_labels_calls_dedicated_task() -> None:

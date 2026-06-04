@@ -37,7 +37,7 @@ from models import (
     PRListItem,
     ReviewVerdict,
 )
-from prep import HYDRAFLOW_LABELS
+from prep import HYDRAFLOW_LABELS, HYDRAFLOW_LITERAL_LABELS
 from subprocess_util import run_subprocess, run_subprocess_with_retry
 from telemetry.spans import port_span  # noqa: E402
 
@@ -96,6 +96,7 @@ class PRManager:
 
     # Re-export from prep module for backward compatibility
     _HYDRAFLOW_LABELS = HYDRAFLOW_LABELS
+    _HYDRAFLOW_LITERAL_LABELS = HYDRAFLOW_LITERAL_LABELS
 
     _REPO_SLUG_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 
