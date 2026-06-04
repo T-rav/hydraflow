@@ -1074,20 +1074,21 @@ class TestPostStreamResult:
         )
         assert "good output" in transcript
 
-    def test_successful_run_mentioning_auth_terms_does_not_raise(self) -> None:
-        """A successful run (exit 0) is never an auth failure, even when its
-        output contains auth phrases — e.g. an agent reviewing/fixing auth code
-        that emits 'AuthenticationError' and the structured token. Regression for
-        the false-positive that killed valid runs and retried 3x."""
+    def test_run_mentioning_auth_terms_in_prose_does_not_raise(self) -> None:
+        """An agent reviewing/fixing auth code emits the class name
+        'AuthenticationError' and the words 'authentication failed' in its
+        stdout response — that PROSE is not an auth failure (only the structured
+        stream-json token is). Regression for the false-positive that killed
+        valid runs and retried 3x. (stderr is clean; exit code is irrelevant.)"""
         transcript = _post_stream_result(
             raw_lines=[
-                "Reviewing AuthenticationError handling…",
-                '{"error": "authentication_failed"}',
+                "Reviewing the AuthenticationError handler; the authentication "
+                "failed branch looks correct.",
             ],
             accumulated_text="review complete\n",
             result_text="review complete",
             early_killed=False,
-            returncode=0,
+            returncode=1,
             stderr_text="",
             parser=self._make_parser_with_snapshot(),
             config=StreamConfig(),

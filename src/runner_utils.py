@@ -62,10 +62,12 @@ _AUTH_FAILURE_STDOUT_PATTERNS = ("authentication_failed",)
 def _is_auth_failure(stderr: str, stdout: str) -> bool:
     """Return True if the CLI itself reported a retryable auth failure.
 
-    Broad patterns match only in *stderr*; *stdout* (the agent's response) is
-    matched only on the structured claude stream-json error token. Callers MUST
-    additionally gate on a non-zero exit code — a successful run is never an auth
-    failure no matter what its output text says.
+    Broad patterns (incl. the class name ``AuthenticationError``) match only in
+    *stderr* — the CLI's own error channel. *stdout* (the agent's response, where
+    a reviewer/triage run legitimately mentions those words) is matched only on
+    claude's structured stream-json error token ``authentication_failed``.
+    Exit code is deliberately NOT gated on: claude reports auth failures in-band
+    via stream-json and can still exit 0.
     """
     if any(pattern in stderr for pattern in _AUTH_FAILURE_PATTERNS):
         return True
@@ -141,16 +143,12 @@ def _post_stream_result(
     # Skip auth/credit checks when early_killed — killing the process can cause
     # in-flight API requests to fail with spurious errors.
     raw_output = "\n".join(raw_lines)
-    # A successful run (exit 0) is NEVER an auth failure regardless of what its
-    # output text contains — real CLI auth failures exit non-zero. Gating on the
-    # exit code stops a reviewer/triage run whose output merely mentions auth
-    # (e.g. reviewing auth code) from being killed and retried 3x as a bogus
-    # auth failure.
-    if (
-        not early_killed
-        and returncode not in (0, None)
-        and _is_auth_failure(stderr_text, raw_output)
-    ):
+    # Detect auth failure from the CLI's OWN signal — the broad patterns in
+    # stderr, or claude's structured stream-json token in stdout — NOT from the
+    # agent's prose. Scanning the whole transcript for "AuthenticationError"
+    # killed reviewer/triage runs that merely mentioned auth as a bogus "auth
+    # failure" (retried 3x then failed).
+    if not early_killed and _is_auth_failure(stderr_text, raw_output):
         raise AuthenticationRetryError(
             "Agent CLI authentication failed — check the provider's auth "
             "(ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / GEMINI_API_KEY / "
