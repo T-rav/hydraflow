@@ -1050,20 +1050,54 @@ class TestPlanPhaseBatchScaling:
 
 
 class TestPlanPhaseResearch:
-    def test_should_research_true_when_runner_present(self, config):
-        """Research runs when runner is wired."""
+    """Research pre-pass gating.
+
+    The research pre-pass is a full extra codebase-exploration subprocess, so
+    it is reserved for issues that need the depth: escalated issues (carrying a
+    ``research_escalation_labels`` label) and cycled issues that have failed to
+    land (route-back count > 0). A plain first-pass issue skips research even
+    when a runner is wired, and the planner explores once.
+    """
+
+    def test_should_research_false_for_plain_first_pass_issue(self, config):
+        """A plain issue skips research even with a runner wired."""
         phase, *_ = make_plan_phase(config)
         phase._research_runner = AsyncMock()
-        assert phase._should_research() is True
+        issue = TaskFactory.create(id=1)  # default tags=["ready"], no route-back
+        assert phase._should_research(issue) is False
+
+    def test_should_research_true_for_escalated_label(self, config):
+        """An issue carrying an escalation label triggers research."""
+        phase, *_ = make_plan_phase(config)
+        phase._research_runner = AsyncMock()
+        issue = TaskFactory.create(id=1, tags=[config.research_escalation_labels[0]])
+        assert phase._should_research(issue) is True
+
+    def test_should_research_true_for_cycled_issue(self, config):
+        """An issue that has cycled back (route-back > 0) triggers research."""
+        phase, state, *_ = make_plan_phase(config)
+        phase._research_runner = AsyncMock()
+        issue = TaskFactory.create(id=7)
+        state.increment_route_back_count(issue.id)
+        assert phase._should_research(issue) is True
 
     def test_should_research_false_when_no_runner(self, config):
-        """No research_runner means no research."""
+        """No research_runner means no research, even for escalated issues."""
         phase, *_ = make_plan_phase(config)
         # phase._research_runner is None by default
-        assert phase._should_research() is False
+        issue = TaskFactory.create(id=1, tags=[config.research_escalation_labels[0]])
+        assert phase._should_research(issue) is False
+
+    def test_should_research_false_when_disabled(self, config):
+        """research_enabled=False disables research even for escalated issues."""
+        config.research_enabled = False  # type: ignore[assignment]
+        phase, *_ = make_plan_phase(config)
+        phase._research_runner = AsyncMock()
+        issue = TaskFactory.create(id=1, tags=[config.research_escalation_labels[0]])
+        assert phase._should_research(issue) is False
 
     @pytest.mark.asyncio
-    async def test_plan_one_calls_research_for_complex_issue(self, config):
+    async def test_plan_one_calls_research_for_escalated_issue(self, config):
         """When research is triggered, result context is passed to planner."""
         phase, _state, planners, prs, store, _stop = make_plan_phase(config)
 
@@ -1075,7 +1109,7 @@ class TestPlanPhaseResearch:
         )
         phase._research_runner = research_mock
 
-        issue = TaskFactory.create(id=1)
+        issue = TaskFactory.create(id=1, tags=[config.research_escalation_labels[0]])
         plan_result = PlanResultFactory.create(
             issue_number=1,
             success=True,
@@ -1092,6 +1126,36 @@ class TestPlanPhaseResearch:
         # Verify research_context was passed
         call_kwargs = planners.plan.call_args
         assert call_kwargs.kwargs.get("research_context") == "Found relevant files"
+
+    @pytest.mark.asyncio
+    async def test_plan_one_skips_research_for_plain_issue(self, config):
+        """A plain first-pass issue skips research even when a runner is wired."""
+        phase, _state, planners, prs, store, _stop = make_plan_phase(config)
+
+        research_mock = AsyncMock()
+        research_mock.research = AsyncMock(
+            return_value=ResearchResult(
+                issue_number=1, success=True, research="Found relevant files"
+            )
+        )
+        phase._research_runner = research_mock
+
+        issue = TaskFactory.create(id=1)  # plain: no escalation label, no route-back
+        plan_result = PlanResultFactory.create(
+            issue_number=1,
+            success=True,
+            plan="## Files to Modify\n- src/main.py\n## Testing Strategy\n- tests/test.py",
+            summary="Plan summary",
+        )
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        research_mock.research.assert_not_awaited()
+        # Planner still called, with empty research_context
+        call_kwargs = planners.plan.call_args
+        assert call_kwargs.kwargs.get("research_context") == ""
 
     @pytest.mark.asyncio
     async def test_plan_one_skips_research_when_no_runner(self, config):

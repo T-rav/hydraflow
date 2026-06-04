@@ -1846,6 +1846,20 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Run ResearchRunner before PlanPhase to inject codebase context",
     )
+    # The research pre-pass is a full extra codebase-exploration subprocess
+    # on top of the planner's own exploration — so it is gated, not run for
+    # every issue. With ``research_enabled`` on, research runs only for issues
+    # that need the depth: those carrying one of these escalation labels, and
+    # those that have cycled back to planning (route-back count > 0). The
+    # common first-pass issue skips research and lets the planner explore once.
+    research_escalation_labels: list[str] = Field(
+        default=["hydraflow-hitl-escalation"],
+        description=(
+            "Labels that force the research pre-pass before planning "
+            "(escalated issues). Cycled issues (route-back count > 0) also "
+            "trigger research regardless of label. OR logic."
+        ),
+    )
 
     # Transcript summarization
     transcript_summarization_enabled: bool = Field(
