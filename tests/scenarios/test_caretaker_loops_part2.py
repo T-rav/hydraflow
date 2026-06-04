@@ -429,6 +429,11 @@ class TestL22StagingPromotionLoop:
         prs.create_promotion_pr = AsyncMock(return_value=42)
         prs.push_synthetic_commit = AsyncMock(return_value="synthetic-sha")
         prs.wait_for_ci = AsyncMock(return_value=(True, "all green"))
+        # Empty-RC guard added in #9231: the loop awaits this before opening the
+        # promotion PR. Default True = RC has commits ahead of main, so the cut
+        # path proceeds. Without an explicit AsyncMock the bare MagicMock raises
+        # "object MagicMock can't be used in 'await' expression".
+        prs.branch_has_diff_from_main = AsyncMock(return_value=True)
 
         return StagingPromotionLoop(config=config, prs=prs, deps=deps), prs, config
 
