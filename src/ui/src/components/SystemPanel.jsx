@@ -127,7 +127,7 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
     lastRun = null
     details = {}
   } else if (state.enabled === false) {
-    dotColor = theme.red
+    dotColor = theme.textInactive
     statusText = 'off'
     lastRun = state.last_run || null
     details = state.details || {}

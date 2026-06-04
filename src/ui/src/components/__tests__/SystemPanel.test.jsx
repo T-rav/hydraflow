@@ -148,7 +148,7 @@ describe('SystemPanel', () => {
       const errDot = screen.getByTestId('dot-retrospective')
       expect(errDot.style.background).toBe('var(--red)')
       const offDot = screen.getByTestId('dot-dependabot_merge')
-      expect(offDot.style.background).toBe('var(--red)')
+      expect(offDot.style.background).toBe('var(--text-inactive)')
     })
 
     it('shows last run time when available', () => {
