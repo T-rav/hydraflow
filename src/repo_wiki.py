@@ -1374,6 +1374,7 @@ class RepoWikiStore:
         second directory walk.
         """
         pairs: list[tuple[WikiEntry, Path]] = []
+        skipped_ids: list[str] = []
         for raw in _load_tracked_active_entries(topic_dir):
             try:
                 corroborations_raw = raw.get("corroborations", "1")
@@ -1397,7 +1398,26 @@ class RepoWikiStore:
                 path = Path(path_raw) if path_raw else topic_dir / "unknown.md"
                 pairs.append((entry, path))
             except (ValueError, TypeError):
-                logger.warning("Skipping malformed tracked entry under %s", topic_dir)
+                # Per-entry skips log at DEBUG (with the offending id/path so the
+                # skip stays diagnosable) instead of WARNING. The parser re-reads
+                # the same malformed files on every loop tick, so a per-entry
+                # WARNING here produced a self-amplifying log storm (~7,663
+                # lines/run in prod, 85% of all warnings). The single aggregate
+                # WARNING below is the operator-actionable signal per dir per tick.
+                offender = raw.get("id") or raw.get("path") or "<unknown>"
+                skipped_ids.append(str(offender))
+                logger.debug(
+                    "repo_wiki: skipping malformed tracked entry %s under %s",
+                    offender,
+                    topic_dir,
+                )
+        if skipped_ids:
+            logger.warning(
+                "repo_wiki: skipped %d malformed entries under %s (ids: %s)",
+                len(skipped_ids),
+                topic_dir,
+                ", ".join(skipped_ids),
+            )
         return pairs
 
     def _load_topic_entries(self, topic_path: Path) -> list[WikiEntry]:
