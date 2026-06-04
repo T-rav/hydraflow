@@ -286,6 +286,11 @@ _bg_worker_defs = [
         "Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline.",
     ),
     (
+        "honeycomb_ingest",
+        "Honeycomb Ingest",
+        "Low-noise inbound: polls Honeycomb SLOs / burn alerts and files an issue only for sustained, budget-backed reliability breaches. Default-disabled.",
+    ),
+    (
         "staging_promotion",
         "Staging Promotion",
         "Cuts release-candidate snapshots from staging and auto-promotes them to main on green CI. See ADR-0042.",

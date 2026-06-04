@@ -51,6 +51,7 @@ from harness_insights import HarnessInsightStore
 from health_monitor_loop import HealthMonitorLoop
 from hitl_phase import HITLPhase
 from hitl_runner import HITLRunner
+from honeycomb_loop import HoneycombIngestLoop  # noqa: TCH001 — dataclass field
 from implement_phase import ImplementPhase
 from issue_cache import IssueCache
 from issue_fetcher import GitHubTaskFetcher, IssueFetcher
@@ -195,6 +196,7 @@ class ServiceRegistry:
     staging_bisect_loop: StagingBisectLoop
     stale_issue_loop: StaleIssueLoop
     sentry_loop: SentryLoop
+    honeycomb_ingest_loop: HoneycombIngestLoop
     stale_issue_gc_loop: StaleIssueGCLoop
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
@@ -999,6 +1001,12 @@ def build_services(
         dedup=sentry_dedup,
         state=state,
     )
+    honeycomb_ingest_loop = HoneycombIngestLoop(
+        config=config,
+        prs=prs,
+        deps=loop_deps,
+        credentials=credentials,
+    )
     stale_issue_gc_loop = StaleIssueGCLoop(  # noqa: F841
         config=config,
         pr_manager=prs,
@@ -1396,6 +1404,7 @@ def build_services(
         github_cache=gh_cache,
         github_cache_loop=gh_cache_loop,
         sentry_loop=sentry_loop,
+        honeycomb_ingest_loop=honeycomb_ingest_loop,
         stale_issue_gc_loop=stale_issue_gc_loop,
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,

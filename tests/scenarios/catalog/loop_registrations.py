@@ -178,6 +178,24 @@ def _build_sentry_ingest(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     return SentryLoop(config=config, prs=ports["github"], deps=deps)
 
 
+def _build_honeycomb_ingest(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    from config import Credentials  # noqa: PLC0415
+    from honeycomb_loop import HoneycombIngestLoop  # noqa: PLC0415
+
+    # Scenarios opt the loop on and inject a fake httpx client factory via
+    # ports; absent those, the loop stays default-disabled (no-op).
+    credentials = ports.get("honeycomb_credentials") or Credentials()
+    factory = ports.get("honeycomb_http_factory")
+    return HoneycombIngestLoop(
+        config=config,
+        prs=ports["github"],
+        deps=deps,
+        credentials=credentials,
+        http_client_factory=factory,
+        state_path=ports.get("honeycomb_state_path"),
+    )
+
+
 def _build_live_corpus_replay(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from contracts.shadow import ShadowCorpus  # noqa: PLC0415
     from dedup_store import DedupStore  # noqa: PLC0415
@@ -1402,6 +1420,7 @@ _BUILDERS: dict[str, Any] = {
     "github_cache": _build_github_cache,
     "repo_wiki": _build_repo_wiki,
     "sentry_ingest": _build_sentry_ingest,
+    "honeycomb_ingest": _build_honeycomb_ingest,
     "live_corpus_replay": _build_live_corpus_replay,
     "diagnostic": _build_diagnostic,
     "report_issue": _build_report_issue,

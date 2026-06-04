@@ -629,6 +629,7 @@ class MockWorld:
         loops: list[str],
         *,
         cycles: int = 1,
+        config_overrides: dict[str, Any] | None = None,
     ) -> dict[str, dict[str, Any] | None]:
         """Instantiate and run real BaseBackgroundLoop subclasses via LoopCatalog.
 
@@ -643,11 +644,19 @@ class MockWorld:
         FakeGitHub is wired as the PRPort so loops interact with seeded
         world state.
 
+        ``config_overrides`` lets a scenario flip default-disabled loops on
+        (e.g. ``{"honeycomb_ingest_loop_enabled": True}``) or tune knobs.
+
         Returns a dict mapping loop name → last ``_do_work()`` stats.
         """
         from tests.helpers import make_bg_loop_deps  # noqa: PLC0415
 
         bg = make_bg_loop_deps(self._tmp_path)
+        # Apply scenario config overrides directly on the frozen-by-convention
+        # config (ConfigFactory.create has a fixed kwarg surface, so set them
+        # here via object.__setattr__ to flip default-disabled loops on / tune).
+        for _key, _val in (config_overrides or {}).items():
+            object.__setattr__(bg.config, _key, _val)
         call_count = 0
         stop_event = bg.stop_event
 
