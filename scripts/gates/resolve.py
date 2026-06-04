@@ -6,7 +6,11 @@ from typing import Any
 
 from scripts.gates.contract import Contract, Gate, RepoProfile
 
-_REF = {"main": "~DEFAULT_BRANCH", "staging": "refs/heads/staging"}
+# Target main by explicit ref, NOT ~DEFAULT_BRANCH: in the two-tier model
+# (ADR-0042) staging is the GitHub default branch and main is the protected
+# release branch. ~DEFAULT_BRANCH would slide this ruleset onto staging and
+# leave main unprotected the moment the default flips.
+_REF = {"main": "refs/heads/main", "staging": "refs/heads/staging"}
 
 
 def gate_applies(gate: Gate, repo: RepoProfile | None) -> bool:
