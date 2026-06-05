@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W23
 
+- `96a2fdc` — Merge remote-tracking branch 'origin/staging' into HEAD *(2026-06-04)*
+- `e451fa3` — fix(adr): update ADR-0009 citations to current symbols (closes #9173) (#9255) (#9255) *(2026-06-04)*
 - `d500472` — fix(adr): stop ADR-0011 false-positive drift on unrelated core-module churn *(2026-06-04)*
 - `455bf0e` — chore(gates): target main ruleset by explicit refs/heads/main, not ~DEFAULT_BRANCH (#9252) (#9252) *(2026-06-04)*
 - `eff5ffc` — Merge pull request #9250 from T-rav/rc/2026-06-04-1254 *(2026-06-04)*
