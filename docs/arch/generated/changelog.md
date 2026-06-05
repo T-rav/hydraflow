@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W23
 
+- `619d97f` — chore(arch): re-stamp generated artifacts for #9317 fix *(2026-06-05)*
 - `a1e7727` — chore(arch): re-stamp generated artifacts after second arch-regen pass *(2026-06-05)*
 - `74932f6` — chore(arch): re-stamp generated artifacts for #9314 fix *(2026-06-05)*
 - `2b4b46c` — fix(contracts): stop gh_shape_validator false-positives on projection-only pr/issue calls (closes #9314) *(2026-06-05)*
