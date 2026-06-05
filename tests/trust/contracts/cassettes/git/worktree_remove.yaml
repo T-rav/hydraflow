@@ -1,0 +1,16 @@
+adapter: git
+interaction: worktree_remove
+recorded_at: "2026-06-04T00:00:00Z"
+recorder_sha: "455bf0e9"
+fixture_repo: tests/trust/contracts/fixtures/git_sandbox
+input:
+  command: worktree_remove
+  args:
+    - "agent/issue-0000"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ""
+  stderr: ""
+normalizers: []
