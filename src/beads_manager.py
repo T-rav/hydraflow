@@ -101,11 +101,27 @@ class BeadsManager:
         Uses ``--server`` to avoid the embedded Dolt CGO requirement.
         Server mode uses a Dolt SQL server backend which works in all
         environments including Docker containers built without CGO.
+
+        Idempotent: ``bd init`` aborts with rc=1 ("This workspace is already
+        initialized." / "Found existing Dolt database") when a database already
+        exists for *cwd*. That is benign — the planner calls ``init`` once per
+        planned issue against the shared repo root, so the second issue onward
+        would otherwise raise ``RuntimeError`` and silently drop the whole plan
+        pool worker mid-decomposition. Treat the already-initialized signal as
+        success; re-raise every other failure.
         """
         try:
             await run_subprocess("bd", "init", "--server", cwd=cwd, timeout=30.0)
         except FileNotFoundError as exc:
             raise BeadsNotInstalledError() from exc
+        except RuntimeError as exc:
+            msg = str(exc).lower()
+            if "already initialized" in msg or "found existing dolt database" in msg:
+                logger.debug(
+                    "beads already initialized in %s — treating as success", cwd
+                )
+                return
+            raise
 
     async def create_task(self, title: str, priority: str, cwd: Path) -> str:
         """Create a bead task, returning the bead ID.
