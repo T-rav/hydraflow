@@ -166,3 +166,97 @@ async def test_unknown_subcommand_skipped(tmp_path: Path) -> None:
         stdout='{"data": {}}\n',
     )
     assert await gh_shape_validator(sample) is None
+
+
+# --- Regression: partial-field fetches must not produce false drift (#9299) ---
+
+
+@pytest.mark.asyncio
+async def test_issue_view_partial_state_only_skipped(tmp_path: Path) -> None:
+    """gh issue view N --json state,stateReason omits 'number' — must skip."""
+    sample = _sample(
+        tmp_path,
+        args=["issue", "view", "123", "--json", "state,stateReason"],
+        stdout=json.dumps({"state": "CLOSED", "stateReason": "completed"}) + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_issue_view_comments_only_skipped(tmp_path: Path) -> None:
+    """gh issue view N --json comments omits required fields — must skip."""
+    sample = _sample(
+        tmp_path,
+        args=["issue", "view", "123", "--json", "comments"],
+        stdout=json.dumps({"comments": []}) + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_pr_view_commits_only_skipped(tmp_path: Path) -> None:
+    """gh pr view N --json commits omits required fields — must skip."""
+    sample = _sample(
+        tmp_path,
+        args=["pr", "view", "42", "--json", "commits"],
+        stdout=json.dumps({"commits": []}) + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_pr_view_reviews_only_skipped(tmp_path: Path) -> None:
+    """gh pr view N --json reviews omits required fields — must skip."""
+    sample = _sample(
+        tmp_path,
+        args=["pr", "view", "42", "--json", "reviews"],
+        stdout=json.dumps({"reviews": []}) + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_pr_list_partial_fields_skipped(tmp_path: Path) -> None:
+    """gh pr list --json number,labels,body omits 'title','state' — must skip."""
+    sample = _sample(
+        tmp_path,
+        args=["pr", "list", "--json", "number,labels,body"],
+        stdout=json.dumps([{"number": 1, "labels": [], "body": "x"}]) + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_issue_list_full_fields_validates(tmp_path: Path) -> None:
+    """gh issue list --json number,title,body validates against GhIssueListItem."""
+    sample = _sample(
+        tmp_path,
+        args=["issue", "list", "--json", "number,title,body,updatedAt"],
+        stdout=json.dumps(
+            [{"number": 1, "title": "bug x", "body": "desc", "updatedAt": "2026-01-01"}]
+        )
+        + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_issue_list_partial_fields_skipped(tmp_path: Path) -> None:
+    """gh issue list --json number,body omits 'title' — must skip."""
+    sample = _sample(
+        tmp_path,
+        args=["issue", "list", "--json", "number,body"],
+        stdout=json.dumps([{"number": 1, "body": "x"}]) + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_pr_view_detail_partial_no_number_skipped(tmp_path: Path) -> None:
+    """gh pr view N --json headRefOid (detail signal, no 'number') — must skip."""
+    sample = _sample(
+        tmp_path,
+        args=["pr", "view", "42", "--json", "headRefOid"],
+        stdout=json.dumps({"headRefOid": "abc123"}) + "\n",
+    )
+    assert await gh_shape_validator(sample) is None

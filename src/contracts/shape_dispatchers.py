@@ -35,6 +35,7 @@ from pydantic import BaseModel, ValidationError
 
 from contracts.shapes import (
     GhCheckRun,
+    GhIssueListItem,
     GhIssueSummary,
     GhPRDetail,
     GhPRSummary,
@@ -65,7 +66,15 @@ def _pick_shape_for_pr(args: list[str]) -> type[BaseModel] | None:
         "isDraft",
     }
     if fields & detail_signals:
+        # GhPRDetail requires 'number'; partial fetches like --json commits
+        # or --json headRefOid omit it — return None rather than false-drift.
+        if "number" not in fields:
+            return None
         return GhPRDetail
+    # GhPRSummary requires 'number', 'title', 'state'; partial fetches like
+    # --json number,labels,body or --json commits skip validation.
+    if not {"number", "title", "state"} <= fields:
+        return None
     return GhPRSummary
 
 
@@ -73,7 +82,21 @@ def _pick_shape_for_issue(args: list[str]) -> type[BaseModel] | None:
     fields = _extract_json_fields(args)
     if fields is None:
         return None
+    # GhIssueSummary requires 'number' and 'state'; partial fetches like
+    # --json state,stateReason or --json comments skip validation.
+    if not {"number", "state"} <= fields:
+        return None
     return GhIssueSummary
+
+
+def _pick_shape_for_issue_list(args: list[str]) -> type[BaseModel] | None:
+    fields = _extract_json_fields(args)
+    if fields is None:
+        return None
+    # GhIssueListItem requires 'number' and 'title'; skip partial fetches.
+    if not {"number", "title"} <= fields:
+        return None
+    return GhIssueListItem
 
 
 def _pick_shape_for_checks(args: list[str]) -> type[BaseModel] | None:
@@ -127,8 +150,10 @@ async def gh_shape_validator(sample: ShadowSample) -> dict[str, object] | None: 
     shape_cls: type[BaseModel] | None = None
     if subcommand in ("pr-view", "pr-list"):
         shape_cls = _pick_shape_for_pr(sample.args)
-    elif subcommand in ("issue-view", "issue-list"):
+    elif subcommand == "issue-view":
         shape_cls = _pick_shape_for_issue(sample.args)
+    elif subcommand == "issue-list":
+        shape_cls = _pick_shape_for_issue_list(sample.args)
     elif subcommand == "pr-checks":
         shape_cls = _pick_shape_for_checks(sample.args)
     if shape_cls is None:
