@@ -60,7 +60,7 @@ export function SessionSidebar() {
     sessions,
     selectedRepoSlug,
     stageStatus,
-    orchestratorStatus,
+    connected,
     selectRepo,
     supervisedRepos = [],
     runtimes = [],
@@ -159,8 +159,11 @@ export function SessionSidebar() {
           const rt = entry.runtime
           const isRunning = rt?.running ?? entry.info?.running ?? false
           const lastError = rt?.last_error || null
-          const orchRunning = orchestratorStatus === 'running'
-          const disabled = !orchRunning && !isRunning
+          // Each factory line is an independent runtime: its Start/Stop is
+          // gated only on server connectivity, not on the host orchestrator
+          // running. The host repo is just another line — stopping it must
+          // not disable the control needed to start it again.
+          const disabled = !connected
           const slug = entry.repoSlug || entry.displayName
 
           return (
@@ -188,7 +191,7 @@ export function SessionSidebar() {
                       disabled={disabled}
                       style={isRunning ? styles.runtimeStopBtn : disabled ? styles.runtimeDisabledBtn : styles.runtimeStartBtn}
                       aria-label={isRunning ? 'Stop repo' : 'Start repo'}
-                      title={disabled ? 'Start the orchestrator first' : isRunning ? 'Stop processing' : 'Start processing'}
+                      title={disabled ? 'Disconnected from server' : isRunning ? 'Stop processing' : 'Start processing'}
                     >
                       {isRunning ? '■' : '▶'}
                     </button>

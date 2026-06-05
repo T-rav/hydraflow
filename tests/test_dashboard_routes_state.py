@@ -1864,3 +1864,78 @@ class TestRuntimeEndpointsWithRegistry:
 # ---------------------------------------------------------------------------
 # GET /api/retrospectives — edge cases
 # ---------------------------------------------------------------------------
+
+
+class TestDefaultRepoRuntimeFullLifecycle:
+    """Host (default) repo factory line uses the full orchestrator lifecycle.
+
+    The legacy pipeline-toggle behavior is gone: the host line's Stop fully
+    halts the orchestrator (every loop, including background workers) and its
+    Start restarts it — identical to every other factory line.
+    """
+
+    @pytest.mark.asyncio
+    async def test_stop_host_repo_fully_halts_orchestrator(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        mock_orch = MagicMock()
+        mock_orch.running = True
+        mock_orch.request_stop = AsyncMock()
+
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        endpoint = find_endpoint(router, "/api/runtimes/{slug}/stop")
+
+        resp = await endpoint(config.repo)
+
+        data = json.loads(resp.body)
+        assert resp.status_code == 200
+        assert data["status"] == "stopped"
+        mock_orch.request_stop.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_start_host_repo_restarts_stopped_orchestrator(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        mock_orch = MagicMock()
+        mock_orch.running = False
+        mock_orch.reset = MagicMock()
+        mock_orch.run = AsyncMock()
+        captured: dict[str, object] = {}
+
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            get_orch=lambda: mock_orch,
+            set_run_task=lambda task: captured.__setitem__("task", task),
+        )
+        endpoint = find_endpoint(router, "/api/runtimes/{slug}/start")
+
+        resp = await endpoint(config.repo)
+
+        data = json.loads(resp.body)
+        assert resp.status_code == 200
+        assert data["status"] == "started"
+        mock_orch.reset.assert_called_once()
+        assert mock_orch.pipeline_enabled is True
+        assert "task" in captured
+        await captured["task"]  # drain the scheduled restart task
+
+    @pytest.mark.asyncio
+    async def test_start_host_repo_conflicts_when_already_running(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        mock_orch = MagicMock()
+        mock_orch.running = True
+
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        endpoint = find_endpoint(router, "/api/runtimes/{slug}/start")
+
+        resp = await endpoint(config.repo)
+
+        assert resp.status_code == 409

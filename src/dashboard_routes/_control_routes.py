@@ -472,11 +472,25 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
 
     @router.post("/api/control/stop")
     async def stop_orchestrator() -> JSONResponse:
-        """Request a graceful stop of the running orchestrator."""
+        """Stop the entire factory — the host orchestrator and every line.
+
+        The factory-level Stop halts the host orchestrator *and* every
+        registered repo runtime (``registry.stop_all``), so no factory line
+        keeps running after a factory stop. Stopping a single line is handled
+        by ``POST /api/runtimes/{slug}/stop``.
+        """
         orch = ctx.get_orchestrator()
-        if not orch or not orch.running:
+        registry = ctx.registry
+        host_running = bool(orch and orch.running)
+        registry_running = bool(
+            registry is not None and any(rt.running for rt in registry.all)
+        )
+        if not host_running and not registry_running:
             return JSONResponse({"error": "not running"}, status_code=400)
-        await orch.request_stop()
+        if orch is not None and orch.running:
+            await orch.request_stop()
+        if registry is not None:
+            await registry.stop_all()
         return JSONResponse({"status": "stopping"})
 
     @router.post("/api/control/clear-credit-pause")
