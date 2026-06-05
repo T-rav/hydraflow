@@ -87,6 +87,22 @@ def load_pricing(*args: Any, **kwargs: Any) -> Any:
 __all__ = ["CommentFormatter", "SelfReviewError", "PRManager"]
 
 
+def _normalise_issue_comment(comment: dict[str, Any]) -> dict[str, Any]:
+    """Map a ``gh issue view --json comments`` object to the stable port shape.
+
+    gh emits GraphQL-shaped ``author.login`` / ``createdAt``; the port contract
+    (and the fake) expose REST-shaped ``user.login`` / ``created_at``. Accept
+    either input so the contract holds across gh versions.
+    """
+    author = comment.get("author") or comment.get("user") or {}
+    login = author.get("login", "") if isinstance(author, dict) else ""
+    return {
+        "user": {"login": login},
+        "body": comment.get("body", ""),
+        "created_at": comment.get("createdAt") or comment.get("created_at") or "",
+    }
+
+
 class PRManager:
     """Pushes branches, creates PRs, merges, and manages labels."""
 
@@ -1196,12 +1212,13 @@ class PRManager:
     async def list_issue_comments(self, issue_number: int) -> list[dict[str, Any]]:
         """List comments on a GitHub issue (oldest first; max 100).
 
-        Returns dicts with `user.login`, `body`, `created_at` keys
-        (matches `gh issue view --json comments` shape).
+        Normalises ``gh issue view --json comments`` (which yields GraphQL-shaped
+        ``author.login`` / ``createdAt``) into the stable port contract: dicts
+        with ``user.login``, ``body`` and ``created_at`` keys.
         """
         self._assert_repo()
         try:
-            output, _ = await self._run_gh(
+            output = await self._run_gh(
                 "gh",
                 "issue",
                 "view",
@@ -1220,7 +1237,7 @@ class PRManager:
             logger.warning("Bad comments JSON for issue #%d: %s", issue_number, exc)
             return []
         comments = payload.get("comments") or []
-        return list(comments)
+        return [_normalise_issue_comment(c) for c in comments if isinstance(c, dict)]
 
     async def submit_review(
         self, pr_number: int, verdict: ReviewVerdict, body: str
