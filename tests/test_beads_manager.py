@@ -94,13 +94,74 @@ async def test_ensure_installed_npm_fails_to_install(manager):
 
 
 @pytest.mark.asyncio()
-async def test_init_success(manager):
+async def test_init_success_uses_embedded(manager, tmp_path):
+    """Default init uses bd's embedded store (no --server), skipping agent/hook
+    setup so it never rewrites the worktree's CLAUDE.md."""
     with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run:
         mock_run.return_value = "Initialized"
-        await manager.init(Path("/repo"))
+        await manager.init(tmp_path)
         mock_run.assert_called_once_with(
-            "bd", "init", "--server", cwd=Path("/repo"), timeout=30.0
+            "bd",
+            "init",
+            "--skip-agents",
+            "--skip-hooks",
+            "-q",
+            cwd=tmp_path,
+            timeout=60.0,
         )
+
+
+@pytest.mark.asyncio()
+async def test_init_skips_when_metadata_exists(manager, tmp_path):
+    """Idempotent: an existing .beads/metadata.json means already-initialized —
+    no bd subprocess is spawned (bd re-init aborts)."""
+    (tmp_path / ".beads").mkdir()
+    (tmp_path / ".beads" / "metadata.json").write_text("{}")
+    with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run:
+        await manager.init(tmp_path)
+        mock_run.assert_not_called()
+
+
+@pytest.mark.asyncio()
+async def test_init_falls_back_to_server_on_cgo(manager, tmp_path):
+    """Where embedded Dolt is unavailable (no CGO), init retries with --server."""
+    calls: list[tuple] = []
+
+    async def _side_effect(*args, **kwargs):
+        calls.append(args)
+        if "--server" not in args:
+            raise RuntimeError("embedded Dolt requires CGO; use server mode")
+        return "Initialized"
+
+    with patch("beads_manager.run_subprocess", new=AsyncMock(side_effect=_side_effect)):
+        await manager.init(tmp_path)
+
+    assert any("--server" not in c for c in calls), "should try embedded first"
+    assert any("--server" in c for c in calls), "should fall back to --server"
+
+
+@pytest.mark.asyncio()
+async def test_export_writes_issues_jsonl(manager, tmp_path):
+    (tmp_path / ".beads").mkdir()
+    payload = '{"_type":"issue","id":"x","title":"t","status":"open"}\n'
+    with patch(
+        "beads_manager.run_subprocess", new=AsyncMock(return_value=payload)
+    ) as mock_run:
+        await manager.export(tmp_path)
+        mock_run.assert_called_once_with("bd", "export", cwd=tmp_path, timeout=30.0)
+    assert (tmp_path / ".beads" / "issues.jsonl").read_text() == payload
+
+
+@pytest.mark.asyncio()
+async def test_export_best_effort_on_failure(manager, tmp_path):
+    """An export failure must not raise (never fail the pipeline)."""
+    (tmp_path / ".beads").mkdir()
+    with patch(
+        "beads_manager.run_subprocess",
+        new=AsyncMock(side_effect=RuntimeError("bd export boom")),
+    ):
+        await manager.export(tmp_path)  # must not raise
+    assert not (tmp_path / ".beads" / "issues.jsonl").exists()
 
 
 @pytest.mark.asyncio()
@@ -389,7 +450,8 @@ async def test_create_from_phases(manager):
     ]
 
     with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run_fn:
-        mock_run_fn.side_effect = ["repo-id1", "repo-id2", "ok"]
+        # create P1, create P2, dep add, then the trailing `bd export`.
+        mock_run_fn.side_effect = ["repo-id1", "repo-id2", "ok", ""]
         mapping = await manager.create_from_phases(phases, 42, Path("/repo"))
 
     assert mapping == {"P1": "repo-id1", "P2": "repo-id2"}

@@ -96,22 +96,35 @@ class BeadsManager:
             raise BeadsNotInstalledError() from exc
 
     async def init(self, cwd: Path) -> None:
-        """Initialize a beads project in *cwd* (idempotent).
+        """Initialize a per-worktree beads project in *cwd* (idempotent).
 
-        Uses ``--server`` to avoid the embedded Dolt CGO requirement.
-        Server mode uses a Dolt SQL server backend which works in all
-        environments including Docker containers built without CGO.
+        Uses bd's default **embedded** Dolt store (bd >= 1.0): an in-process
+        engine with no separate ``dolt sql-server`` — so each worktree gets its
+        own isolated ``.beads/embeddeddolt`` (no shared server, no cross-worktree
+        "already initialized" collisions). ``--skip-agents``/``--skip-hooks``
+        stop bd from rewriting the worktree's CLAUDE.md or installing git hooks.
 
-        Idempotent: ``bd init`` aborts with rc=1 ("This workspace is already
-        initialized." / "Found existing Dolt database") when a database already
-        exists for *cwd*. That is benign — the planner calls ``init`` once per
-        planned issue against the shared repo root, so the second issue onward
-        would otherwise raise ``RuntimeError`` and silently drop the whole plan
-        pool worker mid-decomposition. Treat the already-initialized signal as
-        success; re-raise every other failure.
+        Idempotent: if ``.beads/metadata.json`` already exists the workspace is
+        initialized — skip (bd re-init aborts on existing data). The broad
+        already-initialized signals are also swallowed defensively.
+
+        Container fallback: if embedded Dolt is unavailable (no CGO, e.g. a
+        slim container image), fall back to external ``--server`` mode, which
+        works without CGO. JSONL export (:meth:`export`) works in either mode.
         """
+        if (cwd / ".beads" / "metadata.json").exists():
+            logger.debug("beads already initialized in %s — skipping init", cwd)
+            return
         try:
-            await run_subprocess("bd", "init", "--server", cwd=cwd, timeout=30.0)
+            await run_subprocess(
+                "bd",
+                "init",
+                "--skip-agents",
+                "--skip-hooks",
+                "-q",
+                cwd=cwd,
+                timeout=60.0,
+            )
         except FileNotFoundError as exc:
             raise BeadsNotInstalledError() from exc
         except RuntimeError as exc:
@@ -121,7 +134,52 @@ class BeadsManager:
                     "beads already initialized in %s — treating as success", cwd
                 )
                 return
+            if "cgo" in msg or "embedded dolt" in msg:
+                logger.info(
+                    "embedded beads unavailable in %s (%s) — falling back to --server",
+                    cwd,
+                    exc,
+                )
+                await self._init_server(cwd)
+                return
             raise
+
+    async def _init_server(self, cwd: Path) -> None:
+        """Fallback init using an external Dolt sql-server (no CGO required)."""
+        try:
+            await run_subprocess(
+                "bd",
+                "init",
+                "--server",
+                "--skip-agents",
+                "--skip-hooks",
+                "-q",
+                cwd=cwd,
+                timeout=60.0,
+            )
+        except RuntimeError as exc:
+            msg = str(exc).lower()
+            if "already initialized" in msg or "found existing dolt database" in msg:
+                return
+            raise
+
+    async def export(self, cwd: Path) -> None:
+        """Write the per-worktree JSONL artifact ``.beads/issues.jsonl``.
+
+        bd's store is the embedded Dolt engine; this exports it to newline-
+        delimited JSON so each worktree carries a plain-text ``issues.jsonl``.
+        Best-effort: an export failure must never fail the pipeline.
+        """
+        try:
+            output = await run_subprocess("bd", "export", cwd=cwd, timeout=30.0)
+        except (FileNotFoundError, OSError, RuntimeError) as exc:
+            logger.warning("bd export failed in %s: %s", cwd, exc)
+            return
+        target = cwd / ".beads" / "issues.jsonl"
+        try:
+            target.write_text(output)
+        except OSError as exc:
+            logger.warning("failed writing %s: %s", target, exc)
 
     async def create_task(self, title: str, priority: str, cwd: Path) -> str:
         """Create a bead task, returning the bead ID.
@@ -207,6 +265,10 @@ class BeadsManager:
             for dep_id in phase.depends_on:
                 parent_bead = mapping[dep_id]
                 await self.add_dependency(child_bead, parent_bead, cwd)
+
+        # Refresh the per-worktree JSONL artifact so the created beads land in
+        # .beads/issues.jsonl (best-effort; never fails the pipeline).
+        await self.export(cwd)
 
         return mapping
 

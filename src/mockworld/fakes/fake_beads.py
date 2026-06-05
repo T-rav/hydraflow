@@ -10,6 +10,7 @@ accept a BeadsManager can accept FakeBeads without modification.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -63,6 +64,24 @@ class FakeBeads:
         """Mark the fake as initialised (idempotent)."""
         _ = cwd
         self._initialized = True
+
+    async def export(self, cwd: Path) -> None:
+        """Write in-memory tasks to ``.beads/issues.jsonl`` (mirrors BeadsManager)."""
+        target = cwd / ".beads" / "issues.jsonl"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        lines = [
+            json.dumps(
+                {
+                    "_type": "issue",
+                    "id": t.task_id,
+                    "title": t.title,
+                    "status": t.status,
+                    "priority": t.priority,
+                }
+            )
+            for t in self._tasks.values()
+        ]
+        target.write_text("\n".join(lines) + ("\n" if lines else ""))
 
     async def create_task(self, title: str, priority: str, cwd: Path) -> str:
         """Create an in-memory bead task and return its generated ID."""
@@ -153,6 +172,8 @@ class FakeBeads:
             for dep_id in phase.depends_on:
                 parent_bead = mapping[dep_id]
                 await self.add_dependency(child_bead, parent_bead, cwd)
+
+        await self.export(cwd)
 
         return mapping
 
