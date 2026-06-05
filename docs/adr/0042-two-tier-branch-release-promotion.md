@@ -40,7 +40,9 @@ When false, every behavior is identical to the pre-feature state.
 The decision is encoded in two GitHub rulesets so the platform itself rejects
 violations rather than relying on convention:
 
-- **`main protect`** (ruleset id `15468404`, targets `~DEFAULT_BRANCH`) —
+- **`main protect`** (ruleset id `15468404`, targets `refs/heads/main` — an
+  explicit ref, not `~DEFAULT_BRANCH`, since `staging` is the GitHub default
+  branch and `main` is the protected release branch) —
   `allowed_merge_methods: ["merge"]` only. Squash into `main` is rejected
   (squash from a long-lived integration branch produces growing-diff
   regression). Required status checks include the full standard CI gate

@@ -200,7 +200,7 @@ async def test_issue_list_without_state_validates_cleanly(tmp_path: Path) -> Non
     """gh issue list --json number,title omits 'state' (filtered server-side).
 
     Previously routed to GhIssueSummary which requires state, producing
-    spurious drift for every issue-list shadow sample.
+    spurious drift for every issue-list shadow sample (signature 5653c1c6d466).
     Now routed to GhIssueListItem which only requires number and title.
     """
     sample = _sample(

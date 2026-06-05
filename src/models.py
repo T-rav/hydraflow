@@ -1904,6 +1904,15 @@ class StateData(BaseModel):
     diagnostic_attempts: dict[str, list[AttemptRecord]] = Field(default_factory=dict)
     diagnosis_severities: dict[str, str] = Field(default_factory=dict)
     sentry_creation_attempts: dict[str, int] = Field(default_factory=dict)
+    # LogIngestLoop — per-log-file byte-offset cursor (cursor-from-now). Keyed
+    # by the resolved log file path; value is the last-scanned EOF byte offset.
+    # On the first run for a file the cursor is primed to current EOF (no
+    # filing) so historical errors are not back-filled / re-filed.
+    log_ingest_cursor: dict[str, int] = Field(default_factory=dict)
+    # Per-Sentry-issue cooldown stamps (id -> ISO timestamp of last filing
+    # attempt). Suppresses re-filing a flapping error every poll within
+    # ``sentry_signal_cooldown_hours``. See sentry_loop.SentryLoop.
+    sentry_signal_cooldown: dict[str, str] = Field(default_factory=dict)
     trace_runs: TraceRunsContainer = Field(default_factory=TraceRunsContainer)
     # StagingBisectLoop state (spec §4.3 + §8). Written by StagingPromotionLoop
     # on each promotion outcome; polled + mutated by StagingBisectLoop.
@@ -2224,8 +2233,17 @@ class TrackedReport(BaseModel):
 
         Appends a :class:`ReportHistoryEntry` and updates ``updated_at``.
 
-        Raises :class:`ValueError` if the transition is not allowed.
+        A self-transition (``new_status == self.status``) is a semantic no-op:
+        it leaves the report unchanged and returns without raising.  This keeps
+        idempotent re-marks (e.g. ``report_issue_loop`` re-marking an already
+        ``in-progress`` report every tick) from raising ``ValueError`` — the
+        highest-volume production ERROR before this fix.
+
+        Raises :class:`ValueError` if the transition is to a *distinct*,
+        disallowed state.
         """
+        if new_status == self.status:
+            return
         allowed = self._VALID_TRANSITIONS.get(self.status, set())
         if new_status not in allowed:
             msg = f"Invalid transition: {self.status} -> {new_status}"

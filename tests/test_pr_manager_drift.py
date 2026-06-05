@@ -3,6 +3,11 @@
 See ADR-0056. Two drift kinds:
 - ``pr_ahead_of_issue``: issue at ready/plan, PR at review with commits
 - ``pr_at_pre_pr_stage``: PR labelled ready/plan but has commits
+
+The commit count is fetched per Fixes-matched PR via ``gh pr view --json
+commits`` (not the bulk ``pr list``, which would expand the authors connection
+and exceed GitHub's GraphQL node ceiling), so these tests script a
+``("pr", "view")`` response for matched PRs.
 """
 
 from __future__ import annotations
@@ -35,6 +40,10 @@ def _gh_responder(mapping: dict[tuple[str, ...], str]):
     return _side_effect
 
 
+def _commits_json(n: int) -> str:
+    return json.dumps({"commits": [{"oid": str(i)} for i in range(n)]})
+
+
 class TestFindLabelDrift:
     @pytest.mark.asyncio
     async def test_detects_issue_at_ready_pr_at_review(self, config, event_bus) -> None:
@@ -48,7 +57,6 @@ class TestFindLabelDrift:
                     "number": 100,
                     "labels": [{"name": "hydraflow-review"}],
                     "body": "## Summary\n\nFixes #42.\n",
-                    "commits": [{"oid": "a"}, {"oid": "b"}],
                 }
             ]
         )
@@ -60,6 +68,7 @@ class TestFindLabelDrift:
                 side_effect=_gh_responder(
                     {
                         ("pr", "list"): prs_json,
+                        ("pr", "view"): _commits_json(2),
                         ("issue", "view"): issue_json,
                     }
                 )
@@ -86,7 +95,6 @@ class TestFindLabelDrift:
                     "number": 200,
                     "labels": [{"name": "hydraflow-ready"}],
                     "body": "Fixes #99",
-                    "commits": [{"oid": "a"}, {"oid": "b"}, {"oid": "c"}],
                 }
             ]
         )
@@ -98,6 +106,7 @@ class TestFindLabelDrift:
                 side_effect=_gh_responder(
                     {
                         ("pr", "list"): prs_json,
+                        ("pr", "view"): _commits_json(3),
                         ("issue", "view"): issue_json,
                     }
                 )
@@ -121,7 +130,6 @@ class TestFindLabelDrift:
                     "number": 300,
                     "labels": [{"name": "hydraflow-review"}],
                     "body": "Fixes #7",
-                    "commits": [{"oid": "x"}],
                 }
             ]
         )
@@ -133,6 +141,7 @@ class TestFindLabelDrift:
                 side_effect=_gh_responder(
                     {
                         ("pr", "list"): prs_json,
+                        ("pr", "view"): _commits_json(1),
                         ("issue", "view"): issue_json,
                     }
                 )
@@ -153,7 +162,6 @@ class TestFindLabelDrift:
                     "number": 400,
                     "labels": [{"name": "hydraflow-review"}],
                     "body": "no fixes link here",
-                    "commits": [{"oid": "x"}],
                 }
             ]
         )
@@ -165,6 +173,33 @@ class TestFindLabelDrift:
             drift = await mgr.find_label_drift()
 
         assert drift == []
+
+    @pytest.mark.asyncio
+    async def test_bulk_pr_list_does_not_request_commits(
+        self, config, event_bus
+    ) -> None:
+        """The bulk ``pr list`` must not request ``commits`` — that field
+        expands each commit's authors connection and exceeds GitHub's GraphQL
+        500k-node ceiling at --limit 200 (the original failure)."""
+        mgr = make_pr_manager(config, event_bus)
+        calls: list[tuple[str, ...]] = []
+
+        async def _record(*args, **kwargs):
+            calls.append(args)
+            if "list" in args:
+                return json.dumps([])
+            return json.dumps({"labels": []})
+
+        with patch(
+            "pr_manager.run_subprocess_with_retry",
+            new=AsyncMock(side_effect=_record),
+        ):
+            await mgr.find_label_drift()
+
+        pr_list_calls = [a for a in calls if "list" in a]
+        assert pr_list_calls
+        for call_args in pr_list_calls:
+            assert "commits" not in ",".join(call_args)
 
 
 class TestFindLabelDriftAutoCloseKeywords:
@@ -190,7 +225,6 @@ class TestFindLabelDriftAutoCloseKeywords:
                     "number": 500,
                     "labels": [{"name": "hydraflow-review"}],
                     "body": f"## Summary\n\n{keyword} #42.\n",
-                    "commits": [{"oid": "a"}],
                 }
             ]
         )
@@ -202,6 +236,7 @@ class TestFindLabelDriftAutoCloseKeywords:
                 side_effect=_gh_responder(
                     {
                         ("pr", "list"): prs_json,
+                        ("pr", "view"): _commits_json(1),
                         ("issue", "view"): issue_json,
                     }
                 )

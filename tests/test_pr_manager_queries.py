@@ -422,8 +422,10 @@ class TestRetryWrapperUsage:
             mock_retry.return_value = "[]"
             await mgr.ensure_labels_exist()
 
-        # 1 list call + 12 create calls = 13
-        assert mock_retry.await_count == 1 + len(PRManager._HYDRAFLOW_LABELS)
+        # 1 list call + 1 create per config-backed label + 1 per literal label
+        assert mock_retry.await_count == 1 + len(PRManager._HYDRAFLOW_LABELS) + len(
+            PRManager._HYDRAFLOW_LITERAL_LABELS
+        )
 
     @pytest.mark.asyncio
     async def test_pull_main_uses_retry(self, config, event_bus):

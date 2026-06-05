@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/events.py:EventBus"
 aliases: ["pub/sub bus", "hydraflow event bus"]
 related: []
-evidence: []
+evidence: ["01KQP0XFBGMB32VFGNPV8GZ268"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668765+00:00"
-updated_at: "2026-05-05T03:35:36.668766+00:00"
+updated_at: "2026-06-04T05:06:42.396716+00:00"
 ---
 
 ## Definition

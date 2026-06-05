@@ -119,6 +119,22 @@ async def test_init_runtime_error(manager):
             await manager.init(Path("/repo"))
 
 
+@pytest.mark.asyncio()
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "Command ('bd', 'init', '--server') failed (rc=1): Error:\n"
+        "⚠ This workspace is already initialized.\nAborting.",
+        "Command failed (rc=1): Found existing Dolt database: dolt server at "
+        "127.0.0.1:55405",
+    ],
+)
+async def test_init_already_initialized_is_noop(manager, stderr):
+    with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run:
+        mock_run.side_effect = RuntimeError(stderr)
+        await manager.init(Path("/repo"))  # must not raise
+
+
 # ---------------------------------------------------------------------------
 # create_task — `bd create "title" -p <priority> --silent`
 # ---------------------------------------------------------------------------

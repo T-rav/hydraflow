@@ -12,7 +12,7 @@ from typing import ClassVar
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventType, HydraFlowEvent
-from exception_classify import reraise_on_credit_or_bug
+from exception_classify import exc_detail, reraise_on_credit_or_bug
 from models import NewIssueSpec, PlannerStatus, PlannerUpdatePayload, PlanResult, Task
 from plan_constants import (
     LITE_BODY_THRESHOLD,
@@ -218,7 +218,7 @@ class PlannerRunner(BaseRunner):
             logger.exception(
                 "Planner failed for issue #%d: %s",
                 task.id,
-                exc,
+                exc_detail(exc),
                 extra={"issue": task.id},
             )
             await self._emit_status(task.id, worker_id, PlannerStatus.FAILED)

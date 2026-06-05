@@ -28,6 +28,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **HealthMonitorLoop** | `src.health_monitor_loop` | 7200 | — | — | — |
 | **LabelDriftWatcherLoop** | `src.label_drift_watcher_loop` | 600 | — | — | — |
 | **LiveCorpusReplayLoop** | `src.live_corpus_replay_loop` | 900 | — | — | — |
+| **LogIngestLoop** | `src.log_ingest_loop` | 14400 | — | — | — |
 | **MemoryBacklogLoop** | `src.memory_backlog_loop` | 86400 | — | — | — |
 | **MergeStateWatcherLoop** | `src.merge_state_watcher_loop` | 600 | — | — | — |
 | **PRUnstickerLoop** | `src.pr_unsticker_loop` | 3600 | — | — | — |

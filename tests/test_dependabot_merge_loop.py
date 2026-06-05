@@ -18,13 +18,17 @@ from tests.helpers import make_bg_loop_deps
 
 
 def _make_pr(
-    pr: int, author: str = "dependabot[bot]", title: str = "Bump foo"
+    pr: int,
+    author: str = "dependabot[bot]",
+    title: str = "Bump foo",
+    branch: str = "",
 ) -> PRListItem:
     """Build a minimal PRListItem for testing."""
     return PRListItem(
         pr=pr,
         author=author,
         title=title,
+        branch=branch,
         url=f"https://github.com/o/r/pull/{pr}",
     )
 
@@ -306,3 +310,70 @@ class TestDependabotMergeLoopRun:
         await loop.run()
 
         loop._status_cb.assert_not_called()
+
+
+class TestDependabotMergeLoopAutoAgentBranch:
+    """Auto-Agent preflight PRs ride the factory-owned ``agent/auto-agent-N``
+    branch and are authored by the ambient owner token (not a bot author), so
+    the review->merge pipeline (keyed on hydraflow-review + agent/issue-N) never
+    lands them. The loop merges them by branch prefix so they don't pile up.
+    """
+
+    @pytest.mark.asyncio
+    async def test_merges_auto_agent_pr_despite_non_bot_author(
+        self, tmp_path: Path
+    ) -> None:
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(42, author="T-rav", branch="agent/auto-agent-42")],
+            ci_result=(True, "All checks passed"),
+        )
+
+        result = await loop._do_work()
+
+        assert result["merged"] == 1
+        prs.merge_pr.assert_awaited_once_with(42, auto_rebase=True)
+        state.add_dependabot_merge_processed.assert_called_once_with(42)
+
+    @pytest.mark.asyncio
+    async def test_does_not_merge_normal_pipeline_branch(self, tmp_path: Path) -> None:
+        """agent/issue-N PRs belong to the review->merge pipeline, not this loop."""
+        loop, _, _, prs, _ = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(42, author="T-rav", branch="agent/issue-42")],
+        )
+
+        result = await loop._do_work()
+
+        assert result == {"merged": 0, "skipped": 0, "failed": 0}
+        prs.wait_for_ci.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_does_not_merge_arbitrary_owner_branch(self, tmp_path: Path) -> None:
+        """A hand-authored owner PR on an arbitrary branch must not auto-merge."""
+        loop, _, _, prs, _ = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(42, author="T-rav", branch="fix/manual-thing")],
+        )
+
+        result = await loop._do_work()
+
+        assert result == {"merged": 0, "skipped": 0, "failed": 0}
+        prs.wait_for_ci.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_auto_agent_pr_failing_ci_respects_failure_strategy(
+        self, tmp_path: Path
+    ) -> None:
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(42, author="T-rav", branch="agent/auto-agent-42")],
+            ci_result=(False, "2/5 checks failed: lint, test"),
+            failure_strategy="skip",
+        )
+
+        result = await loop._do_work()
+
+        assert result["skipped"] == 1
+        prs.merge_pr.assert_not_awaited()
+        state.add_dependabot_merge_processed.assert_not_called()

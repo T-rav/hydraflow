@@ -211,6 +211,30 @@ async def test_do_work_skips_filing_when_dedup_key_present(loop_env) -> None:
     pr.create_issue.assert_not_awaited()
 
 
+async def test_do_work_create_issue_zero_sentinel_not_tracked(loop_env) -> None:
+    """create_issue's 0 sentinel must not record a phantom anomaly or dedup.
+
+    Regression for issue #9241: a failed gh call returns 0; tracking it
+    permanently suppresses re-filing without a real issue ever existing.
+    """
+    cfg, state, bg_workers, pr, dedup, bus = loop_env
+    pr.create_issue = AsyncMock(return_value=0)
+
+    async def fake_load(since):  # noqa: ARG001
+        return [_make_status_event("ci_monitor", "ok", ago_s=600, filed=20)]
+
+    bus.load_events_since = fake_load  # type: ignore[method-assign]
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    loop._load_cost_reader = MagicMock(return_value=None)
+    stats = await loop._do_work()
+
+    pr.create_issue.assert_awaited()  # it tried
+    assert stats["anomalies"] == 0  # but recorded nothing
+    assert stats["filed"] == 0
+    dedup.set_all.assert_not_called()  # no dedup add — retries next cycle
+
+
 async def test_do_work_staleness_detector_uses_bg_worker_state(loop_env) -> None:
     cfg, state, bg_workers, pr, dedup, bus = loop_env
     old = (datetime.now(UTC) - timedelta(seconds=99_999)).isoformat()

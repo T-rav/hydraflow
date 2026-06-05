@@ -324,3 +324,66 @@ class TestL8DependabotMergeSkipsOnFailure:
         assert stats["dependabot_merge"]["merged"] == 0
         # PR should NOT be merged
         assert world.github.pr(600).merged is False
+
+
+# ---------------------------------------------------------------------------
+# L7b: Dependabot Merge also lands Auto-Agent PRs (agent/auto-agent-N)
+# ---------------------------------------------------------------------------
+
+
+class TestL7bAutoAgentPrMerges:
+    """L7b: Auto-Agent preflight PRs ride agent/auto-agent-N and are authored by
+    the ambient owner token (not a bot author), so the review->merge pipeline
+    never lands them. DependabotMergeLoop merges them by branch prefix; normal
+    pipeline PRs (agent/issue-N) are left to the review loop."""
+
+    async def test_auto_agent_pr_merged_on_ci_pass(self, tmp_path):
+        world = MockWorld(tmp_path)
+
+        from mockworld.fakes.fake_github import FakePR
+        from models import PRListItem
+
+        agent_pr = PRListItem(
+            pr=700,
+            title="fix(contracts): expand GhCheckRun states",
+            author="T-rav",  # owner token — NOT a configured bot author
+            branch="agent/auto-agent-700",
+        )
+        world.github._prs[700] = FakePR(
+            number=700, issue_number=0, branch="agent/auto-agent-700"
+        )
+
+        await world.run_with_loops(["dependabot_merge"], cycles=1)
+        world._dependabot_cache.get_open_prs.return_value = [agent_pr]
+        world._dependabot_cache.get_all_open_prs.return_value = [agent_pr]
+
+        stats = await world.run_with_loops(["dependabot_merge"], cycles=1)
+
+        assert stats["dependabot_merge"]["merged"] == 1
+        assert world.github.pr(700).merged is True
+
+    async def test_normal_pipeline_pr_not_merged(self, tmp_path):
+        """agent/issue-N PRs belong to the review->merge pipeline, not this loop."""
+        world = MockWorld(tmp_path)
+
+        from mockworld.fakes.fake_github import FakePR
+        from models import PRListItem
+
+        pipeline_pr = PRListItem(
+            pr=701,
+            title="feat: pipeline change",
+            author="T-rav",
+            branch="agent/issue-701",
+        )
+        world.github._prs[701] = FakePR(
+            number=701, issue_number=701, branch="agent/issue-701"
+        )
+
+        await world.run_with_loops(["dependabot_merge"], cycles=1)
+        world._dependabot_cache.get_open_prs.return_value = [pipeline_pr]
+        world._dependabot_cache.get_all_open_prs.return_value = [pipeline_pr]
+
+        stats = await world.run_with_loops(["dependabot_merge"], cycles=1)
+
+        assert stats["dependabot_merge"]["merged"] == 0
+        assert world.github.pr(701).merged is False

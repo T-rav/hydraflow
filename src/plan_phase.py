@@ -380,11 +380,34 @@ class PlanPhase:
         )
         self._persist_adversarial_state(issue, adv)
 
-    def _should_research(self) -> bool:
-        """Return True if research should run before planning."""
+    def _should_research(self, issue: Task) -> bool:
+        """Return True if the research pre-pass should run before planning *issue*.
+
+        Research spawns a full extra codebase-exploration subprocess on top of
+        the planner's own exploration, so it is gated rather than run for every
+        issue. With ``research_enabled`` on and a runner wired, research runs
+        only for issues that need the depth:
+
+        - **Escalated** — the issue carries one of
+          ``config.research_escalation_labels``.
+        - **Cycled / failing to land** — the issue has been routed back to
+          planning at least once (route-back count > 0).
+
+        The common first-pass issue skips research and lets the planner explore
+        once.
+        """
         if not getattr(self._config, "research_enabled", True):
             return False
-        return self._research_runner is not None
+        if self._research_runner is None:
+            return False
+        # Cycled / failing to land: routed back from a later stage at least once.
+        if self._state.get_route_back_count(issue.id) > 0:
+            return True
+        # Escalated: operator/loop flagged the issue for deeper handling.
+        escalation_labels = {
+            lbl.lower() for lbl in self._config.research_escalation_labels
+        }
+        return any(tag.lower() in escalation_labels for tag in issue.tags)
 
     async def _handle_already_satisfied(self, issue: Task, result: PlanResult) -> bool:
         """Validate evidence and close issue as already-satisfied.
@@ -1179,7 +1202,7 @@ class PlanPhase:
             with _sentry_transaction("pipeline.plan", f"plan:#{issue.id}"):
                 async with store_lifecycle(self._store, issue.id, "plan"):
                     research_context = ""
-                    if self._should_research():
+                    if self._should_research(issue):
                         research_result = await self._research_runner.research(issue)  # type: ignore[union-attr]
                         if research_result.success:
                             research_context = research_result.research

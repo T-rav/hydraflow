@@ -298,6 +298,19 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                 )
                 if attempts >= _MAX_ATTEMPTS:
                     issue_no = await self._file_anomaly(worker, kind, det)
+                    if issue_no == 0:
+                        # create_issue's documented 0-sentinel: the gh call
+                        # failed. Don't record a phantom anomaly or add the
+                        # dedup key — that would suppress re-filing forever
+                        # without a real issue. Retry next cycle.
+                        logger.warning(
+                            "trust_fleet_sanity: create_issue returned 0 "
+                            "(sentinel) for %s/%s; skipping, will retry next "
+                            "cycle",
+                            worker,
+                            kind,
+                        )
+                        continue
                     anomalies.append(
                         {
                             "worker": worker,

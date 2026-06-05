@@ -170,6 +170,7 @@ class HydraFlowOrchestrator:
             "staging_bisect": svc.staging_bisect_loop,
             "stale_issue": svc.stale_issue_loop,
             "sentry_ingest": svc.sentry_loop,
+            "log_ingest": svc.log_ingest_loop,
             "github_cache": svc.github_cache_loop,
             "stale_issue_gc": svc.stale_issue_gc_loop,
             "ci_monitor": svc.ci_monitor_loop,
@@ -1013,6 +1014,7 @@ class HydraFlowOrchestrator:
             ("staging_bisect", self._svc.staging_bisect_loop.run),
             ("stale_issue", self._svc.stale_issue_loop.run),
             ("sentry_ingest", self._svc.sentry_loop.run),
+            ("log_ingest", self._svc.log_ingest_loop.run),
             ("github_cache", self._svc.github_cache_loop.run),
             ("pipeline_poller", self._pipeline_stats_loop),
             ("diagnostic", self._svc.diagnostic_loop.run),
@@ -1053,9 +1055,9 @@ class HydraFlowOrchestrator:
 
         # Hindsight WAL replay loop removed in Phase 3 cutover — the wiki
         # pipeline doesn't need a replay loop.
-        self._state_restorer.prune_stale_disabled_workers(
-            {n for n, _ in loop_factories}
-        )
+        known_worker_names = {n for n, _ in loop_factories}
+        self._state_restorer.prune_stale_disabled_workers(known_worker_names)
+        self._state_restorer.prune_stale_worker_states(known_worker_names)
         tasks: dict[str, asyncio.Task[None]] = {}
         for name, factory in loop_factories:
             tasks[name] = asyncio.create_task(factory(), name=f"hydraflow-{name}")

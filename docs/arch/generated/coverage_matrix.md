@@ -32,6 +32,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `HealthMonitorLoop` | ✅ [0045, 0046] | ✅ [testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_health_monitor_loop_primary_cycle.py` | ✅ in catalog | ✅ `s48_health_monitor_idle_poll.py` |
 | `LabelDriftWatcherLoop` | ✅ [0056] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_label_drift_watcher_loop.py` | ✅ in catalog | ❌ |
 | `LiveCorpusReplayLoop` | ✅ [0086] | ✅ [live-corpus-replay-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_live_corpus_replay_loop.py` | ✅ in catalog | ✅ `s43_live_corpus_replay_idle.py` |
+| `LogIngestLoop` | ❌ | ❌ | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_log_ingest_loop.py` | ✅ in catalog | ❌ |
 | `MemoryBacklogLoop` | ✅ [0057] | ✅ [README.md] | ✅ loops.md | ✅ README.md | ✅ `test_memory_backlog_loop.py` | ✅ in catalog | ❌ |
 | `MergeStateWatcherLoop` | ✅ [0075, 0077] | ✅ [merge-state-watcher-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_merge_state_watcher_loop.py` | ✅ in catalog | ✅ `s49_merge_state_watcher_idle_poll.py` |
 | `PRUnstickerLoop` | ✅ [0075, 0077] | ✅ [pr-unsticker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_pr_unsticker_loop.py` | ✅ in catalog | ✅ `s08_pr_unsticker_revives_stuck_pr.py` |

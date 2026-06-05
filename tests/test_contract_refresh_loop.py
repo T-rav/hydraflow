@@ -750,6 +750,51 @@ async def test_escalation_is_deduped_across_ticks(
 
 
 @pytest.mark.asyncio
+async def test_escalation_zero_sentinel_does_not_dedup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """create_issue's 0 sentinel must not add the escalation dedup key.
+
+    Regression for issue #9241: a failed gh call returns 0; adding the
+    adapter to the escalation dedup would suppress re-escalation forever
+    without a real issue. The next stuck tick must re-attempt.
+    """
+    _stub_recording(monkeypatch)
+    rec = _seed_recorded_cassette(tmp_path / "rec" / "git", "git", "commit")
+    monkeypatch.setattr(crl_module, "record_git", lambda *_a, **_k: [rec])
+    monkeypatch.setattr(
+        crl_module,
+        "detect_fleet_drift",
+        lambda *_a, **_k: _drift_fleet_for("git", rec),
+    )
+    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    _stub_make_trust_contracts_ok(monkeypatch)
+
+    state = _FakeState()
+    state.inc_contract_refresh_attempts("git")
+    state.inc_contract_refresh_attempts("git")
+
+    prs = AsyncMock()
+    prs.create_issue = AsyncMock(return_value=0)  # gh failed → sentinel
+    loop = _loop(tmp_path, prs=prs, state=state)
+
+    # Tick 3: escalation attempted but create_issue returns 0.
+    await loop._do_work()
+    # Dedup key must NOT be set — adapter can re-escalate.
+    assert "git" not in loop._escalation_dedup.get()
+
+    # Tick 4: still stuck → re-attempts (would be deduped if sentinel had
+    # been recorded).
+    await loop._do_work()
+    escalations = [
+        c
+        for c in prs.create_issue.await_args_list
+        if "hitl-escalation" in (c.kwargs.get("labels") or [])
+    ]
+    assert len(escalations) == 2, escalations
+
+
+@pytest.mark.asyncio
 async def test_escalation_resets_after_clean_tick(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

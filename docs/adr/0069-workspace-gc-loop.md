@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-05-19
-**Enforced by:** `tests/test_workspace_gc_loop.py`
+**Enforced by:** tests/test_workspace_gc_loop.py
 
 ## Context
 

@@ -43,6 +43,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "repo_wiki": (300, 604800),
     "diagnostic": (10, 3600),
     "sentry_ingest": (60, 86400),
+    "log_ingest": (300, 86400),  # 5m min, 1d max (default 4h)
     "report_issue": (10, 3600),
     "epic_monitor": (60, 86400),
     "epic_sweeper": (600, 86400),

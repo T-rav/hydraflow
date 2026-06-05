@@ -13,7 +13,14 @@ import pytest
 
 from admin_tasks import _seed_context_assets
 from models import AuditCheckStatus
-from prep import HYDRAFLOW_LABELS, PrepResult, _list_existing_labels, ensure_labels
+from prep import (
+    HYDRAFLOW_LABELS,
+    HYDRAFLOW_LITERAL_LABELS,
+    PrepResult,
+    _label_names,
+    _list_existing_labels,
+    ensure_labels,
+)
 from tests.conftest import SubprocessMockBuilder
 from tests.helpers import (
     AuditCheckFactory,
@@ -162,6 +169,15 @@ class TestListExistingLabels:
 # ---------------------------------------------------------------------------
 
 
+def _expected_label_count(config: Any) -> int:
+    """Total labels ensure_labels creates: config-resolved + ad-hoc literals."""
+    config_count = sum(
+        len(_label_names(getattr(config, cfg_field)))
+        for cfg_field, _color, _desc in HYDRAFLOW_LABELS
+    )
+    return config_count + len(HYDRAFLOW_LITERAL_LABELS)
+
+
 class TestEnsureLabels:
     @pytest.mark.asyncio
     async def test_creates_all_labels(self) -> None:
@@ -176,9 +192,42 @@ class TestEnsureLabels:
             result = await ensure_labels(config)
 
         # All labels should be created (none existed)
-        assert len(result.created) == len(HYDRAFLOW_LABELS)
+        assert len(result.created) == _expected_label_count(config)
         assert len(result.existed) == 0
         assert len(result.failed) == 0
+
+    @pytest.mark.asyncio
+    async def test_creates_ad_hoc_literal_labels(self) -> None:
+        """Ad-hoc string-literal labels loops pass to create_issue are created.
+
+        Root-cause completion for the recurring `create_issue`-returns-0
+        sentinel: loops pass bare labels like ``hitl-escalation``,
+        ``rc-red-retry``, ``trust-loop-anomaly`` straight to
+        ``gh issue create --label`` without a backing config field, so they
+        were never created and the first filing failed. ensure_labels now
+        creates every row in HYDRAFLOW_LITERAL_LABELS.
+        """
+        config = ConfigFactory.create()
+        created: list[str] = []
+
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_label_side_effect("[]", capture=created),
+        ):
+            result = await ensure_labels(config)
+
+        literal_names = {name for name, _c, _d in HYDRAFLOW_LITERAL_LABELS}
+        assert literal_names <= set(created)
+        assert literal_names <= set(result.created)
+        # Spot-check representatives of each color family.
+        for name in (
+            "hitl-escalation",
+            "rc-red-retry",
+            "flaky-test-stuck",
+            "trust-loop-anomaly",
+            "human-required",
+        ):
+            assert name in created
 
     @pytest.mark.asyncio
     async def test_reports_already_existing_labels_in_existed_list(self) -> None:
@@ -200,7 +249,9 @@ class TestEnsureLabels:
             result = await ensure_labels(config)
 
         assert set(result.existed) == set(existing)
-        assert len(result.created) + len(result.existed) == len(HYDRAFLOW_LABELS)
+        assert len(result.created) + len(result.existed) == _expected_label_count(
+            config
+        )
         assert len(result.failed) == 0
 
     @pytest.mark.asyncio
@@ -237,7 +288,7 @@ class TestEnsureLabels:
         # No subprocess calls at all
         mock.assert_not_called()
         # But result should list what would be created
-        assert len(result.created) == len(HYDRAFLOW_LABELS)
+        assert len(result.created) == _expected_label_count(config)
         assert len(result.existed) == 0
 
     @pytest.mark.asyncio
@@ -253,7 +304,7 @@ class TestEnsureLabels:
             result = await ensure_labels(config)
 
         assert fail_label in result.failed
-        assert len(result.created) == len(HYDRAFLOW_LABELS) - 1
+        assert len(result.created) == _expected_label_count(config) - 1
         assert len(result.failed) == 1
 
     @pytest.mark.asyncio
@@ -268,17 +319,18 @@ class TestEnsureLabels:
             result = await ensure_labels(config)
 
         # All should be "created" since list failed (empty existing set)
-        assert len(result.created) == len(HYDRAFLOW_LABELS)
+        assert len(result.created) == _expected_label_count(config)
         assert len(result.existed) == 0
 
     @pytest.mark.asyncio
     async def test_all_already_exist(self) -> None:
         """All labels already present are classified as 'existed'."""
         config = ConfigFactory.create()
-        # Build the list of all default label names
+        # Build the list of all default label names (config-backed + literals)
         all_names = []
         for cfg_field, _, _ in HYDRAFLOW_LABELS:
-            all_names.extend(getattr(config, cfg_field))
+            all_names.extend(_label_names(getattr(config, cfg_field)))
+        all_names.extend(name for name, _c, _d in HYDRAFLOW_LITERAL_LABELS)
         existing_json = json.dumps([{"name": n} for n in all_names])
 
         with patch(
@@ -288,8 +340,32 @@ class TestEnsureLabels:
             result = await ensure_labels(config)
 
         assert len(result.created) == 0
-        assert len(result.existed) == len(HYDRAFLOW_LABELS)
+        assert len(result.existed) == _expected_label_count(config)
         assert len(result.failed) == 0
+
+    @pytest.mark.asyncio
+    async def test_provisions_memory_backlog_labels(self) -> None:
+        """MemoryBacklogLoop's labels are provisioned by ensure_labels.
+
+        Root-cause for the recurring `create_issue`-returns-0 / phantom
+        `issue #0` filings: `gh issue create --label <X>` fails when label
+        X is absent from the repo, so create_issue's except returns the
+        0 sentinel every cycle. The memory-backlog labels were missing
+        from HYDRAFLOW_LABELS, so ensure_labels never created them.
+        """
+        config = ConfigFactory.create()
+        created: list[str] = []
+
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_label_side_effect("[]", capture=created),
+        ):
+            await ensure_labels(config)
+
+        for name in config.memory_backlog_label:
+            assert name in created
+        for name in config.memory_backlog_stuck_label:
+            assert name in created
 
 
 # ---------------------------------------------------------------------------
