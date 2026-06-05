@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 
-from src.adversarial_agents import AgentLike
+from src.adversarial_agents import AgentLike, extract_json
 from src.pending_concerns import Concern
 from src.plan_council_prompts import (
     BUILDER_PROMPT,
@@ -99,7 +99,7 @@ class PlanCouncil:
     async def _run_voter(self, role: str, user_msg: str) -> list[Concern]:
         raw = await self.agents[role].run(_PROMPTS[role], user_msg)
         try:
-            data = json.loads(raw)
+            data = extract_json(raw)
         except json.JSONDecodeError:
             logger.warning("PlanCouncil voter %s returned non-JSON", role)
             return []
