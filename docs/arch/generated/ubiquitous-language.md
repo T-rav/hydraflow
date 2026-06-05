@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_41 terms across 3 bounded contexts._
+_47 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -115,6 +115,18 @@ Trust-fleet loop that autonomously grows the adversarial test corpus from escape
 - Cases that trip more than one catcher are rejected as ambiguous before they can corrupt the corpus.
 - No `corpus_learning_enabled` config field exists — kill-switch is purely via `enabled_cb("corpus_learning")` (spec §12.2, ADR-0049).
 
+## DedupStore
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/dedup_store.py:DedupStore` · **Confidence:** `accepted`
+**Aliases:** `dedup set`, `deduplication store`, `dedup store`
+
+A file-backed persistent dedup set that loops use to track which signals they have already acted on, preventing re-filing the same issue or PR on subsequent ticks. Identified by a set_name and a file_path; exposes get/add/set_all operations with atomic writes and fail-open read semantics. Used across the caretaker and builder loop fleet as the canonical idempotency contract for loop-generated GitHub activity — engineers name it explicitly in design conversations ('keyed DedupStore', 'dedup key clears on close') and wire it as a first-class constructor dependency in every loop that must not act twice on the same signal.
+
+**Invariants:**
+- Writes are atomic — a partial write never corrupts the stored set.
+- Read errors return an empty set (fail-open); write errors are logged but not re-raised.
+- Each loop instance owns one DedupStore per deduplication purpose, scoped by set_name.
+
 ## DependabotMergeLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/dependabot_merge_loop.py:DependabotMergeLoop` · **Confidence:** `accepted`
@@ -226,6 +238,18 @@ Centralized GitHub data poller that replaces the pattern where every dashboard e
 - Write operations bypass the cache and call `gh` directly.
 - Cache staleness is observable: each `CacheSnapshot` carries a `fetched_at` timestamp; `age_seconds` is infinite until the first poll completes.
 
+## GitHubCacheLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/github_cache_loop.py:GitHubCacheLoop` · **Confidence:** `accepted`
+**Aliases:** `github cache loop`, `github data cache loop`, `github poller`
+
+Centralized GitHub data poller that replaces the pattern where every dashboard endpoint and background worker makes its own `gh api` calls (ADR-0041). A single `GitHubCacheLoop` polls GitHub on a fixed interval and stores results in `GitHubDataCache` — in memory and on disk. Dashboard endpoints and background workers read from the cache instantly rather than hitting the API. Write operations (create PR, merge, comment, label swap) still call `gh` directly because they need immediate confirmation.
+
+**Invariants:**
+- Only one instance per repo runtime; all read consumers share the same cache snapshot.
+- Write operations bypass the cache and call `gh` directly.
+- Cache staleness is observable: each `CacheSnapshot` carries a `fetched_at` timestamp; `age_seconds` is infinite until the first poll completes.
+
 ## HydraFlowConfig
 
 **Kind:** `aggregate` · **Context:** `shared-kernel` · **Anchor:** `src/config.py:HydraFlowConfig` · **Confidence:** `accepted`
@@ -237,6 +261,18 @@ Pydantic-validated runtime configuration aggregate for the HydraFlow orchestrato
 - Worker concurrency fields default to 1 and are bounded by ge=1, le=10 (max_hitl_workers le=5).
 - batch_size is bounded ge=1, le=50.
 - repo is auto-detected from the git remote when left empty.
+
+## HydraFlowEvent
+
+**Kind:** `domain_event` · **Context:** `shared-kernel` · **Anchor:** `src/events.py:HydraFlowEvent` · **Confidence:** `accepted`
+**Aliases:** `event`, `bus event`, `orchestrator event`
+
+A single typed message published on the EventBus, carrying a monotonic id, an EventType discriminator, a UTC timestamp, a freeform payload map, and optional session and repository scope. Every in-process state change — phase transitions, worker updates, CI checks, HITL escalations, epic lifecycle milestones — is communicated across the system as a HydraFlowEvent, making it the universal unit of observable state in the orchestrator. Callers construct and publish instances directly; subscribers receive them via async queues and may cast the payload to a typed dict via typed_data().
+
+**Invariants:**
+- id is monotonically increasing and always exceeds any previously persisted historical event id (enforced by _Counter.advance after log replay)
+- Ephemeral event types (e.g. PIPELINE_SNAPSHOT) are fanned out live but never retained in in-memory history nor written to the on-disk EventLog
+- timestamp is always a UTC ISO-8601 string produced at construction time
 
 ## IssueFetcherPort
 
@@ -312,6 +348,18 @@ Daily caretaker loop that fetches LiteLLM's `model_prices_and_context_window.jso
 - Kill-switch is the `HYDRAFLOW_DISABLE_PRICING_REFRESH=1` env var.
 - PR is always on the fixed branch `pricing-refresh-auto`; no-op ticks do not open a PR.
 - Bounds violations are separate from network errors; each has a distinct response path.
+
+## PRManager
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/pr_manager.py:PRManager` · **Confidence:** `accepted`
+**Aliases:** `pr lifecycle service`, `pull request manager`, `github mutation facade`
+
+PRManager is the shared-kernel service responsible for the full pull-request lifecycle against GitHub: pushing branches, opening and merging PRs, posting and truncating comments, swapping labels, creating and querying issues, and managing repo labels. It is the sole outbound mutation surface for GitHub in HydraFlow — every caretaker loop that needs to file an issue, swap a label, or open a PR does so through PRManager. It enforces a validated repo slug before any mutation, respects the global dry_run flag, and retries transient gh-CLI failures via configurable max_retries.
+
+**Invariants:**
+- Repo slug must match `owner/name` pattern before any mutation is attempted (`_assert_repo`).
+- All state-mutating operations are no-ops when `HydraFlowConfig.dry_run` is true.
+- Label-count queries are cached with a 30-second TTL to reduce gh-CLI call volume.
 
 ## PRPort
 
@@ -455,6 +503,18 @@ A source-agnostic work item abstraction representing tasks from any source (GitH
 - URLs validated as empty or http(s):// via AfterValidator
 - Timestamps validated as empty or ISO 8601 format
 
+## Term
+
+**Kind:** `entity` · **Context:** `shared-kernel` · **Anchor:** `src/ubiquitous_language.py:Term` · **Confidence:** `accepted`
+**Aliases:** `ul term`, `glossary term`, `ubiquitous language term`
+
+A first-class domain entity representing a named concept in HydraFlow's ubiquitous language. Each Term captures a load-bearing domain name with its definition, kind, bounded context, code anchor, relationships to other terms, lifecycle confidence (proposed → accepted → deprecated), and wiki-entry evidence. Terms are persisted as exactly one Markdown file in docs/wiki/terms/ and form the ontology that caretaker loops grow, enrich, and prune autonomously.
+
+**Invariants:**
+- A Term must have a unique ULID id, a non-empty name, and a valid code_anchor (module:symbol) pointing to its canonical source location.
+- confidence follows a one-way lifecycle: proposed → accepted → deprecated; a deprecated Term carries a non-null superseded_by.
+- Each Term is stored as exactly one Markdown file in docs/wiki/terms/, keyed by a slug derived from its name.
+
 ## TermPrunerLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/term_pruner_loop.py:TermPrunerLoop` · **Confidence:** `accepted`
@@ -467,6 +527,17 @@ Caretaker background loop that autonomously prunes stale terms from the ubiquito
 - Opens at most one PR per tick, bundling all eligible terms into a single `hydraflow-ul-deprecated`-labelled PR.
 - `ReviewPhase` skips routing for PRs carrying `TERM_PRUNER_PR_LABEL` so the deprecation PR is not sent through the agent pipeline.
 - Companion to `TermProposerLoop`: together they implement the two-tick grow/prune cycle that keeps `make lint-ul` anchor-resolution green without human intervention.
+
+## TermStore
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/ubiquitous_language.py:TermStore` · **Confidence:** `accepted`
+**Aliases:** `term repository`, `ul store`
+
+TermStore is the persistence service for HydraFlow's ubiquitous-language glossary. It reads and writes Term records stored as one markdown file per term under docs/wiki/terms/, and exposes a list() interface consumed by EdgeProposerLoop, EntryEvidenceLoop, TermProposerLoop, and TermPrunerLoop to iterate over and mutate the live term collection. It is the single authoritative access point for the on-disk term corpus.
+
+**Invariants:**
+- Each Term is backed by exactly one markdown file under docs/wiki/terms/.
+- list() reflects the current on-disk state, parsed deterministically via load_term_file.
 
 ## WikiRotDetectorLoop
 
