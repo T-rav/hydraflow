@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W23
 
+- `d500472` — fix(adr): stop ADR-0011 false-positive drift on unrelated core-module churn *(2026-06-04)*
 - `455bf0e` — chore(gates): target main ruleset by explicit refs/heads/main, not ~DEFAULT_BRANCH (#9252) (#9252) *(2026-06-04)*
 - `eff5ffc` — Merge pull request #9250 from T-rav/rc/2026-06-04-1254 *(2026-06-04)*
 - `90878f5` — fix(adr): use bare paths in ADR-0069/0072 Enforced-by lines (#9247) (#9247) *(2026-06-04)*
