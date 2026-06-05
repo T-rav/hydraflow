@@ -274,6 +274,20 @@ class TestIsRetryableError:
     def test_not_retryable_on_generic_error(self) -> None:
         assert _is_retryable_error("something else went wrong") is False
 
+    def test_not_retryable_on_graphql_node_limit(self) -> None:
+        """GraphQL node-cost errors are deterministic — never succeed on retry.
+
+        Their message contains the substring 'connection' ('authors
+        connection'), which would otherwise match _RETRYABLE_PATTERNS and burn
+        3 retries on a guaranteed failure.
+        """
+        msg = (
+            "GraphQL: By the time this query traverses to the authors "
+            "connection, it is requesting up to 1,000,000 possible nodes which "
+            "exceeds the maximum limit of 500,000."
+        )
+        assert _is_retryable_error(msg) is False
+
 
 # --- run_subprocess_with_retry ---
 
