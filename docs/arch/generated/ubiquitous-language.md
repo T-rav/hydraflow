@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_41 terms across 3 bounded contexts._
+_52 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -54,6 +54,18 @@ Subprocess runner for the implement phase: launches a `claude -p` process inside
 - Phase name is fixed: _phase_name == 'implement'.
 - The runner commits inside the worktree but never pushes or opens a PR — that work belongs to downstream phases.
 - Self-check checklist is dynamically extended with checklist items from recurring review escalations.
+
+## AgentSkill
+
+**Kind:** `entity` · **Context:** `builder` · **Anchor:** `src/skill_registry.py:AgentSkill` · **Confidence:** `accepted`
+**Aliases:** `post-implementation skill`, `quality gate skill`, `pipeline skill check`
+
+A declarative, immutable descriptor for a post-implementation quality check that runs as a subprocess after AgentRunner finishes a task. Each AgentSkill carries a unique name, a blocking flag (blocking skills halt the pipeline on failure; non-blocking skills emit warnings), a config_key pointing to a HydraFlowConfig field that can zero-out the skill's attempt budget to disable it, a prompt_builder that constructs the check input from the diff and issue context, and a result_parser that extracts a pass/fail verdict plus structured findings from the check's transcript. CorpusLearningLoop additionally references AgentSkill result_parsers directly to gate adversarial corpus cases during self-validation.
+
+**Invariants:**
+- A blocking AgentSkill whose result_parser returns passed=False stops the pipeline and triggers a retry cycle
+- Setting the referenced HydraFlowConfig field to 0 disables the skill entirely for all runs
+- name is the stable identity used to reference a skill across AgentRunner, CorpusLearningLoop, and the adversarial corpus
 
 ## BaseBackgroundLoop
 
@@ -114,6 +126,18 @@ Trust-fleet loop that autonomously grows the adversarial test corpus from escape
 - All three validation gates must pass before a case reaches disk: harness accepts it, expected catcher trips, no other catcher also trips.
 - Cases that trip more than one catcher are rejected as ambiguous before they can corrupt the corpus.
 - No `corpus_learning_enabled` config field exists — kill-switch is purely via `enabled_cb("corpus_learning")` (spec §12.2, ADR-0049).
+
+## DedupStore
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/dedup_store.py:DedupStore` · **Confidence:** `accepted`
+**Aliases:** `dedup set`, `deduplication store`, `dedup store`
+
+A file-backed persistent dedup set that loops use to track which signals they have already acted on, preventing re-filing the same issue or PR on subsequent ticks. Identified by a set_name and a file_path; exposes get/add/set_all operations with atomic writes and fail-open read semantics. Used across the caretaker and builder loop fleet as the canonical idempotency contract for loop-generated GitHub activity — engineers name it explicitly in design conversations ('keyed DedupStore', 'dedup key clears on close') and wire it as a first-class constructor dependency in every loop that must not act twice on the same signal.
+
+**Invariants:**
+- Writes are atomic — a partial write never corrupts the stored set.
+- Read errors return an empty set (fail-open); write errors are logged but not re-raised.
+- Each loop instance owns one DedupStore per deduplication purpose, scoped by set_name.
 
 ## DependabotMergeLoop
 
@@ -226,6 +250,39 @@ Centralized GitHub data poller that replaces the pattern where every dashboard e
 - Write operations bypass the cache and call `gh` directly.
 - Cache staleness is observable: each `CacheSnapshot` carries a `fetched_at` timestamp; `age_seconds` is infinite until the first poll completes.
 
+## GitHubCacheLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/github_cache_loop.py:GitHubCacheLoop` · **Confidence:** `accepted`
+**Aliases:** `github cache loop`, `github data cache loop`, `github poller`
+
+Centralized GitHub data poller that replaces the pattern where every dashboard endpoint and background worker makes its own `gh api` calls (ADR-0041). A single `GitHubCacheLoop` polls GitHub on a fixed interval and stores results in `GitHubDataCache` — in memory and on disk. Dashboard endpoints and background workers read from the cache instantly rather than hitting the API. Write operations (create PR, merge, comment, label swap) still call `gh` directly because they need immediate confirmation.
+
+**Invariants:**
+- Only one instance per repo runtime; all read consumers share the same cache snapshot.
+- Write operations bypass the cache and call `gh` directly.
+- Cache staleness is observable: each `CacheSnapshot` carries a `fetched_at` timestamp; `age_seconds` is infinite until the first poll completes.
+
+## GitHubIssue
+
+**Kind:** `entity` · **Context:** `shared-kernel` · **Anchor:** `src/models.py:GitHubIssue` · **Confidence:** `accepted`
+**Aliases:** `github issue`, `issue`
+
+A GitHub issue as seen by HydraFlow's domain layer: the primary work item the system fetches, enqueues, and drives through the issue→PR pipeline. Carries identity (issue number), lifecycle state (OPEN/CLOSED via GitHubIssueState), and the metadata all major ports exchange — IssueFetcherPort fetches collections of them, IssueStorePort queues and tracks them, and PRPort and PRManager act on them throughout the pipeline.
+
+**Invariants:**
+- State is always one of GitHubIssueState.OPEN or GitHubIssueState.CLOSED — no other lifecycle values are recognised at this layer.
+
+## HITLItem
+
+**Kind:** `entity` · **Context:** `builder` · **Anchor:** `src/models.py:HITLItem` · **Confidence:** `accepted`
+**Aliases:** `hitl item`, `human-in-the-loop item`, `operator review item`
+
+An HITLItem (Human-In-The-Loop Item) is a domain entity representing a pending operator decision point within the pipeline — a named work item that requires human review and explicit resolution before automated processing can continue. It carries a lifecycle status (PENDING → PROCESSING → RESOLVED) tracked via HITLItemStatus, is cached and surfaced by GitHubCacheLoop, and is referenced across the port boundary by PRPort, PRManager, and all major infrastructure ports. Engineers name it explicitly in design discussions: 'This action produces a new HITLItem' or 'The pipeline is blocked on an unresolved HITLItem.'
+
+**Invariants:**
+- Status transitions are monotonically forward: PENDING → PROCESSING → RESOLVED; no backward transitions are defined.
+- Every HITLItem in the system is reflected in the GitHubCacheLoop's HITL item snapshot, making it visible to all consumers without direct API calls.
+
 ## HydraFlowConfig
 
 **Kind:** `aggregate` · **Context:** `shared-kernel` · **Anchor:** `src/config.py:HydraFlowConfig` · **Confidence:** `accepted`
@@ -237,6 +294,18 @@ Pydantic-validated runtime configuration aggregate for the HydraFlow orchestrato
 - Worker concurrency fields default to 1 and are bounded by ge=1, le=10 (max_hitl_workers le=5).
 - batch_size is bounded ge=1, le=50.
 - repo is auto-detected from the git remote when left empty.
+
+## HydraFlowEvent
+
+**Kind:** `domain_event` · **Context:** `shared-kernel` · **Anchor:** `src/events.py:HydraFlowEvent` · **Confidence:** `accepted`
+**Aliases:** `event`, `bus event`, `orchestrator event`
+
+A single typed message published on the EventBus, carrying a monotonic id, an EventType discriminator, a UTC timestamp, a freeform payload map, and optional session and repository scope. Every in-process state change — phase transitions, worker updates, CI checks, HITL escalations, epic lifecycle milestones — is communicated across the system as a HydraFlowEvent, making it the universal unit of observable state in the orchestrator. Callers construct and publish instances directly; subscribers receive them via async queues and may cast the payload to a typed dict via typed_data().
+
+**Invariants:**
+- id is monotonically increasing and always exceeds any previously persisted historical event id (enforced by _Counter.advance after log replay)
+- Ephemeral event types (e.g. PIPELINE_SNAPSHOT) are fanned out live but never retained in in-memory history nor written to the on-disk EventLog
+- timestamp is always a UTC ISO-8601 string produced at construction time
 
 ## IssueFetcherPort
 
@@ -313,6 +382,18 @@ Daily caretaker loop that fetches LiteLLM's `model_prices_and_context_window.jso
 - PR is always on the fixed branch `pricing-refresh-auto`; no-op ticks do not open a PR.
 - Bounds violations are separate from network errors; each has a distinct response path.
 
+## PRManager
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/pr_manager.py:PRManager` · **Confidence:** `accepted`
+**Aliases:** `pr lifecycle service`, `pull request manager`, `github mutation facade`
+
+PRManager is the shared-kernel service responsible for the full pull-request lifecycle against GitHub: pushing branches, opening and merging PRs, posting and truncating comments, swapping labels, creating and querying issues, and managing repo labels. It is the sole outbound mutation surface for GitHub in HydraFlow — every caretaker loop that needs to file an issue, swap a label, or open a PR does so through PRManager. It enforces a validated repo slug before any mutation, respects the global dry_run flag, and retries transient gh-CLI failures via configurable max_retries.
+
+**Invariants:**
+- Repo slug must match `owner/name` pattern before any mutation is attempted (`_assert_repo`).
+- All state-mutating operations are no-ops when `HydraFlowConfig.dry_run` is true.
+- Label-count queries are cached with a 30-second TTL to reduce gh-CLI call volume.
+
 ## PRPort
 
 **Kind:** `port` · **Context:** `shared-kernel` · **Anchor:** `src/ports.py:PRPort` · **Confidence:** `accepted`
@@ -383,6 +464,16 @@ Hexagonal port for persisting and querying recurring reviewer-feedback patterns.
 - Pure Protocol — no implementation, no state.
 - Methods cover the full lifecycle: `append_review` writes a new record, `load_recent` reads recent history, `get_proposed_categories` and `mark_category_proposed` gate category escalation, and `record_proposal`, `load_proposal_metadata`, and `update_proposal_verified` track whether a proposed mandatory block reduced the pattern.
 
+## ReviewVerdict
+
+**Kind:** `value_object` · **Context:** `shared-kernel` · **Anchor:** `src/models.py:ReviewVerdict` · **Confidence:** `accepted`
+**Aliases:** `review decision`, `review outcome`, `pr verdict`
+
+An enumeration of the possible outcomes an automated or human reviewer can submit for a pull request — at minimum APPROVE and CHANGES_REQUESTED. ReviewVerdict is the canonical domain token that crosses the PRPort boundary whenever the system acts as a reviewer: callers pass a ReviewVerdict to PRPort.submit_review() to express a deliberate review decision rather than a raw string. DependabotMergeLoop, for example, submits ReviewVerdict.APPROVE after CI passes before calling merge_pr(), making the verdict an explicit, named step in the bot-PR lifecycle rather than an implicit side-effect of the merge call.
+
+**Invariants:**
+- Value must be a member of the closed set of review actions recognised by the GitHub Reviews API (e.g. APPROVE, REQUEST_CHANGES)
+
 ## RouteBackCounterPort
 
 **Kind:** `port` · **Context:** `shared-kernel` · **Anchor:** `src/route_back.py:RouteBackCounterPort` · **Confidence:** `accepted`
@@ -443,6 +534,17 @@ JSON-file backed state service for crash recovery. Composes ~30 domain mixins (i
 - Issue/PR/epic numbers are stored as string keys; helpers convert to int on read.
 - On corrupt primary file, load() falls back to the most recent .bak before defaulting to an empty StateData.
 
+## SubprocessRunner
+
+**Kind:** `port` · **Context:** `shared-kernel` · **Anchor:** `src/execution.py:SubprocessRunner` · **Confidence:** `accepted`
+**Aliases:** `subprocess executor`, `process runner`
+
+A Protocol defining the subprocess execution contract used by loops and runners throughout HydraFlow. It abstracts the host-vs-Docker execution boundary, enabling AgentRunner, ReportIssueLoop, and SentryLoop to be injected with either a HostRunner (asyncio.create_subprocess_exec on the host) or a DockerRunner (containerised execution) without changing call-site code. The interface exposes two operations: create_streaming_process for long-running agent runs where the caller manages stdin/stdout lifecycle, and run_simple for command-and-capture invocations with a hard timeout.
+
+**Invariants:**
+- Two standard implementations: HostRunner (host asyncio) and DockerRunner (containerised execution)
+- cleanup() must be called by callers to release resources held by container-based implementations
+
 ## Task
 
 **Kind:** `entity` · **Context:** `builder` · **Anchor:** `src/models.py:Task` · **Confidence:** `accepted`
@@ -454,6 +556,18 @@ A source-agnostic work item abstraction representing tasks from any source (GitH
 - TaskLink relationships extracted via regex patterns with first-match precedence per target_id
 - URLs validated as empty or http(s):// via AfterValidator
 - Timestamps validated as empty or ISO 8601 format
+
+## Term
+
+**Kind:** `entity` · **Context:** `shared-kernel` · **Anchor:** `src/ubiquitous_language.py:Term` · **Confidence:** `accepted`
+**Aliases:** `ul term`, `glossary term`, `ubiquitous language term`
+
+A first-class domain entity representing a named concept in HydraFlow's ubiquitous language. Each Term captures a load-bearing domain name with its definition, kind, bounded context, code anchor, relationships to other terms, lifecycle confidence (proposed → accepted → deprecated), and wiki-entry evidence. Terms are persisted as exactly one Markdown file in docs/wiki/terms/ and form the ontology that caretaker loops grow, enrich, and prune autonomously.
+
+**Invariants:**
+- A Term must have a unique ULID id, a non-empty name, and a valid code_anchor (module:symbol) pointing to its canonical source location.
+- confidence follows a one-way lifecycle: proposed → accepted → deprecated; a deprecated Term carries a non-null superseded_by.
+- Each Term is stored as exactly one Markdown file in docs/wiki/terms/, keyed by a slug derived from its name.
 
 ## TermPrunerLoop
 
@@ -467,6 +581,17 @@ Caretaker background loop that autonomously prunes stale terms from the ubiquito
 - Opens at most one PR per tick, bundling all eligible terms into a single `hydraflow-ul-deprecated`-labelled PR.
 - `ReviewPhase` skips routing for PRs carrying `TERM_PRUNER_PR_LABEL` so the deprecation PR is not sent through the agent pipeline.
 - Companion to `TermProposerLoop`: together they implement the two-tick grow/prune cycle that keeps `make lint-ul` anchor-resolution green without human intervention.
+
+## TermStore
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/ubiquitous_language.py:TermStore` · **Confidence:** `accepted`
+**Aliases:** `term repository`, `ul store`
+
+TermStore is the persistence service for HydraFlow's ubiquitous-language glossary. It reads and writes Term records stored as one markdown file per term under docs/wiki/terms/, and exposes a list() interface consumed by EdgeProposerLoop, EntryEvidenceLoop, TermProposerLoop, and TermPrunerLoop to iterate over and mutate the live term collection. It is the single authoritative access point for the on-disk term corpus.
+
+**Invariants:**
+- Each Term is backed by exactly one markdown file under docs/wiki/terms/.
+- list() reflects the current on-disk state, parsed deterministically via load_term_file.
 
 ## WikiRotDetectorLoop
 
