@@ -110,12 +110,19 @@ def _pick_shape_for_issue_list(args: list[str]) -> type[BaseModel] | None:
     fields = _extract_json_fields(args)
     if fields is None:
         return None
+    # GhIssueListItem requires number and title; skip date-only or other
+    # narrow queries that omit them (e.g. --json createdAt,closedAt).
+    if not {"number", "title"} <= fields:
+        return None
     return GhIssueListItem
 
 
 def _pick_shape_for_checks(args: list[str]) -> type[BaseModel] | None:
     fields = _extract_json_fields(args)
     if fields is None:
+        return None
+    # GhCheckRun requires name; skip projection-only calls like --json conclusion.
+    if "name" not in fields:
         return None
     return GhCheckRun
 
