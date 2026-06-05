@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W23
 
+- `2b4b46c` — fix(contracts): stop gh_shape_validator false-positives on projection-only pr/issue calls (closes #9314) *(2026-06-05)*
 - `7316aba` — fix(wiki): repair malformed topic entries + guard against silent data loss (#9281) (#9281) *(2026-06-04)*
 - `e91dd05` — fix(adr): stop ADR-0011 false-positive drift on unrelated core-module churn (closes #9176) (#9256) (#9256) *(2026-06-04)*
 - `e451fa3` — fix(adr): update ADR-0009 citations to current symbols (closes #9173) (#9255) (#9255) *(2026-06-04)*
