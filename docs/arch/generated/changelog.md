@@ -6,10 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W23
 
-- `6ccf1f5` — chore(arch): re-stamp generated artifacts after staging merge *(2026-06-04)*
-- `96a2fdc` — Merge remote-tracking branch 'origin/staging' into HEAD *(2026-06-04)*
+- `74932f6` — chore(arch): re-stamp generated artifacts for #9314 fix *(2026-06-05)*
+- `2b4b46c` — fix(contracts): stop gh_shape_validator false-positives on projection-only pr/issue calls (closes #9314) *(2026-06-05)*
+- `7316aba` — fix(wiki): repair malformed topic entries + guard against silent data loss (#9281) (#9281) *(2026-06-04)*
+- `e91dd05` — fix(adr): stop ADR-0011 false-positive drift on unrelated core-module churn (closes #9176) (#9256) (#9256) *(2026-06-04)*
 - `e451fa3` — fix(adr): update ADR-0009 citations to current symbols (closes #9173) (#9255) (#9255) *(2026-06-04)*
-- `d500472` — fix(adr): stop ADR-0011 false-positive drift on unrelated core-module churn *(2026-06-04)*
 - `455bf0e` — chore(gates): target main ruleset by explicit refs/heads/main, not ~DEFAULT_BRANCH (#9252) (#9252) *(2026-06-04)*
 - `eff5ffc` — Merge pull request #9250 from T-rav/rc/2026-06-04-1254 *(2026-06-04)*
 - `90878f5` — fix(adr): use bare paths in ADR-0069/0072 Enforced-by lines (#9247) (#9247) *(2026-06-04)*
@@ -432,7 +433,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `4c09083` — Fixes #2264: [ADR] Draft decision from memory #2258: Implementation... (#2292) (#2292) *(2026-03-08)*
 - `c4b8ecd` — Fixes #2374: Add ADR-0023 for supersession regex verb form coverage (#2379) (#2379) *(2026-03-08)*
 - `7c6410a` — Fixes #2210: sync ADR index statuses (#2233) (#2233) *(2026-03-07)*
-- `b1df31d` — Fixes #1977: Document cross-phase integration harness (#2146) (#2146) *(2026-03-06)*
 
 
 <!-- arch:generated -->

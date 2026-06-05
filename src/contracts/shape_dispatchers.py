@@ -54,7 +54,14 @@ logger = logging.getLogger("hydraflow.contracts.shape_dispatchers")
 
 def _pick_shape_for_pr(args: list[str]) -> type[BaseModel] | None:
     """``gh pr ...`` shape selection. Detect summary vs detail by which
-    detail-only fields are requested in ``--json FIELDS``."""
+    detail-only fields are requested in ``--json FIELDS``.
+
+    Only select a shape when ALL of its required fields are present in the
+    requested field set.  Narrow projection calls (e.g. ``--json commits``,
+    ``--json reviews``, ``--json headRefOid``) don't include all required
+    fields, so the dispatcher returns ``None`` to avoid false-positive drift
+    signals for those projection-only shadow-corpus samples.
+    """
     fields = _extract_json_fields(args)
     if fields is None:
         return None
@@ -66,24 +73,33 @@ def _pick_shape_for_pr(args: list[str]) -> type[BaseModel] | None:
         "isDraft",
     }
     if fields & detail_signals:
+        # GhPRDetail requires number — skip projection-only calls like --json headRefOid
+        if "number" not in fields:
+            return None
         return GhPRDetail
+    # GhPRSummary requires number, title, state
+    if not {"number", "title", "state"} <= fields:
+        return None
     return GhPRSummary
 
 
 def _pick_shape_for_issue(args: list[str]) -> type[BaseModel] | None:
     """Issue shape selection based on which fields are requested.
 
-    ``GhIssueSummary`` requires ``state`` — only use it when the call
-    actually requests that field.  Narrow list calls (``number,title,...``
-    without ``state``) use ``GhIssueListItem`` instead.  Calls that
+    ``GhIssueSummary`` requires ``number`` and ``state`` — only use it when
+    the call requests both.  Narrow calls like ``--json state,stateReason``
+    (which omit ``number``) would otherwise fail validation on the required
+    ``number`` field, producing a false-positive drift signal.  Calls that
     request fields outside both shapes (e.g. ``--json comments``) get
-    ``None`` so the dispatcher skips them rather than producing a
-    false-positive drift signal.
+    ``None`` so the dispatcher skips them.
     """
     fields = _extract_json_fields(args)
     if fields is None:
         return None
     if "state" in fields:
+        # GhIssueSummary requires both number and state
+        if "number" not in fields:
+            return None
         return GhIssueSummary
     if "number" in fields and "title" in fields:
         return GhIssueListItem
