@@ -71,10 +71,23 @@ def _pick_shape_for_pr(args: list[str]) -> type[BaseModel] | None:
 
 
 def _pick_shape_for_issue(args: list[str]) -> type[BaseModel] | None:
+    """Issue shape selection based on which fields are requested.
+
+    ``GhIssueSummary`` requires ``state`` — only use it when the call
+    actually requests that field.  Narrow list calls (``number,title,...``
+    without ``state``) use ``GhIssueListItem`` instead.  Calls that
+    request fields outside both shapes (e.g. ``--json comments``) get
+    ``None`` so the dispatcher skips them rather than producing a
+    false-positive drift signal.
+    """
     fields = _extract_json_fields(args)
     if fields is None:
         return None
-    return GhIssueSummary
+    if "state" in fields:
+        return GhIssueSummary
+    if "number" in fields and "title" in fields:
+        return GhIssueListItem
+    return None
 
 
 def _pick_shape_for_issue_list(args: list[str]) -> type[BaseModel] | None:
@@ -121,12 +134,17 @@ async def gh_shape_validator(sample: ShadowSample) -> dict[str, object] | None: 
         - A diff-payload dict if validation fails — the loop fingerprints
           this to file a single drift issue per signature.
         - ``None`` for samples this dispatcher has no opinion on
-          (unknown subcommand, no ``--json`` flag, empty stdout, etc.) —
-          the loop treats those as "skipped, no opinion".
+          (unknown subcommand, no ``--json`` flag, ``--jq`` transform
+          applied, empty stdout, etc.) — the loop treats those as
+          "skipped, no opinion".
     """
     if sample.adapter != "github" or sample.command != "gh":
         return None
     if not sample.stdout.strip():
+        return None
+    # --jq transforms output to an arbitrary shape (scalar, array, etc.);
+    # shape validation against a fixed Pydantic model is meaningless.
+    if "--jq" in sample.args:
         return None
     subcommand = _gh_subcommand(sample.args)
     if subcommand is None:
