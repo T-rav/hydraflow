@@ -77,6 +77,19 @@ def test_check_run_rejects_unknown_conclusion() -> None:
         )
 
 
+def test_check_run_accepts_success_state() -> None:
+    """gh pr checks --json collapses status+conclusion into state, so SUCCESS
+    appears in the state field for completed/passing checks."""
+    cr = GhCheckRun.model_validate({"name": "Tests", "state": "SUCCESS"})
+    assert cr.state == "SUCCESS"
+
+
+def test_check_run_accepts_skipped_state() -> None:
+    """SKIPPED appears for workflow steps that didn't run due to conditions."""
+    cr = GhCheckRun.model_validate({"name": "Sandbox", "state": "SKIPPED"})
+    assert cr.state == "SKIPPED"
+
+
 # ---------------------------------------------------------------------------
 # GhPRSummary
 # ---------------------------------------------------------------------------
