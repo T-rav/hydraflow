@@ -35,6 +35,7 @@ from pydantic import BaseModel, ValidationError
 
 from contracts.shapes import (
     GhCheckRun,
+    GhIssueListItem,
     GhIssueSummary,
     GhPRDetail,
     GhPRSummary,
@@ -53,7 +54,14 @@ logger = logging.getLogger("hydraflow.contracts.shape_dispatchers")
 
 def _pick_shape_for_pr(args: list[str]) -> type[BaseModel] | None:
     """``gh pr ...`` shape selection. Detect summary vs detail by which
-    detail-only fields are requested in ``--json FIELDS``."""
+    detail-only fields are requested in ``--json FIELDS``.
+
+    Only select a shape when ALL of its required fields are present in the
+    requested field set.  Narrow projection calls (e.g. ``--json commits``,
+    ``--json reviews``, ``--json headRefOid``) don't include all required
+    fields, so the dispatcher returns ``None`` to avoid false-positive drift
+    signals for those projection-only shadow-corpus samples.
+    """
     fields = _extract_json_fields(args)
     if fields is None:
         return None
@@ -65,20 +73,56 @@ def _pick_shape_for_pr(args: list[str]) -> type[BaseModel] | None:
         "isDraft",
     }
     if fields & detail_signals:
+        # GhPRDetail requires number — skip projection-only calls like --json headRefOid
+        if "number" not in fields:
+            return None
         return GhPRDetail
+    # GhPRSummary requires number, title, state
+    if not {"number", "title", "state"} <= fields:
+        return None
     return GhPRSummary
 
 
 def _pick_shape_for_issue(args: list[str]) -> type[BaseModel] | None:
+    """Issue shape selection for ``issue-view`` calls.
+
+    ``GhIssueSummary`` requires ``number`` and ``state`` — only use it when
+    the call requests both.  Narrow calls like ``--json state,stateReason``
+    (which omit ``number``) would otherwise fail validation on the required
+    ``number`` field, producing a false-positive drift signal.  Calls that
+    request fields outside both shapes (e.g. ``--json comments``) get
+    ``None`` so the dispatcher skips them.
+    """
     fields = _extract_json_fields(args)
     if fields is None:
         return None
-    return GhIssueSummary
+    if "state" in fields:
+        # GhIssueSummary requires both number and state
+        if "number" not in fields:
+            return None
+        return GhIssueSummary
+    if "number" in fields and "title" in fields:
+        return GhIssueListItem
+    return None
+
+
+def _pick_shape_for_issue_list(args: list[str]) -> type[BaseModel] | None:
+    fields = _extract_json_fields(args)
+    if fields is None:
+        return None
+    # GhIssueListItem requires number and title; skip date-only or other
+    # narrow queries that omit them (e.g. --json createdAt,closedAt).
+    if not {"number", "title"} <= fields:
+        return None
+    return GhIssueListItem
 
 
 def _pick_shape_for_checks(args: list[str]) -> type[BaseModel] | None:
     fields = _extract_json_fields(args)
     if fields is None:
+        return None
+    # GhCheckRun requires name; skip projection-only calls like --json conclusion.
+    if "name" not in fields:
         return None
     return GhCheckRun
 
@@ -120,6 +164,10 @@ async def gh_shape_validator(sample: ShadowSample) -> dict[str, object] | None: 
         return None
     if not sample.stdout.strip():
         return None
+    # --jq transforms output to an arbitrary shape (scalar, array, etc.);
+    # shape validation against a fixed Pydantic model is meaningless.
+    if "--jq" in sample.args:
+        return None
     subcommand = _gh_subcommand(sample.args)
     if subcommand is None:
         return None
@@ -127,8 +175,10 @@ async def gh_shape_validator(sample: ShadowSample) -> dict[str, object] | None: 
     shape_cls: type[BaseModel] | None = None
     if subcommand in ("pr-view", "pr-list"):
         shape_cls = _pick_shape_for_pr(sample.args)
-    elif subcommand in ("issue-view", "issue-list"):
+    elif subcommand == "issue-view":
         shape_cls = _pick_shape_for_issue(sample.args)
+    elif subcommand == "issue-list":
+        shape_cls = _pick_shape_for_issue_list(sample.args)
     elif subcommand == "pr-checks":
         shape_cls = _pick_shape_for_checks(sample.args)
     if shape_cls is None:
