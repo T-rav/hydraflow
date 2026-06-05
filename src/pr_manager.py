@@ -1713,6 +1713,29 @@ class PRManager:
                 if pr_number is not None:
                     await self._remove_label("pr", pr_number, lbl)
 
+    async def _pr_commit_count(self, pr_number: int) -> int:
+        """Return the commit count for a single PR.
+
+        Fetched per-PR (not in the bulk ``pr list``) because requesting the
+        ``commits`` field for many PRs expands each commit's authors connection
+        and exceeds GitHub's GraphQL 500,000-node ceiling.
+        """
+        data = await self._gh_json_query(
+            "gh",
+            "pr",
+            "view",
+            str(pr_number),
+            "--repo",
+            self._repo,
+            "--json",
+            "commits",
+            dry_run_return={"commits": []},
+            error_log=f"find_label_drift: pr {pr_number} commits fetch failed",
+        )
+        if not isinstance(data, dict):
+            return 0
+        return len(data.get("commits") or [])
+
     async def find_label_drift(self) -> list[LabelDrift]:
         """Scan open PRs for cross-entity label drift vs their linked issues.
 
@@ -1733,7 +1756,7 @@ class PRManager:
             "--limit",
             "200",
             "--json",
-            "number,labels,body,commits",
+            "number,labels,body",
             dry_run_return=[],
             error_log="find_label_drift: pr list failed",
         )
@@ -1763,12 +1786,17 @@ class PRManager:
                 (lbl for lbl in pr_labels if lbl.startswith("hydraflow-")),
                 "",
             )
-            commits = len(pr.get("commits") or [])
             body = pr.get("body") or ""
             m = fixes_re.search(body)
             if not m:
                 continue
             issue_n = int(m.group(1))
+
+            # Commit count is fetched per-PR (only for Fixes-matched PRs, which
+            # already trigger an issue fetch below) — requesting `commits` in the
+            # bulk `pr list` expands each commit's authors connection and blows
+            # past GitHub's GraphQL 500k-node ceiling at --limit 200.
+            commits = await self._pr_commit_count(pr_n)
 
             issue_labels_raw = await self._gh_json_query(
                 "gh",
