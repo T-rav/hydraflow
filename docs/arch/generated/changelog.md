@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W23
 
+- `9b97208` — fix(merge): auto-merge Auto-Agent PRs (agent/auto-agent-N) to end the contract-fix runaway (#9332) (#9332) *(2026-06-05)*
 - `ec00913` — fix(contracts): stop gh_shape_validator false-positives on projection-only pr/issue calls (closes #9314) (#9316) (#9316) *(2026-06-05)*
 - `7316aba` — fix(wiki): repair malformed topic entries + guard against silent data loss (#9281) (#9281) *(2026-06-04)*
 - `e91dd05` — fix(adr): stop ADR-0011 false-positive drift on unrelated core-module churn (closes #9176) (#9256) (#9256) *(2026-06-04)*
