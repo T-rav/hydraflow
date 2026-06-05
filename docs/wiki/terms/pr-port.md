@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/ports.py:PRPort"
 aliases: ["pr port", "pull request port", "github pr port"]
 related: [{"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}]
-evidence: []
+evidence: ["01KRBX2N4QP7VW8FGH3J5YD0M2", "01KRBX2N4QP7VW8FGH3J5YD0M3", "01KRBX2N4QP7VW8FGH3J5YD0M5"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668784+00:00"
-updated_at: "2026-05-16T23:48:13.299804+00:00"
+updated_at: "2026-06-05T01:05:34.672901+00:00"
 ---
 
 ## Definition

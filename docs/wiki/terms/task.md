@@ -6,12 +6,12 @@ bounded_context: "builder"
 code_anchor: "src/models.py:Task"
 aliases: ["work item", "ticket"]
 related: []
-evidence: []
+evidence: ["01KQP0XFBGMB32VFGNPV8GZ26W"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-07T15:20:32.920858+00:00"
-updated_at: "2026-05-07T15:20:32.920863+00:00"
+updated_at: "2026-06-05T01:05:34.672901+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-05-07T15:20:32.920451+00:00"
 proposal_signals: ["S2"]
