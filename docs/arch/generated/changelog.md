@@ -6,8 +6,14 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W23
 
+- `455bf0e` — chore(gates): target main ruleset by explicit refs/heads/main, not ~DEFAULT_BRANCH (#9252) (#9252) *(2026-06-04)*
+- `eff5ffc` — Merge pull request #9250 from T-rav/rc/2026-06-04-1254 *(2026-06-04)*
+- `90878f5` — fix(adr): use bare paths in ADR-0069/0072 Enforced-by lines (#9247) (#9247) *(2026-06-04)*
+- `adae9a8` — Accept ADR-0071: route back counter port (#9218) (#9218) *(2026-06-04)*
+- `b7119da` — feat(log-ingest): 4h loop that clusters/dedups log errors+warnings into fix-issues (#9245) (#9245) *(2026-06-04)*
 - `07b8937` — Revert "feat(honeycomb): low-noise SLO/burn-alert issue-ingestion loop (default-disabled) (#9237)" (#9244) (#9244) *(2026-06-04)*
 - `b3d0896` — feat(honeycomb): low-noise SLO/burn-alert issue-ingestion loop (default-disabled) (#9237) (#9237) *(2026-06-04)*
+- `05ea34a` — feat(ul): entry-evidence — 4 new entry links across 2 terms *(2026-06-03)*
 - `7bbc795` — test(sandbox): e2e backfill batch 1 — workspace_gc, runs_gc, health_monitor, merge_state_watcher (#9159) (#9159) *(2026-06-02)*
 - `1209d49` — fix(sandbox): skip ContractRefreshLoop external recorders in the air-gapped sandbox (s30) (#9152) (#9152) *(2026-06-02)*
 - `abb52ba` — fix(dependabot): cache all open PRs so DependabotMergeLoop can see bot PRs (s09) (#9151) (#9151) *(2026-06-02)*
@@ -423,7 +429,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `c4b8ecd` — Fixes #2374: Add ADR-0023 for supersession regex verb form coverage (#2379) (#2379) *(2026-03-08)*
 - `7c6410a` — Fixes #2210: sync ADR index statuses (#2233) (#2233) *(2026-03-07)*
 - `b1df31d` — Fixes #1977: Document cross-phase integration harness (#2146) (#2146) *(2026-03-06)*
-- `548bf0b` — Fixes #2031: normalize superseded ADR statuses (#2158) (#2158) *(2026-03-06)*
 
 
 <!-- arch:generated -->
