@@ -107,7 +107,14 @@ Key implementation details:
 ## Related
 
 - Source memory: Issue #1682 — *[Memory] Epic release creation architecture*
-- `src/epic.py` — `EpicManager._try_auto_close()`, `EpicCompletionChecker._create_release_for_epic()`
-- `src/pr_manager.py` — `PRManager.create_tag()`, `PRManager.create_release()`
-- `src/models.py` — `Release` model, `StateData.releases`
+- `src/epic.py:EpicManager._try_auto_close`, `src/epic.py:EpicCompletionChecker._create_release_for_epic` — the epic-close entry point and the release side-effect it triggers
+- `src/pr_manager.py:PRManager.create_tag`, `src/pr_manager.py:PRManager.create_release` — the two-step tag-then-release operations
+- `src/models.py:Release`, `src/models.py:StateData.releases` — the release model and where release state is persisted
 - PR #1690 — *feat: create GitHub Release with changelog when epic closes*
+
+> **Symbol-granular citations (per #9176).** These files are extremely
+> high-churn shared modules; citing them at bare *file* granularity made
+> the `adr_touchpoint_auditor` flag ADR-0011 as drifted on *any* change to
+> them, even changes unrelated to epic-release creation. The citations
+> above name the specific symbols this ADR is responsible for, so drift
+> only fires when one of those symbols actually changes.
