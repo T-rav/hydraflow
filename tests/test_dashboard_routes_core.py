@@ -568,53 +568,61 @@ class TestStopOrchestratorEndpoint:
         mock_orch.request_stop.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_factory_stop_halts_host_and_all_registered_lines(
+    async def test_factory_stop_halts_all_lines(
         self, config, event_bus, state, tmp_path
     ) -> None:
         import json
 
-        mock_orch = MagicMock()
-        mock_orch.running = True
-        mock_orch.request_stop = AsyncMock()
-        mock_registry = MagicMock()
-        mock_registry.all = []
-        mock_registry.stop_all = AsyncMock()
-        router, _ = make_dashboard_router(
-            config,
-            event_bus,
-            state,
-            tmp_path,
-            get_orch=lambda: mock_orch,
-            registry=mock_registry,
-        )
-        endpoint = find_endpoint(router, "/api/control/stop")
-        response = await endpoint()
-        data = json.loads(response.body)
-        assert data["status"] == "stopping"
-        mock_orch.request_stop.assert_awaited_once()
-        mock_registry.stop_all.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_factory_stop_halts_registered_lines_when_host_idle(
-        self, config, event_bus, state, tmp_path
-    ) -> None:
         running_line = MagicMock()
         running_line.running = True
         mock_registry = MagicMock()
         mock_registry.all = [running_line]
         mock_registry.stop_all = AsyncMock()
         router, _ = make_dashboard_router(
-            config,
-            event_bus,
-            state,
-            tmp_path,
-            get_orch=lambda: None,
-            registry=mock_registry,
+            config, event_bus, state, tmp_path, registry=mock_registry
         )
         endpoint = find_endpoint(router, "/api/control/stop")
         response = await endpoint()
-        assert response.status_code == 200
+        data = json.loads(response.body)
+        assert data["status"] == "stopping"
         mock_registry.stop_all.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_factory_stop_errors_when_no_line_running(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        idle_line = MagicMock()
+        idle_line.running = False
+        mock_registry = MagicMock()
+        mock_registry.all = [idle_line]
+        mock_registry.stop_all = AsyncMock()
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=mock_registry
+        )
+        endpoint = find_endpoint(router, "/api/control/stop")
+        response = await endpoint()
+        assert response.status_code == 400
+        mock_registry.stop_all.assert_not_awaited()
+
+
+class TestFactoryStartEndpoint:
+    @pytest.mark.asyncio
+    async def test_factory_start_starts_all_lines(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+
+        mock_registry = MagicMock()
+        mock_registry.all = []
+        mock_registry.start_all = AsyncMock()
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=mock_registry
+        )
+        endpoint = find_endpoint(router, "/api/control/start")
+        response = await endpoint()
+        data = json.loads(response.body)
+        assert data["status"] == "started"
+        mock_registry.start_all.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

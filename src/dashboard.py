@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
     from orchestrator import HydraFlowOrchestrator
-    from repo_runtime import RepoRuntimeRegistry
+    from repo_runtime import RepoRuntime, RepoRuntimeRegistry
     from repo_store import RepoRecord, RepoStore
 
 logger = logging.getLogger("hydraflow.dashboard")
@@ -48,6 +48,7 @@ class HydraFlowDashboard:
         event_bus: EventBus,
         state: StateTracker,
         orchestrator: HydraFlowOrchestrator | None = None,
+        host_runtime: RepoRuntime | None = None,
         registry: RepoRuntimeRegistry | None = None,
         repo_store: RepoStore | None = None,
         register_repo_cb: Callable[
@@ -67,6 +68,7 @@ class HydraFlowDashboard:
         self._bus = event_bus
         self._state = state
         self._orchestrator = orchestrator
+        self._host_runtime = host_runtime
         self._registry = registry
         self._repo_store = repo_store
         self._register_repo_cb = register_repo_cb
@@ -122,7 +124,7 @@ class HydraFlowDashboard:
             event_bus=self._bus,
             state=self._state,
             pr_manager=pr_mgr,
-            get_orchestrator=lambda: self._orchestrator,
+            get_orchestrator=self._get_orchestrator,
             set_orchestrator=self._set_orchestrator,
             set_run_task=self._set_run_task,
             ui_dist_dir=ui_dist_dir,
@@ -139,6 +141,18 @@ class HydraFlowDashboard:
 
         self._app = app
         return app
+
+    def _get_orchestrator(self) -> HydraFlowOrchestrator | None:
+        """Return the host orchestrator.
+
+        In production the host is a registered :class:`RepoRuntime` (sharing
+        the app-level bus/state), so its orchestrator is the source of truth.
+        Falls back to the on-demand ``_orchestrator`` when no host runtime was
+        supplied (single-repo/test wiring).
+        """
+        if self._host_runtime is not None:
+            return self._host_runtime.orchestrator
+        return self._orchestrator
 
     def _set_orchestrator(self, orch: HydraFlowOrchestrator) -> None:
         self._orchestrator = orch

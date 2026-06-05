@@ -360,17 +360,8 @@ class RouteContext:
 
     # -- Dependency resolution helpers ------------------------------------------
 
-    def _is_default_repo(self, slug: str) -> bool:
-        """Check if *slug* refers to the default (host) repo."""
-        default = self.config.repo
-        if not default:
-            return False
-        normalized = default.replace("/", "-")
-        slug_lower = slug.lower()
-        return slug_lower in (default.lower(), normalized.lower())
-
-    def _is_default_pipeline_active(self) -> bool:
-        """Check if the default repo's pipeline is enabled.
+    def _host_pipeline_active(self) -> bool:
+        """Fallback host-pipeline check for single-repo/test wiring (no registry).
 
         Returns True when no orchestrator exists (headless/test mode).
         """
@@ -384,22 +375,17 @@ class RouteContext:
     def is_repo_pipeline_active(self, slug: str | None) -> bool:
         """Return whether the resolved repo's pipeline is actively processing.
 
-        When *slug* is ``None`` (All repos view), returns True if ANY
-        repo (default or added) has an active pipeline.
+        The host repo is a registered runtime like any other, so this resolves
+        purely through the registry. When *slug* is ``None`` (All repos view),
+        returns True if ANY line is running.
         """
-        if slug is None:
-            if self._is_default_pipeline_active():
-                return True
-            if self.registry is not None:
-                return any(getattr(rt, "running", False) for rt in self.registry.all)
-            return False
-        if self._is_default_repo(slug):
-            return self._is_default_pipeline_active()
         if self.registry is not None:
+            if slug is None:
+                return any(getattr(rt, "running", False) for rt in self.registry.all)
             rt = self.registry.get(slug)
-            if rt is not None:
-                return getattr(rt, "running", False)
-        return False
+            return getattr(rt, "running", False) if rt is not None else False
+        # No registry (single-repo/test wiring): fall back to the host orch.
+        return self._host_pipeline_active()
 
     def resolve_runtime(
         self,
@@ -416,8 +402,9 @@ class RouteContext:
         configured, returns the single-repo defaults for backward compatibility.
         """
         if self.registry is not None and slug is not None:
-            if self._is_default_repo(slug):
-                return self.config, self.state, self.event_bus, self.get_orchestrator
+            # The host repo is a registered runtime sharing the app-level
+            # bus/state, so registry.get() resolves it just like any other line
+            # — no default-repo special case needed.
             rt: RepoRuntime | None = self.registry.get(slug)
             if rt is not None:
                 return rt.config, rt.state, rt.event_bus, lambda: rt.orchestrator

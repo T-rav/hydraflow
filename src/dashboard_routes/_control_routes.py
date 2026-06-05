@@ -440,7 +440,24 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
 
     @router.post("/api/control/start")
     async def start_orchestrator() -> JSONResponse:
-        """Create and start a new orchestrator instance."""
+        """Start the entire factory — the host orchestrator and every line.
+
+        The factory-level Start starts every registered repo runtime
+        (``registry.start_all``), including the host. Starting a single line
+        is handled by ``POST /api/runtimes/{slug}/start``.
+        """
+        registry = ctx.registry
+        if registry is not None:
+            await registry.start_all()
+            await ctx.event_bus.publish(
+                HydraFlowEvent(
+                    type=EventType.ORCHESTRATOR_STATUS,
+                    data=OrchestratorStatusPayload(status="running", reset=True),
+                )
+            )
+            return JSONResponse({"status": "started"})
+
+        # Legacy single-repo/test wiring (no registry): create+run the host orch.
         orch = ctx.get_orchestrator()
         if orch and orch.running:
             return JSONResponse({"error": "already running"}, status_code=409)
@@ -474,23 +491,22 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
     async def stop_orchestrator() -> JSONResponse:
         """Stop the entire factory — the host orchestrator and every line.
 
-        The factory-level Stop halts the host orchestrator *and* every
-        registered repo runtime (``registry.stop_all``), so no factory line
-        keeps running after a factory stop. Stopping a single line is handled
-        by ``POST /api/runtimes/{slug}/stop``.
+        The factory-level Stop halts every registered repo runtime
+        (``registry.stop_all``), including the host. Stopping a single line is
+        handled by ``POST /api/runtimes/{slug}/stop``.
         """
-        orch = ctx.get_orchestrator()
         registry = ctx.registry
-        host_running = bool(orch and orch.running)
-        registry_running = bool(
-            registry is not None and any(rt.running for rt in registry.all)
-        )
-        if not host_running and not registry_running:
-            return JSONResponse({"error": "not running"}, status_code=400)
-        if orch is not None and orch.running:
-            await orch.request_stop()
         if registry is not None:
+            if not any(rt.running for rt in registry.all):
+                return JSONResponse({"error": "not running"}, status_code=400)
             await registry.stop_all()
+            return JSONResponse({"status": "stopping"})
+
+        # Legacy single-repo/test wiring (no registry): stop the host orch.
+        orch = ctx.get_orchestrator()
+        if not orch or not orch.running:
+            return JSONResponse({"error": "not running"}, status_code=400)
+        await orch.request_stop()
         return JSONResponse({"status": "stopping"})
 
     @router.post("/api/control/clear-credit-pause")
