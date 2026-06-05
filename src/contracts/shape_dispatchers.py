@@ -54,7 +54,14 @@ logger = logging.getLogger("hydraflow.contracts.shape_dispatchers")
 
 def _pick_shape_for_pr(args: list[str]) -> type[BaseModel] | None:
     """``gh pr ...`` shape selection. Detect summary vs detail by which
-    detail-only fields are requested in ``--json FIELDS``."""
+    detail-only fields are requested in ``--json FIELDS``.
+
+    ``GhPRSummary`` requires ``state`` — only apply it when the call
+    explicitly requests that field.  PR calls that request fields outside
+    both shapes (e.g. ``--json commits``, ``--json reviews``,
+    ``--json title,body``) return ``None`` so the dispatcher skips them
+    rather than producing false-positive drift signals.
+    """
     fields = _extract_json_fields(args)
     if fields is None:
         return None
@@ -67,23 +74,26 @@ def _pick_shape_for_pr(args: list[str]) -> type[BaseModel] | None:
     }
     if fields & detail_signals:
         return GhPRDetail
-    return GhPRSummary
+    if "state" in fields:
+        return GhPRSummary
+    return None
 
 
 def _pick_shape_for_issue(args: list[str]) -> type[BaseModel] | None:
     """Issue shape selection based on which fields are requested.
 
-    ``GhIssueSummary`` requires ``state`` — only use it when the call
-    actually requests that field.  Narrow list calls (``number,title,...``
-    without ``state``) use ``GhIssueListItem`` instead.  Calls that
-    request fields outside both shapes (e.g. ``--json comments``) get
-    ``None`` so the dispatcher skips them rather than producing a
-    false-positive drift signal.
+    ``GhIssueSummary`` requires both ``state`` and ``number`` — only use
+    it when the call requests both fields.  Narrow list calls
+    (``number,title,...`` without ``state``) use ``GhIssueListItem``
+    instead.  Calls that request only ``state,stateReason`` (without
+    ``number``) or other fields outside both shapes return ``None`` so
+    the dispatcher skips them rather than producing false-positive drift
+    signals.
     """
     fields = _extract_json_fields(args)
     if fields is None:
         return None
-    if "state" in fields:
+    if "state" in fields and "number" in fields:
         return GhIssueSummary
     if "number" in fields and "title" in fields:
         return GhIssueListItem
@@ -91,10 +101,20 @@ def _pick_shape_for_issue(args: list[str]) -> type[BaseModel] | None:
 
 
 def _pick_shape_for_issue_list(args: list[str]) -> type[BaseModel] | None:
+    """``gh issue list`` shape selection.
+
+    ``GhIssueListItem`` requires both ``number`` and ``title`` — only
+    apply it when the call requests both fields.  Calls requesting only
+    ``--json title`` (e.g. for dedup lookups) return ``None`` so the
+    dispatcher skips them rather than failing validation on the missing
+    ``number``.
+    """
     fields = _extract_json_fields(args)
     if fields is None:
         return None
-    return GhIssueListItem
+    if "number" in fields and "title" in fields:
+        return GhIssueListItem
+    return None
 
 
 def _pick_shape_for_checks(args: list[str]) -> type[BaseModel] | None:

@@ -202,3 +202,102 @@ async def test_unknown_subcommand_skipped(tmp_path: Path) -> None:
         stdout='{"data": {}}\n',
     )
     assert await gh_shape_validator(sample) is None
+
+
+# --- Regression tests for false-positive drift signatures (issue #9321) ---
+# These calls produce output whose fields don't match GhPRSummary/GhIssueSummary
+# required fields — the dispatcher must return None (no opinion) rather than
+# applying the wrong shape and generating spurious drift.
+
+
+@pytest.mark.asyncio
+async def test_pr_view_commits_only_skipped(tmp_path: Path) -> None:
+    """gh pr view N --json commits: no state/detail signals → no opinion."""
+    sample = _sample(
+        tmp_path,
+        args=["pr", "view", "42", "--json", "commits"],
+        stdout=json.dumps({"commits": [{"oid": "abc123", "messageHeadline": "fix: x"}]})
+        + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_pr_view_reviews_only_skipped(tmp_path: Path) -> None:
+    """gh pr view N --json reviews: no state/detail signals → no opinion."""
+    sample = _sample(
+        tmp_path,
+        args=["pr", "view", "42", "--json", "reviews"],
+        stdout=json.dumps(
+            {"reviews": [{"state": "APPROVED", "author": {"login": "alice"}}]}
+        )
+        + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_pr_view_title_body_skipped(tmp_path: Path) -> None:
+    """gh pr view N --json title,body: missing state → no opinion (GhPRSummary requires state)."""
+    sample = _sample(
+        tmp_path,
+        args=["pr", "view", "42", "--json", "title,body"],
+        stdout=json.dumps({"title": "fix: bug", "body": "closes #41"}) + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_pr_list_number_labels_body_skipped(tmp_path: Path) -> None:
+    """gh pr list --json number,labels,body: missing state → no opinion."""
+    sample = _sample(
+        tmp_path,
+        args=["pr", "list", "--json", "number,labels,body"],
+        stdout=json.dumps(
+            [{"number": 1, "labels": [{"name": "bug"}], "body": "fixes #1"}]
+        )
+        + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_issue_view_state_reason_only_skipped(tmp_path: Path) -> None:
+    """gh issue view N --json state,stateReason: missing number → no opinion.
+
+    GhIssueSummary requires number; calls omitting it must be skipped to
+    avoid false-positive drift (stuck signature in issue #9321).
+    """
+    sample = _sample(
+        tmp_path,
+        args=["issue", "view", "7", "--json", "state,stateReason"],
+        stdout=json.dumps({"state": "CLOSED", "stateReason": "completed"}) + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_issue_list_title_only_skipped(tmp_path: Path) -> None:
+    """gh issue list --json title: missing number → no opinion.
+
+    GhIssueListItem requires number; calls omitting it must be skipped to
+    avoid false-positive drift (pattern from rc_budget_loop dedup checks).
+    """
+    sample = _sample(
+        tmp_path,
+        args=["issue", "list", "--json", "title"],
+        stdout=json.dumps([{"title": "fix: stuck drift"}]) + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_issue_view_with_number_and_state_validates(tmp_path: Path) -> None:
+    """gh issue view N --json number,state,stateReason: both required fields → GhIssueSummary used."""
+    sample = _sample(
+        tmp_path,
+        args=["issue", "view", "7", "--json", "number,state,stateReason"],
+        stdout=json.dumps({"number": 7, "state": "CLOSED", "stateReason": "completed"})
+        + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
