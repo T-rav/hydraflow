@@ -35,6 +35,7 @@ from pydantic import BaseModel, ValidationError
 
 from contracts.shapes import (
     GhCheckRun,
+    GhIssueListItem,
     GhIssueSummary,
     GhPRDetail,
     GhPRSummary,
@@ -74,6 +75,13 @@ def _pick_shape_for_issue(args: list[str]) -> type[BaseModel] | None:
     if fields is None:
         return None
     return GhIssueSummary
+
+
+def _pick_shape_for_issue_list(args: list[str]) -> type[BaseModel] | None:
+    fields = _extract_json_fields(args)
+    if fields is None:
+        return None
+    return GhIssueListItem
 
 
 def _pick_shape_for_checks(args: list[str]) -> type[BaseModel] | None:
@@ -127,8 +135,10 @@ async def gh_shape_validator(sample: ShadowSample) -> dict[str, object] | None: 
     shape_cls: type[BaseModel] | None = None
     if subcommand in ("pr-view", "pr-list"):
         shape_cls = _pick_shape_for_pr(sample.args)
-    elif subcommand in ("issue-view", "issue-list"):
+    elif subcommand == "issue-view":
         shape_cls = _pick_shape_for_issue(sample.args)
+    elif subcommand == "issue-list":
+        shape_cls = _pick_shape_for_issue_list(sample.args)
     elif subcommand == "pr-checks":
         shape_cls = _pick_shape_for_checks(sample.args)
     if shape_cls is None:
