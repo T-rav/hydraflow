@@ -65,6 +65,11 @@ _HELPER_NAMES = frozenset(
 _FAKE_HELPER_OVERRIDES: dict[tuple[str, str], str] = {
     ("FakeGitHub", "clear_rate_limit"): "test-helper",
     ("FakeGitHub", "set_rate_limit_mode"): "test-helper",
+    # FakeDocker's single-shot fault-injection helpers have no real-adapter
+    # counterpart (the real container runner has no fail_next/clear_fault), so
+    # no cassette can record them — mirror the FakeGitHub carve-out (#9177).
+    ("FakeDocker", "clear_fault"): "test-helper",
+    ("FakeDocker", "fail_next"): "test-helper",
 }
 
 
