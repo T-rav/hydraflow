@@ -126,6 +126,19 @@ def _gh_subcommand(args: list[str]) -> str | None:
     return f"{args[0]}-{args[1]}"
 
 
+# Minimum fields a call must request before we'll validate against a shape.
+# Narrow queries (e.g. ``--json commits``, ``--json headRefOid``) omit
+# required fields, so validating against a shape that needs them produces
+# spurious drift signals.
+_SHAPE_REQUIRED_FIELDS: dict[str, frozenset[str]] = {
+    "GhPRSummary": frozenset({"number", "title", "state"}),
+    "GhPRDetail": frozenset({"number"}),
+    "GhIssueSummary": frozenset({"number", "state"}),
+    "GhIssueListItem": frozenset({"number", "title"}),
+    "GhCheckRun": frozenset({"name"}),
+}
+
+
 async def gh_shape_validator(sample: ShadowSample) -> dict[str, object] | None:  # noqa: PLR0911
     """Dispatcher: validate ``sample.stdout`` against the matching shape.
 
@@ -135,7 +148,8 @@ async def gh_shape_validator(sample: ShadowSample) -> dict[str, object] | None: 
           this to file a single drift issue per signature.
         - ``None`` for samples this dispatcher has no opinion on
           (unknown subcommand, no ``--json`` flag, ``--jq`` transform
-          applied, empty stdout, etc.) — the loop treats those as
+          applied, empty stdout, requested fields don't cover the shape's
+          required fields, etc.) — the loop treats those as
           "skipped, no opinion".
     """
     if sample.adapter != "github" or sample.command != "gh":
@@ -160,6 +174,15 @@ async def gh_shape_validator(sample: ShadowSample) -> dict[str, object] | None: 
     elif subcommand == "pr-checks":
         shape_cls = _pick_shape_for_checks(sample.args)
     if shape_cls is None:
+        return None
+
+    # Only validate when the requested fields cover the shape's required
+    # fields.  Narrow queries (e.g. ``--json commits``, ``--json headRefOid``)
+    # don't request the required fields, so attempting to validate them
+    # produces false-positive drift for every valid call of that shape.
+    requested = _extract_json_fields(sample.args)
+    required = _SHAPE_REQUIRED_FIELDS.get(shape_cls.__name__, frozenset())
+    if requested is not None and not required.issubset(requested):
         return None
 
     try:
