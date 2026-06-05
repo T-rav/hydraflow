@@ -5,13 +5,13 @@ kind: "loop"
 bounded_context: "caretaker"
 code_anchor: "src/term_pruner_loop.py:TermPrunerLoop"
 aliases: ["term pruner loop", "UL pruner", "glossary pruner"]
-related: []
+related: [{"kind": "depends_on", "target": "01KQZR9QW4RJ5Q7TB2220V3JZN"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
 evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T00:00:00.000000+00:00"
-updated_at: "2026-05-19T00:00:00.000000+00:00"
+updated_at: "2026-06-05T01:03:42.463501+00:00"
 ---
 
 ## Definition

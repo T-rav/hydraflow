@@ -5,13 +5,13 @@ kind: "loop"
 bounded_context: "caretaker"
 code_anchor: "src/corpus_learning_loop.py:CorpusLearningLoop"
 aliases: ["corpus learning loop", "adversarial corpus loop", "escape signal ingestion loop"]
-related: []
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
 evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T20:00:00.000000+00:00"
-updated_at: "2026-05-19T20:00:00.000000+00:00"
+updated_at: "2026-06-05T01:03:42.463501+00:00"
 ---
 
 ## Definition
