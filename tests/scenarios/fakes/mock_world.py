@@ -375,7 +375,6 @@ class MockWorld:
         EventBus tagged via set_repo, so >=2 calls yield genuinely independent
         runtimes that resolve_runtimes can aggregate.
         """
-        from pathlib import Path  # noqa: PLC0415
         from types import SimpleNamespace  # noqa: PLC0415
 
         from events import EventBus  # noqa: PLC0415
@@ -387,7 +386,10 @@ class MockWorld:
         store.upsert(RepoRecord(slug=slug, repo=slug, path=path))
 
         dash = slug.replace("/", "-")
-        repo_root = Path(path)
+        # The seed `path` may be a container path (e.g. /workspace/...) that is
+        # not writable in-process; give the runtime a tmp-based repo_root so
+        # building it never touches the seed's filesystem location.
+        repo_root = self._tmp_path / "repo_runtimes" / dash
         repo_root.mkdir(parents=True, exist_ok=True)
         cfg = ConfigFactory.create(repo=slug, repo_root=repo_root)
         bus = EventBus()
