@@ -1483,6 +1483,8 @@ def make_dashboard_router(
     default_repo_slug=None,
     allowed_repo_roots_fn=None,
     credentials=None,
+    set_orchestrator=None,
+    set_run_task=None,
 ):
     """Create a dashboard router with test-friendly defaults.
 
@@ -1508,6 +1510,10 @@ def make_dashboard_router(
         Optional callable returning allowed filesystem roots.
     credentials:
         Optional ``Credentials`` instance for route context.
+    set_orchestrator / set_run_task:
+        Optional callbacks wired into the route context so tests can spy on
+        orchestrator replacement and run-task scheduling (e.g. verifying the
+        host repo's Start restarts the orchestrator).
     """
     from dashboard_routes import create_router
     from pr_manager import PRManager
@@ -1519,8 +1525,8 @@ def make_dashboard_router(
         state=state,
         pr_manager=pr_mgr,
         get_orchestrator=get_orch or (lambda: None),
-        set_orchestrator=lambda o: None,
-        set_run_task=lambda t: None,
+        set_orchestrator=set_orchestrator or (lambda o: None),
+        set_run_task=set_run_task or (lambda t: None),
         ui_dist_dir=ui_dist_dir or (tmp_path / "no-dist"),
         template_dir=template_dir or (tmp_path / "no-templates"),
         credentials=credentials,

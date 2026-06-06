@@ -157,15 +157,22 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         return JSONResponse(info.model_dump())
 
     @router.post("/api/runtimes/{slug}/start")
-    async def start_runtime(slug: str) -> JSONResponse:
+    async def start_runtime(slug: str) -> JSONResponse:  # noqa: PLR0911
         """Start a specific repo runtime."""
         if _is_default_repo(slug):
             orch = get_orchestrator()
-            if not orch or not orch.running:
-                return JSONResponse(
-                    {"error": "Orchestrator not running"}, status_code=400
-                )
+            if orch is None:
+                return JSONResponse({"error": "No orchestrator"}, status_code=400)
+            if orch.running:
+                return JSONResponse({"error": "Already running"}, status_code=409)
+            # Full restart. A prior Stop fully halts the host orchestrator
+            # (cancels every loop, including background workers), so the run
+            # task has exited — toggling pipeline_enabled alone would not
+            # revive the cancelled tasks. reset() clears mutable state per its
+            # contract; run() recreates all loops. Uniform with rt.start().
+            orch.reset()
             orch.pipeline_enabled = True
+            ctx.set_run_task(asyncio.create_task(orch.run()))
             return JSONResponse({"status": "started", "slug": slug})
 
         if registry is None:
@@ -187,7 +194,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             orch = get_orchestrator()
             if not orch or not orch.running:
                 return JSONResponse({"error": "Not running"}, status_code=400)
-            orch.pipeline_enabled = False
+            # Full stop: halt every loop (pipeline + background workers), not
+            # just pause the pipeline. Uniform with every other factory line,
+            # whose stop routes through rt.stop() -> orchestrator.stop().
+            await orch.request_stop()
             return JSONResponse({"status": "stopped", "slug": slug})
 
         if registry is None:
