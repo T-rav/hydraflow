@@ -130,6 +130,7 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
 
     event_log = EventLog(config.event_log_path)
     bus = EventBus(event_log=event_log)
+    bus.set_repo(config.repo_slug)
     await bus.rotate_log(
         config.event_log_max_size_mb * 1024 * 1024,
         config.event_log_retention_days,
@@ -232,6 +233,7 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
         register_repo_cb=_register_repo,
         remove_repo_cb=_remove_repo,
         list_repos_cb=repo_store.list,
+        default_repo_slug=config.repo_slug,
         credentials=credentials,
     )
     await dashboard.start()

@@ -1221,3 +1221,79 @@ class TestListSupervisedReposWithStore:
         assert resp.status_code == 200
         assert data["repos"][0]["running"] is True
         assert data["repos"][0]["session_id"] == "sess-abc"
+
+    @pytest.mark.asyncio
+    async def test_includes_host_entry_and_default_slug(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+
+        from repo_store import RepoRegistryStore
+
+        store = RepoRegistryStore(tmp_path)
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            repo_store=store,
+            default_repo_slug="test-org-test-repo",
+        )
+        endpoint = find_endpoint(router, "/api/repos")
+        resp = await endpoint()
+
+        data = json.loads(resp.body)
+        assert data["default_repo_slug"] == "test-org-test-repo"
+        defaults = [r for r in data["repos"] if r.get("is_default")]
+        assert len(defaults) == 1
+        assert defaults[0]["slug"] == "test-org-test-repo"
+
+    @pytest.mark.asyncio
+    async def test_does_not_double_list_host(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+
+        from repo_store import RepoRecord, RepoRegistryStore
+
+        store = RepoRegistryStore(tmp_path)
+        store.upsert(
+            RepoRecord(
+                slug="test-org/test-repo",
+                repo="test-org/test-repo",
+                path=str(tmp_path),
+            )
+        )
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            repo_store=store,
+            default_repo_slug="test-org-test-repo",
+        )
+        endpoint = find_endpoint(router, "/api/repos")
+        resp = await endpoint()
+
+        data = json.loads(resp.body)
+        host_entries = [r for r in data["repos"] if r["slug"] == "test-org-test-repo"]
+        assert len(host_entries) == 1
+
+    @pytest.mark.asyncio
+    async def test_no_host_entry_without_default_slug(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+
+        from repo_store import RepoRegistryStore
+
+        store = RepoRegistryStore(tmp_path)
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, repo_store=store
+        )
+        endpoint = find_endpoint(router, "/api/repos")
+        resp = await endpoint()
+
+        data = json.loads(resp.body)
+        assert all(not r.get("is_default") for r in data["repos"])
+        assert data["default_repo_slug"] is None
