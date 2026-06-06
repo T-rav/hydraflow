@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from exception_classify import reraise_on_credit_or_bug
-from src.adversarial_agents import AgentLike
+from src.adversarial_agents import AgentLike, extract_json
 from src.pending_concerns import Concern
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ class SpecJudge:
 
         try:
             raw = await self.agent.run(_SYSTEM_PROMPT, user_msg)
-            data = json.loads(raw)
+            data = extract_json(raw)
         except json.JSONDecodeError as exc:
             logger.warning("SpecJudge JSON parse failure: %s", exc)
             return _parse_failure_result(

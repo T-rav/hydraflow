@@ -228,6 +228,37 @@ class TestRepoRuntime:
         assert "org-proj" in r
         assert "stopped" in r
 
+    def test_from_shared_reuses_injected_bus_and_state(self, tmp_path):
+        config = ConfigFactory.create(repo="acme/widgets", repo_root=tmp_path)
+        shared_bus = MagicMock()
+        shared_state = MagicMock()
+        with patch("repo_runtime.HydraFlowOrchestrator") as mock_orch_cls:
+            runtime = RepoRuntime.from_shared(config, shared_bus, shared_state)
+        assert runtime.event_bus is shared_bus
+        assert runtime.state is shared_state
+        assert runtime.slug == "acme-widgets"
+        _, kwargs = mock_orch_cls.call_args
+        assert kwargs["event_bus"] is shared_bus
+        assert kwargs["state"] is shared_state
+
+    @pytest.mark.asyncio
+    async def test_start_resets_orchestrator_before_run(self, tmp_path):
+        config = ConfigFactory.create(repo_root=tmp_path)
+        mock_orch = MagicMock()
+        mock_orch.run = AsyncMock()
+        mock_orch.running = False
+        with (
+            patch("repo_runtime.EventLog"),
+            patch("repo_runtime.EventBus"),
+            patch("repo_runtime.build_state_tracker"),
+            patch("repo_runtime.HydraFlowOrchestrator", return_value=mock_orch),
+        ):
+            runtime = RepoRuntime(config)
+        await runtime.start()
+        await asyncio.sleep(0)
+        mock_orch.reset.assert_called_once()
+        mock_orch.run.assert_awaited_once()
+
 
 class TestRepoRuntimeRegistry:
     @pytest.mark.asyncio
@@ -363,3 +394,47 @@ class TestRepoRuntimeRegistry:
         assert rt_a.orchestrator is not rt_b.orchestrator
         assert rt_a.event_bus is not rt_b.event_bus
         assert len(registry) == 2
+
+    def test_add_inserts_prebuilt_runtime(self, tmp_path):
+        config = ConfigFactory.create(repo="acme/widgets", repo_root=tmp_path)
+        with (
+            patch("repo_runtime.EventLog"),
+            patch("repo_runtime.EventBus"),
+            patch("repo_runtime.build_state_tracker"),
+            patch("repo_runtime.HydraFlowOrchestrator"),
+        ):
+            runtime = RepoRuntime(config)
+        registry = RepoRuntimeRegistry()
+        added = registry.add(runtime)
+        assert added is runtime
+        assert registry.get("acme-widgets") is runtime
+        assert registry.get("acme/widgets") is runtime
+        assert len(registry) == 1
+
+    def test_add_duplicate_raises(self, tmp_path):
+        config = ConfigFactory.create(repo="acme/widgets", repo_root=tmp_path)
+        with (
+            patch("repo_runtime.EventLog"),
+            patch("repo_runtime.EventBus"),
+            patch("repo_runtime.build_state_tracker"),
+            patch("repo_runtime.HydraFlowOrchestrator"),
+        ):
+            runtime = RepoRuntime(config)
+        registry = RepoRuntimeRegistry()
+        registry.add(runtime)
+        with pytest.raises(ValueError, match="already registered"):
+            registry.add(runtime)
+
+    @pytest.mark.asyncio
+    async def test_start_all_starts_each_runtime(self):
+        registry = RepoRuntimeRegistry()
+        rt1 = MagicMock()
+        rt1.start = AsyncMock()
+        rt1.running = False
+        rt2 = MagicMock()
+        rt2.start = AsyncMock()
+        rt2.running = False
+        registry._runtimes = {"a": rt1, "b": rt2}
+        await registry.start_all()
+        rt1.start.assert_awaited_once()
+        rt2.start.assert_awaited_once()

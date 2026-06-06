@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -184,3 +185,23 @@ async def test_show_returns_bead_task_shape() -> None:
     assert task.priority == 0
     assert task.status == "open"
     assert task.depends_on == []
+
+
+# ---------------------------------------------------------------------------
+# export — writes the per-worktree .beads/issues.jsonl artifact
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio()
+async def test_export_writes_issues_jsonl(tmp_path: Path) -> None:
+    beads = FakeBeads()
+    await beads.init(cwd=tmp_path)
+    await beads.create_task(title="alpha", priority="0", cwd=tmp_path)
+    await beads.create_task(title="beta", priority="1", cwd=tmp_path)
+
+    await beads.export(cwd=tmp_path)
+
+    jsonl = tmp_path / ".beads" / "issues.jsonl"
+    assert jsonl.exists()
+    lines = [ln for ln in jsonl.read_text().splitlines() if ln.strip()]
+    assert {json.loads(ln)["title"] for ln in lines} == {"alpha", "beta"}

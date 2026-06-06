@@ -152,9 +152,16 @@ class OpenAutoPRBotPRPort:
     once the PR carries `hydraflow-ul-proposed`.
     """
 
-    def __init__(self, *, repo_root: Path, gh_token: str = "") -> None:
+    def __init__(
+        self, *, repo_root: Path, gh_token: str = "", base: str = "main"
+    ) -> None:
         self._repo_root = repo_root
         self._gh_token = gh_token
+        # Target branch for the bot PR. Callers pass ``config.base_branch()`` so
+        # UL PRs follow the two-tier branch model (ADR-0042): ``staging`` when
+        # staging is enabled, ``main`` otherwise. Defaults to ``main`` for the
+        # pre-staging single-tier case.
+        self._base = base
 
     async def open_bot_pr(
         self,
@@ -192,7 +199,7 @@ class OpenAutoPRBotPRPort:
             files=written_paths,
             pr_title=title,
             pr_body=body,
-            base="main",
+            base=self._base,
             auto_merge=False,
             gh_token=self._gh_token,
             raise_on_failure=False,

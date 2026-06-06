@@ -29,20 +29,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
     """Register state/repos/runtimes/filesystem routes on *router*."""
 
     config = ctx.config
-    get_orchestrator = ctx.get_orchestrator
     registry = ctx.registry
     repo_store = ctx.repo_store
     register_repo_cb = ctx.register_repo_cb
     remove_repo_cb = ctx.remove_repo_cb
-
-    def _is_default_repo(slug: str) -> bool:
-        return ctx._is_default_repo(slug)
-
-    def _default_repo_pipeline_running() -> bool:
-        orch = get_orchestrator()
-        if not orch or not orch.running:
-            return False
-        return orch.pipeline_enabled
 
     def _list_repo_records() -> list[Any]:
         return ctx.list_repo_records()
@@ -92,24 +82,12 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
 
     @router.get("/api/runtimes")
     async def list_runtimes() -> JSONResponse:
-        """List all registered repo runtimes with status."""
+        """List all registered repo runtimes with status.
+
+        The host repo is a registered runtime like every added repo, so the
+        list is simply the registry — no special host entry to prepend.
+        """
         infos: list[dict[str, Any]] = []
-
-        orch = get_orchestrator()
-        pipeline_active = _default_repo_pipeline_running()
-        default_slug = config.repo.replace("/", "-") if config.repo else ""
-        if config.repo:
-            infos.append(
-                RepoRuntimeInfo(
-                    slug=default_slug,
-                    repo=config.repo,
-                    running=pipeline_active,
-                    session_id=orch.current_session_id
-                    if orch and orch.running
-                    else None,
-                ).model_dump()
-            )
-
         if registry is not None:
             for rt in registry.all:
                 infos.append(
@@ -128,18 +106,6 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
     @router.get("/api/runtimes/{slug}")
     async def get_runtime_status(slug: str) -> JSONResponse:
         """Get status of a specific repo runtime."""
-        if _is_default_repo(slug):
-            orch = get_orchestrator()
-            pipeline_active = _default_repo_pipeline_running()
-            default_slug = config.repo.replace("/", "-") if config.repo else ""
-            info = RepoRuntimeInfo(
-                slug=default_slug,
-                repo=config.repo,
-                running=pipeline_active,
-                session_id=orch.current_session_id if orch and orch.running else None,
-            )
-            return JSONResponse(info.model_dump())
-
         if registry is None:
             return JSONResponse(
                 {"error": "No runtime registry configured"}, status_code=501
@@ -158,16 +124,11 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
 
     @router.post("/api/runtimes/{slug}/start")
     async def start_runtime(slug: str) -> JSONResponse:
-        """Start a specific repo runtime."""
-        if _is_default_repo(slug):
-            orch = get_orchestrator()
-            if not orch or not orch.running:
-                return JSONResponse(
-                    {"error": "Orchestrator not running"}, status_code=400
-                )
-            orch.pipeline_enabled = True
-            return JSONResponse({"status": "started", "slug": slug})
+        """Start a factory line — the host repo is just another line.
 
+        ``rt.start()`` resets and relaunches the orchestrator (all loops,
+        incl. background workers), so a stopped line restarts cleanly.
+        """
         if registry is None:
             return JSONResponse(
                 {"error": "No runtime registry configured"}, status_code=501
@@ -182,14 +143,12 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
 
     @router.post("/api/runtimes/{slug}/stop")
     async def stop_runtime(slug: str) -> JSONResponse:
-        """Stop a specific repo runtime."""
-        if _is_default_repo(slug):
-            orch = get_orchestrator()
-            if not orch or not orch.running:
-                return JSONResponse({"error": "Not running"}, status_code=400)
-            orch.pipeline_enabled = False
-            return JSONResponse({"status": "stopped", "slug": slug})
+        """Stop a factory line — fully halts that line's orchestrator.
 
+        Halts every loop (pipeline + background workers) via
+        ``rt.stop()`` -> ``orchestrator.stop()``. The host repo is uniform
+        with every other line.
+        """
         if registry is None:
             return JSONResponse(
                 {"error": "No runtime registry configured"}, status_code=501
@@ -242,15 +201,17 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         default_slug = ctx.default_repo_slug or ""
         default_entry: dict[str, Any] | None = None
         if default_slug:
-            orch = get_orchestrator()
-            host_running = _default_repo_pipeline_running()
+            # The host is a registry member (from_shared), so its live status
+            # comes from the registry like any other line.
+            host_rt = registry.get(default_slug) if registry else None
+            host_running = bool(host_rt.running) if host_rt else False
             default_entry = {
                 "slug": default_slug,
                 "repo": config.repo or default_slug,
                 "path": str(config.repo_root),
                 "running": host_running,
-                "session_id": orch.current_session_id
-                if orch and host_running
+                "session_id": host_rt.orchestrator.current_session_id
+                if host_rt and host_running
                 else None,
                 "is_default": True,
             }
@@ -259,10 +220,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             records = _list_repo_records()
             payload: list[dict[str, Any]] = []
             for rec in records:
-                if default_entry is not None and _is_default_repo(rec.slug):
+                safe_slug = rec.slug.replace("/", "-") if rec.slug else rec.slug
+                if default_entry is not None and safe_slug == default_slug:
                     continue  # host emitted once above; only dedup when present
                 runtime = registry.get(rec.slug) if registry else None
-                safe_slug = rec.slug.replace("/", "-") if rec.slug else rec.slug
                 payload.append(
                     {
                         "slug": safe_slug,

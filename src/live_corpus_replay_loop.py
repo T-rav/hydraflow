@@ -180,15 +180,27 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
 
             # If any signature reached the threshold, file an escalation
             # issue routed to the auto-agent preflight loop via the
-            # ``hitl-escalation`` label.
+            # ``hitl-escalation`` label.  Dedup-guarded so the escalation
+            # fires exactly once per drift run, not on every subsequent tick.
             if escalated_signatures:
-                escalated_issue = await self._file_escalation_issue(
-                    escalated_signatures
-                )
-        # Clean tick: clear all attempt counters so a future
-        # re-occurrence of the same drift starts fresh.
-        elif self._state is not None:
-            self._state.clear_live_corpus_drift_attempts()
+                esc_key = _escalation_dedup_key(escalated_signatures)
+                esc_seen = self._dedup.get()
+                if esc_key not in esc_seen:
+                    escalated_issue = await self._file_escalation_issue(
+                        escalated_signatures
+                    )
+                    if escalated_issue and escalated_issue != 0:
+                        esc_seen.add(esc_key)
+                        self._dedup.set_all(esc_seen)
+        # Clean tick: clear all attempt counters AND escalation dedup keys so
+        # a future re-occurrence of the same drift starts fresh.
+        else:
+            if self._state is not None:
+                self._state.clear_live_corpus_drift_attempts()
+            cur = self._dedup.get()
+            esc_keys = {k for k in cur if k.startswith("esc:")}
+            if esc_keys:
+                self._dedup.set_all(cur - esc_keys)
 
         return {
             "status": "ok",
@@ -311,3 +323,15 @@ def _fleet_dedup_key(drifted: list[tuple[Path, str]]) -> str:
     payload = {"signatures": sorted(sig for _path, sig in drifted)}
     blob = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
+
+
+def _escalation_dedup_key(signatures: list[str]) -> str:
+    """Stable dedup key for an escalation issue.
+
+    Prefixed with ``"esc:"`` so it can be distinguished from drift dedup keys
+    in the shared DedupStore and removed on a clean tick (allowing a future
+    recurrence of the same drift to re-escalate).
+    """
+    payload = {"escalated": sorted(signatures)}
+    blob = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return "esc:" + hashlib.sha256(blob).hexdigest()

@@ -716,7 +716,11 @@ _RETRYABLE_PATTERNS = (
 )
 # Rate-limit errors are handled by the global cooldown in run_subprocess(),
 # not by per-call retries which would just amplify the problem.
-_NON_RETRYABLE_PATTERNS = ("401", "403", "404")
+# "exceeds the maximum limit" is GitHub's GraphQL node-cost error — a
+# deterministic too-expensive-query failure that will never succeed on retry,
+# yet its message contains the substring "connection" (e.g. "authors
+# connection"), so without this guard _RETRYABLE_PATTERNS would retry it 3×.
+_NON_RETRYABLE_PATTERNS = ("401", "403", "404", "exceeds the maximum limit")
 
 
 def _is_retryable_error(stderr: str) -> bool:

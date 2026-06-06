@@ -124,13 +124,12 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
     from dashboard import HydraFlowDashboard  # noqa: PLC0415
     from events import EventBus, EventLog, EventType, HydraFlowEvent  # noqa: PLC0415
     from models import Phase  # noqa: PLC0415
-    from repo_runtime import RepoRuntimeRegistry  # noqa: PLC0415
+    from repo_runtime import RepoRuntime, RepoRuntimeRegistry  # noqa: PLC0415
     from repo_store import RepoRecord, RepoRegistryStore  # noqa: PLC0415
     from service_registry import build_state_tracker  # noqa: PLC0415
 
     event_log = EventLog(config.event_log_path)
     bus = EventBus(event_log=event_log)
-    bus.set_repo(config.repo_slug)
     await bus.rotate_log(
         config.event_log_max_size_mb * 1024 * 1024,
         config.event_log_retention_days,
@@ -141,12 +140,22 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
     repo_store = RepoRegistryStore(config.data_root)
     registry = RepoRuntimeRegistry()
 
+    # The host repo is a first-class factory line: register it as a runtime
+    # that shares the app-level bus/state (already rotated + history-loaded
+    # above) so the dashboard's default (no-repo) views and the host's own
+    # start/stop resolve through the registry uniformly — no special-casing.
+    host_runtime = RepoRuntime.from_shared(config, bus, state)
+    registry.add(host_runtime)
+
     # Restore previously registered repos into the runtime registry.
     # The repo store persists to disk, but the registry is in-memory —
     # without this, added repos are lost on restart and their play
     # buttons return 404.
     for record in repo_store.list():
         if not record.path:
+            continue
+        if record.slug in registry:
+            # Already registered (e.g. the host repo added above) — skip.
             continue
         repo_path = Path(record.path)
         if not repo_path.is_dir():
@@ -228,6 +237,7 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
         config=config,
         event_bus=bus,
         state=state,
+        host_runtime=host_runtime,
         registry=registry,
         repo_store=repo_store,
         register_repo_cb=_register_repo,
@@ -253,8 +263,9 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
     try:
         await stop_event.wait()
     finally:
-        if dashboard._orchestrator and dashboard._orchestrator.running:
-            await dashboard._orchestrator.stop()
+        # The host is a registered runtime now, so stop_all() halts it along
+        # with every other factory line.
+        await registry.stop_all()
         await dashboard.stop()
 
 

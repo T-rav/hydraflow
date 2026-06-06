@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import cast
 
 from exception_classify import reraise_on_credit_or_bug
-from src.adversarial_agents import AgentLike
+from src.adversarial_agents import AgentLike, extract_json
 from src.pending_concerns import Concern, Phase
 
 logger = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ class AssumptionSurfacer:
 
         try:
             raw = await self.agent.run(_SYSTEM_PROMPT, user_msg)
-            data = json.loads(raw)
+            data = extract_json(raw)
         except json.JSONDecodeError as exc:
             logger.warning("AssumptionSurfacer JSON parse failure: %s", exc)
             return SurfacerOutput()

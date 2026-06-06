@@ -27,13 +27,25 @@ class RepoRuntime:
     shut it down gracefully.
     """
 
-    def __init__(self, config: HydraFlowConfig) -> None:
+    def __init__(
+        self,
+        config: HydraFlowConfig,
+        *,
+        event_bus: EventBus | None = None,
+        state: StateTracker | None = None,
+    ) -> None:
         self._config = config
         self._slug = config.repo.replace("/", "-") or config.repo_root.name
-        event_log = EventLog(config.event_log_path)
-        self._event_bus = EventBus(event_log=event_log)
+        if event_bus is None:
+            event_log = EventLog(config.event_log_path)
+            event_bus = EventBus(event_log=event_log)
+        self._event_bus = event_bus
+        # Tag the bus so published events carry this repo's slug. For the host
+        # (from_shared) this tags the shared/app bus with the host slug; for
+        # added repos it tags their own bus. _slug is non-empty (repo_root.name
+        # fallback), so the publish-time injection guard always fires.
         self._event_bus.set_repo(self._slug)
-        self._state = build_state_tracker(config)
+        self._state = state if state is not None else build_state_tracker(config)
         self._orchestrator = HydraFlowOrchestrator(
             config,
             event_bus=self._event_bus,
@@ -56,6 +68,23 @@ class RepoRuntime:
         )
         await runtime._event_bus.load_history_from_disk()
         return runtime
+
+    @classmethod
+    def from_shared(
+        cls,
+        config: HydraFlowConfig,
+        event_bus: EventBus,
+        state: StateTracker,
+    ) -> RepoRuntime:
+        """Construct a runtime that reuses an existing event bus and state.
+
+        Used for the host repo, whose bus/state are owned by the app process
+        (already rotated + history-loaded) and shared with the dashboard's
+        default (no-``repo``) views. Unlike :meth:`create`, this does NOT
+        rotate the log or reload history — the caller already did so on the
+        shared bus.
+        """
+        return cls(config, event_bus=event_bus, state=state)
 
     # --- Properties ---
 
@@ -105,6 +134,10 @@ class RepoRuntime:
             logger.warning("Runtime %r already running", self._slug)
             return
         self._last_error = None
+        # Clear stale events/active-issue sets so a restarted runtime begins
+        # cleanly — a prior stop cancels the loops mid-flight. reset() is a
+        # no-op on a freshly constructed orchestrator.
+        self._orchestrator.reset()
         logger.info("Starting runtime for %r", self._slug)
         self._task = asyncio.create_task(
             self._orchestrator.run(), name=f"runtime-{self._slug}"
@@ -168,6 +201,19 @@ class RepoRuntimeRegistry:
         logger.info("Registered runtime %r", runtime.slug)
         return runtime
 
+    def add(self, runtime: RepoRuntime) -> RepoRuntime:
+        """Register a pre-constructed runtime (e.g. the host repo, which shares
+        the app-level bus/state via :meth:`RepoRuntime.from_shared`).
+
+        Raises ``ValueError`` if a runtime with the same slug already exists.
+        """
+        if runtime.slug in self._runtimes:
+            msg = f"Runtime already registered for slug {runtime.slug!r}"
+            raise ValueError(msg)
+        self._runtimes[runtime.slug] = runtime
+        logger.info("Added runtime %r", runtime.slug)
+        return runtime
+
     @staticmethod
     def _normalize(slug: str) -> str:
         """Normalize ``owner/repo`` to the dash-separated key format."""
@@ -192,6 +238,12 @@ class RepoRuntimeRegistry:
     def all(self) -> list[RepoRuntime]:
         """Return all registered runtimes."""
         return list(self._runtimes.values())
+
+    async def start_all(self) -> None:
+        """Start every registered runtime (no-op on already-running ones)."""
+        tasks = [runtime.start() for runtime in self._runtimes.values()]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def stop_all(self) -> None:
         """Stop all registered runtimes gracefully."""

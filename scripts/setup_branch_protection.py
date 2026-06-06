@@ -2,7 +2,7 @@
 
 The rulesets encode ADR-0042's two-tier branch model (counts are generated
 from ``gates.toml``; see the README's generated gate table, not this prose):
-- ``main protect`` (targets ``~DEFAULT_BRANCH``): merge-commit only, with the
+- ``main protect`` (targets ``refs/heads/main``): merge-commit only, with the
   full standard CI set plus the RC promotion + MockWorld + e2e gate.
 - ``staging protect`` (targets ``refs/heads/staging``): squash or merge, with
   the always-on baseline checks (heavy jobs run but are path-filter-safe).

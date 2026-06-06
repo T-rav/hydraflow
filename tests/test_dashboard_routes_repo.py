@@ -1297,3 +1297,68 @@ class TestListSupervisedReposWithStore:
         data = json.loads(resp.body)
         assert all(not r.get("is_default") for r in data["repos"])
         assert data["default_repo_slug"] is None
+
+    @pytest.mark.asyncio
+    async def test_host_entry_running_from_registry(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+        from types import SimpleNamespace
+
+        from repo_store import RepoRegistryStore
+        from tests.helpers import make_registry
+
+        # The host is a registry member; its running/session_id come from it.
+        registry = make_registry(
+            {
+                "slug": "test-org-test-repo",
+                "running": True,
+                "orchestrator": SimpleNamespace(current_session_id="sess-host"),
+            }
+        )
+        store = RepoRegistryStore(tmp_path)
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            repo_store=store,
+            registry=registry,
+            default_repo_slug="test-org-test-repo",
+        )
+        endpoint = find_endpoint(router, "/api/repos")
+        resp = await endpoint()
+
+        data = json.loads(resp.body)
+        host = next(r for r in data["repos"] if r.get("is_default"))
+        assert host["running"] is True
+        assert host["session_id"] == "sess-host"
+
+    @pytest.mark.asyncio
+    async def test_host_and_non_default_coexist(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+
+        from repo_store import RepoRecord, RepoRegistryStore
+
+        store = RepoRegistryStore(tmp_path)
+        store.upsert(
+            RepoRecord(slug="acme/app", repo="acme/app", path=str(tmp_path / "acme"))
+        )
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            repo_store=store,
+            default_repo_slug="test-org-test-repo",
+        )
+        endpoint = find_endpoint(router, "/api/repos")
+        resp = await endpoint()
+
+        data = json.loads(resp.body)
+        slugs = [r["slug"] for r in data["repos"]]
+        assert data["repos"][0]["slug"] == "test-org-test-repo"  # host pinned first
+        assert data["repos"][0]["is_default"] is True
+        assert "acme-app" in slugs

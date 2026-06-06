@@ -16,9 +16,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.dependabot_merge_loop")
 
+# Factory-owned branch prefix for Auto-Agent (preflight) PRs. These are opened
+# by the auto-agent subprocess under the ambient gh token (the owner account),
+# so they are NOT in ``settings.authors`` and the review→merge pipeline ignores
+# them (it keys on ``hydraflow-review`` + ``agent/issue-N``). Without this they
+# never land — they only get rebased by MergeStateWatcher — and pile up. The
+# prefix is exact and never used by a human or by the normal pipeline
+# (``agent/issue-N``), so matching on it is safe.
+_AUTO_AGENT_BRANCH_PREFIX = "agent/auto-agent-"
+
 
 class DependabotMergeLoop(BaseBackgroundLoop):
-    """Polls open PRs and auto-merges those authored by Dependabot and other configured bots."""
+    """Polls open PRs and auto-merges configured bot PRs + Auto-Agent PRs after CI passes."""
 
     def __init__(
         self,
@@ -54,7 +63,11 @@ class DependabotMergeLoop(BaseBackgroundLoop):
         bot_prs = [
             pr
             for pr in open_prs
-            if pr.author.lower() in bot_authors and pr.pr not in processed
+            if pr.pr not in processed
+            and (
+                pr.author.lower() in bot_authors
+                or pr.branch.startswith(_AUTO_AGENT_BRANCH_PREFIX)
+            )
         ]
 
         merged = 0

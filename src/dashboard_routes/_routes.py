@@ -360,17 +360,8 @@ class RouteContext:
 
     # -- Dependency resolution helpers ------------------------------------------
 
-    def _is_default_repo(self, slug: str) -> bool:
-        """Check if *slug* refers to the default (host) repo."""
-        default = self.config.repo
-        if not default:
-            return False
-        normalized = default.replace("/", "-")
-        slug_lower = slug.lower()
-        return slug_lower in (default.lower(), normalized.lower())
-
-    def _is_default_pipeline_active(self) -> bool:
-        """Check if the default repo's pipeline is enabled.
+    def _host_pipeline_active(self) -> bool:
+        """Fallback host-pipeline check for single-repo/test wiring (no registry).
 
         Returns True when no orchestrator exists (headless/test mode).
         """
@@ -384,22 +375,17 @@ class RouteContext:
     def is_repo_pipeline_active(self, slug: str | None) -> bool:
         """Return whether the resolved repo's pipeline is actively processing.
 
-        When *slug* is ``None`` (All repos view), returns True if ANY
-        repo (default or added) has an active pipeline.
+        The host repo is a registered runtime like any other, so this resolves
+        purely through the registry. When *slug* is ``None`` (All repos view),
+        returns True if ANY line is running.
         """
-        if slug is None:
-            if self._is_default_pipeline_active():
-                return True
-            if self.registry is not None:
-                return any(getattr(rt, "running", False) for rt in self.registry.all)
-            return False
-        if self._is_default_repo(slug):
-            return self._is_default_pipeline_active()
         if self.registry is not None:
+            if slug is None:
+                return any(getattr(rt, "running", False) for rt in self.registry.all)
             rt = self.registry.get(slug)
-            if rt is not None:
-                return getattr(rt, "running", False)
-        return False
+            return getattr(rt, "running", False) if rt is not None else False
+        # No registry (single-repo/test wiring): fall back to the host orch.
+        return self._host_pipeline_active()
 
     def resolve_runtime(
         self,
@@ -416,8 +402,9 @@ class RouteContext:
         configured, returns the single-repo defaults for backward compatibility.
         """
         if self.registry is not None and slug is not None:
-            if self._is_default_repo(slug):
-                return self.config, self.state, self.event_bus, self.get_orchestrator
+            # The host repo is a registered runtime sharing the app-level
+            # bus/state, so registry.get() resolves it just like any other line
+            # — no default-repo special case needed.
             rt: RepoRuntime | None = self.registry.get(slug)
             if rt is not None:
                 return rt.config, rt.state, rt.event_bus, lambda: rt.orchestrator
@@ -456,14 +443,16 @@ class RouteContext:
           :meth:`resolve_runtime` and tagging it with the *resolved* slug (a
           fell-back tuple is tagged with the default slug, never the bogus
           requested slug).
-        - ``REPO_ALL`` returns the default/host runtime followed by every
-          registered runtime, deduped by slug. With no registry it degenerates
-          to the single default runtime.
+        - ``REPO_ALL`` returns every registered runtime. The host repo is a
+          registry member (the server registers it via
+          ``RepoRuntime.from_shared``), so no separate default tuple is
+          prepended. With no registry it degenerates to the single shared
+          default.
 
         The 5th element is the canonical dash slug for tagging. The 4th element
-        is always a zero-arg callable; the default runtime's may return ``None``
-        while registry runtimes always yield a live orchestrator — consumers
-        must handle ``None``.
+        is always a zero-arg callable; the no-registry default may return
+        ``None`` while registry runtimes yield their live orchestrator —
+        consumers must handle ``None``.
         """
         default_slug = self.default_repo_slug or (
             self.config.repo.replace("/", "-")
@@ -472,15 +461,18 @@ class RouteContext:
         )
 
         if slug is not None and slug.strip().lower() == REPO_ALL:
-            runtimes: list[
-                tuple[
-                    HydraFlowConfig,
-                    StateTracker,
-                    EventBus,
-                    Callable[[], HydraFlowOrchestrator | None],
-                    str,
+            if self.registry is not None:
+                return [
+                    (
+                        rt.config,
+                        rt.state,
+                        rt.event_bus,
+                        lambda _rt=rt: _rt.orchestrator,
+                        rt.slug,
+                    )
+                    for rt in self.registry.all
                 ]
-            ] = [
+            return [
                 (
                     self.config,
                     self.state,
@@ -489,37 +481,21 @@ class RouteContext:
                     default_slug,
                 )
             ]
-            if self.registry is not None:
-                for rt in self.registry.all:
-                    if self._is_default_repo(rt.slug):
-                        continue  # already covered by the default entry above
-                    runtimes.append(
-                        (
-                            rt.config,
-                            rt.state,
-                            rt.event_bus,
-                            lambda _rt=rt: _rt.orchestrator,
-                            rt.slug,
-                        )
-                    )
-            return runtimes
 
-        # Single-repo path. Determine the truthful resolved slug, then reuse the
-        # singular resolver for the actual dependencies.
-        if slug is None or self._is_default_repo(slug):
-            resolved_slug = default_slug
-        else:
-            resolved_slug = default_slug
-            if self.registry is not None:
-                matched = self.registry.get(slug)
-                if matched is not None:
-                    resolved_slug = matched.slug
-                else:
-                    slug_lower = slug.lower()
-                    for rt in self.registry.all:
-                        if rt.slug.lower() == slug_lower:
-                            resolved_slug = rt.slug
-                            break
+        # Single-repo path. Determine the truthful resolved slug (a fell-back
+        # tuple is tagged with the default slug, never the bogus requested
+        # slug), then reuse the singular resolver for the dependencies.
+        resolved_slug = default_slug
+        if slug is not None and self.registry is not None:
+            matched = self.registry.get(slug)
+            if matched is not None:
+                resolved_slug = matched.slug
+            else:
+                slug_lower = slug.lower()
+                for rt in self.registry.all:
+                    if rt.slug.lower() == slug_lower:
+                        resolved_slug = rt.slug
+                        break
         cfg, st, bus, get_orch = self.resolve_runtime(slug)
         return [(cfg, st, bus, get_orch, resolved_slug)]
 

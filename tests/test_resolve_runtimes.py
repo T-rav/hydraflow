@@ -83,7 +83,9 @@ def test_concrete_slug_returns_single_tagged(config, event_bus, state, tmp_path)
     assert slug == "owner-alpha"
 
 
-def test_repo_all_returns_default_plus_all(config, event_bus, state, tmp_path):
+def test_repo_all_returns_registry_all(config, event_bus, state, tmp_path):
+    # The host is a registry member in production (from_shared), so the
+    # aggregate is simply every registered runtime — no separate default tuple.
     registry = make_registry({"slug": "owner-alpha"}, {"slug": "owner-beta"})
     ctx = _make_ctx(
         config,
@@ -97,7 +99,7 @@ def test_repo_all_returns_default_plus_all(config, event_bus, state, tmp_path):
     result = ctx.resolve_runtimes(REPO_ALL)
 
     slugs = [r[4] for r in result]
-    assert slugs == ["test-org-test-repo", "owner-alpha", "owner-beta"]
+    assert slugs == ["owner-alpha", "owner-beta"]
 
 
 def test_repo_all_case_insensitive(config, event_bus, state, tmp_path):
@@ -111,13 +113,21 @@ def test_repo_all_case_insensitive(config, event_bus, state, tmp_path):
         default_repo_slug="test-org-test-repo",
     )
 
-    assert len(ctx.resolve_runtimes("__ALL__")) == 2
+    assert len(ctx.resolve_runtimes("__ALL__")) == 1
 
 
-def test_repo_all_dedups_default_in_registry(config, event_bus, state, tmp_path):
-    # config.repo defaults to "test-org/test-repo"; a registry entry for the
-    # same repo must not double-list.
-    registry = make_registry({"slug": "test-org-test-repo"}, {"slug": "owner-alpha"})
+def test_repo_all_orchestrator_getters_are_per_runtime(
+    config, event_bus, state, tmp_path
+):
+    # The 4th tuple element must yield EACH runtime's own orchestrator — guards
+    # the loop closure against a late-binding bug (every getter returning the
+    # last runtime). The foundation guarantee every Phase 2+ consumer relies on.
+    orch_a = object()
+    orch_b = object()
+    registry = make_registry(
+        {"slug": "owner-alpha", "orchestrator": orch_a},
+        {"slug": "owner-beta", "orchestrator": orch_b},
+    )
     ctx = _make_ctx(
         config,
         event_bus,
@@ -127,10 +137,11 @@ def test_repo_all_dedups_default_in_registry(config, event_bus, state, tmp_path)
         default_repo_slug="test-org-test-repo",
     )
 
-    slugs = [r[4] for r in ctx.resolve_runtimes(REPO_ALL)]
+    result = ctx.resolve_runtimes(REPO_ALL)
+    getter_by_slug = {r[4]: r[3] for r in result}
 
-    assert slugs.count("test-org-test-repo") == 1
-    assert "owner-alpha" in slugs
+    assert getter_by_slug["owner-alpha"]() is orch_a
+    assert getter_by_slug["owner-beta"]() is orch_b
 
 
 def test_unknown_slug_tags_default_not_bogus(config, event_bus, state, tmp_path):

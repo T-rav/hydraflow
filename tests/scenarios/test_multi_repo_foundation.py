@@ -50,8 +50,10 @@ async def test_seeded_registry_aggregates_through_resolver(
     default_slug = config.repo.replace("/", "-")
     ctx = _ctx(config, event_bus, state, tmp_path, mock_world.registry, default_slug)
 
+    # The host is not in the MockWorld registry (only seeded repos are), so the
+    # aggregate is exactly the seeded runtimes — REPO_ALL == registry.all.
     all_slugs = [r[4] for r in ctx.resolve_runtimes(REPO_ALL)]
-    assert all_slugs == [default_slug, "owner-alpha", "owner-beta"]
+    assert all_slugs == ["owner-alpha", "owner-beta"]
 
 
 @pytest.mark.asyncio
