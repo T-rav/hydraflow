@@ -494,11 +494,12 @@ class RouteContext:
         if slug is not None and self.registry is not None:
             matched = self.registry.get(slug)
             if matched is not None:
-                resolved_slug = matched.slug
+                # Tolerate minimal runtime doubles without a slug attr.
+                resolved_slug = getattr(matched, "slug", None) or slug
             else:
                 slug_lower = slug.lower()
                 for rt in self.registry.all:
-                    if rt.slug.lower() == slug_lower:
+                    if getattr(rt, "slug", "").lower() == slug_lower:
                         resolved_slug = rt.slug
                         break
         cfg, st, bus, get_orch = self.resolve_runtime(slug)
@@ -1991,11 +1992,17 @@ def create_router(
     async def get_sessions(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Return session logs for the selected repo."""
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        sessions = _state.load_sessions()
+        """Return session logs — unioned across repos for ``repo=__all__``.
+
+        Each runtime's state is already repo-scoped, and ``SessionLog.repo``
+        + the ``{repo_slug}-{ts}`` session_id make entries self-identifying.
+        """
+        sessions = []
+        for _cfg, _state, _bus, _get_orch, _slug in _resolve_runtimes(repo):
+            sessions.extend(_state.load_sessions())
         repo_filter = (repo or "").strip()
-        if repo_filter and registry is None:
+        if repo_filter and repo_filter.lower() != REPO_ALL and registry is None:
+            # Legacy no-registry wiring: load_sessions returns ALL; filter by tag.
             normalized = repo_filter.lower()
             sessions = [
                 session
@@ -2009,19 +2016,22 @@ def create_router(
         session_id: str,
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Return a single session by ID with associated events."""
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        session = _state.get_session(session_id)
-        if session is None:
-            return JSONResponse({"error": "Session not found"}, status_code=404)
-        # Include events tagged with this session_id
-        all_events = _bus.get_history()
-        session_events = [
-            e.model_dump() for e in all_events if e.session_id == session_id
-        ]
-        data = session.model_dump()
-        data["events"] = session_events
-        return JSONResponse(data)
+        """Return a single session by ID with associated events.
+
+        Searches the resolved runtime(s) — for ``repo=__all__`` this finds the
+        owning repo across every line; for a specific repo it checks just that one.
+        """
+        for _cfg, _state, _bus, _get_orch, _slug in _resolve_runtimes(repo):
+            session = _state.get_session(session_id)
+            if session is None:
+                continue
+            session_events = [
+                e.model_dump() for e in _bus.get_history() if e.session_id == session_id
+            ]
+            data = session.model_dump()
+            data["events"] = session_events
+            return JSONResponse(data)
+        return JSONResponse({"error": "Session not found"}, status_code=404)
 
     @router.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket) -> None:
