@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from issue_store import STAGE_NAME_MAP
+from route_types import REPO_ALL  # noqa: F401  (re-exported for handlers)
 
 # Backend stage keys → frontend stage names lives in issue_store (the routing
 # layer imports it FROM issue_store, never the reverse) to avoid a layering
