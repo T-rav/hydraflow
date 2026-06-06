@@ -49,6 +49,7 @@ export const initialState = {
   canRegisterRepos: false,
   supervisedRepos: [],
   runtimes: [],
+  defaultRepoSlug: null,
   issueHistory: null,
   harnessInsights: null,
   reviewInsights: null,
@@ -707,6 +708,7 @@ export function reducer(state, action) {
         supervisedRepos: Array.isArray(action.data?.repos)
           ? action.data.repos
           : [],
+        defaultRepoSlug: action.data?.default_repo_slug ?? null,
       }
 
     case 'SELECT_REPO': {
@@ -963,7 +965,14 @@ export function HydraFlowProvider({ children }) {
       if (!res.ok) throw new Error(`status ${res.status}`)
       const payload = await res.json()
       const repos = Array.isArray(payload.repos) ? payload.repos : []
-      dispatch({ type: 'SET_REPOS', data: { repos, can_register: payload.can_register } })
+      dispatch({
+        type: 'SET_REPOS',
+        data: {
+          repos,
+          can_register: payload.can_register,
+          default_repo_slug: payload.default_repo_slug,
+        },
+      })
     } catch (err) {
       console.warn('Failed to fetch supervised repos', err)
       dispatch({ type: 'SET_REPOS', data: { repos: [], can_register: false } })

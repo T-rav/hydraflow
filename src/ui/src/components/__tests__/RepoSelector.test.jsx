@@ -41,6 +41,19 @@ describe('RepoSelector', () => {
     expect(selectRepo).toHaveBeenCalledWith('acme/app')
   })
 
+  it('marks the host repo entry with a Host badge', () => {
+    mockUseHydraFlow.mockReturnValue(makeContext({
+      defaultRepoSlug: 'test-org-test-repo',
+      supervisedRepos: [
+        { slug: 'test-org-test-repo', repo: 'test-org/test-repo', is_default: true, running: true },
+        { slug: 'acme-app', repo: 'acme/app', running: false },
+      ],
+    }))
+    render(<RepoSelector />)
+    fireEvent.click(screen.getByTestId('repo-selector-trigger'))
+    expect(screen.getByText('Host')).toBeInTheDocument()
+  })
+
   it('opens register dialog when clicking register button', () => {
     const onOpenRegister = vi.fn()
     mockUseHydraFlow.mockReturnValue(makeContext({ canRegisterRepos: true }))

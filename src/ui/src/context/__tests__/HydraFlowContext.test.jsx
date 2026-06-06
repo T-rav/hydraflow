@@ -83,6 +83,14 @@ describe('HydraFlowContext reducer', () => {
     expect(next.supervisedRepos).toEqual(repos)
   })
 
+  it('SET_REPOS stores default_repo_slug', () => {
+    const next = reducer(initialState, {
+      type: 'SET_REPOS',
+      data: { repos: [], can_register: true, default_repo_slug: 'test-org-test-repo' },
+    })
+    expect(next.defaultRepoSlug).toBe('test-org-test-repo')
+  })
+
   it('GITHUB_METRICS action sets githubMetrics state', () => {
     const data = {
       open_by_label: { 'hydraflow-plan': 3, 'hydraflow-ready': 1 },
