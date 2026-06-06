@@ -1315,6 +1315,10 @@ def build_services(
     term_proposer_pr_port = OpenAutoPRBotPRPort(
         repo_root=config.repo_root,
         gh_token=credentials.gh_token,
+        # Route UL bot PRs to the active integration branch (staging when
+        # enabled, else main) per ADR-0042. Shared by all UL loops
+        # (term-proposer/-pruner, edge-proposer, entry-evidence).
+        base=config.base_branch(),
     )
     term_proposer_loop = TermProposerLoop(  # noqa: F841
         config=config,
