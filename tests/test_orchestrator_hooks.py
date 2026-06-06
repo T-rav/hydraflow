@@ -815,6 +815,16 @@ class TestStartSession:
         assert orch._session_issue_results == {}
 
     @pytest.mark.asyncio
+    async def test_tags_bus_with_repo_slug(self, config: HydraFlowConfig) -> None:
+        """_start_session should tag the bus so published events carry the repo."""
+        bus = EventBus()
+        orch = HydraFlowOrchestrator(config, event_bus=bus)
+
+        await orch._start_session()
+
+        assert bus._active_repo == config.repo.replace("/", "-")
+
+    @pytest.mark.asyncio
     async def test_publishes_session_start_event(self, config: HydraFlowConfig) -> None:
         """_start_session should publish a SESSION_START event with the repo."""
         bus = EventBus()

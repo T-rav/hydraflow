@@ -61,6 +61,17 @@ class TestRepoRuntime:
             runtime = RepoRuntime(config)
         assert runtime.slug == "acme-widgets"
 
+    def test_init_tags_event_bus_with_slug(self, tmp_path):
+        config = ConfigFactory.create(repo="acme/widgets", repo_root=tmp_path)
+        with (
+            patch("repo_runtime.EventLog"),
+            patch("repo_runtime.EventBus") as mock_bus_cls,
+            patch("repo_runtime.build_state_tracker"),
+            patch("repo_runtime.HydraFlowOrchestrator"),
+        ):
+            RepoRuntime(config)
+        mock_bus_cls.return_value.set_repo.assert_called_once_with("acme-widgets")
+
     def test_slug_fallback_to_dir_name(self, tmp_path):
         config = ConfigFactory.create(repo="", repo_root=tmp_path)
         with (

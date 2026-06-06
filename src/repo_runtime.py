@@ -32,6 +32,7 @@ class RepoRuntime:
         self._slug = config.repo.replace("/", "-") or config.repo_root.name
         event_log = EventLog(config.event_log_path)
         self._event_bus = EventBus(event_log=event_log)
+        self._event_bus.set_repo(self._slug)
         self._state = build_state_tracker(config)
         self._orchestrator = HydraFlowOrchestrator(
             config,

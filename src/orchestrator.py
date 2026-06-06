@@ -776,6 +776,7 @@ class HydraFlowOrchestrator:
         self._state.reset_session_counters(session_start_time.isoformat())
         self._state.save_session(self._current_session)
         self._bus.set_session_id(session_id)
+        self._bus.set_repo(repo_slug)
         data: SessionStartPayload = {
             "session_id": session_id,
             "repo": self._config.repo,
