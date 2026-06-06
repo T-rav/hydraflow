@@ -71,7 +71,7 @@ from models import (
 from ports import PRPort
 from pr_manager import PRManager
 from prompt_telemetry import PromptTelemetry
-from route_types import RepoSlugParam
+from route_types import REPO_ALL, RepoSlugParam
 from state import StateTracker
 from timeline import TimelineBuilder
 from transcript_summarizer import TranscriptSummarizer
@@ -438,6 +438,91 @@ class RouteContext:
             return self.config, self.state, self.event_bus, self.get_orchestrator
         return self.config, self.state, self.event_bus, self.get_orchestrator
 
+    def resolve_runtimes(
+        self,
+        slug: str | None,
+    ) -> list[
+        tuple[
+            HydraFlowConfig,
+            StateTracker,
+            EventBus,
+            Callable[[], HydraFlowOrchestrator | None],
+            str,
+        ]
+    ]:
+        """Resolve per-repo dependencies for one repo, or every repo.
+
+        - A concrete slug (or ``None``) returns a single-element list, reusing
+          :meth:`resolve_runtime` and tagging it with the *resolved* slug (a
+          fell-back tuple is tagged with the default slug, never the bogus
+          requested slug).
+        - ``REPO_ALL`` returns the default/host runtime followed by every
+          registered runtime, deduped by slug. With no registry it degenerates
+          to the single default runtime.
+
+        The 5th element is the canonical dash slug for tagging. The 4th element
+        is always a zero-arg callable; the default runtime's may return ``None``
+        while registry runtimes always yield a live orchestrator — consumers
+        must handle ``None``.
+        """
+        default_slug = self.default_repo_slug or (
+            self.config.repo.replace("/", "-")
+            if self.config.repo
+            else self.config.repo_root.name
+        )
+
+        if slug is not None and slug.strip().lower() == REPO_ALL:
+            runtimes: list[
+                tuple[
+                    HydraFlowConfig,
+                    StateTracker,
+                    EventBus,
+                    Callable[[], HydraFlowOrchestrator | None],
+                    str,
+                ]
+            ] = [
+                (
+                    self.config,
+                    self.state,
+                    self.event_bus,
+                    self.get_orchestrator,
+                    default_slug,
+                )
+            ]
+            if self.registry is not None:
+                for rt in self.registry.all:
+                    if self._is_default_repo(rt.slug):
+                        continue  # already covered by the default entry above
+                    runtimes.append(
+                        (
+                            rt.config,
+                            rt.state,
+                            rt.event_bus,
+                            lambda _rt=rt: _rt.orchestrator,
+                            rt.slug,
+                        )
+                    )
+            return runtimes
+
+        # Single-repo path. Determine the truthful resolved slug, then reuse the
+        # singular resolver for the actual dependencies.
+        if slug is None or self._is_default_repo(slug):
+            resolved_slug = default_slug
+        else:
+            resolved_slug = default_slug
+            if self.registry is not None:
+                matched = self.registry.get(slug)
+                if matched is not None:
+                    resolved_slug = matched.slug
+                else:
+                    slug_lower = slug.lower()
+                    for rt in self.registry.all:
+                        if rt.slug.lower() == slug_lower:
+                            resolved_slug = rt.slug
+                            break
+        cfg, st, bus, get_orch = self.resolve_runtime(slug)
+        return [(cfg, st, bus, get_orch, resolved_slug)]
+
     async def execute_admin_task(
         self,
         task_name: str,
@@ -652,6 +737,19 @@ def create_router(
         Callable[[], HydraFlowOrchestrator | None],
     ]:
         return ctx.resolve_runtime(slug)
+
+    def _resolve_runtimes(
+        slug: str | None,
+    ) -> list[
+        tuple[
+            HydraFlowConfig,
+            StateTracker,
+            EventBus,
+            Callable[[], HydraFlowOrchestrator | None],
+            str,
+        ]
+    ]:
+        return ctx.resolve_runtimes(slug)
 
     def _is_pipeline_active(slug: str | None) -> bool:
         """Check if the selected repo's pipeline is running.
