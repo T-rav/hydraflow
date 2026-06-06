@@ -648,10 +648,12 @@ class TestGetStatsEndpoint:
     async def test_includes_queue_when_orchestrator_present(
         self, config, event_bus, state, tmp_path
     ) -> None:
+        from models import QueueStats
+
         mock_orch = MagicMock()
         mock_orch.issue_store = MagicMock()
         mock_orch.issue_store.get_queue_stats = MagicMock(
-            return_value=MagicMock(model_dump=lambda: {"triage": 0, "plan": 0})
+            return_value=QueueStats(in_flight_count=2)
         )
         router, _ = make_dashboard_router(
             config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
@@ -692,10 +694,12 @@ class TestGetQueueEndpoint:
     async def test_returns_queue_from_orchestrator(
         self, config, event_bus, state, tmp_path
     ) -> None:
+        from models import QueueStats
+
         mock_orch = MagicMock()
         mock_orch.issue_store = MagicMock()
         mock_orch.issue_store.get_queue_stats = MagicMock(
-            return_value=MagicMock(model_dump=lambda: {"triage": 3, "plan": 1})
+            return_value=QueueStats(queue_depth={"plan": 3})
         )
         router, _ = make_dashboard_router(
             config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
@@ -703,7 +707,7 @@ class TestGetQueueEndpoint:
         endpoint = find_endpoint(router, "/api/queue")
         response = await endpoint()
         data = json.loads(response.body)
-        assert data["triage"] == 3
+        assert data["queue_depth"]["plan"] == 3
 
 
 # ---------------------------------------------------------------------------
