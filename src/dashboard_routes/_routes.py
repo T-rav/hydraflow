@@ -64,7 +64,7 @@ from models import (
     IssueOutcomeType,
     PipelineIssue,
     PipelineSnapshot,
-    PipelineSnapshotEntry,
+    PipelineStats,
     QueueStats,
     parse_task_links,
 )
@@ -78,6 +78,11 @@ from transcript_summarizer import TranscriptSummarizer
 
 if TYPE_CHECKING:
     from orchestrator import HydraFlowOrchestrator
+from dashboard_routes._stats_merge import (
+    merge_lifetime_stats,
+    merge_pipeline_stats,
+    merge_queue_stats,
+)
 from repo_runtime import RepoRuntime, RepoRuntimeRegistry
 from repo_store import RepoRecord, RepoStore
 
@@ -376,11 +381,11 @@ class RouteContext:
         """Return whether the resolved repo's pipeline is actively processing.
 
         The host repo is a registered runtime like any other, so this resolves
-        purely through the registry. When *slug* is ``None`` (All repos view),
-        returns True if ANY line is running.
+        purely through the registry. When *slug* is ``None`` or the ``REPO_ALL``
+        sentinel (All repos view), returns True if ANY line is running.
         """
         if self.registry is not None:
-            if slug is None:
+            if slug is None or slug.strip().lower() == REPO_ALL:
                 return any(getattr(rt, "running", False) for rt in self.registry.all)
             rt = self.registry.get(slug)
             return getattr(rt, "running", False) if rt is not None else False
@@ -1391,26 +1396,37 @@ def create_router(
     async def get_stats(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Return lifetime stats and optional queue depths."""
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        data: dict[str, Any] = _state.get_lifetime_stats().model_dump()
-        orch = _get_orch()
-        if orch:
-            data["queue"] = orch.issue_store.get_queue_stats().model_dump()
+        """Return lifetime stats and optional queue depths.
+
+        For ``repo=__all__`` the lifetime stats are summed across every repo and
+        the queue depths are merged across the active lines.
+        """
+        runtimes = _resolve_runtimes(repo)
+        data: dict[str, Any] = merge_lifetime_stats(
+            [st.get_lifetime_stats() for _cfg, st, _bus, _go, _slug in runtimes]
+        ).model_dump()
+        queues: list[QueueStats] = []
+        for _cfg, _st, _bus, get_orch, _slug in runtimes:
+            orch = get_orch()
+            if orch:
+                queues.append(orch.issue_store.get_queue_stats())
+        if queues:
+            data["queue"] = merge_queue_stats(queues).model_dump()
         return JSONResponse(data)
 
     @router.get("/api/queue")
     async def get_queue(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Return current queue depths, active counts, and throughput."""
-        if not _is_pipeline_active(repo):
-            return JSONResponse(QueueStats().model_dump())
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        orch = _get_orch()
-        if orch:
-            return JSONResponse(orch.issue_store.get_queue_stats().model_dump())
-        return JSONResponse(QueueStats().model_dump())
+        """Return current queue depths, merged across active lines for __all__."""
+        queues: list[QueueStats] = []
+        for _cfg, _st, _bus, get_orch, slug in _resolve_runtimes(repo):
+            if not _is_pipeline_active(slug):
+                continue
+            orch = get_orch()
+            if orch:
+                queues.append(orch.issue_store.get_queue_stats())
+        return JSONResponse(merge_queue_stats(queues).model_dump())
 
     @router.post("/api/request-changes")
     async def request_changes(
@@ -1422,6 +1438,14 @@ def create_router(
         escalation event all land on the SELECTED repo — not the default one —
         in a multi-repo deployment.
         """
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "detail": "request-changes requires a specific repo",
+                },
+                status_code=400,
+            )
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         issue_number: int | None = body.get("issue_number")
         feedback = (body.get("feedback") or "").strip()
@@ -1469,39 +1493,41 @@ def create_router(
     async def get_pipeline(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Return current pipeline snapshot with issues per stage."""
-        if not _is_pipeline_active(repo):
-            return JSONResponse(PipelineSnapshot().model_dump())
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        orch = _get_orch()
-        if orch:
+        """Return the pipeline snapshot — issues per stage, unioned across repos
+        for ``repo=__all__`` with each issue tagged by its repo slug."""
+        merged_stages: dict[str, list[PipelineIssue]] = {}
+        for _cfg, _st, _bus, get_orch, slug in _resolve_runtimes(repo):
+            if not _is_pipeline_active(slug):
+                continue
+            orch = get_orch()
+            if orch is None:
+                continue
             raw = orch.issue_store.get_pipeline_snapshot()
-            mapped: dict[str, list[PipelineSnapshotEntry]] = {}
             for backend_stage, issues in raw.items():
                 frontend_stage = _STAGE_NAME_MAP.get(backend_stage, backend_stage)
-                mapped[frontend_stage] = issues
-            snapshot = PipelineSnapshot(
-                stages={
-                    k: [PipelineIssue.model_validate(i) for i in v]
-                    for k, v in mapped.items()
-                }
-            )
-            return JSONResponse(snapshot.model_dump())
-        return JSONResponse(PipelineSnapshot().model_dump())
+                bucket = merged_stages.setdefault(frontend_stage, [])
+                for entry in issues:
+                    bucket.append(
+                        PipelineIssue.model_validate(entry).model_copy(
+                            update={"repo": slug}
+                        )
+                    )
+        return JSONResponse(PipelineSnapshot(stages=merged_stages).model_dump())
 
     @router.get("/api/pipeline/stats")
     async def get_pipeline_stats(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Return lightweight pipeline stats (counts only, no issue details)."""
-        if not _is_pipeline_active(repo):
-            return JSONResponse({})
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        orch = _get_orch()
-        if orch:
-            stats = orch.build_pipeline_stats()
-            return JSONResponse(stats.model_dump())
-        return JSONResponse({})
+        """Return lightweight pipeline stats — merged across active lines for __all__."""
+        stats_list: list[PipelineStats] = []
+        for _cfg, _st, _bus, get_orch, slug in _resolve_runtimes(repo):
+            if not _is_pipeline_active(slug):
+                continue
+            orch = get_orch()
+            if orch:
+                stats_list.append(orch.build_pipeline_stats())
+        merged = merge_pipeline_stats(stats_list)
+        return JSONResponse(merged.model_dump() if merged is not None else {})
 
     @router.get("/api/events")
     async def get_events(
