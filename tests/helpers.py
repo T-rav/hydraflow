@@ -1535,6 +1535,36 @@ def make_dashboard_router(
     return router, pr_mgr
 
 
+def make_registry(*specs: dict[str, Any]):
+    """Build a RepoRuntimeRegistry of duck-typed runtimes for tests.
+
+    Each spec is a dict with at least ``{"slug": ...}``. Optional keys:
+    ``config``, ``state``, ``event_bus``, ``orchestrator`` (default None),
+    ``running`` (default False), ``last_error`` (default None). The slug is
+    dash-normalized and used as the registry key. This bypasses the heavy async
+    ``register()``/``RepoRuntime.create()`` path by writing duck-typed
+    namespaces straight into ``_runtimes`` — the proven pattern from
+    ``test_ui_repo_parity.py``.
+    """
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from repo_runtime import RepoRuntimeRegistry  # noqa: PLC0415
+
+    registry = RepoRuntimeRegistry()
+    for spec in specs:
+        slug = str(spec["slug"]).replace("/", "-")
+        registry._runtimes[slug] = SimpleNamespace(
+            slug=slug,
+            config=spec.get("config"),
+            state=spec.get("state"),
+            event_bus=spec.get("event_bus"),
+            orchestrator=spec.get("orchestrator"),
+            running=spec.get("running", False),
+            last_error=spec.get("last_error"),
+        )
+    return registry
+
+
 def find_endpoint(router: Any, path: str, method: str | None = None) -> Any | None:
     """Locate an endpoint handler on *router* by path and optional HTTP method.
 
