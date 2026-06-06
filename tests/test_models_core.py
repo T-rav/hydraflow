@@ -960,6 +960,7 @@ class TestHITLItem:
             "llm_summary": "",
             "llm_summary_updated_at": None,
             "visual_evidence": None,
+            "repo": "",
         }
 
     def test_serialization_by_alias_outputs_camel_case(self) -> None:

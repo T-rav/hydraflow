@@ -42,6 +42,12 @@ class TestSharedConstants:
     def test_safe_slug_component_is_compiled_regex(self) -> None:
         assert isinstance(_SAFE_SLUG_COMPONENT, re.Pattern)
 
+    def test_repo_all_reexported_from_common(self) -> None:
+        from dashboard_routes._common import REPO_ALL
+        from route_types import REPO_ALL as RT_REPO_ALL
+
+        assert REPO_ALL is RT_REPO_ALL
+
     def test_safe_slug_component_accepts_valid(self) -> None:
         assert _SAFE_SLUG_COMPONENT.match("my-repo_1.0")
 

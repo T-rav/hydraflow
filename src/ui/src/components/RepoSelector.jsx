@@ -31,6 +31,7 @@ export function RepoSelector({ onOpenRegister }) {
     runtimes = [],
     selectedRepoSlug,
     selectRepo,
+    defaultRepoSlug = null,
   } = useHydraFlow()
   const [open, setOpen] = useState(false)
   const containerRef = useRef(null)
@@ -58,6 +59,9 @@ export function RepoSelector({ onOpenRegister }) {
       const filterSlug = canonicalRepoSlug(rawSlug)
       const runtime = runtimeMap.get(filterSlug)
       const isRunning = runtime?.running ?? repo.running ?? repo.status === 'running'
+      const isDefault =
+        repo.is_default === true ||
+        (!!defaultRepoSlug && filterSlug === canonicalRepoSlug(defaultRepoSlug))
       return {
         key: `${filterSlug || rawSlug}-${index}`,
         label: buildDisplayName(repo),
@@ -65,11 +69,12 @@ export function RepoSelector({ onOpenRegister }) {
         filterSlug,
         rawSlug,
         isRunning,
+        isDefault,
       }
     })
     entries.sort((a, b) => a.label.localeCompare(b.label))
     return entries
-  }, [supervisedRepos, runtimeMap])
+  }, [supervisedRepos, runtimeMap, defaultRepoSlug])
 
   const currentLabel = useMemo(() => {
     if (!selectedRepoSlug) return 'All repos'
@@ -126,6 +131,7 @@ export function RepoSelector({ onOpenRegister }) {
                   <span style={opt.isRunning ? statusDotRunning : statusDotStopped} />
                   <span>
                     <span style={styles.optionLabel}>{opt.label}</span>
+                    {opt.isDefault && <span style={styles.optionSubLabel}>Host</span>}
                     {opt.subLabel && <span style={styles.optionSubLabel}>{opt.subLabel}</span>}
                   </span>
                 </span>

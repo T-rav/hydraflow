@@ -40,6 +40,11 @@ class RepoRuntime:
             event_log = EventLog(config.event_log_path)
             event_bus = EventBus(event_log=event_log)
         self._event_bus = event_bus
+        # Tag the bus so published events carry this repo's slug. For the host
+        # (from_shared) this tags the shared/app bus with the host slug; for
+        # added repos it tags their own bus. _slug is non-empty (repo_root.name
+        # fallback), so the publish-time injection guard always fires.
+        self._event_bus.set_repo(self._slug)
         self._state = state if state is not None else build_state_tracker(config)
         self._orchestrator = HydraFlowOrchestrator(
             config,

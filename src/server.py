@@ -243,6 +243,7 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
         register_repo_cb=_register_repo,
         remove_repo_cb=_remove_repo,
         list_repos_cb=repo_store.list,
+        default_repo_slug=config.repo_slug,
         credentials=credentials,
     )
     await dashboard.start()

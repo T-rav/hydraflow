@@ -192,13 +192,38 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
 
     @router.get("/api/repos")
     async def list_supervised_repos() -> JSONResponse:
-        """List repos from the store or callback."""
+        """List supervised repos plus the default/host repo as a pickable entry.
+
+        The host entry is emitted only when ``default_repo_slug`` is explicitly
+        threaded (production sets it; single-repo/legacy callers do not), so the
+        change is purely additive for existing callers.
+        """
+        default_slug = ctx.default_repo_slug or ""
+        default_entry: dict[str, Any] | None = None
+        if default_slug:
+            # The host is a registry member (from_shared), so its live status
+            # comes from the registry like any other line.
+            host_rt = registry.get(default_slug) if registry else None
+            host_running = bool(host_rt.running) if host_rt else False
+            default_entry = {
+                "slug": default_slug,
+                "repo": config.repo or default_slug,
+                "path": str(config.repo_root),
+                "running": host_running,
+                "session_id": host_rt.orchestrator.current_session_id
+                if host_rt and host_running
+                else None,
+                "is_default": True,
+            }
+
         if repo_store is not None or ctx.list_repos_cb is not None:
             records = _list_repo_records()
             payload: list[dict[str, Any]] = []
             for rec in records:
-                runtime = registry.get(rec.slug) if registry else None
                 safe_slug = rec.slug.replace("/", "-") if rec.slug else rec.slug
+                if default_entry is not None and safe_slug == default_slug:
+                    continue  # host emitted once above; only dedup when present
+                runtime = registry.get(rec.slug) if registry else None
                 payload.append(
                     {
                         "slug": safe_slug,
@@ -210,8 +235,21 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                         else None,
                     }
                 )
-            return JSONResponse({"repos": payload, "can_register": True})
-        return JSONResponse({"repos": [], "can_register": False})
+            repos = ([default_entry] if default_entry else []) + payload
+            return JSONResponse(
+                {
+                    "repos": repos,
+                    "can_register": True,
+                    "default_repo_slug": default_slug or None,
+                }
+            )
+        return JSONResponse(
+            {
+                "repos": [default_entry] if default_entry else [],
+                "can_register": False,
+                "default_repo_slug": default_slug or None,
+            }
+        )
 
     @router.get("/api/fs/roots")
     async def list_browsable_roots() -> JSONResponse:
