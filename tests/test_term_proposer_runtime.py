@@ -119,9 +119,44 @@ class TestOpenAutoPRBotPRPort:
         assert captured["pr_title"] == "feat(ul): batch"
         assert captured["labels"] == ["hydraflow-ul-proposed"]
         assert captured["auto_merge"] is False  # DependabotMergeLoop handles merge
-        assert captured["base"] == "main"
+        assert captured["base"] == "main"  # default (single-tier / pre-staging)
         # 2 term files + the 2 regenerated ubiquitous-language views ride along.
         assert len(captured["files"]) == 4
+
+    @pytest.mark.asyncio
+    async def test_targets_configured_base_branch(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        # Regression (UL→main PR runaway): when staging is enabled the registry
+        # passes config.base_branch()=="staging"; the bot PR MUST target it, not
+        # a hardcoded "main". main-targeted PRs are BLOCKED by branch protection
+        # (main only advances via rc/* promotion) and pile up unmerged.
+        from auto_pr import AutoPrResult
+
+        captured: dict = {}
+
+        async def fake_open_automated_pr_async(**kwargs):
+            captured.update(kwargs)
+            return AutoPrResult(
+                status="opened",
+                pr_url="https://github.com/T-rav/hydraflow/pull/9001",
+                branch=kwargs["branch"],
+            )
+
+        monkeypatch.setattr(
+            "auto_pr.open_automated_pr_async", fake_open_automated_pr_async
+        )
+
+        port = OpenAutoPRBotPRPort(repo_root=tmp_path, gh_token="ghs_x", base="staging")
+        await port.open_bot_pr(
+            branch="ul-proposer/abc123",
+            title="feat(ul): batch",
+            body="body",
+            labels=["hydraflow-ul-proposed"],
+            files={"docs/wiki/terms/foo-loop.md": _term_file_str("FooLoop")},
+        )
+
+        assert captured["base"] == "staging"
 
     @pytest.mark.asyncio
     async def test_raises_on_open_failure(self, tmp_path: Path, monkeypatch) -> None:

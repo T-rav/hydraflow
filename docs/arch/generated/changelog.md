@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W23
 
+- `15589dc` — fix(beads): create the bead task graph in the implement worktree (fix claim/close) (#9345) (#9345) *(2026-06-05)*
 - `f624cbd` — fix(beads): per-worktree embedded store + JSONL export (drop shared --server) (#9337) (#9337) *(2026-06-05)*
 - `9b97208` — fix(merge): auto-merge Auto-Agent PRs (agent/auto-agent-N) to end the contract-fix runaway (#9332) (#9332) *(2026-06-05)*
 - `ec00913` — fix(contracts): stop gh_shape_validator false-positives on projection-only pr/issue calls (closes #9314) (#9316) (#9316) *(2026-06-05)*

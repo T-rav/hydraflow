@@ -214,7 +214,10 @@ class PricingRefreshLoop(BaseBackgroundLoop):
             files=files_to_commit,
             pr_title=pr_title,
             pr_body=pr_body,
-            base="main",
+            # Target the active integration branch (staging when ADR-0042 is
+            # enabled, else main); a hardcoded "main" is BLOCKED by branch
+            # protection and the PR piles up unmerged.
+            base=self._config.base_branch(),
             auto_merge=False,  # Always human-reviewed per spec §3.
             labels=["hydraflow-ready", "pricing-refresh"],
             raise_on_failure=False,
