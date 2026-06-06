@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/config.py:HydraFlowConfig"
 aliases: ["hydraflow config", "config aggregate", "orchestrator config"]
 related: []
-evidence: []
+evidence: ["01KQNYW9WM9NY7XJ0DNPVW4GDQ", "01KQNYZRM4B7DX9MWDQFHF488E", "01KQNYZRM4B7DX9MWDQFHF488H", "01KQNYZRM4B7DX9MWDQFHF488P"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668539+00:00"
-updated_at: "2026-05-05T03:35:36.668752+00:00"
+updated_at: "2026-06-06T01:07:16.635794+00:00"
 ---
 
 ## Definition
