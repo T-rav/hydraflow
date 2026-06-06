@@ -6,6 +6,8 @@
 graph LR
   subgraph builder
     AgentRunner["AgentRunner<br/><i>runner</i>"]
+    AgentSkill["AgentSkill<br/><i>entity</i>"]
+    HITLItem["HITLItem<br/><i>entity</i>"]
     ReportIssueLoop["ReportIssueLoop<br/><i>loop</i>"]
     Task["Task<br/><i>entity</i>"]
   end
@@ -23,6 +25,7 @@ graph LR
     FakeCoverageAuditorLoop["FakeCoverageAuditorLoop<br/><i>loop</i>"]
     FlakeTrackerLoop["FlakeTrackerLoop<br/><i>loop</i>"]
     GitHubCacheLoop["GitHubCacheLoop<br/><i>loop</i>"]
+    GitHubCacheLoop["GitHubCacheLoop<br/><i>loop</i>"]
     LiveCorpusReplayLoop["LiveCorpusReplayLoop<br/><i>loop</i>"]
     MergeStateWatcherLoop["MergeStateWatcherLoop<br/><i>loop</i>"]
     PricingRefreshLoop["PricingRefreshLoop<br/><i>loop</i>"]
@@ -39,18 +42,39 @@ graph LR
     AgentPort["AgentPort<br/><i>port</i>"]
     BaseBackgroundLoop["BaseBackgroundLoop<br/><i>loop</i>"]
     BotPRPort["BotPRPort<br/><i>port</i>"]
+    DedupStore["DedupStore<br/><i>service</i>"]
     EventBus["EventBus<br/><i>service</i>"]
+    GitHubIssue["GitHubIssue<br/><i>entity</i>"]
     HydraFlowConfig["HydraFlowConfig<br/><i>aggregate</i>"]
+    HydraFlowEvent["HydraFlowEvent<br/><i>domain_event</i>"]
     IssueFetcherPort["IssueFetcherPort<br/><i>port</i>"]
     IssueStorePort["IssueStorePort<br/><i>port</i>"]
     ObservabilityPort["ObservabilityPort<br/><i>port</i>"]
+    PRManager["PRManager<br/><i>service</i>"]
     PRPort["PRPort<br/><i>port</i>"]
     RepoWikiStore["RepoWikiStore<br/><i>service</i>"]
     ReviewInsightStorePort["ReviewInsightStorePort<br/><i>port</i>"]
+    ReviewVerdict["ReviewVerdict<br/><i>value_object</i>"]
     RouteBackCounterPort["RouteBackCounterPort<br/><i>port</i>"]
     StateTracker["StateTracker<br/><i>service</i>"]
+    SubprocessRunner["SubprocessRunner<br/><i>port</i>"]
+    Term["Term<br/><i>entity</i>"]
+    TermStore["TermStore<br/><i>service</i>"]
     WorkspacePort["WorkspacePort<br/><i>port</i>"]
   end
+  ADRReviewerLoop -->|depends_on| HydraFlowConfig
+  ADRReviewerLoop -->|depends_on| BaseBackgroundLoop
+  ADRReviewerLoop -->|implements| BaseBackgroundLoop
+  AdrTouchpointAuditorLoop -->|depends_on| BaseBackgroundLoop
+  AdrTouchpointAuditorLoop -->|depends_on| StateTracker
+  AdrTouchpointAuditorLoop -->|depends_on| HydraFlowConfig
+  AdrTouchpointAuditorLoop -->|implements| BaseBackgroundLoop
+  AdrTouchpointAuditorLoop -->|depends_on| PRManager
+  AdrTouchpointAuditorLoop -->|depends_on| DedupStore
+  AgentPort -->|depends_on| Task
+  AgentPort -->|depends_on| HITLItem
+  AgentPort -->|depends_on| ReviewVerdict
+  AgentPort -->|depends_on| GitHubIssue
   AgentRunner -->|depends_on| PRPort
   AgentRunner -->|depends_on| WorkspacePort
   AgentRunner -->|depends_on| IssueStorePort
@@ -58,12 +82,196 @@ graph LR
   AgentRunner -->|depends_on| RepoWikiStore
   AgentRunner -->|depends_on| Task
   AgentRunner -->|depends_on| EventBus
+  AgentRunner -->|depends_on| HydraFlowEvent
+  AgentRunner -->|depends_on| AgentSkill
+  AgentRunner -->|depends_on| SubprocessRunner
+  AgentSkill -->|depends_on| AgentRunner
+  AgentSkill -->|depends_on| CorpusLearningLoop
   BaseBackgroundLoop -->|depends_on| EventBus
   BaseBackgroundLoop -->|depends_on| HydraFlowConfig
+  BaseBackgroundLoop -->|depends_on| HydraFlowEvent
   BotPRPort -->|depends_on| HydraFlowConfig
   BotPRPort -->|depends_on| BaseBackgroundLoop
+  BotPRPort -->|depends_on| Term
+  BotPRPort -->|depends_on| TermStore
+  BotPRPort -->|depends_on| DedupStore
+  CIMonitorLoop -->|depends_on| PRPort
+  CIMonitorLoop -->|depends_on| HydraFlowConfig
+  CIMonitorLoop -->|depends_on| BaseBackgroundLoop
+  CIMonitorLoop -->|implements| BaseBackgroundLoop
+  ContractRefreshLoop -->|depends_on| BaseBackgroundLoop
+  ContractRefreshLoop -->|depends_on| StateTracker
+  ContractRefreshLoop -->|depends_on| HydraFlowConfig
+  ContractRefreshLoop -->|implements| BaseBackgroundLoop
+  ContractRefreshLoop -->|depends_on| PRManager
+  ContractRefreshLoop -->|depends_on| DedupStore
+  CorpusLearningLoop -->|depends_on| BaseBackgroundLoop
+  CorpusLearningLoop -->|depends_on| StateTracker
+  CorpusLearningLoop -->|depends_on| HydraFlowConfig
+  CorpusLearningLoop -->|implements| BaseBackgroundLoop
+  CorpusLearningLoop -->|depends_on| PRManager
+  CorpusLearningLoop -->|depends_on| AgentSkill
+  CorpusLearningLoop -->|depends_on| DedupStore
+  DependabotMergeLoop -->|depends_on| PRPort
+  DependabotMergeLoop -->|depends_on| HydraFlowConfig
+  DependabotMergeLoop -->|depends_on| BaseBackgroundLoop
+  DependabotMergeLoop -->|depends_on| StateTracker
+  DependabotMergeLoop -->|implements| BaseBackgroundLoop
+  DependabotMergeLoop -->|depends_on| ReviewVerdict
+  DiagnosticLoop -->|depends_on| BaseBackgroundLoop
+  DiagnosticLoop -->|depends_on| StateTracker
+  DiagnosticLoop -->|depends_on| PRPort
+  DiagnosticLoop -->|depends_on| HydraFlowConfig
+  DiagnosticLoop -->|implements| BaseBackgroundLoop
+  DiagnosticLoop -->|depends_on| HydraFlowEvent
+  DiagramLoop -->|depends_on| HydraFlowConfig
+  DiagramLoop -->|depends_on| BaseBackgroundLoop
+  DiagramLoop -->|implements| BaseBackgroundLoop
+  EdgeProposerLoop -->|depends_on| BaseBackgroundLoop
+  EdgeProposerLoop -->|depends_on| HydraFlowConfig
+  EdgeProposerLoop -->|depends_on| BotPRPort
+  EdgeProposerLoop -->|implements| BaseBackgroundLoop
+  EdgeProposerLoop -->|depends_on| Term
+  EdgeProposerLoop -->|depends_on| TermStore
+  EntryEvidenceLoop -->|depends_on| BaseBackgroundLoop
+  EntryEvidenceLoop -->|depends_on| RepoWikiStore
+  EntryEvidenceLoop -->|depends_on| HydraFlowConfig
+  EntryEvidenceLoop -->|depends_on| BotPRPort
+  EntryEvidenceLoop -->|implements| BaseBackgroundLoop
+  EntryEvidenceLoop -->|depends_on| Term
+  EntryEvidenceLoop -->|depends_on| TermStore
+  EntryEvidenceLoop -->|depends_on| DedupStore
+  FakeCoverageAuditorLoop -->|depends_on| BaseBackgroundLoop
+  FakeCoverageAuditorLoop -->|depends_on| StateTracker
+  FakeCoverageAuditorLoop -->|depends_on| HydraFlowConfig
+  FakeCoverageAuditorLoop -->|implements| BaseBackgroundLoop
+  FakeCoverageAuditorLoop -->|depends_on| PRManager
+  FakeCoverageAuditorLoop -->|depends_on| DedupStore
+  FlakeTrackerLoop -->|depends_on| BaseBackgroundLoop
+  FlakeTrackerLoop -->|depends_on| HydraFlowConfig
+  FlakeTrackerLoop -->|depends_on| StateTracker
+  FlakeTrackerLoop -->|implements| BaseBackgroundLoop
+  FlakeTrackerLoop -->|depends_on| DedupStore
+  FlakeTrackerLoop -->|depends_on| PRManager
+  GitHubCacheLoop -->|depends_on| BaseBackgroundLoop
+  GitHubCacheLoop -->|depends_on| HydraFlowConfig
+  GitHubCacheLoop -->|implements| BaseBackgroundLoop
+  GitHubCacheLoop -->|depends_on| HITLItem
+  GitHubCacheLoop -->|depends_on| PRManager
+  HITLItem -->|depends_on| GitHubCacheLoop
+  HITLItem -->|depends_on| PRPort
+  HITLItem -->|depends_on| PRManager
   IssueFetcherPort -->|depends_on| IssueStorePort
+  IssueFetcherPort -->|depends_on| Task
+  IssueFetcherPort -->|depends_on| HITLItem
+  IssueFetcherPort -->|depends_on| ReviewVerdict
+  IssueFetcherPort -->|depends_on| GitHubIssue
   IssueStorePort -->|depends_on| Task
+  IssueStorePort -->|depends_on| HITLItem
+  IssueStorePort -->|depends_on| ReviewVerdict
+  IssueStorePort -->|depends_on| GitHubIssue
+  LiveCorpusReplayLoop -->|depends_on| HydraFlowConfig
+  LiveCorpusReplayLoop -->|depends_on| BaseBackgroundLoop
+  LiveCorpusReplayLoop -->|depends_on| StateTracker
+  LiveCorpusReplayLoop -->|implements| BaseBackgroundLoop
+  LiveCorpusReplayLoop -->|depends_on| DedupStore
+  LiveCorpusReplayLoop -->|depends_on| PRManager
+  MergeStateWatcherLoop -->|depends_on| PRPort
+  MergeStateWatcherLoop -->|depends_on| HydraFlowConfig
+  MergeStateWatcherLoop -->|depends_on| BaseBackgroundLoop
+  MergeStateWatcherLoop -->|implements| BaseBackgroundLoop
+  ObservabilityPort -->|depends_on| Task
+  ObservabilityPort -->|depends_on| HITLItem
+  ObservabilityPort -->|depends_on| ReviewVerdict
+  ObservabilityPort -->|depends_on| GitHubIssue
+  PricingRefreshLoop -->|depends_on| BaseBackgroundLoop
+  PricingRefreshLoop -->|depends_on| HydraFlowConfig
+  PricingRefreshLoop -->|implements| BaseBackgroundLoop
+  PRManager -->|depends_on| AdrTouchpointAuditorLoop
+  PRManager -->|depends_on| ContractRefreshLoop
+  PRManager -->|depends_on| CorpusLearningLoop
+  PRManager -->|depends_on| FakeCoverageAuditorLoop
+  PRManager -->|depends_on| FlakeTrackerLoop
+  PRManager -->|depends_on| GitHubCacheLoop
+  PRManager -->|depends_on| LiveCorpusReplayLoop
+  PRManager -->|depends_on| RCBudgetLoop
+  PRManager -->|depends_on| ReportIssueLoop
+  PRManager -->|depends_on| SentryLoop
+  PRManager -->|depends_on| SkillPromptEvalLoop
+  PRManager -->|depends_on| WikiRotDetectorLoop
+  PRManager -->|depends_on| HITLItem
+  PRManager -->|depends_on| HydraFlowEvent
+  PRManager -->|depends_on| EventBus
+  PRManager -->|depends_on| ReviewVerdict
+  PRManager -->|depends_on| HydraFlowConfig
+  PRManager -->|depends_on| GitHubIssue
+  PRManager -->|depends_on| DedupStore
   PRPort -->|depends_on| Task
+  PRPort -->|depends_on| HITLItem
+  PRPort -->|depends_on| ReviewVerdict
+  PRPort -->|depends_on| GitHubIssue
+  PRUnstickerLoop -->|depends_on| PRPort
+  PRUnstickerLoop -->|depends_on| HydraFlowConfig
+  PRUnstickerLoop -->|depends_on| BaseBackgroundLoop
+  PRUnstickerLoop -->|implements| BaseBackgroundLoop
+  RCBudgetLoop -->|depends_on| BaseBackgroundLoop
+  RCBudgetLoop -->|depends_on| StateTracker
+  RCBudgetLoop -->|depends_on| HydraFlowConfig
+  RCBudgetLoop -->|implements| BaseBackgroundLoop
+  RCBudgetLoop -->|depends_on| PRManager
+  RCBudgetLoop -->|depends_on| DedupStore
+  ReportIssueLoop -->|depends_on| BaseBackgroundLoop
+  ReportIssueLoop -->|depends_on| StateTracker
+  ReportIssueLoop -->|depends_on| HydraFlowConfig
+  ReportIssueLoop -->|implements| BaseBackgroundLoop
+  ReportIssueLoop -->|depends_on| HydraFlowEvent
+  ReportIssueLoop -->|depends_on| PRManager
+  ReportIssueLoop -->|depends_on| DedupStore
+  ReportIssueLoop -->|depends_on| SubprocessRunner
+  RepoWikiStore -->|depends_on| DedupStore
+  ReviewInsightStorePort -->|depends_on| Task
+  ReviewInsightStorePort -->|depends_on| HITLItem
+  ReviewInsightStorePort -->|depends_on| ReviewVerdict
+  ReviewInsightStorePort -->|depends_on| GitHubIssue
+  RouteBackCounterPort -->|depends_on| PRPort
+  SentryLoop -->|depends_on| BaseBackgroundLoop
+  SentryLoop -->|depends_on| StateTracker
+  SentryLoop -->|depends_on| HydraFlowConfig
+  SentryLoop -->|implements| BaseBackgroundLoop
+  SentryLoop -->|depends_on| PRManager
+  SentryLoop -->|depends_on| DedupStore
+  SentryLoop -->|depends_on| SubprocessRunner
+  SkillPromptEvalLoop -->|depends_on| BaseBackgroundLoop
+  SkillPromptEvalLoop -->|depends_on| StateTracker
+  SkillPromptEvalLoop -->|depends_on| HydraFlowConfig
+  SkillPromptEvalLoop -->|implements| BaseBackgroundLoop
+  SkillPromptEvalLoop -->|depends_on| PRManager
+  SkillPromptEvalLoop -->|depends_on| DedupStore
+  StaleIssueGCLoop -->|depends_on| PRPort
+  StaleIssueGCLoop -->|depends_on| HydraFlowConfig
+  StaleIssueGCLoop -->|depends_on| BaseBackgroundLoop
+  StaleIssueGCLoop -->|implements| BaseBackgroundLoop
+  TermPrunerLoop -->|depends_on| BotPRPort
+  TermPrunerLoop -->|depends_on| HydraFlowConfig
+  TermPrunerLoop -->|depends_on| BaseBackgroundLoop
+  TermPrunerLoop -->|implements| BaseBackgroundLoop
+  TermPrunerLoop -->|depends_on| TermStore
+  TermPrunerLoop -->|depends_on| Term
+  WikiRotDetectorLoop -->|depends_on| BaseBackgroundLoop
+  WikiRotDetectorLoop -->|depends_on| StateTracker
+  WikiRotDetectorLoop -->|depends_on| RepoWikiStore
+  WikiRotDetectorLoop -->|depends_on| HydraFlowConfig
+  WikiRotDetectorLoop -->|implements| BaseBackgroundLoop
+  WikiRotDetectorLoop -->|depends_on| PRManager
+  WikiRotDetectorLoop -->|depends_on| DedupStore
+  WorkspaceGCLoop -->|depends_on| PRPort
+  WorkspaceGCLoop -->|depends_on| WorkspacePort
+  WorkspaceGCLoop -->|depends_on| HydraFlowConfig
+  WorkspaceGCLoop -->|depends_on| BaseBackgroundLoop
+  WorkspaceGCLoop -->|depends_on| StateTracker
+  WorkspaceGCLoop -->|implements| BaseBackgroundLoop
   WorkspacePort -->|depends_on| Task
+  WorkspacePort -->|depends_on| HITLItem
+  WorkspacePort -->|depends_on| ReviewVerdict
+  WorkspacePort -->|depends_on| GitHubIssue
 ```

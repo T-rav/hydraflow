@@ -5,13 +5,13 @@ kind: "loop"
 bounded_context: "caretaker"
 code_anchor: "src/dependabot_merge_loop.py:DependabotMergeLoop"
 aliases: ["dependabot merge loop", "bot pr merge loop", "auto-merge bot PRs loop"]
-related: []
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K7"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KTANCQNKWYRJ5ETEVNAMEY5A"}]
 evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T20:00:00.000000+00:00"
-updated_at: "2026-05-19T20:00:00.000000+00:00"
+updated_at: "2026-06-06T01:04:43.481148+00:00"
 ---
 
 ## Definition

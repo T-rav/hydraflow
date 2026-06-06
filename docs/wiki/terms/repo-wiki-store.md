@@ -5,13 +5,13 @@ kind: "service"
 bounded_context: "shared-kernel"
 code_anchor: "src/repo_wiki.py:RepoWikiStore"
 aliases: ["repo wiki store", "wiki store", "per-repo wiki"]
-related: []
-evidence: []
+related: [{"kind": "depends_on", "target": "01KTAMZH9S4EH0H06BJ11QNRZE"}]
+evidence: ["01KRBX2N4QP7VW8FGH3J5YD0M2"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668780+00:00"
-updated_at: "2026-05-05T03:35:36.668781+00:00"
+updated_at: "2026-06-06T01:04:43.481148+00:00"
 ---
 
 ## Definition

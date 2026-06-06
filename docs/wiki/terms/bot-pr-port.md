@@ -5,13 +5,13 @@ kind: "port"
 bounded_context: "shared-kernel"
 code_anchor: "src/term_proposer_loop.py:BotPRPort"
 aliases: ["bot pr port"]
-related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KTAN51E5V2D2X7RY7B7P7Q0Q"}, {"kind": "depends_on", "target": "01KTAN6ASKZFQ7Z4DX99H70VSP"}, {"kind": "depends_on", "target": "01KTAMZH9S4EH0H06BJ11QNRZE"}]
 evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-06T22:59:51.300957+00:00"
-updated_at: "2026-05-16T23:48:13.299804+00:00"
+updated_at: "2026-06-06T01:04:43.481148+00:00"
 ---
 
 ## Definition

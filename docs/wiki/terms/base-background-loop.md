@@ -5,13 +5,13 @@ kind: "loop"
 bounded_context: "shared-kernel"
 code_anchor: "src/base_background_loop.py:BaseBackgroundLoop"
 aliases: ["base background loop", "loop base class"]
-related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}]
-evidence: ["01KQP0XFBGMB32VFGNPV8GZ268", "01KQP0XFBGMB32VFGNPV8GZ26F", "01KQP0XFBGMB32VFGNPV8GZ26P"]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KTAN3MGDRZ1MGQ21Z2Q2XM8Z"}]
+evidence: ["01KQP0XFBGMB32VFGNPV8GZ268", "01KQP0XFBGMB32VFGNPV8GZ26F", "01KQP0XFBGMB32VFGNPV8GZ26P", "01KRBX2N4QP7VW8FGH3J5YD0M3", "01KRBX2N4QP7VW8FGH3J5YD0M5"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668776+00:00"
-updated_at: "2026-06-04T05:06:42.396716+00:00"
+updated_at: "2026-06-06T01:04:43.481148+00:00"
 ---
 
 ## Definition

@@ -5,13 +5,13 @@ kind: "port"
 bounded_context: "shared-kernel"
 code_anchor: "src/ports.py:IssueStorePort"
 aliases: ["issue store port", "issue queue port", "work queue port"]
-related: [{"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}]
-evidence: []
+related: [{"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}, {"kind": "depends_on", "target": "01KTANBHSTGWNRXS6M142101ED"}, {"kind": "depends_on", "target": "01KTANCQNKWYRJ5ETEVNAMEY5A"}, {"kind": "depends_on", "target": "01KTBHAP0E4RHCFZVEC1P12QQM"}]
+evidence: ["01KRBX2N4QP7VW8FGH3J5YD0M6"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668794+00:00"
-updated_at: "2026-05-16T23:48:13.299804+00:00"
+updated_at: "2026-06-06T01:04:43.481148+00:00"
 ---
 
 ## Definition
