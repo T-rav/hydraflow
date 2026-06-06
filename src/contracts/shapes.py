@@ -41,7 +41,25 @@ from pydantic import BaseModel, ConfigDict, Field
 _GhIssueState = Literal["OPEN", "CLOSED"]
 _GhPRState = Literal["OPEN", "CLOSED", "MERGED"]
 _GhMergeable = Literal["MERGEABLE", "CONFLICTING", "UNKNOWN"]
-_GhCheckState = Literal["QUEUED", "IN_PROGRESS", "COMPLETED", "PENDING", "WAITING"]
+_GhCheckState = Literal[
+    # Active statuses
+    "QUEUED",
+    "IN_PROGRESS",
+    "COMPLETED",
+    "PENDING",
+    "WAITING",
+    # Terminal conclusion values — gh pr checks --json state collapses the
+    # GitHub conclusion into the state field for finished check runs.
+    "SUCCESS",
+    "FAILURE",
+    "NEUTRAL",
+    "CANCELLED",
+    "TIMED_OUT",
+    "ACTION_REQUIRED",
+    "STALE",
+    "SKIPPED",
+    "STARTUP_FAILURE",
+]
 _GhCheckConclusion = Literal[
     "SUCCESS",
     "FAILURE",
