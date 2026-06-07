@@ -89,7 +89,7 @@ describe('RepoSelector', () => {
     expect(screen.getByTestId('repo-selector-trigger')).toHaveTextContent('All repos')
   })
 
-  it('selects All repos by passing null slug', () => {
+  it('selects All repos by passing the __all__ aggregate slug', () => {
     const selectRepo = vi.fn()
     mockUseHydraFlow.mockReturnValue(makeContext({
       supervisedRepos: [{ slug: 'acme/app' }],
@@ -101,7 +101,19 @@ describe('RepoSelector', () => {
     // Click the "All repos" option
     const allReposOptions = screen.getAllByText('All repos')
     fireEvent.click(allReposOptions[allReposOptions.length - 1])
-    expect(selectRepo).toHaveBeenCalledWith(null)
+    expect(selectRepo).toHaveBeenCalledWith('__all__')
+  })
+
+  it('treats __all__ as All repos (label + highlight)', () => {
+    mockUseHydraFlow.mockReturnValue(makeContext({
+      supervisedRepos: [{ slug: 'acme/app' }],
+      selectedRepoSlug: '__all__',
+    }))
+    render(<RepoSelector />)
+    expect(screen.getByTestId('repo-selector-trigger')).toHaveTextContent('All repos')
+    fireEvent.click(screen.getByTestId('repo-selector-trigger'))
+    const allReposOption = screen.getAllByRole('option')[0]
+    expect(allReposOption).toHaveAttribute('aria-selected', 'true')
   })
 
   it('shows empty state when no repos are registered', () => {

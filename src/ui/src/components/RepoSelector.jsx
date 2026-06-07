@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useHydraFlow } from '../context/HydraFlowContext'
-import { canonicalRepoSlug } from '../constants'
+import { canonicalRepoSlug, REPO_ALL } from '../constants'
 import { theme } from '../theme'
 
 function buildDisplayName(repo) {
@@ -76,11 +76,14 @@ export function RepoSelector({ onOpenRegister }) {
     return entries
   }, [supervisedRepos, runtimeMap, defaultRepoSlug])
 
+  // null (initial) and REPO_ALL (explicitly picked) both mean "All repos".
+  const isAllRepos = selectedRepoSlug == null || selectedRepoSlug === REPO_ALL
+
   const currentLabel = useMemo(() => {
-    if (!selectedRepoSlug) return 'All repos'
+    if (isAllRepos) return 'All repos'
     const match = repoOptions.find(opt => opt.filterSlug === selectedRepoSlug)
     return match?.label || 'All repos'
-  }, [repoOptions, selectedRepoSlug])
+  }, [repoOptions, selectedRepoSlug, isAllRepos])
 
   const handleSelect = (slug) => {
     selectRepo(slug)
@@ -106,10 +109,10 @@ export function RepoSelector({ onOpenRegister }) {
         <div style={styles.dropdown} role="listbox" data-testid="repo-selector-dropdown">
           <button
             type="button"
-            onClick={() => handleSelect(null)}
-            style={selectedRepoSlug == null ? optionActiveStyle : optionStyle}
+            onClick={() => handleSelect(REPO_ALL)}
+            style={isAllRepos ? optionActiveStyle : optionStyle}
             role="option"
-            aria-selected={selectedRepoSlug == null}
+            aria-selected={isAllRepos}
           >
             <span style={styles.optionLabel}>All repos</span>
             <span style={styles.optionStatus}>Aggregated</span>

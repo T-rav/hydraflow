@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useCallback, useReducer, useMemo } from 'react'
-import { MAX_EVENTS, SYSTEM_WORKER_INTERVALS, PIPELINE_POLL_SAFETY_NET_MS, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS } from '../constants'
+import { MAX_EVENTS, SYSTEM_WORKER_INTERVALS, PIPELINE_POLL_SAFETY_NET_MS, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS, REPO_ALL } from '../constants'
 import { deriveStageStatus } from '../hooks/useStageStatus'
 
 const emptyPipeline = {
@@ -82,18 +82,24 @@ function addEvent(state, action) {
   }
 }
 
+// Compound key so two repos' issue #5 don't collide when aggregating (repo=__all__).
+// Single-repo items carry their own repo slug, so the key is stable there too.
+function issueKey(item) {
+  return `${item?.repo ?? ''}#${item?.issue_number}`
+}
+
 function mergeStageIssues(existingIssues, incomingIssues) {
   // Server snapshot is authoritative: items absent from incoming are removed
   // (prevents ghost cards) and incoming fields (including status) override
   // local state for items still present.
-  const existingById = new Map(
+  const existingByKey = new Map(
     (existingIssues || [])
       .filter(item => item?.issue_number != null)
-      .map(item => [item.issue_number, item])
+      .map(item => [issueKey(item), item])
   )
   return (incomingIssues || []).map(item => {
     if (item?.issue_number == null) return item
-    const existing = existingById.get(item.issue_number)
+    const existing = existingByKey.get(issueKey(item))
     return existing ? { ...existing, ...item } : item
   })
 }
@@ -572,6 +578,13 @@ export function reducer(state, action) {
       // unwrapped. Normalize both to the bare stage map.
       const incoming = action.data?.stages ?? action.data ?? {}
       const allStages = ['triage', 'discover', 'shape', 'plan', 'implement', 'review', 'hitl', 'merged']
+      // REST aggregation tags each issue with its repo; a WS frame's issues are
+      // untagged but the event carries event.repo (threaded via onmessage) —
+      // stamp it so WS and REST frames key/merge consistently (no dup cards).
+      const frameRepo = action.repo
+      const tag = (issues) => (frameRepo
+        ? (issues || []).map(item => (item?.repo ? item : { ...item, repo: frameRepo }))
+        : (issues || []))
 
       const nextStages = Object.fromEntries(allStages.map((key) => {
         if (!Object.prototype.hasOwnProperty.call(incoming, key)) {
@@ -579,7 +592,7 @@ export function reducer(state, action) {
         }
         // Server snapshot is authoritative: reconcile stage membership so issues
         // absent from the snapshot are removed (eliminates ghost cards).
-        return [key, mergeStageIssues(state.pipelineIssues[key], incoming[key] || [])]
+        return [key, mergeStageIssues(state.pipelineIssues[key], tag(incoming[key] || []))]
       }))
 
       return {
@@ -1505,7 +1518,7 @@ export function HydraFlowProvider({ children }) {
     ws.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data)
-        dispatch({ type: event.type, data: event.data, timestamp: event.timestamp, id: event.id })
+        dispatch({ type: event.type, data: event.data, timestamp: event.timestamp, id: event.id, repo: event.repo })
         if (event.timestamp && (!lastEventTsRef.current || event.timestamp > lastEventTsRef.current)) {
           lastEventTsRef.current = event.timestamp
         }
@@ -1623,7 +1636,9 @@ export function HydraFlowProvider({ children }) {
   )
 
   const repoFilteredSessions = useMemo(() => {
-    if (!state.selectedRepoSlug) return state.sessions
+    // null (initial) and __all__ (aggregate) both mean "no client-side filter" —
+    // the backend already unions sessions for __all__.
+    if (!state.selectedRepoSlug || state.selectedRepoSlug === REPO_ALL) return state.sessions
     return state.sessions.filter(s => {
       return normalizeRepoSlug(s.repo) === state.selectedRepoSlug
     })
