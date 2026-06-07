@@ -30,10 +30,13 @@ from live_corpus_replay_loop import LiveCorpusReplayLoop
 
 
 class _FakeState:
-    """Minimal StateTracker stub for the per-signature attempt counters."""
+    """Minimal StateTracker stub for the per-signature attempt counters plus
+    the fleet-wide shadow-drift rollup / escalation issue slots."""
 
     def __init__(self) -> None:
         self._attempts: dict[str, int] = {}
+        self._rollup: dict | None = None
+        self._escalation: int | None = None
 
     def get_live_corpus_drift_attempts(self, sig: str) -> int:
         return self._attempts.get(sig, 0)
@@ -44,6 +47,26 @@ class _FakeState:
 
     def clear_live_corpus_drift_attempts(self) -> None:
         self._attempts.clear()
+
+    def get_live_corpus_drift_rollup(self) -> dict | None:
+        return dict(self._rollup) if self._rollup else None
+
+    def set_live_corpus_drift_rollup(
+        self, *, issue_number: int, signature_hash: str
+    ) -> None:
+        self._rollup = {"issue_number": issue_number, "signature_hash": signature_hash}
+
+    def clear_live_corpus_drift_rollup(self) -> None:
+        self._rollup = None
+
+    def get_live_corpus_escalation_issue(self) -> int | None:
+        return self._escalation
+
+    def set_live_corpus_escalation_issue(self, issue_number: int) -> None:
+        self._escalation = issue_number
+
+    def clear_live_corpus_escalation_issue(self) -> None:
+        self._escalation = None
 
 
 def _build_loop(
@@ -65,6 +88,8 @@ def _build_loop(
     if pr is None:
         pr = MagicMock()
         pr.create_issue = AsyncMock(return_value=4242)
+        pr.update_issue_body = AsyncMock()
+        pr.close_issue = AsyncMock()
     dedup = DedupStore(
         "live_corpus_replay",
         config.data_root / "dedup" / "live_corpus_replay.json",
@@ -360,3 +385,188 @@ async def test_clean_tick_clears_attempt_counters(tmp_path: Path) -> None:
 
     assert clean["drifted"] == 0
     assert state._attempts == {}, "clean tick must clear all counters"
+
+
+# ---------------------------------------------------------------------------
+# Rollup + auto-close (fix for the #9258..#9335 shadow-drift pile-up): the loop
+# keeps ONE open issue, rewrites its body as the diverged set changes, and
+# closes it on the first clean tick — instead of filing a new issue per tick.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_changed_drift_set_updates_rollup_not_new_issue(tmp_path: Path) -> None:
+    """A *changed* diverged set updates the open rollup body, not a new issue."""
+    loop, corpus, pr, state = _build_loop(tmp_path)
+    corpus.record(
+        adapter="github",
+        command="gh",
+        args=["pr", "view", "42"],
+        stdout='{"state":"MERGED"}\n',
+        stderr="",
+        exit_code=0,
+    )
+    out = {"state": "OPEN"}
+
+    async def stale_fake(_sample):  # noqa: ANN001
+        return out
+
+    loop.register("github", "gh", stale_fake)
+    first = await loop._do_work()
+    assert first["filed_issue"] == 4242
+    assert state.get_live_corpus_drift_rollup()["issue_number"] == 4242
+    pr.create_issue.assert_awaited_once()
+
+    # Different divergence -> different signature set -> body rewritten in place.
+    out = {"state": "CLOSED"}
+    second = await loop._do_work()
+
+    assert second["filed_issue"] == 4242  # same rollup issue, not a new one
+    pr.create_issue.assert_awaited_once()  # NOT re-filed
+    pr.update_issue_body.assert_awaited_once()
+    assert pr.update_issue_body.await_args.args[0] == 4242
+
+
+@pytest.mark.asyncio
+async def test_unchanged_drift_set_is_a_noop_write(tmp_path: Path) -> None:
+    """Identical diverged set on a later tick performs no GitHub write."""
+    loop, corpus, pr, _state = _build_loop(tmp_path)
+    corpus.record(
+        adapter="github",
+        command="gh",
+        args=["pr", "view", "42"],
+        stdout='{"state":"MERGED"}\n',
+        stderr="",
+        exit_code=0,
+    )
+
+    async def stale_fake(_sample):  # noqa: ANN001
+        return {"state": "OPEN"}
+
+    loop.register("github", "gh", stale_fake)
+    await loop._do_work()
+    second = await loop._do_work()
+
+    assert second["filed_issue"] is None
+    pr.create_issue.assert_awaited_once()
+    pr.update_issue_body.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_clean_tick_closes_open_rollup(tmp_path: Path) -> None:
+    """When the fakes catch up, the open rollup issue is closed and cleared."""
+    loop, corpus, pr, state = _build_loop(tmp_path)
+    corpus.record(
+        adapter="github",
+        command="gh",
+        args=["pr", "view", "42"],
+        stdout='{"state":"MERGED"}\n',
+        stderr="",
+        exit_code=0,
+    )
+    out = {"state": "OPEN"}
+
+    async def fake(_sample):  # noqa: ANN001
+        return out
+
+    loop.register("github", "gh", fake)
+    await loop._do_work()
+    assert state.get_live_corpus_drift_rollup()["issue_number"] == 4242
+
+    out = {"state": "MERGED"}  # fake now matches the live sample
+    result = await loop._do_work()
+
+    assert result["drifted"] == 0
+    pr.close_issue.assert_awaited_once_with(4242)
+    assert state.get_live_corpus_drift_rollup() is None
+
+
+@pytest.mark.asyncio
+async def test_escalation_filed_once_and_closed_on_clean_tick(tmp_path: Path) -> None:
+    """The shadow-drift-stuck escalation is filed once and closed when clean."""
+    pr = MagicMock()
+    pr.create_issue = AsyncMock(side_effect=[4242, 7777])
+    pr.update_issue_body = AsyncMock()
+    pr.close_issue = AsyncMock()
+    loop, corpus, _pr, state = _build_loop(
+        tmp_path, pr_manager=pr, max_drift_attempts=1
+    )
+    corpus.record(
+        adapter="github",
+        command="gh",
+        args=["pr", "view", "42"],
+        stdout='{"state":"MERGED"}\n',
+        stderr="",
+        exit_code=0,
+    )
+    out = {"state": "OPEN"}
+
+    async def fake(_sample):  # noqa: ANN001
+        return out
+
+    loop.register("github", "gh", fake)
+
+    first = await loop._do_work()
+    assert first["escalated_issue"] == 7777
+    assert state.get_live_corpus_escalation_issue() == 7777
+
+    # Drift persists: escalation must NOT be re-filed (one open escalation).
+    await loop._do_work()
+    assert pr.create_issue.await_count == 2  # rollup + escalation only
+
+    # Clean tick closes BOTH the rollup and the escalation.
+    out = {"state": "MERGED"}
+    await loop._do_work()
+    assert state.get_live_corpus_escalation_issue() is None
+    assert state.get_live_corpus_drift_rollup() is None
+    assert pr.close_issue.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_state_less_path_falls_back_to_dedup_gate(tmp_path: Path) -> None:
+    """With no state (state=None), the loop keeps the original dedup-store gate:
+    identical drift across ticks files at most one issue."""
+    config = HydraFlowConfig(
+        data_root=tmp_path / "data",
+        repo_root=tmp_path / "repo",
+        repo="hydra/hydraflow",
+    )
+    (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
+    corpus = ShadowCorpus(config.data_root / "contract_shadow")
+    pr = MagicMock()
+    pr.create_issue = AsyncMock(return_value=4242)
+    pr.update_issue_body = AsyncMock()
+    pr.close_issue = AsyncMock()
+    dedup = DedupStore("live_corpus_replay", config.data_root / "dedup" / "lcr.json")
+    deps = LoopDeps(
+        event_bus=EventBus(),
+        stop_event=asyncio.Event(),
+        status_cb=MagicMock(),
+        enabled_cb=lambda _name: True,
+        sleep_fn=AsyncMock(),
+    )
+    loop = LiveCorpusReplayLoop(
+        config=config,
+        corpus=corpus,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=deps,
+        state=None,
+    )
+    corpus.record(
+        adapter="github",
+        command="gh",
+        args=["pr", "view", "42"],
+        stdout='{"state":"MERGED"}\n',
+        stderr="",
+        exit_code=0,
+    )
+
+    async def stale_fake(_sample):  # noqa: ANN001
+        return {"state": "OPEN"}
+
+    loop.register("github", "gh", stale_fake)
+    await loop._do_work()
+    await loop._do_work()
+
+    pr.create_issue.assert_awaited_once()

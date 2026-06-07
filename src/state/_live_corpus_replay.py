@@ -40,3 +40,45 @@ class LiveCorpusReplayStateMixin:
         if self._data.live_corpus_drift_attempts:
             self._data.live_corpus_drift_attempts = {}
             self.save()
+
+    # --- Fleet-wide shadow-drift rollup tracking (#9351 follow-up) ----------
+    # One open ``shadow-drift`` issue is kept per fleet. ``signature_hash`` is
+    # the hash of the current diverged-sample set so the loop can skip a
+    # redundant body update when the set is unchanged, and close the issue on a
+    # clean tick instead of leaving a pile of stale per-tick snapshots.
+
+    def get_live_corpus_drift_rollup(self) -> dict | None:
+        """Return ``{'issue_number': int, 'signature_hash': str}`` or ``None``."""
+        entry = self._data.live_corpus_drift_rollup
+        if not entry:
+            return None
+        return {
+            "issue_number": int(entry.get("issue_number", 0)),
+            "signature_hash": str(entry.get("signature_hash", "")),
+        }
+
+    def set_live_corpus_drift_rollup(
+        self, *, issue_number: int, signature_hash: str
+    ) -> None:
+        self._data.live_corpus_drift_rollup = {
+            "issue_number": int(issue_number),
+            "signature_hash": signature_hash,
+        }
+        self.save()
+
+    def clear_live_corpus_drift_rollup(self) -> None:
+        if self._data.live_corpus_drift_rollup is not None:
+            self._data.live_corpus_drift_rollup = None
+            self.save()
+
+    def get_live_corpus_escalation_issue(self) -> int | None:
+        return self._data.live_corpus_escalation_issue or None
+
+    def set_live_corpus_escalation_issue(self, issue_number: int) -> None:
+        self._data.live_corpus_escalation_issue = int(issue_number)
+        self.save()
+
+    def clear_live_corpus_escalation_issue(self) -> None:
+        if self._data.live_corpus_escalation_issue is not None:
+            self._data.live_corpus_escalation_issue = None
+            self.save()
