@@ -91,11 +91,41 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
     expect(screen.getByText('No issues match this filter.')).toBeInTheDocument()
   })
 
-  it('filters rows by selected repo slug based on session ids', () => {
+  it('does not filter rows client-side by selected repo (backend scopes)', () => {
+    // The backend now returns only the selected repo's rows (or the per-repo
+    // tagged union for repo=__all__), so the panel must render every row it
+    // receives. The old session_ids client filter would have hidden rows here
+    // and blanked the all-repos view entirely.
     mockUseHydraFlow.mockReturnValue({ issueHistory: makePayload(), selectedRepoSlug: 'acme-app' })
     render(<OutcomesPanel />)
     expect(screen.getByText('Fix auth cache')).toBeInTheDocument()
-    expect(screen.queryByText('Merge docs')).toBeNull()
+    expect(screen.getByText('Merge docs')).toBeInTheDocument()
+  })
+
+  it('renders the repo badge from the backend repo field when present', () => {
+    const payload = makePayload()
+    payload.items[0].repo = 'owner-b'
+    mockUseHydraFlow.mockReturnValue({ issueHistory: payload, selectedRepoSlug: null })
+    render(<OutcomesPanel />)
+    expect(screen.getByTestId('repo-badge-10')).toHaveTextContent('owner-b')
+  })
+
+  it('expands same-numbered rows from different repos independently', () => {
+    const base = makePayload()
+    const payload = {
+      items: [
+        { ...base.items[0], issue_number: 42, repo: 'owner-a', title: 'Alpha 42' },
+        { ...base.items[1], issue_number: 42, repo: 'owner-b', title: 'Beta 42' },
+      ],
+      totals: { issues: 2 },
+    }
+    mockUseHydraFlow.mockReturnValue({ issueHistory: payload, selectedRepoSlug: null })
+    render(<OutcomesPanel />)
+    // Both repos' #42 render as distinct rows (compound React keys).
+    expect(screen.getAllByTestId('outcome-row-42')).toHaveLength(2)
+    // Expanding one must not expand the other (expand state keyed by repo+issue).
+    fireEvent.click(screen.getAllByLabelText('Toggle issue 42')[0])
+    expect(screen.getAllByText('Linked Issues')).toHaveLength(1)
   })
 
   it('expands an issue row to show rollup details with kind-aware linked issues', () => {
@@ -215,9 +245,10 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
   it('displays repo slug extracted from issue URL', async () => {
     render(<OutcomesPanel />)
     await waitFor(() => expect(screen.getByText('Fix auth cache')).toBeInTheDocument())
-    // Should extract and show repo name from GitHub URL
-    expect(screen.getByText('webapp')).toBeInTheDocument()
-    expect(screen.getByText('docs-site')).toBeInTheDocument()
+    // No backend repo field on these rows → falls back to the owner/name parsed
+    // from the GitHub URL, rendered verbatim (matching StreamCard's slug badge).
+    expect(screen.getByText('acme/webapp')).toBeInTheDocument()
+    expect(screen.getByText('acme/docs-site')).toBeInTheDocument()
   })
 
   it('displays outcome reason as subtitle under title', async () => {
@@ -320,8 +351,9 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
     })
     render(<OutcomesPanel />)
     await waitFor(() => expect(screen.getByText('Fix auth cache')).toBeInTheDocument())
-    // Should render without error — no repo slug shown
-    expect(screen.getByText('docs-site')).toBeInTheDocument()
+    // Should render without error — item 10 shows an em-dash (no url/repo),
+    // item 11 still shows its slug parsed from the URL.
+    expect(screen.getByText('acme/docs-site')).toBeInTheDocument()
   })
 
   describe('column sorting', () => {
