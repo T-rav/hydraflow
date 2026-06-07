@@ -318,7 +318,8 @@ class TestOpenPromotionFailing:
             tmp_path,
             monkeypatch,
             open_promotion=_make_pr(99),
-            ci_result=(False, "Timed out after 60s"),
+            # Verbatim sentinel from PRManager.wait_for_ci on timeout.
+            ci_result=(False, "Timeout after 60s"),
         )
         result = await loop._do_work()
         assert result == {"status": "ci_pending", "pr": 99}
