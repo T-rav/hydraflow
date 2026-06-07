@@ -629,3 +629,15 @@ describe('StreamCard transcript rendering', () => {
     expect(screen.queryByText('View Transcript')).not.toBeInTheDocument()
   })
 })
+
+describe('StreamCard repo badge', () => {
+  it('renders the repo badge when issue.repo is set (aggregate view)', () => {
+    render(<StreamCard issue={makeIssue({ repo: 'owner-a' })} />)
+    expect(screen.getByTestId('repo-badge-42')).toHaveTextContent('owner-a')
+  })
+
+  it('hides the repo badge when issue.repo is empty (single-repo view)', () => {
+    render(<StreamCard issue={makeIssue({ repo: '' })} />)
+    expect(screen.queryByTestId('repo-badge-42')).toBeNull()
+  })
+})

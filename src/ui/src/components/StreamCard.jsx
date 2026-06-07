@@ -146,6 +146,20 @@ export function StreamCard({ issue, intent, defaultExpanded, onRequestChanges, t
             <span style={styles.issueNum}>#{issue.issueNumber}</span>
           )}
           <span style={styles.title}>{intent?.text || issue.title}</span>
+          {issue.repo && (
+            <span
+              style={{
+                ...badgeBase,
+                textTransform: 'none',
+                background: theme.surfaceInset,
+                color: theme.textMuted,
+              }}
+              data-testid={`repo-badge-${issue.issueNumber}`}
+              title={`repo: ${issue.repo}`}
+            >
+              {issue.repo}
+            </span>
+          )}
         </div>
         <div style={styles.headerRight}>
           {meta && (

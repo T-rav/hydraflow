@@ -62,7 +62,7 @@ function PipelineFlow({ stageGroups }) {
               : dotStyles.base[group.stage.key]
             return (
               <span
-                key={issue.issueNumber}
+                key={`${issue.repo}#${issue.issueNumber}`}
                 style={dotStyle}
                 title={`#${issue.issueNumber}${isEpic ? ` (Epic #${issue.epicNumber})` : ''}`}
                 data-testid={`flow-dot-${issue.issueNumber}`}
@@ -197,7 +197,7 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
           <>
             {standalone.map(issue => (
               <StreamCard
-                key={issue.issueNumber}
+                key={`${issue.repo}#${issue.issueNumber}`}
                 issue={issue}
                 intent={intentMap.get(issue.issueNumber)}
                 defaultExpanded={issue.overallStatus === 'active'}
@@ -209,7 +209,7 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
               <EpicContainer key={`epic-${epicNum}`} epicNumber={Number(epicNum)} issues={epicIssues}>
                 {epicIssues.map(issue => (
                   <StreamCard
-                    key={issue.issueNumber}
+                    key={`${issue.repo}#${issue.issueNumber}`}
                     issue={issue}
                     intent={intentMap.get(issue.issueNumber)}
                     defaultExpanded={issue.overallStatus === 'active'}
@@ -275,6 +275,7 @@ export function toStreamIssue(pipeIssue, stageKey, prs) {
     stages,
     epicNumber: pipeIssue.epic_number || 0,
     isEpicChild: pipeIssue.is_epic_child || false,
+    repo: pipeIssue.repo || '',
   }
 }
 

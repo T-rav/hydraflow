@@ -91,6 +91,29 @@ describe('HydraFlowContext reducer', () => {
     expect(next.defaultRepoSlug).toBe('test-org-test-repo')
   })
 
+  it('SELECT_REPO accepts the __all__ aggregate slug', () => {
+    const next = reducer(initialState, { type: 'SELECT_REPO', data: { slug: '__all__' } })
+    expect(next.selectedRepoSlug).toBe('__all__')
+  })
+
+  it('PIPELINE_SNAPSHOT keeps cross-repo same-issue-number cards (compound key)', () => {
+    const next = reducer(initialState, {
+      type: 'PIPELINE_SNAPSHOT',
+      data: { plan: [{ issue_number: 5, repo: 'owner-a' }, { issue_number: 5, repo: 'owner-b' }] },
+    })
+    expect(next.pipelineIssues.plan).toHaveLength(2)
+    expect(next.pipelineIssues.plan.map(i => i.repo).sort()).toEqual(['owner-a', 'owner-b'])
+  })
+
+  it('PIPELINE_SNAPSHOT stamps WS-frame issues with the event repo', () => {
+    const next = reducer(initialState, {
+      type: 'PIPELINE_SNAPSHOT',
+      repo: 'owner-a',
+      data: { stages: { plan: [{ issue_number: 7 }] } },
+    })
+    expect(next.pipelineIssues.plan[0].repo).toBe('owner-a')
+  })
+
   it('GITHUB_METRICS action sets githubMetrics state', () => {
     const data = {
       open_by_label: { 'hydraflow-plan': 3, 'hydraflow-ready': 1 },
