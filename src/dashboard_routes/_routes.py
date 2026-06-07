@@ -797,9 +797,11 @@ def create_router(
             key=lambda lnk: lnk.target_id,
         )
 
-    def _new_issue_history_entry(issue_number: int) -> dict[str, Any]:
+    def _new_issue_history_entry(
+        issue_number: int, cfg: HydraFlowConfig
+    ) -> dict[str, Any]:
         """Create a blank history aggregation row for an issue."""
-        repo_slug = (config.repo or "").strip()
+        repo_slug = (cfg.repo or "").strip()
         if repo_slug.startswith("https://github.com/"):
             repo_slug = repo_slug[len("https://github.com/") :]
         elif repo_slug.startswith("http://github.com/"):
@@ -841,6 +843,7 @@ def create_router(
     def _build_issue_history_entry(
         row: dict[str, Any],
         outcome: IssueOutcome | None,
+        repo_slug: str = "",
     ) -> IssueHistoryEntry:
         """Build an ``IssueHistoryEntry`` from a raw aggregation row."""
         issue_number = int(row["issue_number"])
@@ -883,6 +886,7 @@ def create_router(
             first_seen=row.get("first_seen"),
             last_seen=row.get("last_seen"),
             outcome=outcome,
+            repo=repo_slug,
         )
 
     def _aggregate_telemetry_record(
@@ -935,6 +939,7 @@ def create_router(
         pr_to_issue: dict[int, int],
         since_dt: datetime | None,
         until_dt: datetime | None,
+        cfg: HydraFlowConfig,
     ) -> None:
         """Process event-bus events into *issue_rows* in place."""
         for event in events:
@@ -951,7 +956,7 @@ def create_router(
                 continue
 
             row = issue_rows.setdefault(
-                issue_number, _new_issue_history_entry(issue_number)
+                issue_number, _new_issue_history_entry(issue_number, cfg)
             )
             _touch_issue_timestamps(row, timestamp)
 
@@ -1029,6 +1034,8 @@ def create_router(
         issue_rows: dict[int, dict[str, Any]],
         requested_status: str,
         query_text: str,
+        state: StateTracker,
+        repo_slug: str = "",
     ) -> list[IssueHistoryEntry]:
         """Filter *issue_rows* and convert to ``IssueHistoryEntry`` objects."""
         items: list[IssueHistoryEntry] = []
@@ -1047,7 +1054,9 @@ def create_router(
                 continue
 
             items.append(
-                _build_issue_history_entry(row, state.get_outcome(issue_number))
+                _build_issue_history_entry(
+                    row, state.get_outcome(issue_number), repo_slug
+                )
             )
         return items
 
@@ -1057,12 +1066,26 @@ def create_router(
         requested_status: str,
         query_text: str,
         use_unfiltered: bool,
+        *,
+        cfg: HydraFlowConfig,
+        bus: EventBus,
+        state: StateTracker,
+        repo_slug: str,
+        use_cache: bool,
     ) -> list[IssueHistoryEntry]:
         """Enrich items via GitHub and backfill crate titles from milestones.
 
+        Runs against the runtime's own *cfg*/*state*/PR manager. The persistent
+        ``_history_cache`` (enriched-issue set + cached rows) is keyed to the
+        default runtime only, so it is read/written exclusively when *use_cache*
+        is True — per-repo / ``__all__`` requests track enrichment locally and
+        never mutate the default cache.
+
         Returns a (potentially rebuilt) items list.
         """
-        already_enriched: set[int] = _history_cache.get("enriched_issues", set())
+        already_enriched: set[int] = (
+            _history_cache.get("enriched_issues", set()) if use_cache else set()
+        )
         issue_lookup = {
             item.issue_number: issue_rows[item.issue_number] for item in items
         }
@@ -1078,15 +1101,18 @@ def create_router(
         ][:40]
         if enrich_candidates:
             await _enrich_issue_history_with_github(
-                {k: issue_lookup[k] for k in enrich_candidates}
+                {k: issue_lookup[k] for k in enrich_candidates}, cfg
             )
             already_enriched.update(enrich_candidates)
-            _history_cache["enriched_issues"] = already_enriched
-            if use_unfiltered and _history_cache["issue_rows"] is not None:
-                _history_cache["issue_rows"] = copy.deepcopy(issue_rows)
-                _save_history_cache()
+            if use_cache:
+                _history_cache["enriched_issues"] = already_enriched
+                if use_unfiltered and _history_cache["issue_rows"] is not None:
+                    _history_cache["issue_rows"] = copy.deepcopy(issue_rows)
+                    _save_history_cache()
             # Rebuild items from enriched rows.
-            items = _filter_rows_to_items(issue_rows, requested_status, query_text)
+            items = _filter_rows_to_items(
+                issue_rows, requested_status, query_text, state, repo_slug
+            )
 
         # Sort before crate-title backfill so milestone fetches are done
         # after ordering.  The caller applies the page limit after returning.
@@ -1105,7 +1131,8 @@ def create_router(
         if needs_title:
             try:
                 # ``list_milestones`` is concrete-only on PRManager.
-                milestones = await cast("PRManager", pr_manager).list_milestones(
+                manager = _pr_manager_for(cfg, bus)
+                milestones = await cast("PRManager", manager).list_milestones(
                     state="all"
                 )
                 title_map = {m.number: m.title for m in milestones}
@@ -1127,6 +1154,7 @@ def create_router(
                             backfilled = True
                 if (
                     backfilled
+                    and use_cache
                     and use_unfiltered
                     and _history_cache.get("issue_rows") is not None
                 ):
@@ -1175,13 +1203,15 @@ def create_router(
         return items
 
     async def _enrich_issue_history_with_github(
-        entries: dict[int, dict[str, Any]], limit: int = 150
+        entries: dict[int, dict[str, Any]],
+        cfg: HydraFlowConfig,
+        limit: int = 150,
     ) -> None:
         """Concurrently fetch GitHub metadata and apply it to history entries."""
         if not entries:
             return
 
-        fetcher = IssueFetcher(config, credentials=_creds)
+        fetcher = IssueFetcher(cfg, credentials=_creds)
         issue_numbers = sorted(entries.keys(), reverse=True)[:limit]
         sem = asyncio.Semaphore(6)
 
@@ -1759,25 +1789,28 @@ def create_router(
     except Exception:
         logger.warning("History cache warm-up failed", exc_info=True)
 
-    @router.get("/api/issues/history")
-    async def get_issue_history(
-        since: str | None = None,
-        until: str | None = None,
-        status: str | None = None,
-        query: str | None = None,
-        limit: int = 300,
-        repo: RepoSlugParam = None,
-    ) -> JSONResponse:
-        """Return issue lifecycle history with inference rollups (repo-scoped)."""
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        since_dt = _parse_iso_or_none(since)
-        until_dt = _parse_iso_or_none(until)
-        requested_status = (status or "").strip().lower()
-        query_text = (query or "").strip().lower()
-        clamped_limit = max(1, min(limit, 1000))
+    async def _collect_history_items(
+        cfg: HydraFlowConfig,
+        state: StateTracker,
+        bus: EventBus,
+        repo_slug: str,
+        *,
+        since_dt: datetime | None,
+        until_dt: datetime | None,
+        requested_status: str,
+        query_text: str,
+        use_cache: bool,
+    ) -> list[IssueHistoryEntry]:
+        """Build issue-history rows for ONE runtime, tagged with *repo_slug*.
 
-        telemetry = PromptTelemetry(_cfg)
-        all_events = _bus.get_history()
+        Reads the runtime's own telemetry/events/state. The persistent
+        ``_history_cache`` is keyed to the default runtime only, so it is
+        read/written exclusively when *use_cache* is True (``repo is None``);
+        per-repo and ``__all__`` requests build fresh so one repo's rollups
+        never bleed into another's view — or into the cached default.
+        """
+        telemetry = PromptTelemetry(cfg)
+        all_events = bus.get_history()
 
         # Check if we can reuse cached aggregation for the unfiltered case.
         use_unfiltered = since_dt is None and until_dt is None
@@ -1785,8 +1818,8 @@ def create_router(
         telem_mtime = telemetry.get_mtime()
         now = time.monotonic()
         cache_hit = (
-            use_unfiltered
-            and repo is None
+            use_cache
+            and use_unfiltered
             and _history_cache["issue_rows"] is not None
             and _history_cache["event_count"] == event_count
             and _history_cache["telemetry_mtime"] == telem_mtime
@@ -1824,7 +1857,7 @@ def create_router(
         elif use_issue_rollups:
             for issue_number, counters in telemetry.get_issue_totals().items():
                 row = issue_rows.setdefault(
-                    issue_number, _new_issue_history_entry(issue_number)
+                    issue_number, _new_issue_history_entry(issue_number, cfg)
                 )
                 for key in _INFERENCE_COUNTER_KEYS:
                     row["inference"][key] = _coerce_int(counters.get(key, 0))
@@ -1854,20 +1887,20 @@ def create_router(
                 if issue_number <= 0:
                     continue
                 row = issue_rows.setdefault(
-                    issue_number, _new_issue_history_entry(issue_number)
+                    issue_number, _new_issue_history_entry(issue_number, cfg)
                 )
                 _aggregate_telemetry_record(row, record, pr_to_issue, sum_counters=True)
 
         if not cache_hit:
             _process_events_into_rows(
-                all_events, issue_rows, pr_to_issue, since_dt, until_dt
+                all_events, issue_rows, pr_to_issue, since_dt, until_dt, cfg
             )
 
             # Store in cache if this was an unfiltered aggregation. Only the
             # default-repo view is cached: _history_cache is not repo-keyed, so
-            # a per-repo request must never read (see cache_hit above) or write
-            # it, or one repo's rollups would bleed into another's view.
-            if use_unfiltered and repo is None:
+            # a per-repo / __all__ request must never read (see cache_hit) or
+            # write it, or one repo's rollups would bleed into another's view.
+            if use_cache and use_unfiltered:
                 _history_cache["issue_rows"] = copy.deepcopy(issue_rows)
                 _history_cache["pr_to_issue"] = dict(pr_to_issue)
                 _history_cache["event_count"] = event_count
@@ -1875,11 +1908,76 @@ def create_router(
                 _history_cache_ts[0] = now
                 _save_history_cache()
 
-        items = _filter_rows_to_items(issue_rows, requested_status, query_text)
+        items = _filter_rows_to_items(
+            issue_rows, requested_status, query_text, state, repo_slug
+        )
 
         # Enrich via GitHub, backfill crate titles, sort.
         items = await _apply_enrichment_and_crate_titles(
-            items, issue_rows, requested_status, query_text, use_unfiltered
+            items,
+            issue_rows,
+            requested_status,
+            query_text,
+            use_unfiltered,
+            cfg=cfg,
+            bus=bus,
+            state=state,
+            repo_slug=repo_slug,
+            use_cache=use_cache,
+        )
+        return items
+
+    @router.get("/api/issues/history")
+    async def get_issue_history(
+        since: str | None = None,
+        until: str | None = None,
+        status: str | None = None,
+        query: str | None = None,
+        limit: int = 300,
+        repo: RepoSlugParam = None,
+    ) -> JSONResponse:
+        """Return issue lifecycle history with inference rollups (repo-scoped).
+
+        For ``repo=__all__`` the history is unioned across every runtime and
+        each row is tagged with its repo slug. Issue numbers collide across
+        repos, so rows are kept distinct per ``(repo, issue_number)`` (the
+        per-runtime lists are simply concatenated, never merged by number).
+        """
+        since_dt = _parse_iso_or_none(since)
+        until_dt = _parse_iso_or_none(until)
+        requested_status = (status or "").strip().lower()
+        query_text = (query or "").strip().lower()
+        clamped_limit = max(1, min(limit, 1000))
+
+        # The persistent history cache is keyed to the default runtime, so only
+        # a bare (repo is None) request may use it.
+        use_cache = repo is None
+
+        items: list[IssueHistoryEntry] = []
+        for _cfg, _state, _bus, _get_orch, slug in _resolve_runtimes(repo):
+            items.extend(
+                await _collect_history_items(
+                    _cfg,
+                    _state,
+                    _bus,
+                    slug,
+                    since_dt=since_dt,
+                    until_dt=until_dt,
+                    requested_status=requested_status,
+                    query_text=query_text,
+                    use_cache=use_cache,
+                )
+            )
+
+        # Order globally across runtimes (per-runtime lists were each sorted),
+        # then apply the page limit to the merged result.
+        items.sort(
+            key=lambda item: (
+                item.last_seen or "",
+                item.inference.get("total_tokens", 0),
+                item.issue_number,
+            ),
+            reverse=True,
         )
         items = items[:clamped_limit]
 

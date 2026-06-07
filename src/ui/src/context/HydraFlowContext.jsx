@@ -1650,7 +1650,7 @@ export function HydraFlowProvider({ children }) {
     let cancelled = false
 
     const endpoints = [
-      { url: '/api/issues/history?limit=500', key: 'issueHistory' },
+      { url: '/api/issues/history?limit=500', key: 'issueHistory', repoScoped: true },
       { url: '/api/harness-insights', key: 'harnessInsights' },
       { url: '/api/review-insights', key: 'reviewInsights' },
       { url: '/api/retrospectives', key: 'retrospectives' },
@@ -1659,7 +1659,9 @@ export function HydraFlowProvider({ children }) {
 
     async function poll() {
       const results = await Promise.allSettled(
-        endpoints.map(({ url }) => fetch(url).then(r => r.ok ? r.json() : null))
+        endpoints.map(({ url, repoScoped }) =>
+          (repoScoped ? fetchWithRepo(url) : fetch(url)).then(r => r.ok ? r.json() : null)
+        )
       )
       if (cancelled) return
       const update = {}
@@ -1677,7 +1679,7 @@ export function HydraFlowProvider({ children }) {
     poll()
     const interval = setInterval(poll, 30_000)
     return () => { cancelled = true; clearInterval(interval) }
-  }, [state.connected])
+  }, [state.connected, fetchWithRepo])
 
   // Reflect WebSocket connection state as a DOM attribute so Playwright helpers
   // (wait_for_ws_ready) can detect readiness without polling JS state.
