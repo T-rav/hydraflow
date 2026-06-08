@@ -22,6 +22,13 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Query
 
 import dashboard_routes._cost_rollups as _cost_rollups_mod
+from dashboard_routes._cost_merge import (
+    merge_by_loop,
+    merge_cost_by_model,
+    merge_per_loop_cost,
+    merge_rolling_24h,
+    merge_top_issues,
+)
 from dashboard_routes._cost_rollups import (
     _parse_range,
     build_by_loop,
@@ -252,6 +259,17 @@ def build_diagnostics_router(
                 events.append(event)
         return events
 
+    def _runtimes(repo: str | None) -> list[tuple[HydraFlowConfig, str]]:
+        """``(config, slug)`` pairs for cost rollups to aggregate over.
+
+        One element for a concrete slug or ``None`` (the default repo), every
+        registered repo for ``__all__``. Callers guard ``ctx is None`` first and
+        read the bare config, so this is only reached in the multi-repo path.
+        """
+        if ctx is None:
+            return [(config, "")]
+        return [(cfg, slug) for cfg, _s, _b, _g, slug in ctx.resolve_runtimes(repo)]
+
     @router.get("/overview")
     def overview(
         range: str = Query("7d"), repo: RepoSlugParam = None
@@ -383,19 +401,26 @@ def build_diagnostics_router(
         return _cache_hit_rate_buckets(events)
 
     # --- Cost-rollup endpoints (§4.11 points 4–5) ---------------------------
-    # NOTE: these still read the bare ``config`` (host/default repo) and are not
-    # yet repo-scoped — multi-repo cost aggregation is deferred to Phase 3c-2
-    # (along with the Factory Cost sub-tab). Do not assume ``repo`` here yet.
+    # Repo-aware (Phase 3c-2): with ``ctx`` each endpoint builds per repo over
+    # ``resolve_runtimes(repo)`` and folds the results (group-by-sum on the
+    # phase/loop/model dimensions; per-issue rows carry a repo tag). ``ctx is
+    # None`` keeps the bare single-repo builder. NOTE: ``/auto-agent`` (Overview
+    # tab) is NOT yet repo-scoped — its percentile merge is deferred to 3c-3.
 
     @router.get("/cost/rolling-24h")
-    def cost_rolling_24h() -> dict[str, Any]:
+    def cost_rolling_24h(repo: RepoSlugParam = None) -> dict[str, Any]:
         """Total cost burned in the last 24h, grouped by phase and loop (§4.11 point 4)."""
-        return build_rolling_24h(config)
+        if ctx is None:
+            return build_rolling_24h(config)
+        return merge_rolling_24h(
+            [build_rolling_24h(cfg) for cfg, _slug in _runtimes(repo)]
+        )
 
     @router.get("/cost/top-issues")
     def cost_top_issues(
         range: str = Query("7d"),
         limit: int = Query(10, ge=1, le=100),
+        repo: RepoSlugParam = None,
     ) -> list[dict[str, Any]]:
         """Most expensive issues in the window (§4.11 point 4)."""
         try:
@@ -403,42 +428,79 @@ def build_diagnostics_router(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         now = datetime.now(UTC)
-        return build_top_issues(config, since=now - window, until=now, limit=limit)
+        if ctx is None:
+            return build_top_issues(config, since=now - window, until=now, limit=limit)
+        per_repo = [
+            (slug, build_top_issues(cfg, since=now - window, until=now, limit=limit))
+            for cfg, slug in _runtimes(repo)
+        ]
+        return merge_top_issues(per_repo, limit=limit)
 
     @router.get("/cost/by-loop")
-    def cost_by_loop_route(range: str = Query("7d")) -> list[dict[str, Any]]:
+    def cost_by_loop_route(
+        range: str = Query("7d"), repo: RepoSlugParam = None
+    ) -> list[dict[str, Any]]:
         """Per-loop tick and wall-clock share over the range (§4.11 point 4)."""
         try:
             window = _parse_range(range)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         now = datetime.now(UTC)
-        return build_by_loop(config, since=now - window, until=now)
+        if ctx is None:
+            return build_by_loop(config, since=now - window, until=now)
+        return merge_by_loop(
+            [
+                build_by_loop(cfg, since=now - window, until=now)
+                for cfg, _slug in _runtimes(repo)
+            ]
+        )
 
     @router.get("/cost/by-model")
-    def cost_by_model_route(range: str = Query("7d")) -> list[dict[str, Any]]:
+    def cost_by_model_route(
+        range: str = Query("7d"), repo: RepoSlugParam = None
+    ) -> list[dict[str, Any]]:
         """Cross-loop spend broken out by model over the range."""
         try:
             window = _parse_range(range)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         now = _cost_rollups_mod._utcnow()
-        return build_cost_by_model(config, since=now - window, until=now)
+        if ctx is None:
+            return build_cost_by_model(config, since=now - window, until=now)
+        return merge_cost_by_model(
+            [
+                build_cost_by_model(cfg, since=now - window, until=now)
+                for cfg, _slug in _runtimes(repo)
+            ]
+        )
 
     @router.get("/loops/cost")
-    def loops_cost(range: str = Query("7d")) -> list[dict[str, Any]]:
+    def loops_cost(
+        range: str = Query("7d"), repo: RepoSlugParam = None
+    ) -> list[dict[str, Any]]:
         """Per-loop machinery-level cost dashboard (§4.11 point 5)."""
         try:
             window = _parse_range(range)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         now = datetime.now(UTC)
-        event_bus = _event_bus_for_rollup(config)
-        return build_per_loop_cost(
-            config,
-            since=now - window,
-            until=now,
-            event_bus=event_bus,
+        if ctx is None:
+            return build_per_loop_cost(
+                config,
+                since=now - window,
+                until=now,
+                event_bus=_event_bus_for_rollup(config),
+            )
+        return merge_per_loop_cost(
+            [
+                build_per_loop_cost(
+                    cfg,
+                    since=now - window,
+                    until=now,
+                    event_bus=_event_bus_for_rollup(cfg),
+                )
+                for cfg, _slug in _runtimes(repo)
+            ]
         )
 
     @router.get("/auto-agent")
