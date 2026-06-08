@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `b207b54` — feat(system): target the selected repo for bg-worker controls (Phase 3b-fe) (#9363) (#9363) *(2026-06-08)*
 - `5d58cdb` — feat(system): aggregate control status/workers + fan-out credit + config guards (Phase 3b backend) (#9360) (#9360) *(2026-06-08)*
 - `d8df0e1` — feat(hitl): aggregate HITL across repos + row-scoped mutations (Phase 3a) (#9358) (#9358) *(2026-06-08)*
 - `4069df7` — feat(persistence): repo-scope per-repo operational stores under shared data_root (ADR-0021 D2) (#9355) (#9355) *(2026-06-08)*

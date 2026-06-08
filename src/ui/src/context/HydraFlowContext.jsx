@@ -1735,6 +1735,7 @@ export function HydraFlowProvider({ children }) {
     stopOrchestrator,
     releaseEpic,
     refreshControlStatus,
+    fetchWithRepo,
   }
 
   return (

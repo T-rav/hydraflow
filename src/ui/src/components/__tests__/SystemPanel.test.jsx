@@ -24,6 +24,8 @@ function defaultMockContext(overrides = {}) {
     metrics: null,
     metricsHistory: null,
     githubMetrics: null,
+    selectedRepoSlug: null,
+    fetchWithRepo: (url, opts) => fetch(url, opts),
     ...overrides,
   }
 }

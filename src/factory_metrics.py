@@ -284,6 +284,9 @@ def issues_table(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         rows.append(
             {
                 "issue": event.get("issue"),
+                # Owning repo slug (set by the diagnostics loader when unioning
+                # ``__all__``); ``None`` for legacy single-repo events.
+                "repo": event.get("repo"),
                 "phase": event.get("phase"),
                 "run_id": event.get("run_id"),
                 "tokens": _event_tokens_total(event),
