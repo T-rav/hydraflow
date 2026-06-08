@@ -1900,6 +1900,16 @@ class StateData(BaseModel):
     # LiveCorpusReplayLoop (#8786 Phase 3) — per-drift-signature attempt
     # counters for the 3-attempt escalation chain.
     live_corpus_drift_attempts: dict[str, int] = Field(default_factory=dict)
+    # Fleet-wide shadow-drift ROLLUP (#9351 follow-up): one open
+    # ``shadow-drift`` issue tracks the current diverged-sample set. Carries
+    # ``{"issue_number": int, "signature_hash": str}`` so subsequent ticks
+    # update the body in-place when the set changes, and the loop closes the
+    # issue on a clean tick. Replaces the old behaviour where every changed
+    # signature set filed a brand-new issue (issues #9258..#9335 pile-up).
+    live_corpus_drift_rollup: dict | None = Field(default=None)
+    # The single open ``shadow-drift-stuck`` HITL escalation issue, closed on a
+    # clean tick alongside the rollup. None when no escalation is open.
+    live_corpus_escalation_issue: int | None = Field(default=None)
     escalation_contexts: dict[str, EscalationContext] = Field(default_factory=dict)
     diagnostic_attempts: dict[str, list[AttemptRecord]] = Field(default_factory=dict)
     diagnosis_severities: dict[str, str] = Field(default_factory=dict)
@@ -2131,6 +2141,7 @@ class PipelineIssue(BaseModel):
     epic_number: int = 0
     is_epic_child: bool = False
     track: str = ""
+    repo: str = ""
 
 
 class PipelineSnapshot(BaseModel):
@@ -2291,6 +2302,7 @@ class HITLItem(BaseModel):
     llm_summary: str = ""  # cached, operator-focused context summary
     llm_summary_updated_at: str | None = None
     visual_evidence: VisualEvidence | None = None
+    repo: str = ""
 
 
 class ControlStatusConfig(BaseModel):
@@ -2337,6 +2349,11 @@ class ControlStatusResponse(BaseModel):
     # The React UI renders MockWorldBanner when this is True so operators
     # can never confuse a sandbox tab with a production tab.
     mockworld_active: bool = False
+    # Per-repo breakdown for ``repo=__all__`` aggregate mode (empty for a single
+    # repo). Each entry: ``{slug, status, credits_paused_until, mockworld_active,
+    # config}``. The top-level fields above are a rollup; ``config`` is the
+    # default repo's (back-compat).
+    repos: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # --- TypedDicts for replacing Any annotations ---
@@ -3025,6 +3042,7 @@ class BackgroundWorkerStatus(BaseModel):
     interval_seconds: int | None = None
     next_run: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)
+    repo: str = ""
 
 
 class BackgroundWorkersResponse(BaseModel):
@@ -3083,6 +3101,7 @@ class IssueHistoryEntry(BaseModel):
     first_seen: IsoTimestamp | None = None
     last_seen: IsoTimestamp | None = None
     outcome: IssueOutcome | None = None
+    repo: str = ""
 
 
 class IssueHistoryResponse(BaseModel):

@@ -34,3 +34,22 @@ async def test_apply_seed_populates_phase_scripts(mock_world) -> None:
 
     # FakeLLM has the plan script populated for issue 1.
     assert 1 in mock_world._llm.planners._scripts
+
+
+@pytest.mark.asyncio
+async def test_apply_seed_builds_multi_runtime_registry(mock_world, tmp_path) -> None:
+    seed = MockWorldSeed(
+        repos=[
+            ("owner/alpha", str(tmp_path / "alpha")),
+            ("owner/beta", str(tmp_path / "beta")),
+        ],
+    )
+
+    mock_world.apply_seed(seed)
+
+    registry = mock_world.registry
+    assert set(registry.slugs) == {"owner-alpha", "owner-beta"}
+    alpha = registry.get("owner-alpha")
+    beta = registry.get("owner-beta")
+    assert alpha.event_bus is not beta.event_bus  # genuinely independent runtimes
+    assert alpha.event_bus._active_repo == "owner-alpha"  # tagged via set_repo

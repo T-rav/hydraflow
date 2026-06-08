@@ -2,21 +2,20 @@
 
 Prod-code bead lifecycle
 ------------------------
-- **Plan phase** (`plan_phase.py:283`): if ``beads_manager`` is set and
-  ``result.plan`` is non-empty, calls ``_create_beads_from_plan``.
-  That method calls ``extract_phases(plan)`` from ``task_graph``; if phases
-  are found it calls ``create_from_phases`` which creates one bead per phase
-  and wires dependencies.  The ``{phase_id: bead_id}`` mapping is stored in
-  state via ``set_bead_mapping``.
-- **Implement phase** (`implement_phase.py:577-580`): reads the bead mapping
-  from state.  If a mapping exists, calls ``beads_manager.init(wt_path)`` and
-  passes ``bead_mapping`` to the agent runner.  ``claim``/``close`` are NOT
-  called by prod code — those are executed by the real ``bd`` CLI subprocess
-  inside the container.  ``FakeDocker`` does not emulate CLI bead calls, so
+- **Implement phase** (`implement_phase._create_beads_in_worktree`): reads the
+  plan (the issue's "## Implementation Plan" comment, or plans_dir/issue-N.md),
+  calls ``extract_phases``; if phases are found it inits beads in THIS worktree
+  and calls ``create_from_phases`` (one bead per phase + dependency wiring),
+  stores the ``{phase_id: bead_id}`` mapping via ``set_bead_mapping`` and passes
+  it to the agent. Creating beads in the worktree (not a separate planner host
+  store) is what lets the agent's ``bd update --claim`` / ``bd close`` hit a
+  populated per-worktree store. ``claim``/``close`` run in the real ``bd``
+  subprocess inside the container; ``FakeDocker`` does not emulate them, so
   tasks stay in their created state after the pipeline.
-- **Review phase** (`review_phase.py:1082-1113`): reads the mapping from
-  state and builds a ``bead_tasks`` context list (hardcoded ``status='closed'``
-  — an assumption, not a real query).  No ``BeadsManager`` methods are called.
+- **Plan phase**: does NOT create beads (moved to implement phase).
+- **Review phase** (`review_phase.py`): reads the mapping from state and builds
+  a ``bead_tasks`` context list (hardcoded ``status='closed'`` — an assumption,
+  not a real query).  No ``BeadsManager`` methods are called.
 
 The plan text **must** contain phase headers matching the regex
 ``### P{N} — Name`` for ``extract_phases`` to return phases.  The default
@@ -86,6 +85,13 @@ async def test_B1_bead_workflow_end_to_end(tmp_path) -> None:
     worktree_cwd = tmp_path / "worktrees" / "issue-1"
     init_test_worktree(worktree_cwd)
 
+    # Beads are now created by the IMPLEMENT phase in its own worktree, reading
+    # the plan from plans_dir/issue-N.md (written by the planner in prod via
+    # planner._save_plan). Seed it so the implement phase finds the task graph.
+    plans_dir = world.harness.config.plans_dir
+    plans_dir.mkdir(parents=True, exist_ok=True)
+    (plans_dir / "issue-1.md").write_text(_TASK_GRAPH_PLAN)
+
     # Provide a plan whose text contains Task Graph phase headers.
     plan = PlanResultFactory.create(
         issue_number=1,
@@ -106,24 +112,24 @@ async def test_B1_bead_workflow_end_to_end(tmp_path) -> None:
 
     # ------------------------------------------------------------------
     # Assertion 1: FakeBeads was initialised by the implement phase.
-    # Triggered at implement_phase.py:580 when a bead mapping is in state.
-    # If False, the plan phase may not have stored a mapping (check A2).
+    # Triggered by implement_phase._create_beads_in_worktree when the plan has
+    # a task graph. If False, the implementer did not find a plan / phases.
     # ------------------------------------------------------------------
     assert beads._initialized is True, (
-        "FakeBeads.init was never called — implement phase only calls init "
-        "when a bead mapping exists in state (implement_phase.py:577-580). "
-        "This means plan phase did not produce a mapping (check A2 below)."
+        "FakeBeads.init was never called — the implementer inits beads in its "
+        "worktree only when it extracts task-graph phases from the plan "
+        "(implement_phase._create_beads_in_worktree). Check the seeded plan."
     )
 
     # ------------------------------------------------------------------
     # Assertion 2: Two beads were created (one per Task Graph phase).
-    # Triggered by plan_phase._create_beads_from_plan via create_from_phases.
-    # The plan text above has two P{N} headers → two phases → two beads.
+    # Triggered by implement_phase._create_beads_in_worktree via
+    # create_from_phases. The plan above has two P{N} headers → two phases.
     # ------------------------------------------------------------------
     assert beads.task_count() == 2, (
         f"Expected 2 bead tasks (one per plan phase), got {beads.task_count()}. "
-        "plan_phase.py:411 calls create_from_phases only when extract_phases "
-        "finds '### P{N} — Name' headers. Check the plan text format."
+        "implement_phase._create_beads_in_worktree calls create_from_phases "
+        "only when extract_phases finds '### P{N} — Name' headers."
     )
 
     # ------------------------------------------------------------------

@@ -374,7 +374,8 @@ class HealthMonitorLoop(BaseBackgroundLoop):
 
     @property
     def _failures_path(self) -> Path:
-        return self._config.memory_dir / "harness_failures.jsonl"
+        # Repo-scoped (ADR-0021 D2) — must match HarnessInsightStore's writer.
+        return self._config.repo_memory_dir / "harness_failures.jsonl"
 
     async def _do_work(self) -> dict[str, Any] | None:
         """Execute one health-monitor cycle."""
@@ -513,7 +514,7 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                 auto_file_suggestions,
             )
 
-            store = HarnessInsightStore(self._config.memory_dir)
+            store = HarnessInsightStore(self._config.repo_memory_dir)
             await auto_file_suggestions(store, self._config)
         except ImportError:
             pass
@@ -523,8 +524,8 @@ class HealthMonitorLoop(BaseBackgroundLoop):
     async def _run_harness_suggestion_ingestion_cycle(self) -> None:
         """Read harness suggestions JSONL and file each as a memory item."""
         try:
-            suggestions_path = self._config.data_path(
-                "memory", "harness_suggestions.jsonl"
+            suggestions_path = (
+                self._config.repo_memory_dir / "harness_suggestions.jsonl"
             )
             if not suggestions_path.exists():
                 return
@@ -581,7 +582,7 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                 verify_proposals,
             )
 
-            insight_store = ReviewInsightStore(self._config.memory_dir)
+            insight_store = ReviewInsightStore(self._config.repo_memory_dir)
             records = insight_store.load_recent(50)
             stale = verify_proposals(insight_store, records)
             for category in stale:

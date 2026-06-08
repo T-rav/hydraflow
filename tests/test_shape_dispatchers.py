@@ -159,6 +159,42 @@ async def test_non_json_stdout_skipped(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_issue_list_without_state_validates_cleanly(tmp_path: Path) -> None:
+    """gh issue list --json number,title omits 'state' (filtered server-side).
+
+    Previously routed to GhIssueSummary which requires state, producing
+    spurious drift for every issue-list shadow sample (signature 5653c1c6d466).
+    Now routed to GhIssueListItem which only requires number and title.
+    """
+    sample = _sample(
+        tmp_path,
+        args=["issue", "list", "--json", "number,title"],
+        stdout=json.dumps(
+            [
+                {"number": 9278, "title": "Drift survived LiveCorpusReplayLoop"},
+                {"number": 9100, "title": "Another open issue"},
+            ]
+        )
+        + "\n",
+    )
+    assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_issue_list_drifted_number_type_returns_diff(tmp_path: Path) -> None:
+    """issue-list with a wrong-typed number field trips GhIssueListItem validation."""
+    sample = _sample(
+        tmp_path,
+        args=["issue", "list", "--json", "number,title"],
+        stdout=json.dumps([{"number": "not-an-int", "title": "x"}]) + "\n",
+    )
+    result = await gh_shape_validator(sample)
+    assert result is not None
+    assert result["shape_validation_failed"] is True
+    assert result["shape"] == "GhIssueListItem"
+
+
+@pytest.mark.asyncio
 async def test_unknown_subcommand_skipped(tmp_path: Path) -> None:
     sample = _sample(
         tmp_path,

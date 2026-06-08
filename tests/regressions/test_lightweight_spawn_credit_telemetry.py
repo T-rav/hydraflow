@@ -166,7 +166,7 @@ class TestCostRollupCountsEstimatedSpend:
         from model_pricing import load_pricing
 
         config = ConfigFactory.create(repo_root=tmp_path / "repo")
-        path = config.data_path("metrics", "prompt", "inferences.jsonl")
+        path = config.cost_inferences_path
         path.parent.mkdir(parents=True, exist_ok=True)
         rows = [
             # char-estimated lightweight row: 0 actual tokens, stored estimate > 0

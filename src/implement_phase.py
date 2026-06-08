@@ -441,6 +441,51 @@ class ImplementPhase:
         except OSError:
             return ""
 
+    async def _create_beads_in_worktree(
+        self, issue: Task, wt_path: Path
+    ) -> dict[str, str] | None:
+        """Create the issue's bead task graph in its own worktree store.
+
+        Beads are created, claimed, and closed in the same per-worktree store,
+        so the agent's prompt-injected ``bd update --claim`` / ``bd close``
+        operate on a populated store. This replaces the old split where the
+        planner created beads in a separate host store the agent's clone never
+        saw. Best-effort: a beads failure must never block implementation.
+        """
+        from agent import AgentRunner  # noqa: PLC0415
+        from task_graph import extract_phases  # noqa: PLC0415
+
+        assert self._beads_manager is not None  # guarded by caller
+        # The plan lives in the issue's "## Implementation Plan" comment (the
+        # same source the agent reads); the issue was enriched with comments
+        # just above. Fall back to the on-disk plan for safety.
+        plan, _ = AgentRunner._extract_plan_comment(issue.comments)
+        if not plan:
+            plan = self._read_plan_for_recording(issue.id)
+        if not plan:
+            return None
+        phases = extract_phases(plan)
+        if not phases:
+            return None
+        try:
+            await self._beads_manager.ensure_installed()
+            await self._beads_manager.init(wt_path)
+            mapping = await self._beads_manager.create_from_phases(
+                phases, issue.id, wt_path
+            )
+        except Exception as exc:  # noqa: BLE001
+            from exception_classify import reraise_on_credit_or_bug  # noqa: PLC0415
+
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "bead creation in worktree failed for #%d: %s", issue.id, exc
+            )
+            return None
+        if not mapping:
+            return None
+        self._state.set_bead_mapping(issue.id, mapping)
+        return mapping
+
     def _build_cap_exceeded_comment(self, attempts: int, last_error: str) -> str:
         """Build the human-readable comment explaining why the cap was exceeded."""
         return (
@@ -613,12 +658,12 @@ class ImplementPhase:
         # does not include comment bodies.
         issue = await self._store.enrich_with_comments(issue)
 
-        # Load bead mapping for the issue
+        # Create the bead task graph in THIS worktree so the agent's
+        # bd claim/close operate on a populated, per-worktree store (the
+        # planner no longer creates beads in a separate host store).
         bead_mapping: dict[str, str] | None = None
         if self._beads_manager:
-            bead_mapping = self._state.get_bead_mapping(issue.id) or None
-            if bead_mapping:
-                await self._beads_manager.init(wt_path)
+            bead_mapping = await self._create_beads_in_worktree(issue, wt_path)
 
         run_kwargs: dict[str, object] = {
             "worker_id": worker_id,

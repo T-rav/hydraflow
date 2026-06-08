@@ -19,7 +19,7 @@ regressions that call-count-only mocks hide.
 
 
 ```json:entry
-{"id":"01JRC_MOCKWORLD_FAKE_PORT_ASSERTIONS","title":"Assert MockWorld side effects through fake adapters","topic":"mockworld","source_type":"manual","source_issue":"hydraflow-wgac","source_repo":"T-rav/hydraflow","created_at":"2026-05-30T21:15:00+00:00","updated_at":"2026-05-30T21:15:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+{"id":"01JRC_MOCKWORLD_FAKE_PORT_ASSERTIONS","title":"Assert MockWorld side effects through fake adapters","topic":"mockworld","source_type":"manual","source_issue":null,"source_repo":"T-rav/hydraflow","created_at":"2026-05-30T21:15:00+00:00","updated_at":"2026-05-30T21:15:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
 
 
@@ -66,7 +66,7 @@ that decide the outcome being asserted.
 
 
 ```json:entry
-{"id":"01JRC_TEST_VALUE_REVIEW_GATE","title":"Enforce test-value standards during review","topic":"testing","source_type":"manual","source_issue":"hydraflow-1x87","source_repo":"T-rav/hydraflow","created_at":"2026-05-31T23:45:00+00:00","updated_at":"2026-05-31T23:45:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+{"id":"01JRC_TEST_VALUE_REVIEW_GATE","title":"Enforce test-value standards during review","topic":"testing","source_type":"manual","source_issue":null,"source_repo":"T-rav/hydraflow","created_at":"2026-05-31T23:45:00+00:00","updated_at":"2026-05-31T23:45:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
 
 

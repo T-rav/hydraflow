@@ -133,6 +133,10 @@ class TestInitialization:
             # LiveCorpusReplayLoop (#8786 Phase 2 / ADR-0045) — per-drift-
             # signature attempt cap; clean tick resets all counters.
             "live_corpus_drift_attempts",
+            # Fleet-wide shadow-drift rollup + escalation issue slots so the
+            # loop keeps one open issue and closes it on a clean tick.
+            "live_corpus_drift_rollup",
+            "live_corpus_escalation_issue",
             # Auto-Agent — AutoAgentPreflightLoop (spec §3.6)
             "auto_agent_attempts",
             "auto_agent_daily_spend",

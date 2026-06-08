@@ -124,7 +124,7 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
     from dashboard import HydraFlowDashboard  # noqa: PLC0415
     from events import EventBus, EventLog, EventType, HydraFlowEvent  # noqa: PLC0415
     from models import Phase  # noqa: PLC0415
-    from repo_runtime import RepoRuntimeRegistry  # noqa: PLC0415
+    from repo_runtime import RepoRuntime, RepoRuntimeRegistry  # noqa: PLC0415
     from repo_store import RepoRecord, RepoRegistryStore  # noqa: PLC0415
     from service_registry import build_state_tracker  # noqa: PLC0415
 
@@ -140,12 +140,22 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
     repo_store = RepoRegistryStore(config.data_root)
     registry = RepoRuntimeRegistry()
 
+    # The host repo is a first-class factory line: register it as a runtime
+    # that shares the app-level bus/state (already rotated + history-loaded
+    # above) so the dashboard's default (no-repo) views and the host's own
+    # start/stop resolve through the registry uniformly — no special-casing.
+    host_runtime = RepoRuntime.from_shared(config, bus, state)
+    registry.add(host_runtime)
+
     # Restore previously registered repos into the runtime registry.
     # The repo store persists to disk, but the registry is in-memory —
     # without this, added repos are lost on restart and their play
     # buttons return 404.
     for record in repo_store.list():
         if not record.path:
+            continue
+        if record.slug in registry:
+            # Already registered (e.g. the host repo added above) — skip.
             continue
         repo_path = Path(record.path)
         if not repo_path.is_dir():
@@ -227,11 +237,13 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
         config=config,
         event_bus=bus,
         state=state,
+        host_runtime=host_runtime,
         registry=registry,
         repo_store=repo_store,
         register_repo_cb=_register_repo,
         remove_repo_cb=_remove_repo,
         list_repos_cb=repo_store.list,
+        default_repo_slug=config.repo_slug,
         credentials=credentials,
     )
     await dashboard.start()
@@ -251,8 +263,9 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
     try:
         await stop_event.wait()
     finally:
-        if dashboard._orchestrator and dashboard._orchestrator.running:
-            await dashboard._orchestrator.stop()
+        # The host is a registered runtime now, so stop_all() halts it along
+        # with every other factory line.
+        await registry.stop_all()
         await dashboard.stop()
 
 
@@ -306,6 +319,14 @@ async def _run(config: HydraFlowConfig) -> None:
     # because these are heavyweight server-starting functions that bind ports
     # and block forever.  Extracting them as injectable dependencies would be
     # over-engineering for a two-branch dispatch function.
+    #
+    # One-time, host-only migration of legacy flat per-repo stores into the
+    # repo-scoped layout (ADR-0021 D2). Runs once with the host config before
+    # any runtime/member is built, so member repos never claim the host's
+    # legacy flat data. Idempotent — a no-op once migrated.
+    from data_migration import migrate_flat_operational_stores  # noqa: PLC0415
+
+    migrate_flat_operational_stores(config)
     if not await _run_preflight(config):
         return
     if config.dashboard_enabled:

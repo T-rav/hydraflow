@@ -1470,8 +1470,19 @@ class RepoWikiStore:
                 if not metadata.get("title"):
                     metadata["title"] = title
                 entries.append(WikiEntry.model_validate(metadata))
-            except Exception:  # noqa: BLE001
-                logger.warning("Skipping malformed entry in %s", topic_path)
+            except Exception as exc:  # noqa: BLE001
+                # Surface the offending entry id and the validation reason so
+                # drift is diagnosable from the log alone (the bare path is not).
+                try:
+                    entry_id = str(json.loads(meta_match.group(1)).get("id", ""))
+                except Exception:  # noqa: BLE001
+                    entry_id = "<invalid-json>"
+                logger.warning(
+                    "Skipping malformed entry %s in %s: %s",
+                    entry_id or "<no-id>",
+                    topic_path,
+                    exc,
+                )
 
         return entries
 

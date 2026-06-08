@@ -729,7 +729,7 @@ Example: Hook fails → fix code → try commit again, not `git commit --no-veri
 ```
 
 
-### Implement-phase: never publish work for `result.success is False`
+## Implement-phase: never publish work for `result.success is False`
 
 **Pattern:** A blocking post-implementation skill (`discover-completeness`,
 `scope-check`, `diff-sanity`) trips. The agent returns
@@ -751,6 +751,7 @@ also resets the worktree, discarding partial commits).
 ```json:entry
 {
   "id": "implement-phase-half-state-on-skill-failure",
+  "source_type": "manual",
   "topic": "implement_phase",
   "tags": ["state-machine", "ADR-0002", "skill-failure", "label-drift"],
   "rule": "Gate push_branch, _resolve_pr, and transition on (result.success or is_retry).",
@@ -765,7 +766,7 @@ also resets the worktree, discarding partial commits).
 }
 ```
 
-### swap_pipeline_labels: same label to both is wrong for ready/review boundary
+## swap_pipeline_labels: same label to both is wrong for ready/review boundary
 
 **Pattern:** `swap_pipeline_labels(issue_number, label, pr_number=pr)` applies
 the SAME label to issue and PR. For most transitions this is correct (e.g.
@@ -780,6 +781,7 @@ at ready waiting for impl, PR at review awaiting human), call
 ```json:entry
 {
   "id": "swap-pipeline-labels-ready-review-boundary",
+  "source_type": "manual",
   "topic": "label_state_machine",
   "tags": ["state-machine", "ADR-0002", "pr-unsticker", "label-drift"],
   "rule": "Across the ready/review boundary, swap issue and PR with separate calls.",

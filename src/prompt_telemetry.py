@@ -50,9 +50,9 @@ class PromptTelemetry:
         pricing: ModelPricingTable | None = None,
     ) -> None:
         self._config = config
-        self._dir = config.data_path("metrics", "prompt")
-        self._inferences_file = self._dir / "inferences.jsonl"
-        self._pr_stats_file = self._dir / "pr_stats.json"
+        self._inferences_file = config.cost_inferences_path
+        self._pr_stats_file = config.pr_stats_path
+        self._dir = self._inferences_file.parent
         self._lock_file = self._dir / ".lock"
         self._pricing = pricing or load_pricing()
 

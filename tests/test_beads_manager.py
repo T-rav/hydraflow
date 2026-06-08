@@ -94,13 +94,74 @@ async def test_ensure_installed_npm_fails_to_install(manager):
 
 
 @pytest.mark.asyncio()
-async def test_init_success(manager):
+async def test_init_success_uses_embedded(manager, tmp_path):
+    """Default init uses bd's embedded store (no --server), skipping agent/hook
+    setup so it never rewrites the worktree's CLAUDE.md."""
     with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run:
         mock_run.return_value = "Initialized"
-        await manager.init(Path("/repo"))
+        await manager.init(tmp_path)
         mock_run.assert_called_once_with(
-            "bd", "init", "--server", cwd=Path("/repo"), timeout=30.0
+            "bd",
+            "init",
+            "--skip-agents",
+            "--skip-hooks",
+            "-q",
+            cwd=tmp_path,
+            timeout=60.0,
         )
+
+
+@pytest.mark.asyncio()
+async def test_init_skips_when_metadata_exists(manager, tmp_path):
+    """Idempotent: an existing .beads/metadata.json means already-initialized —
+    no bd subprocess is spawned (bd re-init aborts)."""
+    (tmp_path / ".beads").mkdir()
+    (tmp_path / ".beads" / "metadata.json").write_text("{}")
+    with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run:
+        await manager.init(tmp_path)
+        mock_run.assert_not_called()
+
+
+@pytest.mark.asyncio()
+async def test_init_falls_back_to_server_on_cgo(manager, tmp_path):
+    """Where embedded Dolt is unavailable (no CGO), init retries with --server."""
+    calls: list[tuple] = []
+
+    async def _side_effect(*args, **kwargs):
+        calls.append(args)
+        if "--server" not in args:
+            raise RuntimeError("embedded Dolt requires CGO; use server mode")
+        return "Initialized"
+
+    with patch("beads_manager.run_subprocess", new=AsyncMock(side_effect=_side_effect)):
+        await manager.init(tmp_path)
+
+    assert any("--server" not in c for c in calls), "should try embedded first"
+    assert any("--server" in c for c in calls), "should fall back to --server"
+
+
+@pytest.mark.asyncio()
+async def test_export_writes_issues_jsonl(manager, tmp_path):
+    (tmp_path / ".beads").mkdir()
+    payload = '{"_type":"issue","id":"x","title":"t","status":"open"}\n'
+    with patch(
+        "beads_manager.run_subprocess", new=AsyncMock(return_value=payload)
+    ) as mock_run:
+        await manager.export(tmp_path)
+        mock_run.assert_called_once_with("bd", "export", cwd=tmp_path, timeout=30.0)
+    assert (tmp_path / ".beads" / "issues.jsonl").read_text() == payload
+
+
+@pytest.mark.asyncio()
+async def test_export_best_effort_on_failure(manager, tmp_path):
+    """An export failure must not raise (never fail the pipeline)."""
+    (tmp_path / ".beads").mkdir()
+    with patch(
+        "beads_manager.run_subprocess",
+        new=AsyncMock(side_effect=RuntimeError("bd export boom")),
+    ):
+        await manager.export(tmp_path)  # must not raise
+    assert not (tmp_path / ".beads" / "issues.jsonl").exists()
 
 
 @pytest.mark.asyncio()
@@ -117,6 +178,22 @@ async def test_init_runtime_error(manager):
         mock_run.side_effect = RuntimeError("dolt error")
         with pytest.raises(RuntimeError, match="dolt error"):
             await manager.init(Path("/repo"))
+
+
+@pytest.mark.asyncio()
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "Command ('bd', 'init', '--server') failed (rc=1): Error:\n"
+        "⚠ This workspace is already initialized.\nAborting.",
+        "Command failed (rc=1): Found existing Dolt database: dolt server at "
+        "127.0.0.1:55405",
+    ],
+)
+async def test_init_already_initialized_is_noop(manager, stderr):
+    with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run:
+        mock_run.side_effect = RuntimeError(stderr)
+        await manager.init(Path("/repo"))  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +450,8 @@ async def test_create_from_phases(manager):
     ]
 
     with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run_fn:
-        mock_run_fn.side_effect = ["repo-id1", "repo-id2", "ok"]
+        # create P1, create P2, dep add, then the trailing `bd export`.
+        mock_run_fn.side_effect = ["repo-id1", "repo-id2", "ok", ""]
         mapping = await manager.create_from_phases(phases, 42, Path("/repo"))
 
     assert mapping == {"P1": "repo-id1", "P2": "repo-id2"}
@@ -472,15 +550,16 @@ _TASK_GRAPH_PLAN = (
 
 class TestPlanPhaseBeadsIntegration:
     @pytest.mark.asyncio()
-    async def test_creates_beads_and_posts_mapping(self, config) -> None:
+    async def test_planner_does_not_create_beads(self, config) -> None:
+        """Beads are created by the IMPLEMENTER in its own worktree (not the
+        planner), so the agent's claim/close hit a populated per-worktree store.
+        The planner must NOT init/create beads or post a mapping comment, even
+        when the plan contains a task graph."""
         from tests.conftest import PlanResultFactory, TaskFactory
         from tests.helpers import make_plan_phase, supply_once
 
         phase, state, planners, prs, store, _stop = make_plan_phase(config)
         mock_beads = AsyncMock()
-        mock_beads.create_from_phases = AsyncMock(
-            return_value={"P1": "repo-4yu", "P2": "repo-z2o"}
-        )
         phase._beads_manager = mock_beads
 
         issue = TaskFactory.create(id=42)
@@ -489,81 +568,15 @@ class TestPlanPhaseBeadsIntegration:
         )
         store.get_plannable = supply_once([issue])
 
-        await phase.plan_issues()
-
-        mock_beads.init.assert_awaited_once()
-        mock_beads.create_from_phases.assert_awaited_once()
-        assert state.get_bead_mapping(42) == {"P1": "repo-4yu", "P2": "repo-z2o"}
-
-        bead_comments = [
-            c for c in prs.post_comment.call_args_list if "Bead Task Mapping" in str(c)
-        ]
-        assert len(bead_comments) == 1
-        assert "| P1 | #repo-4yu |" in bead_comments[0].args[1]
-
-    @pytest.mark.asyncio()
-    async def test_no_beads_without_manager(self, config) -> None:
-        from tests.conftest import PlanResultFactory, TaskFactory
-        from tests.helpers import make_plan_phase, supply_once
-
-        phase, state, planners, _prs, store, _stop = make_plan_phase(config)
-        # beads_manager is None by default in make_plan_phase
-        issue = TaskFactory.create(id=42)
-        planners.plan = AsyncMock(
-            return_value=PlanResultFactory.create(success=True, plan=_TASK_GRAPH_PLAN)
-        )
-        store.get_plannable = supply_once([issue])
-        await phase.plan_issues()
-        assert state.get_bead_mapping(42) == {}
-
-    @pytest.mark.asyncio()
-    async def test_no_beads_without_task_graph(self, config) -> None:
-        from tests.conftest import PlanResultFactory, TaskFactory
-        from tests.helpers import make_plan_phase, supply_once
-
-        phase, state, planners, _prs, store, _stop = make_plan_phase(config)
-        mock_beads = AsyncMock()
-        phase._beads_manager = mock_beads
-
-        issue = TaskFactory.create(id=42)
-        planners.plan = AsyncMock(
-            return_value=PlanResultFactory.create(
-                success=True, plan="## Plan\n\n1. Do the thing\n"
-            )
-        )
-        store.get_plannable = supply_once([issue])
         await phase.plan_issues()
 
         mock_beads.init.assert_not_awaited()
+        mock_beads.create_from_phases.assert_not_awaited()
         assert state.get_bead_mapping(42) == {}
-
-    @pytest.mark.asyncio()
-    async def test_comment_failure_does_not_crash(self, config) -> None:
-        from tests.conftest import PlanResultFactory, TaskFactory
-        from tests.helpers import make_plan_phase, supply_once
-
-        phase, state, planners, prs, store, _stop = make_plan_phase(config)
-        mock_beads = AsyncMock()
-        mock_beads.create_from_phases = AsyncMock(return_value={"P1": "repo-4yu"})
-        phase._beads_manager = mock_beads
-
-        original_post = prs.post_comment
-
-        async def selective_fail(issue_id, body, *args, **kwargs):
-            if "Bead Task Mapping" in body:
-                raise RuntimeError("GitHub API error")
-            return await original_post(issue_id, body, *args, **kwargs)
-
-        prs.post_comment = AsyncMock(side_effect=selective_fail)
-        issue = TaskFactory.create(id=42)
-        planners.plan = AsyncMock(
-            return_value=PlanResultFactory.create(success=True, plan=_TASK_GRAPH_PLAN)
-        )
-        store.get_plannable = supply_once([issue])
-
-        results = await phase.plan_issues()
-        assert state.get_bead_mapping(42) == {"P1": "repo-4yu"}
-        assert len(results) == 1
+        bead_comments = [
+            c for c in prs.post_comment.call_args_list if "Bead Task Mapping" in str(c)
+        ]
+        assert bead_comments == []
 
 
 # ===========================================================================
@@ -654,15 +667,23 @@ class TestImplementPhaseBeadsIntegration:
         issue = TaskFactory.create(id=42)
         phase, _wt, _prs = make_implement_phase(config, [issue], agent_run=agent)
         phase._store.enrich_with_comments = AsyncMock(return_value=issue)
+        # The implementer extracts phases from the on-disk plan and creates the
+        # beads in THIS worktree, then passes the mapping to the agent.
+        config.plans_dir.mkdir(parents=True, exist_ok=True)
+        (config.plans_dir / "issue-42.md").write_text(_TASK_GRAPH_PLAN)
 
         mock_beads = AsyncMock()
+        mock_beads.create_from_phases = AsyncMock(
+            return_value={"P1": "repo-4yu", "P2": "repo-z2o"}
+        )
         phase._beads_manager = mock_beads
-        phase._state.set_bead_mapping(42, {"P1": "repo-4yu"})
 
         await phase.run_batch()
 
-        assert captured[0]["bead_mapping"] == {"P1": "repo-4yu"}
         mock_beads.init.assert_awaited_once()
+        mock_beads.create_from_phases.assert_awaited_once()
+        assert captured[0]["bead_mapping"] == {"P1": "repo-4yu", "P2": "repo-z2o"}
+        assert phase._state.get_bead_mapping(42) == {"P1": "repo-4yu", "P2": "repo-z2o"}
 
     @pytest.mark.asyncio()
     async def test_no_mapping_without_manager(self, config) -> None:
@@ -685,7 +706,8 @@ class TestImplementPhaseBeadsIntegration:
         assert "bead_mapping" not in captured[0]
 
     @pytest.mark.asyncio()
-    async def test_no_mapping_when_state_empty(self, config) -> None:
+    async def test_no_mapping_without_plan(self, config) -> None:
+        """No plan on disk → no phases → no beads created, no mapping passed."""
         from tests.conftest import TaskFactory
         from tests.helpers import make_implement_phase
 
@@ -704,10 +726,12 @@ class TestImplementPhaseBeadsIntegration:
         phase._store.enrich_with_comments = AsyncMock(return_value=issue)
         mock_beads = AsyncMock()
         phase._beads_manager = mock_beads
+        # No plan file written for this issue → implementer creates no beads.
 
         await phase.run_batch()
         assert "bead_mapping" not in captured[0]
         mock_beads.init.assert_not_awaited()
+        mock_beads.create_from_phases.assert_not_awaited()
 
 
 # ===========================================================================

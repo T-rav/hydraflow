@@ -607,6 +607,10 @@ class _MinimalConfig:
         self.use_quality_gate_in_review = True
         self.max_ci_fix_attempts = 3
         self.repo = "owner/repo"
+        # Repo-scoped data dirs (ADR-0021 D2): mirror HydraFlowConfig so prompt
+        # builders that read repo_memory_dir resolve a real path here too.
+        self.repo_data_root = self.data_root / self.repo.replace("/", "-")
+        self.repo_memory_dir = self.repo_data_root / "memory"
         self.review_insight_window = 50
         self.review_pattern_threshold = 3
         # ADR reviewer fields

@@ -87,6 +87,22 @@ def load_pricing(*args: Any, **kwargs: Any) -> Any:
 __all__ = ["CommentFormatter", "SelfReviewError", "PRManager"]
 
 
+def _normalise_issue_comment(comment: dict[str, Any]) -> dict[str, Any]:
+    """Map a ``gh issue view --json comments`` object to the stable port shape.
+
+    gh emits GraphQL-shaped ``author.login`` / ``createdAt``; the port contract
+    (and the fake) expose REST-shaped ``user.login`` / ``created_at``. Accept
+    either input so the contract holds across gh versions.
+    """
+    author = comment.get("author") or comment.get("user") or {}
+    login = author.get("login", "") if isinstance(author, dict) else ""
+    return {
+        "user": {"login": login},
+        "body": comment.get("body", ""),
+        "created_at": comment.get("createdAt") or comment.get("created_at") or "",
+    }
+
+
 class PRManager:
     """Pushes branches, creates PRs, merges, and manages labels."""
 
@@ -1196,12 +1212,13 @@ class PRManager:
     async def list_issue_comments(self, issue_number: int) -> list[dict[str, Any]]:
         """List comments on a GitHub issue (oldest first; max 100).
 
-        Returns dicts with `user.login`, `body`, `created_at` keys
-        (matches `gh issue view --json comments` shape).
+        Normalises ``gh issue view --json comments`` (which yields GraphQL-shaped
+        ``author.login`` / ``createdAt``) into the stable port contract: dicts
+        with ``user.login``, ``body`` and ``created_at`` keys.
         """
         self._assert_repo()
         try:
-            output, _ = await self._run_gh(
+            output = await self._run_gh(
                 "gh",
                 "issue",
                 "view",
@@ -1220,7 +1237,7 @@ class PRManager:
             logger.warning("Bad comments JSON for issue #%d: %s", issue_number, exc)
             return []
         comments = payload.get("comments") or []
-        return list(comments)
+        return [_normalise_issue_comment(c) for c in comments if isinstance(c, dict)]
 
     async def submit_review(
         self, pr_number: int, verdict: ReviewVerdict, body: str
@@ -1713,6 +1730,29 @@ class PRManager:
                 if pr_number is not None:
                     await self._remove_label("pr", pr_number, lbl)
 
+    async def _pr_commit_count(self, pr_number: int) -> int:
+        """Return the commit count for a single PR.
+
+        Fetched per-PR (not in the bulk ``pr list``) because requesting the
+        ``commits`` field for many PRs expands each commit's authors connection
+        and exceeds GitHub's GraphQL 500,000-node ceiling.
+        """
+        data = await self._gh_json_query(
+            "gh",
+            "pr",
+            "view",
+            str(pr_number),
+            "--repo",
+            self._repo,
+            "--json",
+            "commits",
+            dry_run_return={"commits": []},
+            error_log=f"find_label_drift: pr {pr_number} commits fetch failed",
+        )
+        if not isinstance(data, dict):
+            return 0
+        return len(data.get("commits") or [])
+
     async def find_label_drift(self) -> list[LabelDrift]:
         """Scan open PRs for cross-entity label drift vs their linked issues.
 
@@ -1733,7 +1773,7 @@ class PRManager:
             "--limit",
             "200",
             "--json",
-            "number,labels,body,commits",
+            "number,labels,body",
             dry_run_return=[],
             error_log="find_label_drift: pr list failed",
         )
@@ -1763,12 +1803,17 @@ class PRManager:
                 (lbl for lbl in pr_labels if lbl.startswith("hydraflow-")),
                 "",
             )
-            commits = len(pr.get("commits") or [])
             body = pr.get("body") or ""
             m = fixes_re.search(body)
             if not m:
                 continue
             issue_n = int(m.group(1))
+
+            # Commit count is fetched per-PR (only for Fixes-matched PRs, which
+            # already trigger an issue fetch below) — requesting `commits` in the
+            # bulk `pr list` expands each commit's authors connection and blows
+            # past GitHub's GraphQL 500k-node ceiling at --limit 200.
+            commits = await self._pr_commit_count(pr_n)
 
             issue_labels_raw = await self._gh_json_query(
                 "gh",
@@ -2939,6 +2984,7 @@ class PRManager:
             pr=pr_number,
             pr_url=pr_url,
             branch=branch,
+            repo=self._config.repo_slug,
         )
 
     @staticmethod

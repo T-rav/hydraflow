@@ -4,10 +4,29 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W24
+
+- `d8df0e1` — feat(hitl): aggregate HITL across repos + row-scoped mutations (Phase 3a) (#9358) (#9358) *(2026-06-08)*
+- `4069df7` — feat(persistence): repo-scope per-repo operational stores under shared data_root (ADR-0021 D2) (#9355) (#9355) *(2026-06-08)*
+
 ## 2026-W23
 
+- `4187035` — fix(ul): route bot/caretaker PRs to config.base_branch(), not hardcoded main (#9346) (#9346) *(2026-06-05)*
+- `15589dc` — fix(beads): create the bead task graph in the implement worktree (fix claim/close) (#9345) (#9345) *(2026-06-05)*
+- `f624cbd` — fix(beads): per-worktree embedded store + JSONL export (drop shared --server) (#9337) (#9337) *(2026-06-05)*
+- `9b97208` — fix(merge): auto-merge Auto-Agent PRs (agent/auto-agent-N) to end the contract-fix runaway (#9332) (#9332) *(2026-06-05)*
+- `ec00913` — fix(contracts): stop gh_shape_validator false-positives on projection-only pr/issue calls (closes #9314) (#9316) (#9316) *(2026-06-05)*
+- `7316aba` — fix(wiki): repair malformed topic entries + guard against silent data loss (#9281) (#9281) *(2026-06-04)*
+- `e91dd05` — fix(adr): stop ADR-0011 false-positive drift on unrelated core-module churn (closes #9176) (#9256) (#9256) *(2026-06-04)*
+- `e451fa3` — fix(adr): update ADR-0009 citations to current symbols (closes #9173) (#9255) (#9255) *(2026-06-04)*
+- `455bf0e` — chore(gates): target main ruleset by explicit refs/heads/main, not ~DEFAULT_BRANCH (#9252) (#9252) *(2026-06-04)*
+- `eff5ffc` — Merge pull request #9250 from T-rav/rc/2026-06-04-1254 *(2026-06-04)*
+- `90878f5` — fix(adr): use bare paths in ADR-0069/0072 Enforced-by lines (#9247) (#9247) *(2026-06-04)*
+- `adae9a8` — Accept ADR-0071: route back counter port (#9218) (#9218) *(2026-06-04)*
+- `b7119da` — feat(log-ingest): 4h loop that clusters/dedups log errors+warnings into fix-issues (#9245) (#9245) *(2026-06-04)*
 - `07b8937` — Revert "feat(honeycomb): low-noise SLO/burn-alert issue-ingestion loop (default-disabled) (#9237)" (#9244) (#9244) *(2026-06-04)*
 - `b3d0896` — feat(honeycomb): low-noise SLO/burn-alert issue-ingestion loop (default-disabled) (#9237) (#9237) *(2026-06-04)*
+- `05ea34a` — feat(ul): entry-evidence — 4 new entry links across 2 terms *(2026-06-03)*
 - `7bbc795` — test(sandbox): e2e backfill batch 1 — workspace_gc, runs_gc, health_monitor, merge_state_watcher (#9159) (#9159) *(2026-06-02)*
 - `1209d49` — fix(sandbox): skip ContractRefreshLoop external recorders in the air-gapped sandbox (s30) (#9152) (#9152) *(2026-06-02)*
 - `abb52ba` — fix(dependabot): cache all open PRs so DependabotMergeLoop can see bot PRs (s09) (#9151) (#9151) *(2026-06-02)*
@@ -406,24 +425,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `83cc8b3` — Fixes #2726: [ADR Follow-up] ADR-0012: Council requests changes (#2846) (#2846) *(2026-03-15)*
 - `8b7d06f` — Fixes #2720: Renumber ADR-0023 to ADR-0024 and update status to Accepted (#2816) (#2816) *(2026-03-15)*
 - `4eb1c9a` — Accept ADR-0010: worktree and path isolation (#2696) (#2696) *(2026-03-15)*
-- `a914647` — Fixes #2205: Remove CLI layer and consolidate into server API (#2457) (#2457) *(2026-03-09)*
-
-## 2026-W10
-
-- `29d8268` — Fixes #2382: Add ADR-0023 for duplicate class merge-artifact pattern (#2383) (#2383) *(2026-03-08)*
-- `cad34a6` — Fixes #2253: [ADR] Draft decision from memory #2251: ADR pre-review... (#2254) (#2254) *(2026-03-08)*
-- `4534df5` — Fixes #2373: Add ADR-0023 for dead class artifact detection in mock-based tests (#2378) (#2378) *(2026-03-08)*
-- `312fb6f` — Fixes #2356: Add ADR-0023 for toggle-state test consistency (#2369) (#2369) *(2026-03-08)*
-- `26ed00b` — Fixes #2355: ADR-0023 gate triage call on config toggle, not just HITL fallback (#2360) (#2360) *(2026-03-08)*
-- `1baa85a` — Fixes #2341: Add ADR-0023 for auto-triage toggle routing enforcement (#2344) (#2344) *(2026-03-08)*
-- `12d7c57` — Fixes #2306: Add ADR-0023 for stats counter placement in delegating helpers (#2324) (#2324) *(2026-03-08)*
-- `c22797d` — Fixes #2273: Add ADR-0023 for CLI argparse + config builder pattern (#2302) (#2302) *(2026-03-08)*
-- `7ade583` — Fixes #2267: Add ADR-0023 for multi-repo architecture wiring pattern (#2296) (#2296) *(2026-03-08)*
-- `4c09083` — Fixes #2264: [ADR] Draft decision from memory #2258: Implementation... (#2292) (#2292) *(2026-03-08)*
-- `c4b8ecd` — Fixes #2374: Add ADR-0023 for supersession regex verb form coverage (#2379) (#2379) *(2026-03-08)*
-- `7c6410a` — Fixes #2210: sync ADR index statuses (#2233) (#2233) *(2026-03-07)*
-- `b1df31d` — Fixes #1977: Document cross-phase integration harness (#2146) (#2146) *(2026-03-06)*
-- `548bf0b` — Fixes #2031: normalize superseded ADR statuses (#2158) (#2158) *(2026-03-06)*
 
 
 <!-- arch:generated -->

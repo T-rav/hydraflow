@@ -406,7 +406,7 @@ class TestBuildPrompt:
         """Prompt should include Common Review Feedback when review data exists."""
         from review_insights import ReviewInsightStore, ReviewRecord
 
-        store = ReviewInsightStore(config.repo_root / ".hydraflow" / "memory")
+        store = ReviewInsightStore(config.repo_memory_dir)
         for i in range(4):
             store.append_review(
                 ReviewRecord(
@@ -432,7 +432,7 @@ class TestBuildPrompt:
         """Prompt should include mandatory escalation block when patterns exceed threshold."""
         from review_insights import ReviewInsightStore, ReviewRecord
 
-        store = ReviewInsightStore(config.repo_root / ".hydraflow" / "memory")
+        store = ReviewInsightStore(config.repo_memory_dir)
         for i in range(3):
             store.append_review(
                 ReviewRecord(
@@ -457,7 +457,7 @@ class TestBuildPrompt:
     ) -> None:
         from review_insights import ReviewInsightStore, ReviewRecord
 
-        store = ReviewInsightStore(config.repo_root / ".hydraflow" / "memory")
+        store = ReviewInsightStore(config.repo_memory_dir)
         # Below default threshold of 3
         for i in range(2):
             store.append_review(

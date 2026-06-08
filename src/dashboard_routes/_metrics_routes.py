@@ -21,7 +21,7 @@ from models import (
     MetricsSnapshot,
 )
 from prompt_telemetry import PromptTelemetry
-from route_types import RepoSlugParam
+from route_types import REPO_ALL, RepoSlugParam
 
 if TYPE_CHECKING:
     from pr_manager import PRManager
@@ -95,10 +95,21 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         }
 
     @router.get("/api/issues/outcomes")
-    async def get_issue_outcomes() -> JSONResponse:
-        """Return all recorded issue outcomes."""
-        outcomes = ctx.state.get_all_outcomes()
-        return JSONResponse({k: v.model_dump() for k, v in outcomes.items()})
+    async def get_issue_outcomes(repo: RepoSlugParam = None) -> JSONResponse:
+        """Return all recorded issue outcomes (repo-scoped).
+
+        A specific repo (or the default) keeps the bare issue-number key for
+        backward compatibility. For ``repo=__all__`` outcomes are unioned across
+        repos and keyed ``{repo_slug}#{issue_number}`` (issue numbers collide
+        across repos); every entry is tagged with its ``repo`` slug regardless.
+        """
+        aggregate = repo is not None and repo.strip().lower() == REPO_ALL
+        result: dict[str, Any] = {}
+        for _cfg, _state, _bus, _get_orch, slug in ctx.resolve_runtimes(repo):
+            for num, outcome in _state.get_all_outcomes().items():
+                key = f"{slug}#{num}" if aggregate else str(num)
+                result[key] = {**outcome.model_dump(), "repo": slug}
+        return JSONResponse(result)
 
     @router.get("/api/metrics")
     async def get_metrics(
@@ -248,7 +259,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             generate_suggestions,
         )
 
-        memory_dir = ctx.config.data_path("memory")
+        memory_dir = ctx.config.repo_memory_dir
         store = HarnessInsightStore(memory_dir)
         records = store.load_recent(ctx.config.harness_insight_window)
         proposed = store.get_proposed_patterns()
@@ -278,7 +289,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         """Return raw failure records for historical analysis."""
         from harness_insights import HarnessInsightStore
 
-        memory_dir = ctx.config.data_path("memory")
+        memory_dir = ctx.config.repo_memory_dir
         store = HarnessInsightStore(memory_dir)
         records = store.load_recent(ctx.config.harness_insight_window)
         return JSONResponse([r.model_dump() for r in records])
@@ -288,7 +299,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         """Return aggregated review feedback patterns and category breakdown."""
         from review_insights import ReviewInsightStore, analyze_patterns
 
-        memory_dir = ctx.config.data_path("memory")
+        memory_dir = ctx.config.repo_memory_dir
         store = ReviewInsightStore(memory_dir)
         records = store.load_recent(ctx.config.review_insight_window)
         proposed = store.get_proposed_categories()
@@ -332,7 +343,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         """Return aggregated retrospective stats and recent entries."""
         from retrospective import RetrospectiveEntry
 
-        retro_path = ctx.config.data_path("memory", "retrospectives.jsonl")
+        retro_path = ctx.config.retrospectives_path
         entries: list[RetrospectiveEntry] = []
         if retro_path.exists():
             for line in retro_path.read_text().strip().splitlines():

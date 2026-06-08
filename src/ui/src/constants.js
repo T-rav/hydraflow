@@ -8,6 +8,11 @@ export function canonicalRepoSlug(value) {
   return String(value || '').trim().replace(/[\\/]+/g, '-')
 }
 
+// Reserved aggregate sentinel — selecting "All repos" sends repo=__all__ so the
+// backend unions every repo. Truthy + slash-free, so canonicalRepoSlug and the
+// context's normalizeRepoSlug pass it through unchanged (load-bearing).
+export const REPO_ALL = '__all__'
+
 /**
  * Statuses that indicate a worker is actively processing.
  * Used across dashboard components to filter/count active workers.

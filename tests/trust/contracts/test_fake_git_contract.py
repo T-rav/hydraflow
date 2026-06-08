@@ -56,6 +56,19 @@ async def _invoke_fake_git(cassette: Cassette) -> FakeOutput:  # noqa: PLR0911
         await fake.worktree_prune()
         return FakeOutput(exit_code=0, stdout="", stderr="")
 
+    if method == "worktree_remove":
+        # Seed the worktree so there is something to remove, mirroring the
+        # add→remove lifecycle the real adapter drives.
+        await fake.worktree_add(cwd, branch=str(args[0]), new_branch=True)
+        await fake.worktree_remove(cwd, force=True)
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
+    if method == "status":
+        # `git status --porcelain` on a clean tree emits no output; FakeGit
+        # mirrors that by returning an empty string.
+        out = await fake.status(cwd)
+        return FakeOutput(exit_code=0, stdout=out, stderr="")
+
     if method == "config_unset":
         # Seed the key so there is something to unset, mirroring real usage
         # where a corrupted config entry is cleared.

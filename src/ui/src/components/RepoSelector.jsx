@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useHydraFlow } from '../context/HydraFlowContext'
-import { canonicalRepoSlug } from '../constants'
+import { canonicalRepoSlug, REPO_ALL } from '../constants'
 import { theme } from '../theme'
 
 function buildDisplayName(repo) {
@@ -31,6 +31,7 @@ export function RepoSelector({ onOpenRegister }) {
     runtimes = [],
     selectedRepoSlug,
     selectRepo,
+    defaultRepoSlug = null,
   } = useHydraFlow()
   const [open, setOpen] = useState(false)
   const containerRef = useRef(null)
@@ -58,6 +59,9 @@ export function RepoSelector({ onOpenRegister }) {
       const filterSlug = canonicalRepoSlug(rawSlug)
       const runtime = runtimeMap.get(filterSlug)
       const isRunning = runtime?.running ?? repo.running ?? repo.status === 'running'
+      const isDefault =
+        repo.is_default === true ||
+        (!!defaultRepoSlug && filterSlug === canonicalRepoSlug(defaultRepoSlug))
       return {
         key: `${filterSlug || rawSlug}-${index}`,
         label: buildDisplayName(repo),
@@ -65,17 +69,21 @@ export function RepoSelector({ onOpenRegister }) {
         filterSlug,
         rawSlug,
         isRunning,
+        isDefault,
       }
     })
     entries.sort((a, b) => a.label.localeCompare(b.label))
     return entries
-  }, [supervisedRepos, runtimeMap])
+  }, [supervisedRepos, runtimeMap, defaultRepoSlug])
+
+  // null (initial) and REPO_ALL (explicitly picked) both mean "All repos".
+  const isAllRepos = selectedRepoSlug == null || selectedRepoSlug === REPO_ALL
 
   const currentLabel = useMemo(() => {
-    if (!selectedRepoSlug) return 'All repos'
+    if (isAllRepos) return 'All repos'
     const match = repoOptions.find(opt => opt.filterSlug === selectedRepoSlug)
     return match?.label || 'All repos'
-  }, [repoOptions, selectedRepoSlug])
+  }, [repoOptions, selectedRepoSlug, isAllRepos])
 
   const handleSelect = (slug) => {
     selectRepo(slug)
@@ -101,10 +109,10 @@ export function RepoSelector({ onOpenRegister }) {
         <div style={styles.dropdown} role="listbox" data-testid="repo-selector-dropdown">
           <button
             type="button"
-            onClick={() => handleSelect(null)}
-            style={selectedRepoSlug == null ? optionActiveStyle : optionStyle}
+            onClick={() => handleSelect(REPO_ALL)}
+            style={isAllRepos ? optionActiveStyle : optionStyle}
             role="option"
-            aria-selected={selectedRepoSlug == null}
+            aria-selected={isAllRepos}
           >
             <span style={styles.optionLabel}>All repos</span>
             <span style={styles.optionStatus}>Aggregated</span>
@@ -126,6 +134,7 @@ export function RepoSelector({ onOpenRegister }) {
                   <span style={opt.isRunning ? statusDotRunning : statusDotStopped} />
                   <span>
                     <span style={styles.optionLabel}>{opt.label}</span>
+                    {opt.isDefault && <span style={styles.optionSubLabel}>Host</span>}
                     {opt.subLabel && <span style={styles.optionSubLabel}>{opt.subLabel}</span>}
                   </span>
                 </span>

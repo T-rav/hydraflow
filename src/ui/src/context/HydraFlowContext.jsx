@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useCallback, useReducer, useMemo } from 'react'
-import { MAX_EVENTS, SYSTEM_WORKER_INTERVALS, PIPELINE_POLL_SAFETY_NET_MS, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS } from '../constants'
+import { MAX_EVENTS, SYSTEM_WORKER_INTERVALS, PIPELINE_POLL_SAFETY_NET_MS, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS, REPO_ALL } from '../constants'
 import { deriveStageStatus } from '../hooks/useStageStatus'
 
 const emptyPipeline = {
@@ -49,6 +49,7 @@ export const initialState = {
   canRegisterRepos: false,
   supervisedRepos: [],
   runtimes: [],
+  defaultRepoSlug: null,
   issueHistory: null,
   harnessInsights: null,
   reviewInsights: null,
@@ -81,18 +82,24 @@ function addEvent(state, action) {
   }
 }
 
+// Compound key so two repos' issue #5 don't collide when aggregating (repo=__all__).
+// Single-repo items carry their own repo slug, so the key is stable there too.
+function issueKey(item) {
+  return `${item?.repo ?? ''}#${item?.issue_number}`
+}
+
 function mergeStageIssues(existingIssues, incomingIssues) {
   // Server snapshot is authoritative: items absent from incoming are removed
   // (prevents ghost cards) and incoming fields (including status) override
   // local state for items still present.
-  const existingById = new Map(
+  const existingByKey = new Map(
     (existingIssues || [])
       .filter(item => item?.issue_number != null)
-      .map(item => [item.issue_number, item])
+      .map(item => [issueKey(item), item])
   )
   return (incomingIssues || []).map(item => {
     if (item?.issue_number == null) return item
-    const existing = existingById.get(item.issue_number)
+    const existing = existingByKey.get(issueKey(item))
     return existing ? { ...existing, ...item } : item
   })
 }
@@ -571,6 +578,13 @@ export function reducer(state, action) {
       // unwrapped. Normalize both to the bare stage map.
       const incoming = action.data?.stages ?? action.data ?? {}
       const allStages = ['triage', 'discover', 'shape', 'plan', 'implement', 'review', 'hitl', 'merged']
+      // REST aggregation tags each issue with its repo; a WS frame's issues are
+      // untagged but the event carries event.repo (threaded via onmessage) —
+      // stamp it so WS and REST frames key/merge consistently (no dup cards).
+      const frameRepo = action.repo
+      const tag = (issues) => (frameRepo
+        ? (issues || []).map(item => (item?.repo ? item : { ...item, repo: frameRepo }))
+        : (issues || []))
 
       const nextStages = Object.fromEntries(allStages.map((key) => {
         if (!Object.prototype.hasOwnProperty.call(incoming, key)) {
@@ -578,7 +592,7 @@ export function reducer(state, action) {
         }
         // Server snapshot is authoritative: reconcile stage membership so issues
         // absent from the snapshot are removed (eliminates ghost cards).
-        return [key, mergeStageIssues(state.pipelineIssues[key], incoming[key] || [])]
+        return [key, mergeStageIssues(state.pipelineIssues[key], tag(incoming[key] || []))]
       }))
 
       return {
@@ -707,6 +721,7 @@ export function reducer(state, action) {
         supervisedRepos: Array.isArray(action.data?.repos)
           ? action.data.repos
           : [],
+        defaultRepoSlug: action.data?.default_repo_slug ?? null,
       }
 
     case 'SELECT_REPO': {
@@ -963,7 +978,14 @@ export function HydraFlowProvider({ children }) {
       if (!res.ok) throw new Error(`status ${res.status}`)
       const payload = await res.json()
       const repos = Array.isArray(payload.repos) ? payload.repos : []
-      dispatch({ type: 'SET_REPOS', data: { repos, can_register: payload.can_register } })
+      dispatch({
+        type: 'SET_REPOS',
+        data: {
+          repos,
+          can_register: payload.can_register,
+          default_repo_slug: payload.default_repo_slug,
+        },
+      })
     } catch (err) {
       console.warn('Failed to fetch supervised repos', err)
       dispatch({ type: 'SET_REPOS', data: { repos: [], can_register: false } })
@@ -1496,7 +1518,7 @@ export function HydraFlowProvider({ children }) {
     ws.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data)
-        dispatch({ type: event.type, data: event.data, timestamp: event.timestamp, id: event.id })
+        dispatch({ type: event.type, data: event.data, timestamp: event.timestamp, id: event.id, repo: event.repo })
         if (event.timestamp && (!lastEventTsRef.current || event.timestamp > lastEventTsRef.current)) {
           lastEventTsRef.current = event.timestamp
         }
@@ -1614,7 +1636,9 @@ export function HydraFlowProvider({ children }) {
   )
 
   const repoFilteredSessions = useMemo(() => {
-    if (!state.selectedRepoSlug) return state.sessions
+    // null (initial) and __all__ (aggregate) both mean "no client-side filter" —
+    // the backend already unions sessions for __all__.
+    if (!state.selectedRepoSlug || state.selectedRepoSlug === REPO_ALL) return state.sessions
     return state.sessions.filter(s => {
       return normalizeRepoSlug(s.repo) === state.selectedRepoSlug
     })
@@ -1626,7 +1650,7 @@ export function HydraFlowProvider({ children }) {
     let cancelled = false
 
     const endpoints = [
-      { url: '/api/issues/history?limit=500', key: 'issueHistory' },
+      { url: '/api/issues/history?limit=500', key: 'issueHistory', repoScoped: true },
       { url: '/api/harness-insights', key: 'harnessInsights' },
       { url: '/api/review-insights', key: 'reviewInsights' },
       { url: '/api/retrospectives', key: 'retrospectives' },
@@ -1635,7 +1659,9 @@ export function HydraFlowProvider({ children }) {
 
     async function poll() {
       const results = await Promise.allSettled(
-        endpoints.map(({ url }) => fetch(url).then(r => r.ok ? r.json() : null))
+        endpoints.map(({ url, repoScoped }) =>
+          (repoScoped ? fetchWithRepo(url) : fetch(url)).then(r => r.ok ? r.json() : null)
+        )
       )
       if (cancelled) return
       const update = {}
@@ -1653,7 +1679,7 @@ export function HydraFlowProvider({ children }) {
     poll()
     const interval = setInterval(poll, 30_000)
     return () => { cancelled = true; clearInterval(interval) }
-  }, [state.connected])
+  }, [state.connected, fetchWithRepo])
 
   // Reflect WebSocket connection state as a DOM attribute so Playwright helpers
   // (wait_for_ws_ready) can detect readiness without polling JS state.

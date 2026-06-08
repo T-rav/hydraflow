@@ -64,20 +64,25 @@ from models import (
     IssueOutcomeType,
     PipelineIssue,
     PipelineSnapshot,
-    PipelineSnapshotEntry,
+    PipelineStats,
     QueueStats,
     parse_task_links,
 )
 from ports import PRPort
 from pr_manager import PRManager
 from prompt_telemetry import PromptTelemetry
-from route_types import RepoSlugParam
+from route_types import REPO_ALL, RepoSlugParam
 from state import StateTracker
 from timeline import TimelineBuilder
 from transcript_summarizer import TranscriptSummarizer
 
 if TYPE_CHECKING:
     from orchestrator import HydraFlowOrchestrator
+from dashboard_routes._stats_merge import (
+    merge_lifetime_stats,
+    merge_pipeline_stats,
+    merge_queue_stats,
+)
 from repo_runtime import RepoRuntime, RepoRuntimeRegistry
 from repo_store import RepoRecord, RepoStore
 
@@ -340,7 +345,9 @@ class RouteContext:
     # Derived state — initialised in __post_init__
     issue_fetcher: IssueFetcher = field(init=False)
     hitl_summarizer: TranscriptSummarizer = field(init=False)
-    hitl_summary_inflight: set[int] = field(init=False)
+    # Keys are bare ``int`` issue numbers on the host path and
+    # ``(repo_slug, issue)`` tuples on repo-scoped paths (see warm_hitl_summary).
+    hitl_summary_inflight: set[object] = field(init=False)
     hitl_summary_slots: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -360,17 +367,8 @@ class RouteContext:
 
     # -- Dependency resolution helpers ------------------------------------------
 
-    def _is_default_repo(self, slug: str) -> bool:
-        """Check if *slug* refers to the default (host) repo."""
-        default = self.config.repo
-        if not default:
-            return False
-        normalized = default.replace("/", "-")
-        slug_lower = slug.lower()
-        return slug_lower in (default.lower(), normalized.lower())
-
-    def _is_default_pipeline_active(self) -> bool:
-        """Check if the default repo's pipeline is enabled.
+    def _host_pipeline_active(self) -> bool:
+        """Fallback host-pipeline check for single-repo/test wiring (no registry).
 
         Returns True when no orchestrator exists (headless/test mode).
         """
@@ -384,22 +382,17 @@ class RouteContext:
     def is_repo_pipeline_active(self, slug: str | None) -> bool:
         """Return whether the resolved repo's pipeline is actively processing.
 
-        When *slug* is ``None`` (All repos view), returns True if ANY
-        repo (default or added) has an active pipeline.
+        The host repo is a registered runtime like any other, so this resolves
+        purely through the registry. When *slug* is ``None`` or the ``REPO_ALL``
+        sentinel (All repos view), returns True if ANY line is running.
         """
-        if slug is None:
-            if self._is_default_pipeline_active():
-                return True
-            if self.registry is not None:
-                return any(getattr(rt, "running", False) for rt in self.registry.all)
-            return False
-        if self._is_default_repo(slug):
-            return self._is_default_pipeline_active()
         if self.registry is not None:
+            if slug is None or slug.strip().lower() == REPO_ALL:
+                return any(getattr(rt, "running", False) for rt in self.registry.all)
             rt = self.registry.get(slug)
-            if rt is not None:
-                return getattr(rt, "running", False)
-        return False
+            return getattr(rt, "running", False) if rt is not None else False
+        # No registry (single-repo/test wiring): fall back to the host orch.
+        return self._host_pipeline_active()
 
     def resolve_runtime(
         self,
@@ -416,8 +409,9 @@ class RouteContext:
         configured, returns the single-repo defaults for backward compatibility.
         """
         if self.registry is not None and slug is not None:
-            if self._is_default_repo(slug):
-                return self.config, self.state, self.event_bus, self.get_orchestrator
+            # The host repo is a registered runtime sharing the app-level
+            # bus/state, so registry.get() resolves it just like any other line
+            # — no default-repo special case needed.
             rt: RepoRuntime | None = self.registry.get(slug)
             if rt is not None:
                 return rt.config, rt.state, rt.event_bus, lambda: rt.orchestrator
@@ -437,6 +431,81 @@ class RouteContext:
             logger.debug("Repo %r not in runtime registry — using defaults", slug)
             return self.config, self.state, self.event_bus, self.get_orchestrator
         return self.config, self.state, self.event_bus, self.get_orchestrator
+
+    def resolve_runtimes(
+        self,
+        slug: str | None,
+    ) -> list[
+        tuple[
+            HydraFlowConfig,
+            StateTracker,
+            EventBus,
+            Callable[[], HydraFlowOrchestrator | None],
+            str,
+        ]
+    ]:
+        """Resolve per-repo dependencies for one repo, or every repo.
+
+        - A concrete slug (or ``None``) returns a single-element list, reusing
+          :meth:`resolve_runtime` and tagging it with the *resolved* slug (a
+          fell-back tuple is tagged with the default slug, never the bogus
+          requested slug).
+        - ``REPO_ALL`` returns every registered runtime. The host repo is a
+          registry member (the server registers it via
+          ``RepoRuntime.from_shared``), so no separate default tuple is
+          prepended. With no registry it degenerates to the single shared
+          default.
+
+        The 5th element is the canonical dash slug for tagging. The 4th element
+        is always a zero-arg callable; the no-registry default may return
+        ``None`` while registry runtimes yield their live orchestrator —
+        consumers must handle ``None``.
+        """
+        default_slug = self.default_repo_slug or (
+            self.config.repo.replace("/", "-")
+            if self.config.repo
+            else self.config.repo_root.name
+        )
+
+        if slug is not None and slug.strip().lower() == REPO_ALL:
+            if self.registry is not None:
+                return [
+                    (
+                        rt.config,
+                        rt.state,
+                        rt.event_bus,
+                        lambda _rt=rt: _rt.orchestrator,
+                        rt.slug,
+                    )
+                    for rt in self.registry.all
+                ]
+            return [
+                (
+                    self.config,
+                    self.state,
+                    self.event_bus,
+                    self.get_orchestrator,
+                    default_slug,
+                )
+            ]
+
+        # Single-repo path. Determine the truthful resolved slug (a fell-back
+        # tuple is tagged with the default slug, never the bogus requested
+        # slug), then reuse the singular resolver for the dependencies.
+        resolved_slug = default_slug
+        if slug is not None and self.registry is not None:
+            matched = self.registry.get(slug)
+            if matched is not None:
+                # Tolerate minimal runtime doubles without a slug attr.
+                resolved_slug = getattr(matched, "slug", None) or slug
+            else:
+                slug_lower = slug.lower()
+                for rt in self.registry.all:
+                    if getattr(rt, "slug", "").lower() == slug_lower:
+                        resolved_slug = rt.slug
+                        break
+        cfg, st, bus, get_orch = self.resolve_runtime(slug)
+        return [(cfg, st, bus, get_orch, resolved_slug)]
 
     async def execute_admin_task(
         self,
@@ -467,6 +536,16 @@ class RouteContext:
         if cfg is self.config and bus is self.event_bus:
             return self.pr_manager
         return PRManager(cfg, bus)
+
+    def issue_fetcher_for(self, cfg: HydraFlowConfig) -> IssueFetcher:
+        """Return the shared IssueFetcher for the host config; else a repo-scoped one.
+
+        Mirrors :meth:`pr_manager_for` so a non-default repo fetches its own
+        issues while the host path keeps using the (mockable) shared fetcher.
+        """
+        if cfg is self.config:
+            return self.issue_fetcher
+        return IssueFetcher(cfg, credentials=self.credentials)
 
     def list_repo_records(self) -> list[RepoRecord]:
         """Return repo records from the callback or store, with error fallback."""
@@ -500,9 +579,16 @@ class RouteContext:
             return self.allowed_repo_roots_fn()
         return _allowed_repo_roots()
 
-    def hitl_summary_retry_due(self, issue_number: int) -> bool:
-        """Return True if enough time has passed to retry a failed HITL summary."""
-        failed_at, _ = self.state.get_hitl_summary_failure(issue_number)
+    def hitl_summary_retry_due(
+        self, issue_number: int, *, state: StateTracker | None = None
+    ) -> bool:
+        """Return True if enough time has passed to retry a failed HITL summary.
+
+        ``state`` defaults to the host state; pass the row's repo state so the
+        cooldown is read from the repo that owns the issue (ADR-0007 multi-repo).
+        """
+        st = state or self.state
+        failed_at, _ = st.get_hitl_summary_failure(issue_number)
         failed_dt = _parse_iso_or_none(failed_at)
         if failed_dt is None:
             return True
@@ -510,50 +596,88 @@ class RouteContext:
         return age >= self.hitl_summary_cooldown_seconds
 
     async def compute_hitl_summary(
-        self, issue_number: int, *, cause: str, origin: str | None
+        self,
+        issue_number: int,
+        *,
+        cause: str,
+        origin: str | None,
+        state: StateTracker | None = None,
+        config: HydraFlowConfig | None = None,
+        issue_fetcher: IssueFetcher | None = None,
     ) -> str | None:
-        """Fetch issue, generate and normalise a HITL summary, then persist to state."""
+        """Fetch issue, generate and normalise a HITL summary, then persist to state.
+
+        The ``state``/``config``/``issue_fetcher`` overrides default to the host
+        runtime; callers serving a non-default repo MUST pass that repo's objects
+        so the issue is fetched from the right GitHub repo and the summary is
+        persisted to the right state — otherwise issue #N of repo B would be
+        fetched from repo A and stored under A.
+        """
+        st = state or self.state
+        cfg = config or self.config
+        fetcher = issue_fetcher or self.issue_fetcher
         if (
-            not self.config.transcript_summarization_enabled
-            or self.config.dry_run
+            not cfg.transcript_summarization_enabled
+            or cfg.dry_run
             or not self.credentials.gh_token
         ):
             return None
-        issue = await self.issue_fetcher.fetch_issue_by_number(issue_number)
+        issue = await fetcher.fetch_issue_by_number(issue_number)
         if issue is None:
-            self.state.set_hitl_summary_failure(issue_number, "Issue fetch failed")
+            st.set_hitl_summary_failure(issue_number, "Issue fetch failed")
             return None
         context = _build_hitl_context(issue, cause=cause, origin=origin)
         generated = await self.hitl_summarizer.summarize_hitl_context(context)
         if not generated:
-            self.state.set_hitl_summary_failure(
-                issue_number, "Summary model returned empty"
-            )
+            st.set_hitl_summary_failure(issue_number, "Summary model returned empty")
             return None
         summary = _normalise_summary_lines(generated)
         if not summary:
-            self.state.set_hitl_summary_failure(
+            st.set_hitl_summary_failure(
                 issue_number, "Summary normalization produced empty output"
             )
             return None
-        self.state.set_hitl_summary(issue_number, summary)
-        self.state.clear_hitl_summary_failure(issue_number)
+        st.set_hitl_summary(issue_number, summary)
+        st.clear_hitl_summary_failure(issue_number)
         return summary
 
     async def warm_hitl_summary(
-        self, issue_number: int, *, cause: str, origin: str | None
+        self,
+        issue_number: int,
+        *,
+        cause: str,
+        origin: str | None,
+        state: StateTracker | None = None,
+        config: HydraFlowConfig | None = None,
+        issue_fetcher: IssueFetcher | None = None,
     ) -> None:
-        """Schedule background HITL summary generation, guarded by inflight tracking."""
-        if issue_number in self.hitl_summary_inflight:
+        """Schedule background HITL summary generation, guarded by inflight tracking.
+
+        Pass the row's repo ``state``/``config``/``issue_fetcher`` for non-default
+        repos (see :meth:`compute_hitl_summary`).
+        """
+        # Key the in-flight guard by (repo_slug, issue) when a repo config is
+        # given, so warming repo A's issue #42 does not transiently suppress
+        # repo B's issue #42 (same number, different repo). The host path keeps
+        # the bare-int key for back-compat.
+        inflight_key: object = (
+            (config.repo_slug, issue_number) if config is not None else issue_number
+        )
+        if inflight_key in self.hitl_summary_inflight:
             return
-        self.hitl_summary_inflight.add(issue_number)
+        self.hitl_summary_inflight.add(inflight_key)
         try:
             async with self.hitl_summary_slots:
                 await self.compute_hitl_summary(
-                    issue_number, cause=cause, origin=origin
+                    issue_number,
+                    cause=cause,
+                    origin=origin,
+                    state=state,
+                    config=config,
+                    issue_fetcher=issue_fetcher,
                 )
         except Exception as exc:
-            self.state.set_hitl_summary_failure(
+            (state or self.state).set_hitl_summary_failure(
                 issue_number,
                 f"{type(exc).__name__}: {exc}",
             )
@@ -562,7 +686,7 @@ class RouteContext:
                 issue_number,
             )
         finally:
-            self.hitl_summary_inflight.discard(issue_number)
+            self.hitl_summary_inflight.discard(inflight_key)
 
 
 def _build_hitl_context(issue: GitHubIssue, *, cause: str, origin: str | None) -> str:
@@ -653,6 +777,19 @@ def create_router(
     ]:
         return ctx.resolve_runtime(slug)
 
+    def _resolve_runtimes(
+        slug: str | None,
+    ) -> list[
+        tuple[
+            HydraFlowConfig,
+            StateTracker,
+            EventBus,
+            Callable[[], HydraFlowOrchestrator | None],
+            str,
+        ]
+    ]:
+        return ctx.resolve_runtimes(slug)
+
     def _is_pipeline_active(slug: str | None) -> bool:
         """Check if the selected repo's pipeline is running.
 
@@ -717,9 +854,11 @@ def create_router(
             key=lambda lnk: lnk.target_id,
         )
 
-    def _new_issue_history_entry(issue_number: int) -> dict[str, Any]:
+    def _new_issue_history_entry(
+        issue_number: int, cfg: HydraFlowConfig
+    ) -> dict[str, Any]:
         """Create a blank history aggregation row for an issue."""
-        repo_slug = (config.repo or "").strip()
+        repo_slug = (cfg.repo or "").strip()
         if repo_slug.startswith("https://github.com/"):
             repo_slug = repo_slug[len("https://github.com/") :]
         elif repo_slug.startswith("http://github.com/"):
@@ -761,6 +900,7 @@ def create_router(
     def _build_issue_history_entry(
         row: dict[str, Any],
         outcome: IssueOutcome | None,
+        repo_slug: str = "",
     ) -> IssueHistoryEntry:
         """Build an ``IssueHistoryEntry`` from a raw aggregation row."""
         issue_number = int(row["issue_number"])
@@ -803,6 +943,7 @@ def create_router(
             first_seen=row.get("first_seen"),
             last_seen=row.get("last_seen"),
             outcome=outcome,
+            repo=repo_slug,
         )
 
     def _aggregate_telemetry_record(
@@ -855,6 +996,7 @@ def create_router(
         pr_to_issue: dict[int, int],
         since_dt: datetime | None,
         until_dt: datetime | None,
+        cfg: HydraFlowConfig,
     ) -> None:
         """Process event-bus events into *issue_rows* in place."""
         for event in events:
@@ -871,7 +1013,7 @@ def create_router(
                 continue
 
             row = issue_rows.setdefault(
-                issue_number, _new_issue_history_entry(issue_number)
+                issue_number, _new_issue_history_entry(issue_number, cfg)
             )
             _touch_issue_timestamps(row, timestamp)
 
@@ -949,6 +1091,8 @@ def create_router(
         issue_rows: dict[int, dict[str, Any]],
         requested_status: str,
         query_text: str,
+        state: StateTracker,
+        repo_slug: str = "",
     ) -> list[IssueHistoryEntry]:
         """Filter *issue_rows* and convert to ``IssueHistoryEntry`` objects."""
         items: list[IssueHistoryEntry] = []
@@ -967,7 +1111,9 @@ def create_router(
                 continue
 
             items.append(
-                _build_issue_history_entry(row, state.get_outcome(issue_number))
+                _build_issue_history_entry(
+                    row, state.get_outcome(issue_number), repo_slug
+                )
             )
         return items
 
@@ -977,12 +1123,26 @@ def create_router(
         requested_status: str,
         query_text: str,
         use_unfiltered: bool,
+        *,
+        cfg: HydraFlowConfig,
+        bus: EventBus,
+        state: StateTracker,
+        repo_slug: str,
+        use_cache: bool,
     ) -> list[IssueHistoryEntry]:
         """Enrich items via GitHub and backfill crate titles from milestones.
 
+        Runs against the runtime's own *cfg*/*state*/PR manager. The persistent
+        ``_history_cache`` (enriched-issue set + cached rows) is keyed to the
+        default runtime only, so it is read/written exclusively when *use_cache*
+        is True — per-repo / ``__all__`` requests track enrichment locally and
+        never mutate the default cache.
+
         Returns a (potentially rebuilt) items list.
         """
-        already_enriched: set[int] = _history_cache.get("enriched_issues", set())
+        already_enriched: set[int] = (
+            _history_cache.get("enriched_issues", set()) if use_cache else set()
+        )
         issue_lookup = {
             item.issue_number: issue_rows[item.issue_number] for item in items
         }
@@ -998,15 +1158,18 @@ def create_router(
         ][:40]
         if enrich_candidates:
             await _enrich_issue_history_with_github(
-                {k: issue_lookup[k] for k in enrich_candidates}
+                {k: issue_lookup[k] for k in enrich_candidates}, cfg
             )
             already_enriched.update(enrich_candidates)
-            _history_cache["enriched_issues"] = already_enriched
-            if use_unfiltered and _history_cache["issue_rows"] is not None:
-                _history_cache["issue_rows"] = copy.deepcopy(issue_rows)
-                _save_history_cache()
+            if use_cache:
+                _history_cache["enriched_issues"] = already_enriched
+                if use_unfiltered and _history_cache["issue_rows"] is not None:
+                    _history_cache["issue_rows"] = copy.deepcopy(issue_rows)
+                    _save_history_cache()
             # Rebuild items from enriched rows.
-            items = _filter_rows_to_items(issue_rows, requested_status, query_text)
+            items = _filter_rows_to_items(
+                issue_rows, requested_status, query_text, state, repo_slug
+            )
 
         # Sort before crate-title backfill so milestone fetches are done
         # after ordering.  The caller applies the page limit after returning.
@@ -1025,7 +1188,8 @@ def create_router(
         if needs_title:
             try:
                 # ``list_milestones`` is concrete-only on PRManager.
-                milestones = await cast("PRManager", pr_manager).list_milestones(
+                manager = _pr_manager_for(cfg, bus)
+                milestones = await cast("PRManager", manager).list_milestones(
                     state="all"
                 )
                 title_map = {m.number: m.title for m in milestones}
@@ -1047,6 +1211,7 @@ def create_router(
                             backfilled = True
                 if (
                     backfilled
+                    and use_cache
                     and use_unfiltered
                     and _history_cache.get("issue_rows") is not None
                 ):
@@ -1095,13 +1260,15 @@ def create_router(
         return items
 
     async def _enrich_issue_history_with_github(
-        entries: dict[int, dict[str, Any]], limit: int = 150
+        entries: dict[int, dict[str, Any]],
+        cfg: HydraFlowConfig,
+        limit: int = 150,
     ) -> None:
         """Concurrently fetch GitHub metadata and apply it to history entries."""
         if not entries:
             return
 
-        fetcher = IssueFetcher(config, credentials=_creds)
+        fetcher = IssueFetcher(cfg, credentials=_creds)
         issue_numbers = sorted(entries.keys(), reverse=True)[:limit]
         sem = asyncio.Semaphore(6)
 
@@ -1317,26 +1484,37 @@ def create_router(
     async def get_stats(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Return lifetime stats and optional queue depths."""
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        data: dict[str, Any] = _state.get_lifetime_stats().model_dump()
-        orch = _get_orch()
-        if orch:
-            data["queue"] = orch.issue_store.get_queue_stats().model_dump()
+        """Return lifetime stats and optional queue depths.
+
+        For ``repo=__all__`` the lifetime stats are summed across every repo and
+        the queue depths are merged across the active lines.
+        """
+        runtimes = _resolve_runtimes(repo)
+        data: dict[str, Any] = merge_lifetime_stats(
+            [st.get_lifetime_stats() for _cfg, st, _bus, _go, _slug in runtimes]
+        ).model_dump()
+        queues: list[QueueStats] = []
+        for _cfg, _st, _bus, get_orch, _slug in runtimes:
+            orch = get_orch()
+            if orch:
+                queues.append(orch.issue_store.get_queue_stats())
+        if queues:
+            data["queue"] = merge_queue_stats(queues).model_dump()
         return JSONResponse(data)
 
     @router.get("/api/queue")
     async def get_queue(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Return current queue depths, active counts, and throughput."""
-        if not _is_pipeline_active(repo):
-            return JSONResponse(QueueStats().model_dump())
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        orch = _get_orch()
-        if orch:
-            return JSONResponse(orch.issue_store.get_queue_stats().model_dump())
-        return JSONResponse(QueueStats().model_dump())
+        """Return current queue depths, merged across active lines for __all__."""
+        queues: list[QueueStats] = []
+        for _cfg, _st, _bus, get_orch, slug in _resolve_runtimes(repo):
+            if not _is_pipeline_active(slug):
+                continue
+            orch = get_orch()
+            if orch:
+                queues.append(orch.issue_store.get_queue_stats())
+        return JSONResponse(merge_queue_stats(queues).model_dump())
 
     @router.post("/api/request-changes")
     async def request_changes(
@@ -1348,6 +1526,14 @@ def create_router(
         escalation event all land on the SELECTED repo — not the default one —
         in a multi-repo deployment.
         """
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "detail": "request-changes requires a specific repo",
+                },
+                status_code=400,
+            )
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         issue_number: int | None = body.get("issue_number")
         feedback = (body.get("feedback") or "").strip()
@@ -1395,39 +1581,41 @@ def create_router(
     async def get_pipeline(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Return current pipeline snapshot with issues per stage."""
-        if not _is_pipeline_active(repo):
-            return JSONResponse(PipelineSnapshot().model_dump())
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        orch = _get_orch()
-        if orch:
+        """Return the pipeline snapshot — issues per stage, unioned across repos
+        for ``repo=__all__`` with each issue tagged by its repo slug."""
+        merged_stages: dict[str, list[PipelineIssue]] = {}
+        for _cfg, _st, _bus, get_orch, slug in _resolve_runtimes(repo):
+            if not _is_pipeline_active(slug):
+                continue
+            orch = get_orch()
+            if orch is None:
+                continue
             raw = orch.issue_store.get_pipeline_snapshot()
-            mapped: dict[str, list[PipelineSnapshotEntry]] = {}
             for backend_stage, issues in raw.items():
                 frontend_stage = _STAGE_NAME_MAP.get(backend_stage, backend_stage)
-                mapped[frontend_stage] = issues
-            snapshot = PipelineSnapshot(
-                stages={
-                    k: [PipelineIssue.model_validate(i) for i in v]
-                    for k, v in mapped.items()
-                }
-            )
-            return JSONResponse(snapshot.model_dump())
-        return JSONResponse(PipelineSnapshot().model_dump())
+                bucket = merged_stages.setdefault(frontend_stage, [])
+                for entry in issues:
+                    bucket.append(
+                        PipelineIssue.model_validate(entry).model_copy(
+                            update={"repo": slug}
+                        )
+                    )
+        return JSONResponse(PipelineSnapshot(stages=merged_stages).model_dump())
 
     @router.get("/api/pipeline/stats")
     async def get_pipeline_stats(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Return lightweight pipeline stats (counts only, no issue details)."""
-        if not _is_pipeline_active(repo):
-            return JSONResponse({})
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        orch = _get_orch()
-        if orch:
-            stats = orch.build_pipeline_stats()
-            return JSONResponse(stats.model_dump())
-        return JSONResponse({})
+        """Return lightweight pipeline stats — merged across active lines for __all__."""
+        stats_list: list[PipelineStats] = []
+        for _cfg, _st, _bus, get_orch, slug in _resolve_runtimes(repo):
+            if not _is_pipeline_active(slug):
+                continue
+            orch = get_orch()
+            if orch:
+                stats_list.append(orch.build_pipeline_stats())
+        merged = merge_pipeline_stats(stats_list)
+        return JSONResponse(merged.model_dump() if merged is not None else {})
 
     @router.get("/api/events")
     async def get_events(
@@ -1658,25 +1846,28 @@ def create_router(
     except Exception:
         logger.warning("History cache warm-up failed", exc_info=True)
 
-    @router.get("/api/issues/history")
-    async def get_issue_history(
-        since: str | None = None,
-        until: str | None = None,
-        status: str | None = None,
-        query: str | None = None,
-        limit: int = 300,
-        repo: RepoSlugParam = None,
-    ) -> JSONResponse:
-        """Return issue lifecycle history with inference rollups (repo-scoped)."""
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        since_dt = _parse_iso_or_none(since)
-        until_dt = _parse_iso_or_none(until)
-        requested_status = (status or "").strip().lower()
-        query_text = (query or "").strip().lower()
-        clamped_limit = max(1, min(limit, 1000))
+    async def _collect_history_items(
+        cfg: HydraFlowConfig,
+        state: StateTracker,
+        bus: EventBus,
+        repo_slug: str,
+        *,
+        since_dt: datetime | None,
+        until_dt: datetime | None,
+        requested_status: str,
+        query_text: str,
+        use_cache: bool,
+    ) -> list[IssueHistoryEntry]:
+        """Build issue-history rows for ONE runtime, tagged with *repo_slug*.
 
-        telemetry = PromptTelemetry(_cfg)
-        all_events = _bus.get_history()
+        Reads the runtime's own telemetry/events/state. The persistent
+        ``_history_cache`` is keyed to the default runtime only, so it is
+        read/written exclusively when *use_cache* is True (``repo is None``);
+        per-repo and ``__all__`` requests build fresh so one repo's rollups
+        never bleed into another's view — or into the cached default.
+        """
+        telemetry = PromptTelemetry(cfg)
+        all_events = bus.get_history()
 
         # Check if we can reuse cached aggregation for the unfiltered case.
         use_unfiltered = since_dt is None and until_dt is None
@@ -1684,8 +1875,8 @@ def create_router(
         telem_mtime = telemetry.get_mtime()
         now = time.monotonic()
         cache_hit = (
-            use_unfiltered
-            and repo is None
+            use_cache
+            and use_unfiltered
             and _history_cache["issue_rows"] is not None
             and _history_cache["event_count"] == event_count
             and _history_cache["telemetry_mtime"] == telem_mtime
@@ -1723,7 +1914,7 @@ def create_router(
         elif use_issue_rollups:
             for issue_number, counters in telemetry.get_issue_totals().items():
                 row = issue_rows.setdefault(
-                    issue_number, _new_issue_history_entry(issue_number)
+                    issue_number, _new_issue_history_entry(issue_number, cfg)
                 )
                 for key in _INFERENCE_COUNTER_KEYS:
                     row["inference"][key] = _coerce_int(counters.get(key, 0))
@@ -1753,20 +1944,20 @@ def create_router(
                 if issue_number <= 0:
                     continue
                 row = issue_rows.setdefault(
-                    issue_number, _new_issue_history_entry(issue_number)
+                    issue_number, _new_issue_history_entry(issue_number, cfg)
                 )
                 _aggregate_telemetry_record(row, record, pr_to_issue, sum_counters=True)
 
         if not cache_hit:
             _process_events_into_rows(
-                all_events, issue_rows, pr_to_issue, since_dt, until_dt
+                all_events, issue_rows, pr_to_issue, since_dt, until_dt, cfg
             )
 
             # Store in cache if this was an unfiltered aggregation. Only the
             # default-repo view is cached: _history_cache is not repo-keyed, so
-            # a per-repo request must never read (see cache_hit above) or write
-            # it, or one repo's rollups would bleed into another's view.
-            if use_unfiltered and repo is None:
+            # a per-repo / __all__ request must never read (see cache_hit) or
+            # write it, or one repo's rollups would bleed into another's view.
+            if use_cache and use_unfiltered:
                 _history_cache["issue_rows"] = copy.deepcopy(issue_rows)
                 _history_cache["pr_to_issue"] = dict(pr_to_issue)
                 _history_cache["event_count"] = event_count
@@ -1774,11 +1965,76 @@ def create_router(
                 _history_cache_ts[0] = now
                 _save_history_cache()
 
-        items = _filter_rows_to_items(issue_rows, requested_status, query_text)
+        items = _filter_rows_to_items(
+            issue_rows, requested_status, query_text, state, repo_slug
+        )
 
         # Enrich via GitHub, backfill crate titles, sort.
         items = await _apply_enrichment_and_crate_titles(
-            items, issue_rows, requested_status, query_text, use_unfiltered
+            items,
+            issue_rows,
+            requested_status,
+            query_text,
+            use_unfiltered,
+            cfg=cfg,
+            bus=bus,
+            state=state,
+            repo_slug=repo_slug,
+            use_cache=use_cache,
+        )
+        return items
+
+    @router.get("/api/issues/history")
+    async def get_issue_history(
+        since: str | None = None,
+        until: str | None = None,
+        status: str | None = None,
+        query: str | None = None,
+        limit: int = 300,
+        repo: RepoSlugParam = None,
+    ) -> JSONResponse:
+        """Return issue lifecycle history with inference rollups (repo-scoped).
+
+        For ``repo=__all__`` the history is unioned across every runtime and
+        each row is tagged with its repo slug. Issue numbers collide across
+        repos, so rows are kept distinct per ``(repo, issue_number)`` (the
+        per-runtime lists are simply concatenated, never merged by number).
+        """
+        since_dt = _parse_iso_or_none(since)
+        until_dt = _parse_iso_or_none(until)
+        requested_status = (status or "").strip().lower()
+        query_text = (query or "").strip().lower()
+        clamped_limit = max(1, min(limit, 1000))
+
+        # The persistent history cache is keyed to the default runtime, so only
+        # a bare (repo is None) request may use it.
+        use_cache = repo is None
+
+        items: list[IssueHistoryEntry] = []
+        for _cfg, _state, _bus, _get_orch, slug in _resolve_runtimes(repo):
+            items.extend(
+                await _collect_history_items(
+                    _cfg,
+                    _state,
+                    _bus,
+                    slug,
+                    since_dt=since_dt,
+                    until_dt=until_dt,
+                    requested_status=requested_status,
+                    query_text=query_text,
+                    use_cache=use_cache,
+                )
+            )
+
+        # Order globally across runtimes (per-runtime lists were each sorted),
+        # then apply the page limit to the merged result.
+        items.sort(
+            key=lambda item: (
+                item.last_seen or "",
+                item.inference.get("total_tokens", 0),
+                item.issue_number,
+            ),
+            reverse=True,
         )
         items = items[:clamped_limit]
 
@@ -1891,11 +2147,17 @@ def create_router(
     async def get_sessions(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Return session logs for the selected repo."""
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        sessions = _state.load_sessions()
+        """Return session logs — unioned across repos for ``repo=__all__``.
+
+        Each runtime's state is already repo-scoped, and ``SessionLog.repo``
+        + the ``{repo_slug}-{ts}`` session_id make entries self-identifying.
+        """
+        sessions = []
+        for _cfg, _state, _bus, _get_orch, _slug in _resolve_runtimes(repo):
+            sessions.extend(_state.load_sessions())
         repo_filter = (repo or "").strip()
-        if repo_filter and registry is None:
+        if repo_filter and repo_filter.lower() != REPO_ALL and registry is None:
+            # Legacy no-registry wiring: load_sessions returns ALL; filter by tag.
             normalized = repo_filter.lower()
             sessions = [
                 session
@@ -1909,19 +2171,22 @@ def create_router(
         session_id: str,
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Return a single session by ID with associated events."""
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        session = _state.get_session(session_id)
-        if session is None:
-            return JSONResponse({"error": "Session not found"}, status_code=404)
-        # Include events tagged with this session_id
-        all_events = _bus.get_history()
-        session_events = [
-            e.model_dump() for e in all_events if e.session_id == session_id
-        ]
-        data = session.model_dump()
-        data["events"] = session_events
-        return JSONResponse(data)
+        """Return a single session by ID with associated events.
+
+        Searches the resolved runtime(s) — for ``repo=__all__`` this finds the
+        owning repo across every line; for a specific repo it checks just that one.
+        """
+        for _cfg, _state, _bus, _get_orch, _slug in _resolve_runtimes(repo):
+            session = _state.get_session(session_id)
+            if session is None:
+                continue
+            session_events = [
+                e.model_dump() for e in _bus.get_history() if e.session_id == session_id
+            ]
+            data = session.model_dump()
+            data["events"] = session_events
+            return JSONResponse(data)
+        return JSONResponse({"error": "Session not found"}, status_code=404)
 
     @router.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket) -> None:

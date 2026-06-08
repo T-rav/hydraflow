@@ -537,7 +537,7 @@ def build_services(
 
     # Harness insight store (shared across phases)
     harness_insights = HarnessInsightStore(
-        config.data_path("memory"),
+        config.repo_memory_dir,
         sensor_enrichment_enabled=config.sensor_enrichment_enabled,
         observability=observability,
     )
@@ -821,7 +821,7 @@ def build_services(
         credentials=credentials,
     )
     retrospective_queue = RetrospectiveQueue(
-        config.data_path("memory", "retrospective_queue.jsonl"),
+        config.repo_memory_dir / "retrospective_queue.jsonl",
     )
     retrospective = RetrospectiveCollector(
         config,
@@ -858,7 +858,7 @@ def build_services(
     )
     # ReviewInsightStore shared between AgentRunner and ReviewPhase
     review_insights = ReviewInsightStore(
-        config.memory_dir,
+        config.repo_memory_dir,
         observability=observability,
     )
     # ``_insights`` is internal AgentRunner plumbing not part of any Port.
@@ -1315,6 +1315,10 @@ def build_services(
     term_proposer_pr_port = OpenAutoPRBotPRPort(
         repo_root=config.repo_root,
         gh_token=credentials.gh_token,
+        # Route UL bot PRs to the active integration branch (staging when
+        # enabled, else main) per ADR-0042. Shared by all UL loops
+        # (term-proposer/-pruner, edge-proposer, entry-evidence).
+        base=config.base_branch(),
     )
     term_proposer_loop = TermProposerLoop(  # noqa: F841
         config=config,

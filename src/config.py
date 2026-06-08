@@ -3030,12 +3030,26 @@ class HydraFlowConfig(BaseModel):
 
     @property
     def factory_metrics_path(self) -> Path:
-        """Path to the factory metrics JSONL store."""
-        return self.diagnostics_dir / "factory_metrics.jsonl"
+        """Path to the repo-scoped factory metrics JSONL store (ADR-0021 D2).
+
+        Served by ``/api/diagnostics/*``. Lives under
+        ``data_root/<repo_slug>/diagnostics`` so per-repo telemetry does not
+        collide under a shared ``data_root`` (e.g. ``HYDRAFLOW_HOME``).
+        """
+        return self.repo_data_root / "diagnostics" / "factory_metrics.jsonl"
 
     def data_path(self, *parts: str | os.PathLike[str]) -> Path:
         """Return an absolute path inside the HydraFlow data_root."""
         return self.data_root.joinpath(*parts)
+
+    def repo_data_path(self, *parts: str | os.PathLike[str]) -> Path:
+        """Return an absolute path inside the repo-scoped data dir.
+
+        Mirror of :meth:`data_path` but rooted at ``repo_data_root``
+        (``data_root/<repo_slug>``). Use for per-repo operational stores that
+        must not collide across repos sharing a ``data_root`` (ADR-0021 D2).
+        """
+        return self.repo_data_root.joinpath(*parts)
 
     def format_path_for_display(self, path: Path) -> str:
         """Return a human-friendly path relative to repo or data root when possible."""
@@ -3053,6 +3067,32 @@ class HydraFlowConfig(BaseModel):
     def repo_data_root(self) -> Path:
         """Return the repo-scoped data directory (``data_root / repo_slug``)."""
         return self.data_root / self.repo_slug
+
+    @property
+    def repo_memory_dir(self) -> Path:
+        """Repo-scoped memory dir for per-repo insight stores (ADR-0021 D2).
+
+        Holds the retrospective/harness/review insight files. Distinct from
+        :attr:`memory_dir` (flat ``data_root/memory``), which still hosts
+        cross-repo knowledge (e.g. ``adr_decisions.jsonl``,
+        ``hitl_recommendations.jsonl``).
+        """
+        return self.repo_data_root / "memory"
+
+    @property
+    def retrospectives_path(self) -> Path:
+        """Repo-scoped retrospective records store (``repo_memory_dir``)."""
+        return self.repo_memory_dir / "retrospectives.jsonl"
+
+    @property
+    def cost_inferences_path(self) -> Path:
+        """Repo-scoped LLM inference cost-telemetry store (ADR-0021 D2)."""
+        return self.repo_data_root / "metrics" / "prompt" / "inferences.jsonl"
+
+    @property
+    def pr_stats_path(self) -> Path:
+        """Repo-scoped per-PR telemetry aggregates (ADR-0021 D2)."""
+        return self.repo_data_root / "metrics" / "prompt" / "pr_stats.json"
 
     def base_branch(self) -> str:
         """Return the branch agent PRs should target.

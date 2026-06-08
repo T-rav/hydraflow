@@ -161,33 +161,21 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
                     if attempts >= threshold and sig not in escalated_signatures:
                         escalated_signatures.append(sig)
 
-            dedup_key = _fleet_dedup_key(drifted)
-            seen = self._dedup.get()
-            if dedup_key not in seen:
-                filed_issue = await self._file_drift_issue(drifted)
-                if filed_issue == 0:
-                    # create_issue's documented 0-sentinel: the gh call
-                    # failed. Don't add the dedup key — that would suppress
-                    # re-filing forever without a real issue. Retry next tick.
-                    logger.warning(
-                        "live_corpus_replay: create_issue returned 0 "
-                        "(sentinel) for drift issue; skipping dedup, will "
-                        "retry next cycle",
-                    )
-                else:
-                    seen.add(dedup_key)
-                    self._dedup.set_all(seen)
+            # Keep ONE open ``shadow-drift`` rollup issue and rewrite its body
+            # as the diverged set changes — instead of filing a brand-new issue
+            # for every changed signature set (which piled up #9258..#9335).
+            filed_issue = await self._upsert_drift_rollup(drifted)
 
-            # If any signature reached the threshold, file an escalation
-            # issue routed to the auto-agent preflight loop via the
-            # ``hitl-escalation`` label.
+            # If any signature reached the threshold, keep a single open
+            # ``shadow-drift-stuck`` escalation issue routed to the auto-agent
+            # preflight loop via the ``hitl-escalation`` label.
             if escalated_signatures:
-                escalated_issue = await self._file_escalation_issue(
-                    escalated_signatures
-                )
-        # Clean tick: clear all attempt counters so a future
-        # re-occurrence of the same drift starts fresh.
+                escalated_issue = await self._upsert_escalation(escalated_signatures)
+        # Clean tick: the fakes caught up. Close the open rollup + escalation
+        # issues (their job is done) and clear all per-signature counters so a
+        # future re-occurrence starts fresh.
         elif self._state is not None:
+            await self._resolve_open_issues()
             self._state.clear_live_corpus_drift_attempts()
 
         return {
@@ -200,6 +188,85 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
             "escalated_issue": escalated_issue,
             "escalated_signatures": len(escalated_signatures),
         }
+
+    async def _upsert_drift_rollup(self, drifted: list[tuple[Path, str]]) -> int | None:
+        """Maintain a single open ``shadow-drift`` issue for the fleet.
+
+        With state: create the issue once, then ``update_issue_body`` in place
+        whenever the diverged set changes (skipping a no-op write when it
+        hasn't). Without state (unit tests): preserve the original
+        dedup-store-gated single-file behaviour. Returns the rollup issue
+        number, or ``0``/``None`` when nothing could be filed.
+        """
+        current_hash = _fleet_dedup_key(drifted)
+
+        if self._state is not None:
+            rollup = self._state.get_live_corpus_drift_rollup()
+            if rollup and rollup["issue_number"]:
+                issue_number = rollup["issue_number"]
+                if rollup["signature_hash"] == current_hash:
+                    # Same diverged set as last tick — no GitHub write needed.
+                    return None
+                await self._pr.update_issue_body(
+                    issue_number, self._drift_body(drifted)
+                )
+                self._state.set_live_corpus_drift_rollup(
+                    issue_number=issue_number, signature_hash=current_hash
+                )
+                return issue_number
+            filed = await self._file_drift_issue(drifted)
+            if filed and filed != 0:
+                self._state.set_live_corpus_drift_rollup(
+                    issue_number=filed, signature_hash=current_hash
+                )
+            else:
+                # create_issue 0-sentinel: gh failed. Persist nothing so the
+                # next tick retries the create.
+                logger.warning(
+                    "live_corpus_replay: create_issue returned 0 (sentinel) "
+                    "for drift rollup; will retry next cycle",
+                )
+            return filed
+
+        # State-less path (unit tests): original dedup-store gate.
+        seen = self._dedup.get()
+        if current_hash in seen:
+            return None
+        filed = await self._file_drift_issue(drifted)
+        if filed == 0:
+            logger.warning(
+                "live_corpus_replay: create_issue returned 0 (sentinel) for "
+                "drift issue; skipping dedup, will retry next cycle",
+            )
+            return filed
+        seen.add(current_hash)
+        self._dedup.set_all(seen)
+        return filed
+
+    async def _upsert_escalation(self, signatures: list[str]) -> int | None:
+        """Keep a single open ``shadow-drift-stuck`` escalation issue."""
+        if self._state is not None:
+            existing = self._state.get_live_corpus_escalation_issue()
+            if existing:
+                return existing
+            filed = await self._file_escalation_issue(signatures)
+            if filed and filed != 0:
+                self._state.set_live_corpus_escalation_issue(filed)
+            return filed
+        return await self._file_escalation_issue(signatures)
+
+    async def _resolve_open_issues(self) -> None:
+        """Close the open rollup + escalation issues on a clean (no-drift) tick."""
+        if self._state is None:
+            return
+        rollup = self._state.get_live_corpus_drift_rollup()
+        if rollup and rollup["issue_number"]:
+            await self._pr.close_issue(rollup["issue_number"])
+            self._state.clear_live_corpus_drift_rollup()
+        escalation = self._state.get_live_corpus_escalation_issue()
+        if escalation:
+            await self._pr.close_issue(escalation)
+            self._state.clear_live_corpus_escalation_issue()
 
     async def _file_escalation_issue(self, signatures: list[str]) -> int:
         """File a ``hitl-escalation`` issue when drift signatures exhaust
@@ -237,18 +304,25 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
             labels=labels,
         )
 
-    async def _file_drift_issue(self, drifted: list[tuple[Path, str]]) -> int:
-        """File a single hydraflow-find issue covering all drift this tick."""
-        labels = ["hydraflow-find", "shadow-drift"]
-        title = (
+    @staticmethod
+    def _drift_title(drifted: list[tuple[Path, str]]) -> str:
+        return (
             f"Shadow drift: {len(drifted)} fake-adapter output(s) diverged "
             f"from live samples"
         )
+
+    @staticmethod
+    def _drift_body(drifted: list[tuple[Path, str]]) -> str:
         body_lines = [
             "## Shadow corpus drift",
             "",
             "`LiveCorpusReplayLoop` compared live-recorded subprocess outputs "
             "against fake-adapter outputs and detected divergence.",
+            "",
+            "_This is a rolling rollup: the loop keeps a single open "
+            "`shadow-drift` issue and rewrites this body as the diverged set "
+            "changes, then closes the issue automatically on the first clean "
+            "tick (no drift)._",
             "",
             "### Drifted samples",
             "",
@@ -264,10 +338,14 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
                 "the full auto-repair chain.",
             ]
         )
+        return "\n".join(body_lines)
+
+    async def _file_drift_issue(self, drifted: list[tuple[Path, str]]) -> int:
+        """File a single hydraflow-find issue covering all drift this tick."""
         return await self._pr.create_issue(
-            title=title,
-            body="\n".join(body_lines),
-            labels=labels,
+            title=self._drift_title(drifted),
+            body=self._drift_body(drifted),
+            labels=["hydraflow-find", "shadow-drift"],
         )
 
 

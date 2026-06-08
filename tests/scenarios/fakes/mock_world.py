@@ -253,6 +253,10 @@ class MockWorld:
         self._dashboard: Any = None
         self._dashboard_url: str | None = None
 
+        from repo_runtime import RepoRuntimeRegistry  # noqa: PLC0415
+
+        self._registry: RepoRuntimeRegistry = RepoRuntimeRegistry()
+
         self._wire_targets(self._harness)
 
         if self._use_real_agent:
@@ -363,15 +367,43 @@ class MockWorld:
         return self
 
     def add_repo(self, slug: str, path: str) -> MockWorld:
-        """Seed an entry into the RepoRegistryStore rooted at tmp_path.
+        """Seed a RepoRegistryStore entry AND a live runtime in the registry.
 
-        Scenarios that exercise multi-repo controls (register / remove)
-        start with this rather than driving the UI's 'Add repo' button.
+        Scenarios that exercise multi-repo controls (register / remove) start
+        with this rather than driving the UI's 'Add repo' button. The runtime
+        is a duck-typed namespace (the proven test pattern) with its own
+        EventBus tagged via set_repo, so >=2 calls yield genuinely independent
+        runtimes that resolve_runtimes can aggregate.
         """
+        from types import SimpleNamespace  # noqa: PLC0415
+
+        from events import EventBus  # noqa: PLC0415
         from repo_store import RepoRecord, RepoRegistryStore  # noqa: PLC0415
+        from state import StateTracker  # noqa: PLC0415
+        from tests.helpers import ConfigFactory  # noqa: PLC0415
 
         store = RepoRegistryStore(self._tmp_path)
         store.upsert(RepoRecord(slug=slug, repo=slug, path=path))
+
+        dash = slug.replace("/", "-")
+        # The seed `path` may be a container path (e.g. /workspace/...) that is
+        # not writable in-process; give the runtime a tmp-based repo_root so
+        # building it never touches the seed's filesystem location.
+        repo_root = self._tmp_path / "repo_runtimes" / dash
+        repo_root.mkdir(parents=True, exist_ok=True)
+        cfg = ConfigFactory.create(repo=slug, repo_root=repo_root)
+        bus = EventBus()
+        bus.set_repo(dash)
+        st = StateTracker(repo_root / "state.json")
+        self._registry._runtimes[dash] = SimpleNamespace(
+            slug=dash,
+            config=cfg,
+            state=st,
+            event_bus=bus,
+            orchestrator=None,
+            running=False,
+            last_error=None,
+        )
         return self
 
     def set_phase_result(self, phase: str, issue: int, result: Any) -> MockWorld:
@@ -458,6 +490,11 @@ class MockWorld:
         return self
 
     # --- Inspect world state ---
+
+    @property
+    def registry(self):
+        """The multi-repo runtime registry seeded by add_repo/apply_seed."""
+        return self._registry
 
     @property
     def github(self) -> FakeGitHub:
@@ -742,6 +779,18 @@ class MockWorld:
             event_bus=bus,
             state=state,
             orchestrator=orchestrator,
+            # #9347 began ALWAYS passing this registry to the dashboard, even
+            # empty. A non-None-but-empty registry flips the dashboard onto its
+            # multi-repo branches for single-repo browser scenarios: POST
+            # /api/control/start runs registry.start_all() over zero runtimes
+            # (orchestrator stuck "idle"), and resolve_runtime / is_pipeline_active
+            # resolve an empty set (cards "0 merged", flow-dots missing, routes
+            # fall back to real gh -> 401). Only hand the dashboard the registry
+            # once a repo is actually registered; otherwise use the host/legacy
+            # path (the pre-#9347 behaviour these scenarios were written against).
+            # See issue #9359.
+            registry=self._registry if len(self._registry) > 0 else None,
+            default_repo_slug=config.repo.replace("/", "-") if config.repo else None,
         )
         await dashboard.start()
 

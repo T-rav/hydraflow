@@ -90,6 +90,22 @@ class TestRunDispatch:
             await _run(mock_config)
             mock_headless.assert_awaited_once_with(mock_config)
 
+    @pytest.mark.asyncio
+    async def test_run_migrates_flat_stores_with_host_config(self) -> None:
+        # The D2 flat-store migration must run once with the host config at
+        # startup; otherwise per-repo stores never relocate in prod (ADR-0021).
+        mock_config = MagicMock()
+        mock_config.dashboard_enabled = True
+
+        with (
+            patch("server._run_with_dashboard"),
+            patch("data_migration.migrate_flat_operational_stores") as mock_migrate,
+        ):
+            from server import _run
+
+            await _run(mock_config)
+            mock_migrate.assert_called_once_with(mock_config)
+
 
 class TestDetectSubmoduleParent:
     def test_returns_parent_when_git_is_file(self, tmp_path: Path) -> None:

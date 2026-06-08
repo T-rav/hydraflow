@@ -42,6 +42,42 @@ def _adr_file_in_diff(adr: ADR, changed_files: Iterable[str]) -> bool:
     return any(f.startswith(prefix) for f in changed_files)
 
 
+def _split_path_symbol(entry: str) -> tuple[str, str | None]:
+    """Split a changed-file entry into ``(path, symbol)``.
+
+    A diff entry may optionally carry a ``:Symbol`` tail mirroring an ADR
+    citation (``src/foo.py:Bar.baz``).  In production the auditor passes
+    bare file paths — ``gh`` gives file-level diffs, not symbol-level — so
+    ``symbol`` is ``None`` for those, which is exactly what makes a
+    symbol-qualified citation *not* drift on a file-only touch (#9176).
+    """
+    path, sep, symbol = entry.partition(":")
+    if sep and symbol:
+        return path, symbol
+    return entry, None
+
+
+def _citation_drifts(adr: ADR, path: str, changed_symbols: frozenset[str]) -> bool:
+    """Decide whether *path* drifts *adr* given the symbols changed in it.
+
+    Symbol-aware (#9176):
+
+    * **Bare-file citation** (empty cited-symbol set) → drifts on *any*
+      touch of the file.  This preserves the legacy file-granular
+      behaviour the P2 gate and the existing drift tests rely on.
+    * **Symbol-qualified citation** (non-empty cited-symbol set) → drifts
+      only when a symbol the diff reports as changed for this file
+      matches one of the cited symbols.  A file-only diff (no symbol
+      evidence) therefore does *not* drift a symbol-granular citation, so
+      unrelated churn in a high-churn shared module no longer flags the
+      ADR — the systemic false positive behind #9176.
+    """
+    cited_symbols = adr.source_symbols.get(path, frozenset())
+    if not cited_symbols:
+        return True
+    return bool(cited_symbols & changed_symbols)
+
+
 def compute_drift(
     adr_index: ADRIndex,
     pr_number: int,
@@ -49,17 +85,34 @@ def compute_drift(
 ) -> list[DriftFinding]:
     """Return drift findings for one PR's file diff.
 
+    Drift is symbol-aware (#9176): an ADR that cites a file at *symbol*
+    granularity (``src/foo.py:Bar``) only drifts when the diff reports a
+    change to that symbol; a bare ``src/foo.py`` citation still drifts on
+    any change to the file.  ``changed_files`` entries may optionally carry
+    a ``:Symbol`` tail to supply symbol evidence; bare paths — the
+    production case — supply none.
+
     Findings are sorted by ADR number for deterministic output.
     """
     files = list(changed_files)
-    src_files = [f for f in files if f.startswith("src/")]
-    if not src_files:
+    # Collapse optional `:Symbol` tails into a path → changed-symbols map.
+    changed_by_path: dict[str, set[str]] = {}
+    for entry in files:
+        path, symbol = _split_path_symbol(entry)
+        bucket = changed_by_path.setdefault(path, set())
+        if symbol:
+            bucket.add(symbol)
+    src_paths = [p for p in changed_by_path if p.startswith("src/")]
+    if not src_paths:
         return []
-    by_path = adr_index.adrs_touching(src_files)
+    by_path = adr_index.adrs_touching(src_paths)
 
     adr_hits: dict[int, tuple[ADR, list[str]]] = {}
     for path, adrs in by_path.items():
+        changed_symbols = frozenset(changed_by_path.get(path, set()))
         for adr in adrs:
+            if not _citation_drifts(adr, path, changed_symbols):
+                continue
             slot = adr_hits.setdefault(adr.number, (adr, []))
             slot[1].append(path)
 

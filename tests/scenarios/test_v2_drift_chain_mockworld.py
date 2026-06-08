@@ -67,6 +67,15 @@ def _build_loop(
     state = MagicMock()
     state.inc_live_corpus_drift_attempts = MagicMock(return_value=1)
     state.clear_live_corpus_drift_attempts = MagicMock()
+    # Fleet-wide rollup slots: a bare MagicMock would return a truthy stub for
+    # these getters, making the loop believe a rollup is already open (and
+    # update_issue_body instead of create). Pin them to "no open issue".
+    state.get_live_corpus_drift_rollup = MagicMock(return_value=None)
+    state.set_live_corpus_drift_rollup = MagicMock()
+    state.clear_live_corpus_drift_rollup = MagicMock()
+    state.get_live_corpus_escalation_issue = MagicMock(return_value=None)
+    state.set_live_corpus_escalation_issue = MagicMock()
+    state.clear_live_corpus_escalation_issue = MagicMock()
 
     stop = asyncio.Event()
     deps = LoopDeps(
