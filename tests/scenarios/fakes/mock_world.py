@@ -779,7 +779,17 @@ class MockWorld:
             event_bus=bus,
             state=state,
             orchestrator=orchestrator,
-            registry=self._registry,
+            # #9347 began ALWAYS passing this registry to the dashboard, even
+            # empty. A non-None-but-empty registry flips the dashboard onto its
+            # multi-repo branches for single-repo browser scenarios: POST
+            # /api/control/start runs registry.start_all() over zero runtimes
+            # (orchestrator stuck "idle"), and resolve_runtime / is_pipeline_active
+            # resolve an empty set (cards "0 merged", flow-dots missing, routes
+            # fall back to real gh -> 401). Only hand the dashboard the registry
+            # once a repo is actually registered; otherwise use the host/legacy
+            # path (the pre-#9347 behaviour these scenarios were written against).
+            # See issue #9359.
+            registry=self._registry if len(self._registry) > 0 else None,
             default_repo_slug=config.repo.replace("/", "-") if config.repo else None,
         )
         await dashboard.start()
