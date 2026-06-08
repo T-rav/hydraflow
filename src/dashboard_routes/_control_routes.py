@@ -33,7 +33,12 @@ from models import (
     OrchestratorStatusPayload,
 )
 from prompt_telemetry import PromptTelemetry
-from route_types import ControlStatusConfig, ControlStatusResponse, RepoSlugParam
+from route_types import (
+    REPO_ALL,
+    ControlStatusConfig,
+    ControlStatusResponse,
+    RepoSlugParam,
+)
 from update_check import load_cached_update_result
 
 if TYPE_CHECKING:
@@ -392,9 +397,15 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         "rc_cadence_hours",
     }
 
-    def _build_system_worker_inference_stats() -> dict[str, dict[str, int]]:
-        """Aggregate prompt-telemetry inference stats keyed by worker name."""
-        telemetry = PromptTelemetry(ctx.config)
+    def _build_system_worker_inference_stats(
+        cfg: HydraFlowConfig | None = None,
+    ) -> dict[str, dict[str, int]]:
+        """Aggregate prompt-telemetry inference stats keyed by worker name.
+
+        ``cfg`` defaults to the host config; pass the row's repo config so the
+        per-repo cost telemetry is read from that repo's store.
+        """
+        telemetry = PromptTelemetry(cfg or ctx.config)
         source_totals = telemetry.get_source_totals()
 
         worker_totals: dict[str, dict[str, int]] = {}
@@ -510,9 +521,22 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         return JSONResponse({"status": "stopping"})
 
     @router.post("/api/control/clear-credit-pause")
-    async def clear_credit_pause() -> JSONResponse:
-        """Clear an active credit pause, waking any sleeping loops."""
-        orch = ctx.get_orchestrator()
+    async def clear_credit_pause(repo: RepoSlugParam = None) -> JSONResponse:
+        """Clear an active credit pause, waking any sleeping loops.
+
+        Credit pause is per-orchestrator, so ``repo=__all__`` fans out and
+        clears every paused runtime; a single repo clears just that one.
+        """
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            cleared: list[str] = []
+            for _cfg, _state, _bus, _get_orch, slug in ctx.resolve_runtimes(repo):
+                orch = _get_orch()
+                if orch and orch.credits_paused_until is not None:
+                    orch.clear_credit_pause()
+                    cleared.append(slug)
+            return JSONResponse({"status": "cleared", "repos": cleared})
+        _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
+        orch = _get_orch()
         if not orch:
             return JSONResponse({"error": "no orchestrator"}, status_code=400)
         if orch.credits_paused_until is None:
@@ -520,37 +544,52 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         orch.clear_credit_pause()
         return JSONResponse({"status": "cleared"})
 
-    @router.get("/api/control/status")
-    async def get_control_status(
-        repo: RepoSlugParam = None,
-    ) -> JSONResponse:
-        """Return orchestrator run status, config summary, and version info."""
-        _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
-        orch = _get_orch()
-        status = "idle"
-        current_session = None
-        latest_version = ""
-        update_available = False
-        if orch:
-            status = orch.run_status
-            current_session = orch.current_session_id
-        update_result = load_cached_update_result(current_version=get_app_version())
-        if update_result is not None:
-            latest_version = update_result.latest_version or ""
-            update_available = update_result.update_available
-        credits_until = (
-            orch.credits_paused_until.isoformat()
-            if orch and orch.credits_paused_until
-            else None
+    # Rollup precedence for the aggregate top-level status (highest → lowest).
+    _STATUS_PRECEDENCE = (
+        "credits_paused",
+        "auth_failed",
+        "running",
+        "stopping",
+        "done",
+        "idle",
+    )
+
+    def _control_status_config(
+        cfg: HydraFlowConfig, *, latest_version: str, update_available: bool
+    ) -> ControlStatusConfig:
+        return ControlStatusConfig(
+            app_version=get_app_version(),
+            latest_version=latest_version,
+            update_available=update_available,
+            repo=cfg.repo,
+            ready_label=cfg.ready_label,
+            find_label=cfg.find_label,
+            planner_label=cfg.planner_label,
+            review_label=cfg.review_label,
+            hitl_label=cfg.hitl_label,
+            hitl_active_label=cfg.hitl_active_label,
+            fixed_label=cfg.fixed_label,
+            max_triagers=cfg.max_triagers,
+            max_workers=cfg.max_workers,
+            max_planners=cfg.max_planners,
+            max_reviewers=cfg.max_reviewers,
+            max_hitl_workers=cfg.max_hitl_workers,
+            batch_size=cfg.batch_size,
+            model=cfg.model,
+            pr_unstick_batch_size=cfg.pr_unstick_batch_size,
+            workspace_base=str(cfg.workspace_base),
         )
+
+    def _runtime_status(orch: object | None) -> tuple[ControlStatus, str | None, bool]:
+        """Return (status, credits_paused_until_iso, mockworld_active) for one orch."""
+        status = getattr(orch, "run_status", "idle") if orch else "idle"
         try:
             control_status = ControlStatus(status)
         except ValueError:
             control_status = ControlStatus.IDLE
-        # Detect sandbox-mode by duck-typing the injected PRPort. Fake
-        # adapters carry ``_is_fake_adapter = True``; real ones do not.
-        # No conditional import / no isinstance check — the marker is the
-        # contract (ADR — sandbox tier scenario testing, Task 1.3).
+        credits = getattr(orch, "credits_paused_until", None) if orch else None
+        credits_until = credits.isoformat() if credits else None
+        # Sandbox-mode is duck-typed off the injected PRPort's _is_fake_adapter.
         mockworld_active = False
         if orch is not None:
             svc = getattr(orch, "_svc", None)
@@ -558,30 +597,79 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 mockworld_active = bool(
                     getattr(getattr(svc, "prs", None), "_is_fake_adapter", False)
                 )
+        return control_status, credits_until, mockworld_active
+
+    @router.get("/api/control/status")
+    async def get_control_status(
+        repo: RepoSlugParam = None,
+    ) -> JSONResponse:
+        """Return orchestrator run status, config summary, and version info.
+
+        For ``repo=__all__`` the top-level fields are a rollup and ``repos``
+        carries the per-repo breakdown; ``config`` is the default repo's.
+        """
+        update_result = load_cached_update_result(current_version=get_app_version())
+        latest_version = (
+            (update_result.latest_version or "") if update_result is not None else ""
+        )
+        update_available = (
+            update_result.update_available if update_result is not None else False
+        )
+
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            per_repo: list[dict[str, Any]] = []
+            statuses: list[str] = []
+            credits_candidates: list[str] = []
+            mockworld_any = False
+            for _cfg, _state, _bus, _get_orch, slug in ctx.resolve_runtimes(repo):
+                cs, credits_until, mockworld = _runtime_status(_get_orch())
+                statuses.append(cs.value)
+                if credits_until:
+                    credits_candidates.append(credits_until)
+                mockworld_any = mockworld_any or mockworld
+                per_repo.append(
+                    {
+                        "slug": slug,
+                        "status": cs.value,
+                        "credits_paused_until": credits_until,
+                        "mockworld_active": mockworld,
+                        "config": _control_status_config(
+                            _cfg,
+                            latest_version=latest_version,
+                            update_available=update_available,
+                        ).model_dump(),
+                    }
+                )
+            rollup = next((s for s in _STATUS_PRECEDENCE if s in statuses), "idle")
+            d_cfg, _ds, _db, _dget = ctx.resolve_runtime(None)
+            response = ControlStatusResponse(
+                status=ControlStatus(rollup),
+                credits_paused_until=min(credits_candidates)
+                if credits_candidates
+                else None,
+                config=_control_status_config(
+                    d_cfg,
+                    latest_version=latest_version,
+                    update_available=update_available,
+                ),
+                mockworld_active=mockworld_any,
+                repos=per_repo,
+            )
+            data = response.model_dump()
+            data["current_session_id"] = None
+            return JSONResponse(data)
+
+        _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
+        orch = _get_orch()
+        control_status, credits_until, mockworld_active = _runtime_status(orch)
+        current_session = orch.current_session_id if orch else None
         response = ControlStatusResponse(
             status=control_status,
             credits_paused_until=credits_until,
-            config=ControlStatusConfig(
-                app_version=get_app_version(),
+            config=_control_status_config(
+                _cfg,
                 latest_version=latest_version,
                 update_available=update_available,
-                repo=_cfg.repo,
-                ready_label=_cfg.ready_label,
-                find_label=_cfg.find_label,
-                planner_label=_cfg.planner_label,
-                review_label=_cfg.review_label,
-                hitl_label=_cfg.hitl_label,
-                hitl_active_label=_cfg.hitl_active_label,
-                fixed_label=_cfg.fixed_label,
-                max_triagers=_cfg.max_triagers,
-                max_workers=_cfg.max_workers,
-                max_planners=_cfg.max_planners,
-                max_reviewers=_cfg.max_reviewers,
-                max_hitl_workers=_cfg.max_hitl_workers,
-                batch_size=_cfg.batch_size,
-                model=_cfg.model,
-                pr_unstick_batch_size=_cfg.pr_unstick_batch_size,
-                workspace_base=str(_cfg.workspace_base),
             ),
             mockworld_active=mockworld_active,
         )
@@ -593,8 +681,29 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
     async def credit_refresh(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Attempt to clear credit pause and resume processing."""
+        """Attempt to clear credit pause and resume processing.
+
+        ``probe_credit_availability`` is a single process-global check, so
+        ``repo=__all__`` probes once and resumes every paused runtime (parity
+        with ``clear-credit-pause``).
+        """
         from subprocess_util import probe_credit_availability
+
+        async def _refresh_all() -> JSONResponse:
+            paused = [
+                (slug, orch)
+                for _cfg, _state, _bus, _get_orch, slug in ctx.resolve_runtimes(repo)
+                if (orch := _get_orch()) and orch.credits_paused_until is not None
+            ]
+            if not paused:
+                return JSONResponse({"status": "not_paused"})
+            if not await probe_credit_availability():
+                return JSONResponse({"status": "still_exhausted"})
+            resumed = [slug for slug, orch in paused if orch.try_clear_credit_pause()]
+            return JSONResponse({"status": "resuming", "repos": resumed})
+
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            return await _refresh_all()
 
         _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
         orch = _get_orch()
@@ -645,7 +754,20 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         body: dict[str, Any],
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Update runtime config fields. Pass ``persist: true`` to save to disk."""
+        """Update runtime config fields. Pass ``persist: true`` to save to disk.
+
+        Config writes target a single repo (or the default); ``repo=__all__``
+        is rejected, and ``gh_circuit_breaker_enabled`` is process-global so it
+        cannot be set per-repo.
+        """
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "message": "config writes require a specific repo, not __all__",
+                },
+                status_code=400,
+            )
         persist = body.pop("persist", False)
         _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
 
@@ -657,6 +779,16 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             if not hasattr(_cfg, key):
                 continue
             updates[key] = value
+
+        if repo is not None and "gh_circuit_breaker_enabled" in updates:
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "message": "gh_circuit_breaker_enabled is process-global; "
+                    "it cannot be set per-repo",
+                },
+                status_code=400,
+            )
 
         if not updates:
             return JSONResponse({"status": "ok", "updated": {}})
@@ -701,13 +833,13 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
 
         return JSONResponse({"status": "ok", "updated": applied})
 
-    @router.get("/api/system/workers")
-    async def get_system_workers(
-        repo: RepoSlugParam = None,
-    ) -> JSONResponse:
-        """Return last known status of each background worker."""
-        _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
-        orch = _get_orch()
+    def _workers_for_runtime(
+        _cfg: HydraFlowConfig,
+        _state: Any,
+        orch: Any,
+        slug: str,
+    ) -> list[BackgroundWorkerStatus]:
+        """Build the worker-status list for one runtime, tagged with its slug."""
         bg_states = orch.get_bg_worker_states() if orch else {}
         persisted_states: dict[str, BackgroundWorkerState] = {}
         if not orch:
@@ -715,14 +847,14 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 persisted_states = _state.get_bg_worker_states()
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Failed to load persisted bg worker states")
-        inference_by_worker = _build_system_worker_inference_stats()
+        inference_by_worker = _build_system_worker_inference_stats(_cfg)
         disabled_workers: set[str] = set()
         if not orch:
             try:
                 disabled_workers = _state.get_disabled_workers()
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Failed to load persisted disabled workers")
-        workers = []
+        workers: list[BackgroundWorkerStatus] = []
         for name, label, description in _bg_worker_defs:
             enabled = (
                 orch.is_bg_worker_enabled(name)
@@ -774,6 +906,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                         interval_seconds=interval,
                         next_run=_compute_next_run(last_run, interval),
                         details=details,
+                        repo=slug,
                     )
                 )
             else:
@@ -785,8 +918,27 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                         enabled=enabled,
                         interval_seconds=interval,
                         details=inference_by_worker.get(name, {}),
+                        repo=slug,
                     )
                 )
+        return workers
+
+    @router.get("/api/system/workers")
+    async def get_system_workers(
+        repo: RepoSlugParam = None,
+    ) -> JSONResponse:
+        """Return last known status of each background worker.
+
+        For ``repo=__all__`` every repo's workers are unioned (not merged) and
+        each row is tagged with its repo slug.
+        """
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            workers: list[BackgroundWorkerStatus] = []
+            for _cfg, _state, _bus, _get_orch, slug in ctx.resolve_runtimes(repo):
+                workers.extend(_workers_for_runtime(_cfg, _state, _get_orch(), slug))
+            return JSONResponse(BackgroundWorkersResponse(workers=workers).model_dump())
+        _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
+        workers = _workers_for_runtime(_cfg, _state, _get_orch(), repo or "")
         return JSONResponse(BackgroundWorkersResponse(workers=workers).model_dump())
 
     @router.post("/api/control/bg-worker")
