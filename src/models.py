@@ -1900,6 +1900,16 @@ class StateData(BaseModel):
     # LiveCorpusReplayLoop (#8786 Phase 3) — per-drift-signature attempt
     # counters for the 3-attempt escalation chain.
     live_corpus_drift_attempts: dict[str, int] = Field(default_factory=dict)
+    # Fleet-wide shadow-drift ROLLUP (#9351 follow-up): one open
+    # ``shadow-drift`` issue tracks the current diverged-sample set. Carries
+    # ``{"issue_number": int, "signature_hash": str}`` so subsequent ticks
+    # update the body in-place when the set changes, and the loop closes the
+    # issue on a clean tick. Replaces the old behaviour where every changed
+    # signature set filed a brand-new issue (issues #9258..#9335 pile-up).
+    live_corpus_drift_rollup: dict | None = Field(default=None)
+    # The single open ``shadow-drift-stuck`` HITL escalation issue, closed on a
+    # clean tick alongside the rollup. None when no escalation is open.
+    live_corpus_escalation_issue: int | None = Field(default=None)
     escalation_contexts: dict[str, EscalationContext] = Field(default_factory=dict)
     diagnostic_attempts: dict[str, list[AttemptRecord]] = Field(default_factory=dict)
     diagnosis_severities: dict[str, str] = Field(default_factory=dict)
