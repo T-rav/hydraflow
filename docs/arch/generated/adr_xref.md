@@ -28,7 +28,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0018 | `src.config`, `src.pr_manager`, `src.report_issue_loop`, `src.screenshot_scanner` |
 | ADR-0019 | `src.dashboard_routes`, `src.epic`, `src.issue_fetcher`, `src.post_merge_handler` |
 | ADR-0020 | — |
-| ADR-0021 | `src.config`, `src.file_util`, `src.metrics_manager`, `src.state._session` |
+| ADR-0021 | `src.config`, `src.data_migration`, `src.file_util`, `src.metrics_manager`, `src.state._session` |
 | ADR-0022 | `src.config`, `src.issue_store` |
 | ADR-0023 | — |
 | ADR-0024 | `src.agent`, `src.implement_phase`, `src.state` |
@@ -135,6 +135,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.dashboard_routes._cost_rollups` | ADR-0045 |
 | `src.dashboard_routes._diagnostics_routes` | ADR-0050 |
 | `src.dashboard_routes._routes` | ADR-0030 |
+| `src.data_migration` | ADR-0021 |
 | `src.discover_phase` | ADR-0031, ADR-0045 |
 | `src.discover_runner` | ADR-0031, ADR-0045, ADR-0063 |
 | `src.discovery_council` | ADR-0064 |

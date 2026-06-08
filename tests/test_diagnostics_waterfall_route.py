@@ -10,21 +10,19 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from config import HydraFlowConfig
 from dashboard_routes._diagnostics_routes import build_diagnostics_router
+from tests.helpers import ConfigFactory
 
 
 @pytest.fixture
-def config(tmp_path: Path) -> MagicMock:
-    cfg = MagicMock()
-    cfg.data_root = tmp_path
-    cfg.data_path = tmp_path.joinpath
-    cfg.factory_metrics_path = tmp_path / "diagnostics" / "factory_metrics.jsonl"
-    cfg.repo = "o/r"
-    return cfg
+def config(tmp_path: Path) -> HydraFlowConfig:
+    (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
+    return ConfigFactory.create(repo_root=tmp_path / "repo")
 
 
 @pytest.fixture
-def client(config: MagicMock, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def client(config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     fetcher = MagicMock()
     fetcher.fetch_issue_by_number = AsyncMock(
         return_value=MagicMock(
@@ -43,15 +41,19 @@ def client(config: MagicMock, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     return TestClient(app)
 
 
-def _write_inference(config: MagicMock, **fields: object) -> None:
-    d = config.data_root / "metrics" / "prompt"
-    d.mkdir(parents=True, exist_ok=True)
-    with (d / "inferences.jsonl").open("a", encoding="utf-8") as fh:
+def _write_inference(config: HydraFlowConfig, **fields: object) -> None:
+    config.cost_inferences_path.parent.mkdir(parents=True, exist_ok=True)
+    with config.cost_inferences_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(fields) + "\n")
 
 
 def _write_trace(
-    config: MagicMock, issue: int, phase: str, run_id: int, idx: int, payload: dict
+    config: HydraFlowConfig,
+    issue: int,
+    phase: str,
+    run_id: int,
+    idx: int,
+    payload: dict,
 ) -> None:
     d = config.data_root / "traces" / str(issue) / phase / f"run-{run_id}"
     d.mkdir(parents=True, exist_ok=True)
@@ -59,7 +61,7 @@ def _write_trace(
 
 
 def test_waterfall_route_full_issue_returns_all_kinds(
-    client: TestClient, config: MagicMock
+    client: TestClient, config: HydraFlowConfig
 ) -> None:
     _write_inference(
         config,
@@ -153,7 +155,7 @@ def test_waterfall_route_full_issue_returns_all_kinds(
 
 
 def test_waterfall_route_partial_telemetry_returns_missing_phases(
-    client: TestClient, config: MagicMock
+    client: TestClient, config: HydraFlowConfig
 ) -> None:
     _write_inference(
         config,
@@ -179,7 +181,7 @@ def test_waterfall_route_partial_telemetry_returns_missing_phases(
 
 
 def test_waterfall_route_ghost_issue_still_returns_200(
-    config: MagicMock, monkeypatch: pytest.MonkeyPatch
+    config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Separate client with a fetcher that returns None (deleted/closed issue).
     fetcher = MagicMock()

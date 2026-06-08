@@ -1,7 +1,7 @@
 # ADR-0021: Persistence Architecture and Data Layout
 
 **Status:** Accepted
-**Enforced by:** tests/test_state_persistence.py, tests/test_event_persistence.py
+**Enforced by:** tests/test_state_persistence.py, tests/test_event_persistence.py, tests/test_data_migration_d2.py
 **Date:** 2026-02-28
 
 ## Context
@@ -186,6 +186,63 @@ but the defaults ensure a single `data_root` change relocates everything.
   dual-path branches in seven consumers carried real maintenance cost for a
   feature that hadn't earned an ADR or a deployment.
 
+## Amendment (2026-06-08): repo-scope operational stores under the shared-data-root model (D2)
+
+**Context.** The original "Multi-repo isolation" guarantee above assumed the
+supervisor spawns *one process per repo, each with its own `HYDRAFLOW_HOME` →
+its own `data_root`* (ADR-0009). Under that model, stores resolved via
+`config.data_path(...)` (flat, under `data_root`) never collided — each repo had
+a private `data_root`. The multi-repo **dashboard** model (ADR-0007/0038) breaks
+that assumption: a single host process holds a `RepoRuntimeRegistry` of repo
+runtimes that **share one `data_root`** (the deployment sets `HYDRAFLOW_HOME`).
+Under a shared `data_root`, the flat per-repo operational stores collide across
+repos (e.g. issue #42's run artifacts from repo A overwrite repo B's).
+
+`state.json`, `events.jsonl`, and `sessions.jsonl` were already repo-scoped
+(`_resolve_repo_scoped_paths`). This amendment extends that scoping to the
+remaining per-repo *operational* stores.
+
+**Decision.** The following stores move from flat `data_path(...)` to
+repo-scoped `repo_data_root` (= `data_root/<repo_slug>`), via new
+`HydraFlowConfig` accessors (`repo_data_path()`, `repo_memory_dir`,
+`retrospectives_path`, `cost_inferences_path`, `pr_stats_path`; and
+`factory_metrics_path` is re-pointed):
+
+| Store | Old (flat) | New (repo-scoped) |
+|-------|-----------|-------------------|
+| Run artifacts | `data_root/runs/` | `repo_data_root/runs/` |
+| Cost inferences | `data_root/metrics/prompt/inferences.jsonl` | `repo_data_root/metrics/prompt/inferences.jsonl` |
+| PR telemetry aggregates | `data_root/metrics/prompt/pr_stats.json` | `repo_data_root/metrics/prompt/pr_stats.json` |
+| Factory metrics | `data_root/diagnostics/factory_metrics.jsonl` | `repo_data_root/diagnostics/factory_metrics.jsonl` |
+| Retrospective insights | `data_root/memory/{retrospectives.jsonl,filed_patterns.json,retrospective_queue.jsonl}` | `repo_data_root/memory/…` |
+| Harness insights | `data_root/memory/{harness_failures.jsonl,harness_suggestions.jsonl,harness_proposed.json}` | `repo_data_root/memory/…` |
+| Review insights | `data_root/memory/{reviews.jsonl,proposed_categories.json,proposal_metadata.json}` | `repo_data_root/memory/…` |
+
+This splits the `memory/` directory: per-repo **insight** files move to
+`repo_data_root/memory/` (via `config.repo_memory_dir`), while cross-repo
+**knowledge** files stay flat under `config.memory_dir` (`data_root/memory/`):
+`adr_decisions.jsonl`, `hitl_recommendations.jsonl`, `items.jsonl`,
+`verification_records.jsonl`.
+
+**One-time migration (host-only).** `data_migration.migrate_flat_operational_stores(config)`
+copies any existing flat store into the repo-scoped location, mirroring the
+copy-if-target-absent, `shutil.copy2`, log-on-`OSError` mechanism of
+`_resolve_repo_scoped_paths`. It is idempotent (skips when the scoped target
+exists) and runs **once at host startup** (`server._run`) with the *host* config,
+before any member runtime is built. Rationale: under a shared `data_root` the
+legacy flat data was written by the host process and is already comingled across
+repos, so it belongs to the default/host repo — "the default repo keeps its
+history". Member repos start clean and never claim the host's flat data. A no-op
+when `repo_data_root == data_root` (no slug to scope under).
+
+**Out of scope (deferred, same mechanism applies later).** These per-repo-ish
+stores remain flat for now and are candidates for a follow-up slice:
+`metrics/history_cache.json` (host-only — read/written only for the default repo,
+no cross-repo collision), `traces/`, `reflections/`, `outcomes.jsonl`,
+`item_scores.json`, health-monitor known-pattern / troubleshooting stores. The
+ADR-0010 migration of `log_dir`/`plans_dir` (whole-directory scoping) is likewise
+unchanged by this amendment.
+
 ## Related
 
 - Source memory: [#1624 — HydraFlow persistence architecture and data layout](https://github.com/T-rav/hydra/issues/1624)
@@ -193,6 +250,9 @@ but the defaults ensure a single `data_root` change relocates everything.
 - `src/state:StateTracker` — crash-recovery state persistence
 - `src/state/_session.py` — session history persistence (`sessions.jsonl`)
 - `src/config.py:_resolve_base_paths`, `src/config.py:_resolve_repo_and_identity`, `src/config.py:_resolve_repo_scoped_paths` — data root and path resolution
+- `src/data_migration.py:migrate_flat_operational_stores` — one-time host-only migration of flat per-repo stores to `repo_data_root` (Amendment D2)
+- `src/config.py:HydraFlowConfig.repo_data_path`, `repo_memory_dir`, `cost_inferences_path`, `retrospectives_path`, `factory_metrics_path` — repo-scoped store accessors (Amendment D2)
+- ADR-0007 (Dashboard API Multi-Repo Scoping), ADR-0038 (Multi-Repo Architecture Wiring Pattern) — the shared-`data_root` registry model that motivates Amendment D2
 - `src/config.py:load_config_file`, `src/config.py:save_config_file` — config snapshot persistence
 - `src/config.py:HydraFlowConfig.data_root` — data root configuration
 - `src/metrics_manager.py` — repo-slug namespaced metrics

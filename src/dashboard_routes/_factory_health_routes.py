@@ -53,8 +53,8 @@ def build_factory_health_router(config: HydraFlowConfig) -> APIRouter:
 
     @router.get("/summary")
     def get_factory_health(repo: str = "") -> dict[str, Any]:
-        retro_path = config.data_path("memory", "retrospectives.jsonl")
-        telemetry_path = config.data_path("metrics", "prompt", "inferences.jsonl")
+        retro_path = config.retrospectives_path
+        telemetry_path = config.cost_inferences_path
         retro_entries = _load_jsonl(retro_path)
         telemetry_entries = _load_jsonl(telemetry_path)
         if repo:

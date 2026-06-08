@@ -11,17 +11,15 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from config import HydraFlowConfig
 from dashboard_routes._diagnostics_routes import build_diagnostics_router
+from tests.helpers import ConfigFactory
 
 
 @pytest.fixture
-def config(tmp_path: Path) -> MagicMock:
-    cfg = MagicMock()
-    cfg.data_root = tmp_path
-    cfg.data_path = lambda *parts: tmp_path.joinpath(*parts)  # noqa: PLW0108
-    cfg.factory_metrics_path = tmp_path / "diagnostics" / "factory_metrics.jsonl"
-    cfg.repo = "o/r"
-    return cfg
+def config(tmp_path: Path) -> HydraFlowConfig:
+    (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
+    return ConfigFactory.create(repo_root=tmp_path / "repo")
 
 
 @pytest.fixture
@@ -31,10 +29,9 @@ def client(config) -> TestClient:
     return TestClient(app)
 
 
-def _write_inference(config, **fields) -> None:
-    d = config.data_root / "metrics" / "prompt"
-    d.mkdir(parents=True, exist_ok=True)
-    with (d / "inferences.jsonl").open("a", encoding="utf-8") as fh:
+def _write_inference(config: HydraFlowConfig, **fields) -> None:
+    config.cost_inferences_path.parent.mkdir(parents=True, exist_ok=True)
+    with config.cost_inferences_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(fields) + "\n")
 
 

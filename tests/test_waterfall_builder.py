@@ -8,24 +8,28 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from config import HydraFlowConfig
 from dashboard_routes._waterfall_builder import (
     PHASE_ORDER,
     _phase_for_source,
     build_waterfall,
 )
+from tests.helpers import ConfigFactory
 
 
 @pytest.fixture
-def config(tmp_path: Path) -> MagicMock:
-    cfg = MagicMock()
-    cfg.data_root = tmp_path
-    cfg.data_path = lambda *parts: tmp_path.joinpath(*parts)  # noqa: PLW0108
-    cfg.repo = "o/r"
-    return cfg
+def config(tmp_path: Path) -> HydraFlowConfig:
+    (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
+    return ConfigFactory.create(repo_root=tmp_path / "repo")
 
 
 def _write_trace(
-    config: MagicMock, issue: int, phase: str, run_id: int, idx: int, payload: dict
+    config: HydraFlowConfig,
+    issue: int,
+    phase: str,
+    run_id: int,
+    idx: int,
+    payload: dict,
 ) -> None:
     run_dir = config.data_root / "traces" / str(issue) / phase / f"run-{run_id}"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -34,15 +38,14 @@ def _write_trace(
     )
 
 
-def _write_inference(config: MagicMock, **fields) -> None:
-    inf_dir = config.data_root / "metrics" / "prompt"
-    inf_dir.mkdir(parents=True, exist_ok=True)
-    path = inf_dir / "inferences.jsonl"
+def _write_inference(config: HydraFlowConfig, **fields) -> None:
+    path = config.cost_inferences_path
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(fields) + "\n")
 
 
-def _write_loop_trace(config: MagicMock, loop: str, **fields) -> None:
+def _write_loop_trace(config: HydraFlowConfig, loop: str, **fields) -> None:
     from trace_collector import _slug_for_loop  # noqa: PLC0415
 
     d = config.data_root / "traces" / "_loops" / _slug_for_loop(loop)

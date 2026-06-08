@@ -537,7 +537,7 @@ def build_services(
 
     # Harness insight store (shared across phases)
     harness_insights = HarnessInsightStore(
-        config.data_path("memory"),
+        config.repo_memory_dir,
         sensor_enrichment_enabled=config.sensor_enrichment_enabled,
         observability=observability,
     )
@@ -821,7 +821,7 @@ def build_services(
         credentials=credentials,
     )
     retrospective_queue = RetrospectiveQueue(
-        config.data_path("memory", "retrospective_queue.jsonl"),
+        config.repo_memory_dir / "retrospective_queue.jsonl",
     )
     retrospective = RetrospectiveCollector(
         config,
@@ -858,7 +858,7 @@ def build_services(
     )
     # ReviewInsightStore shared between AgentRunner and ReviewPhase
     review_insights = ReviewInsightStore(
-        config.memory_dir,
+        config.repo_memory_dir,
         observability=observability,
     )
     # ``_insights`` is internal AgentRunner plumbing not part of any Port.

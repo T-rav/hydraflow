@@ -106,7 +106,7 @@ def iter_priced_inferences(
     * ``cost_usd``: ``float``; ``0.0`` when the pricing table has no entry.
     * ``phase``: canonical phase (via ``_phase_for_source``).
     """
-    path = config.data_path("metrics", "prompt", "inferences.jsonl")
+    path = config.cost_inferences_path
     if not path.is_file():
         return
     try:

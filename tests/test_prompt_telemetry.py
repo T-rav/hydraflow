@@ -63,7 +63,7 @@ class TestPromptTelemetry:
             },
         )
 
-        inf_file = telemetry._config.data_path("metrics", "prompt", "inferences.jsonl")
+        inf_file = telemetry._config.cost_inferences_path
         assert inf_file.exists()
 
         rows = [ln for ln in inf_file.read_text().splitlines() if ln.strip()]
@@ -102,7 +102,7 @@ class TestPromptTelemetry:
             },
         )
 
-        pr_file = telemetry._config.data_path("metrics", "prompt", "pr_stats.json")
+        pr_file = telemetry._config.pr_stats_path
         assert pr_file.exists()
 
         rollup = json.loads(pr_file.read_text())
@@ -134,12 +134,12 @@ class TestPromptTelemetry:
             },
         )
 
-        inf_file = telemetry._config.data_path("metrics", "prompt", "inferences.jsonl")
+        inf_file = telemetry._config.cost_inferences_path
         row = json.loads(
             [ln for ln in inf_file.read_text().splitlines() if ln.strip()][0]
         )
 
-        pr_file = telemetry._config.data_path("metrics", "prompt", "pr_stats.json")
+        pr_file = telemetry._config.pr_stats_path
         rollup = json.loads(pr_file.read_text())
 
         lifetime = rollup["lifetime"]
@@ -166,14 +166,14 @@ class TestPromptTelemetry:
             stats={"input_tokens": 123, "output_tokens": 77, "total_tokens": 200},
         )
 
-        inf_file = telemetry._config.data_path("metrics", "prompt", "inferences.jsonl")
+        inf_file = telemetry._config.cost_inferences_path
         row = json.loads(inf_file.read_text().strip())
         assert row["token_source"] == "actual"
         assert row["input_tokens"] == 123
         assert row["output_tokens"] == 77
         assert row["total_tokens"] == 200
 
-        pr_file = telemetry._config.data_path("metrics", "prompt", "pr_stats.json")
+        pr_file = telemetry._config.pr_stats_path
         rollup = json.loads(pr_file.read_text())
         pr = rollup["prs"]["202"]
         assert pr["total_tokens"] == 200
@@ -203,17 +203,13 @@ class TestPromptTelemetry:
             },
         )
 
-        inf_file = telemetry._config.data_path("metrics", "prompt", "inferences.jsonl")
+        inf_file = telemetry._config.cost_inferences_path
         row = json.loads(inf_file.read_text().strip())
         assert row["usage_status"] == "unavailable"
         assert row["usage_available"] is False
         assert isinstance(row["raw_usage"], list)
 
-        rollup = json.loads(
-            telemetry._config.data_path(
-                "metrics", "prompt", "pr_stats.json"
-            ).read_text()
-        )
+        rollup = json.loads(telemetry._config.pr_stats_path.read_text())
         assert rollup["lifetime"]["usage_unavailable_calls"] == 1
 
     def test_get_session_and_lifetime_totals(self, telemetry):
@@ -296,7 +292,7 @@ class TestPromptTelemetry:
             stats={},
         )
 
-        inf_file = telemetry._config.data_path("metrics", "prompt", "inferences.jsonl")
+        inf_file = telemetry._config.cost_inferences_path
         row = json.loads(inf_file.read_text().strip())
         assert row["status"] == "failed"
         assert row["token_source"] == "estimated"
@@ -324,12 +320,12 @@ class TestPromptTelemetry:
                 "section_chars": {"issue_body_before": 1000, "issue_body_after": 700},
             },
         )
-        inf_file = telemetry._config.data_path("metrics", "prompt", "inferences.jsonl")
+        inf_file = telemetry._config.cost_inferences_path
         row = json.loads(inf_file.read_text().strip())
         assert row["pruned_chars_total"] == 123
         assert row["section_chars"]["issue_body_before"] == 1000
 
-        pr_file = telemetry._config.data_path("metrics", "prompt", "pr_stats.json")
+        pr_file = telemetry._config.pr_stats_path
         rollup = json.loads(pr_file.read_text())
         assert rollup["prs"]["500"]["pruned_chars_total"] == 123
 
@@ -352,7 +348,7 @@ class TestPromptTelemetry:
                 "context_chars_after": 1800,
             },
         )
-        inf_file = telemetry._config.data_path("metrics", "prompt", "inferences.jsonl")
+        inf_file = telemetry._config.cost_inferences_path
         row = json.loads(inf_file.read_text().strip())
         assert row["pruned_chars_total"] == 500
 
@@ -408,7 +404,7 @@ class TestPromptTelemetry:
             success=True,
             stats={"input_tokens": 1000, "output_tokens": 500},
         )
-        inf_file = config.data_path("metrics", "prompt", "inferences.jsonl")
+        inf_file = config.cost_inferences_path
         row = json.loads(inf_file.read_text().strip())
         assert row["estimated_cost_usd"] is not None
         assert row["estimated_cost_usd"] > 0
@@ -441,7 +437,7 @@ class TestPromptTelemetry:
             success=True,
             stats={},
         )
-        inf_file = config.data_path("metrics", "prompt", "inferences.jsonl")
+        inf_file = config.cost_inferences_path
         row = json.loads(inf_file.read_text().strip())
         assert row["estimated_cost_usd"] is None
 
@@ -478,7 +474,7 @@ class TestPromptTelemetry:
                 success=True,
                 stats={"input_tokens": 1000, "output_tokens": 200},
             )
-        pr_file = config.data_path("metrics", "prompt", "pr_stats.json")
+        pr_file = config.pr_stats_path
         rollup = json.loads(pr_file.read_text())
         pr_cost = rollup["prs"]["700"]["estimated_cost_usd"]
         single_cost = (15.0 * 1000 + 75.0 * 200) / 1_000_000
@@ -535,7 +531,7 @@ class TestZeroUsageSanityGuard:
                 "usage_status": "unavailable",
             },
         )
-        inf_file = telemetry._config.data_path("metrics", "prompt", "inferences.jsonl")
+        inf_file = telemetry._config.cost_inferences_path
         row = json.loads(
             [ln for ln in inf_file.read_text().splitlines() if ln.strip()][-1]
         )
@@ -564,7 +560,7 @@ class TestZeroUsageSanityGuard:
                 "usage_status": "available",
             },
         )
-        inf_file = telemetry._config.data_path("metrics", "prompt", "inferences.jsonl")
+        inf_file = telemetry._config.cost_inferences_path
         row = json.loads(
             [ln for ln in inf_file.read_text().splitlines() if ln.strip()][-1]
         )
@@ -592,7 +588,7 @@ class TestZeroUsageSanityGuard:
                 "usage_status": "unavailable",
             },
         )
-        inf_file = telemetry._config.data_path("metrics", "prompt", "inferences.jsonl")
+        inf_file = telemetry._config.cost_inferences_path
         row = json.loads(
             [ln for ln in inf_file.read_text().splitlines() if ln.strip()][-1]
         )
@@ -619,7 +615,7 @@ class TestZeroUsageSanityGuard:
                 "usage_status": "unavailable",
             },
         )
-        inf_file = telemetry._config.data_path("metrics", "prompt", "inferences.jsonl")
+        inf_file = telemetry._config.cost_inferences_path
         row = json.loads(
             [ln for ln in inf_file.read_text().splitlines() if ln.strip()][-1]
         )
@@ -651,7 +647,7 @@ class TestZeroUsageSanityGuard:
                 "usage_status": "available",
             },
         )
-        inf_file = telemetry._config.data_path("metrics", "prompt", "inferences.jsonl")
+        inf_file = telemetry._config.cost_inferences_path
         row = json.loads(
             [ln for ln in inf_file.read_text().splitlines() if ln.strip()][-1]
         )
