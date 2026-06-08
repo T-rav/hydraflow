@@ -2349,6 +2349,11 @@ class ControlStatusResponse(BaseModel):
     # The React UI renders MockWorldBanner when this is True so operators
     # can never confuse a sandbox tab with a production tab.
     mockworld_active: bool = False
+    # Per-repo breakdown for ``repo=__all__`` aggregate mode (empty for a single
+    # repo). Each entry: ``{slug, status, credits_paused_until, mockworld_active,
+    # config}``. The top-level fields above are a rollup; ``config`` is the
+    # default repo's (back-compat).
+    repos: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # --- TypedDicts for replacing Any annotations ---
