@@ -4,6 +4,10 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W24
+
+- `15e22ef` — feat(persistence): repo-scope per-repo operational stores under shared data_root (ADR-0021 D2) *(2026-06-08)*
+
 ## 2026-W23
 
 - `4187035` — fix(ul): route bot/caretaker PRs to config.base_branch(), not hardcoded main (#9346) (#9346) *(2026-06-05)*
