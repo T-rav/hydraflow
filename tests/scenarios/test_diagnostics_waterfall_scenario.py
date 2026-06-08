@@ -26,6 +26,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from dashboard_routes._diagnostics_routes import build_diagnostics_router
+from tests.helpers import ConfigFactory
 
 pytestmark = pytest.mark.scenario_loops
 
@@ -64,10 +65,15 @@ class TestDiagnosticsWaterfallScenario:
         t1 = "2026-04-22T10:05:00+00:00"
         t2 = "2026-04-22T10:10:00+00:00"
 
+        (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
+        config = ConfigFactory.create(repo_root=tmp_path / "repo")
+
         # Seed two inferences attributed to different runners (= different
-        # canonical phases via tracing_context.source_to_phase).
+        # canonical phases via tracing_context.source_to_phase). Inferences are
+        # repo-scoped (ADR-0021 D2) → seed under repo_data_root; traces stay
+        # flat under data_root.
         _write_inference(
-            tmp_path,
+            config.repo_data_root,
             timestamp=t0,
             source="triage",
             tool="claude",
@@ -81,7 +87,7 @@ class TestDiagnosticsWaterfallScenario:
             status="success",
         )
         _write_inference(
-            tmp_path,
+            config.repo_data_root,
             timestamp=t1,
             source="implementer",
             tool="claude",
@@ -97,7 +103,7 @@ class TestDiagnosticsWaterfallScenario:
         # Seed a subprocess trace (bash tool_call + one passed skill) so the
         # implement phase also surfaces "subprocess" and "skill" action kinds.
         _write_subprocess_trace(
-            tmp_path,
+            config.data_root,
             issue_n,
             "implement",
             1,
@@ -147,15 +153,6 @@ class TestDiagnosticsWaterfallScenario:
                 "turn_count": 0,
             },
         )
-
-        # Minimal HydraFlowConfig stand-in — the waterfall route only needs
-        # data_root (for traces) and data_path (used by _cost_rollups to
-        # resolve inferences.jsonl).
-        config = MagicMock()
-        config.data_root = tmp_path
-        config.data_path = tmp_path.joinpath
-        config.factory_metrics_path = tmp_path / "diagnostics" / "factory_metrics.jsonl"
-        config.repo = "o/r"
 
         # Bypass GitHub — the waterfall route calls fetch_issue_by_number
         # to hydrate issue_meta. We inject a fake fetcher that returns a
