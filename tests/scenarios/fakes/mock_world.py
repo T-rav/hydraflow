@@ -788,7 +788,9 @@ class MockWorld:
             # fall back to real gh -> 401). Only hand the dashboard the registry
             # once a repo is actually registered; otherwise use the host/legacy
             # path (the pre-#9347 behaviour these scenarios were written against).
-            # See issue #9359.
+            # See issue #9359. This invariant is now also guarded at PR time by
+            # the `scenario-browser-fast` CI job (ci.yml), so dashboard
+            # regressions no longer wait for the rc/*->main promotion gate.
             registry=self._registry if len(self._registry) > 0 else None,
             default_repo_slug=config.repo.replace("/", "-") if config.repo else None,
         )
