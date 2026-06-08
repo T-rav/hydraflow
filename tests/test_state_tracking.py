@@ -114,6 +114,7 @@ class TestInitialization:
             "last_green_audit",
             "last_green_rc_sha",
             "last_rc_red_sha",
+            "consecutive_rc_failures",
             "managed_repos_onboarding_status",
             "onboarding_drafts",
             "principles_drift_attempts",

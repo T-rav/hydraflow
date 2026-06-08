@@ -43,6 +43,23 @@ class StagingBisectStateMixin:
         self._data.last_green_rc_sha = sha
         self.save()
 
+    # --- consecutive_rc_failures (repeated-failure escalation, #9359) ---
+
+    def get_consecutive_rc_failures(self) -> int:
+        return int(self._data.consecutive_rc_failures)
+
+    def increment_consecutive_rc_failures(self) -> int:
+        """Bump the streak and return the new count."""
+        self._data.consecutive_rc_failures = int(self._data.consecutive_rc_failures) + 1
+        self.save()
+        return self._data.consecutive_rc_failures
+
+    def reset_consecutive_rc_failures(self) -> None:
+        """Clear the streak — called on a green promotion."""
+        if self._data.consecutive_rc_failures != 0:
+            self._data.consecutive_rc_failures = 0
+            self.save()
+
     # --- last_rc_red_sha + rc_cycle_id ---
 
     def get_last_rc_red_sha(self) -> str:

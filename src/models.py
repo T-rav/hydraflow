@@ -1929,6 +1929,11 @@ class StateData(BaseModel):
     last_green_rc_sha: str = ""
     last_rc_red_sha: str = ""
     rc_cycle_id: int = 0
+    # StagingPromotionLoop consecutive-failure streak. Incremented on each RC
+    # promotion CI failure, reset to 0 on a green promotion. Crossing
+    # ``rc_consecutive_failure_escalation_threshold`` files one HITL escalation
+    # so a multi-day pipeline stall can't pass unnoticed (#9359 hardening).
+    consecutive_rc_failures: int = 0
     auto_reverts_in_cycle: int = 0
     auto_reverts_successful: int = 0
     flake_reruns_total: int = 0
