@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 
 const mockContext = {
   sessions: [],
@@ -7,6 +7,7 @@ const mockContext = {
   selectedRepoSlug: null,
   stageStatus: null,
   orchestratorStatus: 'stopped',
+  connected: true,
   selectRepo: vi.fn(),
   supervisedRepos: [],
   runtimes: [],
@@ -29,10 +30,35 @@ describe('SessionSidebar last-run summary', () => {
     mockContext.supervisedRepos = []
     mockContext.runtimes = []
     mockContext.orchestratorStatus = 'stopped'
+    mockContext.connected = true
     mockContext.stageStatus = null
     mockContext.currentSessionId = null
+    mockContext.startRuntime = vi.fn()
+    mockContext.stopRuntime = vi.fn()
   })
   afterEach(() => { vi.useRealTimers() })
+
+  it('starts a stopped factory line even when the host orchestrator is down', () => {
+    mockContext.orchestratorStatus = 'idle'
+    mockContext.supervisedRepos = [{ slug: 'owner/host', path: '/p/host', running: false }]
+    mockContext.runtimes = [{ slug: 'owner/host', running: false }]
+    render(<SessionSidebar />)
+    const startBtn = screen.getByLabelText('Start repo')
+    expect(startBtn).not.toBeDisabled()
+    fireEvent.click(startBtn)
+    expect(mockContext.startRuntime).toHaveBeenCalledWith('owner/host')
+  })
+
+  it('disables a line\'s control when disconnected from the server', () => {
+    mockContext.connected = false
+    mockContext.supervisedRepos = [{ slug: 'owner/host', path: '/p/host', running: false }]
+    mockContext.runtimes = [{ slug: 'owner/host', running: false }]
+    render(<SessionSidebar />)
+    const startBtn = screen.getByLabelText('Start repo')
+    expect(startBtn).toBeDisabled()
+    fireEvent.click(startBtn)
+    expect(mockContext.startRuntime).not.toHaveBeenCalled()
+  })
 
   it('shows "never run" for a repo with no sessions', () => {
     mockContext.supervisedRepos = [{ slug: 'owner/alpha', path: '/p/alpha', running: false }]

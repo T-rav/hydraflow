@@ -16,7 +16,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0006 | `src.events`, `src.hf_cli.supervisor_service`, `src.issue_store`, `src.orchestrator`, `src.state` |
 | ADR-0007 | `src.dashboard`, `src.dashboard_routes`, `src.hf_cli.supervisor_client`, `src.hf_cli.supervisor_service` |
 | ADR-0008 | `src.dashboard`, `src.dashboard_routes`, `src.hf_cli.supervisor_service` |
-| ADR-0009 | `src.config`, `src.hf_cli.supervisor_service`, `src.orchestrator`, `src.worktree` |
+| ADR-0009 | `src.config`, `src.orchestrator`, `src.repo_runtime`, `src.workspace` |
 | ADR-0010 | `src.config`, `src.docker_runner`, `src.metrics_manager`, `src.worktree` |
 | ADR-0011 | `src.epic`, `src.models`, `src.pr_manager` |
 | ADR-0012 | `src.epic`, `src.epic_monitor_loop`, `src.models`, `src.post_merge_handler`, `src.review_phase` |
@@ -157,7 +157,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.health_monitor_loop` | ADR-0045, ADR-0046 |
 | `src.hf_cli.__main__` | ADR-0036 |
 | `src.hf_cli.supervisor_client` | ADR-0007 |
-| `src.hf_cli.supervisor_service` | ADR-0006, ADR-0007, ADR-0008, ADR-0009 |
+| `src.hf_cli.supervisor_service` | ADR-0006, ADR-0007, ADR-0008 |
 | `src.hindsight` | ADR-0032 |
 | `src.implement_phase` | ADR-0005, ADR-0014, ADR-0024, ADR-0063 |
 | `src.issue_cache` | ADR-0041 |
@@ -199,7 +199,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.prompt_builder` | ADR-0043 |
 | `src.prompt_template` | ADR-0043 |
 | `src.rc_budget_loop` | ADR-0045 |
-| `src.repo_runtime` | ADR-0038 |
+| `src.repo_runtime` | ADR-0009, ADR-0038 |
 | `src.repo_wiki` | ADR-0032, ADR-0053, ADR-0061 |
 | `src.repo_wiki_loop` | ADR-0032, ADR-0053 |
 | `src.report_issue_loop` | ADR-0013, ADR-0018, ADR-0045 |
@@ -251,8 +251,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.wiki_carryover` | ADR-0064 |
 | `src.wiki_compiler` | ADR-0032 |
 | `src.wiki_rot_detector_loop` | ADR-0045 |
-| `src.workspace` | ADR-0055 |
+| `src.workspace` | ADR-0009, ADR-0055 |
 | `src.workspace_gc_loop` | ADR-0069 |
-| `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
+| `src.worktree` | ADR-0003, ADR-0010 |
 
 <!-- arch:generated -->

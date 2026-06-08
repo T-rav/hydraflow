@@ -86,3 +86,17 @@ class TestNoDuplicateAnnotatedAliases:
         assert len(hits) == 2, (
             f"Scanner should find 2 definitions, found {len(hits)}: {hits}"
         )
+
+
+class TestRepoAllSentinel:
+    """The reserved aggregate sentinel token."""
+
+    def test_repo_all_sentinel_value(self) -> None:
+        from src.route_types import REPO_ALL
+
+        assert REPO_ALL == "__all__"
+
+    def test_repo_all_is_exported(self) -> None:
+        import src.route_types as rt
+
+        assert "REPO_ALL" in rt.__all__

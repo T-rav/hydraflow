@@ -7,23 +7,24 @@
 ## Context
 
 HydraFlow needs to manage multiple GitHub repositories simultaneously while
-keeping each repo's pipeline state, worktrees, and agent processes fully
+keeping each repo's pipeline state, workspaces, and agent processes fully
 isolated. A single-process multi-repo model would require threading repo
 identity through every component (`StateTracker`, `EventBus`, `IssueStore`,
-`WorktreeManager`, worker pools) and risk shared-state bugs between repos.
+`WorkspaceManager`, worker pools) and risk shared-state bugs between repos.
 
-The supervisor (`hf_cli/supervisor_service.py`) already manages repo lifecycle
-via a module-global `RUNNERS` dict of `RepoProcess` structs. Each
-`RepoProcess` holds a `subprocess.Popen` handle, a dynamically allocated TCP
-port, and the repo's filesystem path. The orchestrator (`orchestrator.py`)
-creates a full `HydraFlowOrchestrator` per process with its own `StateTracker`,
-`EventBus`, `IssueStore`, and service registry built by `build_services()`.
+The `RepoRuntimeRegistry` (`repo_runtime.py`) manages repo lifecycle via a
+per-slug registry of `RepoRuntime` instances. Each `RepoRuntime` owns its own
+`asyncio` task, `EventBus`, `StateTracker`, and orchestrator, registered via
+`RepoRuntimeRegistry.register()` and started via `RepoRuntime.start()`. The
+orchestrator (`orchestrator.py`) creates a full `HydraFlowOrchestrator` per
+runtime with its own `StateTracker`, `EventBus`, `IssueStore`, and service
+registry built by `build_services()`.
 
 Runtime state for each managed repo lives under `.hydraflow/` in the repo
-directory (or under `$HYDRAFLOW_HOME/<repo_slug>/` when the supervisor sets
-`HYDRAFLOW_HOME`). Worktree paths are scoped via
-`config.worktree_path_for_issue()` which resolves to
-`<worktree_base>/<repo_slug>/issue-<num>`. The `_resolve_repo_scoped_paths()`
+directory (or under `$HYDRAFLOW_HOME/<repo_slug>/` when the runtime sets
+`HYDRAFLOW_HOME`). Workspace paths are scoped via
+`config.workspace_path_for_issue()` which resolves to
+`<workspace_base>/<repo_slug>/issue-<num>`. The `_resolve_repo_scoped_paths()`
 helper in `config.py` ensures state files (`state.json`, `events.jsonl`,
 `sessions.jsonl`) are placed under the repo slug subdirectory,
 with automatic migration of legacy flat files. (`config.json` is not
@@ -47,8 +48,8 @@ Adopt the **process-per-repo** model as the canonical multi-repo architecture:
    `_resolve_base_paths()` reads this environment variable to set `data_root`,
    ensuring all state files, event logs, and session logs are isolated per repo.
 
-3. **Repo-scoped worktrees.** `WorktreeManager` resolves worktree paths under
-   `<worktree_base>/<repo_slug>/issue-<num>`, eliminating collision risk for
+3. **Repo-scoped workspaces.** `WorkspaceManager` resolves workspace paths under
+   `<workspace_base>/<repo_slug>/issue-<num>`, eliminating collision risk for
    same-numbered issues across repos. Per-repo `asyncio.Lock` instances
    (`_WORKTREE_LOCKS` keyed by `wt:<repo_slug>`) prevent concurrent
    create/destroy races within a single process.
@@ -116,8 +117,8 @@ Adopt the **process-per-repo** model as the canonical multi-repo architecture:
 - ADR-0001 (Five Concurrent Async Loops)
 - ADR-0006 (RepoRuntime Isolation Architecture) — superseded by this ADR
 - ADR-0008 (Multi-Repo Dashboard Architecture)
-- `src/hf_cli/supervisor_service.py:_start_repo`, `src/hf_cli/supervisor_service.py:RUNNERS` — TCP protocol
-- `src/config.py:_resolve_base_paths`, `src/config.py:_resolve_repo_scoped_paths`, `src/config.py:HydraFlowConfig.worktree_path_for_issue`
+- `src/repo_runtime.py:RepoRuntimeRegistry.register`, `src/repo_runtime.py:RepoRuntime.start` — per-repo runtime lifecycle (replaced the former `supervisor_service` `_start_repo`/`RUNNERS` subprocess+TCP registry)
+- `src/config.py:_resolve_base_paths`, `src/config.py:_resolve_repo_scoped_paths`, `src/config.py:HydraFlowConfig.workspace_path_for_issue`
 - `src/orchestrator.py:HydraFlowOrchestrator.__init__`
-- `src/worktree.py:WorktreeManager`
+- `src/workspace.py:WorkspaceManager`
 - `src/state:StateTracker`

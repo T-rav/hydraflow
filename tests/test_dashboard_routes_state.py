@@ -648,10 +648,12 @@ class TestGetStatsEndpoint:
     async def test_includes_queue_when_orchestrator_present(
         self, config, event_bus, state, tmp_path
     ) -> None:
+        from models import QueueStats
+
         mock_orch = MagicMock()
         mock_orch.issue_store = MagicMock()
         mock_orch.issue_store.get_queue_stats = MagicMock(
-            return_value=MagicMock(model_dump=lambda: {"triage": 0, "plan": 0})
+            return_value=QueueStats(in_flight_count=2)
         )
         router, _ = make_dashboard_router(
             config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
@@ -692,10 +694,12 @@ class TestGetQueueEndpoint:
     async def test_returns_queue_from_orchestrator(
         self, config, event_bus, state, tmp_path
     ) -> None:
+        from models import QueueStats
+
         mock_orch = MagicMock()
         mock_orch.issue_store = MagicMock()
         mock_orch.issue_store.get_queue_stats = MagicMock(
-            return_value=MagicMock(model_dump=lambda: {"triage": 3, "plan": 1})
+            return_value=QueueStats(queue_depth={"plan": 3})
         )
         router, _ = make_dashboard_router(
             config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
@@ -703,7 +707,7 @@ class TestGetQueueEndpoint:
         endpoint = find_endpoint(router, "/api/queue")
         response = await endpoint()
         data = json.loads(response.body)
-        assert data["triage"] == 3
+        assert data["queue_depth"]["plan"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -1560,12 +1564,10 @@ class TestRuntimeEndpointsWithRegistry:
 
         resp = await endpoint()
         data = json.loads(resp.body)
-        # Default (host) repo is always included; no additional registered runtimes
-        default_slug = config.repo.replace("/", "-")
-        default_entries = [r for r in data["runtimes"] if r["slug"] == default_slug]
-        assert len(default_entries) == 1
-        registered = [r for r in data["runtimes"] if r["slug"] != default_slug]
-        assert registered == []
+        # The host repo is registered in the registry at boot (server wiring),
+        # so the endpoint no longer special-cases it into the list — an empty
+        # registry yields an empty list.
+        assert data["runtimes"] == []
 
     @pytest.mark.asyncio
     async def test_list_runtimes_with_registered_runtime(
@@ -1864,3 +1866,56 @@ class TestRuntimeEndpointsWithRegistry:
 # ---------------------------------------------------------------------------
 # GET /api/retrospectives — edge cases
 # ---------------------------------------------------------------------------
+
+
+class TestHostRepoRoutesThroughRegistry:
+    """The host repo is an ordinary registered line.
+
+    Its start/stop slug resolves through the registry exactly like any added
+    repo — no default-repo special-casing remains in the route handlers.
+    """
+
+    @pytest.mark.asyncio
+    async def test_stop_host_slug_routes_to_registry_runtime(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        host_rt = MagicMock()
+        host_rt.running = True
+        host_rt.stop = AsyncMock()
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = host_rt
+
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=mock_registry
+        )
+        endpoint = find_endpoint(router, "/api/runtimes/{slug}/stop")
+
+        resp = await endpoint(config.repo)
+
+        data = json.loads(resp.body)
+        assert resp.status_code == 200
+        assert data["status"] == "stopped"
+        host_rt.stop.assert_awaited_once()
+        mock_registry.get.assert_called_with(config.repo)
+
+    @pytest.mark.asyncio
+    async def test_start_host_slug_routes_to_registry_runtime(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        host_rt = MagicMock()
+        host_rt.running = False
+        host_rt.start = AsyncMock()
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = host_rt
+
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=mock_registry
+        )
+        endpoint = find_endpoint(router, "/api/runtimes/{slug}/start")
+
+        resp = await endpoint(config.repo)
+
+        data = json.loads(resp.body)
+        assert resp.status_code == 200
+        assert data["status"] == "started"
+        host_rt.start.assert_awaited_once()

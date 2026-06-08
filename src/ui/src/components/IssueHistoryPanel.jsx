@@ -203,7 +203,7 @@ function formatDuration(firstSeen, lastSeen) {
 const COLUMN_DEFS = [
   { key: 'number', label: '#', width: '52px', align: 'left', sortAccessor: item => item.issue_number },
   { key: 'title', label: 'Title', width: 'minmax(220px, 3fr)', align: 'left', sortAccessor: item => (item.title || '').toLowerCase() },
-  { key: 'repo', label: 'Repo', width: 'minmax(80px, 1fr)', align: 'left', sortAccessor: item => (extractRepoSlug(item.issue_url) || '').toLowerCase() },
+  { key: 'repo', label: 'Repo', width: 'minmax(80px, 1fr)', align: 'left', sortAccessor: item => (item.repo || extractRepoSlug(item.issue_url) || '').toLowerCase() },
   { key: 'stage', label: 'Stage', width: '84px', align: 'left', sortAccessor: item => item.status || 'unknown' },
   { key: 'outcome', label: 'Outcome', width: '100px', align: 'left', sortAccessor: item => item.outcome?.outcome || 'pending' },
   { key: 'prs', label: 'PRs', width: '40px', align: 'left', sortAccessor: item => item.prs?.length || 0 },
@@ -234,7 +234,7 @@ function sortItems(items, sortColumn, sortDirection) {
 }
 
 export function OutcomesPanel() {
-  const { issueHistory, selectedRepoSlug } = useHydraFlow()
+  const { issueHistory } = useHydraFlow()
   const [preset, setPreset] = useState('all')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
@@ -314,16 +314,13 @@ export function OutcomesPanel() {
   )
 
   const filtered = useMemo(() => {
-    const slug = selectedRepoSlug
+    // Repo scoping is server-side: the backend returns only the selected
+    // repo's rows (or, for repo=__all__, the per-repo-tagged union), so there
+    // is no client-side repo filter here — that would blank the all-repos view.
     const q = search.trim().toLowerCase()
     const since = timeRange.since ? new Date(timeRange.since).getTime() : null
     const until = timeRange.until ? new Date(timeRange.until).getTime() : null
     return (payload.items || []).filter(item => {
-      if (slug) {
-        const sessions = Array.isArray(item.session_ids) ? item.session_ids : []
-        const matchesRepo = sessions.some((id) => typeof id === 'string' && id.startsWith(slug))
-        if (!matchesRepo) return false
-      }
       if (since || until) {
         const ts = item.last_seen ? new Date(item.last_seen).getTime() : 0
         if (since && ts < since) return false
@@ -338,7 +335,7 @@ export function OutcomesPanel() {
       if ((item.epic || '').toLowerCase().includes(q)) return true
       if ((item.crate_title || '').toLowerCase().includes(q)) return true
       if (item.crate_number != null && String(item.crate_number).includes(q)) return true
-      const repoSlug = extractRepoSlug(item.issue_url)
+      const repoSlug = item.repo || extractRepoSlug(item.issue_url)
       if (repoSlug && repoSlug.toLowerCase().includes(q)) return true
       if ((item.outcome?.reason || '').toLowerCase().includes(q)) return true
       return false
@@ -349,7 +346,6 @@ export function OutcomesPanel() {
     outcomeFilter,
     epicOnly,
     search,
-    selectedRepoSlug,
     timeRange.since,
     timeRange.until,
   ])
@@ -410,8 +406,8 @@ export function OutcomesPanel() {
 
   const visibleSavedTokens = estimateSavedTokens(visibleTotals.pruned_chars_total)
 
-  const toggleExpanded = (issueNumber) => {
-    setExpanded(prev => ({ ...prev, [issueNumber]: !prev[issueNumber] }))
+  const toggleExpanded = (rowKey) => {
+    setExpanded(prev => ({ ...prev, [rowKey]: !prev[rowKey] }))
   }
 
   const toggleGroupCollapse = (label) => {
@@ -457,10 +453,21 @@ export function OutcomesPanel() {
       )
     },
     repo: (item) => {
-      const repoSlug = extractRepoSlug(item.issue_url)
+      // Prefer the backend's canonical dash slug (owner-name); fall back to the
+      // owner/name parsed from the issue URL for rows without a repo tag.
+      // Render it verbatim (matching StreamCard / RepoSelector) \u2014 the dash slug
+      // can't be split into owner/name reliably, so don't fabricate a short name.
+      const repoSlug = item.repo || extractRepoSlug(item.issue_url)
+      if (!repoSlug) {
+        return <span style={styles.dimText}>{'\u2014'}</span>
+      }
       return (
-        <span style={styles.repoCell} title={repoSlug || ''}>
-          {repoSlug ? repoSlug.split('/')[1] || repoSlug : <span style={styles.dimText}>{'\u2014'}</span>}
+        <span
+          style={styles.repoBadge}
+          data-testid={`repo-badge-${item.issue_number}`}
+          title={`repo: ${repoSlug}`}
+        >
+          {repoSlug}
         </span>
       )
     },
@@ -501,13 +508,18 @@ export function OutcomesPanel() {
 
   function renderIssueRow(item) {
     const issueNum = item.issue_number
-    const isExpanded = !!expanded[issueNum]
+    // Issue numbers collide across repos in the all-repos view, so the React
+    // key and expand/collapse state are keyed by (repo, issue) — keying by the
+    // bare number would make two repos' same-numbered rows share a key and
+    // expand together.
+    const rowKey = `${item.repo || ''}#${issueNum}`
+    const isExpanded = !!expanded[rowKey]
     return (
-      <div key={issueNum} data-testid={`outcome-row-${issueNum}`} style={styles.rowWrap}>
+      <div key={rowKey} data-testid={`outcome-row-${issueNum}`} style={styles.rowWrap}>
         <div style={{ ...styles.row, gridTemplateColumns: gridColumns }}>
           <button
             type="button"
-            onClick={() => toggleExpanded(issueNum)}
+            onClick={() => toggleExpanded(rowKey)}
             style={styles.expandButton}
             aria-label={`Toggle issue ${issueNum}`}
           >
@@ -1065,13 +1077,20 @@ const styles = {
     textOverflow: 'ellipsis',
     maxWidth: 120,
   },
-  repoCell: {
+  repoBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '1px 6px',
+    borderRadius: 8,
+    fontSize: 9,
+    fontWeight: 600,
+    background: theme.surfaceInset,
     color: theme.textMuted,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     minWidth: 0,
-    fontSize: 11,
+    maxWidth: '100%',
   },
   dimText: {
     color: theme.textMuted,

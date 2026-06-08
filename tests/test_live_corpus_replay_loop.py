@@ -570,3 +570,102 @@ async def test_state_less_path_falls_back_to_dedup_gate(tmp_path: Path) -> None:
     await loop._do_work()
 
     pr.create_issue.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Escalation dedup (#9313, preserved from staging): the shadow-drift-stuck
+# escalation fires once per drift run, and a clean tick lets a recurrence
+# re-escalate. These pass through the state-based rollup path above.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_escalation_dedups_on_subsequent_ticks(tmp_path: Path) -> None:
+    """Escalation issue fires exactly once per drift run, not on every tick
+    after the threshold.
+
+    Regression for the missing escalation dedup: before the fix, every tick
+    past the threshold called _file_escalation_issue, filing a new hitl issue
+    each time.
+    """
+    pr = MagicMock()
+    # drift issue (tick 1), escalation issue (tick 3) — ticks 4+ must not
+    # file another escalation.
+    pr.create_issue = AsyncMock(side_effect=[4242, 5555])
+    pr.update_issue_body = AsyncMock()
+    pr.close_issue = AsyncMock()
+    loop, corpus, _pr, _state = _build_loop(
+        tmp_path, pr_manager=pr, max_drift_attempts=3
+    )
+    corpus.record(
+        adapter="github",
+        command="gh",
+        args=["pr", "view", "99"],
+        stdout='{"state":"MERGED"}\n',
+        stderr="",
+        exit_code=0,
+    )
+
+    async def stale_fake(_sample):  # noqa: ANN001
+        return {"state": "OPEN"}
+
+    loop.register("github", "gh", stale_fake)
+
+    # Five ticks — threshold is 3, so ticks 3/4/5 all have the counter at ≥3.
+    for _ in range(5):
+        await loop._do_work()
+
+    # Only two create_issue calls total: the initial drift issue and one escalation.
+    assert pr.create_issue.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_clean_tick_resets_escalation_dedup(tmp_path: Path) -> None:
+    """After a clean tick the escalation is cleared so a future recurrence of
+    the same drift can re-escalate."""
+    pr = MagicMock()
+    pr.create_issue = AsyncMock(side_effect=[4242, 5555, 6666, 7777])
+    pr.update_issue_body = AsyncMock()
+    pr.close_issue = AsyncMock()
+    loop, corpus, _pr, _state = _build_loop(
+        tmp_path, pr_manager=pr, max_drift_attempts=3
+    )
+    corpus.record(
+        adapter="github",
+        command="gh",
+        args=["pr", "view", "7"],
+        stdout='{"state":"MERGED"}\n',
+        stderr="",
+        exit_code=0,
+    )
+
+    async def stale_fake(_sample):  # noqa: ANN001
+        return {"state": "OPEN"}
+
+    async def fixed_fake(_sample):  # noqa: ANN001
+        return {"state": "MERGED"}
+
+    loop.register("github", "gh", stale_fake)
+    for _ in range(3):
+        await loop._do_work()
+    # Escalation is now open.
+
+    # Clean tick — drift stops; the rollup + escalation are closed and cleared.
+    loop.register("github", "gh", fixed_fake)
+    await loop._do_work()
+
+    # Drift recurs — same signature, but the escalation was cleared.
+    loop.register("github", "gh", stale_fake)
+    for _ in range(3):
+        await loop._do_work()
+
+    # The second drift run should have filed a second escalation.
+    escalation_calls = [
+        call
+        for call in pr.create_issue.await_args_list
+        if "hitl-escalation"
+        in (call.kwargs.get("labels") or (call.args[2] if len(call.args) > 2 else []))
+    ]
+    assert len(escalation_calls) == 2, (
+        "clean tick should clear the escalation so recurrence can re-escalate"
+    )

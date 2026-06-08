@@ -6,8 +6,21 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W23
 
+- `15589dc` — fix(beads): create the bead task graph in the implement worktree (fix claim/close) (#9345) (#9345) *(2026-06-05)*
+- `f624cbd` — fix(beads): per-worktree embedded store + JSONL export (drop shared --server) (#9337) (#9337) *(2026-06-05)*
+- `9b97208` — fix(merge): auto-merge Auto-Agent PRs (agent/auto-agent-N) to end the contract-fix runaway (#9332) (#9332) *(2026-06-05)*
+- `ec00913` — fix(contracts): stop gh_shape_validator false-positives on projection-only pr/issue calls (closes #9314) (#9316) (#9316) *(2026-06-05)*
+- `7316aba` — fix(wiki): repair malformed topic entries + guard against silent data loss (#9281) (#9281) *(2026-06-04)*
+- `e91dd05` — fix(adr): stop ADR-0011 false-positive drift on unrelated core-module churn (closes #9176) (#9256) (#9256) *(2026-06-04)*
+- `e451fa3` — fix(adr): update ADR-0009 citations to current symbols (closes #9173) (#9255) (#9255) *(2026-06-04)*
+- `455bf0e` — chore(gates): target main ruleset by explicit refs/heads/main, not ~DEFAULT_BRANCH (#9252) (#9252) *(2026-06-04)*
+- `eff5ffc` — Merge pull request #9250 from T-rav/rc/2026-06-04-1254 *(2026-06-04)*
+- `90878f5` — fix(adr): use bare paths in ADR-0069/0072 Enforced-by lines (#9247) (#9247) *(2026-06-04)*
+- `adae9a8` — Accept ADR-0071: route back counter port (#9218) (#9218) *(2026-06-04)*
+- `b7119da` — feat(log-ingest): 4h loop that clusters/dedups log errors+warnings into fix-issues (#9245) (#9245) *(2026-06-04)*
 - `07b8937` — Revert "feat(honeycomb): low-noise SLO/burn-alert issue-ingestion loop (default-disabled) (#9237)" (#9244) (#9244) *(2026-06-04)*
 - `b3d0896` — feat(honeycomb): low-noise SLO/burn-alert issue-ingestion loop (default-disabled) (#9237) (#9237) *(2026-06-04)*
+- `05ea34a` — feat(ul): entry-evidence — 4 new entry links across 2 terms *(2026-06-03)*
 - `7bbc795` — test(sandbox): e2e backfill batch 1 — workspace_gc, runs_gc, health_monitor, merge_state_watcher (#9159) (#9159) *(2026-06-02)*
 - `1209d49` — fix(sandbox): skip ContractRefreshLoop external recorders in the air-gapped sandbox (s30) (#9152) (#9152) *(2026-06-02)*
 - `abb52ba` — fix(dependabot): cache all open PRs so DependabotMergeLoop can see bot PRs (s09) (#9151) (#9151) *(2026-06-02)*
@@ -421,9 +434,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `7ade583` — Fixes #2267: Add ADR-0023 for multi-repo architecture wiring pattern (#2296) (#2296) *(2026-03-08)*
 - `4c09083` — Fixes #2264: [ADR] Draft decision from memory #2258: Implementation... (#2292) (#2292) *(2026-03-08)*
 - `c4b8ecd` — Fixes #2374: Add ADR-0023 for supersession regex verb form coverage (#2379) (#2379) *(2026-03-08)*
-- `7c6410a` — Fixes #2210: sync ADR index statuses (#2233) (#2233) *(2026-03-07)*
-- `b1df31d` — Fixes #1977: Document cross-phase integration harness (#2146) (#2146) *(2026-03-06)*
-- `548bf0b` — Fixes #2031: normalize superseded ADR statuses (#2158) (#2158) *(2026-03-06)*
 
 
 <!-- arch:generated -->

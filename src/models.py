@@ -2141,6 +2141,7 @@ class PipelineIssue(BaseModel):
     epic_number: int = 0
     is_epic_child: bool = False
     track: str = ""
+    repo: str = ""
 
 
 class PipelineSnapshot(BaseModel):
@@ -2301,6 +2302,7 @@ class HITLItem(BaseModel):
     llm_summary: str = ""  # cached, operator-focused context summary
     llm_summary_updated_at: str | None = None
     visual_evidence: VisualEvidence | None = None
+    repo: str = ""
 
 
 class ControlStatusConfig(BaseModel):
@@ -3035,6 +3037,7 @@ class BackgroundWorkerStatus(BaseModel):
     interval_seconds: int | None = None
     next_run: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)
+    repo: str = ""
 
 
 class BackgroundWorkersResponse(BaseModel):
@@ -3093,6 +3096,7 @@ class IssueHistoryEntry(BaseModel):
     first_seen: IsoTimestamp | None = None
     last_seen: IsoTimestamp | None = None
     outcome: IssueOutcome | None = None
+    repo: str = ""
 
 
 class IssueHistoryResponse(BaseModel):

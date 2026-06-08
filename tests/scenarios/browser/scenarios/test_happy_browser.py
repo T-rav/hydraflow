@@ -18,8 +18,9 @@ Implementation pattern (pilot):
       2. Boot the dashboard with the lightweight _HarnessOrchestratorShim
          (with_orchestrator=False).  The shim exposes the same harness
          IssueStore to the /api/pipeline route, which is gated by
-         _is_default_pipeline_active().  The shim has running=True so the
-         gate passes and the route serves real harness data.
+         is_repo_pipeline_active() (host fallback path, no registry).  The
+         shim has running=True so the gate passes and the route serves real
+         harness data.
       3. Navigate; wait for the WebSocket-ready signal.
       4. Assert the pipeline snapshot that React fetched on mount shows
          issue #1 in the 'merged' stage (stage-section-merged, stage-

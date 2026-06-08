@@ -93,7 +93,19 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             logger.warning("Promotion merge failed for PR #%d", pr_number)
             return {"status": "merge_failed", "pr": pr_number}
 
-        if "timed out" in summary.lower():
+        # wait_for_ci returns "Timeout after {N}s" when CI is still running past
+        # the poll window, and "Stopped" when the kill-switch fires mid-poll.
+        # Neither is a real CI failure — leave the PR open for the next cadence
+        # tick rather than force-closing a still-green RC PR. The old guard only
+        # matched the literal substring "timed out", which "Timeout after 60s"
+        # does NOT contain, so every slow-CI tick closed a passing PR and filed a
+        # noise issue — issues #9219..#9342, ~3 days of stalled main promotion.
+        summary_lower = summary.lower()
+        if (
+            summary_lower.startswith("timeout")
+            or "timed out" in summary_lower
+            or summary == "Stopped"
+        ):
             return {"status": "ci_pending", "pr": pr_number}
 
         issue_number = await self._file_failure_issue(pr_number, summary)

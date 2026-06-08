@@ -35,6 +35,7 @@ from pydantic import BaseModel, ValidationError
 
 from contracts.shapes import (
     GhCheckRun,
+    GhIssueListItem,
     GhIssueSummary,
     GhPRDetail,
     GhPRSummary,
@@ -53,7 +54,14 @@ logger = logging.getLogger("hydraflow.contracts.shape_dispatchers")
 
 def _pick_shape_for_pr(args: list[str]) -> type[BaseModel] | None:
     """``gh pr ...`` shape selection. Detect summary vs detail by which
-    detail-only fields are requested in ``--json FIELDS``."""
+    detail-only fields are requested in ``--json FIELDS``.
+
+    Only select a shape when ALL of its required fields are present in the
+    requested field set.  Narrow projection calls (e.g. ``--json commits``,
+    ``--json reviews``, ``--json headRefOid``) don't include all required
+    fields, so the dispatcher returns ``None`` to avoid false-positive drift
+    signals for those projection-only shadow-corpus samples.
+    """
     fields = _extract_json_fields(args)
     if fields is None:
         return None
@@ -65,15 +73,44 @@ def _pick_shape_for_pr(args: list[str]) -> type[BaseModel] | None:
         "isDraft",
     }
     if fields & detail_signals:
+        # GhPRDetail requires number — skip projection-only calls like --json headRefOid
+        if "number" not in fields:
+            return None
         return GhPRDetail
+    # GhPRSummary requires number, title, state
+    if not {"number", "title", "state"} <= fields:
+        return None
     return GhPRSummary
 
 
 def _pick_shape_for_issue(args: list[str]) -> type[BaseModel] | None:
+    """Issue shape selection based on which fields are requested.
+
+    ``GhIssueSummary`` requires ``number`` and ``state`` — only use it when
+    the call requests both.  Narrow calls like ``--json state,stateReason``
+    (which omit ``number``) would otherwise fail validation on the required
+    ``number`` field, producing a false-positive drift signal.  Calls that
+    request fields outside both shapes (e.g. ``--json comments``) get
+    ``None`` so the dispatcher skips them.
+    """
     fields = _extract_json_fields(args)
     if fields is None:
         return None
-    return GhIssueSummary
+    if "state" in fields:
+        # GhIssueSummary requires both number and state
+        if "number" not in fields:
+            return None
+        return GhIssueSummary
+    if "number" in fields and "title" in fields:
+        return GhIssueListItem
+    return None
+
+
+def _pick_shape_for_issue_list(args: list[str]) -> type[BaseModel] | None:
+    fields = _extract_json_fields(args)
+    if fields is None:
+        return None
+    return GhIssueListItem
 
 
 def _pick_shape_for_checks(args: list[str]) -> type[BaseModel] | None:
@@ -105,6 +142,19 @@ def _gh_subcommand(args: list[str]) -> str | None:
     return f"{args[0]}-{args[1]}"
 
 
+# Minimum fields a call must request before we'll validate against a shape.
+# Narrow queries (e.g. ``--json commits``, ``--json headRefOid``) omit
+# required fields, so validating against a shape that needs them produces
+# spurious drift signals.
+_SHAPE_REQUIRED_FIELDS: dict[str, frozenset[str]] = {
+    "GhPRSummary": frozenset({"number", "title", "state"}),
+    "GhPRDetail": frozenset({"number"}),
+    "GhIssueSummary": frozenset({"number", "state"}),
+    "GhIssueListItem": frozenset({"number", "title"}),
+    "GhCheckRun": frozenset({"name"}),
+}
+
+
 async def gh_shape_validator(sample: ShadowSample) -> dict[str, object] | None:  # noqa: PLR0911
     """Dispatcher: validate ``sample.stdout`` against the matching shape.
 
@@ -113,12 +163,18 @@ async def gh_shape_validator(sample: ShadowSample) -> dict[str, object] | None: 
         - A diff-payload dict if validation fails — the loop fingerprints
           this to file a single drift issue per signature.
         - ``None`` for samples this dispatcher has no opinion on
-          (unknown subcommand, no ``--json`` flag, empty stdout, etc.) —
-          the loop treats those as "skipped, no opinion".
+          (unknown subcommand, no ``--json`` flag, ``--jq`` transform
+          applied, empty stdout, requested fields don't cover the shape's
+          required fields, etc.) — the loop treats those as
+          "skipped, no opinion".
     """
     if sample.adapter != "github" or sample.command != "gh":
         return None
     if not sample.stdout.strip():
+        return None
+    # --jq transforms output to an arbitrary shape (scalar, array, etc.);
+    # shape validation against a fixed Pydantic model is meaningless.
+    if "--jq" in sample.args:
         return None
     subcommand = _gh_subcommand(sample.args)
     if subcommand is None:
@@ -127,11 +183,22 @@ async def gh_shape_validator(sample: ShadowSample) -> dict[str, object] | None: 
     shape_cls: type[BaseModel] | None = None
     if subcommand in ("pr-view", "pr-list"):
         shape_cls = _pick_shape_for_pr(sample.args)
-    elif subcommand in ("issue-view", "issue-list"):
+    elif subcommand == "issue-view":
         shape_cls = _pick_shape_for_issue(sample.args)
+    elif subcommand == "issue-list":
+        shape_cls = _pick_shape_for_issue_list(sample.args)
     elif subcommand == "pr-checks":
         shape_cls = _pick_shape_for_checks(sample.args)
     if shape_cls is None:
+        return None
+
+    # Only validate when the requested fields cover the shape's required
+    # fields.  Narrow queries (e.g. ``--json commits``, ``--json headRefOid``)
+    # don't request the required fields, so attempting to validate them
+    # produces false-positive drift for every valid call of that shape.
+    requested = _extract_json_fields(sample.args)
+    required = _SHAPE_REQUIRED_FIELDS.get(shape_cls.__name__, frozenset())
+    if requested is not None and not required.issubset(requested):
         return None
 
     try:
