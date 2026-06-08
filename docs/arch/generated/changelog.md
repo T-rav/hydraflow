@@ -6,7 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
-- `15e22ef` — feat(persistence): repo-scope per-repo operational stores under shared data_root (ADR-0021 D2) *(2026-06-08)*
+- `4069df7` — feat(persistence): repo-scope per-repo operational stores under shared data_root (ADR-0021 D2) (#9355) (#9355) *(2026-06-08)*
 
 ## 2026-W23
 

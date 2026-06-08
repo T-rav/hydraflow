@@ -3,13 +3,24 @@ import { theme } from '../theme'
 import { PIPELINE_STAGES } from '../constants'
 import { useHITLCorrection } from '../hooks/useHITLCorrection'
 
+// Composite row identity — colliding issue numbers across repos must not share
+// per-row state (corrections/summaries/expand) in aggregate mode. Falls back to
+// the bare issue number when no repo is present (single-repo payloads).
+const rowKey = (item) =>
+  item.repo ? `${item.repo}#${item.issue}` : String(item.issue)
+
 export function HITLTable({ items, onRefresh }) {
+  // Only one row is expanded at a time (expandedIssue is a single composite
+  // key, not a set). Per-row data-testids stay keyed by the bare issue number,
+  // so in aggregate mode colliding issue numbers share a testid — selecting the
+  // detail/action testids is unambiguous precisely because at most one of them
+  // is expanded (and thus rendered) at once.
   const [expandedIssue, setExpandedIssue] = useState(null)
   const [summaryExpandedIssue, setSummaryExpandedIssue] = useState(null)
   const [summaries, setSummaries] = useState(() =>
     Object.fromEntries(
       (items || []).map(item => [
-        item.issue,
+        rowKey(item),
         {
           text: item.llmSummary || '',
           updatedAt: item.llmSummaryUpdatedAt || null,
@@ -52,15 +63,16 @@ export function HITLTable({ items, onRefresh }) {
     setSummaries(prev => {
       const next = { ...prev }
       for (const item of items || []) {
+        const key = rowKey(item)
         if (item.llmSummary) {
-          next[item.issue] = {
+          next[key] = {
             text: item.llmSummary,
             updatedAt: item.llmSummaryUpdatedAt || null,
             loading: false,
             error: '',
           }
-        } else if (!next[item.issue]) {
-          next[item.issue] = {
+        } else if (!next[key]) {
+          next[key] = {
             text: '',
             updatedAt: null,
             loading: false,
@@ -72,30 +84,34 @@ export function HITLTable({ items, onRefresh }) {
     })
   }, [items])
 
-  const visibleItems = items.filter(item => !closedIssues.has(item.issue))
+  const visibleItems = items.filter(item => !closedIssues.has(rowKey(item)))
 
-  const toggleExpand = (issueNum) => {
-    setExpandedIssue(prev => prev === issueNum ? null : issueNum)
+  const toggleExpand = (key) => {
+    setExpandedIssue(prev => prev === key ? null : key)
   }
 
-  const toggleSummaryExpand = (issueNum) => {
-    setSummaryExpandedIssue(prev => prev === issueNum ? null : issueNum)
+  const toggleSummaryExpand = (key) => {
+    setSummaryExpandedIssue(prev => prev === key ? null : key)
   }
 
-  const ensureSummary = async (issueNum) => {
-    const existing = summaries[issueNum]
+  const ensureSummary = async (item) => {
+    const key = rowKey(item)
+    const existing = summaries[key]
     if (existing?.text || existing?.loading) return
     setSummaries(prev => ({
       ...prev,
-      [issueNum]: { ...(prev[issueNum] || {}), loading: true, error: '' },
+      [key]: { ...(prev[key] || {}), loading: true, error: '' },
     }))
     try {
-      const resp = await fetch(`/api/hitl/${issueNum}/summary`)
+      const url = item.repo
+        ? `/api/hitl/${item.issue}/summary?repo=${encodeURIComponent(item.repo)}`
+        : `/api/hitl/${item.issue}/summary`
+      const resp = await fetch(url)
       if (!resp.ok) throw new Error(`status ${resp.status}`)
       const payload = await resp.json()
       setSummaries(prev => ({
         ...prev,
-        [issueNum]: {
+        [key]: {
           text: payload.summary || '',
           updatedAt: payload.updated_at || null,
           loading: false,
@@ -105,8 +121,8 @@ export function HITLTable({ items, onRefresh }) {
     } catch {
       setSummaries(prev => ({
         ...prev,
-        [issueNum]: {
-          ...(prev[issueNum] || {}),
+        [key]: {
+          ...(prev[key] || {}),
           loading: false,
           error: 'Could not generate context summary yet.',
         },
@@ -114,71 +130,75 @@ export function HITLTable({ items, onRefresh }) {
     }
   }
 
-  const toggleExpandAndLoadSummary = (issueNum) => {
-    toggleExpand(issueNum)
+  const toggleExpandAndLoadSummary = (item) => {
+    toggleExpand(rowKey(item))
     setSummaryExpandedIssue(null)
-    void ensureSummary(issueNum)
+    void ensureSummary(item)
   }
 
-  const handleCorrectionChange = (issueNum, value) => {
-    setCorrections(prev => ({ ...prev, [issueNum]: value }))
+  const handleCorrectionChange = (key, value) => {
+    setCorrections(prev => ({ ...prev, [key]: value }))
   }
 
-  const handleRetry = async (issueNum) => {
-    const text = (corrections[issueNum] || '').trim()
+  const handleRetry = async (item) => {
+    const key = rowKey(item)
+    const text = (corrections[key] || '').trim()
     if (!text) return
-    setActionLoading({ issue: issueNum, action: 'retry' })
-    await submitCorrection(issueNum, text)
-    setCorrections(prev => ({ ...prev, [issueNum]: '' }))
+    setActionLoading({ key, action: 'retry' })
+    await submitCorrection(item.issue, text, item.repo)
+    setCorrections(prev => ({ ...prev, [key]: '' }))
     setActionLoading(null)
     onRefresh()
   }
 
-  const handleSkip = async (issueNum) => {
-    setActionLoading({ issue: issueNum, action: 'skip' })
-    setActionError(prev => ({ ...prev, [issueNum]: null }))
-    const reason = corrections[issueNum] || ''
-    const ok = await skipIssue(issueNum, reason)
+  const handleSkip = async (item) => {
+    const key = rowKey(item)
+    setActionLoading({ key, action: 'skip' })
+    setActionError(prev => ({ ...prev, [key]: null }))
+    const reason = corrections[key] || ''
+    const ok = await skipIssue(item.issue, reason, item.repo)
     if (!ok) {
-      setActionError(prev => ({ ...prev, [issueNum]: 'Skip failed. Try again.' }))
+      setActionError(prev => ({ ...prev, [key]: 'Skip failed. Try again.' }))
     }
     setActionLoading(null)
     if (ok) setExpandedIssue(null)
     onRefresh()
   }
 
-  const handleClose = async (issueNum) => {
-    setActionLoading({ issue: issueNum, action: 'close' })
-    setActionError(prev => ({ ...prev, [issueNum]: null }))
-    const reason = corrections[issueNum] || ''
-    const ok = await closeIssue(issueNum, reason)
+  const handleClose = async (item) => {
+    const key = rowKey(item)
+    setActionLoading({ key, action: 'close' })
+    setActionError(prev => ({ ...prev, [key]: null }))
+    const reason = corrections[key] || ''
+    const ok = await closeIssue(item.issue, reason, item.repo)
     if (ok) {
       setClosedIssues(prev => {
         const next = new Set(prev)
-        next.add(issueNum)
+        next.add(key)
         return next
       })
       setExpandedIssue(null)
     } else {
-      setActionError(prev => ({ ...prev, [issueNum]: 'Close failed. Try again.' }))
+      setActionError(prev => ({ ...prev, [key]: 'Close failed. Try again.' }))
     }
     setActionLoading(null)
     onRefresh()
   }
 
-  const handleApproveProcess = async (issueNum) => {
-    setActionLoading({ issue: issueNum, action: 'approve-process' })
-    await approveProcess(issueNum)
+  const handleApproveProcess = async (item) => {
+    const key = rowKey(item)
+    setActionLoading({ key, action: 'approve-process' })
+    await approveProcess(item.issue, item.repo)
     setActionLoading(null)
     setExpandedIssue(null)
     onRefresh()
   }
 
-  const isActionLoading = (issueNum, action) =>
-    actionLoading && actionLoading.issue === issueNum && actionLoading.action === action
+  const isActionLoading = (key, action) =>
+    actionLoading && actionLoading.key === key && actionLoading.action === action
 
-  const isAnyActionLoading = (issueNum) =>
-    actionLoading && actionLoading.issue === issueNum
+  const isAnyActionLoading = (key) =>
+    actionLoading && actionLoading.key === key
 
   return (
     <div style={styles.container}>
@@ -219,16 +239,22 @@ export function HITLTable({ items, onRefresh }) {
         </thead>
         <tbody>
           {visibleItems.map((item) => {
-            const isExpanded = expandedIssue === item.issue
+            const key = rowKey(item)
+            const isExpanded = expandedIssue === key
             const status = item.status || 'pending'
             return (
-              <React.Fragment key={item.issue}>
+              <React.Fragment key={key}>
                 <tr
-                  onClick={() => toggleExpandAndLoadSummary(item.issue)}
+                  onClick={() => toggleExpandAndLoadSummary(item)}
                   style={isExpanded ? styles.rowActive : styles.row}
                   data-testid={`hitl-row-${item.issue}`}
                 >
                   <td style={styles.td}>
+                    {item.repo && (
+                      <span style={styles.repoBadge} data-testid={`hitl-repo-${item.issue}`}>
+                        {item.repo}
+                      </span>
+                    )}
                     <a href={item.issueUrl || item.prUrl || '#'} target="_blank" rel="noreferrer" style={styles.link}
                        onClick={e => e.stopPropagation()}>
                       {item.type === 'pr' ? `PR #${item.pr || item.number}` : `#${item.issue}`}
@@ -269,24 +295,24 @@ export function HITLTable({ items, onRefresh }) {
                             <span style={styles.summaryTitle}>LLM Context Summary</span>
                             <button
                               style={styles.summaryToggle}
-                              onClick={e => { e.stopPropagation(); toggleSummaryExpand(item.issue) }}
-                              disabled={!summaries[item.issue]?.text}
+                              onClick={e => { e.stopPropagation(); toggleSummaryExpand(key) }}
+                              disabled={!summaries[key]?.text}
                               data-testid={`hitl-summary-toggle-${item.issue}`}
                             >
-                              {summaryExpandedIssue === item.issue ? 'Show less' : 'Show more'}
+                              {summaryExpandedIssue === key ? 'Show less' : 'Show more'}
                             </button>
                           </div>
                           <div
                             style={
-                              summaryExpandedIssue === item.issue
+                              summaryExpandedIssue === key
                                 ? styles.summaryExpanded
                                 : styles.summaryCollapsed
                             }
                             data-testid={`hitl-summary-${item.issue}`}
                           >
-                            {summaries[item.issue]?.loading
+                            {summaries[key]?.loading
                               ? 'Generating summary...'
-                              : summaries[item.issue]?.text || summaries[item.issue]?.error || 'Summary pending. Refresh in a few seconds.'}
+                              : summaries[key]?.text || summaries[key]?.error || 'Summary pending. Refresh in a few seconds.'}
                           </div>
                         </div>
                         {item.visualEvidence && item.visualEvidence.items && item.visualEvidence.items.length > 0 && (
@@ -339,49 +365,49 @@ export function HITLTable({ items, onRefresh }) {
                         <textarea
                           style={styles.textarea}
                           placeholder="Provide correction guidance..."
-                          value={corrections[item.issue] || ''}
-                          onChange={e => handleCorrectionChange(item.issue, e.target.value)}
+                          value={corrections[key] || ''}
+                          onChange={e => handleCorrectionChange(key, e.target.value)}
                           onClick={e => e.stopPropagation()}
                           data-testid={`hitl-textarea-${item.issue}`}
                         />
                         <div style={styles.actions}>
                           <button
                             style={styles.retryBtn}
-                            disabled={!(corrections[item.issue] || '').trim() || isAnyActionLoading(item.issue)}
-                            onClick={e => { e.stopPropagation(); handleRetry(item.issue) }}
+                            disabled={!(corrections[key] || '').trim() || isAnyActionLoading(key)}
+                            onClick={e => { e.stopPropagation(); handleRetry(item) }}
                             data-testid={`hitl-retry-${item.issue}`}
                           >
-                            {isActionLoading(item.issue, 'retry') ? 'Processing...' : 'Retry with guidance'}
+                            {isActionLoading(key, 'retry') ? 'Processing...' : 'Retry with guidance'}
                           </button>
                           <button
                             style={styles.skipBtn}
-                            disabled={isAnyActionLoading(item.issue)}
-                            onClick={e => { e.stopPropagation(); handleSkip(item.issue) }}
+                            disabled={isAnyActionLoading(key)}
+                            onClick={e => { e.stopPropagation(); handleSkip(item) }}
                             data-testid={`hitl-skip-${item.issue}`}
                           >
-                            {isActionLoading(item.issue, 'skip') ? 'Skipping...' : 'Skip'}
+                            {isActionLoading(key, 'skip') ? 'Skipping...' : 'Skip'}
                           </button>
                           <button
                             style={styles.closeBtn}
-                            disabled={isAnyActionLoading(item.issue)}
-                            onClick={e => { e.stopPropagation(); handleClose(item.issue) }}
+                            disabled={isAnyActionLoading(key)}
+                            onClick={e => { e.stopPropagation(); handleClose(item) }}
                             data-testid={`hitl-close-${item.issue}`}
                           >
-                            {isActionLoading(item.issue, 'close') ? 'Closing...' : 'Close issue'}
+                            {isActionLoading(key, 'close') ? 'Closing...' : 'Close issue'}
                           </button>
                           {item.issueTypeReview && (
                             <button
                               style={styles.approveProcessBtn}
-                              disabled={isAnyActionLoading(item.issue)}
-                              onClick={e => { e.stopPropagation(); handleApproveProcess(item.issue) }}
+                              disabled={isAnyActionLoading(key)}
+                              onClick={e => { e.stopPropagation(); handleApproveProcess(item) }}
                               data-testid={`hitl-approve-process-${item.issue}`}
                             >
-                              {isActionLoading(item.issue, 'approve-process') ? 'Approving...' : 'Approve'}
+                              {isActionLoading(key, 'approve-process') ? 'Approving...' : 'Approve'}
                             </button>
                           )}
                         </div>
-                        {actionError[item.issue] && (
-                          <div style={styles.actionError}>{actionError[item.issue]}</div>
+                        {actionError[key] && (
+                          <div style={styles.actionError}>{actionError[key]}</div>
                         )}
                       </div>
                     </td>
@@ -513,6 +539,11 @@ const styles = {
   row: { cursor: 'pointer' },
   rowActive: { cursor: 'pointer', background: theme.surfaceInset },
   link: { color: theme.accent, textDecoration: 'none' },
+  repoBadge: {
+    display: 'inline-block', marginRight: 6, fontSize: 9, padding: '1px 6px',
+    borderRadius: 8, background: theme.surfaceInset, color: theme.textMuted,
+    verticalAlign: 'middle',
+  },
   causeText: { fontSize: 11, color: theme.orange, fontWeight: 500 },
   causePlaceholder: { color: theme.textMuted, fontStyle: 'italic' },
   detailCell: { padding: 0, borderBottom: `1px solid ${theme.border}` },

@@ -2984,6 +2984,7 @@ class PRManager:
             pr=pr_number,
             pr_url=pr_url,
             branch=branch,
+            repo=self._config.repo_slug,
         )
 
     @staticmethod

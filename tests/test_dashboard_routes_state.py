@@ -1411,6 +1411,20 @@ class TestRepoScopedEndpoints:
                 self.origin_calls.append(issue)
                 return config.review_label[0]
 
+            # get_hitl now reads the summary surface from the row's runtime
+            # state too (not the host ctx.state) — the fake must provide it.
+            def get_hitl_summary(self, issue: int) -> str:
+                return ""
+
+            def get_hitl_summary_updated_at(self, issue: int) -> str | None:
+                return None
+
+            def get_hitl_visual_evidence(self, issue: int) -> object | None:
+                return None
+
+            def get_hitl_summary_failure(self, issue: int) -> tuple[str | None, str]:
+                return (None, "")
+
         runtime = SimpleNamespace(
             config=config.model_copy(),
             event_bus=MagicMock(),

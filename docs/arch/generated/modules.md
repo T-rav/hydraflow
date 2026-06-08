@@ -35,7 +35,7 @@ graph LR
     src_arch_generators -- "11" --> src_arch
     src_dashboard_routes -- "3" --> src_onboarding
     src_dashboard_routes -- "1" --> src_preflight
-    src_dashboard_routes -- "1" --> src_state
+    src_dashboard_routes -- "2" --> src_state
     src_mockworld_fakes -- "29" --> src_mockworld
     src_mockworld_fakes -- "1" --> src_telemetry
     src_preflight -- "1" --> src_runners

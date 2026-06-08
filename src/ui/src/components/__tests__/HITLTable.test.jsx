@@ -496,3 +496,85 @@ describe('HITLTable component', () => {
     expect(runLink.getAttribute('href')).toBe('https://ci.example.com/run/123')
   })
 })
+
+describe('HITLTable multi-repo (aggregate mode)', () => {
+  const collidingItems = [
+    { issue: 42, title: 'A bug', repo: 'org-a', branch: 'a/42', status: 'pending' },
+    { issue: 42, title: 'B bug', repo: 'org-b', branch: 'b/42', status: 'pending' },
+  ]
+
+  it('renders a per-repo badge for each row', () => {
+    render(<HITLTable items={collidingItems} onRefresh={() => {}} />)
+    expect(screen.getByText('org-a')).toBeInTheDocument()
+    expect(screen.getByText('org-b')).toBeInTheDocument()
+  })
+
+  it('keeps per-row correction state isolated for colliding issue numbers', () => {
+    render(<HITLTable items={collidingItems} onRefresh={() => {}} />)
+    const rows = screen.getAllByTestId('hitl-row-42')
+
+    // Expand org-a's #42 and type a correction.
+    fireEvent.click(rows[0])
+    fireEvent.change(screen.getByTestId('hitl-textarea-42'), {
+      target: { value: 'guidance for A' },
+    })
+
+    // Expanding org-b's #42 (single-expand) shows an EMPTY textarea — not A's.
+    fireEvent.click(rows[1])
+    expect(screen.getByTestId('hitl-textarea-42').value).toBe('')
+
+    // Re-expanding org-a's #42 still shows A's correction (composite keying).
+    fireEvent.click(screen.getAllByTestId('hitl-row-42')[0])
+    expect(screen.getByTestId('hitl-textarea-42').value).toBe('guidance for A')
+  })
+
+  it('targets the row’s own repo when closing a colliding issue', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    global.fetch = fetchMock
+    render(<HITLTable items={collidingItems} onRefresh={() => {}} />)
+
+    // Expand org-b's #42 and close it.
+    fireEvent.click(screen.getAllByTestId('hitl-row-42')[1])
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('hitl-close-42'))
+    })
+
+    const closeCall = fetchMock.mock.calls.find(c => String(c[0]).includes('/close'))
+    expect(closeCall[0]).toBe('/api/hitl/42/close?repo=org-b')
+  })
+
+  it('fetches the summary with the row’s repo for a colliding issue', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ summary: 'B summary', updated_at: null }),
+    })
+    global.fetch = fetchMock
+    render(<HITLTable items={collidingItems} onRefresh={() => {}} />)
+
+    // Expanding org-b's #42 triggers a repo-scoped summary fetch.
+    await act(async () => {
+      fireEvent.click(screen.getAllByTestId('hitl-row-42')[1])
+    })
+
+    const summaryCall = fetchMock.mock.calls.find(c => String(c[0]).includes('/summary'))
+    expect(summaryCall[0]).toBe('/api/hitl/42/summary?repo=org-b')
+  })
+
+  it('closing a colliding issue removes only that repo’s row', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    global.fetch = fetchMock
+    render(<HITLTable items={collidingItems} onRefresh={() => {}} />)
+    expect(screen.getAllByTestId('hitl-row-42')).toHaveLength(2)
+
+    fireEvent.click(screen.getAllByTestId('hitl-row-42')[1])
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('hitl-close-42'))
+    })
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('hitl-row-42')).toHaveLength(1)
+    })
+    expect(screen.getByText('org-a')).toBeInTheDocument()
+    expect(screen.queryByText('org-b')).not.toBeInTheDocument()
+  })
+})
