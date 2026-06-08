@@ -1307,21 +1307,25 @@ export function HydraFlowProvider({ children }) {
     dispatch({ type: 'SESSION_RESET' })
   }, [])
 
+  // Worker controls act on ONE repo (the selected one), so they are no-ops in
+  // aggregate mode — the backend rejects repo=__all__ for these mutations.
   const toggleBgWorker = useCallback(async (name, enabled) => {
+    if (state.selectedRepoSlug === REPO_ALL) return
     // Optimistic local update — works even when backend is down
     dispatch({ type: 'TOGGLE_BG_WORKER', data: { name, enabled } })
     try {
-      await fetch('/api/control/bg-worker', {
+      await fetch(applyRepoParam('/api/control/bg-worker'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, enabled }),
       })
     } catch { /* ignore — local state already updated */ }
-  }, [])
+  }, [applyRepoParam, state.selectedRepoSlug])
 
   const triggerBgWorker = useCallback(async (name) => {
+    if (state.selectedRepoSlug === REPO_ALL) return false
     try {
-      const resp = await fetch('/api/control/bg-worker/trigger', {
+      const resp = await fetch(applyRepoParam('/api/control/bg-worker/trigger'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -1330,19 +1334,20 @@ export function HydraFlowProvider({ children }) {
     } catch {
       return false
     }
-  }, [])
+  }, [applyRepoParam, state.selectedRepoSlug])
 
   const updateBgWorkerInterval = useCallback(async (name, intervalSeconds) => {
+    if (state.selectedRepoSlug === REPO_ALL) return
     // Optimistic local update
     dispatch({ type: 'UPDATE_BG_WORKER_INTERVAL', data: { name, interval_seconds: intervalSeconds } })
     try {
-      await fetch('/api/control/bg-worker/interval', {
+      await fetch(applyRepoParam('/api/control/bg-worker/interval'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, interval_seconds: intervalSeconds }),
       })
     } catch { /* ignore — local state already updated */ }
-  }, [])
+  }, [applyRepoParam, state.selectedRepoSlug])
 
   const requestChanges = useCallback(async (issueNumber, feedback, stage) => {
     try {
@@ -1473,13 +1478,15 @@ export function HydraFlowProvider({ children }) {
       fetchWithRepo('/api/system/workers')
         .then(r => r.json())
         .then(data => {
-          // Sync local toggle overrides to backend
+          // Sync local toggle overrides to the backend — but only when a
+          // single repo is selected; worker mutations are per-repo and the
+          // backend rejects repo=__all__, so skip the push in aggregate mode.
           const localWorkers = bgWorkersRef.current
-          if (localWorkers.length > 0 && data.workers) {
+          if (state.selectedRepoSlug !== REPO_ALL && localWorkers.length > 0 && data.workers) {
             const backendMap = Object.fromEntries(data.workers.map(w => [w.name, w.enabled]))
             for (const lw of localWorkers) {
               if (lw.enabled !== undefined && backendMap[lw.name] !== undefined && lw.enabled !== backendMap[lw.name]) {
-                fetch('/api/control/bg-worker', {
+                fetch(applyRepoParam('/api/control/bg-worker'), {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ name: lw.name, enabled: lw.enabled }),
@@ -1574,7 +1581,7 @@ export function HydraFlowProvider({ children }) {
       console.warn('[HydraFlow] WebSocket error; awaiting close for reconnect', err)
     }
     wsRef.current = ws
-  }, [state.selectedRepoSlug, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo])
+  }, [state.selectedRepoSlug, applyRepoParam, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo])
 
   useEffect(() => {
     const poll = () => {

@@ -941,38 +941,56 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         workers = _workers_for_runtime(_cfg, _state, _get_orch(), repo or "")
         return JSONResponse(BackgroundWorkersResponse(workers=workers).model_dump())
 
+    def _resolve_orch_for(repo: str | None) -> tuple[Any, JSONResponse | None]:
+        """Resolve the row's orchestrator, or a 400 response (incl. __all__)."""
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            return None, JSONResponse(
+                {"error": "this action requires a specific repo"}, status_code=400
+            )
+        _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
+        orch = _get_orch()
+        if not orch:
+            return None, JSONResponse({"error": "no orchestrator"}, status_code=400)
+        return orch, None
+
     @router.post("/api/control/bg-worker")
-    async def toggle_bg_worker(body: dict[str, Any]) -> JSONResponse:
-        """Enable or disable a background worker."""
+    async def toggle_bg_worker(
+        body: dict[str, Any], repo: RepoSlugParam = None
+    ) -> JSONResponse:
+        """Enable or disable a background worker (on the row's repo)."""
         name = body.get("name")
         enabled = body.get("enabled")
         if not name or enabled is None:
             return JSONResponse(
                 {"error": "name and enabled are required"}, status_code=400
             )
-        orch = ctx.get_orchestrator()
-        if not orch:
-            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+        orch, rejected = _resolve_orch_for(repo)
+        if rejected is not None:
+            return rejected
         orch.set_bg_worker_enabled(name, bool(enabled))
         return JSONResponse({"status": "ok", "name": name, "enabled": bool(enabled)})
 
     @router.post("/api/control/bg-worker/trigger")
-    async def trigger_bg_worker(body: dict[str, Any]) -> JSONResponse:
-        """Trigger an immediate execution of a background worker."""
+    async def trigger_bg_worker(
+        body: dict[str, Any], repo: RepoSlugParam = None
+    ) -> JSONResponse:
+        """Trigger an immediate execution of a background worker (row's repo)."""
         name = body.get("name")
         if not name:
             return JSONResponse({"error": "name is required"}, status_code=400)
-        orch = ctx.get_orchestrator()
-        if not orch:
-            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+        orch, rejected = _resolve_orch_for(repo)
+        if rejected is not None:
+            return rejected
         triggered = orch.trigger_bg_worker(name)
         if not triggered:
             return JSONResponse({"error": f"unknown worker '{name}'"}, status_code=404)
         return JSONResponse({"status": "ok", "name": name})
 
     @router.post("/api/control/bg-worker/interval")
-    async def set_bg_worker_interval(body: dict[str, Any]) -> JSONResponse:
-        """Update the polling interval for a background worker."""
+    async def set_bg_worker_interval(
+        body: dict[str, Any], repo: RepoSlugParam = None
+    ) -> JSONResponse:
+        """Update the polling interval for a background worker (row's repo)."""
         name = body.get("name")
         interval = body.get("interval_seconds")
         if not name or interval is None:
@@ -995,9 +1013,9 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 {"error": f"interval_seconds must be between {lo} and {hi}"},
                 status_code=422,
             )
-        orch = ctx.get_orchestrator()
-        if not orch:
-            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+        orch, rejected = _resolve_orch_for(repo)
+        if rejected is not None:
+            return rejected
         orch.set_bg_worker_interval(name, interval)
         return JSONResponse(
             {"status": "ok", "name": name, "interval_seconds": interval}
