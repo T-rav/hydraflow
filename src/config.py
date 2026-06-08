@@ -154,6 +154,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ),
     ("gate_activator_interval", "HYDRAFLOW_GATE_ACTIVATOR_INTERVAL", 604800),
     ("rc_cadence_hours", "HYDRAFLOW_RC_CADENCE_HOURS", 4),
+    (
+        "rc_consecutive_failure_escalation_threshold",
+        "HYDRAFLOW_RC_CONSECUTIVE_FAILURE_ESCALATION_THRESHOLD",
+        3,
+    ),
     ("staging_promotion_interval", "HYDRAFLOW_STAGING_PROMOTION_INTERVAL", 300),
     ("staging_rc_retention_days", "HYDRAFLOW_STAGING_RC_RETENTION_DAYS", 7),
     ("staging_bisect_interval", "HYDRAFLOW_STAGING_BISECT_INTERVAL", 600),
@@ -941,6 +946,10 @@ class HydraFlowConfig(BaseModel):
     fake_coverage_stuck_label: list[str] = Field(
         default=["hydraflow-fake-coverage-stuck"],
         description="Labels for stuck fake-coverage gaps (paired with hitl_escalation_label)",
+    )
+    rc_promotion_stuck_label: list[str] = Field(
+        default=["rc-promotion-stuck"],
+        description="Label for repeated staging→main promotion failures (paired with hitl_escalation_label)",
     )
     max_diagnosticians: int = Field(
         default=1,
@@ -1905,6 +1914,15 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=168,
         description="Hours between release-candidate cuts",
+    )
+    rc_consecutive_failure_escalation_threshold: int = Field(
+        default=3,
+        ge=1,
+        le=50,
+        description=(
+            "Consecutive RC-promotion CI failures before StagingPromotionLoop "
+            "files one hitl-escalation issue (so a multi-day stall is noticed)"
+        ),
     )
     rc_branch_prefix: str = Field(
         default="rc/",

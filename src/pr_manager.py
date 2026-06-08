@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Literal, TypeVar
 from urllib.parse import quote
 
+import ci_sentinels
 from comment_formatter import CommentFormatter, SelfReviewError
 from config import Credentials, HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
@@ -2490,7 +2491,7 @@ class PRManager:
         elapsed = 0
         while elapsed < timeout:
             if stop_event.is_set():
-                return False, "Stopped"
+                return False, ci_sentinels.CI_STOPPED
 
             checks = await self.get_pr_checks(pr_number)
 
@@ -2508,7 +2509,7 @@ class PRManager:
                 # retries on the next loop tick.
                 try:
                     await asyncio.wait_for(stop_event.wait(), timeout=poll_interval)
-                    return False, "Stopped"
+                    return False, ci_sentinels.CI_STOPPED
                 except TimeoutError:
                     elapsed += poll_interval
                     continue
@@ -2534,7 +2535,7 @@ class PRManager:
                 )
                 try:
                     await asyncio.wait_for(stop_event.wait(), timeout=poll_interval)
-                    return False, "Stopped"
+                    return False, ci_sentinels.CI_STOPPED
                 except TimeoutError:
                     elapsed += poll_interval
                     continue
@@ -2556,7 +2557,7 @@ class PRManager:
             await self._bus.publish(HydraFlowEvent(type=EventType.CI_CHECK, data=data))
             return passed, msg
 
-        return False, f"Timeout after {timeout}s"
+        return False, ci_sentinels.ci_timeout(timeout)
 
     # --- PR activity query helpers ---
 
