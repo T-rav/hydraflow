@@ -753,3 +753,42 @@ class TestCreateRouterUsesRouteContext:
     def test_route_context_is_importable(self) -> None:
         """RouteContext can be imported from dashboard_routes."""
         assert RouteContext is not None
+
+
+@pytest.mark.asyncio
+async def test_warm_hitl_summary_inflight_keyed_per_repo(
+    config, event_bus, state, tmp_path, monkeypatch
+) -> None:
+    """Same issue number in two repos must both warm — not collide on the int key."""
+    import asyncio  # noqa: PLC0415
+
+    ctx = _make_ctx(config, event_bus, state, tmp_path)
+    release = asyncio.Event()
+    seen: list[str] = []
+
+    async def _fake_compute(
+        issue_number, *, cause, origin, state=None, config=None, issue_fetcher=None
+    ):
+        seen.append(config.repo_slug if config is not None else "host")
+        await release.wait()
+
+    monkeypatch.setattr(ctx, "compute_hitl_summary", _fake_compute)
+    cfg_a = config.model_copy(update={"repo": "org/a"})
+    cfg_b = config.model_copy(update={"repo": "org/b"})
+
+    t1 = asyncio.create_task(
+        ctx.warm_hitl_summary(42, cause="", origin=None, config=cfg_a)
+    )
+    t2 = asyncio.create_task(
+        ctx.warm_hitl_summary(42, cause="", origin=None, config=cfg_b)
+    )
+    for _ in range(100):
+        if len(seen) == 2:
+            break
+        await asyncio.sleep(0)
+    release.set()
+    await asyncio.gather(t1, t2)
+
+    # Both repos' #42 reached compute — neither was suppressed by a shared
+    # int inflight key.
+    assert sorted(seen) == ["org-a", "org-b"]

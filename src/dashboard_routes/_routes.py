@@ -345,7 +345,9 @@ class RouteContext:
     # Derived state — initialised in __post_init__
     issue_fetcher: IssueFetcher = field(init=False)
     hitl_summarizer: TranscriptSummarizer = field(init=False)
-    hitl_summary_inflight: set[int] = field(init=False)
+    # Keys are bare ``int`` issue numbers on the host path and
+    # ``(repo_slug, issue)`` tuples on repo-scoped paths (see warm_hitl_summary).
+    hitl_summary_inflight: set[object] = field(init=False)
     hitl_summary_slots: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -535,6 +537,16 @@ class RouteContext:
             return self.pr_manager
         return PRManager(cfg, bus)
 
+    def issue_fetcher_for(self, cfg: HydraFlowConfig) -> IssueFetcher:
+        """Return the shared IssueFetcher for the host config; else a repo-scoped one.
+
+        Mirrors :meth:`pr_manager_for` so a non-default repo fetches its own
+        issues while the host path keeps using the (mockable) shared fetcher.
+        """
+        if cfg is self.config:
+            return self.issue_fetcher
+        return IssueFetcher(cfg, credentials=self.credentials)
+
     def list_repo_records(self) -> list[RepoRecord]:
         """Return repo records from the callback or store, with error fallback."""
         if self.list_repos_cb is not None:
@@ -567,9 +579,16 @@ class RouteContext:
             return self.allowed_repo_roots_fn()
         return _allowed_repo_roots()
 
-    def hitl_summary_retry_due(self, issue_number: int) -> bool:
-        """Return True if enough time has passed to retry a failed HITL summary."""
-        failed_at, _ = self.state.get_hitl_summary_failure(issue_number)
+    def hitl_summary_retry_due(
+        self, issue_number: int, *, state: StateTracker | None = None
+    ) -> bool:
+        """Return True if enough time has passed to retry a failed HITL summary.
+
+        ``state`` defaults to the host state; pass the row's repo state so the
+        cooldown is read from the repo that owns the issue (ADR-0007 multi-repo).
+        """
+        st = state or self.state
+        failed_at, _ = st.get_hitl_summary_failure(issue_number)
         failed_dt = _parse_iso_or_none(failed_at)
         if failed_dt is None:
             return True
@@ -577,50 +596,88 @@ class RouteContext:
         return age >= self.hitl_summary_cooldown_seconds
 
     async def compute_hitl_summary(
-        self, issue_number: int, *, cause: str, origin: str | None
+        self,
+        issue_number: int,
+        *,
+        cause: str,
+        origin: str | None,
+        state: StateTracker | None = None,
+        config: HydraFlowConfig | None = None,
+        issue_fetcher: IssueFetcher | None = None,
     ) -> str | None:
-        """Fetch issue, generate and normalise a HITL summary, then persist to state."""
+        """Fetch issue, generate and normalise a HITL summary, then persist to state.
+
+        The ``state``/``config``/``issue_fetcher`` overrides default to the host
+        runtime; callers serving a non-default repo MUST pass that repo's objects
+        so the issue is fetched from the right GitHub repo and the summary is
+        persisted to the right state — otherwise issue #N of repo B would be
+        fetched from repo A and stored under A.
+        """
+        st = state or self.state
+        cfg = config or self.config
+        fetcher = issue_fetcher or self.issue_fetcher
         if (
-            not self.config.transcript_summarization_enabled
-            or self.config.dry_run
+            not cfg.transcript_summarization_enabled
+            or cfg.dry_run
             or not self.credentials.gh_token
         ):
             return None
-        issue = await self.issue_fetcher.fetch_issue_by_number(issue_number)
+        issue = await fetcher.fetch_issue_by_number(issue_number)
         if issue is None:
-            self.state.set_hitl_summary_failure(issue_number, "Issue fetch failed")
+            st.set_hitl_summary_failure(issue_number, "Issue fetch failed")
             return None
         context = _build_hitl_context(issue, cause=cause, origin=origin)
         generated = await self.hitl_summarizer.summarize_hitl_context(context)
         if not generated:
-            self.state.set_hitl_summary_failure(
-                issue_number, "Summary model returned empty"
-            )
+            st.set_hitl_summary_failure(issue_number, "Summary model returned empty")
             return None
         summary = _normalise_summary_lines(generated)
         if not summary:
-            self.state.set_hitl_summary_failure(
+            st.set_hitl_summary_failure(
                 issue_number, "Summary normalization produced empty output"
             )
             return None
-        self.state.set_hitl_summary(issue_number, summary)
-        self.state.clear_hitl_summary_failure(issue_number)
+        st.set_hitl_summary(issue_number, summary)
+        st.clear_hitl_summary_failure(issue_number)
         return summary
 
     async def warm_hitl_summary(
-        self, issue_number: int, *, cause: str, origin: str | None
+        self,
+        issue_number: int,
+        *,
+        cause: str,
+        origin: str | None,
+        state: StateTracker | None = None,
+        config: HydraFlowConfig | None = None,
+        issue_fetcher: IssueFetcher | None = None,
     ) -> None:
-        """Schedule background HITL summary generation, guarded by inflight tracking."""
-        if issue_number in self.hitl_summary_inflight:
+        """Schedule background HITL summary generation, guarded by inflight tracking.
+
+        Pass the row's repo ``state``/``config``/``issue_fetcher`` for non-default
+        repos (see :meth:`compute_hitl_summary`).
+        """
+        # Key the in-flight guard by (repo_slug, issue) when a repo config is
+        # given, so warming repo A's issue #42 does not transiently suppress
+        # repo B's issue #42 (same number, different repo). The host path keeps
+        # the bare-int key for back-compat.
+        inflight_key: object = (
+            (config.repo_slug, issue_number) if config is not None else issue_number
+        )
+        if inflight_key in self.hitl_summary_inflight:
             return
-        self.hitl_summary_inflight.add(issue_number)
+        self.hitl_summary_inflight.add(inflight_key)
         try:
             async with self.hitl_summary_slots:
                 await self.compute_hitl_summary(
-                    issue_number, cause=cause, origin=origin
+                    issue_number,
+                    cause=cause,
+                    origin=origin,
+                    state=state,
+                    config=config,
+                    issue_fetcher=issue_fetcher,
                 )
         except Exception as exc:
-            self.state.set_hitl_summary_failure(
+            (state or self.state).set_hitl_summary_failure(
                 issue_number,
                 f"{type(exc).__name__}: {exc}",
             )
@@ -629,7 +686,7 @@ class RouteContext:
                 issue_number,
             )
         finally:
-            self.hitl_summary_inflight.discard(issue_number)
+            self.hitl_summary_inflight.discard(inflight_key)
 
 
 def _build_hitl_context(issue: GitHubIssue, *, cause: str, origin: str | None) -> str:

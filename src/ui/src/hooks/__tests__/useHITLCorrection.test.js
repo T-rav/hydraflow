@@ -149,4 +149,33 @@ describe('useHITLCorrection', () => {
     expect(result.current.closeIssue).toBe(firstRender.closeIssue)
     expect(result.current.approveProcess).toBe(firstRender.approveProcess)
   })
+
+  it('appends ?repo= to every mutation when a repo slug is given', async () => {
+    const { result } = renderHook(() => useHITLCorrection())
+
+    await act(async () => {
+      await result.current.submitCorrection(42, 'fix', 'org-b')
+      await result.current.skipIssue(42, 'reason', 'org-b')
+      await result.current.closeIssue(42, 'reason', 'org-b')
+      await result.current.approveProcess(42, 'org-b')
+    })
+
+    const urls = fetchMock.mock.calls.map(call => call[0])
+    expect(urls).toEqual([
+      '/api/hitl/42/correct?repo=org-b',
+      '/api/hitl/42/skip?repo=org-b',
+      '/api/hitl/42/close?repo=org-b',
+      '/api/hitl/42/approve-process?repo=org-b',
+    ])
+  })
+
+  it('omits the repo query param when no repo is given (single-repo)', async () => {
+    const { result } = renderHook(() => useHITLCorrection())
+
+    await act(async () => {
+      await result.current.submitCorrection(42, 'fix')
+    })
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/hitl/42/correct')
+  })
 })
