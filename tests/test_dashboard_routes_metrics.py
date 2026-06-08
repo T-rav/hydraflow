@@ -315,7 +315,7 @@ class TestReviewInsightsEndpoint:
 
         from review_insights import ReviewInsightStore, ReviewRecord
 
-        memory_dir = config.data_path("memory")
+        memory_dir = config.repo_memory_dir
         store = ReviewInsightStore(memory_dir)
         store.append_review(
             ReviewRecord(
@@ -385,7 +385,7 @@ class TestRetrospectivesEndpoint:
 
         from retrospective import RetrospectiveEntry
 
-        retro_path = config.data_path("memory", "retrospectives.jsonl")
+        retro_path = config.retrospectives_path
         retro_path.parent.mkdir(parents=True, exist_ok=True)
 
         entry = RetrospectiveEntry(
@@ -436,7 +436,7 @@ class TestRetrospectivesEdgeCases:
 
         from retrospective import RetrospectiveEntry
 
-        retro_path = config.data_path("memory", "retrospectives.jsonl")
+        retro_path = config.retrospectives_path
         retro_path.parent.mkdir(parents=True, exist_ok=True)
 
         valid = RetrospectiveEntry(

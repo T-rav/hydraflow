@@ -153,7 +153,7 @@ Run through this checklist before your final commit:
             wiki_store=wiki_store,
             tribal_wiki_store=tribal_wiki_store,
         )
-        self._insights = ReviewInsightStore(config.memory_dir)
+        self._insights = ReviewInsightStore(config.repo_memory_dir)
         from context_cache import ContextSectionCache
 
         self._context_cache = ContextSectionCache(config)
@@ -399,7 +399,7 @@ Run through this checklist before your final commit:
         Returns an empty string if no data is available or on any error.
         """
         try:
-            reviews_path = self._config.memory_dir / "reviews.jsonl"
+            reviews_path = self._config.repo_memory_dir / "reviews.jsonl"
 
             def _load_feedback(_cfg: HydraFlowConfig) -> str:
                 recent = self._insights.load_recent(self._config.review_insight_window)
@@ -424,7 +424,7 @@ Run through this checklist before your final commit:
         Returns an empty list on any error.
         """
         try:
-            reviews_path = self._config.memory_dir / "reviews.jsonl"
+            reviews_path = self._config.repo_memory_dir / "reviews.jsonl"
 
             def _load_escalations(_cfg: HydraFlowConfig) -> str:
                 recent = self._insights.load_recent(self._config.review_insight_window)

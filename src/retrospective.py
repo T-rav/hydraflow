@@ -61,10 +61,10 @@ class RetrospectiveCollector:
         self._prs = prs
         self._queue = queue
         self._obs: ObservabilityPort | None = observability
-        self._retro_path = config.data_path("memory", "retrospectives.jsonl")
+        self._retro_path = config.retrospectives_path
         self._filed = DedupStore(
             "filed_patterns",
-            config.data_path("memory", "filed_patterns.json"),
+            config.repo_memory_dir / "filed_patterns.json",
         )
 
     async def record(

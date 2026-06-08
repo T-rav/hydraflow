@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W23
 
+- `4187035` — fix(ul): route bot/caretaker PRs to config.base_branch(), not hardcoded main (#9346) (#9346) *(2026-06-05)*
 - `15589dc` — fix(beads): create the bead task graph in the implement worktree (fix claim/close) (#9345) (#9345) *(2026-06-05)*
 - `f624cbd` — fix(beads): per-worktree embedded store + JSONL export (drop shared --server) (#9337) (#9337) *(2026-06-05)*
 - `9b97208` — fix(merge): auto-merge Auto-Agent PRs (agent/auto-agent-N) to end the contract-fix runaway (#9332) (#9332) *(2026-06-05)*
@@ -419,21 +420,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `83cc8b3` — Fixes #2726: [ADR Follow-up] ADR-0012: Council requests changes (#2846) (#2846) *(2026-03-15)*
 - `8b7d06f` — Fixes #2720: Renumber ADR-0023 to ADR-0024 and update status to Accepted (#2816) (#2816) *(2026-03-15)*
 - `4eb1c9a` — Accept ADR-0010: worktree and path isolation (#2696) (#2696) *(2026-03-15)*
-- `a914647` — Fixes #2205: Remove CLI layer and consolidate into server API (#2457) (#2457) *(2026-03-09)*
-
-## 2026-W10
-
-- `29d8268` — Fixes #2382: Add ADR-0023 for duplicate class merge-artifact pattern (#2383) (#2383) *(2026-03-08)*
-- `cad34a6` — Fixes #2253: [ADR] Draft decision from memory #2251: ADR pre-review... (#2254) (#2254) *(2026-03-08)*
-- `4534df5` — Fixes #2373: Add ADR-0023 for dead class artifact detection in mock-based tests (#2378) (#2378) *(2026-03-08)*
-- `312fb6f` — Fixes #2356: Add ADR-0023 for toggle-state test consistency (#2369) (#2369) *(2026-03-08)*
-- `26ed00b` — Fixes #2355: ADR-0023 gate triage call on config toggle, not just HITL fallback (#2360) (#2360) *(2026-03-08)*
-- `1baa85a` — Fixes #2341: Add ADR-0023 for auto-triage toggle routing enforcement (#2344) (#2344) *(2026-03-08)*
-- `12d7c57` — Fixes #2306: Add ADR-0023 for stats counter placement in delegating helpers (#2324) (#2324) *(2026-03-08)*
-- `c22797d` — Fixes #2273: Add ADR-0023 for CLI argparse + config builder pattern (#2302) (#2302) *(2026-03-08)*
-- `7ade583` — Fixes #2267: Add ADR-0023 for multi-repo architecture wiring pattern (#2296) (#2296) *(2026-03-08)*
-- `4c09083` — Fixes #2264: [ADR] Draft decision from memory #2258: Implementation... (#2292) (#2292) *(2026-03-08)*
-- `c4b8ecd` — Fixes #2374: Add ADR-0023 for supersession regex verb form coverage (#2379) (#2379) *(2026-03-08)*
 
 
 <!-- arch:generated -->

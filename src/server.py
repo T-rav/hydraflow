@@ -319,6 +319,14 @@ async def _run(config: HydraFlowConfig) -> None:
     # because these are heavyweight server-starting functions that bind ports
     # and block forever.  Extracting them as injectable dependencies would be
     # over-engineering for a two-branch dispatch function.
+    #
+    # One-time, host-only migration of legacy flat per-repo stores into the
+    # repo-scoped layout (ADR-0021 D2). Runs once with the host config before
+    # any runtime/member is built, so member repos never claim the host's
+    # legacy flat data. Idempotent — a no-op once migrated.
+    from data_migration import migrate_flat_operational_stores  # noqa: PLC0415
+
+    migrate_flat_operational_stores(config)
     if not await _run_preflight(config):
         return
     if config.dashboard_enabled:

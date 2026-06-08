@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from config import HydraFlowConfig
 from dashboard_routes._cost_rollups import (
     _parse_range,
     build_by_loop,
@@ -19,25 +20,25 @@ from dashboard_routes._cost_rollups import (
     iter_priced_inferences,
     iter_subprocess_traces,
 )
+from tests.helpers import ConfigFactory
 
 
 @pytest.fixture
-def config(tmp_path: Path) -> MagicMock:
-    cfg = MagicMock()
-    cfg.data_root = tmp_path
-    cfg.data_path = lambda *parts: tmp_path.joinpath(*parts)  # noqa: PLW0108
-    cfg.repo = "o/r"
-    return cfg
+def config(tmp_path: Path) -> HydraFlowConfig:
+    # Real config (not a MagicMock) so cost_inferences_path / data_root carry
+    # the true repo-scoped layout instead of a slug-less approximation.
+    (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
+    return ConfigFactory.create(repo_root=tmp_path / "repo")
 
 
-def _write_inference(config: MagicMock, **fields) -> None:
-    d = config.data_root / "metrics" / "prompt"
+def _write_inference(config: HydraFlowConfig, **fields) -> None:
+    d = config.cost_inferences_path.parent
     d.mkdir(parents=True, exist_ok=True)
-    with (d / "inferences.jsonl").open("a", encoding="utf-8") as fh:
+    with config.cost_inferences_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(fields) + "\n")
 
 
-def _write_loop_trace(config: MagicMock, loop: str, **fields) -> None:
+def _write_loop_trace(config: HydraFlowConfig, loop: str, **fields) -> None:
     from trace_collector import _slug_for_loop  # noqa: PLC0415
 
     d = config.data_root / "traces" / "_loops" / _slug_for_loop(loop)
@@ -49,7 +50,7 @@ def _write_loop_trace(config: MagicMock, loop: str, **fields) -> None:
 
 
 def _write_subprocess(
-    config: MagicMock,
+    config: HydraFlowConfig,
     issue: int,
     phase: str,
     run_id: int,
@@ -540,9 +541,8 @@ def test_per_loop_cost_includes_model_breakdown_for_mixed_models(
     """build_per_loop_cost emits model_breakdown with one entry per model used."""
     from datetime import UTC, datetime, timedelta
 
-    config = MagicMock()
-    config.data_root = tmp_path
-    config.data_path = lambda *parts: tmp_path.joinpath(*parts)  # noqa: PLW0108
+    (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
+    config = ConfigFactory.create(repo_root=tmp_path / "repo")
 
     now = datetime(2026, 4, 22, 12, tzinfo=UTC)
     started = now - timedelta(minutes=5)
@@ -598,9 +598,8 @@ def test_per_loop_cost_buckets_missing_model_under_unknown(
     """Records with empty/missing model bucket under 'unknown'."""
     from datetime import UTC, datetime, timedelta
 
-    config = MagicMock()
-    config.data_root = tmp_path
-    config.data_path = lambda *parts: tmp_path.joinpath(*parts)  # noqa: PLW0108
+    (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
+    config = ConfigFactory.create(repo_root=tmp_path / "repo")
 
     now = datetime(2026, 4, 22, 12, tzinfo=UTC)
     started = now - timedelta(minutes=5)
@@ -629,9 +628,8 @@ def test_per_loop_cost_existing_fields_unchanged(tmp_path) -> None:
     """Regression: adding model_breakdown does not change existing field values."""
     from datetime import UTC, datetime, timedelta
 
-    config = MagicMock()
-    config.data_root = tmp_path
-    config.data_path = lambda *parts: tmp_path.joinpath(*parts)  # noqa: PLW0108
+    (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
+    config = ConfigFactory.create(repo_root=tmp_path / "repo")
 
     now = datetime(2026, 4, 22, 12, tzinfo=UTC)
     started = now - timedelta(minutes=5)

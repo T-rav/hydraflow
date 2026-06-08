@@ -53,7 +53,7 @@ def _write_retro_entries(
     config: HydraFlowConfig, entries: list[RetrospectiveEntry]
 ) -> None:
     """Write retrospective entries to the JSONL file."""
-    retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
+    retro_path = config.retrospectives_path
     retro_path.parent.mkdir(parents=True, exist_ok=True)
     with retro_path.open("w") as f:
         for entry in entries:
@@ -200,7 +200,7 @@ class TestJSONLStorage:
         )
         collector._append_entry(entry)
 
-        retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
+        retro_path = config.retrospectives_path
         assert retro_path.exists()
 
     def test_append_writes_valid_jsonl(self, config: HydraFlowConfig) -> None:
@@ -213,7 +213,7 @@ class TestJSONLStorage:
         )
         collector._append_entry(entry)
 
-        retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
+        retro_path = config.retrospectives_path
         lines = retro_path.read_text().strip().splitlines()
         assert len(lines) == 1
         data = json.loads(lines[0])
@@ -230,7 +230,7 @@ class TestJSONLStorage:
             )
             collector._append_entry(entry)
 
-        retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
+        retro_path = config.retrospectives_path
         lines = retro_path.read_text().strip().splitlines()
         assert len(lines) == 3
 
@@ -302,7 +302,7 @@ class TestRecord:
         )
         await collector.record(42, 101, review)
 
-        retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
+        retro_path = config.retrospectives_path
         assert retro_path.exists()
         lines = retro_path.read_text().strip().splitlines()
         assert len(lines) == 1
@@ -331,7 +331,7 @@ class TestRecord:
         review = ReviewResultFactory.create(merged=True)
         await collector.record(42, 101, review)
 
-        retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
+        retro_path = config.retrospectives_path
         lines = retro_path.read_text().strip().splitlines()
         data = json.loads(lines[0])
         assert data["planned_files"] == []
@@ -346,7 +346,7 @@ class TestRecord:
         review = ReviewResultFactory.create(merged=True)
         await collector.record(42, 101, review)
 
-        retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
+        retro_path = config.retrospectives_path
         lines = retro_path.read_text().strip().splitlines()
         data = json.loads(lines[0])
         assert data["actual_files"] == []
@@ -362,7 +362,7 @@ class TestRecord:
         review = ReviewResultFactory.create(merged=True)
         await collector.record(42, 101, review)
 
-        retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
+        retro_path = config.retrospectives_path
         lines = retro_path.read_text().strip().splitlines()
         data = json.loads(lines[0])
         assert data["quality_fix_rounds"] == 0
@@ -563,7 +563,7 @@ class TestPatternDetection:
         collector, mock_prs, _ = _make_collector(config)
 
         # Pre-populate filed patterns
-        filed_path = config.repo_root / ".hydraflow" / "memory" / "filed_patterns.json"
+        filed_path = config.repo_memory_dir / "filed_patterns.json"
         filed_path.parent.mkdir(parents=True, exist_ok=True)
         filed_path.write_text(json.dumps(["quality_fix"]))
 

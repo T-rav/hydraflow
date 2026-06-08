@@ -455,7 +455,7 @@ async def auto_file_suggestions(
 
         import json as _json  # noqa: PLC0415
 
-        suggestions_path = config.data_path("memory", "harness_suggestions.jsonl")
+        suggestions_path = config.repo_memory_dir / "harness_suggestions.jsonl"
         suggestions_path.parent.mkdir(parents=True, exist_ok=True)
 
         for suggestion in suggestions:
