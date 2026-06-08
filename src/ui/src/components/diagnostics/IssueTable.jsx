@@ -19,6 +19,11 @@ export function IssueTable({ rows, onRowClick }) {
     return <div style={styles.empty}>No data</div>
   }
 
+  // Only surface the repo column when rows are repo-attributed (an "All repos"
+  // union, where the same issue number can appear under different repos).
+  // Single-repo views leave it off and render exactly as before.
+  const showRepo = rows.some((row) => row.repo)
+
   return (
     <div style={styles.container}>
       <div style={styles.title}>Per-Issue</div>
@@ -26,6 +31,7 @@ export function IssueTable({ rows, onRowClick }) {
         <thead>
           <tr>
             <th style={styles.th}>#</th>
+            {showRepo && <th style={styles.th}>Repo</th>}
             <th style={styles.th}>Phase</th>
             <th style={styles.th}>Run</th>
             <th style={styles.thRight}>Tokens</th>
@@ -37,7 +43,7 @@ export function IssueTable({ rows, onRowClick }) {
         <tbody>
           {rows.map((row, i) => (
             <tr
-              key={`${row.issue}-${row.phase}-${row.run_id}-${i}`}
+              key={`${row.repo || ''}-${row.issue}-${row.phase}-${row.run_id}-${i}`}
               style={{
                 ...styles.tr,
                 ...(row.crashed ? styles.trCrashed : {}),
@@ -45,6 +51,7 @@ export function IssueTable({ rows, onRowClick }) {
               onClick={() => onRowClick(row)}
             >
               <td style={styles.td}>{row.issue}</td>
+              {showRepo && <td style={styles.td}>{row.repo}</td>}
               <td style={styles.td}>{row.phase}</td>
               <td style={styles.td}>{row.run_id}</td>
               <td style={styles.tdRight}>{formatTokens(row.tokens)}</td>

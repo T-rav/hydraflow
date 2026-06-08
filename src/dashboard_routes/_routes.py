@@ -1729,7 +1729,7 @@ def create_router(
     # --- Diagnostics routes (factory metrics + trace artifacts) ---
     from dashboard_routes._diagnostics_routes import build_diagnostics_router
 
-    router.include_router(build_diagnostics_router(config))
+    router.include_router(build_diagnostics_router(config, ctx))
 
     # --- Trust-fleet routes (§12.1; Plan 5b-3 schema) -----------------------
     from types import SimpleNamespace  # noqa: PLC0415
