@@ -708,6 +708,46 @@ describe('startRuntime compatibility flow', () => {
       body: JSON.stringify({ slug: 'demo' }),
     })
   })
+
+  it('threads the selected repo to bg-worker mutations and no-ops in all-mode', async () => {
+    vi.resetModules()
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    })
+
+    const { HydraFlowProvider, useHydraFlow } = await import('../HydraFlowContext')
+    let cap = null
+    function Cap() {
+      cap = useHydraFlow()
+      return <div>ready</div>
+    }
+    await act(async () => {
+      render(
+        <HydraFlowProvider>
+          <Cap />
+        </HydraFlowProvider>
+      )
+    })
+
+    // A specific repo selected → the bg-worker POST carries ?repo=.
+    await act(async () => { cap.selectRepo('org-b') })
+    await act(async () => { await cap.toggleBgWorker('pr_unsticker', false) })
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/control/bg-worker?repo=org-b',
+      expect.objectContaining({ method: 'POST' })
+    )
+
+    // Aggregate mode → worker mutations are no-ops (backend rejects __all__).
+    fetchSpy.mockClear()
+    await act(async () => { cap.selectRepo('__all__') })
+    await act(async () => { await cap.toggleBgWorker('pr_unsticker', true) })
+    const bgCalls = fetchSpy.mock.calls.filter(c =>
+      String(c[0]).includes('/api/control/bg-worker')
+    )
+    expect(bgCalls).toHaveLength(0)
+  })
   it('falls back to /api/repos/add by path when POST /api/repos is not supported', async () => {
     vi.resetModules()
 
