@@ -100,10 +100,22 @@ The empathy beat — it MUST land within a minute of the claim, or the next fort
 
 An internal platform, AI-built. Agents, retrieval, scheduled tasks, observability. No guardrails.
 
-# August 28, 2025: v1 died. I started over — and kept the lessons.
+# August 28, 2025: v1 died.
 
 <!--
-Motive one — the relatable one, a confession, and secretly the origin of the whole thesis. InsightMesh: a real internal sales-enablement platform, built the way most of this room is building right now — Cursor, fast, thrilling, barely any review, no strong guardrails. (Stack stays a spoken aside at most — "LangGraph agents, Langfuse traces, the stack you'd expect." Real, not a toy.) "And v1 collapsed under its own weight. I couldn't maintain what I'd made. So on August 28, 2025 — the date's in the git history — I did what every engineer in this room has done at least once: threw it away and started over." Then the beat that carries the talk in miniature, slow: "Here's the fork in the road. The obvious fix was to put the human back in the loop — review everything, slow down. I did the opposite. v2 — the version alive today — is still entirely AI-written. Still almost no human review. What changed was the guardrails: standards, tests, CI walls. The version with less structure died. The version with more structure lives." The bet — walls over vigilance — was made HERE, ten months before the factory. The lessons rolled forward — that's roll number one, and it won't be the last time you hear that phrase tonight. This conference's tagline is "you ship it, you own it, you maintain it" — and the word AI changed most isn't ship or own. It's maintain. Vibe to Value — the methodology name is this journey, compressed to three characters.
+Motive one — the relatable one, a confession. InsightMesh: a real internal sales-enablement platform, built the way most of this room is building right now — Cursor, fast, thrilling, barely any review, no strong guardrails. (Stack stays a spoken aside at most — "LangGraph agents, Langfuse traces, the stack you'd expect." Real, not a toy.) "And v1 collapsed under its own weight. I couldn't maintain what I'd made. So on August 28, 2025 — the date's in the git history — I did what every engineer in this room has done at least once: threw it away and started over." This conference's tagline is "you ship it, you own it, you maintain it" — and the word AI changed most isn't ship or own. It's maintain. I didn't need a faster way to write code. I needed help keeping what I'd written alive.
+-->
+
+---
+
+## The fork: put the human back in — or build walls?
+
+v2 is still entirely AI-written. Still almost no human review. What changed was the guardrails.
+
+# The version with less structure died. The version with more structure lives.
+
+<!--
+The beat that carries the talk in miniature — deliver it slow. "Here's the fork in the road. The obvious fix was to put the human back in the loop — review everything, slow down. I did the opposite. v2 — the version alive today — is still entirely AI-written. What changed was the guardrails: standards, tests, CI walls." The bet — walls over vigilance — was made HERE, ten months before the factory existed. The lessons rolled forward — that's roll number one, and it won't be the last time you hear that phrase tonight. Vibe to Value — the methodology name is this journey, compressed to three characters.
 -->
 
 ---
@@ -170,19 +182,39 @@ This is the lean-back line — say it plainly and let it cost something. What go
 **Promoters** move work through tiers · **Provocateurs** attack the system on purpose
 
 <!--
-Pay off the cold-open number — this is the factory's workforce. Walk the categories fast, one breath each; don't lecture the grid. Then the two beats that matter. First: "I designed the first couple up front. The rest accreted, one at a time, each answering a recurring operational problem — and the categories weren't in my sketch. They emerged." VERIFIED from file history: the first two loop files (base_background_loop, pr_unsticker_loop) land Feb 24 — day six. The rest accrete in ones, twos, and threes across four months; the newest entered the registry June 4. Spoken texture option: "The newest loop in that registry is three weeks old. The taxonomy is still growing while I'm standing here." (Caveat: file-date method doesn't follow renames — an Apr 24 ten-file burst is likely a refactor, so keep the claim soft: 'the rest accreted over four months.') Second, land on the provocateurs, because they're the ones that make the room sit up: the factory employs agents whose whole job is to attack it — synthesize adversarial cases from past failures, run them against the system weekly, challenge its own assumptions before reality does. A workforce that maintains, proposes, prunes, audits, repairs, watches, promotes — and red-teams itself. That's who does the work. The next slides are what keeps that workforce honest.
+Pay off the cold-open number — this is the factory's workforce. Walk the categories fast, one breath each; don't lecture the grid. Then: "I designed the first couple up front. The rest accreted, one at a time, each answering a recurring operational problem — and the categories weren't in my sketch. They emerged." VERIFIED from file history: the first two loop files (base_background_loop, pr_unsticker_loop) land Feb 24 — day six. The rest accrete in ones, twos, and threes across four months; the newest entered the registry June 4. Spoken texture option: "The newest loop in that registry is three weeks old. The taxonomy is still growing while I'm standing here." (Caveat: file-date method doesn't follow renames — an Apr 24 ten-file burst is likely a refactor, so keep the claim soft: 'the rest accreted over four months.') Save the provocateurs for the next slide — point at the last cell and say "and that last category deserves its own slide."
+-->
+
+---
+
+## The factory red-teams itself.
+
+Provocateurs synthesize adversarial cases from past failures · run them against the system weekly · challenge its assumptions before reality does
+
+<!--
+The sit-up beat — the factory employs agents whose whole job is to ATTACK it. CorpusLearningLoop mines past skill failures and synthesizes adversarial cases from them; SkillPromptEvalLoop runs that hostile corpus against the built-in skills every week; the advisor pattern wires a skeptical second opinion into PR review and verification. A workforce that maintains, proposes, prunes, audits, repairs, watches, promotes — and red-teams itself. Nobody told it to be paranoid; I encoded the paranoia once and it became a job category. That's who does the work. The next slides are what keeps that workforce honest.
 -->
 
 ---
 
 ## Quality moved from **social** to **structural**.
 
+Senior reviewers, tribal knowledge, manual discipline — none of it scales to a system that mutates daily.
+
+<!--
+The unifying reframe — give it its own breath before the numbers. Quality enforcement used to be social: the senior reviewer who catches it, the tribal knowledge of who-knows-what, the discipline you hope survives the sprint. A system that rewrites itself daily outruns all of that. So HydraFlow doesn't lower the quality bar — it moves the bar INTO the system: validation continuous, governance executable, scenarios authoritative. If you hear "fluid" and think "lower standards," you've got it exactly backwards.
+-->
+
+---
+
+## The encoding has a size.
+
 15,800+ tests · 70% coverage floor, CI-enforced · 478 world-scenario tests · 176 regression tests
 
 #### The gates are habits. The blast radius is a wall.
 
 <!--
-Senior reviewers and tribal knowledge don't scale to a system that mutates daily — so quality got encoded, and the encoding has a size: nearly sixteen thousand tests, a seventy-percent coverage floor CI fails below, four hundred seventy-eight scenario tests that exercise the system inside simulated worlds, and a hundred seventy-six regression tests — every bug that ever bit lands with one, so it can never bite twice. (15,838 collected via pytest 2026-06-09; refresh with the others.) If you hear "fluid" and think "lower standards," it's exactly backwards: the bar didn't drop, it moved INTO the system. Distinguish the two layers now, because the next slide depends on it: the gates are habits — code the factory can edit. The walls are not.
+Numbers one at a time, same trial cadence as the cold open: nearly sixteen thousand tests. A seventy-percent coverage floor CI fails below. Four hundred seventy-eight scenario tests that exercise the system inside simulated worlds. A hundred seventy-six regression tests — every bug that ever bit lands with one, so it can never bite twice. (15,838 collected via pytest 2026-06-09; refresh with the others.) Then the distinction the next slide depends on: the gates are habits — code the factory can edit. The walls are not. Hold that line; it's the hinge of the whole middle act.
 -->
 
 ---
@@ -199,14 +231,32 @@ Containment by construction, three rings — this is the "preventing runaway loo
 
 ---
 
-## The test chamber
+## Testing this used to mean an *environment*.
 
-GitHub, git, Docker, the LLM itself — 12 Ports, 34 Fakes, each held honest by a conformance contract.
+A staging GitHub org. Real tokens. Rate limits. Flaky networks. An LLM bill.
+
+<!--
+Start with the pain everyone in the room knows: "Testing a system like this used to mean an ENVIRONMENT. A staging GitHub org. Real tokens. Rate limits. A flaky network between you and everything. An LLM bill running while your tests do. And a test run measured in minutes — if it didn't fall over first." Let them nod. The next slide is the escape.
+-->
+
+---
+
+## MockWorld: the test chamber
+
+GitHub, git, Docker, the LLM itself — **12 Ports, 34 Fakes**, each pinned to its real adapter by a conformance contract.
+
+#### A mock fakes a response. A Fake world has state, time, and failure modes.
+
+<!--
+The move: every external dependency the factory touches enters through a typed Port — and MockWorld swaps a Fake in at that boundary. These aren't traditional mocks. A mock simulates a RESPONSE — one call, one canned answer. A Fake world simulates CONDITIONS: it has state that persists, time that passes, and failure modes you can program. The entire factory runs inside a simulated world, on a laptop, in seconds — no tokens, no staging org, no bill. And the fakes can't quietly lie: every one is held to a conformance contract test that pins its behavior to the real adapter's (tests/trust/contracts/ — fake_github, fake_git, fake_docker, fake_llm, all of them). That's the answer to the question someone's already drafting for Q&A: "how do you know the fake matches reality?" The contract knows.
+-->
+
+---
 
 # Given-When-Then was always pointing at the world.
 
 <!--
-The boldest claim — give it room, and start with the pain everyone knows: "Testing this kind of system used to mean an ENVIRONMENT. A staging GitHub org, real tokens, rate limits, flaky networks, an LLM bill — and a test run measured in minutes if it didn't fall over first." Then the move: every external dependency the factory touches — GitHub, git, Docker, the LLM itself, observability — enters through a typed Port. MockWorld swaps a Fake in at that boundary. But these aren't traditional mocks: a mock simulates a RESPONSE; a Fake world simulates CONDITIONS — it has state, time, and failure modes you can program. Given GitHub is rate-limiting, given auth is flaky, given the operator's budget is capped — when the loop ticks, then the system yields. The entire factory runs inside a simulated world, on a laptop, in seconds — no tokens, no staging org, no bill. And the fakes can't quietly lie: every one is held to a conformance contract test that pins its behavior to the real adapter's (tests/trust/contracts/ — fake_github, fake_git, fake_docker, fake_llm, all of them). That's not mocking. That's BDD pushed all the way — the "Given" was always pointing past user flows at the whole operating environment. Cockburn's ports plus North's scenarios; it just took autonomous systems to make the combination urgent. Receipts: 12 Port classes, 34 Fake classes, 478 scenario tests running through these worlds.
+The boldest claim — alone on the slide, give it room. "Given GitHub is rate-limiting. Given auth is flaky. Given the operator's budget is capped. WHEN the loop ticks — THEN the system yields its attempt budget. We always wrote tests in that shape. The 'Given' was never just user flows — it was always pointing past them, at the whole operating environment. It just took autonomous systems to make that urgent." Four hundred seventy-eight scenario tests run the factory through hostile worlds before anything it builds touches reality. Cockburn's ports plus North's scenarios — the heritage line again, briefly: nothing here is new; the combination is.
 -->
 
 ---
@@ -239,10 +289,22 @@ The hero slide — and the payoff of the identity beat. "I spent years teaching 
 
 ## I don't read the code. I read what it says about itself.
 
-314 wiki entries, regenerated from live pipeline events · 41 named domain terms — **name drift breaks the build** · 91 ADRs · diagrams regenerated on every PR
+314 wiki entries, regenerated from live pipeline events · 91 ADRs · architecture diagrams regenerated on every PR
 
 <!--
-The living-knowledge layer — HydraFlow's answer to comprehension debt, and the novelty beat alongside MockWorld. Nobody can read a codebase that rewrites itself daily; Yegge says it plainly — he's never read Beads, 225k lines of his own system's Go. I can't read mine either. The difference is mine is REQUIRED to keep explaining itself: the wiki regenerates from live pipeline events, not from anyone's memory. The architecture diagrams regenerate on every PR. And the sharpest one — the vocabulary is load-bearing: forty-one domain terms live as files in the repo, the glossary auto-extracts from code, and if the code and the glossary disagree about what a word means, CI FAILS. That's Eric Evans' ubiquitous language — the DDD discipline — made executable. Documentation didn't die in this regime. Static documentation died. What replaced it is documentation with a pulse, maintained by the same factory it describes — so the comprehension debt never compounds silently. Which raises the obvious question: if even the explanations are code the factory maintains... (hand straight into the next slide)
+The living-knowledge layer — HydraFlow's answer to comprehension debt. Nobody can read a codebase that rewrites itself daily; Yegge says it plainly — he's never read Beads, 225k lines of his own system's Go. I can't read mine either. The difference is mine is REQUIRED to keep explaining itself: the wiki regenerates from live pipeline events, not from anyone's memory. The architecture diagrams regenerate on every PR. Documentation didn't die in this regime. STATIC documentation died. What replaced it is documentation with a pulse, maintained by the same factory it describes — so the comprehension debt never compounds silently.
+-->
+
+---
+
+## The vocabulary is load-bearing.
+
+41 domain terms live as files in the repo. The glossary auto-extracts from code.
+
+# If the code and the glossary disagree, the build fails.
+
+<!--
+The sharpest claim in the knowledge layer — give it its own slide because no one else can say it. Words drift in every codebase: "task" starts meaning three things, "promote" quietly changes semantics, and six months later nobody can read the system because the names lie. Here the names CAN'T lie: forty-one domain terms are files in the repo, the glossary extracts from the live code, and if they disagree about what a word means, CI fails the build. That's Eric Evans' ubiquitous language — the DDD discipline — made executable. The factory is not allowed to redefine a word without telling me. Which raises the obvious question: if even the explanations and the vocabulary are code the factory maintains... (hand straight into the next slide)
 -->
 
 ---
@@ -318,10 +380,18 @@ Games dynamite the legibility assumption the whole field shares — that's why t
 ## Overnight: the factory builds.
 ## Morning: Z plays what it made.
 
+<!--
+The image of the close — keep it future tense, this hasn't run yet. "The plan is a ritual: in the evening Z and I describe the thing — instruct Claude, queue the work. The factory prints overnight. In the morning she plays the build and tells it what's wrong." And the symmetry, said quietly: that's already MY morning. The factory runs while I sleep; I wake to what it made and extend what it can do. The experiment is whether that morning can belong to a kid who can't code.
+-->
+
+---
+
 # A 3D printer for ideas.
 
+#### Except this printer maintains what it prints.
+
 <!--
-The image of the close — keep it future tense, this hasn't run yet. "The plan is a ritual: in the evening Z and I describe the thing — instruct Claude, queue the work. The factory prints overnight. In the morning she plays the build and tells it what's wrong." And the symmetry, said quietly: that's already MY morning. The factory runs while I sleep; I wake to what it made and extend what it can do. The experiment is whether that morning can belong to a kid who can't code. One inoculation, one sentence: a 3D printer hands you an object and walks away — this printer maintains what it printed. Patches, balance, live ops. That's the part desktop printing never had.
+Name the metaphor alone, then inoculate it in the same breath — someone in the room is already thinking "3D printing was supposed to democratize manufacturing and mostly made trinkets." Own it: "I know what happened to desktop 3D printing. The difference between a trinket machine and a real tool was always the rigor of the machine. And there's one more difference here: a 3D printer hands you an object and walks away. This printer maintains what it printed — patches, balance, live ops, forever. That's the part desktop printing never had, and it's the part that was the whole problem to begin with." Maintain — the tagline word, closing its own loop from the InsightMesh slide.
 -->
 
 ---
