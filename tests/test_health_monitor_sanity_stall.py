@@ -29,6 +29,7 @@ def hm_env(tmp_path: Path):
     bg_workers.worker_enabled = {"trust_fleet_sanity": True}
     prs = AsyncMock()
     prs.create_issue = AsyncMock(return_value=17)
+    prs.list_issues_by_label = AsyncMock(return_value=[])
     # ``__new__`` bypasses the ctor; inject the attrs the dead-man-switch
     # uses directly. The real ctor sets all of these — see HealthMonitorLoop.
     hm = HealthMonitorLoop.__new__(HealthMonitorLoop)
@@ -194,3 +195,31 @@ async def test_noop_streak_resets_on_real_work(hm_env) -> None:
     await hm._check_sanity_loop_staleness()
     assert hm._sanity_noop_streak == 0
     prs.create_issue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recovery_closes_open_stall_issue(hm_env) -> None:
+    """#9359: on recovery (real work again), the open sanity-loop-stalled issue
+    is auto-closed via its label."""
+    hm, state, _bg_workers, prs = hm_env
+    stale = (datetime.now(UTC) - timedelta(seconds=2400)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {"status": "ok", "last_run": stale, "details": {}},
+    }
+    await hm._check_sanity_loop_staleness()
+    assert prs.create_issue.await_count == 1
+
+    # Recovery — heartbeat fresh AND real work (workers_scanned > 0).
+    recent = (datetime.now(UTC) - timedelta(seconds=60)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {
+            "status": "ok",
+            "last_run": recent,
+            "details": {"workers_scanned": 5},
+        },
+    }
+    prs.list_issues_by_label = AsyncMock(
+        return_value=[{"number": 91, "title": "x", "body": "", "updated_at": ""}]
+    )
+    await hm._check_sanity_loop_staleness()
+    prs.close_issue.assert_awaited_once_with(91)

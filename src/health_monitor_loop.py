@@ -1053,9 +1053,16 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             if self._sanity_noop_streak >= _SANITY_NOOP_STREAK_THRESHOLD:
                 noop_tripped = True
             else:
-                # Recovery — sanity loop ticking with real work. Clear
-                # dedup so a future stall files a fresh issue.
+                # Recovery — sanity loop ticking with real work. Close any open
+                # stall issue and clear dedup so a future stall files fresh
+                # (#9359 issue-hygiene).
                 if dedup_key in filed_keys:
+                    await self._close_issues_by_label(
+                        prs,
+                        "sanity-loop-stalled",
+                        "trust_fleet_sanity is ticking with real work again — "
+                        "auto-closing.",
+                    )
                     self._sanity_stall_dedup.set_all(filed_keys - {dedup_key})
                 return
         else:
@@ -1151,8 +1158,14 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         filed_keys = self._wiki_stall_dedup.get()
 
         if elapsed_s < threshold_s:
-            # Recovered — clear dedup so a future stall files a fresh issue.
+            # Recovered — close the open wiki-stale issue and clear dedup so a
+            # future stall files a fresh issue (#9359 issue-hygiene).
             if dedup_key in filed_keys:
+                await self._close_issues_by_label(
+                    prs,
+                    "wiki-stale",
+                    "docs/wiki/log.jsonl is moving again — auto-closing.",
+                )
                 self._wiki_stall_dedup.set_all(filed_keys - {dedup_key})
             return
 
@@ -1192,3 +1205,25 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         )
         filed_keys = self._wiki_stall_dedup.get()
         self._wiki_stall_dedup.set_all(filed_keys | {dedup_key})
+
+    async def _close_issues_by_label(
+        self, prs: PRPort, label: str, comment: str
+    ) -> None:
+        """Close every open issue carrying *label* when a dead-man-switch
+        recovers (#9359). Titles embed elapsed-time so they can't be found by
+        title; the label is the stable handle."""
+        try:
+            issues = await prs.list_issues_by_label(label)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "health_monitor: could not list %s issues to close",
+                label,
+                exc_info=True,
+            )
+            return
+        for issue in issues:
+            number = issue.get("number")
+            if not number:
+                continue
+            await prs.post_comment(number, comment)
+            await prs.close_issue(number)
