@@ -211,6 +211,89 @@ async def test_reconcile_closed_escalations_clears_dedup(loop_env, monkeypatch) 
     state.clear_flake_attempts.assert_called_once_with("tests.foo.test_bar")
 
 
+def _recovery_loop(loop_env, monkeypatch, *, download):
+    """Build a FlakeTrackerLoop with stubbed fetch/download/reconcile for a tick."""
+    cfg, state, pr, dedup = loop_env
+    stop = asyncio.Event()
+    loop = FlakeTrackerLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_fetch():
+        return [{"databaseId": 0, "url": "u"}, {"databaseId": 1, "url": "v"}]
+
+    async def fake_reconcile():
+        return None
+
+    monkeypatch.setattr(loop, "_fetch_recent_runs", fake_fetch)
+    monkeypatch.setattr(loop, "_download_junit", download)
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    return loop
+
+
+async def test_recovery_closes_flake_issue_and_drops_dedup(
+    loop_env, monkeypatch
+) -> None:
+    """#9359: a test no longer flaky closes its flaky-test issue + drops the key,
+    but keeps the attempt counter (so repeat flare-ups still climb to escalation)."""
+    cfg, state, pr, dedup = loop_env
+    dedup.get.return_value = {"flake_tracker:tests.foo.test_bar"}
+    state.get_flake_attempts.return_value = 1  # < _MAX_ATTEMPTS — a flake issue
+    pr.find_existing_issue = AsyncMock(return_value=88)
+
+    async def all_pass(_run):
+        return {"tests.foo.test_bar": "pass", "tests.foo.test_ok": "pass"}
+
+    loop = _recovery_loop(loop_env, monkeypatch, download=all_pass)
+    stats = await loop._do_work()
+
+    assert stats["resolved"] == 1
+    pr.find_existing_issue.assert_awaited_once_with("Flaky test: tests.foo.test_bar")
+    pr.close_issue.assert_awaited_once_with(88)
+    remaining = dedup.set_all.call_args.args[0]
+    assert "flake_tracker:tests.foo.test_bar" not in remaining
+    state.clear_flake_attempts.assert_not_called()  # counter preserved
+
+
+async def test_recovery_skips_escalated_test(loop_env, monkeypatch) -> None:
+    """A test that reached the HITL escalation (attempts >= MAX) is NOT auto-closed."""
+    cfg, state, pr, dedup = loop_env
+    dedup.get.return_value = {"flake_tracker:tests.foo.test_bar"}
+    state.get_flake_attempts.return_value = 3  # >= _MAX_ATTEMPTS — operator's call
+    pr.find_existing_issue = AsyncMock(return_value=88)
+
+    async def all_pass(_run):
+        return {"tests.foo.test_bar": "pass"}
+
+    loop = _recovery_loop(loop_env, monkeypatch, download=all_pass)
+    stats = await loop._do_work()
+
+    assert stats["resolved"] == 0
+    pr.close_issue.assert_not_awaited()
+
+
+async def test_recovery_skips_still_flaky_test(loop_env, monkeypatch) -> None:
+    """A test still flaky this window keeps its issue open (no false close)."""
+    cfg, state, pr, dedup = loop_env
+    cfg.flake_threshold = 1
+    dedup.get.return_value = {"flake_tracker:tests.foo.test_bar"}
+    state.get_flake_attempts.return_value = 1
+    pr.find_existing_issue = AsyncMock(return_value=88)
+
+    call = {"n": 0}
+
+    async def mixed(_run):
+        call["n"] += 1
+        # Mixed pass/fail record → still flaky per spec §4.5.
+        return {"tests.foo.test_bar": "fail" if call["n"] == 1 else "pass"}
+
+    loop = _recovery_loop(loop_env, monkeypatch, download=mixed)
+    stats = await loop._do_work()
+
+    assert stats["resolved"] == 0
+    pr.close_issue.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_kill_switch_short_circuits_do_work(loop_env) -> None:
     """Disabled kill-switch → _do_work returns `disabled` and skips reconcile (ADR-0049)."""
