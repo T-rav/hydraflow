@@ -11,7 +11,7 @@ from config import Credentials, HydraFlowConfig
 from dashboard_routes import RouteContext
 from events import EventBus
 from state import StateTracker
-from tests.helpers import make_dashboard_router
+from tests.helpers import make_dashboard_router, make_registry
 
 
 def _make_ctx(
@@ -192,6 +192,106 @@ class TestRouteContextResolveRuntime:
         assert cfg is config
         assert st is state
         assert bus is event_bus
+
+
+class TestRouteContextIsRepoPipelineActive:
+    """The ``None``=default invariant for the pipeline-active indicator (D7).
+
+    ``None`` scopes to the *default* repo (matching the caller's contract);
+    only the ``__all__`` sentinel means "any line running". Previously ``None``
+    aliased ``__all__`` and returned True whenever *any* repo was active.
+    """
+
+    def test_none_scopes_to_default_repo_not_any(
+        self,
+        config: HydraFlowConfig,
+        event_bus: EventBus,
+        state: StateTracker,
+        tmp_path: Path,
+    ) -> None:
+        registry = make_registry(
+            {"slug": "owner-default", "running": False},
+            {"slug": "owner-other", "running": True},
+        )
+        ctx = _make_ctx(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            registry=registry,
+            default_repo_slug="owner-default",
+        )
+
+        # None resolves the default line (idle) — NOT "any line running".
+        assert ctx.is_repo_pipeline_active(None) is False
+
+    def test_all_sentinel_is_true_when_any_line_running(
+        self,
+        config: HydraFlowConfig,
+        event_bus: EventBus,
+        state: StateTracker,
+        tmp_path: Path,
+    ) -> None:
+        registry = make_registry(
+            {"slug": "owner-default", "running": False},
+            {"slug": "owner-other", "running": True},
+        )
+        ctx = _make_ctx(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            registry=registry,
+            default_repo_slug="owner-default",
+        )
+
+        assert ctx.is_repo_pipeline_active("__all__") is True
+
+    def test_specific_slug_resolves_that_line(
+        self,
+        config: HydraFlowConfig,
+        event_bus: EventBus,
+        state: StateTracker,
+        tmp_path: Path,
+    ) -> None:
+        registry = make_registry(
+            {"slug": "owner-default", "running": False},
+            {"slug": "owner-other", "running": True},
+        )
+        ctx = _make_ctx(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            registry=registry,
+            default_repo_slug="owner-default",
+        )
+
+        assert ctx.is_repo_pipeline_active("owner-other") is True
+        assert ctx.is_repo_pipeline_active("owner-default") is False
+
+    def test_none_returns_false_when_default_not_registered(
+        self,
+        config: HydraFlowConfig,
+        event_bus: EventBus,
+        state: StateTracker,
+        tmp_path: Path,
+    ) -> None:
+        # Default slug is absent from the registry — None resolves the default
+        # line, finds nothing, and returns False rather than aliasing "any line
+        # running". (In practice the host is always a registered runtime.)
+        registry = make_registry({"slug": "owner-other", "running": True})
+        ctx = _make_ctx(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            registry=registry,
+            default_repo_slug="owner-default",
+        )
+
+        assert ctx.is_repo_pipeline_active(None) is False
+        assert ctx.is_repo_pipeline_active("__all__") is True
 
 
 class TestRouteContextPrManagerFor:

@@ -68,19 +68,64 @@ class TestSessionAPIRepoFiltering:
         assert data_beta[0]["repo"] == "owner/beta"
 
     @pytest.mark.asyncio
-    async def test_sessions_no_repo_returns_all(
+    async def test_sessions_no_repo_returns_default(
         self, config, event_bus, state, tmp_path: Path
     ) -> None:
-        """GET /api/sessions with no repo param returns all sessions."""
+        """A bare GET /api/sessions scopes to the DEFAULT repo, not all repos.
+
+        Per the ``None``=default invariant (multi-repo scoping spec, D7), an
+        unscoped request is the *default repo's* view — only ``__all__`` unions
+        every line. The legacy single-state path holds sessions for every repo,
+        so it must filter down to the default rather than leak the whole set.
+        """
+        state.save_session(_make_session("owner/alpha", "alpha-1"))
+        state.save_session(_make_session("owner/beta", "beta-1"))
+
+        router, _pr = make_dashboard_router(
+            config, event_bus, state, tmp_path, default_repo_slug="owner-alpha"
+        )
+        endpoint = find_endpoint(router, "/api/sessions")
+
+        resp = await endpoint(repo=None)
+        data = json.loads(resp.body)
+        assert [s["repo"] for s in data] == ["owner/alpha"]
+
+    @pytest.mark.asyncio
+    async def test_sessions_all_returns_union(
+        self, config, event_bus, state, tmp_path: Path
+    ) -> None:
+        """GET /api/sessions?repo=__all__ unions every repo's sessions."""
+        state.save_session(_make_session("owner/alpha", "alpha-1"))
+        state.save_session(_make_session("owner/beta", "beta-1"))
+
+        router, _pr = make_dashboard_router(
+            config, event_bus, state, tmp_path, default_repo_slug="owner-alpha"
+        )
+        endpoint = find_endpoint(router, "/api/sessions")
+
+        resp = await endpoint(repo="__all__")
+        data = json.loads(resp.body)
+        assert {s["repo"] for s in data} == {"owner/alpha", "owner/beta"}
+
+    @pytest.mark.asyncio
+    async def test_sessions_dash_slug_matches_slash_tag(
+        self, config, event_bus, state, tmp_path: Path
+    ) -> None:
+        """A dash-form query slug matches slash-form ``SessionLog.repo`` tags.
+
+        The frontend sends the canonical dash slug (``owner-alpha``) while
+        sessions are tagged with the slash repo (``owner/alpha``). The filter
+        normalizes both sides so the scope still resolves.
+        """
         state.save_session(_make_session("owner/alpha", "alpha-1"))
         state.save_session(_make_session("owner/beta", "beta-1"))
 
         router, _pr = make_dashboard_router(config, event_bus, state, tmp_path)
         endpoint = find_endpoint(router, "/api/sessions")
 
-        resp = await endpoint(repo=None)
+        resp = await endpoint(repo="owner-alpha")
         data = json.loads(resp.body)
-        assert len(data) == 2
+        assert [s["repo"] for s in data] == ["owner/alpha"]
 
     @pytest.mark.asyncio
     async def test_sessions_unknown_repo_returns_empty(

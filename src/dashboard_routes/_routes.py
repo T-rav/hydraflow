@@ -379,17 +379,34 @@ class RouteContext:
             return False
         return orch.pipeline_enabled
 
+    def _default_slug(self) -> str:
+        """Canonical dash slug for the default (host) repo.
+
+        Prefers the explicitly-wired ``default_repo_slug``, else derives it from
+        the host config (``owner/repo`` → ``owner-repo``, or the repo-root name).
+        """
+        return self.default_repo_slug or (
+            self.config.repo.replace("/", "-")
+            if self.config.repo
+            else self.config.repo_root.name
+        )
+
     def is_repo_pipeline_active(self, slug: str | None) -> bool:
         """Return whether the resolved repo's pipeline is actively processing.
 
         The host repo is a registered runtime like any other, so this resolves
-        purely through the registry. When *slug* is ``None`` or the ``REPO_ALL``
-        sentinel (All repos view), returns True if ANY line is running.
+        purely through the registry. Per the ``None``=default invariant, a
+        ``None`` *slug* scopes to the **default** repo; only the ``REPO_ALL``
+        sentinel (All repos view) returns True if ANY line is running.
         """
         if self.registry is not None:
-            if slug is None or slug.strip().lower() == REPO_ALL:
+            if slug is not None and slug.strip().lower() == REPO_ALL:
                 return any(getattr(rt, "running", False) for rt in self.registry.all)
-            rt = self.registry.get(slug)
+            # None ⇒ the default repo; a slug ⇒ that line. The host repo is a
+            # registered runtime, so the default resolves through the registry
+            # like any other (absent ⇒ not running).
+            resolved = slug if slug is not None else self._default_slug()
+            rt = self.registry.get(resolved)
             return getattr(rt, "running", False) if rt is not None else False
         # No registry (single-repo/test wiring): fall back to the host orch.
         return self._host_pipeline_active()
@@ -461,11 +478,7 @@ class RouteContext:
         ``None`` while registry runtimes yield their live orchestrator —
         consumers must handle ``None``.
         """
-        default_slug = self.default_repo_slug or (
-            self.config.repo.replace("/", "-")
-            if self.config.repo
-            else self.config.repo_root.name
-        )
+        default_slug = self._default_slug()
 
         if slug is not None and slug.strip().lower() == REPO_ALL:
             if self.registry is not None:
@@ -793,9 +806,9 @@ def create_router(
     def _is_pipeline_active(slug: str | None) -> bool:
         """Check if the selected repo's pipeline is running.
 
-        When no repo is selected (All repos view), checks the default
-        repo's pipeline state — data only shows when something is
-        actually running.
+        A bare ``None`` slug checks the default repo's pipeline state; only the
+        ``__all__`` sentinel (All repos view) returns True if any line is
+        running. Data only shows when something is actually running.
         """
         return ctx.is_repo_pipeline_active(slug)
 
@@ -2156,13 +2169,19 @@ def create_router(
         for _cfg, _state, _bus, _get_orch, _slug in _resolve_runtimes(repo):
             sessions.extend(_state.load_sessions())
         repo_filter = (repo or "").strip()
-        if repo_filter and repo_filter.lower() != REPO_ALL and registry is None:
-            # Legacy no-registry wiring: load_sessions returns ALL; filter by tag.
-            normalized = repo_filter.lower()
+        if repo_filter.lower() != REPO_ALL and registry is None:
+            # Legacy no-registry wiring: the single state holds sessions for
+            # every repo. Scope to the requested repo — and per the None=default
+            # invariant, a bare request scopes to the DEFAULT repo, not the
+            # whole set. Normalize slash/dash so a dash-form query slug
+            # ("owner-x") matches a slash-form SessionLog.repo ("owner/x").
+            target = (
+                (repo_filter or _resolve_runtimes(None)[0][4]).replace("/", "-").lower()
+            )
             sessions = [
                 session
                 for session in sessions
-                if (session.repo or "").lower() == normalized
+                if (session.repo or "").replace("/", "-").lower() == target
             ]
         return JSONResponse([s.model_dump() for s in sessions])
 
