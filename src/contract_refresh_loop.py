@@ -72,6 +72,7 @@ from contract_recording import (
 )
 from dedup_store import DedupStore
 from models import WorkCycleResult  # noqa: TCH001
+from rollup_issue_manager import RollupIssueManager
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -165,6 +166,22 @@ class ContractRefreshLoop(BaseBackgroundLoop):
 
     def _get_default_interval(self) -> int:
         return self._config.contract_refresh_interval
+
+    def _fake_drift_rollup(self) -> RollupIssueManager:
+        """One rolling ``fake-drift`` issue, body refreshed each tick and
+        auto-closed once the replay gate passes again (#9359).
+
+        Replaces the per-adapter-set ``Fake drift: ... ({adapters})`` titles,
+        which varied with the drifted-adapter set so they never deduped across
+        ticks and never closed on recovery — resolved fake drifts piled up as
+        open ``hydraflow-find`` issues.
+        """
+        return RollupIssueManager(
+            pr=self._prs,
+            state=self._state,
+            namespace="contract_refresh",
+            labels=["hydraflow-find", "fake-drift"],
+        )
 
     # ------------------------------------------------------------------
     # Recording
@@ -493,13 +510,9 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         pr_url: str | None,
     ) -> int:
         adapters_joined = ", ".join(adapters)
-        labels = ["hydraflow-find", "fake-drift"]
-        for adapter in adapters:
-            labels.append(f"adapter-{adapter}")
-
-        title = (
-            f"Fake drift: replay gate failed after contract refresh ({adapters_joined})"
-        )
+        # Stable title (no variable adapter set) so the rollup dedups across
+        # ticks; the drifted-adapter list lives in the body + `adapter-*` labels.
+        title = "Fake drift: replay gate failed after contract refresh"
         pr_line = f"Refresh PR: {pr_url}" if pr_url else "Refresh PR: (not opened)"
         # Clip replay output so the issue body stays reviewable.
         stdout_tail = (replay_proc.stdout or "").strip()[-2000:]
@@ -519,10 +532,11 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             "### replay gate stderr (tail)\n"
             f"```\n{stderr_tail}\n```\n"
         )
-        return await self._prs.create_issue(
+        return await self._fake_drift_rollup().ensure(
+            "fake_drift",
             title=title,
             body=body,
-            labels=labels,
+            extra_labels=[f"adapter-{adapter}" for adapter in adapters],
         )
 
     # ------------------------------------------------------------------
@@ -636,16 +650,26 @@ class ContractRefreshLoop(BaseBackgroundLoop):
     # Tick — phase helpers
     # ------------------------------------------------------------------
 
-    def _on_clean_tick(self) -> WorkCycleResult:
+    async def _on_clean_tick(self) -> WorkCycleResult:
         """Handle a drift-free tick: clear the fleet dedup and return clean status.
 
         A prior refresh PR has been applied (merged) and the recordings now
         match committed cassettes.  Clearing the fleet dedup allows a *future*
         identical drift (e.g. a reverted PR re-introduces the same diff) to be
         re-filed rather than silently swallowed.  Keeps dedup bounded in size.
+
+        No drift means the fakes match the committed cassettes, so any open
+        fake-drift rollup issue has recovered — close it (#9359). Idempotent.
         """
         if self._dedup.get():
             self._dedup.set_all(set())
+        await self._fake_drift_rollup().resolve(
+            "fake_drift",
+            comment=(
+                "No contract drift this tick — fakes in sync; auto-closing "
+                "fake-drift (#9359)."
+            ),
+        )
         return {
             "status": "clean",
             "adapters_refreshed": 0,
@@ -702,6 +726,16 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             fake_drift_issue = await self._file_fake_drift_issue(
                 adapters_drifted, replay_proc, pr_url
             )
+        else:
+            # Replay gate passed after the refresh — fakes are back in sync, so
+            # close any open fake-drift rollup issue (#9359). Idempotent.
+            await self._fake_drift_rollup().resolve(
+                "fake_drift",
+                comment=(
+                    "Post-refresh replay gate passed — fakes back in sync; "
+                    "auto-closing (#9359)."
+                ),
+            )
         return replay_proc, fake_drift_issue
 
     # ------------------------------------------------------------------
@@ -744,7 +778,7 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         self._update_attempt_counters(drifted_adapters)
 
         if not fleet.has_drift:
-            return self._on_clean_tick()
+            return await self._on_clean_tick()
 
         # Task 18 — escalate any adapter that just hit the threshold.
         # Fire before the dedup short-circuit so a stuck adapter whose
