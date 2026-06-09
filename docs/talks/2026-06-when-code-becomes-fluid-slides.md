@@ -30,8 +30,8 @@ PRODUCTION NOTES:
     08:57; orchestrator lands 2026-02-19 00:33; CI 00:38; quality hooks 00:40 (walls up in
     ten minutes); self-issue-fixing PRs #53–60 merged by ~17:00 Feb 19. InsightMesh then
     vendored hydraflow content back (subtree squashes FROM hydraflow commits) until fully
-    removed 2026-05-21 (#722). Cold open's "two days later it was merging its own PRs" is
-    receipt-exact.
+    removed 2026-05-21 (#722). Cold open uses "three days later, it left" (author's call);
+    the day-two self-PR detail stays available as optional spoken escalation.
 -->
 
 # When Code Becomes Fluid
@@ -48,10 +48,10 @@ Hold the title card five seconds. Don't speak. Don't open on a thesis. The first
 
 ## Four months ago, I made a folder inside another repo.
 
-# Two days later, it was merging its own pull requests.
+# Three days later, it left.
 
 <!--
-Say it slow, like you're still slightly unsettled by it. "Four months ago I created a folder inside an internal platform I'd vibe-coded. The folder was called dx/hydra. Within a day, it had its own repository. Within ten minutes of its orchestrator landing there, it had CI and pre-push quality gates — the walls went up before the machine turned on. And by five o'clock the next afternoon, it was fixing its own issues and merging its own pull requests. (beat) It has been building itself ever since." Eerie, not boastful. Every clause has a receipt: born at dx/hydra Feb 18 (commit 542dcd6a, "feat: Add Hydra — parallel Claude Code issue processor"); standalone repo init Feb 18 08:57; orchestrator Feb 19 00:33; CI 00:38; quality hooks 00:40; self-filed-issue-fixing PRs #53–60 merged by ~17:00 Feb 19. (Option: put a commit line on the slide as documentary texture.) Don't explain yet. Let the room want the chronology.
+Say it slow, like you're still slightly unsettled by it. "Four months ago I created a folder inside an internal platform I'd vibe-coded. The folder was called dx/hydra. Three days later, what was in that folder left — into its own repository. (beat) It has been building itself ever since." Eerie, not boastful. Optional escalation texture, all receipt-backed if you want to layer it in: within ten minutes of its orchestrator landing in the new repo it had CI and pre-push quality gates — the walls went up before the machine turned on — and it was fixing its own issues and merging its own pull requests by the next afternoon (PRs #53–60, ~17:00 Feb 19). Receipts: born at dx/hydra Feb 18 (commit 542dcd6a, "feat: Add Hydra — parallel Claude Code issue processor"); standalone repo init Feb 18 08:57; orchestrator Feb 19 00:33; CI 00:38; quality hooks 00:40. (Option: put a commit line on the slide as documentary texture.) Don't explain yet. Let the room want the chronology.
 -->
 
 ---
@@ -99,7 +99,7 @@ Motive one — the relatable one, a confession, and secretly the origin of the w
 # How much of the human can you pull out — and what breaks?
 
 <!--
-Motive two — the question. Be honest: Gas Town was the catalyst, not a parallel discovery. Steve showed the operational thing was buildable — a fleet of agents, an orchestrator, a human babysitting the swarm. I couldn't put the question down. Seven weeks later: first commit, February 18 — inside the InsightMesh repo, because it was born as a maintenance helper for the thing I'd vibed, carrying v2's guardrail lessons with it. Roll number two, and you can see it in the log: within ten minutes of the orchestrator arriving in the new repo, it had CI and quality gates. The walls went up first. Within a day it outgrew its host and moved into its own repo — and InsightMesh carried a vendored copy of its offspring for three more months before the umbilical was fully cut in May. Then the plant, one line, move on: "And somewhere in the four months since, the reason I was building changed. I'll get there."
+Motive two — the question. Be honest: Gas Town was the catalyst, not a parallel discovery. Steve showed the operational thing was buildable — a fleet of agents, an orchestrator, a human babysitting the swarm. I couldn't put the question down. Seven weeks later: first commit, February 18 — inside the InsightMesh repo, because it was born as a maintenance helper for the thing I'd vibed, carrying v2's guardrail lessons with it. Roll number two, and you can see it in the log: within ten minutes of the orchestrator arriving in the new repo, it had CI and quality gates. The walls went up first. Three days later it outgrew its host and moved into its own repo — and InsightMesh carried a vendored copy of its offspring for three more months before the umbilical was fully cut in May. Then the plant, one line, move on: "And somewhere in the four months since, the reason I was building changed. I'll get there."
 -->
 
 ---
