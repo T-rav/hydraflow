@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { theme } from '../../theme'
+import { useHydraFlow } from '../../context/HydraFlowContext'
 import { WikiTopBar } from './WikiTopBar'
 
 export function ArticlesView() {
+  const { fetchWithRepo } = useHydraFlow()
   const [typeFilter, setTypeFilter] = useState('all') // all | adrs | wiki
   const [linkFilter, setLinkFilter] = useState('all') // all | linked | discovered
   const [adrs, setAdrs] = useState([])
@@ -18,9 +20,11 @@ export function ArticlesView() {
 
   // Discovered entry IDs (orphans w/ no term evidence). One fetch on mount —
   // stable enough at the cadence the term-proposer + migration script run at.
+  // All Atlas/wiki reads scope to the selected operated repo via fetchWithRepo
+  // (host/default when none is selected; aggregate under "All repos").
   useEffect(() => {
     let cancelled = false
-    fetch('/api/atlas/discovered')
+    fetchWithRepo('/api/atlas/discovered')
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => {
         if (cancelled) return
@@ -33,28 +37,38 @@ export function ArticlesView() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [fetchWithRepo])
 
   // ADRs (always loaded — small set)
   useEffect(() => {
-    fetch('/api/atlas/adrs')
+    fetchWithRepo('/api/atlas/adrs')
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => setAdrs(Array.isArray(d) ? d : []))
       .catch(() => setAdrs([]))
-  }, [])
+  }, [fetchWithRepo])
 
-  // Wiki repos
+  // Wiki-subject repos for the OPERATED repo's wiki store. On an operated-repo
+  // switch (fetchWithRepo changes) the subject list changes — keep the current
+  // pick if it survives, else fall back to the first.
   useEffect(() => {
-    fetch('/api/wiki/repos')
+    fetchWithRepo('/api/wiki/repos')
       .then((r) => (r.ok ? r.json() : []))
       .then((list) => {
         const safe = Array.isArray(list) ? list : []
         setRepos(safe)
-        if (safe.length > 0 && selectedRepo === null) setSelectedRepo(safe[0])
+        setSelectedRepo((prev) =>
+          prev && safe.some((r) => r.owner === prev.owner && r.repo === prev.repo)
+            ? prev
+            : (safe[0] ?? null),
+        )
       })
-      .catch(() => setRepos([]))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+      // On a repos-fetch error during a repo switch, drop the stale subject so
+      // the entries effect doesn't read the old subject under the new scope.
+      .catch(() => {
+        setRepos([])
+        setSelectedRepo(null)
+      })
+  }, [fetchWithRepo])
 
   // Wiki entries
   useEffect(() => {
@@ -62,18 +76,26 @@ export function ArticlesView() {
       setEntries([])
       return
     }
+    let cancelled = false
     const qs = new URLSearchParams()
     if (wikiFilters.topic) qs.set('topic', wikiFilters.topic)
     if (wikiFilters.status) qs.set('status', wikiFilters.status)
     if (wikiFilters.q) qs.set('q', wikiFilters.q)
     qs.set('limit', '200')
-    fetch(
+    fetchWithRepo(
       `/api/wiki/repos/${selectedRepo.owner}/${selectedRepo.repo}/entries?${qs}`,
     )
       .then((r) => (r.ok ? r.json() : []))
-      .then((d) => setEntries(Array.isArray(d) ? d : []))
-      .catch(() => setEntries([]))
-  }, [selectedRepo, wikiFilters.topic, wikiFilters.status, wikiFilters.q])
+      .then((d) => {
+        if (!cancelled) setEntries(Array.isArray(d) ? d : [])
+      })
+      .catch(() => {
+        if (!cancelled) setEntries([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedRepo, wikiFilters.topic, wikiFilters.status, wikiFilters.q, fetchWithRepo])
 
   // Detail body for selected article
   useEffect(() => {
@@ -87,7 +109,7 @@ export function ArticlesView() {
       url = `/api/wiki/repos/${selected.repo.owner}/${selected.repo.repo}/entries/${selected.id}`
     if (!url) return
     let cancelled = false
-    fetch(url)
+    fetchWithRepo(url)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (!cancelled) setBodyDetail(d)
@@ -98,7 +120,7 @@ export function ArticlesView() {
     return () => {
       cancelled = true
     }
-  }, [selected])
+  }, [selected, fetchWithRepo])
 
   const merged = useMemo(() => {
     const rows = []

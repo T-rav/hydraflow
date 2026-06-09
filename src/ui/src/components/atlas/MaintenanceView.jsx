@@ -11,9 +11,8 @@ export function MaintenanceView() {
   const [termLoops, setTermLoops] = useState(null)
 
   const refresh = useCallback(() => {
-    // Wiki maintenance/health scope to the selected repo (health aggregates
-    // under "All repos"). Term-loops stays host-scoped here; its repo-aware
-    // threading + per-repo nested shape land with AtlasExplorer (5c).
+    // Wiki maintenance/health + term-loops scope to the selected repo (health
+    // aggregates and term-loops nests per repo under "All repos").
     fetchWithRepo('/api/wiki/maintenance/status')
       .then((r) => (r.ok ? r.json() : null))
       .then(setStatus)
@@ -22,11 +21,20 @@ export function MaintenanceView() {
       .then((r) => (r.ok ? r.json() : null))
       .then(setHealth)
       .catch(() => setHealth(null))
-    fetch('/api/atlas/term-loops/status')
+    fetchWithRepo('/api/atlas/term-loops/status')
       .then((r) => (r.ok ? r.json() : null))
       .then(setTermLoops)
       .catch(() => setTermLoops(null))
   }, [fetchWithRepo])
+
+  // term-loops/status returns a flat {loop: {...}} for a single repo, or
+  // {repos: [{repo, loops}]} under __all__. Normalize to a list of
+  // {repo, loops} groups so the render handles both.
+  const termLoopGroups = termLoops?.repos
+    ? termLoops.repos
+    : termLoops
+      ? [{ repo: null, loops: termLoops }]
+      : []
 
   useEffect(() => {
     refresh()
@@ -162,55 +170,62 @@ export function MaintenanceView() {
 
       <div style={{ ...styles.card, gridColumn: 'span 2' }}>
         <div style={styles.label}>Term loops</div>
-        <div
-          style={{
-            marginTop: 6,
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr',
-            gap: 12,
-          }}
-        >
-          {['term_proposer', 'term_pruner', 'edge_proposer'].map((name) => {
-            const loop = termLoops?.[name]
-            const loopStatus = loop?.status ?? 'unknown'
-            const lastRun = loop?.last_run
-            const loopPrUrl = loop?.last_pr_url
-            const count = loop?.last_action_count
-            return (
+        {termLoopGroups.map((group, gi) => (
+          <div key={group.repo ?? gi} style={{ marginTop: 6 }}>
+            {group.repo && (
               <div
-                key={name}
-                style={{
-                  border: `1px solid ${theme.border}`,
-                  borderRadius: 3,
-                  padding: 8,
-                }}
+                style={{ color: theme.textMuted, fontSize: 10, marginBottom: 4 }}
+                data-testid={`term-loops-repo-${group.repo}`}
               >
-                <div style={{ color: theme.textBright }}>{name}</div>
-                <div style={{ color: theme.textMuted, fontSize: 10 }}>
-                  status: {loopStatus}
-                </div>
-                <div style={{ color: theme.textMuted, fontSize: 10 }}>
-                  last run: {lastRun ? lastRun.split('T')[0] : '—'}
-                </div>
-                {loopPrUrl && (
-                  <a
-                    href={loopPrUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: theme.accent, fontSize: 10 }}
-                  >
-                    last PR
-                  </a>
-                )}
-                {typeof count === 'number' && (
-                  <div style={{ color: theme.textMuted, fontSize: 10 }}>
-                    actions: {count}
-                  </div>
-                )}
+                {group.repo}
               </div>
-            )
-          })}
-        </div>
+            )}
+            <div
+              style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}
+            >
+              {['term_proposer', 'term_pruner', 'edge_proposer'].map((name) => {
+                const loop = group.loops?.[name]
+                const loopStatus = loop?.status ?? 'unknown'
+                const lastRun = loop?.last_run
+                const loopPrUrl = loop?.last_pr_url
+                const count = loop?.last_action_count
+                return (
+                  <div
+                    key={name}
+                    style={{
+                      border: `1px solid ${theme.border}`,
+                      borderRadius: 3,
+                      padding: 8,
+                    }}
+                  >
+                    <div style={{ color: theme.textBright }}>{name}</div>
+                    <div style={{ color: theme.textMuted, fontSize: 10 }}>
+                      status: {loopStatus}
+                    </div>
+                    <div style={{ color: theme.textMuted, fontSize: 10 }}>
+                      last run: {lastRun ? lastRun.split('T')[0] : '—'}
+                    </div>
+                    {loopPrUrl && (
+                      <a
+                        href={loopPrUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: theme.accent, fontSize: 10 }}
+                      >
+                        last PR
+                      </a>
+                    )}
+                    {typeof count === 'number' && (
+                      <div style={{ color: theme.textMuted, fontSize: 10 }}>
+                        actions: {count}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
         <div style={{ color: theme.textMuted, fontSize: 10, marginTop: 6 }}>
           From <code>/api/atlas/term-loops/status</code>. Read-only;
           loops are governed by the System tab toggles.

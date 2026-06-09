@@ -87,6 +87,7 @@ describe('MaintenanceView', () => {
       const calls = global.fetch.mock.calls.map((c) => c[0])
       expect(calls).toContain('/api/wiki/maintenance/status?repo=org-x')
       expect(calls).toContain('/api/wiki/health?repo=org-x')
+      expect(calls).toContain('/api/atlas/term-loops/status?repo=org-x')
     })
   })
 
@@ -103,5 +104,25 @@ describe('MaintenanceView', () => {
       (c) => c[1] && c[1].method === 'POST',
     )
     expect(posts).toHaveLength(0)
+  })
+
+  it('renders per-repo term-loop groups for the __all__ nested shape', async () => {
+    ctx.selectedRepoSlug = '__all__'
+    const NESTED = {
+      repos: [
+        { repo: 'org-a', loops: { term_proposer: { status: 'ok' } } },
+        { repo: 'org-b', loops: { term_proposer: { status: 'idle' } } },
+      ],
+    }
+    global.fetch = vi.fn((url) =>
+      url.includes('/api/atlas/term-loops/status')
+        ? Promise.resolve({ ok: true, json: () => Promise.resolve(NESTED) })
+        : Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
+    )
+    render(<MaintenanceView />)
+    await waitFor(() => {
+      expect(screen.getByTestId('term-loops-repo-org-a')).toBeInTheDocument()
+      expect(screen.getByTestId('term-loops-repo-org-b')).toBeInTheDocument()
+    })
   })
 })

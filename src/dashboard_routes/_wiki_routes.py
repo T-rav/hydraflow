@@ -317,20 +317,21 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
             return out
         return _repos(_resolve(repo)[0])
 
-    @router.get("/api/wiki/repos/{owner}/{repo}/entries")
+    # The wiki-SUBJECT repo is the `{owner}/{wiki_repo}` path; the OPERATED repo
+    # is the `repo` query (which wiki store to read), resolved via _resolve. The
+    # path placeholder is `wiki_repo` (not `repo`) so the two don't collide.
+    @router.get("/api/wiki/repos/{owner}/{wiki_repo}/entries")
     def list_wiki_entries(
         owner: str,
-        repo: str,
+        wiki_repo: str,
         topic: str | None = None,
         status: str | None = None,
         q: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        repo: RepoSlugParam = None,
     ) -> list[dict[str, Any]]:
-        # Entry reads are wiki-subject scoped (owner/repo path). Operated-repo
-        # scoping for ArticlesView is reconciled in 5c (the route's `repo` path
-        # param precludes a `repo` query param), so these read the host wiki.
-        repo_dir = _repo_dir(_resolve(None)[0], owner, repo)
+        repo_dir = _repo_dir(_resolve(repo)[0], owner, wiki_repo)
         if repo_dir is None:
             return []
         topics: tuple[str, ...] = (topic,) if topic else _TOPICS
@@ -341,7 +342,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
                 continue
             for entry_path in sorted(topic_dir.glob("*.md")):
                 summary = _entry_summary_from_path(
-                    topic=t, path=entry_path, owner=owner, repo=repo
+                    topic=t, path=entry_path, owner=owner, repo=wiki_repo
                 )
                 if summary is None:
                     continue
@@ -357,9 +358,11 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
         limit = max(limit, 0)
         return out[offset : offset + limit]
 
-    @router.get("/api/wiki/repos/{owner}/{repo}/entries/{entry_id}")
-    def get_wiki_entry(owner: str, repo: str, entry_id: str) -> dict[str, Any]:
-        repo_dir = _repo_dir(_resolve(None)[0], owner, repo)
+    @router.get("/api/wiki/repos/{owner}/{wiki_repo}/entries/{entry_id}")
+    def get_wiki_entry(
+        owner: str, wiki_repo: str, entry_id: str, repo: RepoSlugParam = None
+    ) -> dict[str, Any]:
+        repo_dir = _repo_dir(_resolve(repo)[0], owner, wiki_repo)
         if repo_dir is None:
             raise HTTPException(status_code=404, detail="repo not found")
         if not re.fullmatch(r"\d{1,6}", entry_id):
@@ -376,21 +379,22 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
                     "id": entry_id,
                     "topic": topic,
                     "owner": owner,
-                    "repo": repo,
+                    "repo": wiki_repo,
                     "filename": match.name,
                     "frontmatter": frontmatter,
                     "body": body,
                 }
         raise HTTPException(status_code=404, detail="entry not found")
 
-    @router.get("/api/wiki/repos/{owner}/{repo}/log")
+    @router.get("/api/wiki/repos/{owner}/{wiki_repo}/log")
     def get_wiki_log(
         owner: str,
-        repo: str,
+        wiki_repo: str,
         issue: int | None = None,
         limit: int = 200,
+        repo: RepoSlugParam = None,
     ) -> list[dict[str, Any]]:
-        repo_dir = _repo_dir(_resolve(None)[0], owner, repo)
+        repo_dir = _repo_dir(_resolve(repo)[0], owner, wiki_repo)
         if repo_dir is None:
             return []
         log_dir = repo_dir / "log"

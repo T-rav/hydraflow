@@ -104,6 +104,34 @@ def test_repos_all_unions_across_repos(setup):
     assert ("acme", "beta") in pairs
 
 
+def _seed_entry(cfg, owner, wiki_repo, topic, entry_id, issue):
+    d = cfg.repo_root / cfg.repo_wiki_path / owner / wiki_repo / topic
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{entry_id}-issue-{issue}-note.md").write_text(
+        f"---\ntitle: n{issue}\ntopic: {topic}\nstatus: active\nsource_issue: {issue}\n---\nbody {issue}\n",
+        encoding="utf-8",
+    )
+
+
+def test_entries_scope_to_the_operated_repo(setup):
+    router, cfg_a, cfg_b, *_ = setup
+    # Same wiki subject (acme/widgets), a distinct entry in each operated repo.
+    _seed_entry(cfg_a, "acme", "widgets", "patterns", "0001", "10")
+    _seed_entry(cfg_b, "acme", "widgets", "patterns", "0002", "20")
+    entries = find_endpoint(
+        router, "/api/wiki/repos/{owner}/{wiki_repo}/entries", "GET"
+    )
+    a_files = [
+        e["filename"] for e in entries(owner="acme", wiki_repo="widgets", repo="org-a")
+    ]
+    b_files = [
+        e["filename"] for e in entries(owner="acme", wiki_repo="widgets", repo="org-b")
+    ]
+    # Each operated repo's reads stay in its OWN wiki dir.
+    assert a_files == ["0001-issue-10-note.md"]
+    assert b_files == ["0002-issue-20-note.md"]
+
+
 def test_admin_force_compile_targets_selected_repo(setup):
     router, _cfg_a, _cfg_b, queue_a, queue_b = setup
     force = find_endpoint(router, "/api/wiki/admin/force-compile", "POST")
