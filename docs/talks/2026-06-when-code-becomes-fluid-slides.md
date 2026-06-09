@@ -38,10 +38,12 @@ PRODUCTION NOTES:
 
 ## Lessons from the HydraFlow Experiment
 
+#### When code becomes fluid, where does the engineer go?
+
 Accelerate Chicago 2026
 
 <!--
-Title card carries the submitted talk title — it must match the program attendees picked the session from. ("When Code Becomes Fluid / where does the engineer go?" stays the essay/series title; the engineer question is still answered on the close slide.) Hold the title card five seconds. Don't speak. Don't open on a thesis. The first words out of your mouth are the birth scene.
+Title card carries the submitted talk title — it must match the program attendees picked the session from — with the essay/series title as the subtitle question. The card now does double duty: the program title says what the talk is, the subtitle plants the question the close slide answers ("Into the printer"). Hold the title card five seconds. Don't speak. Don't open on a thesis. The first words out of your mouth are the birth scene.
 -->
 
 ---
