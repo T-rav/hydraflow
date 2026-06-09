@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { ReactFlow, Background, Controls, MiniMap } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { theme } from '../../theme'
+import { useHydraFlow } from '../../context/HydraFlowContext'
 import { useGraphLayout } from './useGraphLayout'
 import { computeFocusSet } from './atlasFocus'
 
@@ -62,6 +63,7 @@ export function GraphView({
   filters,
   focusMode,
 }) {
+  const { fetchWithRepo } = useHydraFlow()
   const [graph, setGraph] = useState(null)
   const [discovered, setDiscovered] = useState([])
   const [error, setError] = useState(null)
@@ -69,11 +71,11 @@ export function GraphView({
   useEffect(() => {
     let cancelled = false
     Promise.all([
-      fetch('/api/atlas/graph?include_entries=true').then((r) => {
+      fetchWithRepo('/api/atlas/graph?include_entries=true').then((r) => {
         if (!r.ok) throw new Error(`status ${r.status}`)
         return r.json()
       }),
-      fetch('/api/atlas/discovered').then((r) => (r.ok ? r.json() : [])),
+      fetchWithRepo('/api/atlas/discovered').then((r) => (r.ok ? r.json() : [])),
     ])
       .then(([graphData, discoveredData]) => {
         if (cancelled) return
@@ -89,7 +91,7 @@ export function GraphView({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [fetchWithRepo])
 
   const merged = mergeDiscovered(graph, discovered)
   const filtered = applyFilters(merged, filters)

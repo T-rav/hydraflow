@@ -1,6 +1,13 @@
 import React from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+const { fetchWithRepo } = vi.hoisted(() => ({
+  fetchWithRepo: (url, opts) => global.fetch(url, opts),
+}))
+vi.mock('../../../context/HydraFlowContext', () => ({
+  useHydraFlow: () => ({ selectedRepoSlug: null, fetchWithRepo }),
+}))
 import { DetailPanel } from '../DetailPanel'
 
 beforeEach(() => {

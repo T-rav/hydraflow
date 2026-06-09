@@ -1,6 +1,13 @@
 import React from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+const { fetchWithRepo } = vi.hoisted(() => ({
+  fetchWithRepo: (url, opts) => global.fetch(url, opts),
+}))
+vi.mock('../../../context/HydraFlowContext', () => ({
+  useHydraFlow: () => ({ selectedRepoSlug: null, fetchWithRepo }),
+}))
 import { TermDetailPanel } from '../TermDetailPanel'
 
 const SAMPLE_TERM = {
@@ -59,6 +66,13 @@ describe('TermDetailPanel', () => {
     render(<TermDetailPanel selectedNodeId="n1" />)
     await waitFor(() => {
       expect(screen.getByText(/unable to load term/i)).toBeInTheDocument()
+    })
+  })
+
+  it('scopes the fetch to the repo encoded in a namespaced node id', async () => {
+    render(<TermDetailPanel selectedNodeId="org-a/01TERM000" />)
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith('/api/atlas/terms/01TERM000?repo=org-a')
     })
   })
 })

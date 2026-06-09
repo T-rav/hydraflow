@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from 'react'
 import { theme } from '../../theme'
+import { useHydraFlow } from '../../context/HydraFlowContext'
+import { splitNodeId } from './atlasNodeId'
 
 export function TermDetailPanel({ selectedNodeId }) {
+  const { fetchWithRepo } = useHydraFlow()
   const [term, setTerm] = useState(null)
   const [error, setError] = useState(null)
 
@@ -12,7 +15,14 @@ export function TermDetailPanel({ selectedNodeId }) {
       return
     }
     let cancelled = false
-    fetch(`/api/atlas/terms/${encodeURIComponent(selectedNodeId)}`)
+    // Under __all__ the node id carries its repo (`${slug}/${id}`): fetch that
+    // repo's term explicitly; otherwise fetchWithRepo scopes to the selection.
+    const { repo, bareId } = splitNodeId(selectedNodeId)
+    const url = `/api/atlas/terms/${encodeURIComponent(bareId)}`
+    const req = repo
+      ? fetch(`${url}?repo=${encodeURIComponent(repo)}`)
+      : fetchWithRepo(url)
+    req
       .then((r) => {
         if (!r.ok) throw new Error(`status ${r.status}`)
         return r.json()
@@ -30,7 +40,7 @@ export function TermDetailPanel({ selectedNodeId }) {
     return () => {
       cancelled = true
     }
-  }, [selectedNodeId])
+  }, [selectedNodeId, fetchWithRepo])
 
   const styles = {
     root: {
