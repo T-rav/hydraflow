@@ -68,16 +68,32 @@ function normalizeRepoSlug(value) {
 
 function isDuplicate(state, action) {
   const eventId = action.id ?? -1
-  return eventId !== -1 && eventId <= state.lastSeenId
+  if (eventId === -1) return false
+  // Aggregate (repo=__all__) view: event ids only approximate order across
+  // buses and collide across repos' persisted history, so the monotonic
+  // watermark would wrongly drop a lagging bus's lower id. De-collide on
+  // (repo, id) against the bounded event log instead.
+  if (state.selectedRepoSlug === REPO_ALL) {
+    const repo = action.repo ?? null
+    return state.events.some(e => e.id === eventId && (e.repo ?? null) === repo)
+  }
+  // Single-repo: ids are monotonic, the watermark is the cheap correct dedup.
+  return eventId <= state.lastSeenId
 }
 
 function addEvent(state, action) {
   const eventId = action.id ?? -1
   if (isDuplicate(state, action)) return state
-  const event = { type: action.type, timestamp: action.timestamp, data: action.data, id: eventId }
+  // Carry the event's repo so the aggregate view can badge it and de-collide
+  // cross-repo events that share an issue/pr/id.
+  const event = { type: action.type, timestamp: action.timestamp, data: action.data, id: eventId, repo: action.repo ?? null }
   return {
     ...state,
-    lastSeenId: eventId !== -1 ? eventId : state.lastSeenId,
+    // lastSeenId is the single-repo watermark only. In the aggregate view dedup
+    // is (repo, id)-based, so leave the watermark untouched there — advancing it
+    // would wrongly gate a later single-repo session's lower ids.
+    lastSeenId:
+      eventId !== -1 && state.selectedRepoSlug !== REPO_ALL ? eventId : state.lastSeenId,
     events: [event, ...state.events].slice(0, MAX_EVENTS),
   }
 }
@@ -560,12 +576,14 @@ export function reducer(state, action) {
       return addEvent(state, action)
 
     case 'BACKFILL_EVENTS': {
-      const existingKeys = new Set(
-        state.events.map(e => `${e.type}|${e.timestamp}`)
-      )
+      // Key on repo too so two repos' same-type/same-timestamp frames don't
+      // collide under repo=__all__; preserve id + repo so the merged log can
+      // badge and (repo, id)-dedup live events that re-arrive.
+      const keyOf = e => `${e.type}|${e.timestamp}|${e.repo ?? ''}`
+      const existingKeys = new Set(state.events.map(keyOf))
       const newEvents = action.data
-        .map(e => ({ type: e.type, timestamp: e.timestamp, data: e.data }))
-        .filter(e => !existingKeys.has(`${e.type}|${e.timestamp}`))
+        .map(e => ({ type: e.type, timestamp: e.timestamp, data: e.data, id: e.id ?? -1, repo: e.repo ?? null }))
+        .filter(e => !existingKeys.has(keyOf(e)))
       const merged = [...state.events, ...newEvents]
         .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
         .slice(0, MAX_EVENTS)
@@ -739,6 +757,9 @@ export function reducer(state, action) {
           reviews: [],
           sessionPrsCount: 0,
           events: [],
+          // Reset the dedup watermark — the new scope's events restart from a
+          // fresh id space (else lower ids would be watermark-dropped).
+          lastSeenId: -1,
         }),
       }
     }
@@ -969,6 +990,9 @@ export function HydraFlowProvider({ children }) {
   }, [fetchWithRepo])
 
   const selectRepo = useCallback((slug) => {
+    // Reset the reconnect backfill cursor: the new scope's event timeline is
+    // independent, so the old since= watermark must not gate it.
+    lastEventTsRef.current = null
     dispatch({ type: 'SELECT_REPO', data: { slug } })
   }, [])
 

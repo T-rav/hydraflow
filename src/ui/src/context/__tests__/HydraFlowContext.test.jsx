@@ -114,6 +114,67 @@ describe('HydraFlowContext reducer', () => {
     expect(next.pipelineIssues.plan[0].repo).toBe('owner-a')
   })
 
+  // --- Phase 4: merged repo=__all__ realtime dedup -------------------------
+
+  it('__all__ keeps two events with the same id but different repo', () => {
+    const state = {
+      ...initialState,
+      selectedRepoSlug: '__all__',
+      events: [{ type: 'log', timestamp: 't1', data: {}, id: 5, repo: 'owner-a' }],
+    }
+    const next = reducer(state, { type: 'log', timestamp: 't2', data: {}, id: 5, repo: 'owner-b' })
+    expect(next.events).toHaveLength(2)
+    expect(next.events.map(e => e.repo).sort()).toEqual(['owner-a', 'owner-b'])
+  })
+
+  it('__all__ drops an exact (repo, id) duplicate', () => {
+    const state = {
+      ...initialState,
+      selectedRepoSlug: '__all__',
+      events: [{ type: 'log', timestamp: 't1', data: {}, id: 5, repo: 'owner-a' }],
+    }
+    const next = reducer(state, { type: 'log', timestamp: 't2', data: {}, id: 5, repo: 'owner-a' })
+    expect(next.events).toHaveLength(1)
+  })
+
+  it('single-repo still drops an event whose id is at/below the watermark', () => {
+    const state = { ...initialState, selectedRepoSlug: null, lastSeenId: 5, events: [] }
+    const next = reducer(state, { type: 'log', timestamp: 't', data: {}, id: 3 })
+    expect(next.events).toHaveLength(0)
+  })
+
+  it('addEvent carries the event repo onto the stored event', () => {
+    const next = reducer(
+      { ...initialState, selectedRepoSlug: '__all__' },
+      { type: 'log', timestamp: 't', data: {}, id: 1, repo: 'owner-z' },
+    )
+    expect(next.events[0].repo).toBe('owner-z')
+  })
+
+  it('BACKFILL keeps cross-repo same type+timestamp frames and preserves repo', () => {
+    const next = reducer(initialState, {
+      type: 'BACKFILL_EVENTS',
+      data: [
+        { type: 'log', timestamp: 'tX', data: {}, id: 1, repo: 'owner-a' },
+        { type: 'log', timestamp: 'tX', data: {}, id: 1, repo: 'owner-b' },
+      ],
+    })
+    expect(next.events).toHaveLength(2)
+    expect(next.events.map(e => e.repo).sort()).toEqual(['owner-a', 'owner-b'])
+  })
+
+  it('__all__ does not advance the single-repo watermark', () => {
+    const state = { ...initialState, selectedRepoSlug: '__all__', lastSeenId: -1 }
+    const next = reducer(state, { type: 'log', timestamp: 't', data: {}, id: 900, repo: 'owner-a' })
+    expect(next.lastSeenId).toBe(-1)
+  })
+
+  it('SELECT_REPO resets the dedup watermark on a scope change', () => {
+    const state = { ...initialState, selectedRepoSlug: 'owner-a', lastSeenId: 50 }
+    const next = reducer(state, { type: 'SELECT_REPO', data: { slug: 'owner-b' } })
+    expect(next.lastSeenId).toBe(-1)
+  })
+
   it('GITHUB_METRICS action sets githubMetrics state', () => {
     const data = {
       open_by_label: { 'hydraflow-plan': 3, 'hydraflow-ready': 1 },
