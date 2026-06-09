@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { theme } from '../../theme'
+import { useHydraFlow } from '../../context/HydraFlowContext'
 
 export function AutoAgentStats() {
+  const { fetchWithRepo, selectedRepoSlug } = useHydraFlow()
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
 
@@ -9,10 +11,13 @@ export function AutoAgentStats() {
     let cancelled = false
     const fetchStats = async () => {
       try {
-        const res = await fetch('/api/diagnostics/auto-agent')
+        const res = await fetchWithRepo('/api/diagnostics/auto-agent')
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const json = await res.json()
-        if (!cancelled) setData(json)
+        if (!cancelled) {
+          setData(json)
+          setError(null)
+        }
       } catch (e) {
         if (!cancelled) setError(String(e))
       }
@@ -23,7 +28,7 @@ export function AutoAgentStats() {
       cancelled = true
       clearInterval(t)
     }
-  }, [])
+  }, [selectedRepoSlug, fetchWithRepo])
 
   if (error) {
     return (

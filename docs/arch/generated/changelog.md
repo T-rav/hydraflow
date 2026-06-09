@@ -6,7 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
-- `6eb3eaf` — feat(diagnostics): factory-health summary aggregates across repos (Phase 3c-3) *(2026-06-08)*
+- `0be9dbc` — feat(diagnostics): factory-health summary aggregates across repos (Phase 3c-3) (#9369) (#9369) *(2026-06-08)*
+- `98b2773` — feat(loops): RollupIssueManager + migrate StagingPromotionLoop to auto-close (#9359) (#9368) (#9368) *(2026-06-08)*
 - `ec58ffb` — feat(diagnostics): Factory Cost rollup endpoints aggregate across repos (Phase 3c-2) (#9367) (#9367) *(2026-06-08)*
 - `b5c9aa6` — feat(diagnostics): factory-metrics endpoints aggregate across repos (Phase 3c-1) (#9366) (#9366) *(2026-06-08)*
 - `b207b54` — feat(system): target the selected repo for bg-worker controls (Phase 3b-fe) (#9363) (#9363) *(2026-06-08)*
