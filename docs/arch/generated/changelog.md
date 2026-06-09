@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `b05bc76` — fix(dashboard): scope bare /api/sessions + pipeline-active to default repo (Phase 6) (#9386) (#9386) *(2026-06-09)*
 - `9a46933` — feat(atlas): ArticlesView + wiki entries scope by operated repo (Phase 5c-2) (#9385) (#9385) *(2026-06-09)*
 - `6aeec86` — feat(atlas): thread operated repo into the graph cluster + namespaced node ids (Phase 5c-1) (#9383) (#9383) *(2026-06-09)*
 - `e6e3269` — fix(loops): auto-close SecurityPatch issues when the alert resolves (#9359) (#9382) (#9382) *(2026-06-09)*

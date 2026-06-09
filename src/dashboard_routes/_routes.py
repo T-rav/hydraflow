@@ -301,6 +301,132 @@ def _is_likely_disconnect(exc: BaseException) -> bool:
     }
 
 
+# Per-bus subscriber queue depth; the merged ``repo=__all__`` socket sizes its
+# shared fan-in queue at ``N × this`` so a busy line can't starve the others.
+_WS_MERGED_PER_BUS_QUEUE = 500
+
+# A resolve_runtimes 5-tuple: (config, state, event_bus, get_orch, slug).
+_Runtime = tuple[Any, Any, Any, Callable[[], Any], str]
+
+
+def _merge_sorted_history(runtimes: list[_Runtime]) -> list[HydraFlowEvent]:
+    """Merge every runtime's event history into one ``(timestamp, id)``-sorted list.
+
+    Each event is stamped with its bus's repo slug when it isn't already tagged
+    (``set_repo`` tags live events, but legacy/untagged history is normalized
+    here). A bus that fails to yield history (a down/unstarted repo) is skipped —
+    a single bad line must never sink the merged backfill. The id is the tie
+    breaker because the module-global ``_event_counter`` only approximates
+    wall-clock order across buses.
+    """
+    events: list[HydraFlowEvent] = []
+    for _cfg, _state, bus, _get_orch, slug in runtimes:
+        try:
+            history = bus.get_history()
+        except Exception:  # noqa: BLE001 — a down repo must not sink the merge
+            logger.warning("merged WS: skipping history for repo %s", slug)
+            continue
+        for event in history:
+            events.append(
+                event
+                if event.repo is not None
+                else event.model_copy(update={"repo": slug})
+            )
+    events.sort(key=lambda e: (e.timestamp, e.id))
+    return events
+
+
+async def _forward_to_merged(
+    src: asyncio.Queue[HydraFlowEvent],
+    dst: asyncio.Queue[HydraFlowEvent],
+    slug: str,
+) -> None:
+    """Forward live frames from one bus's queue into the shared merged queue.
+
+    Stamps the repo slug when missing and drops the oldest frame on a full
+    shared queue (mirroring ``EventBus.publish``'s slow-subscriber policy) so a
+    single repo can't block the fan-in. Cancelled when the socket closes.
+    """
+    while True:
+        event = await src.get()
+        if event.repo is None:
+            event = event.model_copy(update={"repo": slug})
+        try:
+            dst.put_nowait(event)
+        except asyncio.QueueFull:
+            with contextlib.suppress(asyncio.QueueEmpty):
+                dst.get_nowait()
+            with contextlib.suppress(asyncio.QueueFull):
+                dst.put_nowait(event)
+
+
+async def _serve_merged_ws(ws: WebSocket, runtimes: list[_Runtime]) -> None:
+    """Stream a merged, repo-tagged event feed across every runtime's bus.
+
+    Sends a ``(timestamp, id)``-sorted history backfill, then fans every bus's
+    live subscription into one shared queue. A repo whose subscription fails is
+    skipped (never a 1008 close — that would stop the frontend reconnect for the
+    whole aggregate view). The single-repo fast path is handled by the caller.
+
+    Note on ordering/dedup: ``event.id`` is unique only within a process'
+    *live* stream (one shared counter), but persisted history from independent
+    past sessions can reuse ids across repos. The merged feed therefore streams
+    every frame repo-tagged and lets the client de-collide on ``(repo, id)`` —
+    it never drops a frame here. Timestamps are uniformly UTC ISO-8601, so the
+    lexicographic ``(timestamp, id)`` sort is chronological.
+    """
+    await ws.accept()
+    if not runtimes:
+        # Degenerate empty-aggregate view (no registered runtimes): close
+        # cleanly instead of holding a socket the out-queue can never feed.
+        # In practice the empty-registry guard (#9359) yields the default
+        # runtime, so this only triggers defensively.
+        with contextlib.suppress(Exception):
+            await ws.close(code=1000)
+        return
+    history = _merge_sorted_history(runtimes)
+    out_queue: asyncio.Queue[HydraFlowEvent] = asyncio.Queue(
+        maxsize=max(1, len(runtimes)) * _WS_MERGED_PER_BUS_QUEUE
+    )
+    forwarders: list[asyncio.Task[None]] = []
+    async with contextlib.AsyncExitStack() as stack:
+        for _cfg, _state, bus, _get_orch, slug in runtimes:
+            try:
+                queue = await stack.enter_async_context(bus.subscription())
+            except Exception:  # noqa: BLE001 — skip a down repo, keep the socket
+                logger.warning("merged WS: skipping live feed for repo %s", slug)
+                continue
+            forwarders.append(
+                asyncio.create_task(_forward_to_merged(queue, out_queue, slug))
+            )
+        try:
+            for event in history:
+                await ws.send_text(event.model_dump_json())
+            while True:
+                event = await out_queue.get()
+                await ws.send_text(event.model_dump_json())
+        except WebSocketDisconnect:
+            pass
+        except Exception as exc:  # noqa: BLE001
+            if _is_likely_disconnect(exc):
+                logger.warning(
+                    "WebSocket disconnect during merged streaming: %s",
+                    exc.__class__.__name__,
+                )
+            else:
+                logger.error(
+                    "WebSocket error during merged streaming: %s",
+                    exc.__class__.__name__,
+                    exc_info=True,
+                )
+        finally:
+            for task in forwarders:
+                task.cancel()
+            # Await the cancellations so the buses are unsubscribed (AsyncExitStack
+            # exit) only after their forwarders have actually stopped reading.
+            await asyncio.gather(*forwarders, return_exceptions=True)
+
+
 @dataclass
 class RouteContext:
     """Bundles all dependencies needed by dashboard route handlers.
@@ -1637,24 +1763,36 @@ def create_router(
     ) -> JSONResponse:
         """Return event history, optionally filtered by a since timestamp.
 
-        Resolves the per-repo event bus via ``_resolve_runtime(repo)`` (matching
-        the adjacent operational routes) so the reconnect ``?since=`` backfill
-        returns the requested repo's events in a multi-repo deployment, not the
-        module-level default bus's.
+        Resolves the per-repo event bus via ``_resolve_runtimes(repo)`` so the
+        reconnect ``?since=`` backfill returns the requested repo's events in a
+        multi-repo deployment. For ``repo=__all__`` it unions every runtime's
+        events, repo-tags each, and merge-sorts by ``(timestamp, id)`` — the REST
+        twin of the merged ``/ws`` stream.
         """
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
+        since_dt: datetime | None = None
         if since is not None:
             try:
                 since_dt = datetime.fromisoformat(since)
                 if since_dt.tzinfo is None:
                     since_dt = since_dt.replace(tzinfo=UTC)
-                events = await _bus.load_events_since(since_dt)
-                if events is not None:
-                    return JSONResponse([e.model_dump() for e in events])
             except (ValueError, TypeError):
-                pass  # Fall through to in-memory history
-        history = _bus.get_history()
-        return JSONResponse([e.model_dump() for e in history])
+                since_dt = None  # Fall through to in-memory history
+
+        merged: list[HydraFlowEvent] = []
+        for _cfg, _state, _bus, _get_orch, slug in _resolve_runtimes(repo):
+            events: list[HydraFlowEvent] | None = None
+            if since_dt is not None:
+                events = await _bus.load_events_since(since_dt)
+            if events is None:
+                events = _bus.get_history()
+            for event in events:
+                merged.append(
+                    event
+                    if event.repo is not None
+                    else event.model_copy(update={"repo": slug})
+                )
+        merged.sort(key=lambda e: (e.timestamp, e.id))
+        return JSONResponse([e.model_dump() for e in merged])
 
     @router.get("/api/prs")
     async def get_prs(
@@ -2212,7 +2350,14 @@ def create_router(
         """Stream event history then live events over a WebSocket connection."""
         repo_slug: str | None = ws.query_params.get("repo")
 
-        # Resolve the correct event bus for the requested repo.
+        # Aggregate view: fan every registered repo's bus into one socket. Branch
+        # BEFORE _resolve_runtime — it would treat "__all__" as an unknown slug
+        # and 1008-close, streaming one repo mislabeled as the aggregate.
+        if (repo_slug or "").strip().lower() == REPO_ALL:
+            await _serve_merged_ws(ws, _resolve_runtimes(REPO_ALL))
+            return
+
+        # Single-repo fast path (None / specific slug) — unchanged.
         try:
             _cfg, _state, bus, _get_orch = _resolve_runtime(repo_slug)
         except (ValueError, HTTPException):
