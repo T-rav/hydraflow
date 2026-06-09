@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
-import { PIPELINE_LOOPS } from '../../constants'
+import { PIPELINE_LOOPS, REPO_ALL } from '../../constants'
 import { deriveStageStatus } from '../../hooks/useStageStatus'
 
 const mockUseHydraFlow = vi.fn()
@@ -255,6 +255,23 @@ describe('PipelineControlPanel', () => {
         expect(screen.getByTestId(`dec-${loop.key}`)).not.toBeDisabled()
         expect(screen.getByTestId(`inc-${loop.key}`)).not.toBeDisabled()
       }
+    })
+
+    it('disables count controls and fires no write under "All repos" (__all__)', () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+      vi.stubGlobal('fetch', fetchMock)
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({
+        selectedRepoSlug: REPO_ALL,
+        pipelineStats: buildPipelineStats({ triage: 5, discover: 5, shape: 5, plan: 5, implement: 5, review: 5 }),
+      }))
+      render(<PipelineControlPanel onToggleBgWorker={vi.fn()} />)
+      for (const loop of PIPELINE_LOOPS) {
+        expect(screen.getByTestId(`dec-${loop.key}`)).toBeDisabled()
+        expect(screen.getByTestId(`inc-${loop.key}`)).toBeDisabled()
+      }
+      // A config write must not fire against repo=__all__ (the backend 400s it).
+      fireEvent.click(screen.getByTestId('inc-implement'))
+      expect(fetchMock).not.toHaveBeenCalled()
     })
 
     it('calls PATCH /api/control/config with persist:true on increment', async () => {

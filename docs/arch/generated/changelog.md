@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `91b6227` — feat(diagnostics): auto-agent stats scope by repo (Phase 3c-4) (#9371) (#9371) *(2026-06-08)*
 - `0be9dbc` — feat(diagnostics): factory-health summary aggregates across repos (Phase 3c-3) (#9369) (#9369) *(2026-06-08)*
 - `98b2773` — feat(loops): RollupIssueManager + migrate StagingPromotionLoop to auto-close (#9359) (#9368) (#9368) *(2026-06-08)*
 - `ec58ffb` — feat(diagnostics): Factory Cost rollup endpoints aggregate across repos (Phase 3c-2) (#9367) (#9367) *(2026-06-08)*

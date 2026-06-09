@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
-import { BACKGROUND_WORKERS } from '../../constants'
+import { BACKGROUND_WORKERS, REPO_ALL } from '../../constants'
 import { deriveStageStatus } from '../../hooks/useStageStatus'
 
 const mockUseHydraFlow = vi.fn()
@@ -295,6 +295,59 @@ describe('SystemPanel', () => {
       const dependabotCard = screen.getByTestId('worker-card-dependabot_merge')
       fireEvent.click(within(dependabotCard).getByText('Off'))
       expect(onToggle).toHaveBeenCalledWith('dependabot_merge', true)
+    })
+
+    describe('aggregate mode (All repos)', () => {
+      it('shows the aggregate notice and disables worker controls under __all__', () => {
+        const onToggle = vi.fn()
+        mockUseHydraFlow.mockReturnValue(defaultMockContext({
+          orchestratorStatus: 'running',
+          backgroundWorkers: mockBgWorkers,
+          selectedRepoSlug: REPO_ALL,
+        }))
+        render(
+          <SystemPanel
+            backgroundWorkers={mockBgWorkers}
+            onToggleBgWorker={onToggle}
+            onTriggerBgWorker={vi.fn()}
+          />,
+        )
+        expect(screen.getByTestId('workers-aggregate-notice')).toBeInTheDocument()
+        // Worker mutations target one orchestrator, so the toggle is disabled and
+        // a click is inert (the backend would reject it under __all__).
+        const card = screen.getByTestId('worker-card-dependabot_merge')
+        const toggle = within(card).getByText('Off')
+        expect(toggle).toBeDisabled()
+        fireEvent.click(toggle)
+        expect(onToggle).not.toHaveBeenCalled()
+        // Run Now is disabled too.
+        screen.getAllByTestId(/^run-now-/).forEach((btn) => expect(btn).toBeDisabled())
+      })
+
+      it('omits the notice and keeps controls enabled for a specific repo', () => {
+        mockUseHydraFlow.mockReturnValue(defaultMockContext({
+          orchestratorStatus: 'running',
+          backgroundWorkers: mockBgWorkers,
+          selectedRepoSlug: 'org-a',
+        }))
+        render(<SystemPanel backgroundWorkers={mockBgWorkers} onToggleBgWorker={vi.fn()} />)
+        expect(screen.queryByTestId('workers-aggregate-notice')).not.toBeInTheDocument()
+        const card = screen.getByTestId('worker-card-dependabot_merge')
+        expect(within(card).getByText('Off')).not.toBeDisabled()
+      })
+
+      it('disables embedded per-repo config controls (unstick, staging) under __all__', () => {
+        mockUseHydraFlow.mockReturnValue(defaultMockContext({
+          orchestratorStatus: 'running',
+          backgroundWorkers: mockBgWorkers,
+          selectedRepoSlug: REPO_ALL,
+          config: { pr_unstick_batch_size: 3, staging_enabled: false, main_branch: 'main', staging_branch: 'staging', rc_cadence_hours: 4 },
+        }))
+        render(<SystemPanel backgroundWorkers={mockBgWorkers} onToggleBgWorker={vi.fn()} />)
+        expect(screen.getByTestId('unstick-workers-dropdown')).toBeDisabled()
+        expect(screen.getByTestId('staging-enabled-toggle')).toBeDisabled()
+        expect(screen.getByTestId('main-branch-input')).toBeDisabled()
+      })
     })
 
     it('non-system workers show On when orchestrator running and no state reported', () => {
