@@ -33,6 +33,10 @@ logger = logging.getLogger("hydraflow.gate_activator")
 
 _ACTIVATION_LABELS = ["hydraflow-find", "hydraflow-gate-activation"]
 
+# STABLE title (#9359): the count lives in the body, so one open issue tracks
+# "planned gates are ready" and can be found-and-closed when none remain.
+_GATE_ACTIVATION_TITLE = "[gate-activation] planned gates ready to activate"
+
 
 def _proposal_key(repo: str, proposals: list[ActivationProposal]) -> str:
     """Stable dedup key: same set of activatable gates => no re-file.
@@ -45,10 +49,11 @@ def _proposal_key(repo: str, proposals: list[ActivationProposal]) -> str:
     return f"gate_activator:{repo}:{digest[:16]}"
 
 
-def _issue_title(proposals: list[ActivationProposal]) -> str:
-    n = len(proposals)
-    plural = "gate" if n == 1 else "gates"
-    return f"[gate-activation] {n} planned {plural} ready to activate"
+def _issue_title(_proposals: list[ActivationProposal]) -> str:
+    # Stable title — the count is in the body so the open issue can be located
+    # and closed once no proposals remain (#9359). The dedup store still keys on
+    # the proposal set, so a changed set updates nothing here but is harmless.
+    return _GATE_ACTIVATION_TITLE
 
 
 def _issue_body(proposals: list[ActivationProposal]) -> str:
@@ -119,6 +124,10 @@ class GateActivatorLoop(BaseBackgroundLoop):
             return {"error": True}
 
         if not proposals:
+            # No gates left to activate — close the open activation issue and
+            # clear the dedup so a future proposal re-files (#9359). The dedup
+            # store is dedicated to this loop, so clearing it is safe.
+            await self._resolve_activation_issue()
             return {"status": "clean"}
 
         key = _proposal_key(self._config.repo, proposals)
@@ -150,3 +159,15 @@ class GateActivatorLoop(BaseBackgroundLoop):
             len(proposals),
         )
         return {"status": "proposals", "issue_created": issue}
+
+    async def _resolve_activation_issue(self) -> None:
+        """Close the open gate-activation issue and clear the dedup on recovery."""
+        existing = await self._prs.find_existing_issue(_GATE_ACTIVATION_TITLE)
+        if existing:
+            await self._prs.post_comment(
+                existing,
+                "All planned gates have been activated — auto-closing.",
+            )
+            await self._prs.close_issue(existing)
+        if self._dedup.get():
+            self._dedup.set_all(set())
