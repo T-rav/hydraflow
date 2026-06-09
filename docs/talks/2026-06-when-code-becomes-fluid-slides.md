@@ -19,6 +19,15 @@ PRODUCTION NOTES:
 - NO video demo — the cycle walkthrough is three screenshot slides (issue → PR with checks →
   merged). TO CAPTURE: pick one real cycle with a back-row-readable issue title; screenshot the
   issue with labels, the PR with green checks + label timeline, and the merged state.
+- SCAR SLIDE ("The bad day") needs the author's true specifics — the credit-exhaustion shape is
+  reconstructed from the failure mode documented in CLAUDE.md; verify or swap in the real worst day.
+- COVERAGE: get the actual % before stage (floor is 70); say both if actual is well above, drop
+  the metric if it's near the floor.
+- CUT PLAN (live, if behind at the peers slide): drop in this order —
+  1. "Testing this used to mean an environment" (speak the pain over the MockWorld slide instead)
+  2. "The factory red-teams itself" (point at the provocateur cell on the taxonomy grid)
+  3. "The encoding has a size" (speak two of the four numbers over the social→structural slide)
+  Never cut: the scar slide, gate erosion, the fork, the turn, the close.
 - Numbers verified 2026-06-09: 47 loops (docs/arch/generated/loops.md), 1,644 merged PRs
   (gh search), first commit 2026-02-18. REFRESH BOTH before the stage — the loop registry
   is public on hydraflow.ai and the room will check.
@@ -79,10 +88,10 @@ Say it slow, like you're still slightly unsettled by it — picking up directly 
 
 # 47 loops. 1,600+ merged PRs.
 
-#### I have never reviewed its code. No human has.
+#### I don't review its code. No human does.
 
 <!--
-Stage the numbers one at a time, like evidence at trial, not a LinkedIn cadence. "Forty-seven autonomous loops. (beat) More than sixteen hundred merged pull requests. (beat) Four months. (beat) And I have never reviewed its code. No human has." Then, if you want the deepest cut, the handover curve: "Two out of every three commits in the factory were authored by the factory. In the first two weeks, I out-committed my agents. Last month, they out-committed me three to one. The git log shows the handover happening." (Receipts: 1,227 of 1,790 non-merge commits by agent identities; first two weeks Travis 328 vs agents ~244; last 30 days agents 305 vs Travis 116. STRONG CANDIDATE for a slide visual — monthly stacked bar, human vs agent commits, the flip is the picture of 'self-building'.) REFRESH NUMBERS before stage — loops from docs/arch/generated/loops.md, PR count from gh. The claim must match the public registry exactly, because someone in row three will pull it up.
+Stage the numbers one at a time, like evidence at trial, not a LinkedIn cadence. "Forty-seven autonomous loops. (beat) More than sixteen hundred merged pull requests. (beat) Four months. (beat) And I don't review its code. No human does." PRECISION MATTERS HERE — not "never": you hand-wrote the first two weeks (328 commits, it's in the log), and the room's grumpiest principal will check, because the rest of the deck taught them to. The honest version is also the more relatable one: "I wrote the first two weeks by hand, like anyone would. Then the handover happened — the git log shows it. I haven't reviewed its code since month one." Relatability beat, optional: "And before you ask — no, not all sixteen hundred are glamorous. A lot of them are dependency bumps and housekeeping. That's the point. Maintenance is most of software. It does the boring part too." Owning the boring PRs buys more trust than the big number does. Then, if you want the deepest cut, the handover curve: "Two out of every three commits in the factory were authored by the factory. In the first two weeks, I out-committed my agents. Last month, they out-committed me three to one. The git log shows the handover happening." (Receipts: 1,227 of 1,790 non-merge commits by agent identities; first two weeks Travis 328 vs agents ~244; last 30 days agents 305 vs Travis 116. STRONG CANDIDATE for a slide visual — monthly stacked bar, human vs agent commits, the flip is the picture of 'self-building'.) REFRESH NUMBERS before stage — loops from docs/arch/generated/loops.md, PR count from gh. The claim must match the public registry exactly, because someone in row three will pull it up.
 -->
 
 ---
@@ -233,7 +242,7 @@ The unifying reframe — give it its own breath before the numbers. Quality enfo
 #### The gates are habits. The blast radius is a wall.
 
 <!--
-Numbers one at a time, same trial cadence as the cold open: nearly sixteen thousand tests. A seventy-percent coverage floor CI fails below. Four hundred seventy-eight scenario tests that exercise the system inside simulated worlds. A hundred seventy-six regression tests — every bug that ever bit lands with one, so it can never bite twice. (15,838 collected via pytest 2026-06-09; refresh with the others.) Then the distinction the next slide depends on: the gates are habits — code the factory can edit. The walls are not. Hold that line; it's the hinge of the whole middle act.
+Numbers one at a time, same trial cadence as the cold open: nearly sixteen thousand tests. Four hundred seventy-eight scenario tests that exercise the system inside simulated worlds. A hundred seventy-six regression tests — every bug that ever bit lands with one, so it can never bite twice. (15,838 collected via pytest 2026-06-09; refresh with the others.) COVERAGE NOTE: to a room of principals, "70% floor" reads as "30% unwatched." Before stage, run coverage and get the ACTUAL number — if it's meaningfully above 70, say both ("the enforced floor is 70; actual is X"); if it's near 70, drop coverage from the slide entirely and let the test counts carry it. The floor's real story is structural anyway: the build fails below it, and the factory can't quietly lower it. Then the distinction the next slide depends on: the gates are habits — code the factory can edit. The walls are not. Hold that line; it's the hinge of the whole middle act.
 -->
 
 ---
@@ -267,7 +276,7 @@ GitHub, git, Docker, the LLM itself — **12 Ports, 34 Fakes**, each pinned to i
 #### A mock fakes a response. A Fake world has state, time, and failure modes.
 
 <!--
-The move: every external dependency the factory touches enters through a typed Port — and MockWorld swaps a Fake in at that boundary. These aren't traditional mocks. A mock simulates a RESPONSE — one call, one canned answer. A Fake world simulates CONDITIONS: it has state that persists, time that passes, and failure modes you can program. The entire factory runs inside a simulated world, on a laptop, in seconds — no tokens, no staging org, no bill. And the fakes can't quietly lie: every one is held to a conformance contract test that pins its behavior to the real adapter's (tests/trust/contracts/ — fake_github, fake_git, fake_docker, fake_llm, all of them). That's the answer to the question someone's already drafting for Q&A: "how do you know the fake matches reality?" The contract knows.
+The move: every external dependency the factory touches enters through a typed Port — and MockWorld swaps a Fake in at that boundary. These aren't traditional mocks. A mock simulates a RESPONSE — one call, one canned answer. A Fake world simulates CONDITIONS: it has state that persists, time that passes, and failure modes you can program. The entire factory runs inside a simulated world, on a laptop, in seconds — no tokens, no staging org, no bill. And the fakes can't quietly lie: every one is held to a conformance contract test that pins its behavior to the real adapter's (tests/trust/contracts/ — fake_github, fake_git, fake_docker, fake_llm, all of them). That's the answer to the question someone's already drafting for Q&A: "how do you know the fake matches reality?" The contract knows. Pre-arm the sharper jab too — "you faked the LLM, the only dependency that matters": the fake LLM tests the ORCHESTRATION — what the loops do when the model is slow, wrong, or rate-limited. Agent quality itself is validated one tier up, in the sandbox layer, against real models. Different layer, different question, both covered.
 -->
 
 ---
@@ -287,7 +296,19 @@ The boldest claim — alone on the slide, give it room. "Given GitHub is rate-li
 #### No human in that story.
 
 <!--
-A real scene, not a pattern citation — timestamps verified against the PRs (#8460 merged 2026-05-02 21:43:31Z; hotfix #8463 created 22:07:51, merged 22:25:14). Cleanup PR: removed redundant defensive checks, 211 tests green, types clean, merged. Main went red — two test files the change hadn't accounted for. Twenty-four minutes later the hotfix PR was open; eighteen minutes after that it was merged. The entire incident, break to fix, lasted forty-two minutes — while I was doing something else. Read it as a failure and you miss it: the validation didn't gate, it PUSHED. The wrong-but-specific first pass got driven toward right. That's how rightness emerges when wrongness is fast, cheap, and contained.
+A real scene, not a pattern citation — timestamps verified against the PRs (#8460 merged 2026-05-02 21:43:31Z; hotfix #8463 created 22:07:51, merged 22:25:14). Cleanup PR: removed redundant defensive checks, 211 tests green, types clean, merged. Main went red — two test files the change hadn't accounted for. Twenty-four minutes later the hotfix PR was open; eighteen minutes after that it was merged. The entire incident, break to fix, lasted forty-two minutes — while I was doing something else. Read it as a failure and you miss it: the validation didn't gate, it PUSHED. The wrong-but-specific first pass got driven toward right. That's how rightness emerges when wrongness is fast, cheap, and contained. Then the handoff that earns the next slide: "That was the good day. I owe you a bad one."
+-->
+
+---
+
+## The bad day
+
+# It burned its retry budgets against an empty credit account.
+
+#### The loops did what loops do. All of them. At once.
+
+<!--
+THE SCAR SLIDE — the credibility purchase. [VERIFY THE DETAILS OR SWAP IN YOUR TRUE WORST DAY — the shape below is reconstructed from the failure mode documented in the repo's own rules (CLAUDE.md: CreditExhaustedError silently eaten → "the loop burns attempt budget against an exhausted billing signal"). Tell it with the real specifics only you have: when, how long, what it cost, how you found it.] The relatable shape: "The billing API said no. But the error came back wrapped as a generic failure — and loops do what loops do with generic failures. They retried. Every loop, independently, burning its attempt budget against an account that could not say yes. Anyone who's been paged for a retry storm knows exactly what this looks like. My factory built me one." The recovery, briefly: the fix wasn't heroics, it was a rule — every subprocess runner now re-raises credit exhaustion past the generic handler, and that rule lives in the repo where every future agent inherits it. The lesson, plainly: "The factory doesn't fail like a junior engineer. It fails like a distributed system — dumb, persistent, parallel. The walls held: budgets capped it, nothing was destroyed, everything was reversible. But I want you to have the real picture: this thing has bad days, and the bad days are why half those forty-seven loops exist." This slide buys more trust than every green checkmark in the deck. Don't rush it, don't soften it.
 -->
 
 ---
@@ -335,7 +356,7 @@ The sharpest claim in the knowledge layer — give it its own slide because no o
 #### A softened gate looks like a routine change.
 
 <!--
-The honest slide — deliver with conviction, not hedging; the room trusts everything else more after this. The scariest failure isn't a breach. It's a slow softening: a threshold lowered, a skip added, each one defensible, each approved by an agent judging against standards the same drift is relaxing. Gate erosion reads as routine, so it never trips the wire that pulls me in. And yes — I've built a tripwire: there is literally a CI workflow named gates-drift that verifies the branch-protection artifacts still match the gates.toml source of truth and every active gate maps to a real job. But notice what that is: a watcher for the watchers, and it's code too. Turtles, all the way down to one place: the walls cap the damage, and the conventions are mine to keep sound. That's the one job I can't delegate. That's where "stay the engineer" actually bites.
+The honest slide — deliver with conviction, not hedging; the room trusts everything else more after this. The scariest failure isn't a breach. It's a slow softening: a threshold lowered, a skip added, each one defensible, each approved by an agent judging against standards the same drift is relaxing. Gate erosion reads as routine, so it never trips the wire that pulls me in. And yes — I've built a tripwire: there is literally a CI workflow named gates-drift that verifies the branch-protection artifacts still match the gates.toml source of truth and every active gate maps to a real job. But notice what that is: a watcher for the watchers, and it's code too. And name the sharper version of the same problem before someone in row three does: "My test scenarios live in the repo the factory edits. StrongDM holds their evaluations OUTSIDE the system so it can't optimize against them. Mine are inside. What I have today: fresh-eyes review by subagents with no conversation context, conformance contracts the fakes can't dodge, a sandbox tier with real dependencies. What I don't have yet: held-out evals. It's the next wall I owe the system." Saying the gap out loud is the credibility move — this room can smell an unaddressed weakness from the lobby. Turtles, all the way down to one place: the walls cap the damage, and the conventions are mine to keep sound. That's the one job I can't delegate. That's where "stay the engineer" actually bites.
 -->
 
 ---
@@ -453,4 +474,32 @@ HydraFlow · the FLUID principles · V2V
 
 <!--
 References, contact, the essay link. Keep it short; the last real slide was the close.
+
+=== Q&A ARMORY — the four hardest questions, answered in advance ===
+
+1. "What stops it from optimizing against its own tests?" — Concede the gap first: "Honestly?
+   Less than I want. My scenarios live in the repo it edits; StrongDM holds theirs outside the
+   system, and that's the stricter discipline. What I have: fresh-eyes subagent review with no
+   conversation context, conformance contracts pinning every fake to its real adapter, and a
+   sandbox tier with real dependencies. Held-out evals are the next wall I owe it." The
+   concession IS the answer — this room trusts named gaps over claimed completeness.
+
+2. "What does it cost?" — Don't deflect. Shape: "There's a CostBudgetWatcher loop enforcing
+   daily caps per source, and spend is attributed per-loop on the dashboard. The honest pattern:
+   we've spent more engineering on validation and governance than on inference. [TODO: have one
+   real number ready — even a fuzzy daily/monthly figure. 'I don't know' reads worse than any
+   number at a DORA conference.]"
+
+3. "You're going to let a factory with no human review ship software your KID publishes?" —
+   Don't dodge; this is the player-blast-radius slide restated as an accusation. "That's exactly
+   the right question, and it's why the experiment is the talk's ending and not its victory lap.
+   The walls protect my repo today. Before anything she makes reaches another player, the walls
+   have to reach the player too — that's a prerequisite of the experiment, not an afterthought.
+   And the only test that gates a release is the one that can't be automated: us, playing it."
+
+4. "Aren't 47 loops just sprawl? / cron jobs with opinions?" — "Fair — count alone isn't
+   capability. Two things keep it from being sprawl: every loop honors one cross-cutting
+   contract (kill switch, budget, idempotent checkpoints, auto-discovery test), and the
+   taxonomy means a new loop slots into a category instead of inventing a pattern. Sprawl is
+   47 special cases. This is 8 patterns with 47 instances."
 -->
