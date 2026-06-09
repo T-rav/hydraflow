@@ -250,12 +250,24 @@ The turn — pay off the plant from the Gas Town slide. Introduce her by initial
 
 ---
 
-## Her game breaks every rule the factory relies on.
+## The game won't start from zero.
+
+It's born inside the format: one Makefile, the same security, quality, and testing standards, the same CI walls.
+
+#### A blueprint for printing. Follow the spec, get the thing.
+
+<!--
+The lessons roll forward — this is what makes the experiment an experiment and not a hobby. Every HydraFlow-format project inherits the container on day one: the shared make targets, the quality gates, the test pyramid, the CI checks, the walls. Four months of the factory teaching itself discipline, compiled into a blueprint any new repo starts inside. The game gets all of it for free — builds, deploys, regressions, security, every legible failure already guarded. (beat) "Which means the experiment is clean. Every variable the format can check is controlled. There's exactly one it can't." Next slide.
+-->
+
+---
+
+## The format checks everything — except the thing that matters most.
 
 # Fun is not a unit test.
 
 <!--
-Games dynamite the legibility assumption the whole field shares — that's why this is the frontier and not a hobby footnote. Success is aesthetic. Content is generated, not implemented. "Right" means "this feels good," and there is no green checkmark for a seven-year-old laughing. Every peer on the previous axis works above the line of legible failure. This experiment goes below it.
+Games dynamite the legibility assumption the whole field shares — that's why this is the frontier and not a hobby footnote. Success is aesthetic. Content is generated, not implemented. "Right" means "this feels good," and there is no green checkmark for a seven-year-old laughing. Every peer on the earlier axis works above the line of legible failure. This experiment goes below it — with everything legible already controlled by the inherited container, so the open question is isolated to exactly the part no test can reach.
 -->
 
 ---
@@ -299,7 +311,7 @@ End the second-order beats on the gut-punch, not a list. Hooks, credit caps, imm
 #### We'll find out together. I'll let you know.
 
 <!--
-Answer the title — for THEM, not just for you. The craft doesn't disappear; it becomes the machine. Everything that made the factory safe — the walls, the gates, the tests that defend themselves — is SOLID-era engineering, projected up a level. Only people with the craft can build a printer worth trusting. "I spent years teaching the craft one engineer at a time. The factory is the same teaching, compiled." So the direction, plainly: "Go build one. For your team. For someone who can't code. The engineer goes into the printer — that's where the craft lives now." Then home: "Mine is for Z, and a game about scooping poop. We'll find out together. I'll let you know." Walk off on that.
+Answer the title — for THEM, not just for you. The craft doesn't disappear; it becomes the machine. Everything that made the factory safe — the walls, the gates, the tests that defend themselves — is SOLID-era engineering, projected up a level. Only people with the craft can build a printer worth trusting. "I spent years teaching the craft one engineer at a time. The factory is the same teaching, compiled." So the direction, plainly: "Go build one. It starts smaller than you think — a format: shared make targets, quality gates, a test pyramid, CI walls that every new repo inherits. A blueprint for printing. For your team. For someone who can't code. The engineer goes into the printer — that's where the craft lives now." Then home: "Mine is for Z, and a game about scooping poop. We'll find out together. I'll let you know." Walk off on that.
 -->
 
 ---
