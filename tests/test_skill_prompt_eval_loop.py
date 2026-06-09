@@ -254,3 +254,38 @@ async def test_do_work_caps_corpus_cases(loop_env) -> None:
     # available, or count attempts. Simpler: assert state inc was
     # called <= cap times.
     assert state.inc_skill_prompt_attempts.call_count <= 50
+
+
+async def test_recovery_closes_drift_issue_and_clears(loop_env, monkeypatch) -> None:
+    """#9359: a case that passes again (its dedup key set) closes the open drift
+    issue, clears the dedup key + attempts."""
+    cfg, state, pr, dedup = loop_env
+    dedup.get.return_value = {"skill_prompt_eval:case_shrink_001"}
+    pr.find_existing_issue = AsyncMock(return_value=88)
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_run_corpus() -> list[dict]:
+        return [
+            {
+                "case_id": "case_shrink_001",
+                "skill": "diff_sanity",
+                "status": "PASS",
+                "provenance": "hand-crafted",
+                "expected_catcher": "diff_sanity",
+            },
+        ]
+
+    async def fake_reconcile():
+        return None
+
+    monkeypatch.setattr(loop, "_run_corpus", fake_run_corpus)
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+
+    stats = await loop._do_work()
+
+    assert stats["resolved"] == 1
+    pr.close_issue.assert_awaited_once_with(88)
+    state.clear_skill_prompt_attempts.assert_called_once_with("case_shrink_001")
