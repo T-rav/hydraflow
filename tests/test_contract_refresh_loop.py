@@ -56,6 +56,7 @@ class _FakeState:
 
     def __init__(self) -> None:
         self._attempts: dict[str, int] = {}
+        self._rollups: dict[str, dict] = {}
 
     def get_contract_refresh_attempts(self, adapter: str) -> int:
         return int(self._attempts.get(adapter, 0))
@@ -66,6 +67,31 @@ class _FakeState:
 
     def clear_contract_refresh_attempts(self, adapter: str) -> None:
         self._attempts.pop(adapter, None)
+
+    # RollupIssueManager surface (#9359) — mirrors RollupIssueStateMixin.
+    def get_rollup_issue(self, key: str) -> dict | None:
+        entry = self._rollups.get(key)
+        if not entry:
+            return None
+        return {
+            "issue_number": int(entry["issue_number"]),
+            "content_hash": str(entry["content_hash"]),
+        }
+
+    def set_rollup_issue(
+        self, key: str, *, issue_number: int, content_hash: str
+    ) -> None:
+        self._rollups[key] = {
+            "issue_number": int(issue_number),
+            "content_hash": content_hash,
+        }
+
+    def clear_rollup_issue(self, key: str) -> None:
+        self._rollups.pop(key, None)
+
+    def get_rollup_issue_keys(self, namespace: str) -> list[str]:
+        prefix = f"{namespace}:"
+        return [k for k in self._rollups if k.startswith(prefix)]
 
 
 def _loop(
@@ -372,12 +398,15 @@ async def test_do_work_replay_gate_fails_files_companion_issue(
     assert calls, "make trust-contracts should have been invoked"
     assert calls[0][:2] == ["make", "trust-contracts"]
 
-    # Companion issue filed with the right labels.
+    # Companion issue filed with the right labels. The rollup files via
+    # create_issue(title, body, labels) positionally.
     prs.create_issue.assert_awaited()
-    kwargs = prs.create_issue.await_args.kwargs
-    assert "hydraflow-find" in kwargs["labels"]
-    assert "fake-drift" in kwargs["labels"]
-    assert "trust-contracts" in kwargs["body"] or "replay" in kwargs["body"].lower()
+    title, body, labels = prs.create_issue.await_args.args
+    assert title == "Fake drift: replay gate failed after contract refresh"
+    assert "hydraflow-find" in labels
+    assert "fake-drift" in labels
+    assert "adapter-git" in labels  # drifted adapter surfaced as a label
+    assert "trust-contracts" in body or "replay" in body.lower()
 
 
 @pytest.mark.asyncio
@@ -407,6 +436,66 @@ async def test_do_work_replay_gate_passes_no_companion_issue(
     await loop._do_work()
 
     prs.create_issue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_clean_tick_closes_open_fake_drift_issue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#9359: a drift-free tick closes a previously-open fake-drift rollup issue."""
+    _stub_recording(monkeypatch)
+    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    _stub_make_trust_contracts_ok(monkeypatch)
+    monkeypatch.setattr(
+        crl_module,
+        "detect_fleet_drift",
+        lambda *_a, **_k: crl_module.FleetDriftReport(reports=[], has_drift=False),
+    )
+
+    state = _FakeState()
+    # A fake-drift issue is already open from a prior failing tick.
+    state.set_rollup_issue(
+        "contract_refresh:fake_drift", issue_number=77, content_hash="x"
+    )
+    prs = AsyncMock()
+    loop = _loop(tmp_path, prs=prs, state=state)
+
+    await loop._do_work()
+
+    prs.close_issue.assert_awaited_once_with(77)
+    assert state.get_rollup_issue("contract_refresh:fake_drift") is None
+
+
+@pytest.mark.asyncio
+async def test_replay_pass_closes_open_fake_drift_issue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#9359: a passing post-refresh replay gate closes the open fake-drift issue."""
+    _stub_recording(monkeypatch)
+    recorded_git = _seed_recorded_cassette(tmp_path / "rec" / "git", "git", "commit")
+    monkeypatch.setattr(crl_module, "record_git", lambda *_a, **_k: [recorded_git])
+    drifted_report = crl_module.AdapterDriftReport(
+        adapter="git",
+        drifted_cassettes=[recorded_git],
+        new_cassettes=[],
+        deleted_cassettes=[],
+    )
+    fleet = crl_module.FleetDriftReport(reports=[drifted_report], has_drift=True)
+    monkeypatch.setattr(crl_module, "detect_fleet_drift", lambda *_a, **_k: fleet)
+    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    _stub_make_trust_contracts_ok(monkeypatch)
+
+    state = _FakeState()
+    state.set_rollup_issue(
+        "contract_refresh:fake_drift", issue_number=88, content_hash="x"
+    )
+    prs = AsyncMock()
+    loop = _loop(tmp_path, prs=prs, state=state)
+
+    await loop._do_work()
+
+    prs.close_issue.assert_awaited_once_with(88)
+    assert state.get_rollup_issue("contract_refresh:fake_drift") is None
 
 
 # ---------------------------------------------------------------------------
