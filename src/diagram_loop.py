@@ -217,6 +217,19 @@ class DiagramLoop(BaseBackgroundLoop):
     async def _ensure_coverage_issue(self) -> None:
         items = await self._unassigned_items()
         if not items["loops"] and not items["ports"]:
+            # Resolved — every loop/port is now assigned to a functional area.
+            # Close the open coverage issue if one exists (#9359 issue-hygiene)
+            # rather than leaving it stale forever.
+            open_number = await self._pr_manager.find_existing_issue(
+                _COVERAGE_ISSUE_TITLE
+            )
+            if open_number:
+                await self._pr_manager.post_comment(
+                    open_number,
+                    "All loops/ports are now assigned to a functional area — "
+                    "auto-closing.",
+                )
+                await self._pr_manager.close_issue(open_number)
             return
         existing_number = await self._pr_manager.find_existing_issue(
             _COVERAGE_ISSUE_TITLE
