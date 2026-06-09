@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { theme } from '../../theme'
+import { useHydraFlow } from '../../context/HydraFlowContext'
 
 /**
  * Inline SVG sparkline — renders a polyline from an array of numeric values.
@@ -133,13 +134,14 @@ function RegressionAlerts({ regressions }) {
 }
 
 export function FactoryHealthSection() {
+  const { fetchWithRepo, selectedRepoSlug } = useHydraFlow()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    fetch('/api/factory-health/summary')
+    fetchWithRepo('/api/factory-health/summary')
       .then((r) => r.json())
       .then((d) => {
         if (!cancelled) setData(d)
@@ -151,7 +153,7 @@ export function FactoryHealthSection() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [selectedRepoSlug, fetchWithRepo])
 
   if (loading && !data) {
     return <div style={styles.loading}>Loading factory health…</div>

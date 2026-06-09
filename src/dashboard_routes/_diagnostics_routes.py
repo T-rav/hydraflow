@@ -405,7 +405,9 @@ def build_diagnostics_router(
     # ``resolve_runtimes(repo)`` and folds the results (group-by-sum on the
     # phase/loop/model dimensions; per-issue rows carry a repo tag). ``ctx is
     # None`` keeps the bare single-repo builder. NOTE: ``/auto-agent`` (Overview
-    # tab) is NOT yet repo-scoped — its percentile merge is deferred to 3c-3.
+    # tab) is NOT yet repo-scoped — deferred to 3c-4 (its audit.jsonl store is
+    # at the shared data_root with no repo field, so it needs a data-layout
+    # migration, not just a read-side merge like factory-health got in 3c-3).
 
     @router.get("/cost/rolling-24h")
     def cost_rolling_24h(repo: RepoSlugParam = None) -> dict[str, Any]:
