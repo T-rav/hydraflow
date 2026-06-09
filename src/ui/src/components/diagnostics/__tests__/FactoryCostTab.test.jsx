@@ -1,5 +1,27 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+
+// `ctx.selectedRepoSlug` is mutable per-test. `fetchWithRepo` is a STABLE
+// reference (defined once) — like the real useCallback-memoized fetcher — so
+// the component's effect, which depends on it, does not re-run every render.
+// It mirrors applyRepoParam (appends the selected slug) and delegates to the
+// per-test `global.fetch` stub so URL assertions see the real request.
+const { ctx, fetchWithRepo } = vi.hoisted(() => {
+  const ctx = { selectedRepoSlug: null }
+  const fetchWithRepo = (url, opts) => {
+    const sep = url.includes('?') ? '&' : '?'
+    // Mirror the real applyRepoParam exactly, incl. encodeURIComponent.
+    const scoped = ctx.selectedRepoSlug
+      ? `${url}${sep}repo=${encodeURIComponent(ctx.selectedRepoSlug)}`
+      : url
+    return global.fetch(scoped, opts)
+  }
+  return { ctx, fetchWithRepo }
+})
+vi.mock('../../../context/HydraFlowContext', () => ({
+  useHydraFlow: () => ({ selectedRepoSlug: ctx.selectedRepoSlug, fetchWithRepo }),
+}))
+
 import { FactoryCostTab } from '../FactoryCostTab'
 
 // Sanity-check render tests for the §4.11p2 Task 14 composition tab.
@@ -46,6 +68,7 @@ describe('FactoryCostTab', () => {
   let originalFetch
   beforeEach(() => {
     originalFetch = global.fetch
+    ctx.selectedRepoSlug = null
   })
   afterEach(() => {
     global.fetch = originalFetch
@@ -124,6 +147,44 @@ describe('FactoryCostTab', () => {
     await waitFor(() => {
       expect(screen.getByTestId('seg-claude-opus-4-7')).toBeInTheDocument()
       expect(screen.getByTestId('seg-claude-sonnet-4-6')).toBeInTheDocument()
+    })
+  })
+
+  it('scopes cost requests to the selected repo', async () => {
+    ctx.selectedRepoSlug = 'org-x'
+    global.fetch = buildFetchStub()
+    render(<FactoryCostTab range="7d" />)
+    // The repo slug must reach fetch on EVERY cost endpoint, proving the data
+    // path component → fetchWithRepo → repo param → network.
+    await waitFor(() => {
+      const urls = global.fetch.mock.calls.map(([u]) => u)
+      for (const path of ['/cost/rolling-24h', '/cost/top-issues', '/loops/cost', '/cost/by-model']) {
+        expect(urls.some((u) => u.includes(path) && u.includes('repo=org-x'))).toBe(true)
+      }
+    })
+  })
+
+  it('scopes the top-issue waterfall to the row owning repo', async () => {
+    global.fetch = vi.fn((url) => {
+      if (url.includes('/cost/top-issues')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([{ issue: 42, repo: 'org-b', cost_usd: 1, wall_clock_seconds: 1 }]),
+        })
+      }
+      if (url.includes('/waterfall')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ phases: [] }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) })
+    })
+    ctx.selectedRepoSlug = '__all__'
+    render(<FactoryCostTab range="7d" />)
+    const link = await screen.findByText('#42')
+    fireEvent.click(link)
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/diagnostics/issue/42/waterfall?repo=org-b',
+      )
     })
   })
 })
