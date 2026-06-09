@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 import ci_sentinels
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from rollup_issue_manager import RollupIssueManager
 
 if TYPE_CHECKING:
     from ports import PRPort
@@ -44,6 +45,20 @@ class StagingPromotionLoop(BaseBackgroundLoop):
 
     def _get_default_interval(self) -> int:
         return self._config.staging_promotion_interval
+
+    def _rollups(self) -> RollupIssueManager | None:
+        """One rolling "promotion CI is failing" issue, auto-closed on a green
+        promotion — replaces the per-PR ``RC promotion #N failed CI`` pile-up
+        (#9219..#9342). ``None`` when state is absent (unit tests fall back to
+        create_issue's stable-title dedup)."""
+        if self._state is None:
+            return None
+        return RollupIssueManager(
+            pr=self._prs,
+            state=self._state,
+            namespace="staging_promotion",
+            labels=list(self._config.find_label or ["hydraflow-find"]),
+        )
 
     async def _do_work(self) -> dict[str, Any] | None:
         if not self._enabled_cb(self._worker_name):
@@ -93,6 +108,17 @@ class StagingPromotionLoop(BaseBackgroundLoop):
                     # A green promotion clears the consecutive-failure streak so
                     # a future stall re-escalates from scratch (#9359 hardening).
                     self._state.reset_consecutive_rc_failures()
+                    # CI is green again — close the single rolling "promotion CI
+                    # failing" issue if one is open (#9359 issue-hygiene).
+                    rollups = self._rollups()
+                    if rollups is not None:
+                        await rollups.resolve(
+                            "rc_ci",
+                            comment=(
+                                f"RC promotion to {self._config.main_branch} "
+                                "succeeded — auto-closing."
+                            ),
+                        )
                 return {"status": "promoted", "pr": pr_number}
             logger.warning("Promotion merge failed for PR #%d", pr_number)
             return {"status": "merge_failed", "pr": pr_number}
@@ -147,17 +173,28 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         }
 
     async def _file_failure_issue(self, pr_number: int, summary: str) -> int:
-        labels = self._config.find_label or ["hydraflow-find"]
-        title = f"RC promotion #{pr_number} failed CI"
+        # STABLE title (no PR number) so a single rolling issue tracks "promotion
+        # CI is currently failing", updated in place each cadence tick and closed
+        # automatically on the next green promotion. The old per-PR title filed a
+        # brand-new issue every tick (#9219..#9342). #9359 issue-hygiene.
+        labels = list(self._config.find_label or ["hydraflow-find"])
+        title = f"RC promotion to {self._config.main_branch} failing CI"
         body = (
             f"Automated promotion PR #{pr_number} failed CI and was closed.\n\n"
-            f"The StagingPromotionLoop will retry on the next cadence tick.\n\n"
+            f"The StagingPromotionLoop retries on each cadence tick; this issue "
+            f"updates in place while staging→{self._config.main_branch} CI stays "
+            f"red, and auto-closes on the next green promotion.\n\n"
             "Investigate whether the failure is:\n"
             "- a real regression → fix before the next cadence\n"
             "- a flake → re-open the PR or wait for the next cycle\n"
             "- an environmental issue → fix CI config\n\n"
             f"```\n{summary}\n```"
         )
+        rollups = self._rollups()
+        if rollups is not None:
+            return await rollups.ensure("rc_ci", title=title, body=body)
+        # State-less fallback (unit tests): create_issue's exact-title dedup on
+        # the now-stable title still prevents per-tick pile-up.
         try:
             return await self._prs.create_issue(title, body, labels)
         except Exception:  # noqa: BLE001
@@ -185,8 +222,8 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             f"The StagingPromotionLoop has failed to promote `staging` → "
             f"`{self._config.main_branch}` **{failures} times in a row** "
             f"(latest: RC PR #{pr_number}). `main` is not advancing.\n\n"
-            "Per-failure `RC promotion #N failed CI` issues track each red PR, "
-            "but this escalation means the pipeline itself needs a human:\n"
+            "A single rolling `RC promotion to main failing CI` issue tracks the "
+            "red state, but this escalation means the pipeline needs a human:\n"
             "- a real regression on `staging` blocking every RC (run the failing "
             "gate locally to bisect), or\n"
             "- a systemic CI/promotion-loop defect (e.g. the #9351 timeout "
