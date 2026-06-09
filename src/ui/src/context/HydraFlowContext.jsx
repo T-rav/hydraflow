@@ -1410,6 +1410,21 @@ export function HydraFlowProvider({ children }) {
     }
   }, [fetchWithRepo])
 
+  // Force-clear a credit pause (manual override; credit-refresh only resumes
+  // when probing finds credits restored). Scoped to the selected repo via
+  // fetchWithRepo; under "All repos" the backend fans out to every paused repo.
+  const clearCreditPause = useCallback(async () => {
+    try {
+      const res = await fetchWithRepo('/api/control/clear-credit-pause', { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok: false, status: data.error || 'error' }
+      await refreshControlStatus()
+      return { ok: true, status: data.status || 'cleared' }
+    } catch {
+      return { ok: false, status: 'error' }
+    }
+  }, [fetchWithRepo, refreshControlStatus])
+
   const startOrchestrator = useCallback(async () => {
     if (state.selectedRepoSlug) {
       const result = await startRuntime(state.selectedRepoSlug)
@@ -1723,6 +1738,7 @@ export function HydraFlowProvider({ children }) {
     updateBgWorkerInterval,
     dismissSystemAlert: useCallback(() => dispatch({ type: 'CLEAR_SYSTEM_ALERT' }), [dispatch]),
     refreshCreditStatus,
+    clearCreditPause,
     refreshHitl: fetchHitlItems,
     selectRepo,
     addRepoBySlug,

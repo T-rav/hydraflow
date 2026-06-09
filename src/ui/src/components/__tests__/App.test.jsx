@@ -34,6 +34,7 @@ const { mockState } = vi.hoisted(() => {
       systemAlert: null,
       dismissSystemAlert: vi.fn(),
       refreshCreditStatus: vi.fn().mockResolvedValue({ ok: true, status: 'resuming' }),
+      clearCreditPause: vi.fn().mockResolvedValue({ ok: true, status: 'cleared' }),
       sessions: [],
       issueHistory: null,
       harnessInsights: null,
@@ -79,6 +80,7 @@ beforeEach(() => {
   mockState.orchestratorStatus = 'running'
   mockState.systemAlert = null
   mockState.refreshCreditStatus = vi.fn().mockResolvedValue({ ok: true, status: 'resuming' })
+  mockState.clearCreditPause = vi.fn().mockResolvedValue({ ok: true, status: 'cleared' })
   mockState.dismissSystemAlert = vi.fn()
   cleanup()
 })
@@ -392,6 +394,30 @@ describe('SystemAlertBanner refresh button', () => {
     const { default: App } = await import('../../App')
     render(<App />)
     expect(screen.queryByText('Refresh')).toBeNull()
+    mockState.systemAlert = null
+  })
+
+  it('shows a Force clear button on credit alerts that calls clearCreditPause', async () => {
+    mockState.systemAlert = {
+      message: 'Credit limit reached. Pausing all loops.',
+      source: 'implement',
+    }
+    const { default: App } = await import('../../App')
+    render(<App />)
+    const forceClear = screen.getByTestId('credit-force-clear')
+    expect(forceClear).toHaveTextContent('Force clear')
+    await act(async () => {
+      fireEvent.click(forceClear)
+    })
+    expect(mockState.clearCreditPause).toHaveBeenCalled()
+    mockState.systemAlert = null
+  })
+
+  it('does not show Force clear for non-credit alerts', async () => {
+    mockState.systemAlert = { message: 'Auth failed. Check your API key.', source: 'plan' }
+    const { default: App } = await import('../../App')
+    render(<App />)
+    expect(screen.queryByTestId('credit-force-clear')).toBeNull()
     mockState.systemAlert = null
   })
 
