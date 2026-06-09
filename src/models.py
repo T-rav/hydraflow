@@ -1889,6 +1889,12 @@ class StateData(BaseModel):
     # rollup issue number + the set of PR numbers currently listed in the body.
     # Used so subsequent ticks update the body in-place rather than re-filing.
     adr_rollup_issues: dict[str, dict] = Field(default_factory=dict)
+    # Generic rollup tracking for RollupIssueManager (#9359 hygiene). Keyed by
+    # "{namespace}:{subject}" (e.g. "staging_promotion:rc_ci"); value is
+    # {"issue_number": int, "content_hash": str}. Lets any loop keep ONE open
+    # issue per subject (create-once, update_issue_body on change) and close it
+    # on resolve — so resolved conditions stop accumulating stale find-issues.
+    rollup_issues: dict[str, dict] = Field(default_factory=dict)
     memory_backlog_attempts: dict[str, int] = Field(default_factory=dict)
     # TriageRetryLoop (ADR-0063 W2) — per-issue retry counters and the
     # ISO-8601 timestamp of the last retry attempt, used to honour the

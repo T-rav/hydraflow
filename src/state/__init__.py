@@ -44,6 +44,7 @@ from ._principles_audit import PrinciplesAuditStateMixin
 from ._rc_budget import RCBudgetStateMixin
 from ._report import ReportStateMixin
 from ._review import ReviewStateMixin
+from ._rollup_issues import RollupIssueStateMixin
 from ._route_back import RouteBackStateMixin
 from ._sandbox_failure_fixer import SandboxFailureFixerStateMixin
 from ._security_patch import SecurityPatchStateMixin
@@ -80,6 +81,7 @@ class StateTracker(
     PrinciplesAuditStateMixin,
     CorpusLearningStateMixin,
     ReportStateMixin,
+    RollupIssueStateMixin,
     ShapeStateMixin,
     DependabotMergeStateMixin,
     StaleIssueStateMixin,

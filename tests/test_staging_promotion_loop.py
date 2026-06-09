@@ -292,7 +292,10 @@ class TestOpenPromotionFailing:
         prs.create_issue.assert_called_once()
         args, _kwargs = prs.create_issue.call_args
         title, body, labels = args
-        assert "RC promotion #99 failed CI" in title
+        # Stable title (no PR number) so one rolling issue dedups across ticks;
+        # the PR number + failure summary live in the body (#9359).
+        assert title == "RC promotion to main failing CI"
+        assert "#99" in body
         assert "scenario suite failed" in body
         assert labels == ["hydraflow-find"]
 
@@ -578,3 +581,43 @@ class TestSentinelFidelity:
         prs.close_issue.assert_not_called()
         assert state.get_consecutive_rc_failures() == 0
         assert _escalation_calls(prs) == []
+
+
+class TestRollingFailureIssue:
+    """#9359 issue-hygiene: one rolling 'promotion CI failing' issue, auto-closed
+    on the next green promotion (replaces the per-PR pile-up #9219..#9342)."""
+
+    @pytest.mark.asyncio
+    async def test_red_then_green_files_one_issue_and_auto_closes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(number=99),
+            ci_result=(False, "boom"),
+        )
+        prs.create_issue = AsyncMock(return_value=7001)
+        prs.update_issue_body = AsyncMock()
+        state = StateTracker(state_file=tmp_path / "s.json")
+        loop._state = state  # type: ignore[attr-defined]
+
+        # Red tick: files exactly ONE rolling issue, tracked in state.
+        r1 = await loop._do_work()
+        assert r1["status"] == "ci_failed"
+        prs.create_issue.assert_awaited_once()
+        assert state.get_rollup_issue("staging_promotion:rc_ci")["issue_number"] == 7001
+
+        # Second red tick (same body) must NOT file a new issue.
+        await loop._do_work()
+        prs.create_issue.assert_awaited_once()
+
+        # Green tick: promotion succeeds → the rolling issue auto-closes.
+        prs.wait_for_ci.return_value = (True, "ok")
+        prs.merge_promotion_pr = AsyncMock(return_value=True)
+        prs.get_pr_head_sha = AsyncMock(return_value="greensha")
+        r2 = await loop._do_work()
+
+        assert r2["status"] == "promoted"
+        prs.close_issue.assert_any_await(7001)
+        assert state.get_rollup_issue("staging_promotion:rc_ci") is None
