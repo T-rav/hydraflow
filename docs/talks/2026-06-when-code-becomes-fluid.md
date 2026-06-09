@@ -316,6 +316,18 @@ The hardest cultural shift is what stops being measured. Lines of code stop matt
 
 One distinction worth naming: even within V2V teams, there's a gradient. Some teams keep humans in the PR-review loop for intent alignment. HydraFlow itself is operating further along that gradient — the human (me) doesn't review individual PRs. The system handles review through subagent-driven spec-compliance checks, code-quality passes, and fresh-eyes audits. My role is pure workflow encoding: writing the conventions, scenarios, ADRs, and autonomy doctrine the system reads. That's dark factory mode in practice. It's the direction the patterns push toward; it's not the only stop on the gradient. Most teams will land somewhere between human-in-review and human-out-of-review, and both ends are valid V2V — the patterns work the same way.
 
+## The field is converging, and placing different bets
+
+I just described a gradient, from teams that keep a human in PR review to HydraFlow, which doesn't. That gradient isn't mine alone. As I write this, in June 2026, the field is converging on the same idea and landing at different points on that exact axis.
+
+Peter Steinberger puts it flatly: you shouldn't be prompting coding agents anymore, you should be designing loops that prompt your agents. Boris Cherny, who runs Claude Code, says it in the first person: he doesn't prompt Claude anymore, he writes loops that prompt Claude. Addy Osmani gave the practice a name, loop engineering, and credited them both. The thesis stopped being a hot take. It's consensus now.
+
+What separates us isn't whether to build loops. It's how much human review stays inside the loop, and what holds the line once it leaves. Addy keeps the human as the final verifier. Cherny stepped out of prompting but kept a judgment gate on the output. Steinberger went further: if the tests pass, he ships unread, reviewing the prompt instead of the pull request. Steve Yegge stands closest to where I stand, because he built the same kind of machine I did: Gas Town, twenty or thirty agents running in parallel over a memory system, issue-driven, a fleet. His answer is to babysit it. That's his word. He renamed himself an AI babysitter, and he gates the whole thing on staying vigilant: at the high end, he says, if you have any doubt whatsoever, you can't use it.
+
+These are peers, not foils. We built similar machines and bet differently on one question: what holds when the human steps back? My bet is to make the watching structural, so it doesn't lean on me staying sharp. The walls do the watching.
+
+But notice what all of us share. Steinberger's tests, Yegge's fleet, my walls, we are all working in software whose failures are legible. A bad commit is detectable. A failing test is observable. That assumption is quietly holding up every one of these bets, and it's the one I want to break next.
+
 ## This isn't for all software — and games are next
 
 I should be specific about what HydraFlow is and isn't. HydraFlow is software that does software-shaped work: orchestration, infrastructure, dev tools, factory automation. Its outputs are commits and PRs. Its successes are observable through traces and tests. Its failures are reversible through reverts.
