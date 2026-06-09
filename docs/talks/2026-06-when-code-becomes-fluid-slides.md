@@ -19,6 +19,12 @@ PRODUCTION NOTES:
 - Numbers verified 2026-06-09: 47 loops (docs/arch/generated/loops.md), 1,644 merged PRs
   (gh search), first commit 2026-02-18. REFRESH BOTH before the stage — the loop registry
   is public on hydraflow.ai and the room will check.
+- Quality metrics verified 2026-06-09: 12,898 test functions / 839 test files; coverage
+  fail-under 70 (pyproject + ci.yml); 478 scenario tests (tests/scenarios); 61 sandbox e2e
+  files; 176 regression tests; 314 wiki json:entry blocks; 41 term files; 91 ADRs; hero
+  quote verbatim at tests/test_gates_activation.py:148; gates-drift.yml = watcher-for-the-
+  watchers receipt; PR #8460 21:43:31Z → #8463 created 22:07:51, merged 22:25:14 (42 min
+  break-to-fixed total).
 - The her-and-Claude ritual has NOT run yet. Keep it future tense on stage. The close is
   "I'll let you know," and that only stays true if nothing earlier pretends it already happened.
 - InsightMesh chronology VERIFIED from git (2026-06-09):
@@ -71,7 +77,7 @@ Say it slow, like you're still slightly unsettled by it — picking up directly 
 #### I have never reviewed its code. No human has.
 
 <!--
-Stage the numbers one at a time, like evidence at trial, not a LinkedIn cadence. "Forty-seven autonomous loops. (beat) More than sixteen hundred merged pull requests. (beat) Four months. (beat) And I have never reviewed its code. No human has." REFRESH NUMBERS before stage — loops from docs/arch/generated/loops.md, PR count from gh. The claim must match the public registry exactly, because someone in row three will pull it up.
+Stage the numbers one at a time, like evidence at trial, not a LinkedIn cadence. "Forty-seven autonomous loops. (beat) More than sixteen hundred merged pull requests. (beat) Four months. (beat) And I have never reviewed its code. No human has." Then, if you want the deepest cut, the handover curve: "Two out of every three commits in the factory were authored by the factory. In the first two weeks, I out-committed my agents. Last month, they out-committed me three to one. The git log shows the handover happening." (Receipts: 1,227 of 1,790 non-merge commits by agent identities; first two weeks Travis 328 vs agents ~244; last 30 days agents 305 vs Travis 116. STRONG CANDIDATE for a slide visual — monthly stacked bar, human vs agent commits, the flip is the picture of 'self-building'.) REFRESH NUMBERS before stage — loops from docs/arch/generated/loops.md, PR count from gh. The claim must match the public registry exactly, because someone in row three will pull it up.
 -->
 
 ---
@@ -162,17 +168,19 @@ This is the lean-back line — say it plainly and let it cost something. What go
 **Promoters** move work through tiers · **Provocateurs** attack the system on purpose
 
 <!--
-Pay off the cold-open number — this is the factory's workforce. Walk the categories fast, one breath each; don't lecture the grid. Then the two beats that matter. First: "I designed the first couple up front. The rest accreted, one at a time, each answering a recurring operational problem — and the categories weren't in my sketch. They emerged." (Verify the designed-up-front count before stage; the old "2 of 15 caretakers" stat predates the registry hitting 47.) Second, land on the provocateurs, because they're the ones that make the room sit up: the factory employs agents whose whole job is to attack it — synthesize adversarial cases from past failures, run them against the system weekly, challenge its own assumptions before reality does. A workforce that maintains, proposes, prunes, audits, repairs, watches, promotes — and red-teams itself. That's who does the work. The next slides are what keeps that workforce honest.
+Pay off the cold-open number — this is the factory's workforce. Walk the categories fast, one breath each; don't lecture the grid. Then the two beats that matter. First: "I designed the first couple up front. The rest accreted, one at a time, each answering a recurring operational problem — and the categories weren't in my sketch. They emerged." VERIFIED from file history: the first two loop files (base_background_loop, pr_unsticker_loop) land Feb 24 — day six. The rest accrete in ones, twos, and threes across four months; the newest entered the registry June 4. Spoken texture option: "The newest loop in that registry is three weeks old. The taxonomy is still growing while I'm standing here." (Caveat: file-date method doesn't follow renames — an Apr 24 ten-file burst is likely a refactor, so keep the claim soft: 'the rest accreted over four months.') Second, land on the provocateurs, because they're the ones that make the room sit up: the factory employs agents whose whole job is to attack it — synthesize adversarial cases from past failures, run them against the system weekly, challenge its own assumptions before reality does. A workforce that maintains, proposes, prunes, audits, repairs, watches, promotes — and red-teams itself. That's who does the work. The next slides are what keeps that workforce honest.
 -->
 
 ---
 
 ## Quality moved from **social** to **structural**.
 
+12,898 tests · 70% coverage floor, CI-enforced · 478 world-scenario tests · 176 regression tests
+
 #### The gates are habits. The blast radius is a wall.
 
 <!--
-Senior reviewers and tribal knowledge don't scale to a system that mutates daily — so quality got encoded. Validation runs continuously. Governance is executable. Scenarios are the spec. If you hear "fluid" and think "lower standards," it's exactly backwards: the bar didn't drop, it moved INTO the system. Distinguish the two layers now, because the next slide depends on it: the gates are habits — code the factory can edit. The walls are not.
+Senior reviewers and tribal knowledge don't scale to a system that mutates daily — so quality got encoded, and the encoding has a size: nearly thirteen thousand test functions, a seventy-percent coverage floor CI fails below, four hundred seventy-eight scenario tests that exercise the system inside simulated worlds, and a hundred seventy-six regression tests — every bug that ever bit lands with one, so it can never bite twice. (Numbers verified 2026-06-09; refresh with the others.) If you hear "fluid" and think "lower standards," it's exactly backwards: the bar didn't drop, it moved INTO the system. Distinguish the two layers now, because the next slide depends on it: the gates are habits — code the factory can edit. The walls are not.
 -->
 
 ---
@@ -199,14 +207,14 @@ The boldest claim — give it room. Traditional mocks simulate responses; MockWo
 
 ---
 
-## Merged at 21:43. Main red 42 minutes later.
+## Merged at 21:43. Hotfix open by 22:07. Merged 22:25.
 
-# Fixed 42 minutes after that.
+# Broken to fixed: 42 minutes.
 
 #### No human in that story.
 
 <!--
-A real scene, not a pattern citation. Cleanup PR last month: removed redundant defensive checks, 211 tests green, types clean, merged. Forty-two minutes later main was red — two test files the change hadn't accounted for. The hotfix landed forty-two minutes after that, end to end, while I was doing something else. Read it as a failure and you miss it: the validation didn't gate, it PUSHED. The wrong-but-specific first pass got driven toward right. That's how rightness emerges when wrongness is fast, cheap, and contained.
+A real scene, not a pattern citation — timestamps verified against the PRs (#8460 merged 2026-05-02 21:43:31Z; hotfix #8463 created 22:07:51, merged 22:25:14). Cleanup PR: removed redundant defensive checks, 211 tests green, types clean, merged. Main went red — two test files the change hadn't accounted for. Twenty-four minutes later the hotfix PR was open; eighteen minutes after that it was merged. The entire incident, break to fix, lasted forty-two minutes — while I was doing something else. Read it as a failure and you miss it: the validation didn't gate, it PUSHED. The wrong-but-specific first pass got driven toward right. That's how rightness emerges when wrongness is fast, cheap, and contained.
 -->
 
 ---
@@ -217,8 +225,20 @@ A real scene, not a pattern citation. Cleanup PR last month: removed redundant d
 
 #### A test written to resist the system's own future laziness.
 
+<!-- (quote verified verbatim: tests/test_gates_activation.py:148 — option: cite file:line on the slide as documentary texture) -->
+
 <!--
 The hero slide — and the payoff of the identity beat. "I spent years teaching people to write the test first. This is the first test I've ever seen that teaches the NEXT developer — a test written to resist the system's own future laziness, telling whoever comes after to fix reality instead of the test." Not a passing test; a self-defending one. When the codebase fills with artifacts like this, the discipline is real without me enforcing it. TDD didn't get abandoned when I stopped reviewing code. It got projected up a level — from a practice I performed to a property the system defends. This is what "solid" looks like up close. Hold it a beat; it's the emotional center of the middle act.
+-->
+
+---
+
+## I don't read the code. I read what it says about itself.
+
+314 wiki entries, regenerated from live pipeline events · 41 named domain terms — **name drift breaks the build** · 91 ADRs · diagrams regenerated on every PR
+
+<!--
+The living-knowledge layer — HydraFlow's answer to comprehension debt, and the novelty beat alongside MockWorld. Nobody can read a codebase that rewrites itself daily; Yegge says it plainly — he's never read Beads, 225k lines of his own system's Go. I can't read mine either. The difference is mine is REQUIRED to keep explaining itself: the wiki regenerates from live pipeline events, not from anyone's memory. The architecture diagrams regenerate on every PR. And the sharpest one — the vocabulary is load-bearing: forty-one domain terms live as files in the repo, the glossary auto-extracts from code, and if the code and the glossary disagree about what a word means, CI FAILS. That's Eric Evans' ubiquitous language — the DDD discipline — made executable. Documentation didn't die in this regime. Static documentation died. What replaced it is documentation with a pulse, maintained by the same factory it describes — so the comprehension debt never compounds silently. Which raises the obvious question: if even the explanations are code the factory maintains... (hand straight into the next slide)
 -->
 
 ---
@@ -230,7 +250,7 @@ The hero slide — and the payoff of the identity beat. "I spent years teaching 
 #### A softened gate looks like a routine change.
 
 <!--
-The honest slide — deliver with conviction, not hedging; the room trusts everything else more after this. The scariest failure isn't a breach. It's a slow softening: a threshold lowered, a skip added, each one defensible, each approved by an agent judging against standards the same drift is relaxing. Gate erosion reads as routine, so it never trips the wire that pulls me in. The walls cap the damage — but the conventions are mine to keep sound. That's the one job I can't delegate. That's where "stay the engineer" actually bites.
+The honest slide — deliver with conviction, not hedging; the room trusts everything else more after this. The scariest failure isn't a breach. It's a slow softening: a threshold lowered, a skip added, each one defensible, each approved by an agent judging against standards the same drift is relaxing. Gate erosion reads as routine, so it never trips the wire that pulls me in. And yes — I've built a tripwire: there is literally a CI workflow named gates-drift that verifies the branch-protection artifacts still match the gates.toml source of truth and every active gate maps to a real job. But notice what that is: a watcher for the watchers, and it's code too. Turtles, all the way down to one place: the walls cap the damage, and the conventions are mine to keep sound. That's the one job I can't delegate. That's where "stay the engineer" actually bites.
 -->
 
 ---
