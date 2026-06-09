@@ -34,14 +34,14 @@ PRODUCTION NOTES:
     the day-two self-PR detail stays available as optional spoken escalation.
 -->
 
-# When Code Becomes Fluid
+# Self-Building Software
 
-#### Where does the engineer go?
+## Lessons from the HydraFlow Experiment
 
 Accelerate Chicago 2026
 
 <!--
-Hold the title card five seconds. Don't speak. Don't open on a thesis. The first words out of your mouth are the birth scene.
+Title card carries the submitted talk title — it must match the program attendees picked the session from. ("When Code Becomes Fluid / where does the engineer go?" stays the essay/series title; the engineer question is still answered on the close slide.) Hold the title card five seconds. Don't speak. Don't open on a thesis. The first words out of your mouth are the birth scene.
 -->
 
 ---
