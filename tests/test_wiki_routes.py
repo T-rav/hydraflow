@@ -383,6 +383,12 @@ def test_get_wiki_health_reports_unconfigured_when_no_loop():
     router = APIRouter()
     ctx = MagicMock()
     ctx.get_orchestrator = lambda: None
+    ctx.resolve_runtime = lambda repo=None: (
+        MagicMock(),
+        None,
+        None,
+        ctx.get_orchestrator,
+    )
     register(router, ctx)
 
     app = FastAPI()
@@ -440,6 +446,12 @@ def test_get_wiki_health_reports_populated_when_loop_has_stores(tmp_path):
     router = APIRouter()
     ctx = MagicMock()
     ctx.get_orchestrator = lambda: orch
+    ctx.resolve_runtime = lambda repo=None: (
+        MagicMock(),
+        None,
+        None,
+        ctx.get_orchestrator,
+    )
     register(router, ctx)
 
     app = FastAPI()
