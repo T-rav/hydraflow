@@ -16,9 +16,11 @@ Act 2 is the answer to motive 2. The ending shot is motive 3.
 
 PRODUCTION NOTES:
 - Daughter appears as "Z" (initial only) on slides and stage — full name stays out (minor, public stage).
-- NO video demo — the cycle walkthrough is three screenshot slides (issue → PR with checks →
-  merged). TO CAPTURE: pick one real cycle with a back-row-readable issue title; screenshot the
-  issue with labels, the PR with green checks + label timeline, and the merged state.
+- DEMO IS A VIDEO — one pre-recorded screencap of a real cycle at 2–4× speed (issue filed →
+  loop claims it → PR opens → checks green → label trail walks → merge), ~60–90s, played in
+  silence and landed on the merged freeze-frame; a recording can't demoware-fail on stage.
+  TO CAPTURE: pick a cycle with a back-row-readable issue title; show the labels, the green
+  checks + label timeline, and the merged actor.
 - SCAR SLIDE ("The bad day") needs the author's true specifics — the credit-exhaustion shape is
   reconstructed from the failure mode documented in CLAUDE.md; verify or swap in the real worst day.
 - COVERAGE: get the actual % before stage (floor is 70); say both if actual is well above, drop
@@ -88,10 +90,10 @@ Say it slow, like you're still slightly unsettled by it — picking up directly 
 
 # 47 loops. 1,600+ merged PRs.
 
-#### I don't review its code. No human does.
+#### No human reviews its code — none ever has.
 
 <!--
-Stage the numbers one at a time, like evidence at trial, not a LinkedIn cadence. "Forty-seven autonomous loops. (beat) More than sixteen hundred merged pull requests. (beat) Four months. (beat) And I don't review its code. No human does." PRECISION MATTERS HERE — not "never": you hand-wrote the first two weeks (328 commits, it's in the log), and the room's grumpiest principal will check, because the rest of the deck taught them to. The honest version is also the more relatable one: "I wrote the first two weeks by hand, like anyone would. Then the handover happened — the git log shows it. I haven't reviewed its code since month one." Relatability beat, optional: "And before you ask — no, not all sixteen hundred are glamorous. A lot of them are dependency bumps and housekeeping. That's the point. Maintenance is most of software. It does the boring part too." Owning the boring PRs buys more trust than the big number does. Then, if you want the deepest cut, the handover curve: "Two out of every three commits in the factory were authored by the factory. In the first two weeks, I out-committed my agents. Last month, they out-committed me three to one. The git log shows the handover happening." (Receipts: 1,227 of 1,790 non-merge commits by agent identities; first two weeks Travis 328 vs agents ~244; last 30 days agents 305 vs Travis 116. STRONG CANDIDATE for a slide visual — monthly stacked bar, human vs agent commits, the flip is the picture of 'self-building'.) REFRESH NUMBERS before stage — loops from docs/arch/generated/loops.md, PR count from gh. The claim must match the public registry exactly, because someone in row three will pull it up.
+Stage the numbers one at a time, like evidence at trial, not a LinkedIn cadence. "Forty-seven autonomous loops. (beat) More than sixteen hundred merged pull requests. (beat) Four months." Then land the claim flat and let it cost something: "No human reviews its code. None ever has. (beat) I haven't read a line of this code in a year." Don't soften it, don't qualify it — the flinch in the room IS the talk, and the next forty minutes earn the right to have said it. (The "year" reaches back through InsightMesh v2, also entirely vibe-coded with no review — the no-review bet predates the factory, and the next slides pay that off.) Relatability beat, optional: "And before you ask — no, not all sixteen hundred are glamorous. A lot of them are dependency bumps and housekeeping. That's the point. Maintenance is most of software. It does the boring part too." Owning the boring PRs buys more trust than the big number does. If a principal pulls the git log and sees early commits under my name, the answer is precise, not a walk-back: commit identity is not human review — I directed and committed work I never read, and vibe-authoring is not reviewing. The handover curve is still the deepest cut: "Two out of every three commits in the factory were authored by the factory; last month they out-committed me three to one." (Receipts: 1,227 of 1,790 non-merge commits by agent identities; last 30 days agents 305 vs Travis 116. STRONG CANDIDATE for a slide visual — monthly stacked bar, human vs agent commits, the flip is the picture of 'self-building'.) REFRESH NUMBERS before stage — loops from docs/arch/generated/loops.md, PR count from gh. The claim must match the public registry exactly, because someone in row three will pull it up.
 -->
 
 ---
@@ -156,28 +158,12 @@ Name HydraFlow here — not as a product, as the answer to the question. You fil
 
 ---
 
-## One cycle, start to finish.
+## DEMO
 
-*[screenshot: a real issue, freshly filed, hydra labels applied]*
-
-<!--
-No demo, no video — three stills you speak to; the simplest thing that can't fail. This is the non-defensive answer to "is it real?": evidence beats assertion. Slide one: a real issue. "This is an actual work item — I filed the intent, that's my whole contribution to what you're about to see. The label is the state machine; the moment it lands, a loop claims it." Pick an issue whose title reads well from the back row.
--->
-
----
-
-*[screenshot: the PR it opened — checks green, label transitions visible in the timeline]*
+#### One real cycle. Filed to merged. No human in the path.
 
 <!--
-Slide two: the work. "An agent planned it, implemented it, wrote the tests, and opened this PR. Those green checks are the gates from the last section running for real. The label trail on the right is the state machine walking — every transition is a different loop doing its job. Notice what's missing from this picture: me."
--->
-
----
-
-*[screenshot: merged — the full label trail complete, merge actor visible]*
-
-<!--
-Slide three: the landing. "Merged. Reviewed by subagents, validated by the pyramid, promoted by the promotion loop. Issue to merged production code — no human in the path. That's one cycle. It did this sixteen hundred times in four months." Beat, then move on — don't linger past the punchline; the room got it.
+Restored to live motion — the stills went flat, and this is the one beat the room needs to SEE move. Pre-recorded screencap at 2–4× speed (a recording can't demoware-fail you on stage): a real issue filed → a loop claims it the moment the label lands → branch → PR opens → checks go green → the label trail walks → merge. Frame it before you hit play: "I filed the intent — that's my whole contribution to what you're about to watch. Everything after this is the factory." Then hand off the clicker, say "I'll let it run," and stay SILENT while it plays — the confidence is the whole move; narrating over it undercuts it. Land on the final merged frame and speak the punchline to the freeze: "Issue to merged production code. An agent planned it, implemented it, wrote the tests, reviewed it, merged it. Notice what's missing from that list: me. (beat) It did this sixteen hundred times in four months." Cut back to slides — don't linger past the punchline. (Pick a cycle whose issue title reads from the back row.)
 -->
 
 ---
@@ -198,7 +184,7 @@ The thesis. Let the slide sit in silence for a few seconds first. Pour code fast
 #### No human approval in the routine loop.
 
 <!--
-This is the lean-back line — say it plainly and let it cost something. What got pulled out: code review, PR approval, the planning of routine work. Every approval in the day-to-day pipeline is made by another agent. I'm pulled in for high-blast-radius decisions, and I verify direction on a pass — not line by line. My job is to author the conventions the system reviews against, and to hold the boundary it cannot cross. So the obvious question: if not me — who? Next slide.
+This is the lean-back line — say it plainly and let it cost something. What got pulled out: code review, PR approval, the planning of routine work. Every approval in the day-to-day pipeline is made by another agent. I'm pulled in for high-blast-radius decisions, and I verify direction on a pass — not line by line. My job is to author the conventions the system reviews against, and to hold the boundary it cannot cross. So the obvious question: if I'm not the one watching the code, what is? Hold that question — the rest of this act is the whole answer, and it starts with who does the work. Next slide.
 -->
 
 ---
@@ -242,7 +228,7 @@ The unifying reframe — give it its own breath before the numbers. Quality enfo
 #### The gates are habits. The blast radius is a wall.
 
 <!--
-Numbers one at a time, same trial cadence as the cold open: nearly sixteen thousand tests. Four hundred seventy-eight scenario tests that exercise the system inside simulated worlds. A hundred seventy-six regression tests — every bug that ever bit lands with one, so it can never bite twice. (15,838 collected via pytest 2026-06-09; refresh with the others.) COVERAGE NOTE: to a room of principals, "70% floor" reads as "30% unwatched." Before stage, run coverage and get the ACTUAL number — if it's meaningfully above 70, say both ("the enforced floor is 70; actual is X"); if it's near 70, drop coverage from the slide entirely and let the test counts carry it. The floor's real story is structural anyway: the build fails below it, and the factory can't quietly lower it. Then the distinction the next slide depends on: the gates are habits — code the factory can edit. The walls are not. Hold that line; it's the hinge of the whole middle act.
+Numbers one at a time, same trial cadence as the cold open: nearly sixteen thousand tests. Four hundred seventy-eight scenario tests that exercise the system inside simulated worlds. A hundred seventy-six regression tests — every bug that ever bit lands with one, so it can never bite twice. (15,838 collected via pytest 2026-06-09; refresh with the others.) COVERAGE NOTE: to a room of principals, "70% floor" reads as "30% unwatched." Before stage, run coverage and get the ACTUAL number — if it's meaningfully above 70, say both ("the enforced floor is 70; actual is X"); if it's near 70, drop coverage from the slide entirely and let the test counts carry it. The floor's real story is structural anyway: the build fails below it, and the factory can't quietly lower it. Then the distinction the next slide depends on: the gates are habits — code the factory can edit. The walls are not. Hold that line; it's the hinge of the whole middle act — and it sets up the obvious question: what ARE the walls? The next slide names them.
 -->
 
 ---
@@ -254,7 +240,7 @@ Numbers one at a time, same trial cadence as the cold open: nearly sixteen thous
 **Beyond its reach:** destructive ops blocked by hooks · can't raise its own budget · can't touch persisted state
 
 <!--
-Containment by construction, three rings — this is the "preventing runaway loops and cascades" promise from the abstract, delivered. Per loop: budgets and kill switches mean no single loop spins forever. Across loops: the label state machine gives every work item exactly one owner, so a local change can't snowball into a storm. And the hard walls live OUTSIDE the code the factory is allowed to edit: it cannot take an action it can't take back. The point isn't that loops never misbehave. It's that misbehavior is bounded, reversible, and in-budget — by construction.
+Containment by construction, three rings — this is the "preventing runaway loops and cascades" promise from the abstract, delivered. Per loop: budgets and kill switches mean no single loop spins forever. Across loops: the label state machine gives every work item exactly one owner, so a local change can't snowball into a storm. And the hard walls live OUTSIDE the code the factory is allowed to edit: it cannot take an action it can't take back. The point isn't that loops never misbehave. It's that misbehavior is bounded, reversible, and in-budget — by construction. But "bounded, reversible, in-budget" is a CLAIM. How do you test a claim like that — without a staging org, real tokens, and a live bill running while you do? That's the next move.
 -->
 
 ---
@@ -284,7 +270,7 @@ The move: every external dependency the factory touches enters through a typed P
 # Given-When-Then was always pointing at the world.
 
 <!--
-The boldest claim — alone on the slide, give it room. "Given GitHub is rate-limiting. Given auth is flaky. Given the operator's budget is capped. WHEN the loop ticks — THEN the system yields its attempt budget. We always wrote tests in that shape. The 'Given' was never just user flows — it was always pointing past them, at the whole operating environment. It just took autonomous systems to make that urgent." Four hundred seventy-eight scenario tests run the factory through hostile worlds before anything it builds touches reality. Cockburn's ports plus North's scenarios — the heritage line again, briefly: nothing here is new; the combination is.
+The boldest claim — alone on the slide, give it room. "Given GitHub is rate-limiting. Given auth is flaky. Given the operator's budget is capped. WHEN the loop ticks — THEN the system yields its attempt budget. We always wrote tests in that shape. The 'Given' was never just user flows — it was always pointing past them, at the whole operating environment. It just took autonomous systems to make that urgent." Four hundred seventy-eight scenario tests run the factory through hostile worlds before anything it builds touches reality. Cockburn's ports plus North's scenarios — the heritage line again, briefly: nothing here is new; the combination is. So the only question left in this act: does it actually hold? Two days from the log answer it — one good, one bad.
 -->
 
 ---
@@ -308,7 +294,7 @@ A real scene, not a pattern citation — timestamps verified against the PRs (#8
 #### The loops did what loops do. All of them. At once.
 
 <!--
-THE SCAR SLIDE — the credibility purchase. [VERIFY THE DETAILS OR SWAP IN YOUR TRUE WORST DAY — the shape below is reconstructed from the failure mode documented in the repo's own rules (CLAUDE.md: CreditExhaustedError silently eaten → "the loop burns attempt budget against an exhausted billing signal"). Tell it with the real specifics only you have: when, how long, what it cost, how you found it.] The relatable shape: "The billing API said no. But the error came back wrapped as a generic failure — and loops do what loops do with generic failures. They retried. Every loop, independently, burning its attempt budget against an account that could not say yes. Anyone who's been paged for a retry storm knows exactly what this looks like. My factory built me one." The recovery, briefly: the fix wasn't heroics, it was a rule — every subprocess runner now re-raises credit exhaustion past the generic handler, and that rule lives in the repo where every future agent inherits it. The lesson, plainly: "The factory doesn't fail like a junior engineer. It fails like a distributed system — dumb, persistent, parallel. The walls held: budgets capped it, nothing was destroyed, everything was reversible. But I want you to have the real picture: this thing has bad days, and the bad days are why half those forty-seven loops exist." This slide buys more trust than every green checkmark in the deck. Don't rush it, don't soften it.
+THE SCAR SLIDE — the credibility purchase. [VERIFY THE DETAILS OR SWAP IN YOUR TRUE WORST DAY — the shape below is reconstructed from the failure mode documented in the repo's own rules (CLAUDE.md: CreditExhaustedError silently eaten → "the loop burns attempt budget against an exhausted billing signal"). Tell it with the real specifics only you have: when, how long, what it cost, how you found it.] The relatable shape: "The billing API said no. But the error came back wrapped as a generic failure — and loops do what loops do with generic failures. They retried. Every loop, independently, burning its attempt budget against an account that could not say yes. Anyone who's been paged for a retry storm knows exactly what this looks like. My factory built me one." The recovery, briefly: the fix wasn't heroics, it was a rule — every subprocess runner now re-raises credit exhaustion past the generic handler, and that rule lives in the repo where every future agent inherits it. The lesson, plainly: "The factory doesn't fail like a junior engineer. It fails like a distributed system — dumb, persistent, parallel. The walls held: budgets capped it, nothing was destroyed, everything was reversible. But I want you to have the real picture: this thing has bad days, and the bad days are why half those forty-seven loops exist." This slide buys more trust than every green checkmark in the deck. Don't rush it, don't soften it. Then the handoff into the artifact: "And the day after a bad day, this is the kind of thing the factory leaves behind."
 -->
 
 ---
@@ -322,7 +308,7 @@ THE SCAR SLIDE — the credibility purchase. [VERIFY THE DETAILS OR SWAP IN YOUR
 <!-- (quote verified verbatim: tests/test_gates_activation.py:148 — option: cite file:line on the slide as documentary texture) -->
 
 <!--
-The hero slide — and the payoff of the identity beat. "I spent years teaching people to write the test first. This is the first test I've ever seen that teaches the NEXT developer — a test written to resist the system's own future laziness, telling whoever comes after to fix reality instead of the test." Not a passing test; a self-defending one. When the codebase fills with artifacts like this, the discipline is real without me enforcing it. TDD didn't get abandoned when I stopped reviewing code. It got projected up a level — from a practice I performed to a property the system defends. This is what "solid" looks like up close. Hold it a beat; it's the emotional center of the middle act.
+The hero slide — and the payoff of the identity beat. "I spent years teaching people to write the test first. This is the first test I've ever seen that teaches the NEXT developer — a test written to resist the system's own future laziness, telling whoever comes after to fix reality instead of the test." Not a passing test; a self-defending one. When the codebase fills with artifacts like this, the discipline is real without me enforcing it. TDD didn't get abandoned when I stopped reviewing code. It got projected up a level — from a practice I performed to a property the system defends. This is what "solid" looks like up close. Hold it a beat; it's the emotional center of the middle act. Then the turn into the last move: "I can't read the code that grows artifacts like this — so I stopped trying. I read what the code says about itself instead."
 -->
 
 ---
