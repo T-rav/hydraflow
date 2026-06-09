@@ -43,7 +43,13 @@ PRODUCTION NOTES:
 Accelerate Chicago 2026
 
 <!--
-Title card carries the submitted talk title — it must match the program attendees picked the session from — with the essay/series title as the subtitle question. The card now does double duty: the program title says what the talk is, the subtitle plants the question the close slide answers ("Into the printer"). Hold the title card five seconds. Don't speak. Don't open on a thesis. The first words out of your mouth are the birth scene.
+Title card carries the submitted talk title — it must match the program attendees picked the session from — with the essay/series title as the subtitle question. The card does double duty: the program title says what the talk is, the subtitle plants the question the close slide answers ("Into the printer").
+
+Open with a SMALL intro over this card — no silent hold (dead air reads wrong live), but keep it to ~15–20 seconds and don't spend any later beats (no TDD, no daughter — those have slides waiting):
+
+"Thanks, [emcee]. I'm Travis Frisinger — I've been building software for twenty-some years, and for the next forty-five minutes I'm going to tell you the story of the strangest thing I've ever built. (beat) It starts four months ago, with a folder."
+
+Advance to the next slide ON "a folder" — the birth scene lands as the sentence completes. The intro's only jobs: name, warmth, and the promise of a story. Everything else waits.
 -->
 
 ---
@@ -53,7 +59,7 @@ Title card carries the submitted talk title — it must match the program attend
 # Three days later, it left.
 
 <!--
-Say it slow, like you're still slightly unsettled by it. "Four months ago I created a folder inside an internal platform I'd vibe-coded. The folder was called dx/hydra. Three days later, what was in that folder left — into its own repository. (beat) It has been building itself ever since." Eerie, not boastful. Optional escalation texture, all receipt-backed if you want to layer it in: within ten minutes of its orchestrator landing in the new repo it had CI and pre-push quality gates — the walls went up before the machine turned on — and it was fixing its own issues and merging its own pull requests by the next afternoon (PRs #53–60, ~17:00 Feb 19). Receipts: born at dx/hydra Feb 18 (commit 542dcd6a, "feat: Add Hydra — parallel Claude Code issue processor"); standalone repo init Feb 18 08:57; orchestrator Feb 19 00:33; CI 00:38; quality hooks 00:40. (Option: put a commit line on the slide as documentary texture.) Don't explain yet. Let the room want the chronology.
+Say it slow, like you're still slightly unsettled by it — picking up directly from the intro's "...with a folder": "The folder lived inside an internal platform I'd vibe-coded. It was called dx/hydra. (beat) Three days later, what was in that folder left — into its own repository. (beat) It has been building itself ever since." Eerie, not boastful. Optional escalation texture, all receipt-backed if you want to layer it in: within ten minutes of its orchestrator landing in the new repo it had CI and pre-push quality gates — the walls went up before the machine turned on — and it was fixing its own issues and merging its own pull requests by the next afternoon (PRs #53–60, ~17:00 Feb 19). Receipts: born at dx/hydra Feb 18 (commit 542dcd6a, "feat: Add Hydra — parallel Claude Code issue processor"); standalone repo init Feb 18 08:57; orchestrator Feb 19 00:33; CI 00:38; quality hooks 00:40. (Option: put a commit line on the slide as documentary texture.) Don't explain yet. Let the room want the chronology.
 -->
 
 ---
