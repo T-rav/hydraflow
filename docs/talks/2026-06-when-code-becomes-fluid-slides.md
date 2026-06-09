@@ -484,10 +484,10 @@ References, contact, the essay link. Keep it short; the last real slide was the 
    sandbox tier with real dependencies. Held-out evals are the next wall I owe it." The
    concession IS the answer — this room trusts named gaps over claimed completeness.
 
-2. "What does it cost?" — Don't deflect; you have a real number. "I'll give you an actual
-   receipt: one night, thirty merged PRs, $125.19. Call it four dollars and change per merged
-   pull request. There's a CostBudgetWatcher loop enforcing daily caps per source, and spend is
-   attributed per-loop on the dashboard, so I always know that number. The honest pattern
+2. "What does it cost?" — Don't deflect; you have real numbers. "I'll give you an actual
+   receipt: one night, thirty merged PRs, $125.19. The running average is three to seven
+   dollars per merged pull request. There's a CostBudgetWatcher loop enforcing daily caps per
+   source, and spend is attributed per-loop on the dashboard, so I always know that number. The honest pattern
    underneath it: we've spent more engineering on validation and governance than we've ever
    spent on inference." If pressed on whether it scales: the caps are the answer — the factory
    cannot outspend its budget by construction; cost is a wall, not a hope.
