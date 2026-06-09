@@ -19,7 +19,9 @@ PRODUCTION NOTES:
 - Numbers verified 2026-06-09: 47 loops (docs/arch/generated/loops.md), 1,644 merged PRs
   (gh search), first commit 2026-02-18. REFRESH BOTH before the stage — the loop registry
   is public on hydraflow.ai and the room will check.
-- Quality metrics verified 2026-06-09: 12,898 test functions / 839 test files; coverage
+- Quality metrics verified 2026-06-09: 15,838 tests collected (pytest) / 839 test files;
+  12 Port classes, 34 Fake classes, per-fake conformance contracts in tests/trust/contracts/
+  (github, git, docker, llm, honeycomb, workspace); coverage
   fail-under 70 (pyproject + ci.yml); 478 scenario tests (tests/scenarios); 61 sandbox e2e
   files; 176 regression tests; 314 wiki json:entry blocks; 41 term files; 91 ADRs; hero
   quote verbatim at tests/test_gates_activation.py:148; gates-drift.yml = watcher-for-the-
@@ -175,12 +177,12 @@ Pay off the cold-open number — this is the factory's workforce. Walk the categ
 
 ## Quality moved from **social** to **structural**.
 
-12,898 tests · 70% coverage floor, CI-enforced · 478 world-scenario tests · 176 regression tests
+15,800+ tests · 70% coverage floor, CI-enforced · 478 world-scenario tests · 176 regression tests
 
 #### The gates are habits. The blast radius is a wall.
 
 <!--
-Senior reviewers and tribal knowledge don't scale to a system that mutates daily — so quality got encoded, and the encoding has a size: nearly thirteen thousand test functions, a seventy-percent coverage floor CI fails below, four hundred seventy-eight scenario tests that exercise the system inside simulated worlds, and a hundred seventy-six regression tests — every bug that ever bit lands with one, so it can never bite twice. (Numbers verified 2026-06-09; refresh with the others.) If you hear "fluid" and think "lower standards," it's exactly backwards: the bar didn't drop, it moved INTO the system. Distinguish the two layers now, because the next slide depends on it: the gates are habits — code the factory can edit. The walls are not.
+Senior reviewers and tribal knowledge don't scale to a system that mutates daily — so quality got encoded, and the encoding has a size: nearly sixteen thousand tests, a seventy-percent coverage floor CI fails below, four hundred seventy-eight scenario tests that exercise the system inside simulated worlds, and a hundred seventy-six regression tests — every bug that ever bit lands with one, so it can never bite twice. (15,838 collected via pytest 2026-06-09; refresh with the others.) If you hear "fluid" and think "lower standards," it's exactly backwards: the bar didn't drop, it moved INTO the system. Distinguish the two layers now, because the next slide depends on it: the gates are habits — code the factory can edit. The walls are not.
 -->
 
 ---
@@ -199,10 +201,12 @@ Containment by construction, three rings — this is the "preventing runaway loo
 
 ## The test chamber
 
+GitHub, git, Docker, the LLM itself — 12 Ports, 34 Fakes, each held honest by a conformance contract.
+
 # Given-When-Then was always pointing at the world.
 
 <!--
-The boldest claim — give it room. Traditional mocks simulate responses; MockWorld simulates CONDITIONS. The world has state, time, and failure modes you can program: given the API is degraded, given auth is flaky, given the operator has a budget cap — when the loop ticks, then the system yields. Before anything the factory builds reaches reality, it gets exercised in a hostile simulated world. That's not mocking. That's BDD pushed all the way — the "Given" was always pointing past user flows at the whole operating environment. It just took autonomous systems to make that urgent.
+The boldest claim — give it room, and start with the pain everyone knows: "Testing this kind of system used to mean an ENVIRONMENT. A staging GitHub org, real tokens, rate limits, flaky networks, an LLM bill — and a test run measured in minutes if it didn't fall over first." Then the move: every external dependency the factory touches — GitHub, git, Docker, the LLM itself, observability — enters through a typed Port. MockWorld swaps a Fake in at that boundary. But these aren't traditional mocks: a mock simulates a RESPONSE; a Fake world simulates CONDITIONS — it has state, time, and failure modes you can program. Given GitHub is rate-limiting, given auth is flaky, given the operator's budget is capped — when the loop ticks, then the system yields. The entire factory runs inside a simulated world, on a laptop, in seconds — no tokens, no staging org, no bill. And the fakes can't quietly lie: every one is held to a conformance contract test that pins its behavior to the real adapter's (tests/trust/contracts/ — fake_github, fake_git, fake_docker, fake_llm, all of them). That's not mocking. That's BDD pushed all the way — the "Given" was always pointing past user flows at the whole operating environment. Cockburn's ports plus North's scenarios; it just took autonomous systems to make the combination urgent. Receipts: 12 Port classes, 34 Fake classes, 478 scenario tests running through these worlds.
 -->
 
 ---
