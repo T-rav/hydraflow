@@ -2,8 +2,11 @@ import React, { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { theme } from '../../theme'
+import { useHydraFlow } from '../../context/HydraFlowContext'
+import { splitNodeId } from './atlasNodeId'
 
 export function AdrDetailPanel({ selectedNodeId }) {
+  const { fetchWithRepo } = useHydraFlow()
   const [adr, setAdr] = useState(null)
   const [error, setError] = useState(null)
 
@@ -13,8 +16,9 @@ export function AdrDetailPanel({ selectedNodeId }) {
       setError(null)
       return
     }
-    // selectedNodeId for an ADR node is "adr-<number>" (e.g., "adr-59").
-    const m = /^adr-(\d+)$/.exec(selectedNodeId)
+    // The ADR node id is "adr-<n>", namespaced under __all__ ("${slug}/adr-<n>").
+    const { repo, bareId } = splitNodeId(selectedNodeId)
+    const m = /^adr-(\d+)$/.exec(bareId)
     if (!m) {
       setAdr(null)
       setError(new Error('not an adr id'))
@@ -22,7 +26,11 @@ export function AdrDetailPanel({ selectedNodeId }) {
     }
     const number = m[1]
     let cancelled = false
-    fetch(`/api/atlas/adrs/${encodeURIComponent(number)}`)
+    const url = `/api/atlas/adrs/${encodeURIComponent(number)}`
+    const req = repo
+      ? fetch(`${url}?repo=${encodeURIComponent(repo)}`)
+      : fetchWithRepo(url)
+    req
       .then((r) => {
         if (!r.ok) throw new Error(`status ${r.status}`)
         return r.json()
@@ -40,7 +48,7 @@ export function AdrDetailPanel({ selectedNodeId }) {
     return () => {
       cancelled = true
     }
-  }, [selectedNodeId])
+  }, [selectedNodeId, fetchWithRepo])
 
   const styles = {
     root: {

@@ -11,6 +11,10 @@ const { mockState } = vi.hoisted(() => {
       },
       prs: [],
       events: [],
+      selectedRepoSlug: null,
+      // Atlas/wiki views (rendered under the Atlas tab) read fetchWithRepo.
+      fetchWithRepo: (url, opts) =>
+        (global.fetch ? global.fetch(url, opts) : Promise.resolve({ ok: true, json: async () => ({}) })),
       connected: true,
       orchestratorStatus: 'running',
       sessionPrsCount: 0,

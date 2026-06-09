@@ -1,6 +1,13 @@
 import React from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+const { fetchWithRepo } = vi.hoisted(() => ({
+  fetchWithRepo: (url, opts) => global.fetch(url, opts),
+}))
+vi.mock('../../../context/HydraFlowContext', () => ({
+  useHydraFlow: () => ({ selectedRepoSlug: null, fetchWithRepo }),
+}))
 import { AdrDetailPanel } from '../AdrDetailPanel'
 
 const ADR = {
@@ -41,6 +48,13 @@ describe('AdrDetailPanel', () => {
     render(<AdrDetailPanel selectedNodeId="not-an-adr" />)
     await waitFor(() => {
       expect(screen.getByText(/unable to load adr/i)).toBeInTheDocument()
+    })
+  })
+
+  it('scopes the fetch to the repo encoded in a namespaced node id', async () => {
+    render(<AdrDetailPanel selectedNodeId="org-a/adr-60" />)
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith('/api/atlas/adrs/60?repo=org-a')
     })
   })
 })
