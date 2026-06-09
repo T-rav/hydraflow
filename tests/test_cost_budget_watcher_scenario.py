@@ -164,3 +164,25 @@ async def test_kill_switch_short_circuits(monkeypatch: pytest.MonkeyPatch) -> No
     assert result == {"skipped": "kill_switch"}
     mock_rolling.assert_not_called()
     bg.set_enabled.assert_not_called()
+
+
+async def test_recovery_closes_open_cost_issue() -> None:
+    """#9359: spend back under cap → the open cap-exceeded issue auto-closes."""
+    loop, bg, pr, state = _build_loop(cap=10.0)
+    pr.find_existing_issue = AsyncMock(return_value=77)
+    with patch("cost_budget_watcher_loop.build_rolling_24h") as mock_rolling:
+        mock_rolling.return_value = {"total": {"cost_usd": 3.0}}
+        result = await loop._do_work()
+    assert result["action"] == "ok"
+    pr.close_issue.assert_awaited_once_with(77)
+    pr.post_comment.assert_awaited_once()
+
+
+async def test_under_cap_no_close_when_no_open_issue() -> None:
+    """Under cap with no open issue → no close attempt."""
+    loop, bg, pr, state = _build_loop(cap=10.0)
+    pr.find_existing_issue = AsyncMock(return_value=0)
+    with patch("cost_budget_watcher_loop.build_rolling_24h") as mock_rolling:
+        mock_rolling.return_value = {"total": {"cost_usd": 3.0}}
+        await loop._do_work()
+    pr.close_issue.assert_not_awaited()

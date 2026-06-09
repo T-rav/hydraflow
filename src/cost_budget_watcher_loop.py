@@ -145,6 +145,10 @@ class CostBudgetWatcherLoop(BaseBackgroundLoop):
                 "killed_count": len(killed),
             }
 
+        # Under cap — close the open cap-exceeded issue (fulfilling the promise
+        # in its body) so a recovered budget doesn't leave a stale issue (#9359).
+        await self._close_issue_if_open(cap=cap, total=total)
+
         if previously_killed:
             await self._reenable_caretakers(previously_killed)
             return {
@@ -218,3 +222,15 @@ class CostBudgetWatcherLoop(BaseBackgroundLoop):
             body=body,
             labels=["hydraflow-find", "cost-budget"],
         )
+
+    async def _close_issue_if_open(self, *, cap: float, total: float) -> None:
+        """Close the open cap-exceeded issue when spend recovers under cap."""
+        existing = await self._pr_manager.find_existing_issue(_ISSUE_TITLE)
+        if not existing:
+            return
+        await self._pr_manager.post_comment(
+            existing,
+            f"Rolling-24h spend (${total:.2f}) is back under the cap "
+            f"(${cap:.2f}) — caretakers re-enabled, auto-closing.",
+        )
+        await self._pr_manager.close_issue(existing)
