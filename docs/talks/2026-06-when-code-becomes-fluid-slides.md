@@ -16,6 +16,9 @@ Act 2 is the answer to motive 2. The ending shot is motive 3.
 
 PRODUCTION NOTES:
 - Daughter appears as "Z" (initial only) on slides and stage — full name stays out (minor, public stage).
+- NO video demo — the cycle walkthrough is three screenshot slides (issue → PR with checks →
+  merged). TO CAPTURE: pick one real cycle with a back-row-readable issue title; screenshot the
+  issue with labels, the PR with green checks + label timeline, and the merged state.
 - Numbers verified 2026-06-09: 47 loops (docs/arch/generated/loops.md), 1,644 merged PRs
   (gh search), first commit 2026-02-18. REFRESH BOTH before the stage — the loop registry
   is public on hydraflow.ai and the room will check.
@@ -144,12 +147,28 @@ Name HydraFlow here — not as a product, as the answer to the question. You fil
 
 ---
 
-## DEMO
+## One cycle, start to finish.
 
-#### One autonomous cycle. 90 seconds.
+*[screenshot: a real issue, freshly filed, hydra labels applied]*
 
 <!--
-Pre-recorded screencap at 2–4× speed: issue filed → agent claims it → branch → PR opens → checks go green → labels transition → merge. Stand stage right, hands off the clicker, say "I'll let it run" and then SILENCE until it ends. The demo is the non-defensive answer to "is it real?" — evidence beats assertion, and a recording can't demoware-fail you. Cut back to slides immediately.
+No demo, no video — three stills you speak to; the simplest thing that can't fail. This is the non-defensive answer to "is it real?": evidence beats assertion. Slide one: a real issue. "This is an actual work item — I filed the intent, that's my whole contribution to what you're about to see. The label is the state machine; the moment it lands, a loop claims it." Pick an issue whose title reads well from the back row.
+-->
+
+---
+
+*[screenshot: the PR it opened — checks green, label transitions visible in the timeline]*
+
+<!--
+Slide two: the work. "An agent planned it, implemented it, wrote the tests, and opened this PR. Those green checks are the gates from the last section running for real. The label trail on the right is the state machine walking — every transition is a different loop doing its job. Notice what's missing from this picture: me."
+-->
+
+---
+
+*[screenshot: merged — the full label trail complete, merge actor visible]*
+
+<!--
+Slide three: the landing. "Merged. Reviewed by subagents, validated by the pyramid, promoted by the promotion loop. Issue to merged production code — no human in the path. That's one cycle. It did this sixteen hundred times in four months." Beat, then move on — don't linger past the punchline; the room got it.
 -->
 
 ---
