@@ -774,11 +774,21 @@ class MockWorld:
             # without spinning up a full HydraFlowOrchestrator.
             orchestrator = _HarnessOrchestratorShim(self._harness)
 
+        # Surface registered repos through /api/repos (the supervised-repo list
+        # reads a repo_store, not the registry). Only when a repo was actually
+        # added — single-repo scenarios keep the host-only legacy path (#9359).
+        repo_store = None
+        if len(self._registry) > 0:
+            from repo_store import RepoRegistryStore  # noqa: PLC0415
+
+            repo_store = RepoRegistryStore(self._tmp_path)
+
         dashboard = HydraFlowDashboard(
             config=config,
             event_bus=bus,
             state=state,
             orchestrator=orchestrator,
+            repo_store=repo_store,
             # #9347 began ALWAYS passing this registry to the dashboard, even
             # empty. A non-None-but-empty registry flips the dashboard onto its
             # multi-repo branches for single-repo browser scenarios: POST
