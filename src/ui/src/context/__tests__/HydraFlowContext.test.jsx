@@ -175,6 +175,44 @@ describe('HydraFlowContext reducer', () => {
     expect(next.lastSeenId).toBe(-1)
   })
 
+  // --- Phase 4-b2: worker/PR card composite-keying ------------------------
+
+  it('worker_update keys by repo so same-issue cards across repos coexist (__all__)', () => {
+    let s = { ...initialState, selectedRepoSlug: '__all__' }
+    s = reducer(s, { type: 'worker_update', repo: 'owner-a', data: { issue: 5, status: 'active', worker: 1 } })
+    s = reducer(s, { type: 'worker_update', repo: 'owner-b', data: { issue: 5, status: 'active', worker: 1 } })
+    expect(Object.keys(s.workers).sort()).toEqual(['owner-a#5', 'owner-b#5'])
+  })
+
+  it('triage_update keys by repo (cross-repo same issue coexist)', () => {
+    let s = { ...initialState, selectedRepoSlug: '__all__' }
+    s = reducer(s, { type: 'triage_update', repo: 'owner-a', data: { issue: 5, status: 'active', worker: 1 } })
+    s = reducer(s, { type: 'triage_update', repo: 'owner-b', data: { issue: 5, status: 'active', worker: 1 } })
+    expect(Object.keys(s.workers).sort()).toEqual(['triage-owner-a#5', 'triage-owner-b#5'])
+  })
+
+  it('pr_created keeps cross-repo same PR number distinct (__all__)', () => {
+    let s = { ...initialState, selectedRepoSlug: '__all__' }
+    s = reducer(s, { type: 'pr_created', repo: 'owner-a', data: { pr: 7, issue: 5 } })
+    s = reducer(s, { type: 'pr_created', repo: 'owner-b', data: { pr: 7, issue: 5 } })
+    expect(s.prs).toHaveLength(2)
+    expect(s.prs.map(p => p.repo).sort()).toEqual(['owner-a', 'owner-b'])
+  })
+
+  it('merge_update marks the matching repo PR, not a same-number PR in another repo', () => {
+    let s = { ...initialState, selectedRepoSlug: '__all__' }
+    s = reducer(s, { type: 'pr_created', repo: 'owner-a', data: { pr: 7, issue: 5 } })
+    s = reducer(s, { type: 'pr_created', repo: 'owner-b', data: { pr: 7, issue: 5 } })
+    s = reducer(s, { type: 'merge_update', repo: 'owner-b', data: { pr: 7, status: 'merged' } })
+    expect(s.prs.find(p => p.repo === 'owner-a').merged).toBeUndefined()
+    expect(s.prs.find(p => p.repo === 'owner-b').merged).toBe(true)
+  })
+
+  it('single-repo worker_update still uses the bare issue key', () => {
+    const next = reducer(initialState, { type: 'worker_update', data: { issue: 5, status: 'active', worker: 1 } })
+    expect(Object.keys(next.workers)).toEqual(['5'])
+  })
+
   it('GITHUB_METRICS action sets githubMetrics state', () => {
     const data = {
       open_by_label: { 'hydraflow-plan': 3, 'hydraflow-ready': 1 },

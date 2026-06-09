@@ -1798,47 +1798,49 @@ def create_router(
     async def get_prs(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Fetch all open HydraFlow PRs from GitHub."""
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        # Use cached data when orchestrator has a github cache
-        orch = _get_orch()
-        if orch and isinstance(getattr(orch, "github_cache", None), GitHubDataCache):
-            items = orch.github_cache.get_open_prs()
-        else:
-            # ``list_open_prs`` is a dashboard helper on the concrete
-            # PRManager, not on PRPort.
-            manager = cast("PRManager", _pr_manager_for(_cfg, _bus))
-            all_labels = list(
-                {
-                    *_cfg.ready_label,
-                    *_cfg.review_label,
-                    *_cfg.fixed_label,
-                    *_cfg.hitl_label,
-                    *_cfg.hitl_active_label,
-                    *_cfg.planner_label,
-                }
-            )
-            items = await manager.list_open_prs(all_labels)
-        # Overlay merged flag from IssueStore so the frontend has
-        # authoritative merged state instead of session-volatile flags.
-        if not orch:
+        """Fetch all open HydraFlow PRs from GitHub.
+
+        For ``repo=__all__`` this unions every runtime's open PRs; each item is
+        tagged with its repo slug so the frontend de-collides same-number PRs
+        across repos and matches them to repo-qualified live ``pr_created`` /
+        ``merge_update`` frames (else REST-loaded PRs would duplicate).
+        """
+        result: list[dict[str, Any]] = []
+        for _cfg, _state, _bus, _get_orch, slug in _resolve_runtimes(repo):
             orch = _get_orch()
-        if orch:
-            merged_numbers = orch.issue_store.get_merged_numbers()
-            for item in items:
-                issue_num = (
-                    item.get("issue")
-                    if isinstance(item, dict)
-                    else getattr(item, "issue", None)
+            if orch and isinstance(
+                getattr(orch, "github_cache", None), GitHubDataCache
+            ):
+                items = orch.github_cache.get_open_prs()
+            else:
+                # ``list_open_prs`` is a dashboard helper on the concrete
+                # PRManager, not on PRPort.
+                manager = cast("PRManager", _pr_manager_for(_cfg, _bus))
+                all_labels = list(
+                    {
+                        *_cfg.ready_label,
+                        *_cfg.review_label,
+                        *_cfg.fixed_label,
+                        *_cfg.hitl_label,
+                        *_cfg.hitl_active_label,
+                        *_cfg.planner_label,
+                    }
                 )
+                items = await manager.list_open_prs(all_labels)
+            # Overlay merged flag from IssueStore so the frontend has
+            # authoritative merged state instead of session-volatile flags.
+            merged_numbers = (
+                orch.issue_store.get_merged_numbers() if orch else frozenset()
+            )
+            for item in items:
+                data = item if isinstance(item, dict) else item.model_dump()
+                issue_num = data.get("issue")
                 if issue_num in merged_numbers:
-                    if isinstance(item, dict):
-                        item["merged"] = True
-                    else:
-                        item.merged = True
-        return JSONResponse(
-            [item if isinstance(item, dict) else item.model_dump() for item in items]
-        )
+                    data["merged"] = True
+                # Tag with the runtime's canonical slug (matches live event.repo).
+                data["repo"] = slug
+                result.append(data)
+        return JSONResponse(result)
 
     # --- Epic routes (extracted to _epic_routes.py) ---
     from dashboard_routes._epic_routes import register as _register_epics
