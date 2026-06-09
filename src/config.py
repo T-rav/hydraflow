@@ -1179,11 +1179,11 @@ class HydraFlowConfig(BaseModel):
         description="Max fix attempts per TDD REFACTOR sub-agent before reporting failure",
     )
     triage_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
-        default="gemini",
+        default="claude",
         description="CLI backend for triage agents",
     )
     triage_model: str = Field(
-        default="gemini-3.1-pro-preview",
+        default="sonnet",
         description="Model for triage evaluation (fast/cheap)",
     )
     triage_max_turns: int = Field(

@@ -179,10 +179,10 @@ def test_harmonize_allows_codex_gpt() -> None:
     assert cfg.model == "gpt-5-codex"
 
 
-def test_triage_defaults_to_gemini_pro() -> None:
+def test_triage_defaults_to_claude_sonnet() -> None:
     cfg = HydraFlowConfig()
-    assert cfg.triage_tool == "gemini"
-    assert cfg.triage_model == "gemini-3.1-pro-preview"
+    assert cfg.triage_tool == "claude"
+    assert cfg.triage_model == "sonnet"
 
 
 def test_combo_env_sets_sentry_tool_and_model() -> None:
