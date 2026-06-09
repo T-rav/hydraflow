@@ -104,6 +104,17 @@ function issueKey(item) {
   return `${item?.repo ?? ''}#${item?.issue_number}`
 }
 
+// Repo-qualified worker-state key. Live worker/transcript/activity reducers key
+// their map by this so two repos' same issue/pr number render as distinct cards
+// under repo=__all__. The role-prefixed keys (triage-/plan-/review-) compose on
+// top of it. Exported so StreamView's transcript lookup builds the same key.
+export function workerKey(repo, id) {
+  // Degrade to the bare id when there's no repo (single-repo events were not
+  // repo-tagged pre-multi-repo) so the key is stable; a real slug (host or an
+  // aggregated repo) qualifies it as `${repo}#${id}` to de-collide under __all__.
+  return repo ? `${repo}#${id}` : String(id)
+}
+
 function mergeStageIssues(existingIssues, incomingIssues) {
   // Server snapshot is authoritative: items absent from incoming are removed
   // (prevents ghost cards) and incoming fields (including status) override
@@ -185,7 +196,9 @@ export function reducer(state, action) {
 
     case 'worker_update': {
       const { issue, status, worker, role } = action.data
-      const existing = state.workers[issue] || {
+      const repo = action.repo ?? null
+      const key = workerKey(repo, issue)
+      const existing = state.workers[key] || {
         status: 'queued',
         worker,
         role: role || 'implementer',
@@ -193,28 +206,31 @@ export function reducer(state, action) {
         branch: `agent/issue-${issue}`,
         transcript: [],
         pr: null,
+        ...(repo ? { repo } : {}),
       }
       return {
         ...state,
         workers: {
           ...state.workers,
-          [issue]: { ...existing, status, worker, role: role || existing.role },
+          [key]: { ...existing, status, worker, role: role || existing.role },
         },
       }
     }
 
     case 'transcript_line': {
       if (isDuplicate(state, action)) return state
-      let key = action.data.issue || action.data.pr
+      const repo = action.repo ?? null
+      const baseId = action.data.issue || action.data.pr
+      let key = baseId ? workerKey(repo, baseId) : null
       let role = 'implementer'
       if (action.data.source === 'triage') {
-        key = `triage-${action.data.issue}`
+        key = `triage-${workerKey(repo, action.data.issue)}`
         role = 'triage'
       } else if (action.data.source === 'planner') {
-        key = `plan-${action.data.issue}`
+        key = `plan-${workerKey(repo, action.data.issue)}`
         role = 'planner'
       } else if (action.data.source === 'reviewer') {
-        key = `review-${action.data.pr}`
+        key = `review-${workerKey(repo, action.data.pr)}`
         role = 'reviewer'
       }
       if (!key) return addEvent(state, action)
@@ -226,6 +242,7 @@ export function reducer(state, action) {
         branch: '',
         transcript: [],
         pr: action.data.pr || null,
+        ...(repo ? { repo } : {}),
       }
       return {
         ...addEvent(state, action),
@@ -239,10 +256,12 @@ export function reducer(state, action) {
     case 'agent_activity': {
       if (isDuplicate(state, action)) return state
       const { source } = action.data
-      let actKey = action.data.issue || action.data.pr
-      if (source === 'triage') actKey = `triage-${action.data.issue}`
-      else if (source === 'planner') actKey = `plan-${action.data.issue}`
-      else if (source === 'reviewer') actKey = `review-${action.data.pr}`
+      const repo = action.repo ?? null
+      const baseId = action.data.issue || action.data.pr
+      let actKey = baseId ? workerKey(repo, baseId) : null
+      if (source === 'triage') actKey = `triage-${workerKey(repo, action.data.issue)}`
+      else if (source === 'planner') actKey = `plan-${workerKey(repo, action.data.issue)}`
+      else if (source === 'reviewer') actKey = `review-${workerKey(repo, action.data.pr)}`
       if (!actKey) return addEvent(state, action)
       const actWorker = state.workers[actKey]
       if (!actWorker) return addEvent(state, action)
@@ -265,16 +284,18 @@ export function reducer(state, action) {
     }
 
     case 'pr_created': {
-      const exists = state.prs.some(p => p.pr === action.data.pr)
+      const repo = action.repo ?? action.data.repo ?? null
+      const exists = state.prs.some(p => p.pr === action.data.pr && (p.repo ?? null) === repo)
       return {
         ...addEvent(state, action),
-        prs: exists ? state.prs : [...state.prs, action.data],
+        prs: exists ? state.prs : [...state.prs, { ...action.data, ...(repo ? { repo } : {}) }],
         sessionPrsCount: exists ? state.sessionPrsCount : state.sessionPrsCount + 1,
       }
     }
 
     case 'triage_update': {
-      const triageKey = `triage-${action.data.issue}`
+      const repo = action.repo ?? null
+      const triageKey = `triage-${workerKey(repo, action.data.issue)}`
       const triageStatus = action.data.status
       const triageWorker = {
         status: triageStatus,
@@ -284,6 +305,7 @@ export function reducer(state, action) {
         branch: '',
         transcript: [],
         pr: null,
+        ...(repo ? { repo } : {}),
       }
       const existingTriage = state.workers[triageKey]
       return {
@@ -298,7 +320,8 @@ export function reducer(state, action) {
     }
 
     case 'planner_update': {
-      const planKey = `plan-${action.data.issue}`
+      const repo = action.repo ?? null
+      const planKey = `plan-${workerKey(repo, action.data.issue)}`
       const planStatus = action.data.status
       const planWorker = {
         status: planStatus,
@@ -308,6 +331,7 @@ export function reducer(state, action) {
         branch: '',
         transcript: [],
         pr: null,
+        ...(repo ? { repo } : {}),
       }
       const existingPlanner = state.workers[planKey]
       return {
@@ -322,7 +346,8 @@ export function reducer(state, action) {
     }
 
     case 'review_update': {
-      const reviewKey = `review-${action.data.pr}`
+      const repo = action.repo ?? null
+      const reviewKey = `review-${workerKey(repo, action.data.pr)}`
       const reviewStatus = action.data.status
       const reviewWorker = {
         status: reviewStatus,
@@ -332,6 +357,7 @@ export function reducer(state, action) {
         branch: '',
         transcript: [],
         pr: action.data.pr,
+        ...(repo ? { repo } : {}),
       }
       const existingReviewer = state.workers[reviewKey]
       const updatedWorkers = {
@@ -351,14 +377,16 @@ export function reducer(state, action) {
     }
 
     case 'merge_update': {
+      const repo = action.repo ?? action.data.repo ?? null
       const isMerged = action.data.status === 'merged'
       if (!isMerged || !action.data.pr) {
         return { ...addEvent(state, action), prs: state.prs }
       }
-      const found = state.prs.some(p => p.pr === action.data.pr)
+      const matchesPr = p => p.pr === action.data.pr && (p.repo ?? null) === repo
+      const found = state.prs.some(matchesPr)
       const updatedPrs = found
         ? state.prs.map(p => {
-            if (p.pr !== action.data.pr) return p
+            if (!matchesPr(p)) return p
             const updates = { ...p, merged: true }
             if (action.data.title) updates.title = action.data.title
             return updates
@@ -366,6 +394,7 @@ export function reducer(state, action) {
         : [...state.prs, {
             pr: action.data.pr,
             merged: true,
+            ...(repo ? { repo } : {}),
             ...(action.data.title ? { title: action.data.title } : {}),
             ...(action.data.issue ? { issue: action.data.issue } : {}),
           }]
@@ -401,16 +430,18 @@ export function reducer(state, action) {
     }
 
     case 'hitl_escalation': {
-      // Automated escalation: worker is keyed by `review-<pr>`
-      // Manual escalation (request-changes): no pr, worker keyed by issue number
-      const hitlReviewKey = `review-${action.data.pr}`
+      // Automated escalation: worker is keyed by `review-<repo>#<pr>`
+      // Manual escalation (request-changes): no pr, worker keyed by <repo>#<issue>
+      const repo = action.repo ?? null
+      const hitlReviewKey = `review-${workerKey(repo, action.data.pr)}`
+      const hitlIssueKey = workerKey(repo, action.data.issue)
       const hitlReviewWorker = action.data.pr != null ? state.workers[hitlReviewKey] : null
-      const hitlIssueWorker = action.data.issue != null ? state.workers[action.data.issue] : null
+      const hitlIssueWorker = action.data.issue != null ? state.workers[hitlIssueKey] : null
       let hitlWorkers = state.workers
       if (hitlReviewWorker) {
         hitlWorkers = { ...state.workers, [hitlReviewKey]: { ...hitlReviewWorker, status: 'escalated' } }
       } else if (hitlIssueWorker) {
-        hitlWorkers = { ...state.workers, [action.data.issue]: { ...hitlIssueWorker, status: 'escalated' } }
+        hitlWorkers = { ...state.workers, [hitlIssueKey]: { ...hitlIssueWorker, status: 'escalated' } }
       }
       return {
         ...addEvent(state, action),

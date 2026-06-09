@@ -738,6 +738,7 @@ class TestPRsRoute:
             "title",
             "merged",
             "author",
+            "repo",  # repo-tagged so the aggregate view de-collides same-number PRs
         }
         assert set(body[0].keys()) == expected_keys
 
