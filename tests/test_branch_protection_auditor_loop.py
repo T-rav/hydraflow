@@ -31,6 +31,9 @@ def _build(
     )
     pr = MagicMock()
     pr.create_issue = AsyncMock(return_value=4242)
+    pr.find_existing_issue = AsyncMock(return_value=0)
+    pr.close_issue = AsyncMock()
+    pr.post_comment = AsyncMock()
     dedup = DedupStore("bpa", tmp_path / "bpa.json")
     auditor = AsyncMock(return_value=report)
     loop = BranchProtectionAuditorLoop(
@@ -102,3 +105,19 @@ async def test_default_interval_from_config(tmp_path: Path) -> None:
     assert (
         loop._get_default_interval() == loop._config.branch_protection_auditor_interval
     )
+
+
+async def test_clean_closes_open_drift_issue_and_clears_dedup(tmp_path: Path) -> None:
+    """#9359: when drift resolves, close the open drift issue and clear the dedup
+    so a future drift re-files."""
+    loop, pr, dedup, _auditor = _build(tmp_path, report=_DRIFT)
+    # First tick files + dedups.
+    await loop._do_work()
+    assert len(dedup.get()) == 1
+    # Now the ruleset is back in sync → clean report.
+    loop._auditor = AsyncMock(return_value=_CLEAN)  # type: ignore[attr-defined]
+    pr.find_existing_issue = AsyncMock(return_value=4242)
+    result = await loop._do_work()
+    assert result == {"status": "clean"}
+    pr.close_issue.assert_awaited_once_with(4242)
+    assert dedup.get() == set()
