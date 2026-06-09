@@ -40,6 +40,12 @@ _STUCK_TITLE_RE = re.compile(
     r"^Principles drift stuck:\s*(?P<check_id>[\w\.\-]+)\s+in\s+(?P<slug>[\w\.\-/]+)\s*$"
 )
 
+# Inverse of `_drift_title` — recover the (check_id, slug) pair from an open
+# drift issue's title so a recovered check (FAIL→PASS) can auto-close it (#9359).
+_DRIFT_TITLE_RE = re.compile(
+    r"^Principles drift:\s*(?P<check_id>[\w\.\-]+)\s+regressed in\s+(?P<slug>[\w\.\-/]+)\s*$"
+)
+
 
 def _audit_iso_now() -> str:
     """Return the current UTC time as a second-precision ISO-8601 string."""
@@ -78,6 +84,7 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             "onboarded": 0,
             "audited": 0,
             "regressions_filed": 0,
+            "regressions_closed": 0,
             "escalations_filed": 0,
             "ready_flips": 0,
         }
@@ -111,6 +118,9 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             self._save_snapshot(_HYDRAFLOW_SELF, self_report)
             self_snapshot = self._snapshot_from_report(self_report)
             stats["audited"] += 1
+            stats["regressions_closed"] += await self._close_recovered_issues(
+                _HYDRAFLOW_SELF, self_snapshot
+            )
             self_last = self._state.get_last_green_audit(_HYDRAFLOW_SELF)
             self_regressions = self._diff_regressions(self_last, self_snapshot)
             if self_regressions:
@@ -133,6 +143,9 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             try:
                 snapshot = await self._audit_managed_repo(mr)
                 stats["audited"] += 1
+                stats["regressions_closed"] += await self._close_recovered_issues(
+                    mr.slug, snapshot
+                )
                 report = await self._fetch_last_report(mr)
                 last = self._state.get_last_green_audit(mr.slug)
                 regressions = self._diff_regressions(last, snapshot)
@@ -290,12 +303,60 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             if prev == "PASS" and current.get(cid) == "FAIL"
         )
 
+    @staticmethod
+    def _drift_title(slug: str, check_id: str) -> str:
+        """Stable drift-issue title — single source for the file + close paths.
+
+        Used by ``_file_drift_issue`` (producer) and ``_DRIFT_TITLE_RE`` /
+        ``_close_recovered_issues`` (consumer); keeping them in lockstep avoids
+        the fake-fidelity title-drift class behind #9351/#9359.
+        """
+        return f"Principles drift: {check_id} regressed in {slug}"
+
+    async def _close_recovered_issues(self, slug: str, snapshot: dict[str, str]) -> int:
+        """Close drift issues whose check recovered to PASS (#9359 FAIL→PASS).
+
+        Lists open ``principles-drift`` issues, parses ``(check_id, slug)`` from
+        each title, and for every one whose check now reports PASS on ``slug``,
+        closes the informational drift issue and resets its drift-attempt
+        counter so a future regression re-escalates cleanly instead of being
+        suppressed by a stuck counter. The ``hitl-escalation``
+        (``principles-stuck``) issue is intentionally left to the operator-close
+        path (``_reconcile_closed_escalations``) — HITL escalations are not
+        auto-closed.
+        """
+        try:
+            issues = await self._pr.list_issues_by_label("principles-drift")
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
+            logger.debug("recovery-close: skipped for %s", slug, exc_info=True)
+            return 0
+        closed = 0
+        for issue in issues:
+            m = _DRIFT_TITLE_RE.match(str(issue.get("title", "")))
+            if m is None or m.group("slug") != slug:
+                continue
+            check_id = m.group("check_id")
+            if snapshot.get(check_id) != "PASS":
+                continue
+            number = issue.get("number")
+            if number is None:
+                continue
+            await self._pr.post_comment(
+                number,
+                "Principle check recovered to PASS — auto-closing (#9359).",
+            )
+            await self._pr.close_issue(number)
+            self._state.reset_drift_attempts(slug, check_id)
+            closed += 1
+        return closed
+
     async def _file_drift_issue(
         self, slug: str, finding: dict[str, Any], last_status: str
     ) -> int:
         """File a ``hydraflow-find`` + ``principles-drift`` issue for one regression."""
         check_id = finding["check_id"]
-        title = f"Principles drift: {check_id} regressed in {slug}"
+        title = self._drift_title(slug, check_id)
         body = (
             f"**Principle:** {finding['principle']}\n"
             f"**Severity:** {finding['severity']}\n"
