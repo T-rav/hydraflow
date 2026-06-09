@@ -433,3 +433,34 @@ async def test_pr_helper_exception_reverts_pricing_file(repo_root: Path) -> None
         await loop._do_work()
 
     assert pricing_path.read_text() == before
+
+
+async def test_clean_tick_closes_open_pricing_issues(repo_root: Path) -> None:
+    """#9359: a clean parse + no bounds violations auto-closes any open
+    `[pricing-refresh]` parse-error / bounds-violation issues."""
+    upstream_payload = {
+        "claude-haiku-4-5-20251001": {
+            "litellm_provider": "anthropic",
+            "input_cost_per_token": 1e-6,
+            "output_cost_per_token": 5e-6,
+            "cache_creation_input_token_cost": 1.25e-6,
+            "cache_read_input_token_cost": 1e-7,
+        },
+    }
+    loop, pr_manager = _build_loop(repo_root)
+    pr_manager.find_existing_issue = AsyncMock(return_value=88)  # both "open"
+
+    pr_helper = AsyncMock()
+    with (
+        patch(
+            "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
+            return_value=upstream_payload,
+        ),
+        patch("auto_pr.open_automated_pr_async", pr_helper),
+    ):
+        result = await loop._do_work()
+
+    assert result == {"drift": False}
+    # Parse-error AND bounds-violation issues both auto-close on a clean tick.
+    assert pr_manager.close_issue.await_count == 2
+    assert {c.args[0] for c in pr_manager.close_issue.await_args_list} == {88}
