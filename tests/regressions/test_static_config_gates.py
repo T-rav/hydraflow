@@ -174,9 +174,7 @@ def _epic_monitor_loop(tmp_path: Path):
     from epic_monitor_loop import EpicMonitorLoop
 
     d = _deps(tmp_path, "epic_monitor_loop_enabled")
-    return EpicMonitorLoop(
-        config=d.config, epic_manager=MagicMock(), deps=d.loop_deps
-    )
+    return EpicMonitorLoop(config=d.config, epic_manager=MagicMock(), deps=d.loop_deps)
 
 
 def _epic_sweeper_loop(tmp_path: Path):
@@ -258,9 +256,7 @@ def _merge_state_watcher_loop(tmp_path: Path):
     from merge_state_watcher_loop import MergeStateWatcherLoop
 
     d = _deps(tmp_path, "merge_state_watcher_loop_enabled")
-    return MergeStateWatcherLoop(
-        config=d.config, prs=MagicMock(), deps=d.loop_deps
-    )
+    return MergeStateWatcherLoop(config=d.config, prs=MagicMock(), deps=d.loop_deps)
 
 
 def _pr_unsticker_loop(tmp_path: Path):
@@ -299,9 +295,7 @@ def _repo_wiki_loop(tmp_path: Path):
     from repo_wiki_loop import RepoWikiLoop
 
     d = _deps(tmp_path, "repo_wiki_loop_enabled")
-    return RepoWikiLoop(
-        config=d.config, wiki_store=MagicMock(), deps=d.loop_deps
-    )
+    return RepoWikiLoop(config=d.config, wiki_store=MagicMock(), deps=d.loop_deps)
 
 
 def _report_issue_loop(tmp_path: Path):
@@ -333,9 +327,7 @@ def _runs_gc_loop(tmp_path: Path):
     from runs_gc_loop import RunsGCLoop
 
     d = _deps(tmp_path, "runs_gc_loop_enabled")
-    return RunsGCLoop(
-        config=d.config, run_recorder=MagicMock(), deps=d.loop_deps
-    )
+    return RunsGCLoop(config=d.config, run_recorder=MagicMock(), deps=d.loop_deps)
 
 
 def _security_patch_loop(tmp_path: Path):
@@ -343,7 +335,7 @@ def _security_patch_loop(tmp_path: Path):
 
     d = _deps(tmp_path, "security_patch_loop_enabled")
     return SecurityPatchLoop(
-        config=d.config, pr_manager=MagicMock(), deps=d.loop_deps
+        config=d.config, pr_manager=MagicMock(), state=MagicMock(), deps=d.loop_deps
     )
 
 
@@ -351,9 +343,7 @@ def _sentry_loop(tmp_path: Path):
     from sentry_loop import SentryLoop
 
     d = _deps(tmp_path, "sentry_loop_enabled")
-    return SentryLoop(
-        config=d.config, prs=MagicMock(), deps=d.loop_deps
-    )
+    return SentryLoop(config=d.config, prs=MagicMock(), deps=d.loop_deps)
 
 
 def _skill_prompt_eval_loop(tmp_path: Path):
@@ -373,9 +363,7 @@ def _stale_issue_gc_loop(tmp_path: Path):
     from stale_issue_gc_loop import StaleIssueGCLoop
 
     d = _deps(tmp_path, "stale_issue_gc_loop_enabled")
-    return StaleIssueGCLoop(
-        config=d.config, pr_manager=MagicMock(), deps=d.loop_deps
-    )
+    return StaleIssueGCLoop(config=d.config, pr_manager=MagicMock(), deps=d.loop_deps)
 
 
 def _stale_issue_loop(tmp_path: Path):

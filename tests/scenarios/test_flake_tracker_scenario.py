@@ -71,7 +71,10 @@ class TestFlakeTracker:
         assert len(issues) == 1
         issue = world.github.issue(issues[0]["number"])
         assert "test_flaky" in issue.title
-        assert "flake rate: 4/20" in issue.title
+        # Title is stable (#9359); the flake rate moved to the body so the
+        # recovery path can find-and-close the issue by exact title.
+        assert "flake rate" not in issue.title
+        assert "4 of the last 20" in issue.body
         assert "flaky-test" in issue.labels
         assert "hydraflow-find" in issue.labels
         fake_fetch.assert_awaited_once()

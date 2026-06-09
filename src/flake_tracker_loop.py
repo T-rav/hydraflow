@@ -179,11 +179,21 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
             if pass_counts.get(test_id, 0) >= 1
         }
 
+    @staticmethod
+    def _flake_title(test_id: str) -> str:
+        """Stable flake-issue title — single source for the file + close paths.
+
+        The flake *rate* lives in the body (it varies tick-to-tick); keeping it
+        out of the title lets the recovery path find-and-close the issue by exact
+        title and avoids the per-rate title-drift class behind #9351/#9359.
+        """
+        return f"Flaky test: {test_id}"
+
     async def _file_flake_issue(
         self, test_id: str, flake_count: int, runs: list[dict[str, Any]]
     ) -> int:
         """File a ``hydraflow-find`` + ``flaky-test`` issue. Returns issue number."""
-        title = f"Flaky test: {test_id} (flake rate: {flake_count}/{_RUN_WINDOW})"
+        title = self._flake_title(test_id)
         run_lines = "\n".join(
             f"- {r.get('url', '?')} ({r.get('createdAt', '?')})" for r in runs[:10]
         )
@@ -212,6 +222,23 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         return await self._pr.create_issue(
             title, body, ["hitl-escalation", "flaky-test-stuck"]
         )
+
+    async def _resolve_flake_issue(self, test_id: str) -> bool:
+        """Close the open ``flaky-test`` issue for *test_id* on recovery (#9359).
+
+        Returns ``True`` if an issue was found and closed. The stable
+        :meth:`_flake_title` lets us locate it by exact title.
+        """
+        existing = await self._pr.find_existing_issue(self._flake_title(test_id))
+        if not existing:
+            return False
+        await self._pr.post_comment(
+            existing,
+            "Test no longer flaky in the recent RC-promotion window — "
+            "auto-closing (#9359).",
+        )
+        await self._pr.close_issue(existing)
+        return True
 
     async def _reconcile_closed_escalations(self) -> None:
         """Clear dedup keys whose escalation issue has been closed (spec §3.2)."""
@@ -280,9 +307,33 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         self._state.set_flake_counts(counts)
 
         threshold = self._config.flake_threshold
+        flaky_now = {tid for tid, c in counts.items() if c >= threshold}
+        dedup = set(self._dedup.get())
+        dedup_dirty = False
+
+        # Recovery (#9359): a test with an open flake key that is no longer
+        # flaky this window has recovered — close its `flaky-test` issue and
+        # drop the key so a future regression re-files. Gated on
+        # `attempts < _MAX_ATTEMPTS` so the HITL `flaky-test-stuck` escalation
+        # is left to the operator-close path (`_reconcile_closed_escalations`);
+        # the attempt counter is intentionally NOT cleared here so repeated
+        # flare-ups still accumulate toward escalation.
+        resolved = 0
+        for key in sorted(dedup):
+            if not key.startswith("flake_tracker:"):
+                continue
+            test_id = key.split(":", 1)[1]
+            if test_id in flaky_now:
+                continue
+            if self._state.get_flake_attempts(test_id) >= _MAX_ATTEMPTS:
+                continue
+            if await self._resolve_flake_issue(test_id):
+                dedup.discard(key)
+                dedup_dirty = True
+                resolved += 1
+
         filed = 0
         escalated = 0
-        dedup = set(self._dedup.get())
         for test_id, count in counts.items():
             if count < threshold:
                 continue
@@ -297,6 +348,9 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
                 await self._file_flake_issue(test_id, count, runs)
                 filed += 1
             dedup.add(key)
+            dedup_dirty = True
+
+        if dedup_dirty:
             self._dedup.set_all(dedup)
 
         self._emit_trace(t0, runs_seen=len(runs))
@@ -304,6 +358,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
             "status": "ok",
             "filed": filed,
             "escalated": escalated,
+            "resolved": resolved,
             "tests_seen": len(counts),
         }
 

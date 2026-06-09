@@ -34,6 +34,7 @@ def loop_env(tmp_path: Path):
     state.get_drift_attempts.return_value = 0
     pr_manager = AsyncMock()
     pr_manager.create_issue = AsyncMock(return_value=42)
+    pr_manager.list_issues_by_label = AsyncMock(return_value=[])
     return cfg, state, pr_manager
 
 
@@ -520,6 +521,99 @@ async def test_do_work_managed_repo_regression_files_drift(loop_env, monkeypatch
     assert stats["audited"] == 2  # self + acme/widget
     assert stats["regressions_filed"] == 1
     pr.create_issue.assert_awaited()
+
+
+async def test_recovery_closes_drift_issue_and_resets_attempts(loop_env, monkeypatch):
+    """#9359: a check that recovered FAIL→PASS auto-closes its open drift issue
+    and resets the drift-attempt counter so a future regression re-escalates."""
+    cfg, state, pr = loop_env
+    cfg.managed_repos = []
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    # Self audit now reports P1.1 as PASS — it had regressed and is open.
+    async def fake_run_audit(slug, root):
+        return {
+            "summary": {},
+            "findings": [
+                {
+                    "check_id": "P1.1",
+                    "status": "PASS",
+                    "severity": "STRUCTURAL",
+                    "principle": "P1",
+                    "source": "",
+                    "what": "",
+                    "remediation": "",
+                    "message": "",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(loop, "_run_audit", fake_run_audit)
+    pr.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 55,
+                "title": "Principles drift: P1.1 regressed in hydraflow-self",
+                "body": "",
+                "updated_at": "",
+            },
+            {  # a different slug's open drift — must NOT be touched here.
+                "number": 56,
+                "title": "Principles drift: P2.2 regressed in acme/widget",
+                "body": "",
+                "updated_at": "",
+            },
+        ]
+    )
+
+    stats = await loop._do_work()
+
+    assert stats["regressions_closed"] == 1
+    pr.close_issue.assert_awaited_once_with(55)
+    state.reset_drift_attempts.assert_any_call("hydraflow-self", "P1.1")
+
+
+async def test_recovery_skips_check_still_failing(loop_env, monkeypatch):
+    """A drift issue whose check is still FAIL must stay open (no false close)."""
+    cfg, state, pr = loop_env
+    cfg.managed_repos = []
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    async def fake_run_audit(slug, root):
+        return {
+            "summary": {},
+            "findings": [
+                {
+                    "check_id": "P1.1",
+                    "status": "FAIL",
+                    "severity": "STRUCTURAL",
+                    "principle": "P1",
+                    "source": "",
+                    "what": "",
+                    "remediation": "",
+                    "message": "",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(loop, "_run_audit", fake_run_audit)
+    pr.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 55,
+                "title": "Principles drift: P1.1 regressed in hydraflow-self",
+                "body": "",
+                "updated_at": "",
+            },
+        ]
+    )
+
+    stats = await loop._do_work()
+
+    assert stats["regressions_closed"] == 0
+    pr.close_issue.assert_not_awaited()
 
 
 @pytest.mark.asyncio
