@@ -166,7 +166,11 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         )
         if denied is not None:
             await self._prs.add_labels(issue_number, ["human-required"])
-            self._audit_store.append(_skip_audit(issue_number, denied, "deny_list"))
+            self._audit_store.append(
+                _skip_audit(
+                    issue_number, denied, "deny_list", repo=self._config.repo_slug
+                )
+            )
             return {"status": "skipped_deny_list"}
 
         # Attempt-cap check.
@@ -233,6 +237,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
                 pr_url=result.pr_url,
                 diagnosis=result.diagnosis,
                 llm_summary=result.diagnosis[:500],
+                repo=self._config.repo_slug,
             )
         )
 
@@ -298,7 +303,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             return str(self._config.repo_root)
 
 
-def _skip_audit(issue: int, sub_label: str, reason: str):
+def _skip_audit(issue: int, sub_label: str, reason: str, repo: str = ""):
     from preflight.audit import PreflightAuditEntry
 
     return PreflightAuditEntry(
@@ -314,4 +319,5 @@ def _skip_audit(issue: int, sub_label: str, reason: str):
         pr_url=None,
         diagnosis=f"skipped: {reason}",
         llm_summary=f"skipped: {reason}",
+        repo=repo,
     )

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -24,6 +24,10 @@ class PreflightAuditEntry:
     pr_url: str | None
     diagnosis: str
     llm_summary: str
+    # Owning repo (dash slug), stamped by the preflight loop's config. Defaults
+    # to "" so rows written before multi-repo attribution stay readable; such
+    # legacy entries are attributed to the host/default repo on read.
+    repo: str = ""
 
 
 @dataclass(frozen=True)
@@ -52,6 +56,7 @@ class PreflightAuditStore:
     def _read_all(self) -> list[PreflightAuditEntry]:
         if not self._path.exists():
             return []
+        known = {f.name for f in fields(PreflightAuditEntry)}
         out: list[PreflightAuditEntry] = []
         with self._path.open("r", encoding="utf-8") as fh:
             for line in fh:
@@ -59,27 +64,40 @@ class PreflightAuditStore:
                 if not stripped:
                     continue
                 row = json.loads(stripped)
-                out.append(PreflightAuditEntry(**row))
+                # Tolerate forward-compat rows: drop keys this version doesn't
+                # know so a future writer field can't crash older readers.
+                # Missing keys still fall back to dataclass defaults (e.g. repo).
+                out.append(
+                    PreflightAuditEntry(**{k: v for k, v in row.items() if k in known})
+                )
         return out
 
-    def query_window(self, since: datetime) -> AuditWindowStats:
+    def query_window(
+        self, since: datetime, repos: frozenset[str] | None = None
+    ) -> AuditWindowStats:
         entries = [
             e
             for e in self._read_all()
-            if datetime.fromisoformat(e.ts.replace("Z", "+00:00")) >= since
+            if (repos is None or e.repo in repos)
+            and datetime.fromisoformat(e.ts.replace("Z", "+00:00")) >= since
         ]
         return _compute_window(entries)
 
-    def query_24h(self) -> AuditWindowStats:
-        return self.query_window(datetime.now(UTC) - timedelta(hours=24))
+    def query_24h(self, repos: frozenset[str] | None = None) -> AuditWindowStats:
+        return self.query_window(datetime.now(UTC) - timedelta(hours=24), repos)
 
-    def query_7d(self) -> AuditWindowStats:
-        return self.query_window(datetime.now(UTC) - timedelta(days=7))
+    def query_7d(self, repos: frozenset[str] | None = None) -> AuditWindowStats:
+        return self.query_window(datetime.now(UTC) - timedelta(days=7), repos)
 
     def top_spend(
-        self, n: int = 5, since: datetime | None = None
+        self,
+        n: int = 5,
+        since: datetime | None = None,
+        repos: frozenset[str] | None = None,
     ) -> list[PreflightAuditEntry]:
         entries = self._read_all()
+        if repos is not None:
+            entries = [e for e in entries if e.repo in repos]
         if since is not None:
             entries = [
                 e

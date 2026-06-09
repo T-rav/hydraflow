@@ -404,10 +404,22 @@ def build_diagnostics_router(
     # Repo-aware (Phase 3c-2): with ``ctx`` each endpoint builds per repo over
     # ``resolve_runtimes(repo)`` and folds the results (group-by-sum on the
     # phase/loop/model dimensions; per-issue rows carry a repo tag). ``ctx is
-    # None`` keeps the bare single-repo builder. NOTE: ``/auto-agent`` (Overview
-    # tab) is NOT yet repo-scoped — deferred to 3c-4 (its audit.jsonl store is
-    # at the shared data_root with no repo field, so it needs a data-layout
-    # migration, not just a read-side merge like factory-health got in 3c-3).
+    # None`` keeps the bare single-repo builder. ``/auto-agent`` (Phase 3c-4)
+    # reads ONE shared audit.jsonl and filters by each entry's ``repo`` stamp
+    # rather than unioning per-repo files.
+
+    def _audit_repos(repo: str | None) -> frozenset[str] | None:
+        """Acceptable ``entry.repo`` values for the requested scope (``None`` =
+        every repo). Legacy entries (``repo == ""``) were written by the single
+        pre-multi-repo host, so they fold into the host/default repo's scope.
+        """
+        if ctx is None:
+            return None
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            return None
+        default = ctx.resolve_runtimes(None)[0][4]
+        slug = default if repo is None else ctx.resolve_runtimes(repo)[0][4]
+        return frozenset({slug, ""}) if slug == default else frozenset({slug})
 
     @router.get("/cost/rolling-24h")
     def cost_rolling_24h(repo: RepoSlugParam = None) -> dict[str, Any]:
@@ -506,14 +518,21 @@ def build_diagnostics_router(
         )
 
     @router.get("/auto-agent")
-    def auto_agent_stats() -> dict[str, Any]:
-        """Auto-agent dashboard payload (spec §6.2)."""
+    def auto_agent_stats(repo: RepoSlugParam = None) -> dict[str, Any]:
+        """Auto-agent dashboard payload (spec §6.2).
+
+        The preflight audit is ONE shared JSONL whose rows carry a ``repo``
+        stamp, so scoping filters by that stamp rather than unioning per-repo
+        files: ``repo=__all__`` keeps every row, a slug (or the default repo)
+        keeps its rows plus legacy unattributed rows for the host.
+        """
         from preflight.audit import PreflightAuditStore  # noqa: PLC0415
 
+        repos = _audit_repos(repo)
         audit = PreflightAuditStore(config.data_root)
-        today = audit.query_24h()
-        week = audit.query_7d()
-        top = audit.top_spend(n=5)
+        today = audit.query_24h(repos)
+        week = audit.query_7d(repos)
+        top = audit.top_spend(n=5, repos=repos)
         return {
             "today": _stats_payload(today),
             "last_7d": _stats_payload(week),

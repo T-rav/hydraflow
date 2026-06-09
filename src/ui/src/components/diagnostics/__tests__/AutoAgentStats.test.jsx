@@ -1,6 +1,25 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+// `ctx.selectedRepoSlug` is mutable per-test. `fetchWithRepo` is a STABLE
+// hoisted reference (like the real useCallback-memoized fetcher) so the polling
+// effect that depends on it does not re-render-loop. It mirrors applyRepoParam
+// and delegates to the per-test `global.fetch` stub.
+const { ctx, fetchWithRepo } = vi.hoisted(() => {
+  const ctx = { selectedRepoSlug: null }
+  const fetchWithRepo = (url, opts) => {
+    const sep = url.includes('?') ? '&' : '?'
+    const scoped = ctx.selectedRepoSlug
+      ? `${url}${sep}repo=${encodeURIComponent(ctx.selectedRepoSlug)}`
+      : url
+    return global.fetch(scoped, opts)
+  }
+  return { ctx, fetchWithRepo }
+})
+vi.mock('../../../context/HydraFlowContext', () => ({
+  useHydraFlow: () => ({ selectedRepoSlug: ctx.selectedRepoSlug, fetchWithRepo }),
+}))
+
 const MOCK_DATA = {
   today: {
     spend_usd: 1.23,
@@ -38,6 +57,7 @@ global.fetch = vi.fn()
 
 beforeEach(() => {
   vi.clearAllMocks()
+  ctx.selectedRepoSlug = null
 })
 
 import { AutoAgentStats } from '../AutoAgentStats'
@@ -110,5 +130,19 @@ describe('AutoAgentStats', () => {
       expect(screen.getByTestId('auto-agent-stats')).toBeInTheDocument()
     })
     expect(screen.queryByTestId('auto-agent-top-spend')).not.toBeInTheDocument()
+  })
+
+  it('scopes the auto-agent fetch to the selected repo', async () => {
+    ctx.selectedRepoSlug = 'org-x'
+    global.fetch.mockResolvedValue({ ok: true, json: () => Promise.resolve(MOCK_DATA) })
+    render(<AutoAgentStats />)
+    // The repo slug must reach fetch — proving the data path
+    // component → fetchWithRepo → repo param → network.
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/diagnostics/auto-agent?repo=org-x',
+        undefined,
+      )
+    })
   })
 })
