@@ -21,9 +21,15 @@ PRODUCTION NOTES:
   is public on hydraflow.ai and the room will check.
 - The her-and-Claude ritual has NOT run yet. Keep it future tense on stage. The close is
   "I'll let you know," and that only stays true if nothing earlier pretends it already happened.
-- InsightMesh failure scene RESOLVED: v1 vibed without guardrails, didn't survive; v2 (alive today)
-  rebuilt on the lessons, which then rolled into HydraFlow. Optional sharpener for stage: the specific
-  moment the author decided v1 was dead, in one sentence, if it comes back to him.
+- InsightMesh chronology VERIFIED from git (2026-06-09):
+  · v1 → v2 rewrite began 2025-08-28 (v2 repo first commit: "ported slackbot from insightmesh").
+  · v1 was Cursor-built, ~no human review, no guardrails — died. v2: still all vibe-coded, still
+    ~no review, but WITH guardrails — alive today. The walls-over-vigilance bet predates the factory.
+  · HydraFlow born inside InsightMesh at dx/hydra/ on 2026-02-18, commit 542dcd6a
+    "feat: Add Hydra — parallel Claude Code issue processor". Subtree split out by 2026-02-19
+    (squash-merges back begin); vendored references fully removed 2026-05-21 (#722).
+  · Cold open says "three days later it left" — receipts support Feb 18 birth, split by Feb 19–20.
+    Confirm "three days" against memory or soften to "days later."
 -->
 
 # When Code Becomes Fluid
@@ -43,7 +49,7 @@ Hold the title card five seconds. Don't speak. Don't open on a thesis. The first
 # Three days later, it left.
 
 <!--
-Say it slow, like you're still slightly unsettled by it. "Four months ago I created a folder inside an internal platform I'd vibe-coded. Three days later, what was in that folder got pulled out into its own repository. (beat) It has been building itself ever since." Eerie, not boastful. Anyone can claim they don't read their code — this opening, nobody else has. Don't explain yet. Let the room want the chronology.
+Say it slow, like you're still slightly unsettled by it. "Four months ago I created a folder inside an internal platform I'd vibe-coded. The folder was called dx/hydra. Three days later, what was in that folder got pulled out into its own repository. (beat) It has been building itself ever since." Eerie, not boastful. Anyone can claim they don't read their code — this opening, nobody else has, and it has a birth certificate: commit 542dcd6a, February 18, 2026, "feat: Add Hydra — parallel Claude Code issue processor." (Option: put that commit line on the slide as documentary texture.) Don't explain yet. Let the room want the chronology.
 -->
 
 ---
@@ -74,12 +80,12 @@ The empathy beat — it MUST land within a minute of the claim, or the next fort
 
 ## It started as a maintenance problem.
 
-An internal platform I vibe-coded. Agents, retrieval, scheduled tasks, observability. No guardrails.
+An internal platform, AI-built. Agents, retrieval, scheduled tasks, observability. No guardrails.
 
-# v1 didn't survive. I rebuilt it — and kept the lessons.
+# August 28, 2025: v1 died. I started over — and kept the lessons.
 
 <!--
-Motive one — the relatable one, and a confession. InsightMesh: a real production sales-enablement platform, vibed the way most of this room is building right now. (Stack stays a spoken aside at most — "LangGraph agents, Langfuse traces, the stack you'd expect." Real, not a toy.) "I vibed my way to a viable prototype — fast, thrilling, no strong guardrails. And v1 collapsed under its own weight. I couldn't maintain what I'd made. So I did what every engineer in this room has done at least once: I threw it away and started over." [Optional sharpener: the one-sentence moment you decided v1 was dead, if it comes back to you.] v2 — the version alive today — was rebuilt ON guardrails: standards, tests, CI. And here's the part that matters: the guardrails turned out to be the valuable half. The lessons rolled forward — that's roll number one, and it won't be the last time you hear that phrase tonight. This conference's tagline is "you ship it, you own it, you maintain it" — and the word AI changed most isn't ship or own. It's maintain. I didn't need a faster way to write code. I needed help keeping what I'd written alive. Vibe to Value — the methodology name is this journey, compressed to three characters.
+Motive one — the relatable one, a confession, and secretly the origin of the whole thesis. InsightMesh: a real internal sales-enablement platform, built the way most of this room is building right now — Cursor, fast, thrilling, barely any review, no strong guardrails. (Stack stays a spoken aside at most — "LangGraph agents, Langfuse traces, the stack you'd expect." Real, not a toy.) "And v1 collapsed under its own weight. I couldn't maintain what I'd made. So on August 28, 2025 — the date's in the git history — I did what every engineer in this room has done at least once: threw it away and started over." Then the beat that carries the talk in miniature, slow: "Here's the fork in the road. The obvious fix was to put the human back in the loop — review everything, slow down. I did the opposite. v2 — the version alive today — is still entirely AI-written. Still almost no human review. What changed was the guardrails: standards, tests, CI walls. The version with less structure died. The version with more structure lives." The bet — walls over vigilance — was made HERE, ten months before the factory. The lessons rolled forward — that's roll number one, and it won't be the last time you hear that phrase tonight. This conference's tagline is "you ship it, you own it, you maintain it" — and the word AI changed most isn't ship or own. It's maintain. Vibe to Value — the methodology name is this journey, compressed to three characters.
 -->
 
 ---
