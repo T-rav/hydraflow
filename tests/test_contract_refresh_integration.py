@@ -82,6 +82,7 @@ class _FakeState:
 
     def __init__(self) -> None:
         self._attempts: dict[str, int] = {}
+        self._rollups: dict[str, dict] = {}
 
     def get_contract_refresh_attempts(self, adapter: str) -> int:
         return int(self._attempts.get(adapter, 0))
@@ -92,6 +93,31 @@ class _FakeState:
 
     def clear_contract_refresh_attempts(self, adapter: str) -> None:
         self._attempts.pop(adapter, None)
+
+    # RollupIssueManager surface (#9359) — mirrors RollupIssueStateMixin.
+    def get_rollup_issue(self, key: str) -> dict | None:
+        entry = self._rollups.get(key)
+        if not entry:
+            return None
+        return {
+            "issue_number": int(entry["issue_number"]),
+            "content_hash": str(entry["content_hash"]),
+        }
+
+    def set_rollup_issue(
+        self, key: str, *, issue_number: int, content_hash: str
+    ) -> None:
+        self._rollups[key] = {
+            "issue_number": int(issue_number),
+            "content_hash": content_hash,
+        }
+
+    def clear_rollup_issue(self, key: str) -> None:
+        self._rollups.pop(key, None)
+
+    def get_rollup_issue_keys(self, namespace: str) -> list[str]:
+        prefix = f"{namespace}:"
+        return [k for k in self._rollups if k.startswith(prefix)]
 
 
 def _loop(tmp_path: Path, *, prs: Any | None = None) -> ContractRefreshLoop:
@@ -400,12 +426,12 @@ async def test_end_to_end_replay_gate_fail_files_fake_drift_issue(
     # Companion issue was filed with the factory-routing labels + the
     # replay stderr tail embedded in the body.
     prs.create_issue.assert_awaited_once()
-    issue_kwargs = prs.create_issue.await_args.kwargs
-    labels = issue_kwargs["labels"]
+    # The rollup files via create_issue(title, body, labels) positionally.
+    title, body, labels = prs.create_issue.await_args.args
+    assert title == "Fake drift: replay gate failed after contract refresh"
     assert "hydraflow-find" in labels
     assert "fake-drift" in labels
     assert "adapter-git" in labels
-    body = issue_kwargs["body"]
     assert "replay mismatch" in body
     # The refresh PR URL is threaded into the issue body so the repair
     # implementer can open the PR straight from the companion issue.
