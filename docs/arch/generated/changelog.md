@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `af05e0c` — feat(atlas): /api/atlas/* endpoints scope by repo (Phase 5a) (#9377) (#9377) *(2026-06-08)*
 - `1f68711` — feat(system): aggregate-mode worker affordances + force-clear-credit button (Phase 3b-fe polish) (#9374) (#9374) *(2026-06-08)*
 - `91b6227` — feat(diagnostics): auto-agent stats scope by repo (Phase 3c-4) (#9371) (#9371) *(2026-06-08)*
 - `0be9dbc` — feat(diagnostics): factory-health summary aggregates across repos (Phase 3c-3) (#9369) (#9369) *(2026-06-08)*

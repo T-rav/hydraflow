@@ -1,17 +1,24 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { theme } from '../../theme'
+import { REPO_ALL } from '../../constants'
+import { useHydraFlow } from '../../context/HydraFlowContext'
 
 export function MaintenanceView() {
+  const { fetchWithRepo, selectedRepoSlug } = useHydraFlow()
+  const isAggregate = selectedRepoSlug === REPO_ALL
   const [status, setStatus] = useState(null)
   const [health, setHealth] = useState(null)
   const [termLoops, setTermLoops] = useState(null)
 
   const refresh = useCallback(() => {
-    fetch('/api/wiki/maintenance/status')
+    // Wiki maintenance/health scope to the selected repo (health aggregates
+    // under "All repos"). Term-loops stays host-scoped here; its repo-aware
+    // threading + per-repo nested shape land with AtlasExplorer (5c).
+    fetchWithRepo('/api/wiki/maintenance/status')
       .then((r) => (r.ok ? r.json() : null))
       .then(setStatus)
       .catch(() => setStatus(null))
-    fetch('/api/wiki/health')
+    fetchWithRepo('/api/wiki/health')
       .then((r) => (r.ok ? r.json() : null))
       .then(setHealth)
       .catch(() => setHealth(null))
@@ -19,7 +26,7 @@ export function MaintenanceView() {
       .then((r) => (r.ok ? r.json() : null))
       .then(setTermLoops)
       .catch(() => setTermLoops(null))
-  }, [])
+  }, [fetchWithRepo])
 
   useEffect(() => {
     refresh()
@@ -28,13 +35,18 @@ export function MaintenanceView() {
   }, [refresh])
 
   const post = async (path, body = {}) => {
-    await fetch(`/api/wiki/admin/${path}`, {
+    // Admin mutations target a single repo — the backend rejects __all__.
+    if (isAggregate) return
+    await fetchWithRepo(`/api/wiki/admin/${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
     refresh()
   }
+  const adminTip = isAggregate
+    ? 'Select a specific repo to run wiki maintenance actions'
+    : undefined
 
   const styles = {
     root: {
@@ -73,6 +85,7 @@ export function MaintenanceView() {
       cursor: 'pointer',
       fontSize: 12,
     },
+    btnDisabled: { opacity: 0.45, cursor: 'not-allowed' },
     btnRow: { display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' },
     actions: {
       gridColumn: 'span 2',
@@ -118,7 +131,13 @@ export function MaintenanceView() {
           <span>{coalesce}</span>
         </div>
         <div style={styles.btnRow}>
-          <button type="button" style={styles.btn} onClick={() => post('run-now', {})}>
+          <button
+            type="button"
+            style={{ ...styles.btn, ...(isAggregate ? styles.btnDisabled : {}) }}
+            disabled={isAggregate}
+            title={adminTip}
+            onClick={() => post('run-now', {})}
+          >
             Run now
           </button>
         </div>
@@ -203,22 +222,27 @@ export function MaintenanceView() {
         <div style={styles.btnRow}>
           <button
             type="button"
-            style={styles.btn}
+            style={{ ...styles.btn, ...(isAggregate ? styles.btnDisabled : {}) }}
+            disabled={isAggregate}
+            title={adminTip}
             onClick={() => post('rebuild-index', { owner: '', repo: '' })}
           >
             Rebuild index
           </button>
           <button
             type="button"
-            style={styles.btn}
+            style={{ ...styles.btn, ...(isAggregate ? styles.btnDisabled : {}) }}
+            disabled={isAggregate}
+            title={adminTip}
             onClick={() => post('force-compile', { owner: '', repo: '', topic: '' })}
           >
             Force compile
           </button>
         </div>
         <div style={{ color: theme.textMuted, fontSize: 10, marginTop: 6 }}>
-          These actions enqueue a MaintenanceTask onto RepoWikiLoop's queue.
-          Owner/repo fields are placeholders in P1 — wired to a form in a follow-up.
+          These actions enqueue a MaintenanceTask onto the selected repo's
+          RepoWikiLoop queue (disabled under "All repos"). Owner/repo fields are
+          placeholders in P1 — wired to a form in a follow-up.
         </div>
       </div>
     </div>
