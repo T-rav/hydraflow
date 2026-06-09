@@ -29,7 +29,7 @@ graph LR
     src -- "1" --> src_observability
     src -- "12" --> src_preflight
     src -- "1" --> src_review_phase
-    src -- "48" --> src_state
+    src -- "49" --> src_state
     src -- "7" --> src_telemetry
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "11" --> src_arch
