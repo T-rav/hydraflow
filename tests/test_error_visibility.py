@@ -252,6 +252,8 @@ class TestWebSocketDisconnectDifferentiation:
         assert endpoint is not None
 
         mock_ws = AsyncMock()
+        # query_params.get is sync (returns str|None) — no repo param here.
+        mock_ws.query_params.get = MagicMock(return_value=None)
         mock_ws.send_text = AsyncMock(side_effect=ConnectionResetError("gone"))
 
         q: asyncio.Queue = asyncio.Queue()
@@ -290,6 +292,8 @@ class TestWebSocketDisconnectDifferentiation:
         assert endpoint is not None
 
         mock_ws = AsyncMock()
+        # query_params.get is sync (returns str|None) — no repo param here.
+        mock_ws.query_params.get = MagicMock(return_value=None)
         mock_ws.send_text = AsyncMock(side_effect=ValueError("unexpected"))
 
         q: asyncio.Queue = asyncio.Queue()
@@ -324,6 +328,8 @@ class TestWebSocketDisconnectDifferentiation:
         from events import HydraFlowEvent
 
         mock_ws = AsyncMock()
+        # query_params.get is sync (returns str|None) — no repo param here.
+        mock_ws.query_params.get = MagicMock(return_value=None)
         event = HydraFlowEvent(type="system_alert", data={"x": 1})
 
         # Put an event in the queue; send_text will raise on the live stream send
@@ -361,6 +367,8 @@ class TestWebSocketDisconnectDifferentiation:
         from events import HydraFlowEvent
 
         mock_ws = AsyncMock()
+        # query_params.get is sync (returns str|None) — no repo param here.
+        mock_ws.query_params.get = MagicMock(return_value=None)
         event = HydraFlowEvent(type="system_alert", data={"x": 1})
 
         q3: asyncio.Queue = asyncio.Queue()
