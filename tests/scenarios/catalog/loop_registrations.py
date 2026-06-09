@@ -278,7 +278,15 @@ def _build_epic_sweeper(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_security_patch(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from security_patch_loop import SecurityPatchLoop  # noqa: PLC0415
 
-    return SecurityPatchLoop(config=config, pr_manager=ports["github"], deps=deps)
+    state = ports.get("security_patch_state")
+    if state is None:
+        state = MagicMock()
+        state.get_rollup_issue.return_value = None
+        state.get_rollup_issue_keys.return_value = []
+        ports["security_patch_state"] = state
+    return SecurityPatchLoop(
+        config=config, pr_manager=ports["github"], state=state, deps=deps
+    )
 
 
 def _build_stale_issue(ports: dict[str, Any], config: Any, deps: Any) -> Any:

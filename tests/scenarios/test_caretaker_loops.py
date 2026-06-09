@@ -395,6 +395,7 @@ class TestL13SecurityPatchLoop:
         loop = SecurityPatchLoop(
             config=bg.config,
             pr_manager=world.github,
+            state=MagicMock(),
             deps=loop_deps,
         )
         result = await loop._do_work()
