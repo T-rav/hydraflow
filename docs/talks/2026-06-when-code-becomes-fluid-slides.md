@@ -15,7 +15,7 @@ Gas Town: how much human can you pull out, and what breaks; (3) meaning — her.
 Act 2 is the answer to motive 2. The ending shot is motive 3.
 
 PRODUCTION NOTES:
-- Daughter's name kept out of slide text pending the author's OK (minor's name, public stage).
+- Daughter appears as "Z" (initial only) on slides and stage — full name stays out (minor, public stage).
 - Numbers verified 2026-06-09: 47 loops (docs/arch/generated/loops.md), 1,644 merged PRs
   (gh search), first commit 2026-02-18. REFRESH BOTH before the stage — the loop registry
   is public on hydraflow.ai and the room will check.
@@ -132,7 +132,19 @@ The thesis. Let the slide sit in silence for a few seconds first. Pour code fast
 #### No human approval in the routine loop.
 
 <!--
-This is the lean-back line — say it plainly and let it cost something. What got pulled out: code review, PR approval, the planning of routine work. Every approval in the day-to-day pipeline is made by another agent. I'm pulled in for high-blast-radius decisions, and I verify direction on a pass — not line by line. My job is to author the conventions the system reviews against, and to hold the boundary it cannot cross. The next four slides are what holds the line instead of me.
+This is the lean-back line — say it plainly and let it cost something. What got pulled out: code review, PR approval, the planning of routine work. Every approval in the day-to-day pipeline is made by another agent. I'm pulled in for high-blast-radius decisions, and I verify direction on a pass — not line by line. My job is to author the conventions the system reviews against, and to hold the boundary it cannot cross. So the obvious question: if not me — who? Next slide.
+-->
+
+---
+
+## Forty-seven of what, exactly?
+
+**Maintainers** keep state fresh · **Proposers** grow it · **Pruners** shrink it
+**Auditors** verify invariants · **Repairers** fix what broke · **Watchers** budget & escalate
+**Promoters** move work through tiers · **Provocateurs** attack the system on purpose
+
+<!--
+Pay off the cold-open number — this is the factory's workforce. Walk the categories fast, one breath each; don't lecture the grid. Then the two beats that matter. First: "I designed the first couple up front. The rest accreted, one at a time, each answering a recurring operational problem — and the categories weren't in my sketch. They emerged." (Verify the designed-up-front count before stage; the old "2 of 15 caretakers" stat predates the registry hitting 47.) Second, land on the provocateurs, because they're the ones that make the room sit up: the factory employs agents whose whole job is to attack it — synthesize adversarial cases from past failures, run them against the system weekly, challenge its own assumptions before reality does. A workforce that maintains, proposes, prunes, audits, repairs, watches, promotes — and red-teams itself. That's who does the work. The next slides are what keeps that workforce honest.
 -->
 
 ---
@@ -230,10 +242,10 @@ Close the loop on motive two, honestly scoped. Legible software: a bad commit is
 
 ## Somewhere in those four months, the reason changed.
 
-# My daughter wants to make a game.
+# My daughter — Z — wants to make a game.
 
 <!--
-The turn — pay off the plant from the Gas Town slide. Say it plain and a little proud: it's called Poop Scoop Hero. It's real — we have a name, a concept, and she has strong opinions about the dog. Let the room smile; the smile is the door. I started building to maintain a platform. I kept building to answer Steve's question. And then I realized what I was actually holding: not a thing that makes ME better — a thing that could let HER make. (Name stays off the slide — minor, public stage.)
+The turn — pay off the plant from the Gas Town slide. Introduce her by initial only: "my daughter — Z." Say it plain and a little proud: it's called Poop Scoop Hero. It's real — we have a name, a concept, and she has strong opinions about the dog. Let the room smile; the smile is the door. I started building to maintain a platform. I kept building to answer Steve's question. And then I realized what I was actually holding: not a thing that makes ME better — a thing that could let HER make. (She's "Z" everywhere on slides and stage — minor, public stage.)
 -->
 
 ---
@@ -248,21 +260,21 @@ Games dynamite the legibility assumption the whole field shares — that's why t
 
 ---
 
-## Evening: she tells it what she wants.
+## Evening: Z tells it what she wants.
 ## Overnight: the factory builds.
-## Morning: she plays what it made.
+## Morning: Z plays what it made.
 
 # A 3D printer for ideas.
 
 <!--
-The image of the close — keep it future tense, this hasn't run yet. "The plan is a ritual: in the evening she and I describe the thing — instruct Claude, queue the work. The factory prints overnight. In the morning she plays the build and tells it what's wrong." And the symmetry, said quietly: that's already MY morning. The factory runs while I sleep; I wake to what it made and extend what it can do. The experiment is whether that morning can belong to a kid who can't code. One inoculation, one sentence: a 3D printer hands you an object and walks away — this printer maintains what it printed. Patches, balance, live ops. That's the part desktop printing never had.
+The image of the close — keep it future tense, this hasn't run yet. "The plan is a ritual: in the evening Z and I describe the thing — instruct Claude, queue the work. The factory prints overnight. In the morning she plays the build and tells it what's wrong." And the symmetry, said quietly: that's already MY morning. The factory runs while I sleep; I wake to what it made and extend what it can do. The experiment is whether that morning can belong to a kid who can't code. One inoculation, one sentence: a 3D printer hands you an object and walks away — this printer maintains what it printed. Patches, balance, live ops. That's the part desktop printing never had.
 -->
 
 ---
 
 ## When making is free, judging is scarce.
 
-Her "is it fun?" becomes the spec.
+Z's "is it fun?" becomes the spec.
 
 <!--
 Second-order effect one. If the factory builds anything I can specify, the constraint stops being skill at building — it's knowing what's worth building and whether it's good. For her game that signal lives in her face, not a test suite. And fold the inheritance question in here, spoken: I learned to make by struggling with the making. She might learn to make by directing and judging, never touching syntax. New literacy or lost craft — I genuinely don't know, and I'm the one responsible for getting it right.
@@ -287,7 +299,7 @@ End the second-order beats on the gut-punch, not a list. Hooks, credit caps, imm
 #### We'll find out together. I'll let you know.
 
 <!--
-Answer the title — for THEM, not just for you. The craft doesn't disappear; it becomes the machine. Everything that made the factory safe — the walls, the gates, the tests that defend themselves — is SOLID-era engineering, projected up a level. Only people with the craft can build a printer worth trusting. "I spent years teaching the craft one engineer at a time. The factory is the same teaching, compiled." So the direction, plainly: "Go build one. For your team. For someone who can't code. The engineer goes into the printer — that's where the craft lives now." Then home: "Mine is for a seven-year-old and a game about scooping poop. We'll find out together. I'll let you know." Walk off on that.
+Answer the title — for THEM, not just for you. The craft doesn't disappear; it becomes the machine. Everything that made the factory safe — the walls, the gates, the tests that defend themselves — is SOLID-era engineering, projected up a level. Only people with the craft can build a printer worth trusting. "I spent years teaching the craft one engineer at a time. The factory is the same teaching, compiled." So the direction, plainly: "Go build one. For your team. For someone who can't code. The engineer goes into the printer — that's where the craft lives now." Then home: "Mine is for Z, and a game about scooping poop. We'll find out together. I'll let you know." Walk off on that.
 -->
 
 ---
