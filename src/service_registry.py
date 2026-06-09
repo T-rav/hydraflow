@@ -1025,6 +1025,7 @@ def build_services(
     security_patch_loop = SecurityPatchLoop(  # noqa: F841
         config=config,
         pr_manager=prs,
+        state=state,
         deps=loop_deps,
     )
     repo_wiki_loop = RepoWikiLoop(
