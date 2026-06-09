@@ -6,7 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
-- `82e3fd7` — feat(atlas): thread operated repo into the graph cluster + namespaced node ids (Phase 5c-1) *(2026-06-09)*
+- `6aeec86` — feat(atlas): thread operated repo into the graph cluster + namespaced node ids (Phase 5c-1) (#9383) (#9383) *(2026-06-09)*
+- `e6e3269` — fix(loops): auto-close SecurityPatch issues when the alert resolves (#9359) (#9382) (#9382) *(2026-06-09)*
 - `99f1f27` — feat(wiki): /api/wiki/* maintenance surface scopes by repo (Phase 5b) (#9379) (#9379) *(2026-06-09)*
 - `af05e0c` — feat(atlas): /api/atlas/* endpoints scope by repo (Phase 5a) (#9377) (#9377) *(2026-06-08)*
 - `1f68711` — feat(system): aggregate-mode worker affordances + force-clear-credit button (Phase 3b-fe polish) (#9374) (#9374) *(2026-06-08)*

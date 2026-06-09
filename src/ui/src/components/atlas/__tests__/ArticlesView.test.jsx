@@ -1,6 +1,22 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+const { ctx, fetchWithRepo } = vi.hoisted(() => {
+  const ctx = { selectedRepoSlug: null }
+  const fetchWithRepo = (url, opts) => {
+    const sep = url.includes('?') ? '&' : '?'
+    const scoped = ctx.selectedRepoSlug
+      ? `${url}${sep}repo=${encodeURIComponent(ctx.selectedRepoSlug)}`
+      : url
+    return global.fetch(scoped, opts)
+  }
+  return { ctx, fetchWithRepo }
+})
+vi.mock('../../../context/HydraFlowContext', () => ({
+  useHydraFlow: () => ({ selectedRepoSlug: ctx.selectedRepoSlug, fetchWithRepo }),
+}))
+
 import { ArticlesView } from '../ArticlesView'
 
 const ADRS = [
@@ -45,6 +61,7 @@ const ENTRY_DETAIL = {
 }
 
 beforeEach(() => {
+  ctx.selectedRepoSlug = null
   global.fetch = vi.fn((url) => {
     if (url === '/api/atlas/adrs')
       return Promise.resolve({ ok: true, json: () => Promise.resolve(ADRS) })
@@ -143,5 +160,16 @@ describe('ArticlesView', () => {
     expect(
       screen.queryByLabelText(/linked to term/i),
     ).not.toBeInTheDocument()
+  })
+
+  it('scopes its Atlas + wiki reads to the selected operated repo', async () => {
+    ctx.selectedRepoSlug = 'org-x'
+    render(<ArticlesView />)
+    await waitFor(() => {
+      const urls = global.fetch.mock.calls.map((c) => c[0])
+      expect(urls).toContain('/api/atlas/adrs?repo=org-x')
+      expect(urls).toContain('/api/wiki/repos?repo=org-x')
+      expect(urls).toContain('/api/atlas/discovered?repo=org-x')
+    })
   })
 })

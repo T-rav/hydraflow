@@ -135,34 +135,42 @@ class TestReadEndpoints:
         assert result == [{"owner": "acme", "repo": "widget"}]
 
     def test_list_entries_returns_all_by_default(self, router: Any) -> None:
-        handler = find_endpoint(router, "/api/wiki/repos/{owner}/{repo}/entries", "GET")
+        handler = find_endpoint(
+            router, "/api/wiki/repos/{owner}/{wiki_repo}/entries", "GET"
+        )
         assert handler is not None
-        entries = handler(owner="acme", repo="widget")
+        entries = handler(owner="acme", wiki_repo="widget")
         assert len(entries) == 2
         topics = {e["topic"] for e in entries}
         assert topics == {"patterns", "gotchas"}
 
     def test_list_entries_filters_by_topic(self, router: Any) -> None:
-        handler = find_endpoint(router, "/api/wiki/repos/{owner}/{repo}/entries", "GET")
-        entries = handler(owner="acme", repo="widget", topic="patterns")
+        handler = find_endpoint(
+            router, "/api/wiki/repos/{owner}/{wiki_repo}/entries", "GET"
+        )
+        entries = handler(owner="acme", wiki_repo="widget", topic="patterns")
         assert len(entries) == 1
         assert entries[0]["topic"] == "patterns"
 
     def test_list_entries_filters_by_status(self, router: Any) -> None:
-        handler = find_endpoint(router, "/api/wiki/repos/{owner}/{repo}/entries", "GET")
-        stale = handler(owner="acme", repo="widget", status="stale")
+        handler = find_endpoint(
+            router, "/api/wiki/repos/{owner}/{wiki_repo}/entries", "GET"
+        )
+        stale = handler(owner="acme", wiki_repo="widget", status="stale")
         assert len(stale) == 1
         assert stale[0]["topic"] == "gotchas"
 
     def test_list_entries_rejects_path_traversal_in_owner(self, router: Any) -> None:
-        handler = find_endpoint(router, "/api/wiki/repos/{owner}/{repo}/entries", "GET")
-        assert handler(owner="../evil", repo="widget") == []
+        handler = find_endpoint(
+            router, "/api/wiki/repos/{owner}/{wiki_repo}/entries", "GET"
+        )
+        assert handler(owner="../evil", wiki_repo="widget") == []
 
     def test_get_entry_returns_frontmatter_plus_body(self, router: Any) -> None:
         handler = find_endpoint(
-            router, "/api/wiki/repos/{owner}/{repo}/entries/{entry_id}", "GET"
+            router, "/api/wiki/repos/{owner}/{wiki_repo}/entries/{entry_id}", "GET"
         )
-        result = handler(owner="acme", repo="widget", entry_id="0001")
+        result = handler(owner="acme", wiki_repo="widget", entry_id="0001")
         assert result["frontmatter"]["source_phase"] in {"plan", "review"}
         assert "# " in result["body"] or result["body"].strip()
 
@@ -170,31 +178,35 @@ class TestReadEndpoints:
         from fastapi import HTTPException
 
         handler = find_endpoint(
-            router, "/api/wiki/repos/{owner}/{repo}/entries/{entry_id}", "GET"
+            router, "/api/wiki/repos/{owner}/{wiki_repo}/entries/{entry_id}", "GET"
         )
         with pytest.raises(HTTPException) as exc:
-            handler(owner="acme", repo="widget", entry_id="9999")
+            handler(owner="acme", wiki_repo="widget", entry_id="9999")
         assert exc.value.status_code == 404
 
     def test_get_entry_400_for_non_numeric_id(self, router: Any) -> None:
         from fastapi import HTTPException
 
         handler = find_endpoint(
-            router, "/api/wiki/repos/{owner}/{repo}/entries/{entry_id}", "GET"
+            router, "/api/wiki/repos/{owner}/{wiki_repo}/entries/{entry_id}", "GET"
         )
         with pytest.raises(HTTPException) as exc:
-            handler(owner="acme", repo="widget", entry_id="../passwd")
+            handler(owner="acme", wiki_repo="widget", entry_id="../passwd")
         assert exc.value.status_code == 400
 
     def test_get_log_filters_by_issue(self, router: Any) -> None:
-        handler = find_endpoint(router, "/api/wiki/repos/{owner}/{repo}/log", "GET")
-        records = handler(owner="acme", repo="widget", issue=10)
+        handler = find_endpoint(
+            router, "/api/wiki/repos/{owner}/{wiki_repo}/log", "GET"
+        )
+        records = handler(owner="acme", wiki_repo="widget", issue=10)
         assert len(records) == 1
         assert records[0]["issue_number"] == 10
 
     def test_get_log_empty_for_unknown_repo(self, router: Any) -> None:
-        handler = find_endpoint(router, "/api/wiki/repos/{owner}/{repo}/log", "GET")
-        assert handler(owner="ghost", repo="ghost") == []
+        handler = find_endpoint(
+            router, "/api/wiki/repos/{owner}/{wiki_repo}/log", "GET"
+        )
+        assert handler(owner="ghost", wiki_repo="ghost") == []
 
 
 class TestMaintenanceStatus:
