@@ -21,7 +21,9 @@ PRODUCTION NOTES:
   is public on hydraflow.ai and the room will check.
 - The her-and-Claude ritual has NOT run yet. Keep it future tense on stage. The close is
   "I'll let you know," and that only stays true if nothing earlier pretends it already happened.
-- TODO: pick one concrete InsightMesh failure moment for S5 (the vibing-hit-the-wall scene).
+- InsightMesh failure scene RESOLVED: v1 vibed without guardrails, didn't survive; v2 (alive today)
+  rebuilt on the lessons, which then rolled into HydraFlow. Optional sharpener for stage: the specific
+  moment the author decided v1 was dead, in one sentence, if it comes back to him.
 -->
 
 # When Code Becomes Fluid
@@ -72,12 +74,12 @@ The empathy beat — it MUST land within a minute of the claim, or the next fort
 
 ## It started as a maintenance problem.
 
-An internal platform I vibe-coded. Agents, retrieval, scheduled tasks, observability.
+An internal platform I vibe-coded. Agents, retrieval, scheduled tasks, observability. No guardrails.
 
-# Vibe shipped it. Vibe couldn't keep it alive.
+# v1 didn't survive. I rebuilt it — and kept the lessons.
 
 <!--
-Motive one — the relatable one. InsightMesh: a real production sales-enablement platform, vibed the way most of this room is building right now. (Stack stays a spoken aside at most — "LangGraph agents, Langfuse traces, the stack you'd expect." Real, not a toy.) It shipped. It worked. Then it had to LIVE. [TODO: insert the one concrete failure moment here — the scene where vibing visibly ran out.] This conference's tagline is "you ship it, you own it, you maintain it" — and the word AI changed most isn't ship or own. It's maintain. I didn't need a faster way to write code. I needed help keeping what I'd written alive. That's where everyone on this road ends up. Vibe to Value — the methodology name is this journey, compressed to three characters.
+Motive one — the relatable one, and a confession. InsightMesh: a real production sales-enablement platform, vibed the way most of this room is building right now. (Stack stays a spoken aside at most — "LangGraph agents, Langfuse traces, the stack you'd expect." Real, not a toy.) "I vibed my way to a viable prototype — fast, thrilling, no strong guardrails. And v1 collapsed under its own weight. I couldn't maintain what I'd made. So I did what every engineer in this room has done at least once: I threw it away and started over." [Optional sharpener: the one-sentence moment you decided v1 was dead, if it comes back to you.] v2 — the version alive today — was rebuilt ON guardrails: standards, tests, CI. And here's the part that matters: the guardrails turned out to be the valuable half. The lessons rolled forward — that's roll number one, and it won't be the last time you hear that phrase tonight. This conference's tagline is "you ship it, you own it, you maintain it" — and the word AI changed most isn't ship or own. It's maintain. I didn't need a faster way to write code. I needed help keeping what I'd written alive. Vibe to Value — the methodology name is this journey, compressed to three characters.
 -->
 
 ---
@@ -89,7 +91,7 @@ Motive one — the relatable one. InsightMesh: a real production sales-enablemen
 # How much of the human can you pull out — and what breaks?
 
 <!--
-Motive two — the question. Be honest: Gas Town was the catalyst, not a parallel discovery. Steve showed the operational thing was buildable — a fleet of agents, an orchestrator, a human babysitting the swarm. I couldn't put the question down. Seven weeks later: first commit, February 18 — inside the InsightMesh repo, because it was born as a maintenance helper for the thing I'd vibed. Three days later it outgrew its host and moved into its own repo. Then the plant, one line, move on: "And somewhere in the four months since, the reason I was building changed. I'll get there."
+Motive two — the question. Be honest: Gas Town was the catalyst, not a parallel discovery. Steve showed the operational thing was buildable — a fleet of agents, an orchestrator, a human babysitting the swarm. I couldn't put the question down. Seven weeks later: first commit, February 18 — inside the InsightMesh repo, because it was born as a maintenance helper for the thing I'd vibed, carrying v2's guardrail lessons with it. Roll number two. Three days later it outgrew its host and moved into its own repo. Then the plant, one line, move on: "And somewhere in the four months since, the reason I was building changed. I'll get there."
 -->
 
 ---
@@ -257,7 +259,7 @@ It's born inside the format: one Makefile, the same security, quality, and testi
 #### A blueprint for printing. Follow the spec, get the thing.
 
 <!--
-The lessons roll forward — this is what makes the experiment an experiment and not a hobby. Every HydraFlow-format project inherits the container on day one: the shared make targets, the quality gates, the test pyramid, the CI checks, the walls. Four months of the factory teaching itself discipline, compiled into a blueprint any new repo starts inside. The game gets all of it for free — builds, deploys, regressions, security, every legible failure already guarded. (beat) "Which means the experiment is clean. Every variable the format can check is controlled. There's exactly one it can't." Next slide.
+The lessons roll forward — third time now, and say so; the motif pays off here. "v1's collapse became v2's guardrails. v2's guardrails became the factory. And now the factory's discipline becomes the game's birthright." Every HydraFlow-format project inherits the container on day one: the shared make targets, the quality gates, the test pyramid, the CI checks, the walls. Four months of the factory teaching itself discipline, compiled into a blueprint any new repo starts inside. The game gets all of it for free — builds, deploys, regressions, security, every legible failure already guarded. (beat) "Which means the experiment is clean. Every variable the format can check is controlled. There's exactly one it can't." Next slide.
 -->
 
 ---
