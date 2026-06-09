@@ -102,6 +102,9 @@ class PricingRefreshLoop(BaseBackgroundLoop):
             await self._open_parse_issue(str(exc))
             return {"drift": False, "error": "parse"}
 
+        # Upstream parsed cleanly — close any open parse-error issue (#9359).
+        await self._close_issue_if_open(f"{_ISSUE_TITLE_PREFIX} upstream parse error")
+
         upstream = filter_anthropic_entries(upstream_raw)
         local = self._read_local_models()
 
@@ -114,6 +117,9 @@ class PricingRefreshLoop(BaseBackgroundLoop):
                 "error": "bounds",
                 "violations": len(diff.bounds_violations),
             }
+
+        # No bounds violations — close any open bounds-violation issue (#9359).
+        await self._close_issue_if_open(f"{_ISSUE_TITLE_PREFIX} bounds violation")
 
         if not diff.updated and not diff.added:
             return {"drift": False}
@@ -288,6 +294,15 @@ class PricingRefreshLoop(BaseBackgroundLoop):
             body="\n".join(body_lines),
             labels=["hydraflow-find", "pricing-refresh"],
         )
+
+    async def _close_issue_if_open(self, title: str) -> None:
+        """Close a `[pricing-refresh]` issue once its condition clears (#9359)."""
+        existing = await self._pr_manager.find_existing_issue(title)
+        if existing:
+            await self._pr_manager.post_comment(
+                existing, "Pricing-refresh condition resolved — auto-closing."
+            )
+            await self._pr_manager.close_issue(existing)
 
     async def _open_parse_issue(self, detail: str) -> None:
         title = f"{_ISSUE_TITLE_PREFIX} upstream parse error"
