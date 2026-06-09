@@ -43,11 +43,11 @@ If you forget your slides, you can deliver this talk from those seven beats.
 | 5. Four patterns + entropy summary + convergence | 20 min | 14 | The meat — four patterns, closing principle, parallel-evolution observation |
 | 6. Staircase + SDLC breakdown | 5 min | 4 | Where value moved, what gap it fills |
 | 7. V2V teams + peers + scope + games | 6 min | 4 | Team shape, where peers sit on the review axis, honest scope, the tighter hypothesis |
-| 8. What breaks + where engineer goes | 3 min | 3 | Honesty about failure modes, then the personal arc |
+| 8. Containment + what breaks + where engineer goes | 5 min | 4 | How cascades are prevented, honesty about failure modes, then the personal arc |
 | 9. Close | 1 min | 2 | The central shift, the next experiment |
 | **Q&A** | **5–10 min** | — | Prep below |
 
-**Total: 40 slides, ~53 min content + Q&A.** That's the comprehensive version. The Talk Cuts section at the end shows how to trim to 45 min. None of the V2V-teams, peers, or what-breaks-next slides should be cut.
+**Total: 41 slides, ~55 min content + Q&A.** That's the comprehensive version. The Talk Cuts section at the end shows how to trim to 45 min. None of the V2V-teams, peers, containment, or what-breaks-next slides should be cut.
 
 ---
 
@@ -157,13 +157,15 @@ For each slide: **title** · *visual* · speaker beat (1–2 sentences, compress
 
 **S35 · The next experiment — where can humans step out?** · *Large headline: "Is there a class of software where autonomous mutation + self-validation can sustain value with humans at governance boundaries?" Below: four supporting sub-questions in smaller type — caretaker for fun? · encode-corrections for aesthetics? · simulate players? · process under aesthetic iteration?* · "My next experiment isn't 'do the patterns generalize?' — it's tighter. Is there a class of software where autonomous mutation plus self-validation sustains value with humans mostly at governance boundaries? Not removing humans entirely — they can't be, and I'm not trying to. The question is whether there are domains where human time per unit of delivered value drops far enough to change the economics. Games are the proving ground, because they break every legibility assumption HydraFlow currently relies on. If the patterns hold there, you've crossed into a class of software that produces ongoing value with most of the human time pulled out of the mutation loop."
 
-### Movement 8 — What breaks + where the engineer goes (3 min)
+### Movement 8 — Containment + what breaks + where the engineer goes (5 min)
 
-**S36 · What I expect to break next** · *Title at top. Four failure modes as a list: Drift from operator intent · Loop equilibria getting weird · Autonomy doctrine getting stale · Process bankruptcy* · "Quick honesty break. I've described what's working. I should be specific about what I'm watching for. Four failure modes I think are most likely, in roughly the order I expect them. Drift from operator intent — the system optimizing for legible validation while wandering from what I actually wanted. Loop equilibria getting weird — emergent bad equilibria as the count grows. Autonomy doctrine getting stale — gaps accumulating faster than I notice them. Process bankruptcy — the discipline rotting silently. None of these are reasons not to do this work. They're the next experiments. The shape of FLUID engineering is partly deciding which failure mode you're about to hit and building the infrastructure that catches it."
+**S36 · Why it can't run away, containment by construction** · *Three nested rings (or three columns). **Per loop:** attempt budget · idempotent five-checkpoint contract · static-config kill switch · credit-aware yield. **Across loops:** label state machine (one owner per work item) · dedup · escalation · watcher loops (HealthMonitor, CostBudgetWatcher). **Hard walls, outside the code the factory may edit:** destructive ops blocked by hooks · cannot raise its own credit ceiling · cannot touch persisted state · everything reversible by construction.* · "A system that edits the system that runs it can, in principle, spin forever or cascade one loop's change through all the others. The answer is containment by construction, in three rings. Per loop: every loop has an attempt budget, an idempotent contract on the five-checkpoint wiring, a static-config kill switch, and it yields the moment credit is exhausted, so no single loop runs away. Across loops: the label state machine gives each work item exactly one owner, dedup stops loops re-triggering each other, and watcher loops escalate on cost and health, so a local change can't snowball into a storm. And the hard walls, which live outside the code the factory is allowed to edit: destructive operations are intercepted by hooks, it cannot raise its own credit ceiling, it cannot reach into persisted state. The point isn't that loops never misbehave. It's that misbehavior is bounded, reversible, and in-budget by construction. Which sets up the one failure that gets past all of this."
 
-**S37 · The new mastery signals** · *Bulleted list: shaping constraints · designing validation systems · world-modeling · preserving coherence · recognizing taxonomic patterns · writing process discipline into the repo. Below, in smaller type, a day-in-the-life caption: "co-build loop with system · ADR · principles audit · subagent review · staging by morning · extend, don't review."* · "The strongest moments I have with HydraFlow aren't when I'm writing code. They're when I'm naming a domain crisply enough that the system uses the name back. Or noticing a third instance of the same kind of caretaker and codifying the category before the fourth one drifts. In concrete form: HydraFlow runs through the night. By morning I'm not reviewing what it did — I'm *extending* what it can do. We co-build new caretaker loops together. I write the ADR; principles audit reviews it; subagents do the implementation review; by morning the new loop is in staging. The new mastery isn't 'human writes code, AI helps,' or 'human reviews what AI generated.' It's *human encodes the conventions, the system manifests them, the conventions get sharper through use*. The craft is moving — but it isn't disappearing."
+**S37 · What I expect to break next** · *Title at top. Four failure modes as a list: Drift from operator intent · Loop equilibria getting weird · Autonomy doctrine getting stale · Process bankruptcy* · "Quick honesty break. I've described what's working. I should be specific about what I'm watching for. Four failure modes I think are most likely, in roughly the order I expect them. Drift from operator intent — the system optimizing for legible validation while wandering from what I actually wanted. Loop equilibria getting weird — emergent bad equilibria as the count grows. Autonomy doctrine getting stale — gaps accumulating faster than I notice them. Process bankruptcy — the discipline rotting silently. None of these are reasons not to do this work. They're the next experiments. The shape of FLUID engineering is partly deciding which failure mode you're about to hit and building the infrastructure that catches it."
 
-**S38 · "The two questions that tell me who to hire"** · *Single panel with both questions* ·
+**S38 · The new mastery signals** · *Bulleted list: shaping constraints · designing validation systems · world-modeling · preserving coherence · recognizing taxonomic patterns · writing process discipline into the repo. Below, in smaller type, a day-in-the-life caption: "co-build loop with system · ADR · principles audit · subagent review · staging by morning · extend, don't review."* · "The strongest moments I have with HydraFlow aren't when I'm writing code. They're when I'm naming a domain crisply enough that the system uses the name back. Or noticing a third instance of the same kind of caretaker and codifying the category before the fourth one drifts. In concrete form: HydraFlow runs through the night. By morning I'm not reviewing what it did — I'm *extending* what it can do. We co-build new caretaker loops together. I write the ADR; principles audit reviews it; subagents do the implementation review; by morning the new loop is in staging. The new mastery isn't 'human writes code, AI helps,' or 'human reviews what AI generated.' It's *human encodes the conventions, the system manifests them, the conventions get sharper through use*. The craft is moving — but it isn't disappearing."
+
+**S39 · "The two questions that tell me who to hire"** · *Single panel with both questions* ·
 > *What does the system do when it disagrees with itself?*
 > *How do you know the validation is actually validating?*
 
@@ -171,13 +173,13 @@ For each slide: **title** · *visual* · speaker beat (1–2 sentences, compress
 
 ### Movement 9 — Close (1 min)
 
-**S39 · The central shift** · *Two lines, top-and-bottom of slide, large type:*
+**S40 · The central shift** · *Two lines, top-and-bottom of slide, large type:*
 > Old: "Can you build the system?"
 > New: "Can you govern systems that continuously build and evolve themselves safely?"
 
 · "I wrote FLUID fourteen months ago — March 2025 — to describe what code should look like when machines and humans co-author it. Running HydraFlow taught me the principles were necessary but not sufficient. The four patterns are the operating regime. They share one move — quality migrated from social to structural. They collapse into one principle — autonomy without validation is just accelerated entropy. And under all of them, the SOLID craft foundation held. The container is solid; the code inside it is fluid; the container is what makes fluidity safe. I don't review code anymore. The system does. I co-build with the system on intent and test — specs, conventions, scenarios — and the goal is dark factory mode. **And HydraFlow isn't a one-off. There's a handful of published cases now — Yegge's Gas Town (Jan 1), StrongDM's Attractor (Feb 7), HydraFlow (Feb 18), McKinney's factory (May 12) — with new aligned ones surfacing month over month, all arriving independently at the same operational rules from completely different architectures and domains. And the convergence-count number — three to five review passes — keeps appearing independently across them (Yegge cites Emanuel's Rule of Five, McKinney says four or five minimum, mine is three to five iterations). Independent designs. Different starting points. One operational shape, one convergence number. That's what tells me the patterns aren't mine, or theirs. They're what the work demands. The talk you've heard isn't a personal manifesto. It's a working instance of a pattern emerging across the field — at the intersection of where the people you trust on these topics are each pointing.** Most of what I've shown you isn't novel in pieces. What this talk has offered is a coherent integration — a working instance with its operational shape made legible. The contribution isn't being first. It's being whole. The next experiment is whether the same patterns let a game release and maintain itself — and whether dark factory mode survives a domain where the validation problem isn't legible. I'll let you know."
 
-**S40 · Thank you + contact** · *hydraflow.ai, your handle, blog/talk link* · "Questions."
+**S41 · Thank you + contact** · *hydraflow.ai, your handle, blog/talk link* · "Questions."
 
 ---
 
@@ -269,7 +271,8 @@ Apply these in order. Stop when you hit the time target.
 - **S13 (solid container, fluid contents)** — the asymmetry; the single most quotable visual in the talk
 - **S26 (entropy quote card)** — t-shirt line; visual pause is the point
 - **S32 (V2V teams)** — answers the "what does my team do?" question; biggest gap in the original deck
-- **S36 (what breaks next)** — credibility moment; without it the talk reads as a sales pitch
+- **S36 (containment by construction)** — delivers the abstract's "preventing runaway loops and cascades" bullet; sets up S37
+- **S37 (what breaks next)** — credibility moment; without it the talk reads as a sales pitch
 
 ### Cuts in order
 
@@ -282,7 +285,7 @@ Apply these in order. Stop when you hit the time target.
 
 If you're really behind, you can also collapse Pattern 1 from 3 slides to 2 (merge S15 and S16). Don't collapse Pattern 3 — it's the bold claim that earns the talk a memorable line.
 
-The peers beat (S33) adds ~2 min, so the full version now runs ~53 min. It's news-pegged to the June 2026 loop-engineering moment, so it's also the most time-sensitive slide: if you deliver this talk months later, S33 is the first cut. To pay for it now, pair cut #6 (which trims the games slide right after it) with cut #2. Arithmetic from the new ~53 baseline: cuts 1–4 buy ~3 min (to ~50), cuts 1–6 buy ~5 min (to ~48). To reach 45, also tighten S27's spoken case-by-case enumeration, since S33 now carries the "field is converging" point on the review axis, so S27 can drop to the chronology plus the convergence-number kicker (~1.5 min), and take the Pattern-1 collapse (merge S15/S16, ~1 min). That lands 45–46 comfortably.
+Two beats were added after the original spine: peers (S33, ~2 min) and containment (S36, ~1.5 min), so the full version is now ~55 min. Both overlap existing material, which is where you claw the time back. Containment overlaps S16, so cut #5 (fold S16 into S15) becomes mandatory rather than optional, ~1 min. Peers overlaps S27, the heaviest slide in the deck and now covered three times over (S33 on the review axis, S40 on field convergence), so trim S27 hard to its chronology plus the convergence-number kicker, ~2 min. Cuts 1–6 (~5 min, includes #5) plus the hard S27 trim (~2 min) bring ~55 down to ~48. Honest read: with both abstract-aligned beats in, 45 is tight, so plan for ~47–48 unless you also thin one pattern's spoken detail. Note S33 is news-pegged to June 2026, so for any later delivery it's the first cut. Treat S36 (containment), the validation slides, and S33 (trust calibration) as load-bearing, since they deliver the four bullets you sold, so cut convergence enumeration and pattern color before any of them.
 
 ---
 
@@ -294,7 +297,7 @@ The peers beat (S33) adds ~2 min, so the full version now runs ~53 min. It's new
 - **Don't take the bait if someone in Q&A wants to make this a debate about whether AI will replace engineers.** The talk's framing — *engineering value is migrating upward into governance of adaptive systems* — is your answer. Restate it once and move on.
 - **Don't demo more than once.** One landing is a punctuation mark. Three landings is a slideshow.
 - **Don't rush S26 (entropy quote card).** The line needs the silent pause. If you fill it with explanation, the line stops being a callback hook for the rest of the talk.
-- **Don't soft-pedal S36 (what breaks next).** This is the credibility slide. Deliver it with conviction, not hedging. The audience will trust the rest of the talk more after you've admitted what you don't know.
+- **Don't soft-pedal S37 (what breaks next).** This is the credibility slide. Deliver it with conviction, not hedging. The audience will trust the rest of the talk more after you've admitted what you don't know.
 
 ---
 
@@ -306,7 +309,7 @@ When someone asks for follow-up materials, point them at:
 - `hydraflow.ai` for the project.
 - `docs/adr/` in the repo if they want to chase any specific ADR cited in a pattern.
 
-Have a one-page handout with: the staircase, the four patterns, the seven beats, and the failure-mode list from S36. People who liked the talk will want to take that home; people who didn't like it still want to argue with you about it.
+Have a one-page handout with: the staircase, the four patterns, the seven beats, and the failure-mode list from S37. People who liked the talk will want to take that home; people who didn't like it still want to argue with you about it.
 
 **On the handout, put the t-shirt line at the top:**
 
