@@ -126,6 +126,7 @@ class AcceptanceCriteriaGenerator:
             tool=self._config.ac_tool,
             model=self._config.ac_model,
             disallowed_tools="Write,Edit,NotebookEdit",
+            isolate_user_settings=True,
         )
 
     def _build_prompt(

@@ -185,6 +185,20 @@ describe('HydraFlowContext reducer', () => {
     expect(next.backgroundWorkers).toEqual([])
   })
 
+  it('SELECT_REPO clears repo-scoped human-input / intents / escalation on a change', () => {
+    const state = {
+      ...initialState,
+      selectedRepoSlug: 'owner-a',
+      humanInputRequests: { 42: { issue: 42 } },
+      intents: [{ text: 'do a thing', status: 'pending' }],
+      hitlEscalation: { issue: 42 },
+    }
+    const next = reducer(state, { type: 'SELECT_REPO', data: { slug: 'owner-b' } })
+    expect(next.humanInputRequests).toEqual({})
+    expect(next.intents).toEqual([])
+    expect(next.hitlEscalation).toBeNull()
+  })
+
   // --- Phase 4-b2: worker/PR card composite-keying ------------------------
 
   it('worker_update keys by repo so same-issue cards across repos coexist (__all__)', () => {

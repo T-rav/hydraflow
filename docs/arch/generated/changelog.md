@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `123d4da` — fix(dashboard): aggregate /api/metrics/github under __all__; tag single-repo workers with canonical slug *(2026-06-09)*
 - `a0d630c` — test(dashboard): MockWorld scenarios for Phase 2/3 aggregate endpoints (#9392) (#9392) *(2026-06-09)*
 - `56bb8a8` — test(dashboard): multi-repo aggregation e2e + MockWorld scenarios (Phase 4-c) (#9391) (#9391) *(2026-06-09)*
 - `bc3049c` — feat(dashboard): repo-qualify live worker/PR cards for repo=__all__ (Phase 4-b2) (#9390) (#9390) *(2026-06-09)*

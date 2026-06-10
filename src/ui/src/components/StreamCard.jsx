@@ -101,7 +101,7 @@ export function StreamCard({ issue, intent, defaultExpanded, onRequestChanges, t
     if (!feedbackText.trim() || submitting) return
     setSubmitting(true)
     setSubmitError(null)
-    const ok = await onRequestChanges(issue.issueNumber, feedbackText.trim(), issue.currentStage)
+    const ok = await onRequestChanges(issue.issueNumber, feedbackText.trim(), issue.currentStage, issue.repo)
     setSubmitting(false)
     if (ok) {
       setShowFeedback(false)
@@ -109,7 +109,7 @@ export function StreamCard({ issue, intent, defaultExpanded, onRequestChanges, t
     } else {
       setSubmitError('Failed to submit. Please try again.')
     }
-  }, [feedbackText, submitting, onRequestChanges, issue.issueNumber, issue.currentStage])
+  }, [feedbackText, submitting, onRequestChanges, issue.issueNumber, issue.currentStage, issue.repo])
 
   const meta = STAGE_META[issue.currentStage]
   const isActive = issue.overallStatus === 'active'
