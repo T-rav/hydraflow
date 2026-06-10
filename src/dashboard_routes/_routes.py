@@ -2270,7 +2270,16 @@ def create_router(
 
         Repo-scoped: the issue is created in the SELECTED repo (and its URL
         points there), not the default repo, in a multi-repo deployment.
+        ``repo=__all__`` is rejected — issue creation needs a specific repo.
         """
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "detail": "issue creation requires a specific repo",
+                },
+                status_code=400,
+            )
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         title = request.text[:120]
         body = request.text
