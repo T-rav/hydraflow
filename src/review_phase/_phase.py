@@ -330,6 +330,7 @@ class ReviewPhase:
                     tool=parent._config.review_tool,
                     model=model,
                     disallowed_tools="Write,Edit,NotebookEdit",
+                    isolate_user_settings=True,
                 )
                 return await reviewers._execute(
                     cmd,
@@ -1824,6 +1825,7 @@ class ReviewPhase:
                 tool=self._config.review_tool,
                 model=self._config.review_model,
                 disallowed_tools="Write,Edit,NotebookEdit",
+                isolate_user_settings=True,
             )
             transcript = await self._reviewers._execute(
                 cmd,

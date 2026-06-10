@@ -534,6 +534,17 @@ class TestBuildCommand:
         perm_idx = cmd.index("--permission-mode")
         assert cmd[perm_idx + 1] == "bypassPermissions"
 
+    def test_claude_command_isolates_user_settings(self, event_bus: EventBus) -> None:
+        # Regression: the headless triage spawn must not inherit a host
+        # user-level superpowers SessionStart hook, which injects
+        # skill-invocation guidance that derails triage off its JSON verdict
+        # (it explores the repo instead) → parse fails → silent ready=True.
+        config = ConfigFactory.create(triage_tool="claude")
+        runner = TriageRunner(config, event_bus)
+        cmd = runner._build_command()
+        assert "--setting-sources" in cmd
+        assert cmd[cmd.index("--setting-sources") + 1] == "project"
+
     def test_command_supports_codex_backend(self, event_bus: EventBus) -> None:
         config = ConfigFactory.create(
             triage_tool="codex",

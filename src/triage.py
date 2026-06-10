@@ -198,6 +198,12 @@ class TriageRunner(BaseRunner):
             tool=self._config.triage_tool,
             model=self._config.triage_model,
             max_turns=self._config.triage_max_turns,
+            # Triage is a fast JSON-verdict classifier. A host user-level
+            # superpowers SessionStart hook injects "invoke a skill BEFORE any
+            # response, explore first" guidance, derailing triage into repo
+            # exploration so it never emits the {"ready": ...} verdict and the
+            # parser falls back to ready=True. Restrict to project settings.
+            isolate_user_settings=True,
         )
 
     def _build_prompt_with_stats(

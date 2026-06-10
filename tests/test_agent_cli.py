@@ -432,3 +432,84 @@ class TestPluginDirFlags:
         from agent_cli import _PRE_CLONED_PLUGIN_ROOT
 
         assert Path("/opt/plugins") == _PRE_CLONED_PLUGIN_ROOT
+
+
+class TestContractAgentIsolation:
+    """``isolate_user_settings`` shields strict-JSON contract agents (triage,
+    judges, councils) from host user-level plugins/hooks.
+
+    A user-installed superpowers plugin registers a ``SessionStart`` hook that
+    injects "invoke a skill BEFORE any response, explore first" guidance into
+    every headless ``claude -p`` spawn. That guidance derails a contract agent
+    off its JSON output contract (it explores the repo instead of emitting the
+    verdict), so the verdict parser finds nothing. Restricting settings to the
+    ``project`` scope drops the user-level plugin/hook while leaving OAuth /
+    keychain auth intact (unlike ``--bare``), and the pre-cloned ``--plugin-dir``
+    flags are skipped so the same leak can't happen inside the Docker image.
+    """
+
+    def test_streaming_claude_isolation_restricts_setting_sources_to_project(
+        self,
+    ) -> None:
+        cmd = build_agent_command(
+            tool="claude", model="sonnet", isolate_user_settings=True
+        )
+
+        assert "--setting-sources" in cmd
+        assert cmd[cmd.index("--setting-sources") + 1] == "project"
+
+    def test_streaming_claude_isolation_skips_pre_cloned_plugin_dirs(
+        self, tmp_path: Path
+    ) -> None:
+        from unittest.mock import patch
+
+        import agent_cli
+
+        root = tmp_path / "plugins"
+        root.mkdir()
+        (root / "superpowers").mkdir()
+
+        with patch.object(agent_cli, "_PRE_CLONED_PLUGIN_ROOT", root):
+            cmd = build_agent_command(
+                tool="claude", model="sonnet", isolate_user_settings=True
+            )
+
+        assert "--plugin-dir" not in cmd
+
+    def test_streaming_claude_default_omits_setting_sources(self) -> None:
+        cmd = build_agent_command(tool="claude", model="sonnet")
+
+        assert "--setting-sources" not in cmd
+
+    def test_streaming_non_claude_ignores_isolation(self) -> None:
+        cmd = build_agent_command(tool="codex", model="gpt", isolate_user_settings=True)
+
+        assert "--setting-sources" not in cmd
+
+    def test_lightweight_claude_isolation_sets_project_and_drops_plugins(
+        self, tmp_path: Path
+    ) -> None:
+        from unittest.mock import patch
+
+        import agent_cli
+
+        root = tmp_path / "plugins"
+        root.mkdir()
+        (root / "superpowers").mkdir()
+
+        with patch.object(agent_cli, "_PRE_CLONED_PLUGIN_ROOT", root):
+            cmd, _ = build_lightweight_command(
+                tool="claude",
+                model="sonnet",
+                prompt="test",
+                isolate_user_settings=True,
+            )
+
+        assert "--setting-sources" in cmd
+        assert cmd[cmd.index("--setting-sources") + 1] == "project"
+        assert "--plugin-dir" not in cmd
+
+    def test_lightweight_claude_default_omits_setting_sources(self) -> None:
+        cmd, _ = build_lightweight_command(tool="claude", model="sonnet", prompt="test")
+
+        assert "--setting-sources" not in cmd

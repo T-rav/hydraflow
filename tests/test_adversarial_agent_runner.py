@@ -95,6 +95,23 @@ class TestSubprocessAgentRunnerBasic:
         assert cmd[0] == "claude"
         assert "claude-haiku-4-5-test" in cmd
 
+    @pytest.mark.asyncio
+    async def test_claude_spawn_isolates_user_settings(self) -> None:
+        # Regression: adversarial judges (SpecJudge, PlanCouncil, …) emit
+        # strict JSON. A host user-level superpowers SessionStart hook injects
+        # "invoke a skill before responding" guidance that derails the JSON
+        # contract (the judge explores the repo instead of voting), so the
+        # downstream parser fails with "Expecting value: line 1 column 1".
+        # The spawn must restrict settings to the project scope.
+        runner = FakeRunner(returncode=0, stdout='{"verdict": "PASS"}')
+        agent = SubprocessAgentRunner(runner=runner, tool="claude")
+
+        await agent.run("sys", "usr")
+
+        cmd = runner.calls[0]["cmd"]
+        assert "--setting-sources" in cmd
+        assert cmd[cmd.index("--setting-sources") + 1] == "project"
+
 
 class TestSubprocessAgentRunnerErrorHandling:
     @pytest.mark.asyncio

@@ -418,6 +418,7 @@ The experts will read this before revoting.
             model=self._config.triage_model,  # Use fast model for voting
             disallowed_tools="Write,Edit,NotebookEdit",
             max_turns=1,
+            isolate_user_settings=True,
         )
 
     @staticmethod

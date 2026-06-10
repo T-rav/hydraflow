@@ -111,7 +111,13 @@ class SubprocessAgentRunner:
         """
         prompt = self._compose_prompt(system_prompt, user_message)
         cmd, cmd_input = build_lightweight_command(
-            tool=self.tool, model=self.model, prompt=prompt
+            tool=self.tool,
+            model=self.model,
+            prompt=prompt,
+            # Adversarial judges (SpecJudge, PlanCouncil, …) emit strict JSON.
+            # Isolate from host user plugins/hooks (e.g. a superpowers
+            # SessionStart hook) that would derail the JSON contract.
+            isolate_user_settings=True,
         )
         gh_token = self.credentials.gh_token if self.credentials is not None else ""
         env = make_clean_env(gh_token)
