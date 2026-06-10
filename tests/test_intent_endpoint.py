@@ -99,6 +99,25 @@ class TestIntentEndpoint:
         assert data["status"] == "created"
 
     @pytest.mark.asyncio
+    async def test_intent_rejects_repo_all(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """repo=__all__ is rejected — issue creation needs a specific repo."""
+        from models import IntentRequest
+
+        router, pr_mgr = _make_router(config, event_bus, state, tmp_path)
+        pr_mgr.create_issue = AsyncMock(return_value=7)
+
+        endpoint = _find_endpoint(router, "/api/intent")
+        assert endpoint is not None
+
+        response = await endpoint(IntentRequest(text="add a thing"), repo="__all__")
+
+        assert response.status_code == 400
+        assert "specific repo" in json.loads(response.body)["detail"]
+        pr_mgr.create_issue.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_intent_returns_500_on_create_failure(
         self, config, event_bus: EventBus, state, tmp_path: Path
     ) -> None:
