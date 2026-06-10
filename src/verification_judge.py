@@ -347,6 +347,7 @@ REFINED_INSTRUCTIONS_END
             tool=self._config.verification_judge_tool,
             model=self._config.review_model,
             disallowed_tools="Write,Edit,NotebookEdit",
+            isolate_user_settings=True,
         )
 
     def _build_precheck_prompt(

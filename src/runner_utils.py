@@ -557,6 +557,7 @@ async def run_lightweight_agent(
     issue_number: int | None = None,
     pr_number: int | None = None,
     session_id: str | None = None,
+    isolate_user_settings: bool = True,
 ) -> SimpleResult:
     """One-shot lightweight LLM CLI call with credit detection + telemetry.
 
@@ -578,12 +579,24 @@ async def run_lightweight_agent(
     Returns the ``SimpleResult``; callers inspect ``returncode``/``stdout`` as
     before. Lightweight LLM spawns MUST route through this helper rather than
     calling ``run_simple`` on a ``build_lightweight_command`` directly.
+
+    *isolate_user_settings* defaults to ``True``: every current lightweight
+    caller (wiki compiler, ADR reviewer, transcript summarizer, PR unsticker,
+    …) is a strict-output contract worker, so the spawn is restricted to
+    ``project`` settings to keep a host user-level ``SessionStart`` hook from
+    leaking skill-invocation guidance into the reply. Pass ``False`` for a
+    lightweight spawn that legitimately needs host plugins/skills.
     """
     from agent_cli import build_lightweight_command  # noqa: PLC0415
     from exception_classify import reraise_on_credit_or_bug  # noqa: PLC0415
     from execution import SimpleResult  # noqa: PLC0415
 
-    cmd, cmd_input = build_lightweight_command(tool=tool, model=model, prompt=prompt)
+    cmd, cmd_input = build_lightweight_command(
+        tool=tool,
+        model=model,
+        prompt=prompt,
+        isolate_user_settings=isolate_user_settings,
+    )
     env = make_clean_env(gh_token)
     start = time.monotonic()
     success = False

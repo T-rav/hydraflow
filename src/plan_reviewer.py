@@ -267,6 +267,7 @@ class PlanReviewer(BaseRunner):
             tool=self._config.planner_tool,
             model=self._config.planner_model,
             disallowed_tools="Write,Edit,NotebookEdit",
+            isolate_user_settings=True,
         )
 
     # ------------------------------------------------------------------

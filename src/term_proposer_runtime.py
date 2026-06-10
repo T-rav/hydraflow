@@ -63,7 +63,10 @@ class ClaudeCLIClient:
         from runner_utils import raise_if_credit_exhausted  # noqa: PLC0415
 
         cmd, cmd_input = build_lightweight_command(
-            tool=self._tool, model=self._model, prompt=prompt
+            tool=self._tool,
+            model=self._model,
+            prompt=prompt,
+            isolate_user_settings=True,
         )
         result = await self._runner.run_simple(
             cmd, input=cmd_input, timeout=self._timeout
