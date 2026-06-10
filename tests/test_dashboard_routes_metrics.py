@@ -164,6 +164,59 @@ class TestGitHubMetricsEndpoint:
         assert data["total_closed"] == 10
         assert data["total_merged"] == 8
 
+    @pytest.mark.asyncio
+    async def test_github_metrics_sums_across_repos_for_all(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+        from unittest.mock import patch
+
+        from pr_manager import PRManager
+        from tests.helpers import ConfigFactory, make_registry
+
+        registry = make_registry(
+            {
+                "slug": "owner-a",
+                "config": ConfigFactory.create(repo="owner/a"),
+                "running": True,
+            },
+            {
+                "slug": "owner-b",
+                "config": ConfigFactory.create(repo="owner/b"),
+                "running": True,
+            },
+        )
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            registry=registry,
+            default_repo_slug="owner-host",
+        )
+        get_github_metrics = find_endpoint(router, "/api/metrics/github")
+
+        async def _fake_counts(_self, cfg):
+            if "a" in cfg.repo:
+                return {
+                    "open_by_label": {"hydraflow-plan": 2},
+                    "total_closed": 1,
+                    "total_merged": 3,
+                }
+            return {
+                "open_by_label": {"hydraflow-plan": 1, "hydraflow-ready": 4},
+                "total_closed": 2,
+                "total_merged": 0,
+            }
+
+        with patch.object(PRManager, "get_label_counts", _fake_counts):
+            data = json.loads((await get_github_metrics(repo="__all__")).body)
+
+        # per-label open counts merged; closed/merged totals summed across repos.
+        assert data["open_by_label"] == {"hydraflow-plan": 3, "hydraflow-ready": 4}
+        assert data["total_closed"] == 3
+        assert data["total_merged"] == 3
+
 
 class TestMetricsHistoryEndpoint:
     @pytest.mark.asyncio

@@ -929,16 +929,14 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
     ) -> JSONResponse:
         """Return last known status of each background worker.
 
-        For ``repo=__all__`` every repo's workers are unioned (not merged) and
-        each row is tagged with its repo slug.
+        For ``repo=__all__`` every repo's workers are unioned (not merged); a
+        single repo (or the default) returns just its own. Every row is tagged
+        with its CANONICAL resolved slug — resolve_runtimes uniformly handles
+        all three cases, so the single-repo path no longer tags an empty string.
         """
-        if repo is not None and repo.strip().lower() == REPO_ALL:
-            workers: list[BackgroundWorkerStatus] = []
-            for _cfg, _state, _bus, _get_orch, slug in ctx.resolve_runtimes(repo):
-                workers.extend(_workers_for_runtime(_cfg, _state, _get_orch(), slug))
-            return JSONResponse(BackgroundWorkersResponse(workers=workers).model_dump())
-        _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
-        workers = _workers_for_runtime(_cfg, _state, _get_orch(), repo or "")
+        workers: list[BackgroundWorkerStatus] = []
+        for _cfg, _state, _bus, _get_orch, slug in ctx.resolve_runtimes(repo):
+            workers.extend(_workers_for_runtime(_cfg, _state, _get_orch(), slug))
         return JSONResponse(BackgroundWorkersResponse(workers=workers).model_dump())
 
     def _resolve_orch_for(repo: str | None) -> tuple[Any, JSONResponse | None]:

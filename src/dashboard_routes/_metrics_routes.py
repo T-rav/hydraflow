@@ -179,14 +179,31 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
     async def get_github_metrics(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Query GitHub for issue/PR counts by label state."""
-        _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
-        # ``get_label_counts`` is a GitHub-API helper on the concrete
-        # PRManager, not on PRPort. Production always supplies the real
-        # adapter via ``ctx.pr_manager_for``.
-        manager: PRManager = cast("PRManager", ctx.pr_manager_for(_cfg, _bus))
-        counts = await manager.get_label_counts(_cfg)
-        return JSONResponse(counts)
+        """Query GitHub for issue/PR counts by label state.
+
+        For ``repo=__all__`` the counts are summed across every repo (per-label
+        open counts merged, closed/merged totals added). A single repo (or the
+        default) returns its own counts unchanged — resolve_runtimes yields one
+        element there, so the sum is a no-op.
+        """
+        merged: dict[str, Any] = {
+            "open_by_label": {},
+            "total_closed": 0,
+            "total_merged": 0,
+        }
+        for _cfg, _state, _bus, _get_orch, _slug in ctx.resolve_runtimes(repo):
+            # ``get_label_counts`` is a GitHub-API helper on the concrete
+            # PRManager, not on PRPort. Production always supplies the real
+            # adapter via ``ctx.pr_manager_for``.
+            manager: PRManager = cast("PRManager", ctx.pr_manager_for(_cfg, _bus))
+            counts = await manager.get_label_counts(_cfg)
+            for label, count in counts.get("open_by_label", {}).items():
+                merged["open_by_label"][label] = (
+                    merged["open_by_label"].get(label, 0) + count
+                )
+            merged["total_closed"] += counts.get("total_closed", 0)
+            merged["total_merged"] += counts.get("total_merged", 0)
+        return JSONResponse(merged)
 
     @router.get("/api/metrics/history")
     async def get_metrics_history(
