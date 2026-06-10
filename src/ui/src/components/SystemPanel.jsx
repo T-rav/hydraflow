@@ -778,6 +778,28 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWo
   const [activeSubTab, setActiveSubTab] = useState('workers')
   const isAggregate = selectedRepoSlug === REPO_ALL
 
+  // Under "All repos" the worker list carries a `repo` per entry — render one
+  // group layout per repo so two repos' same-named workers don't collapse.
+  const reposInWorkers = isAggregate
+    ? [...new Set(backgroundWorkers.map(w => w.repo).filter(Boolean))].sort()
+    : []
+
+  const renderGroup = (group, workers, keyPrefix = '') => (
+    <WorkerGroupSection
+      key={`${keyPrefix}${group.key}`}
+      group={group}
+      backgroundWorkers={workers}
+      pipelinePollerLastRun={pipelinePollerLastRun}
+      pipelineIssues={pipelineIssues}
+      orchestratorStatus={orchestratorStatus}
+      onToggleBgWorker={onToggleBgWorker}
+      onTriggerBgWorker={onTriggerBgWorker}
+      onUpdateInterval={onUpdateInterval}
+      events={events}
+      isAggregate={isAggregate}
+    />
+  )
+
   return (
     <div style={styles.container}>
       <div style={styles.subTabSidebar}>
@@ -804,21 +826,20 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWo
                 reschedule a worker.
               </div>
             )}
-            {WORKERS_BY_GROUP.map((group) => (
-              <WorkerGroupSection
-                key={group.key}
-                group={group}
-                backgroundWorkers={backgroundWorkers}
-                pipelinePollerLastRun={pipelinePollerLastRun}
-                pipelineIssues={pipelineIssues}
-                orchestratorStatus={orchestratorStatus}
-                onToggleBgWorker={onToggleBgWorker}
-                onTriggerBgWorker={onTriggerBgWorker}
-                onUpdateInterval={onUpdateInterval}
-                events={events}
-                isAggregate={isAggregate}
-              />
-            ))}
+            {isAggregate
+              ? reposInWorkers.map((repo) => (
+                  <div key={repo} data-testid={`workers-repo-${repo}`} style={styles.repoSection}>
+                    <div style={styles.repoSectionLabel}>{repo}</div>
+                    {WORKERS_BY_GROUP.map((group) =>
+                      renderGroup(
+                        group,
+                        backgroundWorkers.filter((w) => w.repo === repo),
+                        `${repo}-`,
+                      ),
+                    )}
+                  </div>
+                ))
+              : WORKERS_BY_GROUP.map((group) => renderGroup(group, backgroundWorkers))}
           </div>
         )}
         {activeSubTab === 'pipeline' && (
@@ -887,6 +908,17 @@ const styles = {
     color: theme.textMuted,
     fontSize: 12,
     lineHeight: 1.5,
+  },
+  repoSection: {
+    marginBottom: 20,
+  },
+  repoSectionLabel: {
+    color: theme.textBright,
+    fontSize: 13,
+    fontWeight: 600,
+    margin: '4px 0 10px',
+    paddingBottom: 6,
+    borderBottom: `1px solid ${theme.border}`,
   },
   controlDisabled: {
     opacity: 0.45,
