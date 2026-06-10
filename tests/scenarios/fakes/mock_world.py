@@ -366,7 +366,9 @@ class MockWorld:
         self._github.add_issue(number, title, body, labels=labels)
         return self
 
-    def add_repo(self, slug: str, path: str) -> MockWorld:
+    def add_repo(
+        self, slug: str, path: str, *, with_pipeline: bool = False
+    ) -> MockWorld:
         """Seed a RepoRegistryStore entry AND a live runtime in the registry.
 
         Scenarios that exercise multi-repo controls (register / remove) start
@@ -374,6 +376,15 @@ class MockWorld:
         is a duck-typed namespace (the proven test pattern) with its own
         EventBus tagged via set_repo, so >=2 calls yield genuinely independent
         runtimes that resolve_runtimes can aggregate.
+
+        When ``with_pipeline`` is True the runtime also gets a pipeline-surfacing
+        orchestrator (the host ``_HarnessOrchestratorShim`` over a fresh per-repo
+        ``IssueStore``) and ``running=True``, so ``/api/pipeline`` (and the other
+        active-gated routes) serve this repo's seeded issues — used by the
+        aggregate browser e2e to render two repos' pipeline cards. Seed via
+        ``registry.get(slug).orchestrator.issue_store.mark_active(n, stage)``.
+        Default ``False`` keeps the legacy orchestrator-less runtime so existing
+        callers are unaffected.
         """
         from types import SimpleNamespace  # noqa: PLC0415
 
@@ -395,13 +406,25 @@ class MockWorld:
         bus = EventBus()
         bus.set_repo(dash)
         st = StateTracker(repo_root / "state.json")
+
+        orchestrator: Any = None
+        running = False
+        if with_pipeline:
+            from unittest.mock import AsyncMock  # noqa: PLC0415
+
+            from issue_store import IssueStore  # noqa: PLC0415
+
+            issue_store = IssueStore(cfg, AsyncMock(), bus)
+            orchestrator = _HarnessOrchestratorShim(SimpleNamespace(store=issue_store))
+            running = True
+
         self._registry._runtimes[dash] = SimpleNamespace(
             slug=dash,
             config=cfg,
             state=st,
             event_bus=bus,
-            orchestrator=None,
-            running=False,
+            orchestrator=orchestrator,
+            running=running,
             last_error=None,
         )
         return self
