@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `56bb8a8` — test(dashboard): multi-repo aggregation e2e + MockWorld scenarios (Phase 4-c) (#9391) (#9391) *(2026-06-09)*
 - `bc3049c` — feat(dashboard): repo-qualify live worker/PR cards for repo=__all__ (Phase 4-b2) (#9390) (#9390) *(2026-06-09)*
 - `2f1c343` — feat(dashboard): merged WebSocket + /api/events backfill for repo=__all__ (Phase 4-a) (#9387) (#9387) *(2026-06-09)*
 - `b05bc76` — fix(dashboard): scope bare /api/sessions + pipeline-active to default repo (Phase 6) (#9386) (#9386) *(2026-06-09)*
