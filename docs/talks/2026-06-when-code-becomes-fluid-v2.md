@@ -1,4 +1,4 @@
-<!-- v2 — rubber-stamping rebuttal integrated: agent review sharpens; executable validation + the walls carry safety; scoped to legible/reversible software, with games conceded as the open case. VERIFY BEFORE STAGE: the DORA two-stability-metrics claim (Accelerate / Forsgren-Humble-Kim) and the Bacchelli-Bird Microsoft code-review finding are now load-bearing citations. Also reconcile "twelve sandbox scenarios" against the real count. Also confirm the Boris Cherny quote ("I don't prompt Claude anymore...") against a citable source before delivery; wording supplied from memory, source not yet pinned. -->
+<!-- v2 — rubber-stamping rebuttal integrated: agent review sharpens; executable validation + the walls carry safety; scoped to legible/reversible software, with games conceded as the open case. VERIFY BEFORE STAGE: the DORA two-stability-metrics claim (Accelerate / Forsgren-Humble-Kim) and the Bacchelli-Bird Microsoft code-review finding are now load-bearing citations. Also reconcile "twelve sandbox scenarios" against the real count. -->
 
 # When Code Becomes FLUID, Where Does the Engineer Go?
 
@@ -22,7 +22,7 @@ Most organizations are still mentally operating in the first phase of AI adoptio
 
 That framing is already outdated. The real transition begins when systems stop merely generating code and start participating in software delivery itself — planning, decomposition, implementation, testing, evaluation, observability, retry, recovery, pull request creation, merge validation, operational feedback loops. Code generation is the least interesting part. At that point the question is no longer "Can AI help humans write software?" It becomes "How do humans safely govern software that continuously rewrites itself?"
 
-<!-- VERIFY BEFORE STAGE: confirm Boris Cherny said this verbatim, with a citable source (talk/post), before delivering publicly. Attribution currently unsourced. -->
+<!-- Source: Boris Cherny, Acquired Unplugged (presented by WorkOS), June 2 2026, https://www.youtube.com/watch?v=RkQQ7WEor7w. Cited in Further reading. Wording matches published transcriptions; confirm against the video if exact phrasing matters before final stage. -->
 Boris Cherny, who built Claude Code, put the shift in its bluntest form: *"I don't prompt Claude anymore. I have loops that are running. They're the ones prompting Claude and figuring out what to do. My job is to write loops."*
 
 He names the mechanism exactly right: the loops are the ones prompting Claude now. The word I'd push on is "anymore." Prompting didn't disappear, it moved, and it got compiled. I still prompt once, at the top, when I hand the factory an issue that states intent, and the loops turn that single prompt into the ten thousand they fire at Claude on my behalf. What went away is the turn-by-turn steering that used to be the job, the "no, do it this way," "now write the test," "rebase onto staging" that ate the day. Writing a loop is writing those prompts ahead of time, once, as reviewed and tested code instead of typing them live and discarding them. So "I write loops" isn't a smaller job than prompting was. It's prompting moved up a level and made durable.
@@ -452,6 +452,7 @@ I'll let you know.
 - Adam Tornhill — *Compressed Cognition: The Hidden Cost* — <https://adamtornhill.substack.com/p/compressed-cognition-the-hidden-cost> — the 19%-slower study and decision-density mechanism.
 - Tori Huang — *Claude Code: Do My Job Faster* — <https://bytorihuang.com/writing/2026/04/claude-code-do-my-job-faster/> — process-vs-knowledge bugs and the encode-corrections loop.
 - Adam Jacobs — *Adaptive Building Blocks* — <https://www.adamhjk.com/blog/adaptive-building-blocks/> — adaptive primitives as the supply-side counterpart.
+- Boris Cherny, *Claude Code & the Future of Engineering*. Acquired Unplugged (presented by WorkOS), June 2, 2026. <https://www.youtube.com/watch?v=RkQQ7WEor7w>. Head of Claude Code at Anthropic, interviewed by Ben Gilbert and David Rosenthal. The source of the "I don't prompt Claude anymore... my job is to write loops" quote, and the practitioner statement of the prompting-to-loop-writing shift the autocomplete-frame section opens on.
 
 **Heritage references (the substrate FLUID rests on):**
 
