@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `96310e4` — fix(trust): right-size FakeCoverageAuditorLoop to cassette-capable adapters *(2026-06-11)*
 - `bc3049c` — feat(dashboard): repo-qualify live worker/PR cards for repo=__all__ (Phase 4-b2) (#9390) (#9390) *(2026-06-09)*
 - `2f1c343` — feat(dashboard): merged WebSocket + /api/events backfill for repo=__all__ (Phase 4-a) (#9387) (#9387) *(2026-06-09)*
 - `b05bc76` — fix(dashboard): scope bare /api/sessions + pipeline-active to default repo (Phase 6) (#9386) (#9386) *(2026-06-09)*

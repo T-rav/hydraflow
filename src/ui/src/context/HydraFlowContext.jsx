@@ -464,15 +464,23 @@ export function reducer(state, action) {
 
     case 'background_worker_status': {
       const { worker, status, last_run, details } = action.data
-      const prev = state.backgroundWorkers.find(w => w.name === worker)
-      const rest = state.backgroundWorkers.filter(w => w.name !== worker)
+      const repo = action.repo ?? null
+      // Aggregate view: two repos' same-named workers must coexist, so key by
+      // (repo, name). Single-repo keeps name-only keying — the backend tags the
+      // WS frame (dash slug) and the REST list (empty) inconsistently outside
+      // __all__, and one repo can't collide with itself.
+      const sameWorker = state.selectedRepoSlug === REPO_ALL
+        ? (w => w.name === worker && (w.repo ?? null) === repo)
+        : (w => w.name === worker)
+      const prev = state.backgroundWorkers.find(sameWorker)
+      const rest = state.backgroundWorkers.filter(w => !sameWorker(w))
       // Preserve local enabled flag if backend doesn't send one
       const enabled = action.data.enabled !== undefined ? action.data.enabled : (prev?.enabled ?? true)
       // Heartbeat events don't carry interval_seconds — preserve from prior state
       const interval_seconds = action.data.interval_seconds ?? prev?.interval_seconds ?? null
       return {
         ...addEvent(state, action),
-        backgroundWorkers: [...rest, { name: worker, status, last_run, details, enabled, interval_seconds }],
+        backgroundWorkers: [...rest, { name: worker, status, last_run, details, enabled, interval_seconds, repo }],
       }
     }
 
@@ -495,13 +503,17 @@ export function reducer(state, action) {
     }
 
     case 'BACKGROUND_WORKERS': {
-      // Merge backend data with local toggle overrides
+      // Merge backend data with local toggle overrides — keyed by (repo, name)
+      // in the aggregate view so two repos' same-named workers don't share an
+      // override; name-only in single-repo (unchanged).
+      const isAgg = state.selectedRepoSlug === REPO_ALL
+      const keyOf = w => (isAgg ? `${w.repo ?? ''}#${w.name}` : w.name)
       const localOverrides = Object.fromEntries(
-        state.backgroundWorkers.map(w => [w.name, w.enabled])
+        state.backgroundWorkers.map(w => [keyOf(w), w.enabled])
       )
       const merged = action.data.map(w => ({
         ...w,
-        enabled: localOverrides[w.name] !== undefined ? localOverrides[w.name] : w.enabled,
+        enabled: localOverrides[keyOf(w)] !== undefined ? localOverrides[keyOf(w)] : w.enabled,
       }))
       return { ...state, backgroundWorkers: merged }
     }
@@ -788,6 +800,16 @@ export function reducer(state, action) {
           reviews: [],
           sessionPrsCount: 0,
           events: [],
+          // Drop the prior scope's background workers — they carry the old
+          // repo tagging (single-repo uses "") and would otherwise be filtered
+          // out of the aggregate grid until the next REST poll repopulates them.
+          backgroundWorkers: [],
+          // These are repo-scoped too — clear them so the prior repo's prompts /
+          // pending intents / escalation context don't flash in the new scope
+          // until their next poll refetches.
+          humanInputRequests: {},
+          intents: [],
+          hitlEscalation: null,
           // Reset the dedup watermark — the new scope's events restart from a
           // fresh id space (else lower ids would be watermark-dropped).
           lastSeenId: -1,
@@ -1291,7 +1313,9 @@ export function HydraFlowProvider({ children }) {
   const submitIntent = useCallback(async (text) => {
     dispatch({ type: 'INTENT_SUBMITTED', data: { text } })
     try {
-      const res = await fetch('/api/intent', {
+      // Create the issue in the SELECTED repo. Under repo=__all__ the backend
+      // rejects (an issue needs a specific repo) and the optimistic entry fails.
+      const res = await fetchWithRepo('/api/intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
@@ -1307,7 +1331,7 @@ export function HydraFlowProvider({ children }) {
       dispatch({ type: 'INTENT_FAILED', data: { text } })
       return null
     }
-  }, [])
+  }, [fetchWithRepo])
 
   const submitReport = useCallback(async ({ description, screenshot_base64 }) => {
     const pi = state.pipelineIssues || {}
@@ -1404,9 +1428,14 @@ export function HydraFlowProvider({ children }) {
     } catch { /* ignore — local state already updated */ }
   }, [applyRepoParam, state.selectedRepoSlug])
 
-  const requestChanges = useCallback(async (issueNumber, feedback, stage) => {
+  const requestChanges = useCallback(async (issueNumber, feedback, stage, repo) => {
     try {
-      const resp = await fetch('/api/request-changes', {
+      // Escalate against the ROW's repo (not the aggregate selection) so the
+      // label swap + HITL cause land on the right line under repo=__all__.
+      const url = repo
+        ? `/api/request-changes?repo=${encodeURIComponent(repo)}`
+        : '/api/request-changes'
+      const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ issue_number: issueNumber, feedback, stage }),

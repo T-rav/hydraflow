@@ -45,6 +45,10 @@ const mockBgWorkers = [
   { name: 'dependabot_merge', status: 'ok', enabled: false, last_run: null, details: {} },
 ]
 
+// Under "All repos" every worker carries a repo slug (the backend tags it);
+// the panel groups by it. Tag a copy for aggregate-mode tests.
+const withRepo = (workers, repo) => workers.map((w) => ({ ...w, repo }))
+
 describe('SystemPanel', () => {
   describe('Sub-tabs', () => {
     it('includes Metrics sub-tab when viewing system panel', () => {
@@ -307,7 +311,7 @@ describe('SystemPanel', () => {
         }))
         render(
           <SystemPanel
-            backgroundWorkers={mockBgWorkers}
+            backgroundWorkers={withRepo(mockBgWorkers, 'org-a')}
             onToggleBgWorker={onToggle}
             onTriggerBgWorker={vi.fn()}
           />,
@@ -343,10 +347,27 @@ describe('SystemPanel', () => {
           selectedRepoSlug: REPO_ALL,
           config: { pr_unstick_batch_size: 3, staging_enabled: false, main_branch: 'main', staging_branch: 'staging', rc_cadence_hours: 4 },
         }))
-        render(<SystemPanel backgroundWorkers={mockBgWorkers} onToggleBgWorker={vi.fn()} />)
+        render(<SystemPanel backgroundWorkers={withRepo(mockBgWorkers, 'org-a')} onToggleBgWorker={vi.fn()} />)
         expect(screen.getByTestId('unstick-workers-dropdown')).toBeDisabled()
         expect(screen.getByTestId('staging-enabled-toggle')).toBeDisabled()
         expect(screen.getByTestId('main-branch-input')).toBeDisabled()
+      })
+
+      it('renders one worker section per repo under __all__', () => {
+        const workers = [
+          ...withRepo(mockBgWorkers, 'org-a'),
+          ...withRepo(mockBgWorkers, 'org-b'),
+        ]
+        mockUseHydraFlow.mockReturnValue(defaultMockContext({
+          orchestratorStatus: 'running',
+          backgroundWorkers: workers,
+          selectedRepoSlug: REPO_ALL,
+        }))
+        render(<SystemPanel backgroundWorkers={workers} onToggleBgWorker={vi.fn()} />)
+        expect(screen.getByTestId('workers-repo-org-a')).toBeInTheDocument()
+        expect(screen.getByTestId('workers-repo-org-b')).toBeInTheDocument()
+        // Each repo gets its own card for the same worker — no cross-repo collapse.
+        expect(screen.getAllByTestId('worker-card-dependabot_merge')).toHaveLength(2)
       })
     })
 

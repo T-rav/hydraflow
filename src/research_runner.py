@@ -104,6 +104,7 @@ class ResearchRunner(BaseRunner):
             tool=self._config.planner_tool,
             model=self._config.planner_model,
             disallowed_tools="Write,Edit,NotebookEdit",
+            isolate_user_settings=True,
         )
 
     async def _build_prompt(self, task: Task) -> str:

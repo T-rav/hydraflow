@@ -131,6 +131,58 @@ class TestMetricsEndpoint:
         assert data["inference_lifetime"]["total_tokens"] == 60
         assert data["inference_session"]["total_tokens"] == 60
 
+    @pytest.mark.asyncio
+    async def test_metrics_aggregates_lifetime_and_rates_for_all(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+        from types import SimpleNamespace
+
+        from models import LifetimeStats
+        from tests.helpers import ConfigFactory, make_registry
+
+        def _stub(issues, merged):
+            return SimpleNamespace(
+                get_lifetime_stats=lambda: LifetimeStats(
+                    issues_completed=issues, prs_merged=merged
+                ),
+                get_retries_summary=lambda: {},
+            )
+
+        registry = make_registry(
+            {
+                "slug": "owner-a",
+                "config": ConfigFactory.create(repo="owner/a"),
+                "state": _stub(3, 2),
+                "running": True,
+            },
+            {
+                "slug": "owner-b",
+                "config": ConfigFactory.create(repo="owner/b"),
+                "state": _stub(2, 1),
+                "running": True,
+            },
+        )
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            registry=registry,
+            default_repo_slug="owner-host",
+        )
+        get_metrics = find_endpoint(router, "/api/metrics")
+
+        data = json.loads((await get_metrics(repo="__all__")).body)
+
+        # lifetime summed across repos; rates recomputed from the merged lifetime.
+        assert data["lifetime"]["issues_completed"] == 5
+        assert data["lifetime"]["prs_merged"] == 3
+        assert data["rates"]["merge_rate"] == 3 / 5
+        # per-repo alerting + breakdown are not surfaced aggregated.
+        assert data["thresholds"] == []
+        assert data["repo_metrics"] == {}
+
 
 class TestGitHubMetricsEndpoint:
     @pytest.mark.asyncio
@@ -164,6 +216,59 @@ class TestGitHubMetricsEndpoint:
         assert data["total_closed"] == 10
         assert data["total_merged"] == 8
 
+    @pytest.mark.asyncio
+    async def test_github_metrics_sums_across_repos_for_all(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+        from unittest.mock import patch
+
+        from pr_manager import PRManager
+        from tests.helpers import ConfigFactory, make_registry
+
+        registry = make_registry(
+            {
+                "slug": "owner-a",
+                "config": ConfigFactory.create(repo="owner/a"),
+                "running": True,
+            },
+            {
+                "slug": "owner-b",
+                "config": ConfigFactory.create(repo="owner/b"),
+                "running": True,
+            },
+        )
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            registry=registry,
+            default_repo_slug="owner-host",
+        )
+        get_github_metrics = find_endpoint(router, "/api/metrics/github")
+
+        async def _fake_counts(_self, cfg):
+            if "a" in cfg.repo:
+                return {
+                    "open_by_label": {"hydraflow-plan": 2},
+                    "total_closed": 1,
+                    "total_merged": 3,
+                }
+            return {
+                "open_by_label": {"hydraflow-plan": 1, "hydraflow-ready": 4},
+                "total_closed": 2,
+                "total_merged": 0,
+            }
+
+        with patch.object(PRManager, "get_label_counts", _fake_counts):
+            data = json.loads((await get_github_metrics(repo="__all__")).body)
+
+        # per-label open counts merged; closed/merged totals summed across repos.
+        assert data["open_by_label"] == {"hydraflow-plan": 3, "hydraflow-ready": 4}
+        assert data["total_closed"] == 3
+        assert data["total_merged"] == 3
+
 
 class TestMetricsHistoryEndpoint:
     @pytest.mark.asyncio
@@ -179,6 +284,32 @@ class TestMetricsHistoryEndpoint:
 
         response = await endpoint()
         data = json.loads(response.body)
+        assert data["snapshots"] == []
+
+    @pytest.mark.asyncio
+    async def test_history_returns_empty_series_for_all(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """repo=__all__ returns an empty series (per-repo time-series aren't merged)."""
+        import json
+
+        from tests.helpers import make_registry
+
+        registry = make_registry(
+            {"slug": "owner-a", "running": True},
+            {"slug": "owner-b", "running": True},
+        )
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            registry=registry,
+            default_repo_slug="owner-host",
+        )
+        endpoint = find_endpoint(router, "/api/metrics/history")
+
+        data = json.loads((await endpoint(repo="__all__")).body)
         assert data["snapshots"] == []
 
     @pytest.mark.asyncio

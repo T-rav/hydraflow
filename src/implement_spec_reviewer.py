@@ -356,6 +356,7 @@ class AgentSubagentRunnerAdapter:
             tool=self._config.review_tool,
             model=model,
             disallowed_tools="Write,Edit,NotebookEdit",
+            isolate_user_settings=True,
         )
         # Use the executor's public AgentPort entry point (forwards to
         # _execute under the hood). cwd is repo_root so the reviewer can

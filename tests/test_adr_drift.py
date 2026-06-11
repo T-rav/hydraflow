@@ -132,6 +132,67 @@ def test_superseded_adr_does_not_drift(adr_index: ADRIndex) -> None:
     assert findings == []
 
 
+def test_bare_citation_of_shared_infra_module_does_not_drift(tmp_path: Path) -> None:
+    # Cross-cutting infrastructure modules (config dataclass, shared models,
+    # Port protocols, post-merge handler) are bare-cited by many ADRs as a
+    # dependency. A file-level touch is implementation churn, not a semantic
+    # change to any one ADR's decision — it must NOT drift (the dominant
+    # ADR-drift false-positive source). Require a :Symbol citation to drift.
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_adr(
+        adr_dir,
+        number=50,
+        title="depends on config",
+        status="Accepted",
+        related_files=["src/config.py"],
+    )
+    findings = compute_drift(
+        ADRIndex(adr_dir), pr_number=1, changed_files=["src/config.py"]
+    )
+    assert findings == []
+
+
+def test_symbol_citation_of_shared_infra_module_still_drifts(tmp_path: Path) -> None:
+    # An ADR that genuinely owns a shared-infra symbol cites it at :Symbol
+    # granularity and still drifts when that symbol changes.
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_adr(
+        adr_dir,
+        number=51,
+        title="owns config schema",
+        status="Accepted",
+        related_files=["src/config.py:HydraFlowConfig"],
+    )
+    findings = compute_drift(
+        ADRIndex(adr_dir),
+        pr_number=1,
+        changed_files=["src/config.py:HydraFlowConfig"],
+    )
+    assert len(findings) == 1
+    assert findings[0].adr.number == 51
+
+
+def test_bare_citation_of_non_infra_module_still_drifts(tmp_path: Path) -> None:
+    # Regression guard: the shared-infra suppression must not change file-level
+    # drift for ordinary (non-infra) cited modules.
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_adr(
+        adr_dir,
+        number=52,
+        title="owns widget",
+        status="Accepted",
+        related_files=["src/widget.py"],
+    )
+    findings = compute_drift(
+        ADRIndex(adr_dir), pr_number=1, changed_files=["src/widget.py"]
+    )
+    assert len(findings) == 1
+    assert findings[0].adr.number == 52
+
+
 def test_adr_file_in_diff_helper(adr_index: ADRIndex) -> None:
     adr = next(a for a in adr_index.adrs() if a.number == 1)
     assert _adr_file_in_diff(adr, ["docs/adr/0001-alpha.md"])

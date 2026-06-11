@@ -310,7 +310,9 @@ describe('StreamCard request changes feedback flow', () => {
     fireEvent.click(submitBtn)
 
     await waitFor(() => {
-      expect(onRequestChanges).toHaveBeenCalledWith(42, 'Fix the tests please', 'review')
+      // The row's repo is threaded so the escalation lands on the right line
+      // under repo=__all__.
+      expect(onRequestChanges).toHaveBeenCalledWith(42, 'Fix the tests please', 'review', issue.repo)
     })
   })
 

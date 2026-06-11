@@ -175,6 +175,30 @@ describe('HydraFlowContext reducer', () => {
     expect(next.lastSeenId).toBe(-1)
   })
 
+  it('SELECT_REPO clears prior-scope background workers on a change', () => {
+    const state = {
+      ...initialState,
+      selectedRepoSlug: 'owner-a',
+      backgroundWorkers: [{ name: 'pr_unsticker', status: 'ok', repo: '' }],
+    }
+    const next = reducer(state, { type: 'SELECT_REPO', data: { slug: '__all__' } })
+    expect(next.backgroundWorkers).toEqual([])
+  })
+
+  it('SELECT_REPO clears repo-scoped human-input / intents / escalation on a change', () => {
+    const state = {
+      ...initialState,
+      selectedRepoSlug: 'owner-a',
+      humanInputRequests: { 42: { issue: 42 } },
+      intents: [{ text: 'do a thing', status: 'pending' }],
+      hitlEscalation: { issue: 42 },
+    }
+    const next = reducer(state, { type: 'SELECT_REPO', data: { slug: 'owner-b' } })
+    expect(next.humanInputRequests).toEqual({})
+    expect(next.intents).toEqual([])
+    expect(next.hitlEscalation).toBeNull()
+  })
+
   // --- Phase 4-b2: worker/PR card composite-keying ------------------------
 
   it('worker_update keys by repo so same-issue cards across repos coexist (__all__)', () => {
@@ -1491,6 +1515,22 @@ describe('background_worker_status action', () => {
     })
     const worker = result.backgroundWorkers.find(w => w.name === 'memory_sync')
     expect(worker.interval_seconds).toBeNull()
+  })
+
+  it('__all__ keeps two repos same-named worker (keyed by repo,name)', () => {
+    let s = { ...initialState, selectedRepoSlug: '__all__' }
+    s = reducer(s, { type: 'background_worker_status', repo: 'org-a', data: { worker: 'pr_unsticker', status: 'ok', details: {} } })
+    s = reducer(s, { type: 'background_worker_status', repo: 'org-b', data: { worker: 'pr_unsticker', status: 'ok', details: {} } })
+    expect(s.backgroundWorkers).toHaveLength(2)
+    expect(s.backgroundWorkers.map(w => w.repo).sort()).toEqual(['org-a', 'org-b'])
+  })
+
+  it('single-repo still replaces a same-named worker (name-only keying)', () => {
+    let s = { ...initialState, selectedRepoSlug: null }
+    s = reducer(s, { type: 'background_worker_status', repo: 'org-a', data: { worker: 'pr_unsticker', status: 'ok', details: {} } })
+    s = reducer(s, { type: 'background_worker_status', repo: 'org-a', data: { worker: 'pr_unsticker', status: 'error', details: {} } })
+    expect(s.backgroundWorkers).toHaveLength(1)
+    expect(s.backgroundWorkers[0].status).toBe('error')
   })
 })
 

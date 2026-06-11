@@ -31,6 +31,26 @@ def _plugin_dir_flags() -> list[str]:
     return flags
 
 
+# Setting-source scope for isolated (contract-agent) claude spawns. Restricting
+# the Claude CLI to the ``project`` scope drops user-level plugins and hooks —
+# notably a host-installed superpowers ``SessionStart`` hook that injects
+# "invoke a skill BEFORE any response, explore first" guidance into every
+# headless ``claude -p`` session. That guidance derails strict-JSON contract
+# agents (triage, judges, councils) off their output contract — they explore
+# the repo instead of emitting the verdict — so the verdict parser finds
+# nothing. ``--setting-sources project`` leaves OAuth/keychain auth intact
+# (unlike ``--bare``, which forces ANTHROPIC_API_KEY). Callers that isolate also
+# skip ``_plugin_dir_flags`` so a pre-cloned superpowers ``--plugin-dir`` can't
+# re-introduce the hook inside the Docker image (an explicit ``--plugin-dir``
+# load bypasses ``--setting-sources``).
+_CONTRACT_SETTING_SOURCES = "project"
+
+
+def _claude_isolation_flags() -> list[str]:
+    """Return flags restricting an isolated claude spawn to project settings."""
+    return ["--setting-sources", _CONTRACT_SETTING_SOURCES]
+
+
 # Tools the issue-derived implementer / auto-agent legitimately needs in
 # restricted mode. WebFetch and WebSearch are deliberately EXCLUDED here and
 # additionally placed on the disallow list — they are the agent's built-in
@@ -61,6 +81,7 @@ def build_agent_command(
     max_turns: int | None = None,
     effort: str | None = None,
     restricted: bool = False,
+    isolate_user_settings: bool = False,
 ) -> list[str]:
     """Build a non-interactive command for an agent stage.
 
@@ -72,6 +93,12 @@ def build_agent_command(
     by ``acceptEdits`` + an explicit tool allowlist, and the network-egress
     tools (WebFetch/WebSearch) are disallowed. Codex switches to its
     network-blocked ``workspace-write`` sandbox.
+
+    *isolate_user_settings* (claude only) restricts the spawn to ``project``
+    settings and skips the pre-cloned ``--plugin-dir`` flags. Strict-JSON
+    contract agents (triage, judges, councils) set this so a host/user-level
+    plugin's ``SessionStart`` hook can't inject skill-invocation guidance that
+    breaks the JSON contract — see :data:`_CONTRACT_SETTING_SOURCES`.
     """
     if tool == "codex":
         return _build_codex_command(model=model, restricted=restricted)
@@ -99,7 +126,10 @@ def build_agent_command(
         disallowed_tools = _merge_disallowed(disallowed_tools, _NETWORK_EGRESS_TOOLS)
     else:
         cmd.extend(["--permission-mode", "bypassPermissions"])
-    cmd.extend(_plugin_dir_flags())
+    if isolate_user_settings:
+        cmd.extend(_claude_isolation_flags())
+    else:
+        cmd.extend(_plugin_dir_flags())
     if disallowed_tools:
         cmd.extend(["--disallowedTools", disallowed_tools])
     if max_turns is not None:
@@ -156,6 +186,7 @@ def build_lightweight_command(
     tool: AgentTool,
     model: str,
     prompt: str,
+    isolate_user_settings: bool = False,
 ) -> tuple[list[str], bytes | None]:
     """Build a simple CLI command for lightweight (non-streaming) callers.
 
@@ -170,6 +201,11 @@ def build_lightweight_command(
 
     Large prompts are passed via stdin to avoid hitting the OS
     ``ARG_MAX`` limit (typically ~130 KB on macOS/Linux).
+
+    *isolate_user_settings* (claude only) restricts the spawn to ``project``
+    settings and skips the pre-cloned ``--plugin-dir`` flags, shielding the
+    contract worker from a host/user ``SessionStart`` hook — see
+    :data:`_CONTRACT_SETTING_SOURCES`.
     """
     if tool == "codex":
         cmd = _build_codex_command(model=model)
@@ -208,7 +244,10 @@ def build_lightweight_command(
         input_bytes = None
 
     if tool == "claude":
-        cmd.extend(_plugin_dir_flags())
+        if isolate_user_settings:
+            cmd.extend(_claude_isolation_flags())
+        else:
+            cmd.extend(_plugin_dir_flags())
     return cmd, input_bytes
 
 

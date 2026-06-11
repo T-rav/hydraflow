@@ -603,18 +603,23 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         all_known: dict[str, list[str]] = {}
         for fake, sets in catalog.items():
             helper_methods = sets["test-helper"]
-            # Only cassette-capable fakes (those in the registry) are
-            # adapter-surface audited. Unregistered fakes have no recordable
-            # real-API surface to contract against — skipping them avoids the
-            # cassette-root fallback that previously flagged every method.
-            registered = fake in _FAKE_TO_CASSETTE_DIR
-            if registered:
-                surface_methods = sets["adapter-surface"]
+            # Adapter-surface (cassette) auditing only applies to fakes
+            # explicitly registered in ``_FAKE_TO_CASSETTE_DIR`` — the fakes of
+            # external adapters whose real I/O can be recorded. Internal-port
+            # fakes (a clock, in-memory stores, span-assertion helpers) have no
+            # recordable counterpart, so no cassette can ever cover them.
+            # Registration is the deliberate opt-in; an unmapped fake is skipped
+            # rather than audited against the cassette ROOT (the old
+            # ``.get(fake, "")`` fallback), which flagged every method as a
+            # false gap. Test-helper (scenario) coverage still applies to all
+            # fakes below.
+            if fake in _FAKE_TO_CASSETTE_DIR:
                 cassette_subdir = cassette_root / _FAKE_TO_CASSETTE_DIR[fake]
                 cassetted = catalog_cassette_methods(cassette_subdir)
+                surface_methods = sets["adapter-surface"]
             else:
-                surface_methods = []
                 cassetted = set()
+                surface_methods = []
 
             covered: list[str] = []
             uncovered_surface: list[str] = []
