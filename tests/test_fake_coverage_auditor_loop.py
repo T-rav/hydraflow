@@ -953,3 +953,28 @@ async def test_helper_coverage_counts_any_test_not_just_scenarios(
     )
 
     assert await loop._grep_scenario_for_helper("script_discover") is True
+
+
+@pytest.mark.asyncio
+async def test_grep_helper_uses_stdlib_fallback_when_ripgrep_absent(
+    loop_env, tmp_path, monkeypatch
+) -> None:
+    """With ripgrep off PATH (CI runners, bare deploy hosts), the helper search
+    falls back to a stdlib scan with the same fixed-string semantics."""
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+
+    cfg, state, pr, dedup = loop_env
+    unit_tests = tmp_path / "tests"
+    unit_tests.mkdir(parents=True)
+    (unit_tests / "test_fake_agent.py").write_text(
+        "def test_x():\n    fake.script_ci(['ok'])\n"
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    # Present in a unit test → found via the fallback; absent → not found.
+    assert await loop._grep_scenario_for_helper("script_ci") is True
+    assert await loop._grep_scenario_for_helper("never_called_helper") is False
