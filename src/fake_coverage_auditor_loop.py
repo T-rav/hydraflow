@@ -39,6 +39,7 @@ import ast
 import asyncio
 import json
 import logging
+import shutil
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -305,22 +306,35 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         tests_dir = repo / "tests"
         if not tests_dir.exists():
             return False
-        cmd = [
-            "rg",
-            "--type=py",
-            "-l",
-            "--fixed-strings",
-            f"{helper}(",
-            str(tests_dir),
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
-        # rg exits 0 on match, 1 on no-match, 2+ on error.
-        return proc.returncode == 0 and bool(stdout.strip())
+        needle = f"{helper}("
+        if shutil.which("rg") is not None:
+            cmd = [
+                "rg",
+                "--type=py",
+                "-l",
+                "--fixed-strings",
+                needle,
+                str(tests_dir),
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            # rg exits 0 on match, 1 on no-match, 2+ on error.
+            return proc.returncode == 0 and bool(stdout.strip())
+
+        # Fallback when ripgrep isn't on PATH (e.g. CI runners, or a deploy
+        # host without it) — a stdlib scan with identical fixed-string
+        # semantics, run off the event loop so the file walk doesn't block it.
+        def _scan() -> bool:
+            return any(
+                needle in path.read_text(encoding="utf-8", errors="ignore")
+                for path in tests_dir.rglob("*.py")
+            )
+
+        return await asyncio.to_thread(_scan)
 
     def _render_surface_body(
         self,
