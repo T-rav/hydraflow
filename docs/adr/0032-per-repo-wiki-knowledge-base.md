@@ -16,7 +16,7 @@ Andrej Karpathy's "LLM Knowledge Base" pattern proposes an alternative: instead 
 - `src/wiki_compiler.py:WikiCompiler` — LLM synthesis (compile_topic, synthesize_ingest)
 - `src/repo_wiki_loop.py:RepoWikiLoop` — background maintenance loop
 - `src/base_runner.py:_inject_repo_wiki` — prompt injection into all runners
-- `src/hindsight.py` — existing vector-search memory (complementary, not replaced)
+- Hindsight (`src/hindsight*`) — existing vector-search memory (complementary, not replaced; external integration, no first-party module)
 
 ## Decision
 
@@ -36,7 +36,7 @@ Adopt a file-based, per-repo wiki system with three layers:
 
 - **Active self-healing lint**: The background loop marks entries stale when their source issues close (via `StateTracker` outcomes), prunes entries older than 90 days, and rebuilds the index. The wiki degrades gracefully without manual curation.
 
-- **Drift detection (two layers)**: A deterministic pass (`wiki_drift_detector.detect_drift`) flags entries whose `src/path.py:Symbol` citations point at files or symbols that no longer exist — cheap, side-effect-free, and auto-marks stale. An optional LLM layer (`scan_semantic_drift`, gated by `semantic_drift_enabled`) asks the compilation model whether an entry's CLAIM still matches the current source for entries older than `semantic_drift_min_age_days`, capped at `semantic_drift_max_entries_per_tick` per loop tick. Semantic findings are logged for human review; only the deterministic layer auto-stales.
+- **Drift detection (two layers)**: A deterministic pass (`wiki_drift_detector.detect_drift`) flags entries whose `src/<module>.py:<Symbol>` citations point at files or symbols that no longer exist — cheap, side-effect-free, and auto-marks stale. An optional LLM layer (`scan_semantic_drift`, gated by `semantic_drift_enabled`) asks the compilation model whether an entry's CLAIM still matches the current source for entries older than `semantic_drift_min_age_days`, capped at `semantic_drift_max_entries_per_tick` per loop tick. Semantic findings are logged for human review; only the deterministic layer auto-stales.
 
 - **Depth signals (corroborations + temporal tags)**: every active entry carries a `corroborations` counter in its frontmatter (default 1). `WikiCompiler.dedup_or_corroborate` uses `generalize_pair` to decide whether a newly-ingested entry is a re-discovery of an existing active entry and returns a `CorroborationDecision` carrying the canonical's file path; callers then use `increment_corroboration(path)` to atomically bump the counter instead of writing a sibling duplicate. On the read path, `RepoWikiStore.query_with_tags` returns a `{title: temporal_tag}` map alongside the markdown, and `BaseRunner._inject_repo_wiki` weaves the tags inline as italic lines under each entry — so the planner/reviewer sees `### Always use factories\n*(stable for 6 months (+4))*`. Tag vocabulary: `recently added` (<30d), `stable for N months`, `stable for N year(s)`, `age unknown`; `(+N)` suffix when corroborations > 1. Addresses two depth gaps vs. agentic-memory systems: evidence-weighting and temporal reasoning about when claims settled.
 

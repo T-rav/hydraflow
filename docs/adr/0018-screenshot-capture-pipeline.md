@@ -138,7 +138,7 @@ inadvertently contains sensitive information.
 - `src/ui/src/components/Header.jsx` — `captureDashboardScreenshot()`, `redactSensitiveElements()`
 - `src/ui/src/components/ReportIssueModal.jsx` — annotation canvas and submission
 - `src/ui/src/constants.js` — `SENSITIVE_SELECTORS`
-- `src/report_issue_loop.py` — `ReportIssueLoop._do_work()`
-- `src/screenshot_scanner.py` — `scan_base64_for_secrets()`
-- `src/pr_manager.py` — `PRManager.upload_screenshot_gist()`
-- `src/config.py` — `screenshot_redaction_enabled`, `screenshot_gist_public`
+- `src/report_issue_loop.py:ReportIssueLoop._do_work` — report-issue intake/orchestration
+- `src/screenshot_scanner.py:scan_base64_for_secrets` — backend secret scan (defense layer 3)
+- `src/pr_manager.py:PRManager.upload_screenshot_gist` — gist visibility control (defense layer 4)
+- `src/config.py:screenshot_redaction_enabled`, `src/config.py:screenshot_gist_public` — redaction + gist-visibility flags
