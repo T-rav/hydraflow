@@ -140,6 +140,20 @@ The beat that carries the talk in miniature — deliver it slow. "Here's the for
 
 ---
 
+## The bet had receipts.
+
+**FLUID** · Mar 2025 · principles for code that mutates
+**2,500 conversations** · Mar 2025 · my own discipline, measured: a third never made it past the AI's first response
+**AI Coherence** · Apr 2025 · models produce plausibility, not truth
+
+#### Vigilance measurably fails. Models can't supply truth. Verification has to be structural.
+
+<!--
+The credentials beat, and it's personal data, not opinion — walk it slow, because this is where "walls over vigilance" stops being a temperament and becomes a conclusion. Before v1 died, I'd already spent the spring of 2025 doing the homework. The case study: I exported 2,443 of my own ChatGPT sessions going back to 2023 and scored them against a five-stage decision loop I defined — frame, generate, judge, verify, refine. The findings were self-incriminating. 34% of my sessions never went past the model's first response. Of the loops I did complete, 27% skipped the critical-evaluation step. Say the next line plainly: "I taught test-driven development for twenty years, and my own validation discipline failed a third of the time. That's not a character flaw. That's what sustained contact with a fluent machine does to vigilance." One behavior fixed it: sessions where I asked the AI to critique its own output completed the loop 98% of the time. Hold that number — it comes back later as a job category. The coherence paper is the theory underneath: LLMs are coherence machines, not truth machines; hallucination is incomplete anchoring, not malfunction; truth enters from outside, through grounding and verification. So when v1 died and the fork came, the data had already voted: if the model only produces plausibility and human vigilance measurably fails — even mine — then verification can't be a virtue. It has to be a wall. Both papers are at aibuddy.software/papers; the room can check. NUMBERS verified against the PDFs 2026-06-11: 2,443 sessions, 34% exit at step one, 27% of completed loops skipped validation, 98% completion for critique-involving sessions.
+-->
+
+---
+
 ## Then Steve Yegge published *Gas Town*.
 
 #### January 1, 2026.
@@ -230,7 +244,7 @@ Pay off the cold-open number — this is the factory's workforce. Walk the categ
 Provocateurs synthesize adversarial cases from past failures · run them against the system weekly · challenge its assumptions before reality does
 
 <!--
-The sit-up beat — the factory employs agents whose whole job is to ATTACK it. CorpusLearningLoop mines past skill failures and synthesizes adversarial cases from them; SkillPromptEvalLoop runs that hostile corpus against the built-in skills every week; the advisor pattern wires a skeptical second opinion into PR review and verification. A workforce that maintains, proposes, prunes, audits, repairs, watches, promotes — and red-teams itself. Nobody told it to be paranoid; I encoded the paranoia once and it became a job category. That's who does the work. The next slides are what keeps that workforce honest.
+The sit-up beat — the factory employs agents whose whole job is to ATTACK it. CorpusLearningLoop mines past skill failures and synthesizes adversarial cases from them; SkillPromptEvalLoop runs that hostile corpus against the built-in skills every week; the advisor pattern wires a skeptical second opinion into PR review and verification. A workforce that maintains, proposes, prunes, audits, repairs, watches, promotes — and red-teams itself. Nobody told it to be paranoid; I encoded the paranoia once and it became a job category. And here's the 98% number from the receipts slide coming back: in my own 2025 chat data, asking the AI to critique its own output was the single behavior that almost guaranteed a completed decision loop. The provocateurs are that finding, hired full-time. That's who does the work. The next slides are what keeps that workforce honest.
 -->
 
 ---
@@ -240,7 +254,7 @@ The sit-up beat — the factory employs agents whose whole job is to ATTACK it. 
 Senior reviewers, tribal knowledge, manual discipline — none of it scales to a system that mutates daily.
 
 <!--
-The unifying reframe — give it its own breath before the numbers. Quality enforcement used to be social: the senior reviewer who catches it, the tribal knowledge of who-knows-what, the discipline you hope survives the sprint. A system that rewrites itself daily outruns all of that. So HydraFlow doesn't lower the quality bar — it moves the bar INTO the system: validation continuous, governance executable, scenarios authoritative. If you hear "fluid" and think "lower standards," you've got it exactly backwards.
+The unifying reframe — give it its own breath before the numbers. Quality enforcement used to be social: the senior reviewer who catches it, the tribal knowledge of who-knows-what, the discipline you hope survives the sprint. A system that rewrites itself daily outruns all of that. So HydraFlow doesn't lower the quality bar — it moves the bar INTO the system: validation continuous, governance executable, scenarios authoritative. If you hear "fluid" and think "lower standards," you've got it exactly backwards. And this isn't post-hoc reasoning: the receipts slide in act one is the proof. The social version was measured failing, in me, in March 2025, before the structural version was ever built.
 -->
 
 ---
@@ -481,7 +495,7 @@ Answer the title — for THEM, not just for you. The craft doesn't disappear; it
 
 ## Thank you
 
-HydraFlow · the FLUID principles · V2V
+HydraFlow · the FLUID principles · V2V · the papers: aibuddy.software/papers
 
 <!--
 References, contact, the essay link. Keep it short; the last real slide was the close.
