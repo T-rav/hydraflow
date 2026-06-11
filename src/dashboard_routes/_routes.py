@@ -2228,7 +2228,20 @@ def create_router(
 
     @router.get("/api/timeline")
     async def get_timeline(repo: RepoSlugParam = None) -> JSONResponse:
-        """Return timelines for all tracked issues (repo-scoped)."""
+        """Return timelines for all tracked issues (repo-scoped).
+
+        For ``repo=__all__`` this unions every runtime's timelines and tags
+        each item with its dash slug, so a same-numbered issue in two repos
+        stays distinct.
+        """
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            merged: list[dict[str, Any]] = []
+            for _cfg, _st, _bus, _get_orch, slug in _resolve_runtimes(repo):
+                for timeline in TimelineBuilder(_bus).build_all():
+                    merged.append(
+                        timeline.model_copy(update={"repo": slug}).model_dump()
+                    )
+            return JSONResponse(merged)
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         builder = TimelineBuilder(_bus)
         timelines = builder.build_all()
@@ -2238,7 +2251,20 @@ def create_router(
     async def get_timeline_issue(
         issue_number: int, repo: RepoSlugParam = None
     ) -> JSONResponse:
-        """Return the event timeline for a single issue (repo-scoped)."""
+        """Return the event timeline for a single issue (repo-scoped).
+
+        For ``repo=__all__`` this searches every runtime and returns the first
+        match (repo-tagged). Issue numbers aren't globally unique, so the first
+        registered repo carrying the issue wins; 404 if no repo has it.
+        """
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            for _cfg, _st, _bus, _get_orch, slug in _resolve_runtimes(repo):
+                timeline = TimelineBuilder(_bus).build_for_issue(issue_number)
+                if timeline is not None:
+                    return JSONResponse(
+                        timeline.model_copy(update={"repo": slug}).model_dump()
+                    )
+            return JSONResponse({"error": "Issue not found"}, status_code=404)
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         builder = TimelineBuilder(_bus)
         timeline = builder.build_for_issue(issue_number)
@@ -2251,8 +2277,17 @@ def create_router(
         """Return persisted timelines for completed (merged) issues (repo-scoped).
 
         Unlike /api/timeline which derives from ephemeral events,
-        these survive event log rotation.
+        these survive event log rotation. For ``repo=__all__`` it unions every
+        runtime's persisted timelines, each tagged with its dash slug.
         """
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            merged: list[dict[str, Any]] = []
+            for _cfg, _st, _bus, _get_orch, slug in _resolve_runtimes(repo):
+                for timeline in _st.get_all_completed_timelines().values():
+                    merged.append(
+                        timeline.model_copy(update={"repo": slug}).model_dump()
+                    )
+            return JSONResponse(merged)
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         timelines = _state.get_all_completed_timelines()
         return JSONResponse([t.model_dump() for t in timelines.values()])

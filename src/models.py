@@ -3215,6 +3215,11 @@ class IssueTimeline(BaseModel):
     pr_number: int | None = None
     pr_url: HttpUrl = ""
     branch: str = ""
+    # Dash slug of the owning repo. Empty in single-repo responses (the default
+    # scope); populated only when an aggregate (``repo=__all__``) response
+    # unions timelines across repos, so a same-numbered issue in two repos
+    # stays distinguishable. Not persisted — set at the API layer.
+    repo: str = ""
 
 
 class CompletedTimeline(BaseModel):
@@ -3229,6 +3234,9 @@ class CompletedTimeline(BaseModel):
     total_duration_seconds: float = 0.0
     phase_durations: dict[str, float] = Field(default_factory=dict)
     pr_number: int | None = None
+    # Dash slug of the owning repo — populated only in aggregate
+    # (``repo=__all__``) responses; empty when stored or served single-repo.
+    repo: str = ""
 
 
 # --- Repo Audit ---
