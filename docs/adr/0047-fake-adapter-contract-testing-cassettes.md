@@ -55,6 +55,17 @@ Weekly, `ContractRefreshLoop` (spec §4.2) re-records the corpus against the rea
 - A new call shape is added to a fake. The fake code must be backed by a cassette proving the new shape matches the real API.
 - An adapter's cassette directory is empty but the fake is wired into production code paths. Fix by recording a baseline cassette even if the corpus is small.
 
+## Auditor scope (right-sizing, 2026-06-11)
+
+`FakeCoverageAuditorLoop` (spec §4.7) enforces this ADR by flagging un-cassetted fake methods. Its **adapter-surface** audit is scoped to the **cassette-capable** adapters only — those with a real recorder in `src/contract_recording.py` and a YAML cassette corpus: **github, git, docker** (claude is contract-tested via JSONL streams, not the YAML cassette-dir). This is the `_FAKE_TO_CASSETTE_DIR` registry.
+
+Two rules keep the audit honest and noise-free:
+
+1. **No recordable surface → not audited.** Fakes with no real recorder/cassette corpus (`FakeBeads`, `FakeSentry`, `FakeHTTP`, `FakeSubprocessRunner`, `FakeFS`, `FakeLLM`) are *out of scope* for the adapter-surface audit — there is nothing to contract a cassette against. Adding one of these to the cassette system means first adding a recorder + cassette dir (per "When to add a new cassette"), *then* registering it. Auditing them before that infrastructure exists only produces false positives.
+2. **Scaffolding is not adapter surface.** A fake public method with no counterpart on its real production adapter (or that adapter's Port) is in-memory test scaffolding (`add_issue`, `from_seed`, `seed_*`, `set_*`) — there is no real API call to record, so it is excluded via `_FAKE_REAL_SURFACE_SOURCES`.
+
+The genuine remaining github adapter-surface debt (real `PRManager` methods lacking cassettes, e.g. mutating `gh pr create`/`gh pr merge`) is **blocked on an isolated recording sandbox** (issue #9080); see "When to replace this pattern" and the negative consequence above re: live-recording credentials.
+
 ## When to replace this pattern
 
 If a service becomes so dynamic (e.g. non-idempotent responses, per-request IDs that can't be normalized) that cassettes can't faithfully capture it, the fake is no longer a valid test double. Options:

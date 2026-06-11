@@ -2,14 +2,25 @@
 
 Spec: `docs/superpowers/specs/2026-04-22-trust-architecture-hardening-design.md`
 §4.7. Introspects fake classes under `src/mockworld/fakes/` via
-``ast.parse`` and compares two method sets to their coverage sources:
+``ast.parse`` and compares three method sets to their coverage sources:
 
-- ``adapter-surface`` — public non-private methods. Covered by a
-  cassette under ``tests/trust/contracts/cassettes/<adapter>/`` whose
-  ``input.command`` names the method.
-- ``test-helper`` — helpers the scenarios drive (``script_*``,
-  ``fail_service``, ``heal_service``, ``set_state``). Covered by a
-  scenario test under ``tests/scenarios/`` that calls the helper.
+- ``adapter-surface`` — public methods that exist on the fake's real
+  production counterpart (or its Port). Audited **only** for the
+  cassette-capable fakes in ``_FAKE_TO_CASSETTE_DIR`` (github/git/docker,
+  ADR-0047 scope). Covered by a cassette under
+  ``tests/trust/contracts/cassettes/<adapter>/`` whose ``input.command``
+  names the method.
+- ``test-helper`` — helpers the tests drive (``script_*``,
+  ``fail_service``, ``heal_service``, ``set_state``). Covered by any
+  test under ``tests/`` that calls the helper (unit or scenario).
+- ``scaffolding`` — public methods with **no real-adapter counterpart**
+  (in-memory builders/inspectors like ``add_issue``, ``from_seed``,
+  ``seed_*``). Ignored: there is no real API call to record against, so
+  flagging them is noise. Computed via ``_FAKE_REAL_SURFACE_SOURCES``.
+
+Fakes absent from ``_FAKE_TO_CASSETTE_DIR`` have no recordable cassette
+surface and are skipped for the adapter-surface audit entirely (they remain
+eligible for the test-helper audit). See ADR-0047 for the cassette scope.
 
 Files ``find_label`` + ``fake_coverage_gap_label`` + one of
 ``adapter_surface_label`` | ``test_helper_label`` per **rollup** —
@@ -79,8 +90,70 @@ def _is_helper(name: str, class_name: str = "") -> bool:
     return any(name.startswith(p) for p in _HELPER_PREFIXES) or name in _HELPER_NAMES
 
 
-def catalog_fake_methods(fake_dir: Path) -> dict[str, dict[str, list[str]]]:
+# Per-fake real-production-surface sources. A fake public method that is
+# neither a test-helper nor present on its real counterpart (or that
+# counterpart's Port protocol) is in-memory *scaffolding* — it has no
+# recordable real-API call, so the auditor must not treat it as an
+# un-cassetted adapter-surface gap (e.g. ``FakeGitHub.add_issue`` /
+# ``from_seed`` / ``seed_*`` build fake state, not gh calls). Each value is
+# a tuple of ``(module_stem, class_name)`` resolved under ``<repo>/src/``.
+# Only fakes whose surface contains such scaffolding need an entry; FakeGit
+# and FakeDocker surfaces are already clean via the helper carve-outs above.
+_FAKE_REAL_SURFACE_SOURCES: dict[str, tuple[tuple[str, str], ...]] = {
+    "FakeGitHub": (("pr_manager", "PRManager"), ("ports", "PRPort")),
+}
+
+
+def _public_methods_of_class(py_path: Path, class_name: str) -> set[str]:
+    """Return the public (non-underscore) method names of ``class_name`` in
+    ``py_path``. Empty set if the file or class is missing/unparseable."""
+    try:
+        tree = ast.parse(py_path.read_text(), filename=str(py_path))
+    except (OSError, SyntaxError):
+        return set()
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            return {
+                child.name
+                for child in node.body
+                if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
+                and not child.name.startswith("_")
+            }
+    return set()
+
+
+def _real_surface_for_fake(fake: str, repo_root: Path) -> set[str] | None:
+    """Union of public methods across ``fake``'s real-surface sources.
+
+    Returns ``None`` when the fake has no mapping *or* when none of its
+    source files resolve — the latter guard prevents a missing real adapter
+    (e.g. a synthetic test tree) from silently reclassifying the entire fake
+    surface as scaffolding.
+    """
+    sources = _FAKE_REAL_SURFACE_SOURCES.get(fake)
+    if not sources:
+        return None
+    src_dir = repo_root / "src"
+    union: set[str] = set()
+    resolved_any = False
+    for module_stem, class_name in sources:
+        methods = _public_methods_of_class(src_dir / f"{module_stem}.py", class_name)
+        if methods:
+            resolved_any = True
+            union |= methods
+    return union if resolved_any else None
+
+
+def catalog_fake_methods(
+    fake_dir: Path, repo_root: Path | None = None
+) -> dict[str, dict[str, list[str]]]:
     """AST-scan ``fake_dir/*.py`` for classes starting with ``Fake``.
+
+    When ``repo_root`` is given, fakes with a ``_FAKE_REAL_SURFACE_SOURCES``
+    entry have their non-helper publics split against the real production
+    surface: methods absent from it land in ``scaffolding`` (ignored by the
+    auditor) rather than ``adapter-surface``. Without ``repo_root`` (or when
+    the real adapter can't be resolved) the legacy split is preserved.
 
     Returns::
 
@@ -88,6 +161,7 @@ def catalog_fake_methods(fake_dir: Path) -> dict[str, dict[str, list[str]]]:
           "FakeGitHub": {
             "adapter-surface": ["create_issue", "close_issue", ...],
             "test-helper":     ["script_ci", "fail_service", ...],
+            "scaffolding":     ["add_issue", "from_seed", ...],
           },
           ...
         }
@@ -108,8 +182,14 @@ def catalog_fake_methods(fake_dir: Path) -> dict[str, dict[str, list[str]]]:
                 continue
             if not node.name.startswith("Fake"):
                 continue
+            real_surface = (
+                _real_surface_for_fake(node.name, repo_root)
+                if repo_root is not None
+                else None
+            )
             surface: list[str] = []
             helpers: list[str] = []
+            scaffolding: list[str] = []
             for child in node.body:
                 if not isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
                     continue
@@ -118,11 +198,14 @@ def catalog_fake_methods(fake_dir: Path) -> dict[str, dict[str, list[str]]]:
                     continue
                 if _is_helper(name, node.name):
                     helpers.append(name)
+                elif real_surface is not None and name not in real_surface:
+                    scaffolding.append(name)
                 else:
                     surface.append(name)
             catalog[node.name] = {
                 "adapter-surface": sorted(surface),
                 "test-helper": sorted(helpers),
+                "scaffolding": sorted(scaffolding),
             }
     return catalog
 
@@ -153,17 +236,21 @@ def catalog_cassette_methods(cassette_dir: Path) -> set[str]:
     return methods
 
 
-# Map from fake class name → cassette sub-directory.
+# Map from fake class name → cassette sub-directory. Scoped to the
+# cassette-*capable* adapters only: those with a real recorder in
+# ``src/contract_recording.py`` and a YAML cassette corpus under
+# ``tests/trust/contracts/cassettes/`` (ADR-0047 scope = github/git/docker;
+# claude is JSONL-stream contract-tested separately, not via this YAML
+# cassette-dir audit). Fakes absent from this map are *not* adapter-surface
+# audited — there is no recordable real-API surface to contract against, so
+# flagging their methods produced pure noise (FakeBeads/FakeSentry/FakeHTTP/
+# FakeSubprocessRunner/FakeFS/FakeLLM). They remain eligible for the
+# scenario-driven *test-helper* audit. See ADR-0047 "When to add a new
+# cassette" and the auditor right-sizing in fix/rightsize-fake-coverage-auditor.
 _FAKE_TO_CASSETTE_DIR: dict[str, str] = {
     "FakeGitHub": "github",
     "FakeDocker": "docker",
     "FakeGit": "git",
-    "FakeBeads": "beads",
-    "FakeSentry": "sentry",
-    "FakeHTTP": "http",
-    "FakeSubprocessRunner": "subprocess",
-    "FakeFS": "fs",
-    "FakeLLM": "llm",
 }
 
 
@@ -205,10 +292,18 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         return self._config.fake_coverage_auditor_interval
 
     async def _grep_scenario_for_helper(self, helper: str) -> bool:
-        """Return True iff ``tests/scenarios/`` contains a call to ``helper``."""
+        """Return True iff any test under ``tests/`` calls ``helper``.
+
+        A fake helper exercised by *any* test (unit or scenario) is part of
+        the working contract and not dead code — restricting the search to
+        ``tests/scenarios/`` produced false positives for helpers that are
+        legitimate unit-test fixtures (e.g. FakeLLM phase scripts driven by
+        ``tests/test_fake_llm_phase_scripts.py``; FakeAgent script helpers by
+        ``tests/test_fake_agent.py``). See the auditor right-sizing notes.
+        """
         repo = self._config.repo_root
-        scenario_dir = repo / "tests" / "scenarios"
-        if not scenario_dir.exists():
+        tests_dir = repo / "tests"
+        if not tests_dir.exists():
             return False
         cmd = [
             "rg",
@@ -216,7 +311,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
             "-l",
             "--fixed-strings",
             f"{helper}(",
-            str(scenario_dir),
+            str(tests_dir),
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -285,8 +380,8 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         lines = [
             "## Fake coverage gap — test helper",
             "",
-            f"Fake class `{fake}` exposes helpers that no scenario under "
-            f"`tests/scenarios/` invokes (grep-based search).",
+            f"Fake class `{fake}` exposes helpers that no test under "
+            f"`tests/` invokes (grep-based search).",
             "",
             f"**Unexercised helpers ({len(uncovered)}):**",
             "",
@@ -307,7 +402,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         lines.extend(
             [
                 "",
-                "**Repair:** add a scenario that calls each helper so it is "
+                "**Repair:** add a test that calls each helper so it is "
                 "part of the working contract. Spec §4.7; filed by "
                 "`fake_coverage_auditor` (#8986 rollup).",
                 "",
@@ -490,7 +585,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         repo = self._config.repo_root
         fake_dir = repo / "src" / "mockworld" / "fakes"
         cassette_root = repo / "tests" / "trust" / "contracts" / "cassettes"
-        catalog = catalog_fake_methods(fake_dir)
+        catalog = catalog_fake_methods(fake_dir, repo_root=repo)
         if not catalog:
             return {"status": "no_fakes", "filed": 0}
 
