@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from config import HydraFlowConfig
 from dashboard_routes._routes import RouteContext
+from dashboard_routes._stats_merge import merge_lifetime_stats
 from metrics_manager import get_metrics_cache_dir
 from models import (
     LifetimeStats,
@@ -22,6 +23,47 @@ from models import (
 )
 from prompt_telemetry import PromptTelemetry
 from route_types import REPO_ALL, RepoSlugParam
+
+
+def _compute_rates(lifetime: LifetimeStats, total_retries: int) -> dict[str, float]:
+    """Derive the dashboard rate metrics from a (possibly merged) LifetimeStats."""
+    rates: dict[str, float] = {}
+    total_reviews = (
+        lifetime.total_review_approvals + lifetime.total_review_request_changes
+    )
+    if lifetime.issues_completed > 0:
+        rates["merge_rate"] = lifetime.prs_merged / lifetime.issues_completed
+        rates["quality_fix_rate"] = (
+            lifetime.total_quality_fix_rounds / lifetime.issues_completed
+        )
+        rates["hitl_escalation_rate"] = (
+            lifetime.total_hitl_escalations / lifetime.issues_completed
+        )
+        rates["avg_implementation_seconds"] = (
+            lifetime.total_implementation_seconds / lifetime.issues_completed
+        )
+    if total_reviews > 0:
+        rates["first_pass_approval_rate"] = (
+            lifetime.total_review_approvals / total_reviews
+        )
+        rates["reviewer_fix_rate"] = lifetime.total_reviewer_fixes / total_reviews
+    if total_retries:
+        rates["retries_per_stage"] = total_retries
+    return rates
+
+
+def _merge_time_percentiles(durations: list[float]) -> dict[str, float]:
+    """avg/p50/p90 over a duration list (mirrors StateTracker._compute_percentiles)."""
+    if not durations:
+        return {}
+    sorted_d = sorted(durations)
+    n = len(sorted_d)
+    return {
+        "avg": round(sum(sorted_d) / n, 1),
+        "p50": round(sorted_d[n // 2], 1),
+        "p90": round(sorted_d[min(int(n * 0.9), n - 1)], 1),
+    }
+
 
 if TYPE_CHECKING:
     from pr_manager import PRManager
@@ -116,37 +158,49 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
         """Return lifetime stats, derived rates, time-to-merge, and thresholds."""
+        # Aggregate view: merge lifetime stats across every repo, recompute rates
+        # + time-to-merge from the merge, and sum inference totals. Thresholds are
+        # a per-repo alerting concept (skipped); repo_metrics is a per-repo
+        # breakdown the panel doesn't render in aggregate.
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            lifetimes: list[LifetimeStats] = []
+            total_retries = 0
+            inf_lifetime: dict[str, int] = {}
+            inf_session: dict[str, int] = {}
+            for _cfg, _state, _bus, _get_orch, _slug in ctx.resolve_runtimes(repo):
+                lifetimes.append(_state.get_lifetime_stats())
+                total_retries += sum(_state.get_retries_summary().values())
+                telemetry = PromptTelemetry(_cfg)
+                for key, val in telemetry.get_lifetime_totals().items():
+                    inf_lifetime[key] = inf_lifetime.get(key, 0) + val
+                orch = _get_orch()
+                session_id = orch.current_session_id if orch else ""
+                if session_id:
+                    for key, val in telemetry.get_session_totals(session_id).items():
+                        inf_session[key] = inf_session.get(key, 0) + val
+            merged = merge_lifetime_stats(lifetimes)
+            return JSONResponse(
+                MetricsResponse(
+                    lifetime=merged,
+                    rates=_compute_rates(merged, total_retries),
+                    time_to_merge=_merge_time_percentiles(merged.merge_durations),
+                    thresholds=[],
+                    inference_lifetime=inf_lifetime,
+                    inference_session=inf_session,
+                    repo_metrics={},
+                ).model_dump()
+            )
+
         _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
         lifetime = _state.get_lifetime_stats()
-        rates: dict[str, float] = {}
-        total_reviews = (
-            lifetime.total_review_approvals + lifetime.total_review_request_changes
-        )
-        if lifetime.issues_completed > 0:
-            rates["merge_rate"] = lifetime.prs_merged / lifetime.issues_completed
-            rates["quality_fix_rate"] = (
-                lifetime.total_quality_fix_rounds / lifetime.issues_completed
-            )
-            rates["hitl_escalation_rate"] = (
-                lifetime.total_hitl_escalations / lifetime.issues_completed
-            )
-            rates["avg_implementation_seconds"] = (
-                lifetime.total_implementation_seconds / lifetime.issues_completed
-            )
-        if total_reviews > 0:
-            rates["first_pass_approval_rate"] = (
-                lifetime.total_review_approvals / total_reviews
-            )
-            rates["reviewer_fix_rate"] = lifetime.total_reviewer_fixes / total_reviews
+        retries = _state.get_retries_summary()
+        rates = _compute_rates(lifetime, sum(retries.values()))
         time_to_merge = _state.get_merge_duration_stats()
         thresholds = _state.check_thresholds(
             _cfg.quality_fix_rate_threshold,
             _cfg.approval_rate_threshold,
             _cfg.hitl_rate_threshold,
         )
-        retries = _state.get_retries_summary()
-        if retries:
-            rates["retries_per_stage"] = sum(retries.values())
 
         telemetry = PromptTelemetry(_cfg)
         inference_lifetime = telemetry.get_lifetime_totals()
@@ -165,12 +219,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 inference_lifetime=inference_lifetime,
                 inference_session=inference_session,
                 repo_metrics=_build_repo_metrics(
-                    _cfg,
-                    _state,
-                    lifetime,
-                    rates,
-                    time_to_merge,
-                    retries,
+                    _cfg, _state, lifetime, rates, time_to_merge, retries
                 ),
             ).model_dump()
         )
@@ -209,7 +258,14 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
     async def get_metrics_history(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Historical snapshots from the metrics issue + current in-memory snapshot."""
+        """Historical snapshots from the metrics issue + current in-memory snapshot.
+
+        Returns an empty series for ``repo=__all__``: the snapshots are per-repo
+        time series that can't be naively interleaved into one chart, so the
+        aggregate view shows nothing rather than mislabeled default-repo history.
+        """
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            return JSONResponse(MetricsHistoryResponse().model_dump())
         _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
         orch = _get_orch()
         if orch is None:
