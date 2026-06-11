@@ -166,6 +166,48 @@ async def test_do_work_files_surface_gap(loop_env, monkeypatch, tmp_path) -> Non
     assert "hydraflow-fake-coverage-gap" in labels
 
 
+async def test_do_work_skips_surface_audit_for_unmapped_fake(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """A fake NOT registered in ``_FAKE_TO_CASSETTE_DIR`` must not file an
+    adapter-surface gap.
+
+    Internal-port fakes (a clock, in-memory stores, assertion helpers) have no
+    recordable external I/O, so no cassette can ever cover them. The empty-string
+    fallback (``_FAKE_TO_CASSETTE_DIR.get(fake, "")``) previously audited such a
+    fake against the cassette *root* — flagging every public method as a false
+    gap (the dominant fake-coverage false positive).
+    """
+    cfg, state, pr, dedup = loop_env
+    state.get_fake_coverage_rollup_issue.return_value = None
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    # FakeClock is not in _FAKE_TO_CASSETTE_DIR; now/monotonic are surface methods.
+    (fake_dir / "fake_clock.py").write_text(
+        "class FakeClock:\n    def now(self): ...\n    def monotonic(self): ...\n"
+    )
+    (tmp_path / "tests" / "trust" / "contracts" / "cassettes").mkdir(parents=True)
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_reconcile():
+        return None
+
+    async def fake_list_titles():
+        return set()
+
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    stats = await loop._do_work()
+
+    assert stats["filed"] == 0
+    pr.create_issue.assert_not_awaited()
+
+
 async def test_do_work_files_helper_gap(loop_env, monkeypatch, tmp_path) -> None:
     """Un-exercised ``script_*`` helper → one ``test-helper`` rollup issue."""
     cfg, state, pr, dedup = loop_env
