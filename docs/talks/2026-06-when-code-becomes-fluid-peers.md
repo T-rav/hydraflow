@@ -30,6 +30,12 @@ By mid-2026 the loop-engineering thesis is consensus, not a hot take:
   crediting Steinberger and Cherny.
 - **Steve Yegge:** 8-stage model of AI-assisted development topping out at
   "build your own orchestrator"; runs 20-30 parallel agents via Gas Town.
+- **Geoff Huntley:** invented the primitive everyone else is elaborating. The
+  Ralph loop, named after Ralph Wiggum: `while :; do cat PROMPT.md | claude;
+  done`. One prompt re-fed forever, repo and git as the only memory, convergence
+  by brute-force rerun. Discovered February 2024, well before the chorus; his
+  current framing is "everything is a Ralph loop." Delivered a $50k-quoted MVP
+  for ~$297 in tokens (verify against primary before quoting).
 
 Talk consequence: I do not have to convince the room the horizon exists. They
 arrive believing it. So the talk should not re-argue the thesis. It should pick
@@ -44,6 +50,7 @@ axis is the spine of the comparison.
 
 | Peer | Human in routine review? | What carries the trust |
 |---|---|---|
+| Geoff Huntley | No human while it runs; reads results after | Stateless rerun: same prompt re-fed until convergence forces self-review |
 | Addy Osmani | Yes, human is the backstop verifier | Human judgment + maker/verifier split |
 | Boris Cherny | Removed from prompting, kept as judgment gate | "A brutal review gate" + human on the other end |
 | Peter Steinberger | No human code review | Automated tests pass = trust; reviews the prompt, not the code |
@@ -124,6 +131,8 @@ valid; the talk just shows the second path.
 - Confirm exact Steinberger quotes ("Prompt Requests," deploy-without-reading)
   against his own X posts / OpenClaw transcript, not secondary writeups.
 - Confirm the Cherny "brutal review gate" phrasing against a primary source.
+- Confirm Huntley's $297-vs-$50k MVP figure and the Ralph origin story (Feb 2024)
+  against his own posts or the Dev Interrupted episode, not secondary writeups.
 - Confirm Yegge's "never read Beads / 225k lines" and the Gas Town agent counts
   against the Changelog episode or his own posts.
 - **Naming collision:** my notes use "beads"; Yegge has a system literally called
@@ -137,6 +146,10 @@ valid; the talk just shows the second path.
 - Steinberger profile (secondary): https://www.toolmesh.ai/news/peter-steinberger-ai-driven-software-development
 - OpenClaw / Steinberger transcript: https://singjupost.com/how-i-created-openclaw-the-breakthrough-ai-agent-peter-steinberger-transcript/
 - Cherny on loops + review gate (secondary): https://www.developersdigest.tech/blog/codex-loops-boris-cherny-agent-routines
+- Cherny "write loops" primary: Acquired Unplugged (WorkOS), June 2 2026: https://www.youtube.com/watch?v=RkQQ7WEor7w
+- Huntley, Ralph Wiggum as a software engineer: https://ghuntley.com/ralph/
+- Huntley, everything is a ralph loop: https://ghuntley.com/loop/
+- Huntley on inventing Ralph (Dev Interrupted): https://linearb.io/dev-interrupted/podcast/inventing-the-ralph-wiggum-loop
 - Yegge on babysitting agents (Changelog & Friends #96): https://changelog.com/friends/96
 - Yegge's 8 levels: https://www.augmentcode.com/guides/steve-yegge-8-levels-ai-assisted-development
 - Understanding Yegge's Gas Town: https://leosimons.com/2026/01/02/understanding-yegges-gas-town/

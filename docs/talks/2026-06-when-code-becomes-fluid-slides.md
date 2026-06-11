@@ -41,6 +41,12 @@ PRODUCTION NOTES:
   quote verbatim at tests/test_gates_activation.py:148; gates-drift.yml = watcher-for-the-
   watchers receipt; PR #8460 21:43:31Z → #8463 created 22:07:51, merged 22:25:14 (42 min
   break-to-fixed total).
+- CHERNY QUOTE SLIDE: wording matches published transcriptions of Acquired Unplugged
+  (WorkOS, June 2 2026, youtube.com/watch?v=RkQQ7WEor7w); CONFIRM verbatim against the video
+  before stage, same flag as the essay. The "~700k views in a day" texture and Huntley's
+  "$297 vs $50k MVP" receipt are from secondary sources; verify against primary
+  (ghuntley.com/ralph, his own posts) or soften to "it went around the industry in a day"
+  and "a fraction of the quoted cost."
 - The her-and-Claude ritual has NOT run yet. Keep it future tense on stage. The close is
   "I'll let you know," and that only stays true if nothing earlier pretends it already happened.
 - InsightMesh chronology VERIFIED from git (2026-06-09):
@@ -184,7 +190,25 @@ The thesis. Let the slide sit in silence for a few seconds first. Pour code fast
 #### No human approval in the routine loop.
 
 <!--
-This is the lean-back line — say it plainly and let it cost something. What got pulled out: code review, PR approval, the planning of routine work. Every approval in the day-to-day pipeline is made by another agent. I'm pulled in for high-blast-radius decisions, and I verify direction on a pass — not line by line. My job is to author the conventions the system reviews against, and to hold the boundary it cannot cross. So the obvious question: if I'm not the one watching the code, what is? Hold that question — the rest of this act is the whole answer, and it starts with who does the work. Next slide.
+This is the lean-back line — say it plainly and let it cost something. What got pulled out: code review, PR approval, the planning of routine work. Every approval in the day-to-day pipeline is made by another agent. I'm pulled in for high-blast-radius decisions, and I verify direction on a pass — not line by line. My job is to author the conventions the system reviews against, and to hold the boundary it cannot cross. So the obvious question: if I'm not the one watching the code, what is? Hold that question — the rest of this act is the whole answer. And I'm not the only one whose job description rewrote itself this spring. Next slide.
+-->
+
+---
+
+## Three weeks ago, the man who built Claude Code said it out loud.
+
+> *"I don't prompt Claude anymore. I have loops that are running. They're the ones prompting Claude and figuring out what to do. My job is to write loops."*
+
+#### Boris Cherny, Head of Claude Code · June 2, 2026
+
+<!--
+The recognition beat. The clip went viral inside a day (secondary sources say ~700k views in 24 hours; VERIFY that figure before speaking it, or just say "it went around the industry in a day"). Half this room has seen it, so let them recognize it before you say a word. Then two moves, in order.
+
+Move one, push on "anymore": prompting didn't disappear. It got compiled. I still prompt once, at the top, when I file an issue that states intent. The loops turn that single prompt into the ten thousand they fire at Claude on my behalf. Writing a loop is writing those prompts ahead of time, once, as reviewed and tested code, instead of typing them live and throwing them away. "Write loops" isn't a smaller job than prompting was. It's prompting moved up a level and made durable.
+
+Move two, the disambiguation the room needs: when most of the industry hears "write loops," they picture Geoff Huntley's Ralph loop, the famous bash one-liner: while true, cat PROMPT.md, pipe to the agent, repeat. One prompt, re-fed forever, the repo as the only memory, done when the backlog converges. And it works; Huntley shipped a fifty-thousand-dollar-quoted MVP for about three hundred dollars in tokens. I'll even concede the kinship: at the bottom of every loop in my registry there's a Ralph loop trying to get out. An agent, a prompt, a retry budget. But a Ralph loop is a harness around one task. It finishes. What I run is what "write loops" means when the loops never finish. Which sets up the question this act answers: forty-seven of WHAT, exactly? Next slide.
+
+SOURCE: Acquired Unplugged (presented by WorkOS), June 2 2026, https://www.youtube.com/watch?v=RkQQ7WEor7w. Wording matches published transcriptions; CONFIRM against the video before stage (same flag as the essay). Huntley receipts: ghuntley.com/ralph, ghuntley.com/loop, Dev Interrupted episode; verify the $297-vs-$50k figure against his own posts before speaking it.
 -->
 
 ---
@@ -349,13 +373,14 @@ The honest slide — deliver with conviction, not hedging; the room trusts every
 
 ## I'm not out here alone.
 
-Steinberger trusts the tests. Cherny keeps a gate.
-Yegge babysits the fleet. I trust the walls.
+Huntley trusts the rerun. Steinberger trusts the tests.
+Cherny keeps a gate. Yegge babysits the fleet.
+I trust the walls.
 
 #### Different bets on one question: what holds when you step back?
 
 <!--
-Thirty seconds, peers not foils. And Steve returns — I borrowed his question and made the opposite bet on the answer. He built my kind of machine, Gas Town, twenty or thirty agents over a memory system — and his answer is to babysit it; he literally retitled himself "AI babysitter" and gates it on staying vigilant. Mine is to move the watching into the structure so it doesn't depend on me being sharp. Both are live experiments; neither is finished. Then the plant that the turn detonates: "Every one of us, though, is working where failure is LEGIBLE — a red test, a bad diff, a broken build. Hold that."
+Forty seconds, peers not foils. Huntley first, one breath: the Ralph loop bets on stateless brute force, rerun the same prompt until the work converges, the repo is the only memory, read the result in the morning. Cherny next, and the callback earns its keep: the write-loops quote from earlier in this talk is his, and the same man still keeps a brutal human review gate on his own loops. The engineer who stopped prompting did not stop reading. And Steve returns — I borrowed his question and made the opposite bet on the answer. He built my kind of machine, Gas Town, twenty or thirty agents over a memory system — and his answer is to babysit it; he literally retitled himself "AI babysitter" and gates it on staying vigilant. Mine is to move the watching into the structure so it doesn't depend on me being sharp. All of these are live experiments; none is finished. Then the plant that the turn detonates: "Every one of us, though, is working where failure is LEGIBLE — a red test, a bad diff, a broken build. Hold that."
 -->
 
 ---
@@ -461,7 +486,7 @@ HydraFlow · the FLUID principles · V2V
 <!--
 References, contact, the essay link. Keep it short; the last real slide was the close.
 
-=== Q&A ARMORY — the four hardest questions, answered in advance ===
+=== Q&A ARMORY — the five hardest questions, answered in advance ===
 
 1. "What stops it from optimizing against its own tests?" — Concede the gap first: "Honestly?
    Less than I want. My scenarios live in the repo it edits; StrongDM holds theirs outside the
@@ -490,4 +515,16 @@ References, contact, the essay link. Keep it short; the last real slide was the 
    contract (kill switch, budget, idempotent checkpoints, auto-discovery test), and the
    taxonomy means a new loop slots into a category instead of inventing a pattern. Sprawl is
    47 special cases. This is 8 patterns with 47 instances."
+
+5. "Isn't this just a Ralph loop with extra steps? Why not just Ralph it?" — Concede the
+   kinship first; Huntley himself says everything is a Ralph loop, and at the bottom of every
+   loop in my registry there IS one trying to get out: an agent, a prompt, a retry budget.
+   "The difference is what the loop is FOR. A Ralph loop is a harness around one task: one
+   prompt, no state between iterations, done when it converges, and convergence is the model
+   running out of things to fix. My loops never finish. They hold a shared operating contract,
+   kill switch, budget, credit-aware yield, they coordinate through a label state machine so
+   every work item has exactly one owner, and a merge is authorized by executable gates, not
+   by the model's own satisfaction. Ralph is a harness. This is an organization of harnesses.
+   If you have one task and a weekend, Ralph it; I mean that. If the loop has to run the
+   factory while you sleep, the loop needs an employer."
 -->
