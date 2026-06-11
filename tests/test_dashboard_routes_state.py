@@ -830,6 +830,141 @@ class TestMultiRepoReadOnlyRouteScoping:
         default = json.loads((await endpoint(repo=None)).body)
         assert not any(t.get("issue_number") == 42 for t in default)
 
+    @pytest.mark.asyncio
+    async def test_timeline_aggregates_and_repo_tags_across_repos_for_all(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        from events import EventType
+        from tests.conftest import EventFactory
+        from tests.helpers import make_registry
+
+        # Issue #7 lives in BOTH repos on their own buses — the repo tag is what
+        # keeps the two timelines distinct under the aggregate scope.
+        bus_a = EventBus()
+        await bus_a.publish(
+            EventFactory.create(
+                type=EventType.TRIAGE_UPDATE, data={"issue": 7, "status": "done"}
+            )
+        )
+        bus_b = EventBus()
+        await bus_b.publish(
+            EventFactory.create(
+                type=EventType.TRIAGE_UPDATE, data={"issue": 7, "status": "done"}
+            )
+        )
+        registry = make_registry(
+            {"slug": "owner-a", "event_bus": bus_a, "running": True},
+            {"slug": "owner-b", "event_bus": bus_b, "running": True},
+        )
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            registry=registry,
+            default_repo_slug="owner-host",
+        )
+        endpoint = find_endpoint(router, "/api/timeline")
+
+        rows = json.loads((await endpoint(repo="__all__")).body)
+        by_repo = {r["repo"] for r in rows if r["issue_number"] == 7}
+        assert by_repo == {"owner-a", "owner-b"}
+
+    @pytest.mark.asyncio
+    async def test_timeline_issue_searches_every_repo_for_all(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        from events import EventType
+        from tests.conftest import EventFactory
+        from tests.helpers import make_registry
+
+        bus_a = EventBus()  # repo-a (searched first) has no #99
+        bus_b = EventBus()
+        await bus_b.publish(
+            EventFactory.create(
+                type=EventType.TRIAGE_UPDATE, data={"issue": 99, "status": "done"}
+            )
+        )
+        registry = make_registry(
+            {"slug": "owner-a", "event_bus": bus_a, "running": True},
+            {"slug": "owner-b", "event_bus": bus_b, "running": True},
+        )
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            registry=registry,
+            default_repo_slug="owner-host",
+        )
+        endpoint = find_endpoint(router, "/api/timeline/issue/{issue_number}")
+
+        # Found in repo-b even though repo-a is searched first → tagged owner-b.
+        found = json.loads((await endpoint(99, repo="__all__")).body)
+        assert found["issue_number"] == 99
+        assert found["repo"] == "owner-b"
+
+        # Present in no repo → 404.
+        missing = await endpoint(123, repo="__all__")
+        assert missing.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_completed_timelines_aggregate_across_repos_for_all(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        from models import CompletedTimeline
+        from tests.helpers import make_registry
+
+        # Colliding issue #5 completed in both repos; the repo tag de-collides.
+        state_a = SimpleNamespace(
+            get_all_completed_timelines=lambda: {
+                5: CompletedTimeline(issue_number=5, title="a-five")
+            }
+        )
+        state_b = SimpleNamespace(
+            get_all_completed_timelines=lambda: {
+                5: CompletedTimeline(issue_number=5, title="b-five")
+            }
+        )
+        registry = make_registry(
+            {"slug": "owner-a", "state": state_a, "running": True},
+            {"slug": "owner-b", "state": state_b, "running": True},
+        )
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            registry=registry,
+            default_repo_slug="owner-host",
+        )
+        endpoint = find_endpoint(router, "/api/timeline/completed")
+
+        rows = json.loads((await endpoint(repo="__all__")).body)
+        tagged = {(r["repo"], r["title"]) for r in rows}
+        assert tagged == {("owner-a", "a-five"), ("owner-b", "b-five")}
+
+    @pytest.mark.asyncio
+    async def test_timeline_single_repo_leaves_repo_tag_empty(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        from events import EventType
+        from tests.conftest import EventFactory
+
+        # Mode-aware contract: single-repo responses carry an empty repo tag
+        # (the default scope), mirroring /api/metrics + /api/system/workers.
+        await event_bus.publish(
+            EventFactory.create(
+                type=EventType.TRIAGE_UPDATE, data={"issue": 3, "status": "done"}
+            )
+        )
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(router, "/api/timeline")
+
+        rows = json.loads((await endpoint(repo=None)).body)
+        three = next(r for r in rows if r["issue_number"] == 3)
+        assert three["repo"] == ""
+
 
 # ---------------------------------------------------------------------------
 # GET /api/prs
