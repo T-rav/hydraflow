@@ -1,49 +1,59 @@
-// Context: where the pre-push arch-check hook fits in the developer-tools surface
+// C4 Context — Fake-adapter contract testing (ADR-0047) and where the
+// github mutation recorder (issue #8693) sits.
 specification {
-  element actor
   element system
-  element component
+  element container
+  element person
+  element external
 }
 
 model {
-  contributor = actor "Human Contributor" {
-    description "Pushes feature branches; subject to local hooks."
+  operator = person 'Operator / CI lane' {
+    description 'Runs on-demand cassette regeneration; reviews refresh PRs.'
   }
 
-  bot = actor "HydraFlow Bot" {
-    description "PR-creating loops. Pushes via --no-verify; bypasses hooks by design."
+  hydraflow = system 'HydraFlow contract-testing subsystem' {
+    description 'Records real adapter behaviour into cassettes and replays them against fakes to prove the fakes never silently diverge.'
+
+    recorders = container 'Recorders (src/contract_recording.py)' {
+      description 'Run the REAL gh/git/docker/claude CLIs and emit cassettes. record_github gains a sandbox-safe mutation path.'
+    }
+    refreshLoop = container 'ContractRefreshLoop' {
+      description 'Weekly: record -> diff vs committed -> open refresh PR. Github mutations stay OFF here (deletion-sweep) until full corpus is recordable.'
+    }
+    regenScript = container 'Manual regen (scripts/record_github_cassettes.py + make target)' {
+      description 'Human/CI entry point that records github mutation cassettes on demand and writes them into the committed corpus.'
+    }
+    replayGate = container 'Replay gate (tests/trust/contracts)' {
+      description 'Replays each committed cassette through the matching fake; drift fails CI.'
+    }
+    corpus = container 'Committed cassette corpus (tests/trust/contracts/cassettes/github)' {
+      description 'Hand-authored baselines today; close_issue becomes recorder-backed.'
+    }
   }
 
-  hf = system "HydraFlow Repo" {
-    githooks = component "Local Git Hooks" {
-      description ".githooks/pre-commit + .githooks/pre-push (active when core.hooksPath=.githooks)."
-    }
-    archRunner = component "arch.runner (--check / --emit)" {
-      description "Regenerates docs/arch/generated/ from source; --check strips footers and diffs."
-    }
-    diagramLoop = component "DiagramLoop (L24)" {
-      description "Caretaker; auto-regens every 4h and opens chore(arch): regenerate PR."
-    }
-    archRegenWorkflow = component "arch-regen.yml CI" {
-      description "GitHub Action: runs arch.runner --check on every PR. Source of truth."
-    }
-    p5Audit = component "Audit P5.8" {
-      description "Asserts .githooks/pre-push exists and references quality-lite."
-    }
+  ghCli = external 'gh CLI + GitHub API' {
+    description 'Real gh binary; mutating ops hit the contracts sandbox repo.'
+  }
+  sandboxRepo = external 'hydraflow-contracts-sandbox repo' {
+    description 'Throwaway issues are created then left closed (terminal-state contract).'
   }
 
-  contributor -> githooks "git push triggers pre-push"
-  githooks -> archRunner "make arch-check (planned addition)"
-  bot -> archRegenWorkflow "git push --no-verify -> CI runs check"
-  diagramLoop -> archRunner "--emit on 4h cadence"
-  archRegenWorkflow -> contributor "Fails PR if drift; contributor must amend"
-  p5Audit -> githooks "validates hook content"
+  operator -> regenScript 'invokes make record-github-cassettes'
+  operator -> refreshLoop 'reviews refresh PRs'
+  regenScript -> recorders 'record_github(record_mutations=True)'
+  refreshLoop -> recorders 'record_*(...) (github mutations OFF by default)'
+  recorders -> ghCli 'gh issue create / gh issue close'
+  ghCli -> sandboxRepo 'creates + closes throwaway issue'
+  recorders -> corpus 'writes stable canonical close_issue.yaml'
+  regenScript -> corpus 'copies recorded cassette into committed tree'
+  refreshLoop -> corpus 'diffs recordings vs committed'
+  replayGate -> corpus 'replays committed cassettes through fakes'
 }
 
 views {
-  view contextView of hf {
-    title "Pre-push arch-check: developer-tools context"
+  view context {
+    title 'Issue #8693 — github mutation recorder context'
     include *
-    autoLayout TopBottom
   }
 }
