@@ -1,0 +1,114 @@
+// Issue #9436 — Contract-test coverage for FakeGitHub promotion-PR methods.
+// Captures the fake-vs-frozen replay gate topology and where the two new
+// cassettes + dispatcher branches slot in.
+
+specification {
+  element system
+  element component
+  element file
+  element method
+  tag new        // added by this issue
+  tag existing
+  tag audit
+}
+
+model {
+
+  contractGate = system 'Fake-Fidelity Contract Gate' {
+    description 'Replays frozen gh-CLI baselines through FakeGitHub to detect fake drift (ADR-0047).'
+
+    replayHarness = component '_replay.replay_cassette' {
+      #existing
+      description 'Loads a cassette, invokes the fake via callback, asserts exit_code/stdout/stderr equal under normalizers.'
+    }
+
+    schema = component 'contracts._schema' {
+      #existing
+      description 'Cassette Pydantic model + normalizer registry (pr_number, sha, iso8601). Re-exported to tests via _schema shim.'
+    }
+
+    dispatcher = component '_invoke_fake_github' {
+      #existing
+      description 'if-chain mapping cassette.input.command -> FakeGitHub method call -> FakeOutput. 11 branches today.'
+
+      brCreatePromotion = method 'create_promotion_pr branch' {
+        #new
+        description 'NEW: call fake.create_promotion_pr(rc_branch=...), emit stored PR url as stdout.'
+      }
+      brMergePromotion = method 'merge_promotion_pr branch' {
+        #new
+        description 'NEW: seed PR, call fake.merge_promotion_pr(n), assert merged side-effect, emit merge stdout.'
+      }
+    }
+
+    cassetteCorpus = component 'cassettes/github/*.yaml' {
+      #existing
+      description 'Hand-authored baselines (recorder_sha 00000000, baseline_only true).'
+
+      cassCreatePromotion = file 'create_promotion_pr.yaml' { #new }
+      cassMergePromotion  = file 'merge_promotion_pr.yaml'  { #new }
+    }
+  }
+
+  fakeGitHub = component 'FakeGitHub' {
+    #existing
+    description 'src/mockworld/fakes/fake_github.py — stateful gh fake (PRManager + PRPort surface).'
+    mCreatePromotion = method 'create_promotion_pr(*, rc_branch, title, body) -> int'
+    mMergePromotion  = method 'merge_promotion_pr(pr_number) -> bool'
+  }
+
+  realSurface = component 'PRManager / PRPort' {
+    #existing
+    description 'src/pr_manager.py + src/ports.py — real gh-backed promotion methods (StagingPromotionLoop, ADR-0042).'
+  }
+
+  auditor = component 'FakeCoverageAuditorLoop' {
+    #audit
+    description 'AST-scans FakeGitHub publics vs cassette input.command set; files rollup for uncovered adapter-surface methods.'
+  }
+
+  // --- replay-time data flow ---
+  replayHarness -> dispatcher 'invoke_fake(cassette)'
+  replayHarness -> schema 'load + normalize'
+  dispatcher -> brCreatePromotion
+  dispatcher -> brMergePromotion
+  brCreatePromotion -> mCreatePromotion 'await'
+  brMergePromotion -> mMergePromotion 'await'
+  dispatcher -> cassetteCorpus 'parametrized over'
+  cassetteCorpus -> cassCreatePromotion
+  cassetteCorpus -> cassMergePromotion
+
+  // --- fidelity relationship ---
+  fakeGitHub -> realSurface 'must mirror behavior of'
+
+  // --- audit closes the loop ---
+  auditor -> fakeGitHub 'AST scan publics'
+  auditor -> cassetteCorpus 'reads input.command set'
+  auditor -> realSurface 'computes adapter-surface = publics(PRManager ∪ PRPort)'
+}
+
+views {
+  view contractTopology {
+    title 'Issue #9436 — FakeGitHub promotion-PR contract coverage'
+    include *
+    include contractGate.*
+    include fakeGitHub.*
+    style element {
+      color slate
+    }
+    style * {
+      opacity 30%
+    }
+  }
+
+  dynamic view replayFlow {
+    title 'Replay flow for a promotion-PR cassette'
+    replayHarness -> dispatcher 'replay_cassette(path)'
+    dispatcher -> cassCreatePromotion 'read input.command = create_promotion_pr'
+    dispatcher -> mCreatePromotion 'await create_promotion_pr(rc_branch=...)'
+    mCreatePromotion -> dispatcher 'returns pr_number; url stored on FakePR'
+    dispatcher -> replayHarness 'FakeOutput(0, url+\\n, "")'
+    replayHarness -> schema 'apply pr_number normalizer to both sides'
+    schema -> replayHarness 'assert equal -> pass/fail'
+  }
+}
