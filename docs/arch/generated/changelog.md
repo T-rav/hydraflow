@@ -6,9 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
-- `eb92994` — fix(trust): min-sample guard + repaired semantics + trust-loop scoping for repair_ratio (#9458) (#9458) *(2026-06-12)*
-- `725f5a8` — fix(pipeline): break the human-required escalation cycle (ADR-0084 PR-1) (#9439) (#9439) *(2026-06-12)*
-- `5ae5f3b` — Fixes #9100: entry_evidence_loop swallows CreditExhaustedError and ... (#9451) (#9451) *(2026-06-12)*
+- `94c67d7` — chore: salvage uncommitted changes for issue #8693 *(2026-06-12)*
+- `1eba9d8` — chore(arch): regen arch artifacts to HEAD (538152bb) *(2026-06-12)*
+- `3bf35a5` — Merge origin/staging: add ADR-0084 auto-agent universal root-cause gate *(2026-06-12)*
+- `538152b` — feat(recording): recorder-side gh issue close/create/merge_pr support (#8693) (#8693) *(2026-06-12)*
+- `839152b` — chore: salvage uncommitted changes for issue #8693 *(2026-06-12)*
 - `d0f190f` — docs(adr): ADR-0084 — Auto-Agent as a universal root-cause HITL gate (Proposed) (#9435) (#9435) *(2026-06-12)*
 - `0c3c314` — fix(retrospective): route stale review-insights to the factory, not HITL (#9227) (#9431) (#9431) *(2026-06-11)*
 - `3f90a67` — fix(adr-drift): symbol-qualify owned citations + pr_manager shared-infra (#9405) (#9405) *(2026-06-11)*
