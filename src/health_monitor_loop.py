@@ -583,7 +583,12 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             )
 
             insight_store = ReviewInsightStore(self._config.repo_memory_dir)
-            records = insight_store.load_recent(50)
+            # Sample current_count over the configured review_insight_window so
+            # it matches the baseline pre_count window (#9444). A hardcoded 50
+            # vs a pre_count measured over review_insight_window (default 10)
+            # made current_count >= pre_count permanently true for frequent
+            # categories, perpetually re-filing false stale-insight HITL recs.
+            records = insight_store.load_recent(self._config.review_insight_window)
             stale = verify_proposals(insight_store, records)
             for category in stale:
                 # Informational HITL-recommendation status, not a warning — this

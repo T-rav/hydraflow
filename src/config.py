@@ -285,6 +285,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("trust_fleet_sanity_interval", "HYDRAFLOW_TRUST_FLEET_SANITY_INTERVAL", 600),
     ("label_drift_watcher_interval", "HYDRAFLOW_LABEL_DRIFT_WATCHER_INTERVAL", 600),
     ("loop_anomaly_issues_per_hour", "HYDRAFLOW_LOOP_ANOMALY_ISSUES_PER_HOUR", 10),
+    (
+        "loop_anomaly_repair_min_sample",
+        "HYDRAFLOW_LOOP_ANOMALY_REPAIR_MIN_SAMPLE",
+        3,
+    ),
     ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 3600),
     ("contract_refresh_interval", "HYDRAFLOW_CONTRACT_REFRESH_INTERVAL", 604800),
     ("max_fake_repair_attempts", "HYDRAFLOW_MAX_FAKE_REPAIR_ATTEMPTS", 3),
@@ -717,7 +722,7 @@ class HydraFlowConfig(BaseModel):
     agent_unrestricted_tools: bool = Field(
         default=False,
         description=(
-            "Escape hatch (ADR-0084): when True, issue-derived implementer/auto-agent "
+            "Escape hatch (ADR-0092): when True, issue-derived implementer/auto-agent "
             "spawns use the legacy bypassPermissions/danger-full-access mode instead of "
             "the hardened acceptEdits + tool-allowlist + WebFetch/WebSearch-disallow "
             "mode. Leave False unless the restricted allowlist breaks a backend."
@@ -2329,7 +2334,7 @@ class HydraFlowConfig(BaseModel):
         description="Labels for stuck ADR drift escalations (paired with hitl_escalation_label)",
     )
 
-    # Trust fleet — MemoryBacklogLoop (ADR-0057)
+    # Trust fleet — MemoryBacklogLoop (ADR-0089)
     memory_backlog_interval_seconds: int = Field(
         default=86_400,
         ge=3_600,
@@ -2567,6 +2572,18 @@ class HydraFlowConfig(BaseModel):
         description=(
             "TrustFleetSanityLoop: `repair_failures_total / repair_successes_total` "
             "over 24h breach threshold (spec §12.1)."
+        ),
+    )
+    loop_anomaly_repair_min_sample: int = Field(
+        default=3,
+        ge=1,
+        le=1000,
+        description=(
+            "TrustFleetSanityLoop: minimum 24h `failed` count before the "
+            "repair_ratio detector escalates a zero-success (`no_successes`) "
+            "loop. Below this floor the signal is too small to escalate and "
+            "the detector returns `insufficient_data` (false-positive guard, "
+            "issue #9458)."
         ),
     )
     loop_anomaly_tick_error_ratio: float = Field(
@@ -3019,6 +3036,11 @@ class HydraFlowConfig(BaseModel):
             self.verify_label,
         ):
             result.extend(labels)
+        # ``human-required`` is orthogonal to the stage machine, but listing it
+        # here ensures ``swap_pipeline_labels`` clears it on a successful HITL
+        # correction — so a corrected issue re-enters the pipeline clean instead
+        # of carrying a stale blocker forever (ADR-0084, pillar C / anti-cycle).
+        result.append("human-required")
         return result
 
     @property

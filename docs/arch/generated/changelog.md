@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `94c67d7` — chore: salvage uncommitted changes for issue #8693 *(2026-06-12)*
 - `1eba9d8` — chore(arch): regen arch artifacts to HEAD (538152bb) *(2026-06-12)*
 - `3bf35a5` — Merge origin/staging: add ADR-0084 auto-agent universal root-cause gate *(2026-06-12)*
 - `538152b` — feat(recording): recorder-side gh issue close/create/merge_pr support (#8693) (#8693) *(2026-06-12)*

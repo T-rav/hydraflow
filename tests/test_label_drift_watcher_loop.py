@@ -1,4 +1,4 @@
-"""Tests for LabelDriftWatcherLoop (ADR-0056).
+"""Tests for LabelDriftWatcherLoop (ADR-0088).
 
 The loop runs ``find_label_drift`` per tick and reconciles each pair via
 two ``swap_pipeline_labels`` calls. We mock the PRPort directly to test

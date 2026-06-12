@@ -43,7 +43,7 @@ Build a trust fleet of **10 autonomous background loops plus 2 non-loop subsyste
 ### Non-loop subsystems
 
 - **§4.10 Product-phase evaluators:** `discover-completeness` + `shape-coherence` skills wired into `DiscoverRunner`/`ShapeRunner` dispatch. Not a loop — a skill-retry gate on Discover/Shape phase outputs.
-- **§4.11 Cost + trust observability:** shared cost aggregator (`src/dashboard_routes/_cost_rollups.py`), 4 diagnostics cost routes, `/api/trust/fleet` endpoint, 4 React UI components (FactoryCostSummary, PerLoopCostTable, WaterfallView, FactoryCostTab), daily + per-issue budget alerts.
+- **§4.11 Cost + trust observability:** shared cost aggregator (`src/dashboard_routes/_cost_rollups.py:build_rolling_24h`), 4 diagnostics cost routes, `/api/trust/fleet` endpoint, 4 React UI components (FactoryCostSummary, PerLoopCostTable, WaterfallView, FactoryCostTab), daily + per-issue budget alerts.
 
 ### Bounded meta-observability
 
@@ -89,14 +89,14 @@ The following files carry this ADR's decisions and must be kept in sync with any
 
 - `src/config.py` — loop interval fields, anomaly thresholds, budget-alert configs.
 - `src/models.py` — `StateData` fields for every new loop (attempts counters, last-green markers, dedup surfaces).
-- `src/orchestrator.py` — `bg_loop_registry` entries for all 10 loops + `set_bg_workers` post-ctor injection calls.
+- `src/orchestrator.py:HydraFlowOrchestrator` — `bg_loop_registry` entries for all 10 loops + `set_bg_workers` post-ctor injection calls.
 - `src/service_registry.py:build_services`, `src/service_registry.py:ServiceRegistry` — dataclass fields + `build_services` instantiation for each loop.
 - `src/pr_manager.py` — per-issue cost-alert hook (§4.11).
-- `src/trust_fleet_sanity_loop.py` — meta-observability implementation (§12.1).
-- `src/health_monitor_loop.py` — dead-man-switch for the meta-observer.
-- `src/corpus_learning_loop.py`, `src/contract_refresh_loop.py`, `src/staging_bisect_loop.py`, `src/principles_audit_loop.py`, `src/flake_tracker_loop.py`, `src/skill_prompt_eval_loop.py`, `src/fake_coverage_auditor_loop.py`, `src/rc_budget_loop.py`, `src/wiki_rot_detector_loop.py` — the nine watched trust loops.
-- `src/discover_phase.py`, `src/discover_runner.py`, `src/shape_phase.py`, `src/shape_runner.py` — §4.10 product-phase evaluator dispatch (extends ADR-0031 with evaluator skill retry + HITL escalation).
-- `src/report_issue_loop.py` — §4.11 daily-budget sweep hook inside `_do_work` (additive; does not change the screenshot-capture behavior covered by ADR-0018).
+- `src/trust_fleet_sanity_loop.py:TrustFleetSanityLoop` — meta-observability implementation (§12.1).
+- `src/health_monitor_loop.py:HealthMonitorLoop` — dead-man-switch for the meta-observer.
+- `src/corpus_learning_loop.py:CorpusLearningLoop`, `src/contract_refresh_loop.py:ContractRefreshLoop`, `src/staging_bisect_loop.py:StagingBisectLoop`, `src/principles_audit_loop.py:PrinciplesAuditLoop`, `src/flake_tracker_loop.py:FlakeTrackerLoop`, `src/skill_prompt_eval_loop.py:SkillPromptEvalLoop`, `src/fake_coverage_auditor_loop.py:FakeCoverageAuditorLoop`, `src/rc_budget_loop.py:RCBudgetLoop`, `src/wiki_rot_detector_loop.py:WikiRotDetectorLoop` — the nine watched trust loops.
+- `src/discover_phase.py:DiscoverPhase`, `src/discover_runner.py:DiscoverRunner`, `src/shape_phase.py:ShapePhase`, `src/shape_runner.py:ShapeRunner` — §4.10 product-phase evaluator dispatch (extends ADR-0031 with evaluator skill retry + HITL escalation).
+- `src/report_issue_loop.py:ReportIssueLoop` — §4.11 daily-budget sweep hook inside `_do_work` (additive; does not change the screenshot-capture behavior covered by ADR-0018).
 
 ## Update Log
 

@@ -1,6 +1,6 @@
 """MemoryBacklogLoop — promote session-memory feedback to the find queue.
 
-ADR-0057. See `docs/superpowers/specs/2026-05-07-tier2-enforcement-batch-design.md` §6
+ADR-0089. See `docs/superpowers/specs/2026-05-07-tier2-enforcement-batch-design.md` §6
 for the design rationale, and `docs/wiki/memory-feedback/README.md` for the
 mirror frontmatter schema.
 
@@ -138,7 +138,7 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
     async def _commit_mirror_updates(self, issue_numbers: list[int]) -> None:
         """Commit `pending → issue-open` frontmatter updates to git history.
 
-        Per ADR-0057: the loop commits status transitions so the audit trail
+        Per ADR-0089: the loop commits status transitions so the audit trail
         lives in git history, not just on-disk frontmatter. Without this,
         edits to `docs/wiki/memory-feedback/*.md` accumulate as uncommitted
         modifications in the orchestrator's working tree, conflicting with

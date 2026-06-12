@@ -14,7 +14,7 @@ Accepted
 
 ## Context
 
-[ADR-0059](0059-atlas-knowledge-graph-dashboard.md) shipped the Atlas dashboard with a unified `Articles` browser that lists ADRs and wiki entries side-by-side. [ADR-0060](0060-atlas-graph-view-and-provenance.md) added ADR nodes to the graph with `relates_to` edges to terms.
+[ADR-0090](0090-atlas-knowledge-graph-dashboard.md) shipped the Atlas dashboard with a unified `Articles` browser that lists ADRs and wiki entries side-by-side. [ADR-0060](0060-atlas-graph-view-and-provenance.md) added ADR nodes to the graph with `relates_to` edges to terms.
 
 Wiki entries — bot-generated knowledge nuggets captured by `RepoWikiLoop` from review escalations, gotchas, patterns, etc. — are still graph-invisible. The `Term` Pydantic model has carried an `evidence: list[str]` field since [ADR-0053](0053-ubiquitous-language-as-living-artifact.md) and a one-shot migration script (`scripts/migrate_entries_to_term_evidence.py`) populates it via LLM matching, but the dashboard does nothing with it.
 
@@ -59,7 +59,7 @@ The unified Articles list gains a third filter dimension alongside `Type` and th
 
 - [ADR-0053](0053-ubiquitous-language-as-living-artifact.md) — UL terms + `evidence` field
 - [ADR-0054](0054-term-auto-proposer-loop.md) — `TermProposerLoop`
-- [ADR-0059](0059-atlas-knowledge-graph-dashboard.md) — Atlas Phase 1
+- [ADR-0090](0090-atlas-knowledge-graph-dashboard.md) — Atlas Phase 1
 - [ADR-0060](0060-atlas-graph-view-and-provenance.md) — Atlas Phase 2 (graph + ADR nodes)
 - `scripts/migrate_entries_to_term_evidence.py` — entry→term linker
 - `src/repo_wiki.py` — `RepoWikiStore`, `WikiEntry`

@@ -179,3 +179,46 @@ async def test_timeout_pairs_correctly() -> None:
         max_attempts=3,
     )
     pr.add_labels.assert_awaited_with(42, ["human-required", "timeout"])
+
+
+@pytest.mark.asyncio
+async def test_retry_keeps_issue_eligible_without_human_label() -> None:
+    # A `retry` below the attempt cap adds no labels and removes none — the
+    # issue keeps `hitl-escalation` (no `human-required`) so the loop re-attempts
+    # next cycle (ADR-0084 pillar B).
+    pr = AsyncMock()
+    state = MagicMock()
+    state.get_auto_agent_attempts = MagicMock(return_value=1)
+    out = await apply_decision(
+        issue_number=42,
+        sub_label="flaky-test-stuck",
+        result=_result("retry"),
+        pr_port=pr,
+        state=state,
+        max_attempts=3,
+    )
+    pr.add_labels.assert_not_awaited()
+    pr.remove_label.assert_not_awaited()
+    assert out["exhausted"] is False
+    assert out["status"] == "retry"
+
+
+@pytest.mark.asyncio
+async def test_retry_at_cap_escalates_to_human() -> None:
+    # A `retry` that exhausts the attempt budget MUST escalate to a human — its
+    # base label map adds no `human-required`, so the exhaustion branch does.
+    pr = AsyncMock()
+    state = MagicMock()
+    state.get_auto_agent_attempts = MagicMock(return_value=3)
+    out = await apply_decision(
+        issue_number=42,
+        sub_label="flaky-test-stuck",
+        result=_result("retry"),
+        pr_port=pr,
+        state=state,
+        max_attempts=3,
+    )
+    assert out["exhausted"] is True
+    pr.add_labels.assert_awaited_once_with(
+        42, ["human-required", "auto-agent-exhausted"]
+    )
