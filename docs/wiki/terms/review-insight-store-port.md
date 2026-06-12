@@ -5,13 +5,13 @@ kind: "port"
 bounded_context: "shared-kernel"
 code_anchor: "src/ports.py:ReviewInsightStorePort"
 aliases: ["review insight store port", "review insight port"]
-related: []
-evidence: []
+related: [{"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}]
+evidence: ["01KRBX2N4QP7VW8FGH3J5YD0M3"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T00:00:00.000000+00:00"
-updated_at: "2026-05-19T00:00:00.000000+00:00"
+updated_at: "2026-06-12T04:18:46.416686+00:00"
 ---
 
 ## Definition
