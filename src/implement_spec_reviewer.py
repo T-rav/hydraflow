@@ -396,3 +396,36 @@ async def compute_branch_diff(
     except (TimeoutError, FileNotFoundError, OSError):
         return ""
     return getattr(result, "stdout", "") or ""
+
+
+async def compute_branch_changed_files(
+    workspace: Path,
+    branch: str,
+    base_branch: str,
+    *,
+    runner_run_simple,  # noqa: ANN001 — duck-typed run_simple callable
+    timeout: int = 30,
+) -> list[str]:
+    """Return the changed file paths of ``branch`` vs ``base_branch``.
+
+    Uses ``git diff --name-only`` so callers (e.g. the null-delivery guard) can
+    classify the change set without parsing a unified diff. Returns an empty
+    list on any error or when there is no diff.
+    """
+    try:
+        result = await runner_run_simple(
+            [
+                "git",
+                "diff",
+                "--name-only",
+                f"origin/{base_branch}...{branch}",
+            ],
+            cwd=str(workspace),
+            timeout=timeout,
+        )
+    except (TimeoutError, FileNotFoundError, OSError):
+        return []
+    stdout = getattr(result, "stdout", "")
+    if not isinstance(stdout, str):
+        return []
+    return [line.strip() for line in stdout.splitlines() if line.strip()]
