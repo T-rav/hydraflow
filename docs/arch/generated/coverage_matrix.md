@@ -40,7 +40,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `PrinciplesAuditLoop` | ✅ [0045, 0056] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_principles_audit_loop.py` | ✅ in catalog | ❌ |
 | `RCBudgetLoop` | ✅ [0045] | ✅ [rc-budget-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_rc_budget_loop.py` | ✅ in catalog | ✅ `s20_rc_budget_no_regression.py` |
 | `RepoWikiLoop` | ✅ [0032, 0053, 0061, 0062, 0064] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_repo_wiki_loop.py` | ✅ in catalog | ❌ |
-| `ReportIssueLoop` | ✅ [0013, 0018, 0028] | ✅ [report-issue-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_report_issue_loop.py` | ✅ in catalog | ✅ `s19_report_issue_empty_queue.py` |
+| `ReportIssueLoop` | ✅ [0013, 0018, 0028, 0045] | ✅ [report-issue-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_report_issue_loop.py` | ✅ in catalog | ✅ `s19_report_issue_empty_queue.py` |
 | `RetrospectiveLoop` | ✅ [0074] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_retrospective_loop.py` | ✅ in catalog | ✅ `s18_retrospective_empty_queue.py` |
 | `RunsGCLoop` | ✅ [0073] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_runs_gc_loop.py` | ✅ in catalog | ✅ `s47_runs_gc_idle_poll.py` |
 | `SandboxFailureFixerLoop` | ✅ [0052, 0063] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_sandbox_failure_fixer_loop.py` | ✅ in catalog | ✅ `s38_sandbox_fixer_richer_context.py` |

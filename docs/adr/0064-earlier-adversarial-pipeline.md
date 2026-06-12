@@ -5,7 +5,7 @@
 - **Supersedes:** none
 - **Superseded by:** none
 - **Related:** [ADR-0001](0001-five-concurrent-async-loops.md) (five async loops), [ADR-0002](0002-labels-as-state-machine.md) (labels as state machine), [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker loop pattern), [ADR-0051](0051-iterative-production-readiness-review.md) (iterative production-readiness review), [ADR-0053](0053-ubiquitous-language-as-living-artifact.md) (ubiquitous language as living artifact). See also `docs/wiki/dark-factory.md` §3 (convergence loop).
-- **Enforced by:** `src/adversarial_retry_loop.py` (shared retry primitive), `src/complexity_gate.py` (routing), `src/plan_phase.py` / `src/shape_phase.py` / `src/discovery_council.py` (call sites), `src/wiki_carryover.py` (carryover→knowledge), `tests/scenarios/test_adversarial_pipeline.py` + `tests/regressions/test_adversarial_pipeline_regressions.py` (behaviour pinning).
+- **Enforced by:** `src/adversarial_retry_loop.py:AdversarialRetryLoop` (shared retry primitive), `src/complexity_gate.py:ComplexityGate` (routing), `src/plan_phase.py:PlanPhase` / `src/shape_phase.py:ShapePhase` / `src/discovery_council.py:DiscoveryCouncil` (call sites), `src/wiki_carryover.py:build_wiki_entry` (carryover→knowledge), `tests/scenarios/test_adversarial_pipeline.py` + `tests/regressions/test_adversarial_pipeline_regressions.py` (behaviour pinning).
 
 ## Context
 
@@ -24,11 +24,11 @@ Insert three new adversarial stages into the pre-implementation pipeline, plus r
 
 | Stage | Phase | Component | New / retrofit |
 |---|---|---|---|
-| AssumptionSurfacer | Discover + Plan | `src/assumption_surfacer.py` | New |
-| DiscoveryCouncil (Problem-Sharpener, Existing-Solution-Hunter, Cheapest-Test-Advocate) | Discover | `src/discovery_council.py` + `src/discovery_council_prompts.py` | New |
-| PlanCouncil (Builder, Tester, Risk-Skeptic) | Plan | `src/plan_council.py` + `src/plan_council_prompts.py` | New |
-| Pre-impl SpecJudge | Plan (post-planner, pre-implementer) | `src/spec_ac_generator.py` + `src/spec_judge.py` | New |
-| Challenger + ExpertCouncil | Shape | `src/shape_challenger.py` + `src/shape_expert_council.py` | Retrofit — already existed; now conforms to the shared contract |
+| AssumptionSurfacer | Discover + Plan | `src/assumption_surfacer.py:AssumptionSurfacer` | New |
+| DiscoveryCouncil (Problem-Sharpener, Existing-Solution-Hunter, Cheapest-Test-Advocate) | Discover | `src/discovery_council.py:DiscoveryCouncil` + `src/discovery_council_prompts.py` | New |
+| PlanCouncil (Builder, Tester, Risk-Skeptic) | Plan | `src/plan_council.py:PlanCouncil` + `src/plan_council_prompts.py` | New |
+| Pre-impl SpecJudge | Plan (post-planner, pre-implementer) | `src/spec_ac_generator.py:SpecACGenerator` + `src/spec_judge.py:SpecJudge` | New |
+| Challenger + ExpertCouncil | Shape | `src/shape_challenger.py:ShapeChallenger` + `src/shape_expert_council.py:ShapeExpertCouncil` | Retrofit — already existed; now conforms to the shared contract |
 
 All five stages are wrapped in a single shared primitive — `src/adversarial_retry_loop.py:AdversarialRetryLoop` — with a uniform contract:
 
@@ -56,7 +56,7 @@ Each is set on entry and cleared on exit by the dispatcher; they make the active
 
 ### Carryover — `ShippedWithKnownGap`
 
-Concerns that survive both the tight loop *and* the wider loop *and* still merge become wiki entries (per [ADR-0032](0032-per-repo-wiki-knowledge-base.md)) via the new `ShippedWithKnownGap` EventBus event. `src/wiki_carryover.py` is the consumer: it converts each unresolved `Concern` into a wiki entry with `confidence: low` and `stale: false`, tagged with the merging PR. This closes the feedback loop — what the factory ships *despite* dissent becomes future input to `AssumptionSurfacer`.
+Concerns that survive both the tight loop *and* the wider loop *and* still merge become wiki entries (per [ADR-0032](0032-per-repo-wiki-knowledge-base.md)) via the new `ShippedWithKnownGap` EventBus event. `src/wiki_carryover.py:build_wiki_entry` is the consumer: it converts each unresolved `Concern` into a wiki entry with `confidence: low` and `stale: false`, tagged with the merging PR. This closes the feedback loop — what the factory ships *despite* dissent becomes future input to `AssumptionSurfacer`.
 
 ### Six new EventBus events
 
@@ -67,7 +67,7 @@ Concerns that survive both the tight loop *and* the wider loop *and* still merge
 - `ComplexityGateRouted`
 - `ShippedWithKnownGap`
 
-Wired in `src/events.py` and reduced into `src/models.py:AdversarialState`. The events are how the dashboard, observability, and downstream loops observe the adversarial pipeline without coupling to its internals.
+Wired in `src/events.py:EventType` and reduced into `src/models.py:AdversarialState`. The events are how the dashboard, observability, and downstream loops observe the adversarial pipeline without coupling to its internals.
 
 ## Consequences
 
@@ -113,17 +113,17 @@ Flagged during Task 14 reflections — these are *not* in scope for the initial 
 
 ## Source-file citations
 
-- `src/adversarial_retry_loop.py` — shared retry primitive (`AdversarialRetryLoop`, `run_with_metrics`).
-- `src/pending_concerns.py` — `Concern`, `ConcernResolution`, `AdversarialState` Pydantic models.
-- `src/complexity_gate.py` — `ComplexityGate` routing.
-- `src/assumption_surfacer.py` — Discover + Plan surfacer.
-- `src/plan_council.py` + `src/plan_council_prompts.py` — Builder / Tester / Risk-Skeptic voters.
-- `src/discovery_council.py` + `src/discovery_council_prompts.py` — Problem-Sharpener / Existing-Solution-Hunter / Cheapest-Test-Advocate voters.
-- `src/spec_ac_generator.py` + `src/spec_judge.py` — pre-impl spec consistency judge (sibling to post-merge AC pipeline).
-- `src/shape_challenger.py` + `src/shape_expert_council.py` + `src/shape_phase.py` — Shape phase retrofit.
+- `src/adversarial_retry_loop.py:AdversarialRetryLoop` — shared retry primitive (`AdversarialRetryLoop`, `run_with_metrics`).
+- `src/pending_concerns.py:Concern` — `Concern`, `ConcernResolution`, `AdversarialState` Pydantic models.
+- `src/complexity_gate.py:ComplexityGate` — `ComplexityGate` routing.
+- `src/assumption_surfacer.py:AssumptionSurfacer` — Discover + Plan surfacer.
+- `src/plan_council.py:PlanCouncil` + `src/plan_council_prompts.py` — Builder / Tester / Risk-Skeptic voters.
+- `src/discovery_council.py:DiscoveryCouncil` + `src/discovery_council_prompts.py` — Problem-Sharpener / Existing-Solution-Hunter / Cheapest-Test-Advocate voters.
+- `src/spec_ac_generator.py:SpecACGenerator` + `src/spec_judge.py:SpecJudge` — pre-impl spec consistency judge (sibling to post-merge AC pipeline).
+- `src/shape_challenger.py:ShapeChallenger` + `src/shape_expert_council.py:ShapeExpertCouncil` + `src/shape_phase.py:ShapePhase` — Shape phase retrofit.
 - `src/adversarial_labels.py` — three transient labels.
-- `src/wiki_carryover.py` + `src/post_merge_handler.py` — `ShippedWithKnownGap` consumer.
-- `src/events.py` + `src/models.py` — six new EventBus events + state model evolution.
+- `src/wiki_carryover.py:build_wiki_entry` + `src/post_merge_handler.py` — `ShippedWithKnownGap` consumer.
+- `src/events.py:EventType` + `src/models.py` — six new EventBus events + state model evolution.
 - `tests/scenarios/test_adversarial_pipeline.py` — MockWorld behaviour scenarios.
 - `tests/regressions/test_adversarial_pipeline_regressions.py` — regression pins.
 - `docs/superpowers/specs/2026-05-16-earlier-adversarial-pipeline-design.md` — design spec **(local-only artifact; not committed to the repo, kept in the worktree as the brainstorming output)**.
