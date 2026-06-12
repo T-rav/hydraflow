@@ -34,6 +34,26 @@ class AutoAgentStateMixin:
         self._data.auto_agent_attempts = attempts
         self.save()
 
+    def refund_auto_agent_attempt(self, issue: int) -> int:
+        """Decrement the attempt counter by one (floor 0).
+
+        Used when an attempt was bumped but no real work happened — e.g. an API
+        credit/session limit aborted the spawn (ADR-0084). Refunding keeps a
+        transient outage from consuming the issue's attempt budget and wrongly
+        exhausting it to ``human-required`` across repeated outages.
+        """
+        key = str(issue)
+        current = int(self._data.auto_agent_attempts.get(key, 0))
+        new_value = max(0, current - 1)
+        attempts = dict(self._data.auto_agent_attempts)
+        if new_value == 0:
+            attempts.pop(key, None)
+        else:
+            attempts[key] = new_value
+        self._data.auto_agent_attempts = attempts
+        self.save()
+        return new_value
+
     def get_auto_agent_daily_spend(self, date_iso: str) -> float:
         return float(self._data.auto_agent_daily_spend.get(date_iso, 0.0))
 
