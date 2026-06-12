@@ -14,7 +14,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from hydraflow_audit.checks.p10_tdd import _touched_regressions
+from scripts.hydraflow_audit.checks.p10_tdd import _touched_regressions
 
 # Long enough that `git show --stat` truncates the leading path segments.
 _LONG_REGRESSION_PATH = (
