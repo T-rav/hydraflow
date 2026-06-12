@@ -95,6 +95,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0081 | `src.epic`, `src.epic_sweeper_loop` |
 | ADR-0082 | `src.branch_protection_audit`, `src.branch_protection_auditor_loop`, `src.gate_activation_check`, `src.gate_activator_loop` |
 | ADR-0083 | — |
+| ADR-0084 | `src.auto_agent_preflight_loop`, `src.base_background_loop`, `src.config`, `src.issue_store`, `src.models`, `src.pr_manager`, `src.preflight.agent`, `src.preflight.context`, `src.preflight.decision`, `src.preflight.runner` |
 | ADR-0084 | `src.agent`, `src.preflight.runner`, `src.untrusted_text` |
 | ADR-0085 | `src.secret_scrub` |
 | ADR-0086 | `src.contracts.shadow`, `src.live_corpus_replay_loop` |
@@ -113,8 +114,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.agent` | ADR-0024, ADR-0027, ADR-0066, ADR-0084 |
 | `src.agent_cli` | ADR-0004 |
 | `src.assumption_surfacer` | ADR-0064 |
-| `src.auto_agent_preflight_loop` | ADR-0050, ADR-0063 |
-| `src.base_background_loop` | ADR-0049, ADR-0055 |
+| `src.auto_agent_preflight_loop` | ADR-0050, ADR-0063, ADR-0084 |
+| `src.base_background_loop` | ADR-0049, ADR-0055, ADR-0084 |
 | `src.base_runner` | ADR-0004, ADR-0032, ADR-0055, ADR-0066 |
 | `src.bg_worker_manager` | ADR-0049 |
 | `src.branch_protection_audit` | ADR-0082 |
@@ -123,7 +124,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.cli` | ADR-0036 |
 | `src.code_grooming_loop` | ADR-0065 |
 | `src.complexity_gate` | ADR-0064 |
-| `src.config` | ADR-0002, ADR-0009, ADR-0010, ADR-0018, ADR-0021, ADR-0022, ADR-0031, ADR-0033, ADR-0034, ADR-0035, ADR-0036, ADR-0045, ADR-0050, ADR-0055, ADR-0065 |
+| `src.config` | ADR-0002, ADR-0009, ADR-0010, ADR-0018, ADR-0021, ADR-0022, ADR-0031, ADR-0033, ADR-0034, ADR-0035, ADR-0036, ADR-0045, ADR-0050, ADR-0055, ADR-0065, ADR-0084 |
 | `src.contract_diff` | ADR-0047, ADR-0052 |
 | `src.contract_recording` | ADR-0047, ADR-0052 |
 | `src.contract_refresh_loop` | ADR-0045, ADR-0047 |
@@ -162,7 +163,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.implement_phase` | ADR-0005, ADR-0014, ADR-0024, ADR-0063 |
 | `src.issue_cache` | ADR-0041 |
 | `src.issue_fetcher` | ADR-0019, ADR-0067 |
-| `src.issue_store` | ADR-0006, ADR-0022, ADR-0041 |
+| `src.issue_store` | ADR-0006, ADR-0022, ADR-0041, ADR-0084 |
 | `src.label_drift_watcher_loop` | ADR-0056 |
 | `src.live_corpus_replay_loop` | ADR-0086 |
 | `src.memory_backlog_loop` | ADR-0057 |
@@ -173,7 +174,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.mockworld.fakes.fake_honeycomb` | ADR-0055 |
 | `src.mockworld.fakes.fake_llm` | ADR-0059 |
 | `src.mockworld.sandbox_main` | ADR-0052 |
-| `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0056, ADR-0064 |
+| `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0056, ADR-0064, ADR-0084 |
 | `src.orchestrator` | ADR-0006, ADR-0009, ADR-0014, ADR-0044, ADR-0045 |
 | `src.pending_concerns` | ADR-0064 |
 | `src.plan_council` | ADR-0064 |
@@ -181,16 +182,16 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.plan_phase` | ADR-0014, ADR-0031, ADR-0063, ADR-0064 |
 | `src.ports` | ADR-0003, ADR-0044, ADR-0066, ADR-0067, ADR-0068, ADR-0069, ADR-0070 |
 | `src.post_merge_handler` | ADR-0012, ADR-0014, ADR-0015, ADR-0016, ADR-0019, ADR-0064 |
-| `src.pr_manager` | ADR-0002, ADR-0005, ADR-0011, ADR-0013, ADR-0018, ADR-0045, ADR-0055, ADR-0056 |
+| `src.pr_manager` | ADR-0002, ADR-0005, ADR-0011, ADR-0013, ADR-0018, ADR-0045, ADR-0055, ADR-0056, ADR-0084 |
 | `src.pr_unsticker` | ADR-0077 |
 | `src.pr_unsticker_loop` | ADR-0077 |
 | `src.precondition_gate` | ADR-0041 |
 | `src.preflight` | ADR-0043 |
-| `src.preflight.agent` | ADR-0050 |
+| `src.preflight.agent` | ADR-0050, ADR-0084 |
 | `src.preflight.audit` | ADR-0050 |
 | `src.preflight.auto_agent_runner` | ADR-0050 |
-| `src.preflight.context` | ADR-0050 |
-| `src.preflight.decision` | ADR-0050 |
+| `src.preflight.context` | ADR-0050, ADR-0084 |
+| `src.preflight.decision` | ADR-0050, ADR-0084 |
 | `src.preflight.runner` | ADR-0050, ADR-0084 |
 | `src.pricing_refresh_diff` | ADR-0078 |
 | `src.pricing_refresh_loop` | ADR-0078 |
