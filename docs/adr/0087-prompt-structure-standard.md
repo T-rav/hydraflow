@@ -1,4 +1,4 @@
-# ADR-0043: Prompt structure standard (XML tags, 8-criterion rubric, mechanical scoring)
+# ADR-0087: Prompt structure standard (XML tags, 8-criterion rubric, mechanical scoring)
 
 - **Status:** Proposed
 - **Date:** 2026-04-21

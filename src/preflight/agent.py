@@ -42,6 +42,34 @@ class PreflightSpawn:
     prompt_hash: str = ""  # hex prefix; populated by spawn_fn for audit traceability
 
 
+# Blocked reasons that genuinely require a human (ADR-0084 pillar B). Any other
+# bail — transient, insufficient_context, low confidence, or a missing/garbled
+# status — is treated as ``retry`` so the loop attempts again rather than paging
+# a human prematurely (the #9275 failure mode).
+_HUMAN_ONLY_REASONS = frozenset(
+    {"needs_human_decision", "needs_credentials", "needs_permissions", "unsafe"}
+)
+
+
+def _derive_status(
+    raw_status: str, confidence: str, blocked_reason: str, pr_url: str | None
+) -> str:
+    """Map the agent's raw self-reported status into the convergence states.
+
+    - ``resolved`` (with a PR) stays ``resolved``; a claimed resolve with no PR
+      is a ``pr_failed``.
+    - A ``needs_human`` bail is honored only for a genuine human-only
+      ``blocked_reason`` at ``high`` confidence.
+    - Everything else — a transient/insufficient-context bail, low confidence,
+      or a missing/garbled status — becomes ``retry``.
+    """
+    if raw_status == "resolved":
+        return "resolved" if pr_url else "pr_failed"
+    if blocked_reason in _HUMAN_ONLY_REASONS and confidence == "high":
+        return "needs_human"
+    return "retry"
+
+
 async def run_preflight(
     *,
     context: PreflightContext,
@@ -141,14 +169,15 @@ async def run_preflight(
         )
 
     parsed = parse_agent_response(spawn.output_text)
-    raw_status: str = parsed["status"] or "needs_human"
-    status = raw_status if raw_status in {"resolved", "needs_human"} else "needs_human"
+    raw_status = parsed["status"] or ""
+    confidence = parsed["confidence"] or "low"
+    blocked_reason = parsed["blocked_reason"] or "none"
     pr_url = parsed["pr_url"]
-    # Agent claimed "resolved" but produced no PR — that's a PR-creation failure
-    # (spec §2.2: pr_failed status). Demote so the loop applies the right label
-    # set instead of treating the missing PR as a successful resolve.
-    if status == "resolved" and not pr_url:
-        status = "pr_failed"
+    # Convergence (ADR-0084 B): a `needs_human` bail is honored only for a real
+    # human-only blocker at high confidence; everything else — including a
+    # missing/garbled status — becomes `retry` so the loop tries again instead
+    # of paging a human on attempt 1 (the #9275 failure mode).
+    status = _derive_status(raw_status, confidence, blocked_reason, pr_url)
     return PreflightResult(
         status=status,
         pr_url=pr_url,
@@ -157,6 +186,8 @@ async def run_preflight(
         wall_clock_s=wall_s,
         tokens=spawn.tokens,
         prompt_hash=spawn_hash,
+        confidence=confidence,
+        blocked_reason=blocked_reason,
     )
 
 

@@ -6,7 +6,7 @@
 
 ## Context
 
-`file_util.append_jsonl` is the durable write helper for HydraFlow's canonical audit, transcript, and event JSONL streams (the post-hoc source of truth, dark-factory §2.3). It fsync'd for crash-safety but did **not** redact secrets. Any agent that surfaces a credential — a failing `gh` command echoing `GH_TOKEN`, an agent pasting an env dump into a transcript, a diagnosis quoting an `ANTHROPIC_API_KEY` — would persist it verbatim into the durable, fanned-out audit stream. The prompt-injection surface (ADR-0084) makes this **attacker-triggerable** (a crafted issue can induce the agent to echo the child env).
+`file_util.append_jsonl` is the durable write helper for HydraFlow's canonical audit, transcript, and event JSONL streams (the post-hoc source of truth, dark-factory §2.3). It fsync'd for crash-safety but did **not** redact secrets. Any agent that surfaces a credential — a failing `gh` command echoing `GH_TOKEN`, an agent pasting an env dump into a transcript, a diagnosis quoting an `ANTHROPIC_API_KEY` — would persist it verbatim into the durable, fanned-out audit stream. The prompt-injection surface (ADR-0092) makes this **attacker-triggerable** (a crafted issue can induce the agent to echo the child env).
 
 Redaction existed only on the API-response egress path (`server.py::_scrub`) and the screenshot scanner (`screenshot_scanner._SECRET_PATTERNS`) — not on the write path — and the pattern sets were duplicated (SEC-AUDIT-001/002/003).
 

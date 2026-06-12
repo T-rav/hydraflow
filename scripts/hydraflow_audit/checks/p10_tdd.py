@@ -195,8 +195,13 @@ def _read_baseline(root: Path) -> str | None:
 
 def _touched_regressions(root: Path, sha: str) -> bool:
     try:
+        # --name-only (not --stat): --stat truncates long paths with `...`,
+        # so a real regression test like
+        # tests/regressions/test_issue_9419_9421_adr_drift.py is silently
+        # dropped from the output, false-flagging the commit as missing a
+        # test. --name-only emits full, untruncated paths.
         result = subprocess.run(
-            ["git", "show", "--stat", "--format=", sha],
+            ["git", "show", "--name-only", "--format=", sha],
             check=False,
             cwd=root,
             capture_output=True,

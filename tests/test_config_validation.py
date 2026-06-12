@@ -1151,6 +1151,16 @@ class TestLabelValidation:
         )
         assert "hydraflow-verify" in cfg.all_pipeline_labels
 
+    def test_human_required_in_all_pipeline_labels(self, tmp_path: Path) -> None:
+        """human-required must be in all_pipeline_labels so swap_pipeline_labels
+        clears it on a successful HITL correction (ADR-0084, pillar C)."""
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert "human-required" in cfg.all_pipeline_labels
+
 
 class TestTimeoutConfigFields:
     def test_agent_timeout_default(self) -> None:

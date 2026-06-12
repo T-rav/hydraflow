@@ -1,16 +1,22 @@
 """Regression for issue #8988 — RetrospectiveLoop must not file duplicate
-``[HITL] Stale review insight: <category>`` issues every tick.
+stale-insight escalations every tick.
 
 Before the fix, ``RetrospectiveLoop._handle_verify_proposals`` filed a fresh
 issue on **every** tick a category was stale, with no open-issue check.  Four
 duplicates were closed manually on 2026-05-19 (``Missing or insufficient test
 coverage`` was filed multiple times for the same recurring pattern).
 
+Since #9227 the escalation is routed to the factory as an actionable
+``[Review Insight] Persistent finding: <category>`` find-queue issue (not a
+HITL dead-end), and subsequent ticks **skip** the open issue silently rather
+than posting follow-up comments.
+
 The contract guarded here:
 
-1. Same category stale across N ticks → 1 ``create_issue`` + N-1 ``post_comment``.
-2. ``[HITL] Stale review insight:`` fallback at
-   ``src/review_phase/_phase.py:3216`` follows the same dedup contract.
+1. Same category stale across N ticks → exactly 1 ``create_issue``, no comment
+   spam (skip while the open one is in the factory pipeline).
+2. The ``ReviewPhase`` fallback at ``src/review_phase/_phase.py`` follows the
+   same dedup + factory-routing contract.
 """
 
 from __future__ import annotations
@@ -64,11 +70,11 @@ def _make_loop_with_prs(
     return loop, insights, queue, prs
 
 
-class TestStaleHITLDedupRegression:
+class TestStaleInsightDedupRegression:
     """Issue #8988 regression — guards the dedup contract end-to-end."""
 
     @pytest.mark.asyncio
-    async def test_five_ticks_one_issue_four_comments(self, tmp_path: Path) -> None:
+    async def test_five_ticks_one_issue_no_comments(self, tmp_path: Path) -> None:
         loop, insights, queue, prs = _make_loop_with_prs(tmp_path)
         insights.load_recent.return_value = []
 
@@ -99,9 +105,8 @@ class TestStaleHITLDedupRegression:
                     await loop._do_work()
 
         assert prs.create_issue.await_count == 1
-        assert prs.post_comment.await_count == 4
-        for call in prs.post_comment.await_args_list:
-            assert call.args[0] == 4242
+        # Routed to the factory; subsequent ticks skip the open issue (no spam).
+        assert prs.post_comment.await_count == 0
 
     @pytest.mark.asyncio
     async def test_closed_then_re_armed(self, tmp_path: Path) -> None:
@@ -136,7 +141,7 @@ class TestStaleHITLDedupRegression:
             prs.list_closed_issues_by_label.return_value = [
                 {
                     "number": 4242,
-                    "title": "[HITL] Stale review insight: Missing test coverage",
+                    "title": "[Review Insight] Persistent finding: Missing test coverage",
                     "body": "",
                     "updated_at": "2026-05-19T01:00:00Z",
                 }
@@ -153,14 +158,14 @@ class TestStaleHITLDedupRegression:
 
 
 class TestReviewPhaseFallbackDedup:
-    """Mirror site — ``src/review_phase/_phase.py:3216`` (fallback branch)
-    must also dedup when a HITL stale-insight issue is already open.
+    """Mirror site — ``src/review_phase/_phase.py`` (fallback branch) must also
+    dedup + route to the factory when a stale-insight issue is already open.
     """
 
     @pytest.mark.asyncio
     async def test_fallback_branch_dedups_via_find_existing_issue(self) -> None:
-        """The fallback path (no retrospective_queue wired) must comment on
-        an existing open HITL issue rather than file a duplicate."""
+        """The fallback path (no retrospective_queue wired) must skip silently
+        when a routed issue is already open rather than file a duplicate."""
         from models import ReviewVerdict
         from tests.conftest import ConfigFactory, ReviewResultFactory
         from tests.helpers import make_review_phase
@@ -196,16 +201,16 @@ class TestReviewPhaseFallbackDedup:
         ):
             await phase._record_review_insight(result)
 
-        # Existing open issue → comment, do NOT create a new task.
-        phase._prs.post_comment.assert_awaited_once()
-        assert phase._prs.post_comment.await_args.args[0] == 7777
+        # Existing open issue → skip silently (no comment spam), and do NOT
+        # create a duplicate task.
+        phase._prs.post_comment.assert_not_awaited()
         phase._prs.create_task.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_fallback_window_guard_skips_back_to_back_filings(self) -> None:
         """Review #8992 S2 fix: two PR reviews completing back-to-back for
         the same stale category must not both file — the in-memory
-        ``_hitl_filed_at`` window guard short-circuits the second call
+        ``_insight_escalated_at`` window guard short-circuits the second call
         before it can race ``find_existing_issue``.
         """
         from models import ReviewVerdict
@@ -252,18 +257,14 @@ class TestReviewPhaseFallbackDedup:
 
 
 class TestRetrospectiveLoopGuardCrashWindow:
-    """Review #8992 S1 fix: the in-memory ``_hitl_filed_at`` guard must
+    """Review #8992 S1 fix: the in-memory ``_insight_escalated_at`` guard must
     be populated BEFORE the ``await create_issue``, not after — otherwise
     a crash between the GitHub write and the assignment leaves the
     just-filed issue with no in-memory guard on restart.
     """
 
     @pytest.mark.asyncio
-    async def test_guard_is_set_before_create_issue_await(
-        self, tmp_path: Path
-    ) -> None:
-        from retrospective_loop import RetrospectiveLoop  # noqa: PLC0415
-
+    async def test_guard_is_set_before_create_issue_await(self, tmp_path: Path) -> None:
         loop, insights, _queue, prs = _make_loop_with_prs(tmp_path)
         prs.find_existing_issue = AsyncMock(return_value=None)
         prs.post_comment = AsyncMock()
@@ -272,9 +273,7 @@ class TestRetrospectiveLoopGuardCrashWindow:
         captured: dict[str, datetime | None] = {"value_at_await": None}
 
         async def capture_create_issue(_title, _body, _labels):
-            captured["value_at_await"] = loop._hitl_filed_at.get(
-                "missing_tests"
-            )
+            captured["value_at_await"] = loop._insight_escalated_at.get("missing_tests")
             return 9999
 
         prs.create_issue = AsyncMock(side_effect=capture_create_issue)

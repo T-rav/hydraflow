@@ -6,6 +6,15 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `ea1cf32` — feat(auto-agent): rescue stuck pipeline PRs — diagnose-route + credit-transient (ADR-0084) *(2026-06-12)*
+- `2d8bd40` — feat(auto-agent): converge via retry instead of one-shot needs_human (ADR-0084 PR-2) (#9467) (#9467) *(2026-06-12)*
+- `725f5a8` — fix(pipeline): break the human-required escalation cycle (ADR-0084 PR-1) (#9439) (#9439) *(2026-06-12)*
+- `5ae5f3b` — Fixes #9100: entry_evidence_loop swallows CreditExhaustedError and ... (#9451) (#9451) *(2026-06-12)*
+- `d0f190f` — docs(adr): ADR-0084 — Auto-Agent as a universal root-cause HITL gate (Proposed) (#9435) (#9435) *(2026-06-12)*
+- `0c3c314` — fix(retrospective): route stale review-insights to the factory, not HITL (#9227) (#9431) (#9431) *(2026-06-11)*
+- `3f90a67` — fix(adr-drift): symbol-qualify owned citations + pr_manager shared-infra (#9405) (#9405) *(2026-06-11)*
+- `bc00ebe` — fix(mockworld): re-export FakeRouteBackCounter so its marker is actually verified (#8809) (#9408) (#9408) *(2026-06-11)*
+- `9685284` — docs(wiki): correct EpicMonitorLoop entry — it writes, not read-only (#8764) (#9407) (#9407) *(2026-06-11)*
 - `dc7e09b` — fix(trust): right-size FakeCoverageAuditorLoop to cassette-capable adapters (#9403) (#9403) *(2026-06-11)*
 - `d0ad6db` — fix(dashboard): aggregate /api/timeline* under __all__, repo-tag each item (#9402) (#9402) *(2026-06-11)*
 - `0f9b7fa` — fix(dashboard): aggregate /api/metrics/github under __all__; tag single-repo workers with canonical slug (#9399) (#9399) *(2026-06-10)*
