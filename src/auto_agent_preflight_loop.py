@@ -16,6 +16,7 @@ from typing import Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from exception_classify import reraise_on_credit_or_bug
+from subprocess_util import CreditExhaustedError
 
 logger = logging.getLogger("hydraflow.auto_agent_preflight")
 
@@ -205,12 +206,22 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             spawn_fn=spawn_fn,
         )
         worktree_path = await self._resolve_worktree(issue_number)
-        result = await run_preflight(
-            context=ctx,
-            repo_slug="",
-            worktree_path=worktree_path,
-            deps=deps,
-        )
+        try:
+            result = await run_preflight(
+                context=ctx,
+                repo_slug="",
+                worktree_path=worktree_path,
+                deps=deps,
+            )
+        except CreditExhaustedError:
+            # A credit/session limit aborted the spawn before any real work
+            # happened. Refund the attempt bumped above so a transient outage
+            # doesn't consume the issue's budget and wrongly exhaust it to
+            # human-required across repeated outages — then re-raise to stop the
+            # cycle per the dark-factory credit-stop contract. The issue stays
+            # eligible and is retried when budget returns (ADR-0084 pillar B).
+            self._state.refund_auto_agent_attempt(issue_number)
+            raise
 
         # Apply decision.
         await apply_decision(
@@ -221,6 +232,23 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             state=self._state,
             max_attempts=self._config.auto_agent_max_attempts,
         )
+
+        # A *resolved* diagnose-failed issue (routed here from the diagnostic
+        # loop, ADR-0084) must re-enter review rather than linger in the HITL
+        # queue: the Auto-Agent pushed its fix to the existing PR branch, so
+        # swap it back to review for a fresh pass.
+        if result.status == "resolved" and "diagnose-failed" in sub_labels:
+            try:
+                await self._prs.swap_pipeline_labels(
+                    issue_number, self._config.review_label[0]
+                )
+            except Exception:
+                logger.warning(
+                    "Auto-agent: failed to route resolved diagnose-failed #%d "
+                    "back to review",
+                    issue_number,
+                    exc_info=True,
+                )
 
         # Append audit.
         self._audit_store.append(

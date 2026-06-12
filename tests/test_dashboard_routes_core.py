@@ -607,13 +607,16 @@ class TestStopOrchestratorEndpoint:
 
 class TestFactoryStartEndpoint:
     @pytest.mark.asyncio
-    async def test_factory_start_starts_all_lines(
+    async def test_factory_start_starts_host_line_only(
         self, config, event_bus, state, tmp_path
     ) -> None:
         import json
 
+        host_rt = MagicMock()
+        host_rt.running = False
+        host_rt.start = AsyncMock()
         mock_registry = MagicMock()
-        mock_registry.all = []
+        mock_registry.get.return_value = host_rt
         mock_registry.start_all = AsyncMock()
         router, _ = make_dashboard_router(
             config, event_bus, state, tmp_path, registry=mock_registry
@@ -622,7 +625,8 @@ class TestFactoryStartEndpoint:
         response = await endpoint()
         data = json.loads(response.body)
         assert data["status"] == "started"
-        mock_registry.start_all.assert_awaited_once()
+        host_rt.start.assert_awaited_once()
+        mock_registry.start_all.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

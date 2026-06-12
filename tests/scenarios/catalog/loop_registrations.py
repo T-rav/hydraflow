@@ -743,7 +743,7 @@ def _build_gate_activator(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 
 
 def _build_memory_backlog(ports: dict[str, Any], config: Any, deps: Any) -> Any:
-    """Build MemoryBacklogLoop for scenarios (ADR-0057).
+    """Build MemoryBacklogLoop for scenarios (ADR-0089).
 
     Files hydraflow-find issues for pending entries in
     ``docs/wiki/memory-feedback/``. ``state`` and ``dedup`` default to
@@ -1219,7 +1219,7 @@ def _build_entry_evidence(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 
 
 def _build_label_drift_watcher(ports: dict[str, Any], config: Any, deps: Any) -> Any:
-    """Build LabelDriftWatcherLoop for scenarios (ADR-0056).
+    """Build LabelDriftWatcherLoop for scenarios (ADR-0088).
 
     Minimal builder: the loop takes only ``pr_manager``; no state or dedup.
     The ``pr_manager`` port falls back to ``ports['github']`` so the standard
@@ -1460,7 +1460,7 @@ _BUILDERS: dict[str, Any] = {
     "entry_evidence": _build_entry_evidence,
     "term_proposer": _build_term_proposer,
     "term_pruner": _build_term_pruner,
-    # label drift (ADR-0056)
+    # label drift (ADR-0088)
     "label_drift_watcher": _build_label_drift_watcher,
     # staging promotion (ADR-0042)
     "staging_promotion": _build_staging_promotion,

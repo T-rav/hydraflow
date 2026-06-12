@@ -1,4 +1,4 @@
-"""MockWorld scenario for the Atlas dashboard surface (ADR-0059).
+"""MockWorld scenario for the Atlas dashboard surface (ADR-0090).
 
 Exercises the API + the data flow that the Domain view relies on, end-to-end:
 1. Seed a tracked docs/wiki/terms/ tree with two terms and an edge.

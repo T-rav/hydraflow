@@ -717,3 +717,26 @@ class TestMultipleIssuesInCycle:
         assert result["fixed"] == 1
         assert result["escalated"] == 1
         assert result["retried"] == 0
+
+
+class TestDiagnosticEscalationRoutesToAutoAgent:
+    """ADR-0084: a diagnose failure is routed into the Auto-Agent (it polls
+    hitl-escalation) before any human, not dead-ended at hydraflow-hitl."""
+
+    @pytest.mark.asyncio
+    async def test_escalate_adds_auto_agent_routing_labels(
+        self, tmp_path: Path
+    ) -> None:
+        loop, _runner, prs, _state, _ = _make_loop(tmp_path)
+        prs.add_labels = AsyncMock()
+
+        await loop._escalate_to_hitl(42, comment="root cause: X")
+
+        # Still visible in the HITL queue...
+        prs.swap_pipeline_labels.assert_awaited_once_with(
+            42, loop._config.hitl_label[0]
+        )
+        # ...and discoverable by the Auto-Agent convergence loop.
+        prs.add_labels.assert_awaited_once_with(
+            42, ["hitl-escalation", "diagnose-failed"]
+        )
