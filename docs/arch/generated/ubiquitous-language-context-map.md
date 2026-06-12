@@ -24,6 +24,7 @@ graph LR
     FakeCoverageAuditorLoop["FakeCoverageAuditorLoop<br/><i>loop</i>"]
     FlakeTrackerLoop["FlakeTrackerLoop<br/><i>loop</i>"]
     GitHubCacheLoop["GitHubCacheLoop<br/><i>loop</i>"]
+    GitHubCacheLoop["GitHubCacheLoop<br/><i>loop</i>"]
     LiveCorpusReplayLoop["LiveCorpusReplayLoop<br/><i>loop</i>"]
     MergeStateWatcherLoop["MergeStateWatcherLoop<br/><i>loop</i>"]
     PricingRefreshLoop["PricingRefreshLoop<br/><i>loop</i>"]
@@ -58,6 +59,11 @@ graph LR
   ADRReviewerLoop -->|depends_on| BaseBackgroundLoop
   ADRReviewerLoop -->|implements| BaseBackgroundLoop
   ADRReviewerLoop -->|depends_on| ADRCouncilReviewer
+  AdrTouchpointAuditorLoop -->|depends_on| BaseBackgroundLoop
+  AdrTouchpointAuditorLoop -->|depends_on| HydraFlowConfig
+  AdrTouchpointAuditorLoop -->|depends_on| StateTracker
+  AdrTouchpointAuditorLoop -->|implements| BaseBackgroundLoop
+  AgentPort -->|depends_on| Task
   AgentRunner -->|depends_on| PRPort
   AgentRunner -->|depends_on| WorkspacePort
   AgentRunner -->|depends_on| IssueStorePort
@@ -69,16 +75,107 @@ graph LR
   BaseBackgroundLoop -->|depends_on| HydraFlowConfig
   BotPRPort -->|depends_on| HydraFlowConfig
   BotPRPort -->|depends_on| BaseBackgroundLoop
+  CIMonitorLoop -->|depends_on| HydraFlowConfig
+  CIMonitorLoop -->|depends_on| BaseBackgroundLoop
+  CIMonitorLoop -->|depends_on| PRPort
+  CIMonitorLoop -->|implements| BaseBackgroundLoop
+  ContractRefreshLoop -->|depends_on| BaseBackgroundLoop
+  ContractRefreshLoop -->|depends_on| HydraFlowConfig
+  ContractRefreshLoop -->|depends_on| StateTracker
+  ContractRefreshLoop -->|implements| BaseBackgroundLoop
+  CorpusLearningLoop -->|depends_on| BaseBackgroundLoop
+  CorpusLearningLoop -->|depends_on| HydraFlowConfig
+  CorpusLearningLoop -->|depends_on| StateTracker
+  CorpusLearningLoop -->|implements| BaseBackgroundLoop
+  DependabotMergeLoop -->|depends_on| HydraFlowConfig
+  DependabotMergeLoop -->|depends_on| BaseBackgroundLoop
+  DependabotMergeLoop -->|depends_on| StateTracker
+  DependabotMergeLoop -->|depends_on| PRPort
+  DependabotMergeLoop -->|implements| BaseBackgroundLoop
+  DiagnosticLoop -->|depends_on| BaseBackgroundLoop
+  DiagnosticLoop -->|depends_on| PRPort
+  DiagnosticLoop -->|depends_on| HydraFlowConfig
+  DiagnosticLoop -->|depends_on| StateTracker
+  DiagnosticLoop -->|implements| BaseBackgroundLoop
+  DiagramLoop -->|depends_on| BaseBackgroundLoop
+  DiagramLoop -->|depends_on| HydraFlowConfig
+  DiagramLoop -->|implements| BaseBackgroundLoop
+  EdgeProposerLoop -->|depends_on| BaseBackgroundLoop
+  EdgeProposerLoop -->|depends_on| BotPRPort
+  EdgeProposerLoop -->|depends_on| HydraFlowConfig
+  EdgeProposerLoop -->|implements| BaseBackgroundLoop
+  EntryEvidenceLoop -->|depends_on| BaseBackgroundLoop
+  EntryEvidenceLoop -->|depends_on| BotPRPort
+  EntryEvidenceLoop -->|depends_on| RepoWikiStore
+  EntryEvidenceLoop -->|depends_on| HydraFlowConfig
+  EntryEvidenceLoop -->|implements| BaseBackgroundLoop
+  FakeCoverageAuditorLoop -->|depends_on| BaseBackgroundLoop
+  FakeCoverageAuditorLoop -->|depends_on| HydraFlowConfig
+  FakeCoverageAuditorLoop -->|depends_on| StateTracker
+  FakeCoverageAuditorLoop -->|implements| BaseBackgroundLoop
+  FlakeTrackerLoop -->|depends_on| HydraFlowConfig
+  FlakeTrackerLoop -->|depends_on| BaseBackgroundLoop
+  FlakeTrackerLoop -->|depends_on| StateTracker
+  FlakeTrackerLoop -->|implements| BaseBackgroundLoop
+  GitHubCacheLoop -->|depends_on| BaseBackgroundLoop
+  GitHubCacheLoop -->|depends_on| HydraFlowConfig
+  GitHubCacheLoop -->|implements| BaseBackgroundLoop
   IssueFetcherPort -->|depends_on| IssueStorePort
+  IssueFetcherPort -->|depends_on| Task
   IssueStorePort -->|depends_on| Task
+  LiveCorpusReplayLoop -->|depends_on| HydraFlowConfig
+  LiveCorpusReplayLoop -->|depends_on| BaseBackgroundLoop
+  LiveCorpusReplayLoop -->|depends_on| StateTracker
+  LiveCorpusReplayLoop -->|implements| BaseBackgroundLoop
+  MergeStateWatcherLoop -->|depends_on| HydraFlowConfig
+  MergeStateWatcherLoop -->|depends_on| BaseBackgroundLoop
+  MergeStateWatcherLoop -->|depends_on| PRPort
+  MergeStateWatcherLoop -->|implements| BaseBackgroundLoop
+  ObservabilityPort -->|depends_on| Task
+  PricingRefreshLoop -->|depends_on| BaseBackgroundLoop
+  PricingRefreshLoop -->|depends_on| HydraFlowConfig
+  PricingRefreshLoop -->|implements| BaseBackgroundLoop
   PRPort -->|depends_on| Task
+  PRUnstickerLoop -->|depends_on| HydraFlowConfig
+  PRUnstickerLoop -->|depends_on| BaseBackgroundLoop
+  PRUnstickerLoop -->|depends_on| PRPort
+  PRUnstickerLoop -->|implements| BaseBackgroundLoop
+  RCBudgetLoop -->|depends_on| BaseBackgroundLoop
+  RCBudgetLoop -->|depends_on| HydraFlowConfig
+  RCBudgetLoop -->|depends_on| StateTracker
+  RCBudgetLoop -->|implements| BaseBackgroundLoop
+  ReportIssueLoop -->|depends_on| BaseBackgroundLoop
+  ReportIssueLoop -->|depends_on| HydraFlowConfig
+  ReportIssueLoop -->|depends_on| StateTracker
+  ReportIssueLoop -->|implements| BaseBackgroundLoop
+  ReviewInsightStorePort -->|depends_on| Task
+  RouteBackCounterPort -->|depends_on| PRPort
   SentryLoop -->|depends_on| BaseBackgroundLoop
   SentryLoop -->|depends_on| HydraFlowConfig
   SentryLoop -->|depends_on| StateTracker
   SentryLoop -->|implements| BaseBackgroundLoop
+  SkillPromptEvalLoop -->|depends_on| BaseBackgroundLoop
+  SkillPromptEvalLoop -->|depends_on| HydraFlowConfig
+  SkillPromptEvalLoop -->|depends_on| StateTracker
+  SkillPromptEvalLoop -->|implements| BaseBackgroundLoop
   StaleIssueGCLoop -->|depends_on| HydraFlowConfig
   StaleIssueGCLoop -->|depends_on| BaseBackgroundLoop
   StaleIssueGCLoop -->|depends_on| PRPort
   StaleIssueGCLoop -->|implements| BaseBackgroundLoop
+  TermPrunerLoop -->|depends_on| HydraFlowConfig
+  TermPrunerLoop -->|depends_on| BaseBackgroundLoop
+  TermPrunerLoop -->|depends_on| BotPRPort
+  TermPrunerLoop -->|implements| BaseBackgroundLoop
+  WikiRotDetectorLoop -->|depends_on| BaseBackgroundLoop
+  WikiRotDetectorLoop -->|depends_on| RepoWikiStore
+  WikiRotDetectorLoop -->|depends_on| HydraFlowConfig
+  WikiRotDetectorLoop -->|depends_on| StateTracker
+  WikiRotDetectorLoop -->|implements| BaseBackgroundLoop
+  WorkspaceGCLoop -->|depends_on| HydraFlowConfig
+  WorkspaceGCLoop -->|depends_on| BaseBackgroundLoop
+  WorkspaceGCLoop -->|depends_on| StateTracker
+  WorkspaceGCLoop -->|depends_on| WorkspacePort
+  WorkspaceGCLoop -->|depends_on| PRPort
+  WorkspaceGCLoop -->|implements| BaseBackgroundLoop
   WorkspacePort -->|depends_on| Task
 ```
