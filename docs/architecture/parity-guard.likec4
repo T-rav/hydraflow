@@ -1,0 +1,134 @@
+// Issue #9440 — Reciprocal cassette↔surface parity guard for the github contract corpus.
+// Captures the topology around the change: the new synchronous CI guard that completes
+// the parity check the FakeCoverageAuditorLoop only does weekly.
+
+specification {
+  element system
+  element container
+  element component
+  element datastore
+  element actor
+
+  tag existing   // already in the codebase
+  tag new        // added by this issue
+  tag reused     // existing code the guard reuses unchanged
+}
+
+model {
+  ci = actor "CI / make quality" {
+    description "Runs `PYTHONPATH=src pytest tests/` — collects tests/trust/contracts/ (no deselect marker)."
+    #existing
+  }
+
+  hydraflow = system "HydraFlow contract-corpus trust machinery" {
+
+    // ---- The fakes + their real adapters (source of the adapter-surface set) ----
+    fakes = container "MockWorld fakes" {
+      description "src/mockworld/fakes/*.py — FakeGitHub, FakeGit, FakeDocker"
+      #existing
+      fakeGithub = component "FakeGitHub" { #existing }
+      fakeGit    = component "FakeGit"    { #existing }
+      fakeDocker = component "FakeDocker" { #existing }
+    }
+
+    realAdapters = container "Real adapter surface" {
+      description "src/pr_manager.py PRManager + src/ports.py PRPort — defines what counts as adapter-surface vs scaffolding"
+      #existing
+    }
+
+    // ---- The cassette corpus (source of the cassetted set) ----
+    cassettes = datastore "Cassette corpus" {
+      description "tests/trust/contracts/cassettes/{github,git,docker}/*.yaml — each has input.command naming the recorded method"
+      #existing
+    }
+
+    // ---- Existing catalog primitives (reused unchanged) ----
+    auditor = container "fake_coverage_auditor_loop.py" {
+      description "src/fake_coverage_auditor_loop.py — weekly caretaker + shared catalog primitives"
+      #existing
+      catalogFake = component "catalog_fake_methods(fake_dir, repo_root)" {
+        description "AST-scans fakes → {fake: {adapter-surface, test-helper, scaffolding}}. repo_root applies the scaffolding split."
+        #reused
+      }
+      catalogCass = component "catalog_cassette_methods(dir)" {
+        description "Scans cassette YAML input.command → set[str] of recorded methods"
+        #reused
+      }
+      dirMap = component "_FAKE_TO_CASSETTE_DIR" {
+        description "{FakeGitHub: github, FakeGit: git, FakeDocker: docker} — the 3 cassette-capable fakes"
+        #reused
+      }
+      loop = component "FakeCoverageAuditorLoop._do_work" {
+        description "Weekly: files rollup issues for adapter-surface gaps. Async, GitHub-side signal."
+        #existing
+      }
+    }
+
+    // ---- Existing replay gate: cassette -> dispatcher direction ----
+    replayGate = container "test_fake_*_contract.py (replay gate)" {
+      description "Parametrized over cassettes. _invoke_fake_* dispatches each cassette; missing branch raises NotImplementedError."
+      #existing
+    }
+
+    // ---- NEW: synchronous surface -> cassette parity guard ----
+    parityGuard = container "test_fake_surface_cassette_parity.py" {
+      description "NEW. Parametrized over _FAKE_TO_CASSETTE_DIR. Asserts adapter-surface − cassetted ⊆ grandfather; grandfather ⊆ uncovered (no stale)."
+      #new
+    }
+    grandfather = datastore "_surface_cassette_grandfathered.yaml" {
+      description "NEW. Frozen allowlist of known-uncovered methods. github = 49 (#9183, blocked on sandbox #9080); git/docker = empty (strict)."
+      #new
+    }
+
+    // ---- Relationships ----
+    ci -> replayGate "runs"
+    ci -> parityGuard "runs (synchronous gate)"
+    ci -> auditor "schedules weekly (async signal)"
+
+    catalogFake -> fakes "AST-parses"
+    catalogFake -> realAdapters "splits surface vs scaffolding via repo_root"
+    catalogCass -> cassettes "reads input.command"
+
+    loop -> catalogFake "uses"
+    loop -> catalogCass "uses"
+    loop -> dirMap "iterates"
+
+    replayGate -> cassettes "replays each"
+    replayGate -> fakes "dispatches into"
+
+    parityGuard -> catalogFake "reuses (with repo_root!)"
+    parityGuard -> catalogCass "reuses"
+    parityGuard -> dirMap "iterates the 3 fakes"
+    parityGuard -> grandfather "subtracts allowlist"
+  }
+}
+
+views {
+  view index {
+    title "Issue #9440 — context: synchronous parity guard vs weekly auditor"
+    include *
+    include hydraflow.*
+  }
+
+  view components {
+    title "Component view — surface→cassette parity machinery"
+    include hydraflow.auditor.*
+    include hydraflow.parityGuard
+    include hydraflow.grandfather
+    include hydraflow.replayGate
+    include hydraflow.cassettes
+    include hydraflow.fakes
+    include hydraflow.realAdapters
+    include ci
+  }
+
+  // Dynamic view: how the guard evaluates one parametrized fake case.
+  dynamic view guardFlow {
+    title "Dynamic — guard evaluates one fake (e.g. FakeGitHub)"
+    ci -> hydraflow.parityGuard "pytest collects param[FakeGitHub]"
+    hydraflow.parityGuard -> hydraflow.auditor.catalogFake "catalog_fake_methods(fakes, repo_root=repo)['FakeGitHub']['adapter-surface'] → 60"
+    hydraflow.parityGuard -> hydraflow.auditor.catalogCass "catalog_cassette_methods(cassettes/github) → 11"
+    hydraflow.parityGuard -> hydraflow.grandfather "load gaps['FakeGitHub'] → 49 grandfathered"
+    hydraflow.parityGuard -> hydraflow.parityGuard "new = (60−11) − 49 = ∅  → PASS; stale = 49 − 49 = ∅ → PASS"
+  }
+}
