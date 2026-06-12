@@ -6,7 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `476b205` — Merge remote-tracking branch 'origin/staging' into feat/auto-agent-convergence *(2026-06-12)*
 - `cded616` — feat(auto-agent): converge via retry instead of one-shot needs_human (ADR-0084 PR-2) *(2026-06-12)*
+- `5ae5f3b` — Fixes #9100: entry_evidence_loop swallows CreditExhaustedError and ... (#9451) (#9451) *(2026-06-12)*
+- `d0f190f` — docs(adr): ADR-0084 — Auto-Agent as a universal root-cause HITL gate (Proposed) (#9435) (#9435) *(2026-06-12)*
 - `0c3c314` — fix(retrospective): route stale review-insights to the factory, not HITL (#9227) (#9431) (#9431) *(2026-06-11)*
 - `3f90a67` — fix(adr-drift): symbol-qualify owned citations + pr_manager shared-infra (#9405) (#9405) *(2026-06-11)*
 - `bc00ebe` — fix(mockworld): re-export FakeRouteBackCounter so its marker is actually verified (#8809) (#9408) (#9408) *(2026-06-11)*
