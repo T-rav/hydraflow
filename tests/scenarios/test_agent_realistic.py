@@ -557,6 +557,42 @@ async def test_A13_zero_diff_fails_without_merge(tmp_path) -> None:
     assert wr.success is False, f"expected success=False; got {wr}"
 
 
+async def test_A13b_null_delivery_diagrams_only_fails_without_merge(tmp_path) -> None:
+    """Agent commits ONLY a planner diagram → null-delivery guard, no merge (#9480).
+
+    The planner copies ``.likec4`` context diagrams into the worktree; when the
+    implementer produces no code, the auto-commit fallback salvages only those
+    diagrams, yielding a commit (so the zero-commit gate passes) whose diff is
+    diagrams-only. ``ImplementPhase._handle_implementation_result`` calls the
+    null-delivery guard (``_is_null_delivery`` → ``null_delivery.is_null_delivery``
+    over ``git diff --name-only``), which routes the run to a failed attempt with
+    no PR — preventing a PR that would falsely close the issue on merge.
+
+    Uses ``script_run_with_commits`` to write+commit a single
+    ``docs/architecture/*.likec4`` file so ``_verify_result`` observes a commit,
+    exercising the real git diff + classifier path end-to-end.
+    """
+    world = MockWorld(tmp_path, use_real_agent_runner=True)
+    world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
+    worktree_cwd = tmp_path / "worktrees" / "issue-1"
+    init_test_worktree(worktree_cwd)
+
+    world.docker.script_run_with_commits(
+        events=[{"type": "result", "success": True, "exit_code": 0}],
+        commits=[("docs/architecture/change-area.likec4", "// diagram only\n")],
+        cwd=worktree_cwd,
+    )
+
+    result = await world.run_pipeline()
+
+    assert not result.issue(1).merged, (
+        f"diagrams-only delivery must not merge; outcome={result.issue(1)}"
+    )
+    wr = result.issue(1).worker_result
+    assert wr is not None, "expected a WorkerResult recording the failure"
+    assert wr.success is False, f"expected success=False; got {wr}"
+
+
 async def test_A15_epic_decomposition_creates_children(tmp_path) -> None:
     """High-complexity issue with scripted decomp creates 2 child issues.
 
