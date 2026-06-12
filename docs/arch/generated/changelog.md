@@ -6,7 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
-- `f449900` — feat(ul): edge-proposer — 3 new edges across 2 terms *(2026-06-11)*
+- `740144f` — feat(ul): entry-evidence — 2 new entry links across 2 terms *(2026-06-11)*
 - `3f90a67` — fix(adr-drift): symbol-qualify owned citations + pr_manager shared-infra (#9405) (#9405) *(2026-06-11)*
 - `bc00ebe` — fix(mockworld): re-export FakeRouteBackCounter so its marker is actually verified (#8809) (#9408) (#9408) *(2026-06-11)*
 - `9685284` — docs(wiki): correct EpicMonitorLoop entry — it writes, not read-only (#8764) (#9407) (#9407) *(2026-06-11)*
