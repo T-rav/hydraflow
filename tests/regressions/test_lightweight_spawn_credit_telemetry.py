@@ -111,8 +111,10 @@ class TestRunLightweightAgentCredit:
         # is "". It previously collapsed to rc=-1 with an EMPTY stderr, so the
         # wiki compiler (and every other lightweight caller) logged an
         # undiagnosable "model failed (rc=-1): " with no hint it was a timeout.
-        # The timeout — and the deadline that was exceeded — must survive into
-        # stderr so the failure is actionable.
+        # The *actual* deadline must survive into stderr (137 — a non-default
+        # value — proves the timeout arg is interpolated, not hardcoded), AND a
+        # timed-out spawn must still record a failed inference so the spend
+        # stays visible to the cost cap (the WS-2.2 invariant of this module).
         config = ConfigFactory.create(repo_root=tmp_path / "repo")
         runner = _FakeRunner(raise_exc=TimeoutError())
 
@@ -122,14 +124,22 @@ class TestRunLightweightAgentCredit:
             tool="claude",
             model="sonnet",
             prompt="x",
-            source="unit_test",
-            timeout=120.0,
+            source="unit_test_timeout",
+            timeout=137.0,
         )
 
         assert result.returncode == -1
         assert result.stderr, "timeout must produce a non-empty, diagnosable stderr"
         assert "timed out" in result.stderr.lower()
-        assert "120" in result.stderr
+        assert "137" in result.stderr, "the actual deadline must be interpolated"
+
+        rows = PromptTelemetry(config).load_inferences()
+        timed_out = [r for r in rows if r.get("source") == "unit_test_timeout"]
+        assert timed_out, "a timed-out lightweight spawn must record a telemetry row"
+        assert timed_out[-1]["status"] == "failed", (
+            "timed-out spend must be recorded as a failed inference so it stays "
+            "visible to the cost cap"
+        )
 
     @pytest.mark.asyncio
     async def test_empty_message_transient_exc_keeps_detail(self, tmp_path) -> None:
