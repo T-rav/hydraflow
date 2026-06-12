@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from dedup_store import DedupStore
 from repo_wiki import RepoWikiStore
+from subprocess_util import AuthenticationError, CreditExhaustedError
 from term_proposer_llm import LLMClient
 from term_proposer_loop import BotPRPort, _render_term_file_str
 from ubiquitous_language import Term, TermStore, _slugify_term_name
@@ -267,7 +268,6 @@ class EntryEvidenceLoop(BaseBackgroundLoop):
         swallowed. Both subclass RuntimeError, so this re-raise MUST precede
         the broad clause below (mirrors term_proposer_loop.py WS-2.2 M1).
         """
-        from subprocess_util import AuthenticationError, CreditExhaustedError
 
         prompt = _build_prompt(entry_text, terms)
         try:
