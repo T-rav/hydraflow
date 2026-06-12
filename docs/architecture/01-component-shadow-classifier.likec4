@@ -1,0 +1,75 @@
+// Issue #9354 — Component view: where the shape classifier inserts into the
+// shadow-corpus -> replay-loop drift pipeline.
+//
+// NEW element: contracts.shadow_classifier (classify / is_value_comparable /
+// SHAPE_VERDICT_KEY). It is a pure function consulted at TWO seams:
+//   (a) record-time   — ShadowCorpus.record drops MUTATING shapes.
+//   (b) compare-time   — LiveCorpusReplayLoop suppresses raw-value drift on
+//                        non-deterministic shapes and stabilises signatures.
+
+specification {
+  element module
+  element newmodule {
+    style { color green }
+  }
+  element store
+}
+
+model {
+  subprocess = module 'subprocess_util' {
+    description 'run_subprocess + _maybe_sample_shadow hook'
+  }
+
+  classifier = newmodule 'contracts.shadow_classifier' {
+    description 'NEW: classify(adapter,command,args) -> ShapeClass; is_value_comparable(); SHAPE_VERDICT_KEY'
+  }
+
+  corpus = module 'contracts.shadow.ShadowCorpus' {
+    description 'Bounded, normalized, PII-scrubbed YAML store (LRU per adapter). NOW: skips MUTATING shapes at record time when exclude_mutating'
+  }
+
+  disk = store '.hydraflow/contract_shadow/<adapter>/<hash>.yaml' {
+    description 'On-disk corpus (100/adapter LRU cap)'
+  }
+
+  loop = module 'live_corpus_replay_loop.LiveCorpusReplayLoop' {
+    description 'Each tick: list() corpus, dispatch, compare. NOW: classifies each sample, suppresses raw-value drift on volatile/mutating, stabilises signature'
+  }
+
+  dispatcher = module 'contracts.shape_dispatchers.gh_shape_validator' {
+    description 'Shape-only validator. Returns None (clean) or {SHAPE_VERDICT_KEY: True, ...} (shape drift)'
+  }
+
+  shapes = module 'contracts.shapes' {
+    description 'Pydantic gh JSON I/O models (GhPRDetail, GhIssueListItem, ...)'
+  }
+
+  prman = module 'PRManager / PRPort' {
+    description 'create_issue / update_issue_body / close_issue'
+  }
+
+  config = module 'HydraFlowConfig' {
+    description 'NEW field: shadow_corpus_exclude_mutating (default True)'
+  }
+
+  // --- record path ---
+  subprocess -> corpus 'sampler hook: (adapter, command, args, stdout, ...)'
+  corpus -> classifier 'classify() == MUTATING ? skip'
+  config -> corpus 'exclude_mutating'
+  corpus -> disk 'persist non-mutating sample'
+
+  // --- replay path ---
+  loop -> disk 'list() + load() samples'
+  loop -> classifier 'classify(sample) + is_value_comparable()'
+  loop -> dispatcher 'dispatch(sample)'
+  dispatcher -> shapes 'model_validate'
+  dispatcher -> classifier 'SHAPE_VERDICT_KEY (payload marker)'
+  loop -> prman 'file/update/close shadow-drift rollup'
+}
+
+views {
+  view component {
+    title 'Issue #9354 — shape classifier inserted at record-time and compare-time seams'
+    include *
+  }
+}

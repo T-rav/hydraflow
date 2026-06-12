@@ -1,0 +1,52 @@
+// Issue #9354 — Dynamic view: one record event + one replay tick, showing the
+// three classifications branching at both seams.
+
+specification {
+  element step
+}
+
+model {
+  // record-time
+  r1 = step 'subprocess completes: gh issue comment / git push / gh pr view'
+  r2 = step 'ShadowCorpus.record(adapter, command, args, stdout)'
+  r3 = step 'classify(adapter, command, args)'
+  r4 = step 'MUTATING (comment/push/create/commit/clone/worktree/...) -> return None (NOT persisted)'
+  r5 = step 'VOLATILE (issue list / pr list / api search) -> persist (kept for shape validation)'
+  r6 = step 'DETERMINISTIC (pr view / issue view / pr checks) -> persist (value-comparable)'
+
+  // replay-time
+  t1 = step 'LiveCorpusReplayLoop tick: corpus.list()'
+  t2 = step 'for each sample: classify() + dispatch via gh_shape_validator'
+  t3 = step 'dispatcher returns None -> clean, no drift'
+  t4 = step 'dispatcher returns {SHAPE_VERDICT_KEY: True} -> shape drift (fires for ALL classes)'
+  t5 = step 'dispatcher returns raw fake value + sample is VOLATILE/MUTATING -> SUPPRESS (skipped_nondeterministic++)'
+  t6 = step 'dispatcher returns raw fake value + sample is DETERMINISTIC -> value-compare'
+  t7 = step '_drift_signature: non-deterministic -> hash excludes raw sample value (STABLE across ticks)'
+  t8 = step '_drift_signature: deterministic -> hash includes sample value (drift identity)'
+  t9 = step 'upsert single shadow-drift rollup issue (hydraflow-find), self-closing on clean tick'
+
+  r1 -> r2
+  r2 -> r3
+  r3 -> r4 'mutating'
+  r3 -> r5 'volatile'
+  r3 -> r6 'deterministic'
+
+  r5 -> t1
+  r6 -> t1
+  t1 -> t2
+  t2 -> t3 'valid shape'
+  t2 -> t4 'shape changed'
+  t2 -> t5 'value dispatcher on volatile'
+  t2 -> t6 'value dispatcher on deterministic'
+  t4 -> t7
+  t6 -> t8
+  t7 -> t9
+  t8 -> t9
+}
+
+views {
+  view tick {
+    title 'Issue #9354 — record + replay tick with 3-way shape classification'
+    include *
+  }
+}
