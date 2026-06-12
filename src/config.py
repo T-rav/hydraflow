@@ -196,7 +196,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("quality_timeout", "HYDRAFLOW_QUALITY_TIMEOUT", 3600),
     ("git_command_timeout", "HYDRAFLOW_GIT_COMMAND_TIMEOUT", 30),
     ("summarizer_timeout", "HYDRAFLOW_SUMMARIZER_TIMEOUT", 120),
-    ("wiki_compilation_timeout", "HYDRAFLOW_WIKI_COMPILATION_TIMEOUT", 120),
+    ("wiki_compilation_timeout", "HYDRAFLOW_WIKI_COMPILATION_TIMEOUT", 300),
     ("error_output_max_chars", "HYDRAFLOW_ERROR_OUTPUT_MAX_CHARS", 3000),
     (
         "max_troubleshooting_prompt_chars",
@@ -1636,7 +1636,7 @@ class HydraFlowConfig(BaseModel):
         description="CLI backend for wiki compilation",
     )
     wiki_compilation_timeout: int = Field(
-        default=120,
+        default=300,
         ge=30,
         le=600,
         description="Timeout in seconds for wiki compilation LLM calls",
