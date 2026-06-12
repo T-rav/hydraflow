@@ -313,3 +313,88 @@ class TestEntryEvidenceLoop:
         llm.complete_structured.reset_mock()
         await loop._do_work()  # noqa: SLF001
         assert llm.complete_structured.await_count == 0
+
+
+class TestEntryEvidenceLoopCreditPropagation:
+    """CreditExhaustedError / AuthenticationError must propagate out of _do_work
+    to BaseBackgroundLoop's pause handler rather than being swallowed by the
+    broad except (RuntimeError, json.JSONDecodeError) in _match_entry.
+    Both error types subclass RuntimeError, so the re-raise MUST come first."""
+
+    def _make_loop(self, tmp_path: Path, pr_port):
+        _seed_terms(tmp_path)
+        _seed_wiki(tmp_path, with_orphan=False)
+        config = HydraFlowConfig(repo_root=tmp_path)
+        llm = AsyncMock()
+        return (
+            EntryEvidenceLoop(
+                config=config,
+                deps=_make_deps(tmp_path),
+                llm=llm,
+                pr_port=pr_port,
+                repo_root=tmp_path,
+                dedup_path=tmp_path / "dedup.json",
+            ),
+            llm,
+        )
+
+    @pytest.mark.asyncio
+    async def test_credit_exhausted_during_match_propagates_out_of_do_work(
+        self, tmp_path: Path, pr_port_capturing
+    ) -> None:
+        from subprocess_util import CreditExhaustedError
+
+        loop, llm = self._make_loop(tmp_path, pr_port_capturing)
+        llm.complete_structured = AsyncMock(
+            side_effect=CreditExhaustedError("credit out")
+        )
+
+        with pytest.raises(CreditExhaustedError):
+            await loop._do_work()  # noqa: SLF001
+
+    @pytest.mark.asyncio
+    async def test_credit_exhausted_tick_opens_no_pr_and_does_not_poison_cache(
+        self, tmp_path: Path, pr_port_capturing
+    ) -> None:
+        from subprocess_util import CreditExhaustedError
+
+        loop, llm = self._make_loop(tmp_path, pr_port_capturing)
+        llm.complete_structured = AsyncMock(
+            side_effect=CreditExhaustedError("credit out")
+        )
+
+        with pytest.raises(CreditExhaustedError):
+            await loop._do_work()  # noqa: SLF001
+
+        pr_port_capturing.open_bot_pr.assert_not_awaited()
+        assert "ev-001" not in loop._dedup.get()  # noqa: SLF001
+
+    @pytest.mark.asyncio
+    async def test_authentication_error_during_match_propagates_out_of_do_work(
+        self, tmp_path: Path, pr_port_capturing
+    ) -> None:
+        from subprocess_util import AuthenticationError
+
+        loop, llm = self._make_loop(tmp_path, pr_port_capturing)
+        llm.complete_structured = AsyncMock(
+            side_effect=AuthenticationError("auth failed")
+        )
+
+        with pytest.raises(AuthenticationError):
+            await loop._do_work()  # noqa: SLF001
+
+    @pytest.mark.asyncio
+    async def test_soft_llm_failure_does_not_poison_dedup_cache(
+        self, tmp_path: Path, pr_port_capturing
+    ) -> None:
+        loop, llm = self._make_loop(tmp_path, pr_port_capturing)
+        llm.complete_structured = AsyncMock(
+            side_effect=RuntimeError("transient parse error")
+        )
+
+        result = await loop._do_work()  # noqa: SLF001
+
+        assert result is not None
+        assert result["status"] == "ok"
+        assert result["opened_pr"] is False
+        assert "ev-001" not in loop._dedup.get()  # noqa: SLF001 — entry stays retryable
