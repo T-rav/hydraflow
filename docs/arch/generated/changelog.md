@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `942c03f` — fix(adr): right-size bare citations for 5 stuck-HITL drift ADRs (#9417/#9419/#9420/#9421/#9447) *(2026-06-12)*
 - `3492a42` — fix(adr): resolve 6 duplicate ADR-number collisions (#9406) — unblocks the drift auditor *(2026-06-12)*
 - `725f5a8` — fix(pipeline): break the human-required escalation cycle (ADR-0084 PR-1) (#9439) (#9439) *(2026-06-12)*
 - `5ae5f3b` — Fixes #9100: entry_evidence_loop swallows CreditExhaustedError and ... (#9451) (#9451) *(2026-06-12)*
