@@ -833,61 +833,71 @@ class HydraFlowOrchestrator:
         """
         self._stop_event.clear()
         self._running = True
-        self._restore_state()
-        await self._publish_status()
-        logger.info(
-            "HydraFlow starting — repo=%s label=%s workers=%d poll=%ds pipeline=%s",
-            self._config.repo,
-            ",".join(self._config.ready_label),
-            self._config.max_workers,
-            self._config.poll_interval,
-            "enabled" if self._pipeline_enabled else "paused",
-        )
-
-        # Only initialize the repo and create a session when the pipeline
-        # is enabled.  When pipeline_enabled=False (dashboard mode), the
-        # orchestrator only runs background workers — no issue fetching,
-        # no repo sanitization, no session.
         try:
-            import sentry_sdk as _sentry  # noqa: PLC0415
-        except ImportError:
-            pass
-        else:
-            try:
-                _sentry.set_tag("hydraflow.repo", self._config.repo or "")
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("sentry_sdk.set_tag failed: %s", exc)
-
-        session_started = False
-        if self._pipeline_enabled:
-            # Concrete-only setup methods — not on Port. See _deferred_pipeline_start.
-            workspaces: WorkspaceManager = cast(
-                "WorkspaceManager", self._svc.workspaces
-            )
-            prs: PRManager = cast("PRManager", self._svc.prs)
-            await workspaces.sanitize_repo()
-            await prs.ensure_labels_exist()
-            await workspaces.enable_rerere()
-            self._warn_if_agents_md_missing()
-            await self._start_session()
-            session_started = True
-
-        try:
-            await self._supervise_loops()
-        finally:
-            if session_started:
-                await self._end_session()
-            self._svc.planners.terminate()
-            self._svc.agents.terminate()
-            self._svc.reviewers.terminate()
-            self._svc.hitl_runner.terminate()
-            with contextlib.suppress(Exception):
-                # Same concrete-only narrowing as the bootstrap above.
-                await cast("WorkspaceManager", self._svc.workspaces).sanitize_repo()
-            await asyncio.sleep(0)
-            self._running = False
+            self._restore_state()
             await self._publish_status()
-            logger.info("HydraFlow stopped")
+            logger.info(
+                "HydraFlow starting — repo=%s label=%s workers=%d poll=%ds pipeline=%s",
+                self._config.repo,
+                ",".join(self._config.ready_label),
+                self._config.max_workers,
+                self._config.poll_interval,
+                "enabled" if self._pipeline_enabled else "paused",
+            )
+
+            # Only initialize the repo and create a session when the pipeline
+            # is enabled.  When pipeline_enabled=False (dashboard mode), the
+            # orchestrator only runs background workers — no issue fetching,
+            # no repo sanitization, no session.
+            try:
+                import sentry_sdk as _sentry  # noqa: PLC0415
+            except ImportError:
+                pass
+            else:
+                try:
+                    _sentry.set_tag("hydraflow.repo", self._config.repo or "")
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("sentry_sdk.set_tag failed: %s", exc)
+
+            session_started = False
+            if self._pipeline_enabled:
+                # Concrete-only setup methods — not on Port. See _deferred_pipeline_start.
+                workspaces: WorkspaceManager = cast(
+                    "WorkspaceManager", self._svc.workspaces
+                )
+                prs: PRManager = cast("PRManager", self._svc.prs)
+                await workspaces.sanitize_repo()
+                await prs.ensure_labels_exist()
+                await workspaces.enable_rerere()
+                self._warn_if_agents_md_missing()
+                await self._start_session()
+                session_started = True
+
+            try:
+                await self._supervise_loops()
+            finally:
+                if session_started:
+                    await self._end_session()
+                self._svc.planners.terminate()
+                self._svc.agents.terminate()
+                self._svc.reviewers.terminate()
+                self._svc.hitl_runner.terminate()
+                with contextlib.suppress(Exception):
+                    # Same concrete-only narrowing as the bootstrap above.
+                    await cast("WorkspaceManager", self._svc.workspaces).sanitize_repo()
+                await asyncio.sleep(0)
+                self._running = False
+                await self._publish_status()
+                logger.info("HydraFlow stopped")
+        finally:
+            # Safety net: if run() is cancelled or raises during the setup
+            # phase above (before the supervise-loops try-block), the inner
+            # finally never executes and the line would stay stuck reporting
+            # running=True forever — a stopped factory line shows green on the
+            # dashboard with last_error=None. Guarantee the flag clears on ANY
+            # exit. Idempotent with the inner finally on the normal shutdown
+            # path. See `rt.start()` -> wait_for cancellation in repo_runtime.
+            self._running = False
 
     def _warn_if_agents_md_missing(self) -> None:
         """Log a warning if AGENTS.md is absent from the repo root.

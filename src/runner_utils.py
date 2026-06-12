@@ -588,7 +588,10 @@ async def run_lightweight_agent(
     lightweight spawn that legitimately needs host plugins/skills.
     """
     from agent_cli import build_lightweight_command  # noqa: PLC0415
-    from exception_classify import reraise_on_credit_or_bug  # noqa: PLC0415
+    from exception_classify import (  # noqa: PLC0415
+        exc_detail,
+        reraise_on_credit_or_bug,
+    )
     from execution import SimpleResult  # noqa: PLC0415
 
     cmd, cmd_input = build_lightweight_command(
@@ -607,15 +610,28 @@ async def run_lightweight_agent(
             result = await runner.run_simple(
                 cmd, env=env, input=cmd_input, timeout=timeout
             )
+        except TimeoutError:
+            # ``asyncio.wait_for`` raises a *bare* TimeoutError whose ``str()``
+            # is "", which would collapse to an undiagnosable "rc=-1: " at the
+            # caller's failure log (the symptom that surfaced the masked wiki
+            # compilation timeouts). Spell out the deadline so the soft failure
+            # is actionable; a timeout is transient, so it is recorded as a
+            # failed inference like any other soft rc=-1.
+            result = SimpleResult(
+                stderr=f"timed out after {timeout:.0f}s", returncode=-1
+            )
+            record_row = True
+            return result
         except Exception as exc:
             # Credit / likely-bug exceptions propagate so the outer loop can
             # pause or surface the bug — and are NOT recorded, matching
             # BaseSubprocessRunner (which reraises before its telemetry write)
             # so a credit-blocked spawn never attributes phantom cost. Transient
             # failures become a soft rc=-1 result the caller treats as an empty
-            # reply, and ARE recorded as a failed inference.
+            # reply, and ARE recorded as a failed inference. ``exc_detail`` keeps
+            # a diagnostic even when ``str(exc)`` is empty (bare OSError, etc.).
             reraise_on_credit_or_bug(exc)
-            result = SimpleResult(stderr=str(exc), returncode=-1)
+            result = SimpleResult(stderr=exc_detail(exc), returncode=-1)
             record_row = True
             return result
         # Credit-out via output text propagates without recording, same as above.

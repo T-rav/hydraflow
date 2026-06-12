@@ -106,6 +106,64 @@ class TestRunLightweightAgentCredit:
         assert result.returncode == -1
 
     @pytest.mark.asyncio
+    async def test_timeout_surfaces_diagnostic_stderr(self, tmp_path) -> None:
+        # Regression: asyncio.wait_for raises a *bare* TimeoutError whose str()
+        # is "". It previously collapsed to rc=-1 with an EMPTY stderr, so the
+        # wiki compiler (and every other lightweight caller) logged an
+        # undiagnosable "model failed (rc=-1): " with no hint it was a timeout.
+        # The *actual* deadline must survive into stderr (137 — a non-default
+        # value — proves the timeout arg is interpolated, not hardcoded), AND a
+        # timed-out spawn must still record a failed inference so the spend
+        # stays visible to the cost cap (the WS-2.2 invariant of this module).
+        config = ConfigFactory.create(repo_root=tmp_path / "repo")
+        runner = _FakeRunner(raise_exc=TimeoutError())
+
+        result = await run_lightweight_agent(
+            runner=runner,
+            config=config,
+            tool="claude",
+            model="sonnet",
+            prompt="x",
+            source="unit_test_timeout",
+            timeout=137.0,
+        )
+
+        assert result.returncode == -1
+        assert result.stderr, "timeout must produce a non-empty, diagnosable stderr"
+        assert "timed out" in result.stderr.lower()
+        assert "137" in result.stderr, "the actual deadline must be interpolated"
+
+        rows = PromptTelemetry(config).load_inferences()
+        timed_out = [r for r in rows if r.get("source") == "unit_test_timeout"]
+        assert timed_out, "a timed-out lightweight spawn must record a telemetry row"
+        assert timed_out[-1]["status"] == "failed", (
+            "timed-out spend must be recorded as a failed inference so it stays "
+            "visible to the cost cap"
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_message_transient_exc_keeps_detail(self, tmp_path) -> None:
+        # Regression: an empty-message transient exception (str(exc) == "") must
+        # still yield a non-empty stderr via exc_detail() rather than swallowing
+        # the only diagnostic the caller will log.
+        config = ConfigFactory.create(repo_root=tmp_path / "repo")
+        runner = _FakeRunner(raise_exc=OSError())  # str(OSError()) == ""
+
+        result = await run_lightweight_agent(
+            runner=runner,
+            config=config,
+            tool="claude",
+            model="sonnet",
+            prompt="x",
+            source="unit_test",
+            timeout=5.0,
+        )
+
+        assert result.returncode == -1
+        assert result.stderr, "empty-message exception must still leave a diagnostic"
+        assert "OSError" in result.stderr
+
+    @pytest.mark.asyncio
     async def test_records_telemetry_row_with_source(self, tmp_path) -> None:
         config = ConfigFactory.create(repo_root=tmp_path / "repo")
         runner = _FakeRunner(stdout="ok", returncode=0)

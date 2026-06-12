@@ -14,7 +14,7 @@ Accepted
 
 ## Context
 
-[ADR-0059](0059-atlas-knowledge-graph-dashboard.md) shipped Atlas Phase 1: a `Domain` view rendering the ubiquitous-language term graph as React Flow parent-grouped nodes, an `Articles` browser unifying ADRs and wiki entries, and a `Maintenance` panel. Five new term + ADR endpoints exposed the data.
+[ADR-0090](0090-atlas-knowledge-graph-dashboard.md) shipped Atlas Phase 1: a `Domain` view rendering the ubiquitous-language term graph as React Flow parent-grouped nodes, an `Articles` browser unifying ADRs and wiki entries, and a `Maintenance` panel. Five new term + ADR endpoints exposed the data.
 
 Phase 1 deferred three pieces of value that the dataset is now ready to absorb:
 
@@ -81,7 +81,7 @@ A new endpoint `GET /api/atlas/term-loops/status` reads from the orchestrator's 
 
 ## Related
 
-- [ADR-0059](0059-atlas-knowledge-graph-dashboard.md) — Atlas Phase 1
+- [ADR-0090](0090-atlas-knowledge-graph-dashboard.md) — Atlas Phase 1
 - [ADR-0053](0053-ubiquitous-language-as-living-artifact.md) — UL terms
 - [ADR-0054](0054-term-auto-proposer-loop.md) — `TermProposerLoop`
 - [ADR-0057](0057-term-pruner-loop.md) — `TermPrunerLoop`

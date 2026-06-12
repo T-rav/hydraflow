@@ -57,7 +57,7 @@ def _claude_isolation_flags() -> list[str]:
 # network-egress/exfiltration surface that a prompt-injection payload would
 # reach for. Bash stays allowed (the implementer must run git/tests/build), so
 # a fully airtight egress block still requires a container-level network policy
-# on the agent runtime (see ADR-0084). This is defence-in-depth, not a sandbox.
+# on the agent runtime (see ADR-0092). This is defence-in-depth, not a sandbox.
 _RESTRICTED_ALLOWED_TOOLS = (
     "Bash Read Edit Write MultiEdit Glob Grep LS TodoWrite NotebookEdit Task Skill"
 )
@@ -89,7 +89,7 @@ def build_agent_command(
     ``"high"``, ``"max"``).  When ``None``, the CLI default is used.
 
     *restricted* hardens issue-derived spawns (implementer, auto-agent) against
-    prompt injection (ADR-0084): the blanket ``bypassPermissions`` is replaced
+    prompt injection (ADR-0092): the blanket ``bypassPermissions`` is replaced
     by ``acceptEdits`` + an explicit tool allowlist, and the network-egress
     tools (WebFetch/WebSearch) are disallowed. Codex switches to its
     network-blocked ``workspace-write`` sandbox.
@@ -144,7 +144,7 @@ def _build_codex_command(*, model: str, restricted: bool = False) -> list[str]:
 
     In *restricted* mode the sandbox is ``workspace-write`` (writes allowed,
     network blocked) and the dangerous bypass flag is dropped — for codex this
-    is a real network-egress block (ADR-0084). Otherwise the legacy
+    is a real network-egress block (ADR-0092). Otherwise the legacy
     ``danger-full-access`` behaviour is preserved for trusted, non-issue spawns.
     """
     cmd = [

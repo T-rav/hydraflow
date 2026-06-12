@@ -30,6 +30,8 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from trust_fleet_anomaly_detectors import REPAIRED_SUCCESS_KEYS
+
 if TYPE_CHECKING:
     from bg_worker_manager import BGWorkerManager
     from config import HydraFlowConfig
@@ -195,7 +197,9 @@ def _tally_events(events: list[Any]) -> dict[str, dict[str, Any]]:
             row["issues_filed_total"] += int(details.get("filed", 0) or 0)
             row["issues_closed_total"] += int(details.get("closed", 0) or 0)
             row["issues_open_escalated"] += int(details.get("escalated", 0) or 0)
-            row["repair_successes_total"] += int(details.get("repaired", 0) or 0)
+            row["repair_successes_total"] += sum(
+                int(details.get(key, 0) or 0) for key in REPAIRED_SUCCESS_KEYS
+            )
             row["repair_failures_total"] += int(details.get("failed", 0) or 0)
             row["repair_attempts_total"] = (
                 row["repair_successes_total"] + row["repair_failures_total"]

@@ -1,14 +1,16 @@
-"""Regression: github cassettes carry ``baseline_only: true`` (Phase 4 of #8786).
+"""Regression: unretired github cassettes carry ``baseline_only: true`` (Phase 4 of #8786).
 
-The marker is the machine-checkable retirement signal — when a
-``LiveCorpusReplayLoop`` dispatcher covers the same shape, the
-baseline cassette is redundant and a future audit can flag it. Until
-then the marker just documents the corpus as hand-authored.
+The marker is the machine-checkable retirement signal — when a cassette is
+covered by a live recorder (``record_github_mutation`` for mutating ops),
+``baseline_only`` flips to ``false`` and the cassette becomes auto-refreshable.
 
 This test guards against:
-- New github cassettes landing without the marker.
-- A future PR accidentally flipping all markers off in bulk.
+- New github cassettes landing without the marker when they should be baselines.
+- A future PR accidentally flipping remaining baseline markers off in bulk.
 - The schema field disappearing.
+
+Cassettes promoted to live-recording via ``record_github_mutation`` (issue #8693)
+are explicitly allowed to carry ``baseline_only: false``.
 """
 
 from __future__ import annotations
@@ -21,23 +23,41 @@ from contracts._schema import Cassette
 
 _GH_CASSETTES = Path(__file__).parent / "trust" / "contracts" / "cassettes" / "github"
 
+# Cassettes covered by record_github_mutation — live-recorded, baseline_only: false.
+_LIVE_RECORDED = frozenset({"close_issue.yaml", "create_issue.yaml", "merge_pr.yaml"})
 
-def test_every_github_cassette_is_baseline_only() -> None:
-    """Every YAML cassette under cassettes/github/ must carry
-    ``baseline_only: true``. New cassettes without it suggest the author
-    is recording live (which github currently does NOT do — see the
-    cassette dir README)."""
+
+def test_unretired_github_cassettes_are_baseline_only() -> None:
+    """Every github cassette NOT in _LIVE_RECORDED must carry
+    ``baseline_only: true``. Cassettes in _LIVE_RECORDED are auto-refreshed
+    by ``record_github_mutation`` and are expected to carry ``baseline_only: false``."""
     yamls = list(_GH_CASSETTES.glob("*.yaml"))
     assert yamls, "expected at least one github cassette"
     missing: list[str] = []
     for path in yamls:
+        if path.name in _LIVE_RECORDED:
+            continue
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         if raw.get("baseline_only") is not True:
             missing.append(path.name)
     assert not missing, (
         "the following github cassettes are missing `baseline_only: true`: "
-        f"{missing}. See cassettes/github/README.md for the retirement plan."
+        f"{missing}. See cassettes/github/README.md. If they are now live-recorded, "
+        "add them to _LIVE_RECORDED in this test."
     )
+
+
+def test_live_recorded_cassettes_have_baseline_only_false() -> None:
+    """Cassettes managed by record_github_mutation must have baseline_only: false
+    so ContractRefreshLoop can auto-regenerate them."""
+    for name in sorted(_LIVE_RECORDED):
+        path = _GH_CASSETTES / name
+        assert path.exists(), f"expected live-recorded cassette at {path}"
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        assert raw.get("baseline_only") is not True, (
+            f"{name}: live-recorded cassette must have baseline_only: false, "
+            "not true — remove the baseline_only: true line or set it to false."
+        )
 
 
 def test_cassette_schema_round_trips_baseline_only() -> None:

@@ -432,7 +432,17 @@ class DiagnosticLoop(BaseBackgroundLoop):
         return "escalated"
 
     async def _escalate_to_hitl(self, issue_number: int, *, comment: str) -> None:
-        """Post the diagnosis comment and swap labels to HITL."""
+        """Post the diagnosis comment and route to HITL via the Auto-Agent.
+
+        The diagnose phase couldn't resolve this, but rather than dead-end at a
+        human we first route it into the Auto-Agent's convergence loop
+        (ADR-0084): ``hydraflow-hitl`` keeps it visible in the HITL queue, and
+        ``hitl-escalation`` + ``diagnose-failed`` make ``AutoAgentPreflightLoop``
+        discover it and attempt a root-cause fix — retrying a transient (e.g. a
+        credit/session limit) or applying the diagnosis — before any human is
+        involved. The Auto-Agent routes a *resolved* diagnose-failed issue back
+        to review.
+        """
         try:
             await self._prs.post_comment(issue_number, comment)
         except Exception:
@@ -449,6 +459,20 @@ class DiagnosticLoop(BaseBackgroundLoop):
             logger.warning(
                 "Diagnostic: label swap to HITL failed for issue #%d "
                 "— issue may need manual label update",
+                issue_number,
+                exc_info=True,
+            )
+        # Route into the Auto-Agent convergence loop. ``hitl-escalation`` is not
+        # a pipeline-stage label, so it survives the swap above — the issue then
+        # carries both ``hydraflow-hitl`` (HITL queue) and the Auto-Agent
+        # routing labels.
+        try:
+            await self._prs.add_labels(
+                issue_number, ["hitl-escalation", "diagnose-failed"]
+            )
+        except Exception:
+            logger.warning(
+                "Diagnostic: failed to add Auto-Agent routing labels for #%d",
                 issue_number,
                 exc_info=True,
             )

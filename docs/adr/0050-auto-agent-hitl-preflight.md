@@ -82,7 +82,7 @@ The initial PR landing this ADR shipped the full pipeline scaffolding
 sub-label playbooks, the dashboard + `/api/diagnostics/auto-agent`
 endpoint, and the adversarial corpus harness — but `_build_spawn_fn`
 was a placeholder. The follow-up PR replaced that placeholder with
-`AutoAgentRunner` (`src/preflight/auto_agent_runner.py`), which spawns
+`AutoAgentRunner` (`src/preflight/auto_agent_runner.py:AutoAgentRunner`), which spawns
 the real Claude Code subprocess via `stream_claude_process`,
 captures cost via `prompt_telemetry`, applies the spec §5.2 tool
 restrictions (`--disallowedTools=WebFetch` at the CLI; path-level
@@ -109,19 +109,28 @@ through the loop.
 The following files carry this ADR's decisions and must be kept in sync with any supersession:
 
 - `src/models.py` — `StateData` fields `auto_agent_attempts: dict[str, int]` and `auto_agent_daily_spend: dict[str, float]`.
-- `src/state/_auto_agent.py` — `AutoAgentStateMixin` (attempts get/bump/clear + daily-spend get/add).
+- `src/state/_auto_agent.py:AutoAgentStateMixin` — `AutoAgentStateMixin` (attempts get/bump/clear + daily-spend get/add).
 - `src/config.py` — `auto_agent_preflight_enabled`, `auto_agent_preflight_interval`, `auto_agent_persona`, `auto_agent_max_attempts`, `auto_agent_skip_sublabels`, `auto_agent_cost_cap_usd`, `auto_agent_wall_clock_cap_s`, `auto_agent_daily_budget_usd` fields + matching env-overrides.
-- `src/preflight/audit.py` — `PreflightAuditStore` durable JSONL persistence (file_lock + fsync) + 24h/7d aggregates + top-spend.
-- `src/preflight/context.py` — `PreflightContext` dataclass + `gather_context()` (handles `escalation_context=None`).
-- `src/preflight/decision.py` — `PreflightResult` + `apply_decision()` pure label state machine for all 6 statuses.
-- `src/preflight/agent.py` — `PreflightAgent` + `run_preflight` + cost/wall-clock cap watchers.
-- `src/preflight/runner.py` — prompt rendering helpers + `parse_agent_response`.
-- `src/preflight/auto_agent_runner.py` — `AutoAgentRunner` real Claude Code subprocess spawn (production `_build_spawn_fn`) + per-attempt telemetry to `inferences.jsonl` + cost estimate via `model_pricing`.
-- `src/sentry/reverse_lookup.py` — `query_sentry_by_title()` (never-raises).
-- `src/auto_agent_preflight_loop.py` — `AutoAgentPreflightLoop._do_work` pipeline + reconcile-on-close.
+- `src/preflight/audit.py:PreflightAuditStore` — `PreflightAuditStore` durable JSONL persistence (file_lock + fsync) + 24h/7d aggregates + top-spend.
+- `src/preflight/context.py:PreflightContext` — `PreflightContext` dataclass + `gather_context()` (handles `escalation_context=None`).
+- `src/preflight/decision.py:apply_decision` — `PreflightResult` + `apply_decision()` pure label state machine for all 6 statuses.
+- `src/preflight/agent.py:run_preflight` — `PreflightAgentDeps` + `run_preflight` + cost/wall-clock cap watchers.
+- `src/preflight/runner.py:parse_agent_response` — prompt rendering helpers + `parse_agent_response`.
+- `src/preflight/auto_agent_runner.py:AutoAgentRunner` — `AutoAgentRunner` real Claude Code subprocess spawn (production `_build_spawn_fn`) + per-attempt telemetry to `inferences.jsonl` + cost estimate via `model_pricing`.
+- `src/sentry/reverse_lookup.py:query_sentry_by_title` — `query_sentry_by_title()` (never-raises).
+- `src/auto_agent_preflight_loop.py:AutoAgentPreflightLoop` — `AutoAgentPreflightLoop._do_work` pipeline + reconcile-on-close.
 - `prompts/auto_agent/` — shared envelope (`_envelope.md`) + `_default.md` + 9 sub-label prompt files.
-- `src/dashboard_routes/_diagnostics_routes.py` — `/api/diagnostics/auto-agent` endpoint.
+- `src/dashboard_routes/_diagnostics_routes.py:build_diagnostics_router` — `/api/diagnostics/auto-agent` endpoint.
 - `src/ui/src/components/diagnostics/AutoAgentStats.jsx` — System tab tile.
 - `tests/test_auto_agent_preflight_loop.py` + `tests/test_auto_agent_close_reconciliation.py` + `tests/test_auto_agent_loop_wiring.py` + `tests/test_preflight_auto_agent_runner.py` — unit + wiring + runner tests.
 - `tests/scenarios/test_auto_agent_preflight.py` — full-loop scenario tests.
 - `tests/auto_agent/adversarial/test_corpus.py` + `tests/auto_agent/adversarial/corpus/` — 9-entry adversarial corpus + harness (run via `make auto-agent-adversarial`).
+
+## Subsequent evolution
+
+The pre-flight loop's architecture is unchanged, but its behaviour has been
+extended since this ADR was accepted. Recorded here so the decision stays honest:
+
+- **Specialist-aware playbook bundles** ([ADR-0063](0063-factory-phase-drift-mitigation.md)) — the single generic `_default` persona is generalised so a `*-stuck` sub-label routes to a phase-specific playbook bundle (existing playbooks become the `_default` for their sub-label). The pre-flight loop becomes specialist-aware rather than running one lead-engineer persona for every escalation.
+- **Tightened escalation contract** ([ADR-0084](0084-auto-agent-universal-root-cause-gate.md), Proposed — *amends* this ADR) — keeps this architecture but makes the gate universal, persistent, and root-cause-oriented: a `retry` outcome with confidence/blocked-reason so a transient bail is no longer indistinguishable from a true human-only blocker, a global escalation cap so exhausted issues stop cycling, and a shared escalation helper so every loop routes through the gate.
+- **Multi-repo audit scoping** (Phase-3c) — `PreflightAuditEntry` carries a `repo` field, `PreflightAuditStore` queries accept a `repos` filter, and `/api/diagnostics/auto-agent` accepts `repo=__all__` to union every repo's audit rows so the diagnostics tile aggregates correctly under multi-repo mode.
