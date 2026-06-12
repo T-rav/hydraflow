@@ -1,4 +1,4 @@
-"""/api/atlas/* endpoints — the Atlas knowledge-graph dashboard surface (ADR-0059).
+"""/api/atlas/* endpoints — the Atlas knowledge-graph dashboard surface (ADR-0090).
 
 Reads from the existing TermStore at config.repo_root/docs/wiki/terms/ and from
 docs/adr/*.md. Sibling to _wiki_routes.py; does not replace it. The Maintenance

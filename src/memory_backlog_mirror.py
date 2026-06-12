@@ -100,7 +100,7 @@ def render_issue_body(entry: MirrorEntry, *, repo_relative_path: str) -> str:
         f"## Rule (from memory)\n\n"
         f"{entry.body}\n"
         f"---\n"
-        f"_Filed by `MemoryBacklogLoop` (ADR-0057) — promote by enforcing "
+        f"_Filed by `MemoryBacklogLoop` (ADR-0089) — promote by enforcing "
         f"the rule (test/fixture/lint/loop), then close this issue with "
         f"`promoted_in: <PR>` in the mirror frontmatter._\n"
     )

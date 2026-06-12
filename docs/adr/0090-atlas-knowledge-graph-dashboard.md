@@ -1,4 +1,4 @@
-# ADR-0059: Atlas — Knowledge Graph Dashboard Surface
+# ADR-0090: Atlas — Knowledge Graph Dashboard Surface
 
 ## Status
 
