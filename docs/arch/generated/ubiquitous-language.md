@@ -6,6 +6,18 @@ _42 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
+## ADRCouncilReviewer
+
+**Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/adr_reviewer.py:ADRCouncilReviewer` · **Confidence:** `accepted`
+**Aliases:** `adr council reviewer`, `council reviewer`
+
+ADRCouncilReviewer is the domain service that runs multi-agent council review sessions on proposed Architecture Decision Records. It scans the ADR directory for files marked Status: Proposed, gates each candidate through ADRPreValidator, detects near-duplicate ADRs via similarity scoring, orchestrates multi-round council voting, and routes each outcome to acceptance, rejection, escalation, or duplicate-flagging. ADRReviewerLoop delegates all review logic to this service on every polling cycle.
+
+**Invariants:**
+- CreditExhaustedError and AuthenticationError propagate out of the review batch rather than being swallowed per-item, so BaseBackgroundLoop can pause on a fatal billing signal.
+- Every ADR that reaches Accepted status is guaranteed to carry an **Enforced by:** line (injected as '(none)' if absent) before it is written back.
+- Pre-validation must pass before a council session is started; a failing ADR is routed and counted separately without blocking the rest of the batch.
+
 ## ADRReviewerLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/adr_reviewer_loop.py:ADRReviewerLoop` · **Confidence:** `accepted`
@@ -213,18 +225,6 @@ Trust-fleet loop that detects persistently flaky tests by parsing JUnit XML from
 - Flake detection requires at least one pass AND one fail within the window — pure-fail tests are not flakes.
 - Maximum 3 repair attempts per test before HITL escalation; the dedup key for the `hydraflow-find` issue does not reset until the escalation is resolved.
 - Kill-switch is via `enabled_cb("flake_tracker")` (ADR-0049).
-
-## GitHubCacheLoop
-
-**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/github_cache_loop.py:GitHubCacheLoop` · **Confidence:** `accepted`
-**Aliases:** `github cache loop`, `github data cache loop`, `github poller`
-
-Centralized GitHub data poller that replaces the pattern where every dashboard endpoint and background worker makes its own `gh api` calls (ADR-0041). A single `GitHubCacheLoop` polls GitHub on a fixed interval and stores results in `GitHubDataCache` — in memory and on disk. Dashboard endpoints and background workers read from the cache instantly rather than hitting the API. Write operations (create PR, merge, comment, label swap) still call `gh` directly because they need immediate confirmation.
-
-**Invariants:**
-- Only one instance per repo runtime; all read consumers share the same cache snapshot.
-- Write operations bypass the cache and call `gh` directly.
-- Cache staleness is observable: each `CacheSnapshot` carries a `fetched_at` timestamp; `age_seconds` is infinite until the first poll completes.
 
 ## GitHubCacheLoop
 
