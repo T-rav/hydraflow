@@ -31,6 +31,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
+from contracts.shadow_classifier import SHAPE_VERDICT_KEY, classify, is_value_comparable
 from models import WorkCycleResult  # noqa: TCH001
 from state import StateTracker  # noqa: TCH001
 
@@ -111,6 +112,7 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
         samples = self._corpus.list()
         compared = 0
         skipped_no_dispatcher = 0
+        skipped_volatile = 0
         drifted: list[tuple[Path, str]] = []  # (path, signature)
         errors = 0
 
@@ -141,6 +143,17 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
 
             compared += 1
             if fake_output is None:
+                continue
+
+            shape_class = classify(sample.adapter, sample.command, sample.args)
+            # VOLATILE/MUTATING: only count as drift when the dispatcher signals a
+            # real schema failure via SHAPE_VERDICT_KEY. Raw-value differences on
+            # live-state queries are expected non-determinism, not a fake gap.
+            if (
+                not is_value_comparable(shape_class)
+                and SHAPE_VERDICT_KEY not in fake_output
+            ):
+                skipped_volatile += 1
                 continue
 
             signature = _drift_signature(sample, fake_output)
@@ -182,6 +195,7 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
             "status": "ok",
             "compared": compared,
             "skipped_no_dispatcher": skipped_no_dispatcher,
+            "skipped_volatile": skipped_volatile,
             "drifted": len(drifted),
             "errors": errors,
             "filed_issue": filed_issue,

@@ -85,3 +85,65 @@ class TestLiveCorpusReplayScenario:
         # human escalation only on N-attempt exhaustion (Phase 3).
         assert "hitl-escalation" not in labels
         assert "human-required" not in labels
+
+    async def test_volatile_shape_is_skipped_not_drifted(self, tmp_path: Path) -> None:
+        """A VOLATILE corpus sample (gh issue list) must never produce a
+        shadow-drift signal regardless of what the dispatcher returns.
+
+        Acceptance criterion for issue #9354: skipped_volatile == 1, drifted == 0,
+        no hydraflow-find issue filed.
+        """
+        world = MockWorld(tmp_path)
+        config = HydraFlowConfig(
+            data_root=tmp_path / "data",
+            repo_root=tmp_path / "repo",
+            repo="hydra/hydraflow",
+        )
+        (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
+        corpus = ShadowCorpus(config.data_root / "contract_shadow")
+        # VOLATILE_SHAPE: gh issue list — output changes every time any issue
+        # is filed; a fake adapter cannot match the point-in-time snapshot.
+        corpus.record(
+            adapter="github",
+            command="gh",
+            args=["issue", "list", "--state", "open", "--json", "number,title"],
+            stdout='[{"number":9354,"title":"Shadow-drift: exclude volatile samples"}]\n',
+            stderr="",
+            exit_code=0,
+        )
+        dedup = DedupStore(
+            "live_corpus_replay",
+            config.data_root / "dedup" / "live_corpus_replay.json",
+        )
+        stop = asyncio.Event()
+        deps = LoopDeps(
+            event_bus=EventBus(),
+            stop_event=stop,
+            status_cb=MagicMock(),
+            enabled_cb=lambda _: True,
+            sleep_fn=AsyncMock(),
+        )
+        loop = LiveCorpusReplayLoop(
+            config=config,
+            corpus=corpus,
+            pr_manager=world.github,
+            dedup=dedup,
+            deps=deps,
+        )
+
+        # Dispatcher returns a completely different list — simulates the
+        # live corpus changing as issues are filed/closed.
+        async def stub_list_dispatcher(_sample):  # noqa: ANN001
+            # Return as dict so the type contract is satisfied; the VOLATILE
+            # suppression happens before value comparison is attempted.
+            return {"items": [{"number": 1, "title": "some other issue"}]}
+
+        loop.register("github", "gh", stub_list_dispatcher)
+
+        result = await loop._do_work()
+
+        assert result["skipped_volatile"] == 1
+        assert result["drifted"] == 0
+        assert len(world.github._issues) == 0, (
+            "volatile shape difference must not file a hydraflow-find issue"
+        )
