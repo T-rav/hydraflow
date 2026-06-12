@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_42 terms across 3 bounded contexts._
+_43 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -225,6 +225,18 @@ Trust-fleet loop that detects persistently flaky tests by parsing JUnit XML from
 - Flake detection requires at least one pass AND one fail within the window — pure-fail tests are not flakes.
 - Maximum 3 repair attempts per test before HITL escalation; the dedup key for the `hydraflow-find` issue does not reset until the escalation is resolved.
 - Kill-switch is via `enabled_cb("flake_tracker")` (ADR-0049).
+
+## GitHubCacheLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/github_cache_loop.py:GitHubCacheLoop` · **Confidence:** `accepted`
+**Aliases:** `github cache loop`, `github data cache loop`, `github poller`
+
+Centralized GitHub data poller that replaces the pattern where every dashboard endpoint and background worker makes its own `gh api` calls (ADR-0041). A single `GitHubCacheLoop` polls GitHub on a fixed interval and stores results in `GitHubDataCache` — in memory and on disk. Dashboard endpoints and background workers read from the cache instantly rather than hitting the API. Write operations (create PR, merge, comment, label swap) still call `gh` directly because they need immediate confirmation.
+
+**Invariants:**
+- Only one instance per repo runtime; all read consumers share the same cache snapshot.
+- Write operations bypass the cache and call `gh` directly.
+- Cache staleness is observable: each `CacheSnapshot` carries a `fetched_at` timestamp; `age_seconds` is infinite until the first poll completes.
 
 ## GitHubCacheLoop
 
