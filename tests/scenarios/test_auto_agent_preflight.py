@@ -205,3 +205,68 @@ async def test_principles_stuck_bypassed(tmp_path: Path) -> None:
     assert result["result_status"] == "skipped_deny_list"
     pr.add_labels.assert_awaited_with(1, ["human-required"])
     assert spawn_called is False
+
+
+@pytest.mark.asyncio
+async def test_credit_exhaustion_refunds_attempt_and_reraises(tmp_path: Path) -> None:
+    # A session/credit limit mid-spawn is a transient (ADR-0084): refund the
+    # attempt and re-raise to stop the cycle — never strand the issue or burn
+    # its budget toward a wrongful human-required.
+    from subprocess_util import CreditExhaustedError  # noqa: PLC0415
+
+    loop, state, pr, _audit = _make_loop(tmp_path)
+    state.refund_auto_agent_attempt = MagicMock(return_value=0)
+    pr.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 1,
+                "body": "x",
+                "labels": [
+                    {"name": "hitl-escalation"},
+                    {"name": "flaky-test-stuck"},
+                ],
+            },
+        ]
+    )
+
+    async def _spawn(prompt: str, worktree_path: str):
+        raise CreditExhaustedError("You've hit your session limit")
+
+    loop._build_spawn_fn = lambda issue: _spawn
+
+    with pytest.raises(CreditExhaustedError):
+        await loop._do_work()
+
+    state.refund_auto_agent_attempt.assert_called_once_with(1)
+    # No human escalation — the issue stays eligible for retry when budget returns.
+    for call in pr.add_labels.await_args_list:
+        assert "human-required" not in call.args[1]
+
+
+@pytest.mark.asyncio
+async def test_resolved_diagnose_failed_routes_back_to_review(tmp_path: Path) -> None:
+    # A diagnose-failed issue (routed from the diagnostic loop) that the
+    # Auto-Agent resolves must re-enter review, not linger in the HITL queue.
+    loop, _state, pr, _audit = _make_loop(tmp_path)
+    pr.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 1,
+                "body": "x",
+                "labels": [
+                    {"name": "hitl-escalation"},
+                    {"name": "diagnose-failed"},
+                ],
+            },
+        ]
+    )
+    _stub_spawn(
+        loop,
+        "<status>resolved</status><pr_url>https://x/pr/1</pr_url>"
+        "<confidence>high</confidence><diagnosis>applied review fixes</diagnosis>",
+    )
+
+    result = await loop._do_work()
+
+    assert result["result_status"] == "resolved"
+    pr.swap_pipeline_labels.assert_awaited_once_with(1, loop._config.review_label[0])
