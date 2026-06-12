@@ -17,13 +17,19 @@ logger = logging.getLogger("hydraflow.preflight.decision")
 
 @dataclass(frozen=True)
 class PreflightResult:
-    status: str  # "resolved" | "needs_human" | "fatal" | "pr_failed" | "cost_exceeded" | "timeout"
+    status: str  # "resolved" | "retry" | "needs_human" | "fatal" | "pr_failed" | "cost_exceeded" | "timeout"
     pr_url: str | None
     diagnosis: str
     cost_usd: float
     wall_clock_s: float
     tokens: int
     prompt_hash: str = ""  # populated from PreflightSpawn for audit traceability
+    # Convergence signals (ADR-0084 pillar B): the agent's self-assessed
+    # confidence and why it stopped. ``needs_human`` is only honored for a
+    # genuine human-only ``blocked_reason`` at high confidence; otherwise the
+    # bail is treated as ``retry`` and the loop tries again next cycle.
+    confidence: str = "high"  # "high" | "medium" | "low"
+    blocked_reason: str = "none"
 
 
 class _PRPort(Protocol):
@@ -46,6 +52,11 @@ class _PRPort(Protocol):
 # doesn't stay in the human queue after a successful auto-fix.
 _LABEL_MAP: dict[str, tuple[list[str], list[str]]] = {
     "resolved": ([], ["hitl-escalation", "human-required"]),
+    # `retry` (ADR-0084 B): a recoverable/low-confidence bail. Add nothing and
+    # remove nothing — the issue keeps `hitl-escalation` (no `human-required`)
+    # so the loop re-attempts next cycle. If the attempt budget is exhausted,
+    # the exhaustion branch below escalates it to a human.
+    "retry": ([], []),
     "needs_human": (["human-required"], []),
     "fatal": (["human-required", "auto-agent-fatal"], []),
     "pr_failed": (["human-required", "auto-agent-pr-failed"], []),
@@ -76,11 +87,17 @@ async def apply_decision(
     if result.status == "resolved" and sub_label and sub_label != "_default":
         remove = list(remove) + [sub_label]
 
-    # Exhaustion check — if this attempt brought us to the cap and it didn't resolve,
-    # flag as exhausted on top of the normal needs_human/fatal label set.
+    # Exhaustion check — if this attempt brought us to the cap and it didn't
+    # resolve, flag as exhausted on top of the normal needs_human/fatal label
+    # set. A `retry` that exhausts its budget must still escalate to a human:
+    # its base label map adds no `human-required`, so add it here.
     exhausted = result.status != "resolved" and current_attempts >= max_attempts
     if exhausted:
-        add = list(add) + ["auto-agent-exhausted"]
+        add = list(add)
+        if "human-required" not in add:
+            add.append("human-required")
+        if "auto-agent-exhausted" not in add:
+            add.append("auto-agent-exhausted")
 
     if add:
         await pr_port.add_labels(issue_number, add)

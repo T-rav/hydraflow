@@ -1,6 +1,6 @@
 {
-  "status": "needs_human",
-  "labels_added": ["human-required"],
+  "status": "retry",
+  "labels_added": [],
   "labels_removed": [],
   "pr_url": null
 }
