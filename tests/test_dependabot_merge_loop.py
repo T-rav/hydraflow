@@ -38,8 +38,14 @@ def _make_state(
     authors: list[str] | None = None,
     failure_strategy: str = "skip",
     processed: set[int] | None = None,
+    arch_refresh_attempts: dict[int, int] | None = None,
 ) -> MagicMock:
-    """Build a mock StateTracker with bot PR methods."""
+    """Build a mock StateTracker with bot PR methods.
+
+    The arch-staleness self-heal counter is backed by a real dict so that
+    ``get`` reflects ``bump`` within a single ``_do_work`` call (the loop reads
+    the counter back after bumping for its log line).
+    """
     state = MagicMock()
     settings = DependabotMergeSettings(
         authors=authors or ["dependabot[bot]"],
@@ -47,6 +53,19 @@ def _make_state(
     )
     state.get_dependabot_merge_settings.return_value = settings
     state.get_dependabot_merge_processed.return_value = processed or set()
+
+    counter: dict[int, int] = dict(arch_refresh_attempts or {})
+
+    def _get_attempts(pr_number: int) -> int:
+        return counter.get(pr_number, 0)
+
+    def _bump_attempts(pr_number: int) -> int:
+        counter[pr_number] = counter.get(pr_number, 0) + 1
+        return counter[pr_number]
+
+    state.get_dependabot_arch_refresh_attempts.side_effect = _get_attempts
+    state.bump_dependabot_arch_refresh_attempts.side_effect = _bump_attempts
+    state._arch_refresh_counter = counter  # exposed for assertions
     return state
 
 
@@ -61,6 +80,9 @@ def _make_loop(
     failure_strategy: str = "skip",
     processed: set[int] | None = None,
     authors: list[str] | None = None,
+    arch_refresh_attempts: dict[int, int] | None = None,
+    arch_refresh_result: bool = True,
+    arch_autoheal_max_attempts: int | None = None,
 ) -> tuple[DependabotMergeLoop, asyncio.Event, MagicMock, MagicMock, MagicMock]:
     """Build a DependabotMergeLoop with test-friendly defaults.
 
@@ -69,6 +91,12 @@ def _make_loop(
     deps = make_bg_loop_deps(
         tmp_path, enabled=enabled, dependabot_merge_interval=interval
     )
+    if arch_autoheal_max_attempts is not None:
+        object.__setattr__(
+            deps.config,
+            "dependabot_arch_autoheal_max_attempts",
+            arch_autoheal_max_attempts,
+        )
 
     cache = MagicMock()
     # DependabotMergeLoop reads the label-agnostic snapshot (get_all_open_prs);
@@ -83,11 +111,13 @@ def _make_loop(
     prs.add_labels = AsyncMock()
     prs.post_comment = AsyncMock()
     prs.close_issue = AsyncMock()
+    prs.refresh_pr_branch_with_arch_regen = AsyncMock(return_value=arch_refresh_result)
 
     state = _make_state(
         authors=authors,
         failure_strategy=failure_strategy,
         processed=processed,
+        arch_refresh_attempts=arch_refresh_attempts,
     )
 
     loop = DependabotMergeLoop(
@@ -377,3 +407,170 @@ class TestDependabotMergeLoopAutoAgentBranch:
         assert result["skipped"] == 1
         prs.merge_pr.assert_not_awaited()
         state.add_dependabot_merge_processed.assert_not_called()
+
+
+class TestIsArchStalenessFailure:
+    """The pure detector that classifies a CI-failure summary as stale-arch."""
+
+    @pytest.mark.parametrize(
+        "summary",
+        [
+            "Failed checks: arch-check",
+            "Failed checks: Architecture Check",
+            "Failed checks: lint, Architecture Check, test",
+            "test_curated_generated_is_in_sync_with_source failed",
+            "docs/arch/generated/ is stale relative to source. Run `make arch-regen`",
+        ],
+    )
+    def test_arch_summaries_detected(self, summary: str) -> None:
+        from dependabot_merge_loop import _is_arch_staleness_failure
+
+        assert _is_arch_staleness_failure(summary) is True
+
+    @pytest.mark.parametrize(
+        "summary",
+        [
+            "",
+            "Failed checks: lint, test",
+            "Failed checks: Type Check",
+            "Failed checks: Browser Scenarios",
+            "CI timed out after 60s",
+        ],
+    )
+    def test_non_arch_summaries_rejected(self, summary: str) -> None:
+        from dependabot_merge_loop import _is_arch_staleness_failure
+
+        assert _is_arch_staleness_failure(summary) is False
+
+
+class TestDependabotArchSelfHeal:
+    """The stale-arch self-heal path: merge base + arch-regen + push, bounded
+    by ``dependabot_arch_autoheal_max_attempts``, before failure_strategy."""
+
+    @pytest.mark.asyncio
+    async def test_arch_stale_failure_triggers_refresh_not_strategy(
+        self, tmp_path: Path
+    ) -> None:
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(9422, author="hydraflow-ul-bot", branch="ul-edge-1")],
+            ci_result=(False, "Failed checks: arch-check"),
+            failure_strategy="hitl",
+            authors=["hydraflow-ul-bot"],
+        )
+
+        result = await loop._do_work()
+
+        # Refresh was attempted on the PR's branch; counter bumped; PR left
+        # open (skipped) for the next tick to re-evaluate.
+        prs.refresh_pr_branch_with_arch_regen.assert_awaited_once_with(
+            9422, "ul-edge-1"
+        )
+        state.bump_dependabot_arch_refresh_attempts.assert_called_once_with(9422)
+        assert result["skipped"] == 1
+        assert result["failed"] == 0
+        # No failure_strategy side effects (hitl would label + comment + track).
+        prs.add_labels.assert_not_awaited()
+        prs.post_comment.assert_not_awaited()
+        state.add_dependabot_merge_processed.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_refresh_no_op_falls_through_to_strategy(
+        self, tmp_path: Path
+    ) -> None:
+        # Refresh returns False (e.g. a real non-generated conflict) — the loop
+        # must apply the failure strategy, NOT bump the counter.
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(9423, author="hydraflow-ul-bot", branch="ul-edge-2")],
+            ci_result=(False, "Failed checks: arch-check"),
+            failure_strategy="hitl",
+            authors=["hydraflow-ul-bot"],
+            arch_refresh_result=False,
+        )
+
+        result = await loop._do_work()
+
+        prs.refresh_pr_branch_with_arch_regen.assert_awaited_once()
+        state.bump_dependabot_arch_refresh_attempts.assert_not_called()
+        # Fell through to hitl strategy.
+        assert result["failed"] == 1
+        prs.add_labels.assert_awaited_once()
+        prs.post_comment.assert_awaited_once()
+        state.add_dependabot_merge_processed.assert_called_once_with(9423)
+
+    @pytest.mark.asyncio
+    async def test_cap_reached_falls_through_to_strategy(self, tmp_path: Path) -> None:
+        # Already at the cap (2 attempts) — no further refresh; apply strategy.
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(9424, author="hydraflow-ul-bot", branch="ul-edge-3")],
+            ci_result=(False, "Failed checks: arch-check"),
+            failure_strategy="skip",
+            authors=["hydraflow-ul-bot"],
+            arch_refresh_attempts={9424: 2},
+            arch_autoheal_max_attempts=2,
+        )
+
+        result = await loop._do_work()
+
+        prs.refresh_pr_branch_with_arch_regen.assert_not_awaited()
+        assert result["skipped"] == 1  # strategy=skip
+        state.add_dependabot_merge_processed.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_non_arch_failure_skips_refresh(self, tmp_path: Path) -> None:
+        # A real (non-arch) failure must NOT trigger a refresh — strategy only.
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(9425, author="hydraflow-ul-bot", branch="ul-edge-4")],
+            ci_result=(False, "Failed checks: lint, test"),
+            failure_strategy="hitl",
+            authors=["hydraflow-ul-bot"],
+        )
+
+        result = await loop._do_work()
+
+        prs.refresh_pr_branch_with_arch_regen.assert_not_awaited()
+        assert result["failed"] == 1
+        prs.add_labels.assert_awaited_once()
+        state.add_dependabot_merge_processed.assert_called_once_with(9425)
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_zero_disables_refresh(self, tmp_path: Path) -> None:
+        # max_attempts=0 is the kill switch: never refresh, even on stale-arch.
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(9426, author="hydraflow-ul-bot", branch="ul-edge-5")],
+            ci_result=(False, "Failed checks: arch-check"),
+            failure_strategy="skip",
+            authors=["hydraflow-ul-bot"],
+            arch_autoheal_max_attempts=0,
+        )
+
+        result = await loop._do_work()
+
+        prs.refresh_pr_branch_with_arch_regen.assert_not_awaited()
+        assert result["skipped"] == 1
+        state.bump_dependabot_arch_refresh_attempts.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_below_cap_still_refreshes(self, tmp_path: Path) -> None:
+        # One prior attempt, cap=2 — a second refresh is still allowed.
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(9427, author="hydraflow-ul-bot", branch="ul-edge-6")],
+            ci_result=(False, "Failed checks: Architecture Check"),
+            failure_strategy="skip",
+            authors=["hydraflow-ul-bot"],
+            arch_refresh_attempts={9427: 1},
+            arch_autoheal_max_attempts=2,
+        )
+
+        result = await loop._do_work()
+
+        prs.refresh_pr_branch_with_arch_regen.assert_awaited_once_with(
+            9427, "ul-edge-6"
+        )
+        state.bump_dependabot_arch_refresh_attempts.assert_called_once_with(9427)
+        assert result["skipped"] == 1
