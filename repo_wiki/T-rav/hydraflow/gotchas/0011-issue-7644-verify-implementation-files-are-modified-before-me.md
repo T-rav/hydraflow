@@ -5,7 +5,7 @@ source_issue: 7644
 source_phase: review
 created_at: 2026-05-07T07:44:17.831282+00:00
 status: active
-corroborations: 1
+corroborations: 2
 ---
 
 # Verify implementation files are modified before merging a feature PR
