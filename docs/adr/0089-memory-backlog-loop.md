@@ -1,4 +1,4 @@
-# ADR-0057: MemoryBacklogLoop — promote session-memory feedback to the find queue
+# ADR-0089: MemoryBacklogLoop — promote session-memory feedback to the find queue
 
 - **Status:** Accepted
 - **Date:** 2026-05-07
