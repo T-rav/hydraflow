@@ -1,0 +1,154 @@
+// Issue #9080 — Provision isolated GitHub contracts sandbox
+// C4 model of the contract-recording trust fleet around the change area.
+
+specification {
+  element system
+  element container
+  element component
+  element external
+
+  tag new        // introduced by issue #9080
+  tag modified   // touched by issue #9080
+  tag unchanged  // existing, shown for context
+}
+
+model {
+
+  trustFleet = system 'Trust Fleet — Fake Contract Testing' {
+    description 'Records real CLI shapes into cassettes; replays them through fakes to detect fake/real drift (ADR-0047).'
+
+    refreshLoop = container 'ContractRefreshLoop' {
+      description 'Weekly caretaker: record → diff → refresh PR → replay gate → escalate.'
+      technology 'src/contract_refresh_loop.py'
+      #unchanged
+
+      recordAll = component '_record_all / _record_with_trace' {
+        description 'Dispatches each adapter recorder via asyncio.to_thread; gated by contract_refresh_external_enabled.'
+        #unchanged
+      }
+    }
+
+    recording = container 'contract_recording (recorder fleet)' {
+      description 'Real-binary boundary: each record_* spawns the real CLI and writes cassette YAML/JSONL. Graceful-failure, 120s timeout.'
+      technology 'src/contract_recording.py'
+
+      recGithub = component 'record_github' {
+        description 'TODAY: no-op (returns []). Stays no-op until mutating GitHub recording is explicitly enabled (#9080 unblocks #8693/#8699).'
+        #modified
+      }
+      recGit = component 'record_git' {
+        description 'Records git commit/rev_parse in a THROWAWAY tmp dir — mutating but isolated. The pattern #9080 mirrors for GitHub.'
+        #unchanged
+      }
+      recDocker = component 'record_docker' { #unchanged }
+      recClaude = component 'record_claude_stream' { #unchanged }
+    }
+
+    sandbox = container 'GitHubSandboxProvisioner' {
+      description 'NEW: provisions a per-run EPHEMERAL repo, hands recorders an isolated target, tears it down (context-managed). All gh calls confined to this real-binary boundary module.'
+      technology 'src/contract_github_sandbox.py'
+      #new
+
+      provision = component 'provision()' {
+        description 'gh repo create <owner>/<base>-run-<token> --private; returns SandboxTarget or None on failure.'
+        #new
+      }
+      teardown = component 'teardown()' {
+        description 'gh repo delete <slug> --yes; idempotent (absent repo = success); best-effort, logged.'
+        #new
+      }
+      ctxmgr = component '__enter__/__exit__' {
+        description 'Guarantees teardown even when the recording body raises.'
+        #new
+      }
+    }
+
+    smoke = container 'contract_sandbox_smoke (proof)' {
+      description 'NEW dry-run proof: provision → gh issue create → gh issue close → teardown → assert repo absent. Exit 0 ⇔ no durable leak.'
+      technology 'scripts/contract_sandbox_smoke.py'
+      #new
+    }
+
+    replayGate = container 'FakeGitHub contract replay' {
+      description 'make trust-contracts — replays every cassette through FakeGitHub. The contract the recordings must satisfy.'
+      technology 'tests/trust/contracts/test_fake_github_contract.py'
+      #unchanged
+    }
+  }
+
+  ci = system 'CI / GitHub Actions' {
+    recordWorkflow = container 'contract-record.yml' {
+      description 'NEW: workflow_dispatch + weekly schedule. Auths gh with a delete_repo-scoped PAT, runs the smoke proof, cleans up on always().'
+      technology '.github/workflows/contract-record.yml'
+      #new
+    }
+  }
+
+  ghApi = external 'GitHub REST/GraphQL API' {
+    description 'gh repo create/delete, gh issue create/close against the ephemeral repo.'
+  }
+
+  cfg = external 'HydraFlowConfig' {
+    description 'contracts_sandbox_repo (owner), contract_github_recording_enabled (NEW master gate, default False), contract_refresh_external_enabled.'
+    #modified
+  }
+
+  // --- relationships ---
+  refreshLoop -> recording 'invokes record_* (weekly tick)'
+  recordAll -> recGithub 'calls (no-op today)'
+  recordAll -> recGit 'calls'
+
+  recordWorkflow -> smoke 'runs make contract-sandbox-smoke'
+  recordWorkflow -> ghApi 'gh auth (delete_repo PAT); always() cleanup'
+  smoke -> sandbox 'provision() / teardown() (context-managed)'
+  smoke -> ghApi 'gh issue create / close on ephemeral repo'
+
+  sandbox -> ghApi 'gh repo create / delete'
+  provision -> ghApi 'gh repo create'
+  teardown -> ghApi 'gh repo delete'
+
+  recGithub -> sandbox 'FUTURE (#8693/#8699): records mutating ops against SandboxTarget when gate is ON'
+  recGithub -> cfg 'reads contract_github_recording_enabled (stays no-op when False)'
+  sandbox -> cfg 'owner from contracts_sandbox_repo'
+
+  recording -> replayGate 'cassettes must replay through FakeGitHub'
+}
+
+views {
+
+  view index {
+    title 'Issue #9080 — Context'
+    include *
+    autoLayout TopBottom
+  }
+
+  view trustFleetContainers of trustFleet {
+    title 'Trust Fleet — containers (change area)'
+    include *
+    include ci.*, ghApi, cfg
+    autoLayout LeftRight
+  }
+
+  view sandboxComponents of sandbox {
+    title 'GitHubSandboxProvisioner — components (NEW)'
+    include *
+    include smoke, ghApi, cfg, recGithub
+    autoLayout TopBottom
+  }
+
+  dynamic view provisionFlow {
+    title 'Dynamic — provision → record → teardown (no-leak)'
+
+    recordWorkflow -> smoke 'make contract-sandbox-smoke'
+    smoke -> provision 'provision()'
+    provision -> ghApi 'gh repo create <owner>/<base>-run-<runId> --private'
+    ghApi -> provision 'SandboxTarget(repo)'
+    smoke -> ghApi 'gh issue create -R <repo>'
+    smoke -> ghApi 'gh issue close -R <repo> <n>'
+    smoke -> teardown 'teardown() (in __exit__, always)'
+    teardown -> ghApi 'gh repo delete <repo> --yes'
+    smoke -> ghApi 'gh repo view <repo>  (expect NOT FOUND ⇒ no leak)'
+
+    autoLayout TopBottom
+  }
+}
