@@ -48,6 +48,7 @@ class TestInitialization:
             "baseline_audit",
             "bg_worker_states",
             "dependabot_merge_processed",
+            "dependabot_arch_refresh_attempts",
             "dependabot_merge_settings",
             "ci_monitor_settings",
             "ci_monitor_tracked_failures",
@@ -149,7 +150,7 @@ class TestInitialization:
             # Per-ADR rollup tracking (#8987) — see ADR-0056 amendment.
             "adr_rollup_issues",
             "rollup_issues",
-            # MemoryBacklogLoop (ADR-0057)
+            # MemoryBacklogLoop (ADR-0089)
             "memory_backlog_attempts",
             # TriageRetryLoop (ADR-0063 W2)
             "triage_retry_attempts",

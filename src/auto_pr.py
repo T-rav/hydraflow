@@ -718,3 +718,255 @@ async def _remove_worktree_async(
         )
     except RuntimeError:
         logger.warning("git branch -D failed for %s", branch)
+
+
+# ---------------------------------------------------------------------------
+# Arch-staleness self-heal — merge base + regenerate generated/ + push
+# ---------------------------------------------------------------------------
+
+# Path prefixes whose merge conflicts are auto-resolvable by re-running
+# arch-regen. A bot PR commits `docs/arch/generated/` artifacts; when the base
+# branch advances, every OTHER open bot PR's committed generated files go stale
+# and conflict on merge. Re-emitting them from source resolves the conflict.
+# `.meta.json` carries the regen stamp and conflicts the same way.
+_ARCH_GENERATED_PREFIX = "docs/arch/generated/"
+_ARCH_META_PATH = "docs/arch/.meta.json"
+
+# Outcome of an arch-staleness refresh attempt.
+ArchRefreshStatus = Literal["refreshed", "no-diff", "real-conflict", "failed"]
+
+
+@dataclass(frozen=True)
+class ArchRefreshResult:
+    """Outcome of :func:`refresh_branch_with_arch_regen`.
+
+    - ``refreshed``: merged base, regenerated artifacts, committed + pushed.
+    - ``no-diff``: base merged cleanly with nothing to regenerate/commit
+      (already up to date) — nothing pushed.
+    - ``real-conflict``: a non-generated file conflicted; merge aborted, no
+      push. The caller must fall through to its failure strategy.
+    - ``failed``: a git/gh step errored (network, auth, regen crash).
+    """
+
+    status: ArchRefreshStatus
+    error: str | None = None
+
+
+def _is_arch_only_conflict(conflicted_paths: list[str]) -> bool:
+    """True iff every conflicting path is an arch-generated artifact.
+
+    An empty list (no conflicts) is *not* an arch conflict — the caller treats
+    a clean merge separately. Returns False the moment a non-generated path
+    appears, because regen cannot resolve a real content conflict.
+    """
+    if not conflicted_paths:
+        return False
+    return all(
+        p == _ARCH_META_PATH or p.startswith(_ARCH_GENERATED_PREFIX)
+        for p in conflicted_paths
+    )
+
+
+async def refresh_branch_with_arch_regen(  # noqa: PLR0911 — linear step-by-step guards, each with its own fail/outcome path
+    *,
+    repo_root: Path,
+    branch: str,
+    base: str,
+    gh_token: str = "",
+    worktree_parent: Path | None = None,
+    commit_author_name: str = BOT_NAME,
+    commit_author_email: str = BOT_EMAIL,
+) -> ArchRefreshResult:
+    """Self-heal a bot PR stuck red on stale ``docs/arch/generated/`` artifacts.
+
+    In an ephemeral worktree checked out on the PR's existing remote head
+    (``origin/{branch}``):
+
+    1. ``git merge origin/{base} --no-edit`` (a merge commit, not a rebase —
+       rebase needs a force-push, which the pre-push hook blocks; squash-merge
+       collapses the merge commit anyway).
+    2. If the merge conflicts only under ``docs/arch/generated/`` (+
+       ``.meta.json``), regenerate the artifacts (``arch.runner --emit``),
+       ``git add -A``, and commit. If ANY non-generated path conflicts, abort
+       the merge and return ``real-conflict`` — a genuine content conflict
+       cannot be auto-healed.
+    3. If the merge was clean, still re-emit so source/generated drift
+       introduced by the newly-merged base is resolved, then stage + commit
+       only if there is a diff.
+    4. Push the temp branch to ``origin/{branch}``.
+
+    The worktree + temp local branch are always removed in a ``finally``.
+    Never force-pushes. Returns an :class:`ArchRefreshResult`.
+    """
+    from subprocess_util import run_subprocess  # local import: avoids cycles
+
+    repo_root = repo_root.resolve()
+    timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    safe = _sanitize_branch_for_path(branch)
+    wt_parent = (worktree_parent or repo_root.parent).resolve()
+    wt_parent.mkdir(parents=True, exist_ok=True)
+    worktree_path = wt_parent / f"archheal-{safe}-{timestamp}"
+    # Temp LOCAL branch name — never the PR's real branch, so cleanup's
+    # `branch -D` can't delete the PR head. We push it to `origin/{branch}`.
+    local_branch = f"archheal-{safe}-{timestamp}"
+
+    async def _git(*args: str, cwd: Path) -> str:
+        return await run_subprocess("git", *args, cwd=cwd, gh_token=gh_token)
+
+    # Refresh both refs we need: the PR head and the base.
+    for ref in (branch, base):
+        try:
+            await run_subprocess(
+                "git",
+                "fetch",
+                "origin",
+                ref,
+                "--quiet",
+                cwd=repo_root,
+                gh_token=gh_token,
+            )
+        except RuntimeError as exc:
+            logger.warning(
+                "arch-refresh: git fetch origin %s failed for %s; "
+                "continuing with cached ref: %s",
+                ref,
+                branch,
+                exc,
+            )
+
+    try:
+        try:
+            await _git(
+                "worktree",
+                "add",
+                "-b",
+                local_branch,
+                str(worktree_path),
+                f"origin/{branch}",
+                cwd=repo_root,
+            )
+        except RuntimeError as exc:
+            return ArchRefreshResult(
+                status="failed",
+                error=f"git worktree add failed for {branch!r}: {exc}",
+            )
+
+        # Merge the base into the PR head. A non-zero exit can mean conflicts
+        # OR a genuine error; we disambiguate by inspecting the unmerged set.
+        merge_conflicted = False
+        try:
+            await _git("merge", f"origin/{base}", "--no-edit", cwd=worktree_path)
+        except RuntimeError:
+            merge_conflicted = True
+
+        if merge_conflicted:
+            try:
+                unmerged_out = await _git(
+                    "diff", "--name-only", "--diff-filter=U", cwd=worktree_path
+                )
+            except RuntimeError as exc:
+                await _abort_merge(worktree_path, gh_token)
+                return ArchRefreshResult(
+                    status="failed",
+                    error=f"could not inspect merge conflicts for {branch!r}: {exc}",
+                )
+            conflicted = [p for p in unmerged_out.splitlines() if p.strip()]
+            if not _is_arch_only_conflict(conflicted):
+                # Real content conflict (or an empty/odd merge failure) — abort
+                # and let the caller's failure strategy take over.
+                await _abort_merge(worktree_path, gh_token)
+                return ArchRefreshResult(
+                    status="real-conflict",
+                    error="non-generated merge conflict: " + ", ".join(conflicted[:10]),
+                )
+
+        # Regenerate the architecture artifacts from source. This resolves an
+        # arch-only conflict AND repairs plain staleness from the merged base.
+        try:
+            await run_subprocess(
+                "uv",
+                "run",
+                "python",
+                "-m",
+                "arch.runner",
+                "--emit",
+                "--repo-root",
+                str(worktree_path),
+                cwd=worktree_path,
+                gh_token=gh_token,
+            )
+        except RuntimeError as exc:
+            await _abort_merge(worktree_path, gh_token)
+            return ArchRefreshResult(
+                status="failed", error=f"arch.runner --emit failed: {exc}"
+            )
+
+        # Stage everything (the merged base files + regenerated artifacts).
+        try:
+            await _git("add", "-A", cwd=worktree_path)
+        except RuntimeError as exc:
+            await _abort_merge(worktree_path, gh_token)
+            return ArchRefreshResult(status="failed", error=f"git add failed: {exc}")
+
+        # On a CLEAN merge with no regen diff there is nothing to commit and the
+        # branch is already current — report no-diff so the caller does NOT burn
+        # a refresh attempt on a no-op (a real failure stays red and the cap
+        # still bounds it).
+        staged_empty = await _staged_diff_empty(worktree_path, gh_token)
+        if staged_empty and not merge_conflicted:
+            return ArchRefreshResult(status="no-diff")
+
+        commit_args = _build_commit_args(
+            commit_author_name,
+            commit_author_email,
+            f"chore(arch): refresh generated artifacts after merging {base}",
+        )
+        try:
+            await run_subprocess(
+                "git", *commit_args, cwd=worktree_path, gh_token=gh_token
+            )
+        except RuntimeError as exc:
+            return ArchRefreshResult(status="failed", error=f"git commit failed: {exc}")
+
+        # Push the temp branch's head to the PR's remote branch. NOT a
+        # force-push: a merge commit fast-forwards the remote head cleanly.
+        try:
+            await _git("push", "origin", f"HEAD:refs/heads/{branch}", cwd=worktree_path)
+        except RuntimeError as exc:
+            return ArchRefreshResult(
+                status="failed", error=f"git push failed for {branch!r}: {exc}"
+            )
+
+        return ArchRefreshResult(status="refreshed")
+    finally:
+        await _remove_worktree_async(repo_root, worktree_path, local_branch, gh_token)
+
+
+async def _abort_merge(worktree_path: Path, gh_token: str) -> None:
+    """Best-effort ``git merge --abort``. Never raises."""
+    from subprocess_util import run_subprocess  # local import: avoids cycles
+
+    try:
+        await run_subprocess(
+            "git", "merge", "--abort", cwd=worktree_path, gh_token=gh_token
+        )
+    except RuntimeError:
+        logger.warning("git merge --abort failed in %s", worktree_path)
+
+
+async def _staged_diff_empty(worktree_path: Path, gh_token: str) -> bool:
+    """True when ``git diff --cached --quiet`` exits 0 (no staged changes)."""
+    from subprocess_util import run_subprocess  # local import: avoids cycles
+
+    try:
+        await run_subprocess(
+            "git",
+            "diff",
+            "--cached",
+            "--quiet",
+            cwd=worktree_path,
+            gh_token=gh_token,
+        )
+        return True  # exit 0 → no staged diff
+    except RuntimeError:
+        return False  # non-zero → there IS a staged diff

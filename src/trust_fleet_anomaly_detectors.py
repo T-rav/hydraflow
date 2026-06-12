@@ -38,6 +38,27 @@ TRUST_LOOP_WORKERS: tuple[str, ...] = (
 )
 
 
+# Per-loop BACKGROUND_WORKER_STATUS detail keys whose count is a *repair
+# success* — a unit of work the loop completed (resolved a flake, refreshed a
+# cassette, merged/reverted a bad SHA, synthesized a corpus case, updated a
+# fake). ``detect_repair_ratio`` compares 24h ``failed`` against the sum of
+# these. Historically the collector and the /api/trust/fleet route only read a
+# literal ``repaired`` key that NO production trust loop emits, so
+# ``repaired_day`` / ``repair_successes_total`` were permanently 0 and the
+# detector could only ever return ``no_successes`` — root cause B of #9458. The
+# literal ``repaired`` key is kept first for forward compatibility and for
+# tests/scenarios that emit it directly.
+REPAIRED_SUCCESS_KEYS: tuple[str, ...] = (
+    "repaired",  # generic / scenario-emitted
+    "resolved",  # flake_tracker, skill_prompt_eval
+    "refreshed",  # contract_refresh
+    "updated",  # fake_coverage_auditor
+    "merged",  # staging_bisect
+    "reverted",  # staging_bisect
+    "cases_filed",  # corpus_learning
+)
+
+
 def detect_issues_per_hour(
     worker: str,
     metrics: dict[str, Any],
@@ -64,8 +85,16 @@ def detect_repair_ratio(
     metrics: dict[str, Any],
     *,
     threshold: float,
+    min_sample: int = 1,
 ) -> tuple[bool, dict[str, Any]]:
-    """`failed / repaired >= threshold` over 24h -> breach (spec §12.1 bullet 2)."""
+    """`failed / repaired >= threshold` over 24h -> breach (spec §12.1 bullet 2).
+
+    ``min_sample`` is the floor on the 24h ``failed`` count required before the
+    zero-success (`no_successes`) branch escalates. A single failure with no
+    recorded successes is not enough signal to page a human — below the floor
+    the detector returns no breach with ``status="insufficient_data"``,
+    mirroring the zero/zero guard (false-positive guard, issue #9458).
+    """
     repaired = int(metrics.get("repaired_day", 0))
     failed = int(metrics.get("failed_day", 0))
     if repaired == 0 and failed == 0:
@@ -76,14 +105,25 @@ def detect_repair_ratio(
             "failed": 0,
         }
     if repaired == 0:
-        # No successes + >=1 failure — can't compute a finite ratio.
-        # Escalate conservatively; operator decides if signal is real.
+        if failed < min_sample:
+            # Too few failures to escalate a zero-success loop — a routine
+            # one-off failure shouldn't page a human (issue #9458).
+            return False, {
+                "worker": worker,
+                "status": "insufficient_data",
+                "repaired": 0,
+                "failed": failed,
+                "min_sample": min_sample,
+            }
+        # No successes + enough failures to clear the floor — can't compute a
+        # finite ratio. Escalate conservatively; operator decides if real.
         return True, {
             "worker": worker,
             "status": "no_successes",
             "repaired": 0,
             "failed": failed,
             "threshold": threshold,
+            "min_sample": min_sample,
         }
     ratio = failed / repaired
     breached = ratio >= threshold

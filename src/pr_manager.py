@@ -1758,7 +1758,7 @@ class PRManager:
         """Scan open PRs for cross-entity label drift vs their linked issues.
 
         Returns a list of :class:`LabelDrift` records, one per drifted pair.
-        See ADR-0056 for the drift kinds and reconciliation policy.
+        See ADR-0088 for the drift kinds and reconciliation policy.
 
         Each tick: fetch open PRs (any state), parse ``Fixes #N`` from the
         body, fetch the linked issue's labels, then classify the pair.
@@ -2558,6 +2558,57 @@ class PRManager:
             return passed, msg
 
         return False, ci_sentinels.ci_timeout(timeout)
+
+    async def refresh_pr_branch_with_arch_regen(
+        self, pr_number: int, branch: str
+    ) -> bool:
+        """Self-heal a bot PR stuck red on stale ``docs/arch/generated/``.
+
+        Merges ``origin/<base>`` into the PR head in an ephemeral worktree,
+        re-runs ``arch.runner --emit`` to repair the staleness (or resolve an
+        arch-generated-only merge conflict), commits, and pushes — re-triggering
+        CI. Returns True only when a refresh commit was actually pushed; returns
+        False for a clean no-op, a real (non-generated) conflict, or any git/gh
+        failure, so the caller falls through to its ``failure_strategy``.
+
+        Never force-pushes (the pre-push hook blocks it); a merge commit
+        fast-forwards the remote head and squash-merge collapses it.
+        """
+        if self._config.dry_run:
+            logger.info(
+                "[dry-run] Would arch-refresh bot PR #%d on branch %s",
+                pr_number,
+                branch,
+            )
+            return False
+
+        from auto_pr import refresh_branch_with_arch_regen  # noqa: PLC0415
+
+        result = await refresh_branch_with_arch_regen(
+            repo_root=self._config.repo_root,
+            branch=branch,
+            base=self._config.base_branch(),
+            gh_token=self._credentials.gh_token,
+            worktree_parent=self._config.workspace_base,
+            commit_author_name=self._config.git_user_name,
+            commit_author_email=self._config.git_user_email,
+        )
+        if result.status == "refreshed":
+            logger.info(
+                "Arch-refreshed bot PR #%d (%s) — merged base + regenerated "
+                "artifacts; CI will re-run",
+                pr_number,
+                branch,
+            )
+            return True
+        logger.info(
+            "Arch-refresh of bot PR #%d (%s) did not push (%s)%s",
+            pr_number,
+            branch,
+            result.status,
+            f": {result.error}" if result.error else "",
+        )
+        return False
 
     # --- PR activity query helpers ---
 

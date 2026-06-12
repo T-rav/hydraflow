@@ -1,4 +1,4 @@
-# Hand-authored baseline (recorder_sha: "00000000").
+# Hand-authored baseline promoted to auto-refreshable (issue #8693).
 # create_issue returns the new issue number. When the fake's _issues store is
 # empty, max(keys, default=9000) + 1 = 9001. stdout follows the same URL
 # convention as create_task so the contract is checkable and consistent with
@@ -20,6 +20,5 @@ output:
   exit_code: 0
   stdout: "https://github.com/test-org/test-repo/issues/9001\n"
   stderr: ""
-baseline_only: true
 normalizers: []
-baseline_only: true
+baseline_only: false

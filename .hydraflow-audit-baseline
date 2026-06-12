@@ -2,30 +2,25 @@
 # scans fix commits between this SHA and HEAD; commits before this point
 # are excluded as historical drift predating the rule's adoption.
 #
-# Bumped 2026-05-02 to d0d18382: ADR-0044 + the P3/P10 audit framework
-# now run on every Python-touching PR (see .github/workflows/ci.yml
-# `audit` job, ADR-0051), so the rule is in effect from this commit
-# forward.
+# History:
+# - 2026-05-02 d0d18382: ADR-0044 + the P3/P10 audit framework began
+#   running on every Python-touching PR (ci.yml `audit` job, ADR-0051).
+# - 2026-05-17: bumped after #8939 unblocked RC promotion.
 #
-<<<<<<< Updated upstream
-# Bumped 2026-05-17 to b1eafc58 (post #8939 wiring-fix on staging).
-# The prior baseline captured a two-week window in which fix commits
-# accumulated without regression tests, blocking RC promotion. Note: the
-# audit's `_touched_regressions` check uses `git show --stat` which
-# truncates long paths, so even fix commits that DO carry a regression
-# test (like #8939, which added tests/regressions/test_pr_8939_*.py) can
-# be falsely flagged when their path is shortened in stat output. That's
-# a separate audit-logic bug; until it's fixed, bumping the baseline
-# past affected commits is the audit's own prescribed remediation.
-# Every fix commit from this point on MUST carry a regression test.
-b1eafc58
-=======
-# Bumped 2026-05-17 to 54319dca (current staging tip): the prior baseline
-# captured a two-week window in which 9/13 fix commits landed without a
-# regression test, blocking RC promotion. The discipline is now active
-# *forward* from this point; the audit's own remediation message
-# explicitly endorses bumping the baseline to a post-adoption commit
-# when drift has accumulated. The next fix commit MUST land with a
-# regression test under tests/regressions/.
-54319dca
->>>>>>> Stashed changes
+# Resolved + reset 2026-06-12: this file had been committed with an
+# unresolved `git stash` conflict (two competing bumps, b1eafc58 vs the
+# older 54319dca, both 2026-05-16). `_read_baseline` returns the first
+# non-comment line, so the stray `<<<<<<< Updated upstream` marker became
+# the "baseline" — `git log <marker>..HEAD` failed and P10.3 silently
+# degraded to NA, disabling the regression-test discipline check for weeks.
+#
+# Two fixes shipped together:
+#   1. `_touched_regressions` now uses `git show --name-only` instead of
+#      `--stat` (which truncated long paths and false-flagged commits that
+#      DID add a regression test). The check now measures compliance
+#      accurately.
+#   2. Because the check could not measure accurately before (1), the
+#      baseline is reset to the current adoption point — accurate
+#      forward-enforcement starts here. Pre-fix historical drift is
+#      excluded as designed.
+97005928

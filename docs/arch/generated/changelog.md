@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `cdce17b` — chore: salvage uncommitted changes for issue #9354 *(2026-06-12)*
 - `f3547cf` — fix(#9354): expose skipped_volatile counter and add scenario + unit tests *(2026-06-12)*
 - `3525a6a` — chore: salvage uncommitted changes for issue #9354 *(2026-06-12)*
 - `4c75e32` — Fixes #9354: exclude non-deterministic corpus samples from value comparison *(2026-06-12)*

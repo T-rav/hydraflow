@@ -191,7 +191,14 @@ class RetrospectiveLoop(BaseBackgroundLoop):
             verify_proposals,
         )
 
-        records = self._insights.load_recent(50)
+        # Sample current_count over the SAME window the baseline pre_count was
+        # measured over (review_insight_window). Hardcoding 50 here while
+        # pre_count is captured over review_insight_window (default 10) makes
+        # current_count >= pre_count permanently true for high-frequency
+        # categories, so verify_proposals could never observe improvement and
+        # re-filed false stale-insight HITL issues forever (#9444). This
+        # mirrors ReviewPhase._record_review_insight's correct window usage.
+        records = self._insights.load_recent(self._config.review_insight_window)
         stale = verify_proposals(self._insights, records)
 
         if not stale:

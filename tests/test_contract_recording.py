@@ -37,6 +37,7 @@ from contract_recording import (
     record_docker,
     record_git,
     record_github,
+    record_github_mutation,
 )
 from tests.trust.contracts._schema import Cassette
 
@@ -70,25 +71,22 @@ def _load_yaml(path: Path) -> dict[str, object]:
 # ---------------------------------------------------------------------------
 
 
-def test_record_github_is_no_op(tmp_path: Path) -> None:
-    """``record_github`` is intentionally a no-op pending shape-aligned
-    read-only recording. It must return [] without invoking subprocess —
-    github cassettes are hand-authored baselines (see
-    tests/trust/contracts/cassettes/github/README.md)."""
-    with patch("contract_recording.subprocess.run") as run_mock:
+def test_record_github_delegates_to_mutation_recorder(tmp_path: Path) -> None:
+    """``record_github`` must delegate to ``record_github_mutation`` and return
+    its results — the old no-op is replaced by sandbox-safe live recording."""
+    sentinel = [tmp_path / "close_issue.yaml"]
+    with patch(
+        "contract_recording.record_github_mutation", return_value=sentinel
+    ) as mock:
         paths = record_github(
             sandbox_repo="T-rav-Hydra-Ops/hydraflow-contracts-sandbox",
             tmp_cassette_dir=tmp_path,
         )
-
-    assert paths == []
-    assert run_mock.call_count == 0, (
-        "record_github must not shell out — github corpus is hand-authored"
+    mock.assert_called_once_with(
+        sandbox_repo="T-rav-Hydra-Ops/hydraflow-contracts-sandbox",
+        tmp_cassette_dir=tmp_path,
     )
-    # tmp_cassette_dir must remain pristine.
-    assert not any(tmp_path.iterdir()), (
-        f"record_github must not write any files; found {list(tmp_path.iterdir())}"
-    )
+    assert paths == sentinel
 
 
 # ---------------------------------------------------------------------------
@@ -399,8 +397,6 @@ def test_recorders_invoke_subprocess_run_with_text_capture(tmp_path: Path) -> No
     sandbox = tmp_path / "sbx"
     sandbox.mkdir()
 
-    # record_github is a no-op so subprocess.run is never invoked for it
-    # — exclude from this contract test.
     for recorder, kwargs in (
         (record_git, {"sandbox_dir": sandbox, "tmp_cassette_dir": cassette_dir}),
         (record_docker, {"tmp_cassette_dir": cassette_dir}),
@@ -422,3 +418,165 @@ def test_recorders_invoke_subprocess_run_with_text_capture(tmp_path: Path) -> No
             )
             # ``check=False`` — we handle non-zero exits ourselves.
             assert kwargs_passed.get("check", False) is False
+
+
+# ---------------------------------------------------------------------------
+# record_github_mutation
+# ---------------------------------------------------------------------------
+
+_SANDBOX = "T-rav-Hydra-Ops/hydraflow-contracts-sandbox"
+_ISSUE_URL = (
+    "https://github.com/T-rav-Hydra-Ops/hydraflow-contracts-sandbox/issues/42\n"
+)
+_PR_URL = "https://github.com/T-rav-Hydra-Ops/hydraflow-contracts-sandbox/pull/7\n"
+_MAIN_SHA = "a" * 40 + "\n"
+
+
+def _mutation_fake_run(
+    argv: list[str], **_: object
+) -> subprocess.CompletedProcess[str]:
+    """Simulate gh CLI responses for the three mutation recordings."""
+    # gh api .../git/ref/heads/main  → main SHA
+    if "api" in argv and any("git/ref" in a for a in argv):
+        return _completed(argv=argv, stdout=_MAIN_SHA)
+    # gh api .../git/refs (branch creation)
+    if "api" in argv and any("git/refs" in a for a in argv):
+        return _completed(argv=argv, stdout="{}\n")
+    # gh issue create → issue URL
+    if "issue" in argv and "create" in argv:
+        return _completed(argv=argv, stdout=_ISSUE_URL)
+    # gh pr create → PR URL
+    if "pr" in argv and "create" in argv:
+        return _completed(argv=argv, stdout=_PR_URL)
+    # gh issue close / gh pr merge → exit 0, no output
+    if ("issue" in argv and "close" in argv) or ("pr" in argv and "merge" in argv):
+        return _completed(argv=argv, stdout="")
+    # git rev-parse (recorder_sha)
+    return _completed(argv=argv, stdout="abc1234\n")
+
+
+def test_record_github_mutation_writes_close_issue_cassette(tmp_path: Path) -> None:
+    with patch("contract_recording.subprocess.run", side_effect=_mutation_fake_run):
+        paths = record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    stems = {p.stem for p in paths}
+    assert "close_issue" in stems
+    raw = _load_yaml(tmp_path / "close_issue.yaml")
+    cassette = Cassette.model_validate(raw)
+    assert cassette.adapter == "github"
+    assert cassette.interaction == "close_issue"
+    assert cassette.output.exit_code == 0
+    assert cassette.output.stdout == ""
+    assert cassette.output.stderr == ""
+    assert not cassette.baseline_only
+
+
+def test_record_github_mutation_close_issue_uses_fake_shaped_output(
+    tmp_path: Path,
+) -> None:
+    """Cassette stdout/stderr must match FakeGitHub.close_issue shape, not raw gh output."""
+
+    def fake_run_with_gh_output(
+        argv: list[str], **_: object
+    ) -> subprocess.CompletedProcess[str]:
+        if "issue" in argv and "close" in argv:
+            # Real gh CLI emits a confirmation line; we must NOT store it.
+            return _completed(argv=argv, stdout="✓ Closed issue #42\n")
+        return _mutation_fake_run(argv)
+
+    with patch(
+        "contract_recording.subprocess.run", side_effect=fake_run_with_gh_output
+    ):
+        paths = record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    stems = {p.stem for p in paths}
+    assert "close_issue" in stems
+    cassette = Cassette.model_validate(_load_yaml(tmp_path / "close_issue.yaml"))
+    assert cassette.output.stdout == "", (
+        "close_issue cassette must store empty stdout (fake-shaped), not raw gh output"
+    )
+    assert cassette.output.stderr == ""
+
+
+def test_record_github_mutation_writes_create_issue_cassette(tmp_path: Path) -> None:
+    with patch("contract_recording.subprocess.run", side_effect=_mutation_fake_run):
+        paths = record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    stems = {p.stem for p in paths}
+    assert "create_issue" in stems
+    cassette = Cassette.model_validate(_load_yaml(tmp_path / "create_issue.yaml"))
+    assert cassette.adapter == "github"
+    assert cassette.interaction == "create_issue"
+    assert cassette.output.exit_code == 0
+    assert cassette.output.stdout  # non-empty URL
+    assert not cassette.baseline_only
+
+
+def test_record_github_mutation_writes_merge_pr_cassette(tmp_path: Path) -> None:
+    with patch("contract_recording.subprocess.run", side_effect=_mutation_fake_run):
+        paths = record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    stems = {p.stem for p in paths}
+    assert "merge_pr" in stems
+    cassette = Cassette.model_validate(_load_yaml(tmp_path / "merge_pr.yaml"))
+    assert cassette.adapter == "github"
+    assert cassette.interaction == "merge_pr"
+    assert cassette.output.exit_code == 0
+    assert "pr_number" in cassette.normalizers
+    assert not cassette.baseline_only
+
+
+def test_record_github_mutation_returns_empty_when_gh_missing(
+    tmp_path: Path,
+) -> None:
+    with patch(
+        "contract_recording.subprocess.run",
+        side_effect=FileNotFoundError("gh not found"),
+    ):
+        paths = record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+    assert paths == []
+
+
+def test_record_github_mutation_close_issue_skipped_when_create_fails(
+    tmp_path: Path,
+) -> None:
+    def failing_create(
+        argv: list[str], **_: object
+    ) -> subprocess.CompletedProcess[str]:
+        if "issue" in argv and "create" in argv:
+            return _completed(argv=argv, returncode=1, stderr="forbidden\n")
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=failing_create):
+        paths = record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    stems = {p.stem for p in paths}
+    assert "close_issue" not in stems
+
+
+def test_record_github_mutation_all_cassettes_have_baseline_only_false(
+    tmp_path: Path,
+) -> None:
+    with patch("contract_recording.subprocess.run", side_effect=_mutation_fake_run):
+        paths = record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    assert paths, "expected at least one cassette written"
+    for p in paths:
+        cassette = Cassette.model_validate(_load_yaml(p))
+        assert not cassette.baseline_only, (
+            f"{p.name}: baseline_only must be False for recorder-generated cassettes"
+        )
+
+
+def test_record_github_mutation_gh_invoked_with_text_capture(tmp_path: Path) -> None:
+    run_mock = MagicMock(side_effect=lambda argv, **_: _mutation_fake_run(argv))
+    with patch("contract_recording.subprocess.run", run_mock):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    gh_calls = [c for c in run_mock.call_args_list if c.args and "gh" in c.args[0]]
+    assert gh_calls, "expected at least one gh invocation"
+    for call in gh_calls:
+        kw = call.kwargs
+        assert kw.get("capture_output") is True
+        assert kw.get("text") is True
+        assert kw.get("check", False) is False
