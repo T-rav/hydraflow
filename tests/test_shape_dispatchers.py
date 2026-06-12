@@ -202,3 +202,23 @@ async def test_unknown_subcommand_skipped(tmp_path: Path) -> None:
         stdout='{"data": {}}\n',
     )
     assert await gh_shape_validator(sample) is None
+
+
+@pytest.mark.asyncio
+async def test_shape_failure_dict_uses_shape_verdict_key_constant(
+    tmp_path: Path,
+) -> None:
+    """gh_shape_validator must embed SHAPE_VERDICT_KEY (not a literal string) so
+    the LiveCorpusReplayLoop's compare-time suppression for VOLATILE shapes can
+    detect a real shape failure vs a raw-value difference."""
+    from contracts.shadow_classifier import SHAPE_VERDICT_KEY
+
+    sample = _sample(
+        tmp_path,
+        args=["pr", "list", "--json", "number,title,state"],
+        stdout=json.dumps([{"number": 1, "title": "x", "state": "QUEUED"}]) + "\n",
+    )
+    result = await gh_shape_validator(sample)
+    assert result is not None
+    assert SHAPE_VERDICT_KEY in result
+    assert result[SHAPE_VERDICT_KEY] is True
