@@ -10,6 +10,7 @@ graph LR
     Task["Task<br/><i>entity</i>"]
   end
   subgraph caretaker
+    ADRCouncilReviewer["ADRCouncilReviewer<br/><i>service</i>"]
     ADRReviewerLoop["ADRReviewerLoop<br/><i>loop</i>"]
     AdrTouchpointAuditorLoop["AdrTouchpointAuditorLoop<br/><i>loop</i>"]
     CIMonitorLoop["CIMonitorLoop<br/><i>loop</i>"]
@@ -52,9 +53,12 @@ graph LR
     StateTracker["StateTracker<br/><i>service</i>"]
     WorkspacePort["WorkspacePort<br/><i>port</i>"]
   end
+  ADRCouncilReviewer -->|depends_on| EventBus
+  ADRCouncilReviewer -->|depends_on| HydraFlowConfig
   ADRReviewerLoop -->|depends_on| HydraFlowConfig
   ADRReviewerLoop -->|depends_on| BaseBackgroundLoop
   ADRReviewerLoop -->|implements| BaseBackgroundLoop
+  ADRReviewerLoop -->|depends_on| ADRCouncilReviewer
   AdrTouchpointAuditorLoop -->|depends_on| BaseBackgroundLoop
   AdrTouchpointAuditorLoop -->|depends_on| HydraFlowConfig
   AdrTouchpointAuditorLoop -->|depends_on| StateTracker

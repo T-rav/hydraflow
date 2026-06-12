@@ -6,12 +6,20 @@ bounded_context: "caretaker"
 code_anchor: "src/stale_issue_gc_loop.py:StaleIssueGCLoop"
 aliases: ["stale issue gc loop", "stale hitl gc loop", "hitl stale closer"]
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K7"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
+<<<<<<< HEAD
 evidence: []
+=======
+evidence: ["01KQP0R43781VJFJ9HZRWQCZPA"]
+>>>>>>> origin/staging
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T20:00:00.000000+00:00"
+<<<<<<< HEAD
 updated_at: "2026-06-12T04:17:13.434460+00:00"
+=======
+updated_at: "2026-06-12T04:20:14.221533+00:00"
+>>>>>>> origin/staging
 ---
 
 ## Definition

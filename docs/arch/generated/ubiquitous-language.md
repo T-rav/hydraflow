@@ -2,9 +2,21 @@
 
 # Ubiquitous Language
 
-_42 terms across 3 bounded contexts._
+_43 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
+
+## ADRCouncilReviewer
+
+**Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/adr_reviewer.py:ADRCouncilReviewer` · **Confidence:** `accepted`
+**Aliases:** `adr council reviewer`, `council reviewer`
+
+ADRCouncilReviewer is the domain service that runs multi-agent council review sessions on proposed Architecture Decision Records. It scans the ADR directory for files marked Status: Proposed, gates each candidate through ADRPreValidator, detects near-duplicate ADRs via similarity scoring, orchestrates multi-round council voting, and routes each outcome to acceptance, rejection, escalation, or duplicate-flagging. ADRReviewerLoop delegates all review logic to this service on every polling cycle.
+
+**Invariants:**
+- CreditExhaustedError and AuthenticationError propagate out of the review batch rather than being swallowed per-item, so BaseBackgroundLoop can pause on a fatal billing signal.
+- Every ADR that reaches Accepted status is guaranteed to carry an **Enforced by:** line (injected as '(none)' if absent) before it is written back.
+- Pre-validation must pass before a council session is started; a failing ADR is routed and counted separately without blocking the rest of the batch.
 
 ## ADRReviewerLoop
 
