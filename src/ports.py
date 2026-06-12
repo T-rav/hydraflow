@@ -218,6 +218,19 @@ class PRPort(Protocol):
         """
         ...
 
+    async def refresh_pr_branch_with_arch_regen(
+        self, pr_number: int, branch: str
+    ) -> bool:
+        """Self-heal a bot PR stuck red on stale ``docs/arch/generated/``.
+
+        Merges ``origin/<base>`` into the PR head, re-runs arch-regen, commits,
+        and pushes — re-triggering CI. Returns True only when a refresh commit
+        was pushed; False on a no-op, a real (non-generated) conflict, or any
+        failure. Matches ``pr_manager.PRManager.refresh_pr_branch_with_arch_regen``
+        exactly.
+        """
+        ...
+
     # --- Label management ---
 
     async def add_labels(self, issue_number: int, labels: list[str]) -> None:

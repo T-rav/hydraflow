@@ -48,6 +48,7 @@ class TestInitialization:
             "baseline_audit",
             "bg_worker_states",
             "dependabot_merge_processed",
+            "dependabot_arch_refresh_attempts",
             "dependabot_merge_settings",
             "ci_monitor_settings",
             "ci_monitor_tracked_failures",

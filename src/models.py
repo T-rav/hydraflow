@@ -1836,6 +1836,11 @@ class StateData(BaseModel):
         default_factory=DependabotMergeSettings
     )
     dependabot_merge_processed: list[int] = Field(default_factory=list)
+    # PR-number (string key, JSON-object compatible) -> count of arch-staleness
+    # self-heal refreshes DependabotMergeLoop has attempted on that bot PR. Bounds
+    # the merge+arch-regen+push retry so a real (non-arch) failure eventually
+    # falls through to ``failure_strategy``. Cleared when the PR is merged/closed.
+    dependabot_arch_refresh_attempts: dict[str, int] = Field(default_factory=dict)
     shape_conversations: dict[str, ShapeConversation] = Field(default_factory=dict)
     shape_responses: dict[str, str] = Field(default_factory=dict)
     stale_issue_settings: StaleIssueSettings = Field(default_factory=StaleIssueSettings)

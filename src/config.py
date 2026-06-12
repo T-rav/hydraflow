@@ -139,6 +139,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_transcript_summary_chars", "HYDRAFLOW_MAX_TRANSCRIPT_SUMMARY_CHARS", 50_000),
     ("pr_unstick_interval", "HYDRAFLOW_PR_UNSTICK_INTERVAL", 3600),
     ("dependabot_merge_interval", "HYDRAFLOW_DEPENDABOT_MERGE_INTERVAL", 3600),
+    (
+        "dependabot_arch_autoheal_max_attempts",
+        "HYDRAFLOW_DEPENDABOT_ARCH_AUTOHEAL_MAX_ATTEMPTS",
+        2,
+    ),
     ("report_issue_interval", "HYDRAFLOW_REPORT_ISSUE_INTERVAL", 30),
     ("stale_report_threshold_hours", "HYDRAFLOW_STALE_REPORT_THRESHOLD_HOURS", 6),
     ("epic_monitor_interval", "HYDRAFLOW_EPIC_MONITOR_INTERVAL", 1800),
@@ -2185,6 +2190,24 @@ class HydraFlowConfig(BaseModel):
         ge=60,
         le=86400,
         description="Seconds between Dependabot merge auto-merge polls",
+    )
+    dependabot_arch_autoheal_max_attempts: int = Field(
+        default=2,
+        ge=0,
+        le=10,
+        description=(
+            "Max times DependabotMergeLoop will self-heal a bot PR whose CI is "
+            "red purely on stale docs/arch/generated/ artifacts (merge "
+            "origin/<base>, run arch-regen, push). When another open bot PR "
+            "advances <base>, every other open bot PR's committed generated "
+            "artifacts go stale and arch-check fails even on files the PR never "
+            "touched, leaving the PR stuck open forever (observed on "
+            "#9422-#9428). The loop merges + regenerates instead of skipping; a "
+            "bounded retry is the safety net for a real (non-arch) failure: when "
+            "regen does not turn the PR green within this many attempts, the "
+            "normal failure_strategy applies. Set to 0 to disable self-heal "
+            "entirely (kill switch)."
+        ),
     )
     pr_unstick_batch_size: int = Field(
         default=10,

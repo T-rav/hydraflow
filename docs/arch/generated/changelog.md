@@ -6,7 +6,12 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
-- `ea1cf32` — feat(auto-agent): rescue stuck pipeline PRs — diagnose-route + credit-transient (ADR-0084) *(2026-06-12)*
+- `9ed1b39` — feat(auto-agent): rescue stuck pipeline PRs — diagnose-route + credit-transient (ADR-0084) (#9473) (#9473) *(2026-06-12)*
+- `44d1957` — Fixes #8693: "Recorder-side `gh issue close` support for cassette r... (#9446) (#9446) *(2026-06-12)*
+- `1a7071a` — fix(trust): min-sample guard + repaired semantics + trust-loop scoping for repair_ratio (#9458) (#9470) (#9470) *(2026-06-12)*
+- `db883f4` — fix(review-insights): word-boundary category match + matched verification window (#9426, #9444) (#9469) (#9469) *(2026-06-12)*
+- `030bd7a` — fix(adr): right-size bare citations for 5 stuck-HITL drift ADRs (#9417/#9419/#9420/#9421/#9447) (#9472) (#9472) *(2026-06-12)*
+- `aaa7a02` — fix(adr): resolve 6 duplicate ADR-number collisions (#9406) — unblocks the drift auditor (#9471) (#9471) *(2026-06-12)*
 - `2d8bd40` — feat(auto-agent): converge via retry instead of one-shot needs_human (ADR-0084 PR-2) (#9467) (#9467) *(2026-06-12)*
 - `725f5a8` — fix(pipeline): break the human-required escalation cycle (ADR-0084 PR-1) (#9439) (#9439) *(2026-06-12)*
 - `5ae5f3b` — Fixes #9100: entry_evidence_loop swallows CreditExhaustedError and ... (#9451) (#9451) *(2026-06-12)*

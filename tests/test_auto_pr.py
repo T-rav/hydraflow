@@ -649,3 +649,190 @@ async def test_async_fail_logs_at_warning_not_error(
     ]
     assert failure_logs, "expected a failure log line"
     assert all(rec.levelname == "WARNING" for rec in failure_logs)
+
+
+# ---------------------------------------------------------------------------
+# refresh_branch_with_arch_regen — arch-staleness self-heal
+# ---------------------------------------------------------------------------
+
+
+def test_is_arch_only_conflict_classifier() -> None:
+    from auto_pr import _is_arch_only_conflict
+
+    # Only generated artifacts + .meta.json → auto-resolvable.
+    assert _is_arch_only_conflict(["docs/arch/generated/ubiquitous-language.md"])
+    assert _is_arch_only_conflict(
+        ["docs/arch/generated/loops.md", "docs/arch/.meta.json"]
+    )
+    # Any non-generated path → NOT auto-resolvable.
+    assert not _is_arch_only_conflict(["docs/arch/generated/loops.md", "src/foo.py"])
+    assert not _is_arch_only_conflict(["README.md"])
+    # An empty conflict set is not an arch conflict (clean merge handled apart).
+    assert not _is_arch_only_conflict([])
+
+
+def _seed_arch_bot_branch(
+    local_repo: Path,
+    *,
+    bot_branch: str,
+    base: str = "staging",
+    also_conflict_nongenerated: bool = False,
+) -> None:
+    """Set up a base branch and a bot branch that conflict on a generated file.
+
+    Both branches edit ``docs/arch/generated/x.md`` differently so merging
+    *base* into *bot_branch* produces an arch-generated conflict. With
+    *also_conflict_nongenerated*, both also edit a non-generated file → a real
+    content conflict that must NOT auto-heal.
+    """
+    gen = local_repo / "docs" / "arch" / "generated"
+    gen.mkdir(parents=True, exist_ok=True)
+    (gen / "x.md").write_text("base v0\n")
+    if also_conflict_nongenerated:
+        (local_repo / "code.txt").write_text("shared v0\n")
+    subprocess.run(["git", "-C", str(local_repo), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(local_repo), "commit", "-m", "seed arch file"], check=True
+    )
+    subprocess.run(["git", "-C", str(local_repo), "push", "origin", "main"], check=True)
+
+    # base branch advances the generated file.
+    subprocess.run(["git", "-C", str(local_repo), "checkout", "-b", base], check=True)
+    (gen / "x.md").write_text("BASE ADVANCED\n")
+    if also_conflict_nongenerated:
+        (local_repo / "code.txt").write_text("base changed code\n")
+    subprocess.run(["git", "-C", str(local_repo), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(local_repo), "commit", "-m", f"advance {base}"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", base], check=True
+    )
+
+    # bot branch (off the seed commit) edits the same generated file differently.
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "-b", bot_branch, "main"],
+        check=True,
+    )
+    (gen / "x.md").write_text("BOT STALE\n")
+    if also_conflict_nongenerated:
+        (local_repo / "code.txt").write_text("bot changed code\n")
+    subprocess.run(["git", "-C", str(local_repo), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(local_repo), "commit", "-m", "bot edit"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", bot_branch],
+        check=True,
+    )
+    # Return to main so the helper's worktree-add isn't blocked by a checked-out
+    # branch.
+    subprocess.run(["git", "-C", str(local_repo), "checkout", "main"], check=True)
+
+
+def _arch_regen_intercepting_stub(local_repo: Path) -> Callable[..., Awaitable[str]]:
+    """run_subprocess stub: real git, but intercept ``arch.runner --emit`` to
+    write a deterministic regenerated artifact (resolving the conflict)."""
+
+    async def fake_run(
+        *cmd: str,
+        cwd: _Path | None = None,
+        gh_token: str = "",
+        timeout: float = 120.0,
+        runner: object = None,
+    ) -> str:
+        del gh_token, timeout, runner
+        if "arch.runner" in cmd:
+            # Simulate `arch.runner --emit`: write the regenerated content into
+            # the worktree's generated dir, overwriting any conflict markers.
+            assert cwd is not None
+            gen = _Path(cwd) / "docs" / "arch" / "generated" / "x.md"
+            gen.parent.mkdir(parents=True, exist_ok=True)
+            gen.write_text("REGENERATED FROM SOURCE\n")
+            return ""
+        try:
+            return _sp.run(
+                list(cmd),
+                cwd=str(cwd) if cwd is not None else None,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        except _sp.CalledProcessError as exc:
+            raise RuntimeError(exc.stderr or str(exc)) from exc
+
+    return fake_run
+
+
+@pytest.mark.asyncio
+async def test_refresh_arch_only_conflict_regenerates_and_pushes(
+    local_repo: Path, bare_remote: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pr import refresh_branch_with_arch_regen
+
+    _seed_arch_bot_branch(local_repo, bot_branch="ul-edge-1", base="staging")
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _arch_regen_intercepting_stub(local_repo),
+    )
+
+    result = await refresh_branch_with_arch_regen(
+        repo_root=local_repo,
+        branch="ul-edge-1",
+        base="staging",
+        commit_author_name="t",
+        commit_author_email="t@t",
+    )
+
+    assert result.status == "refreshed", result.error
+    # The remote bot branch now carries the regenerated artifact.
+    show = subprocess.run(
+        ["git", "-C", str(bare_remote), "show", "ul-edge-1:docs/arch/generated/x.md"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "REGENERATED FROM SOURCE" in show.stdout
+
+
+@pytest.mark.asyncio
+async def test_refresh_real_conflict_aborts_no_push(
+    local_repo: Path, bare_remote: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pr import refresh_branch_with_arch_regen
+
+    _seed_arch_bot_branch(
+        local_repo,
+        bot_branch="ul-edge-2",
+        base="staging",
+        also_conflict_nongenerated=True,
+    )
+    before = subprocess.run(
+        ["git", "-C", str(bare_remote), "rev-parse", "ul-edge-2"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _arch_regen_intercepting_stub(local_repo),
+    )
+
+    result = await refresh_branch_with_arch_regen(
+        repo_root=local_repo,
+        branch="ul-edge-2",
+        base="staging",
+        commit_author_name="t",
+        commit_author_email="t@t",
+    )
+
+    assert result.status == "real-conflict", result.error
+    # The remote bot branch is UNCHANGED — nothing was pushed.
+    after = subprocess.run(
+        ["git", "-C", str(bare_remote), "rev-parse", "ul-edge-2"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert before == after

@@ -41,6 +41,21 @@ def _build_dependabot_merge(ports: dict[str, Any], config: Any, deps: Any) -> An
         state = MagicMock()
         state.get_dependabot_merge_settings.return_value = DependabotMergeSettings()
         state.get_dependabot_merge_processed.return_value = set()
+        # Arch-staleness self-heal counter backed by a real dict so the loop's
+        # ``get < cap`` / ``bump`` logic behaves like the real StateTracker
+        # across ticks. A bare MagicMock would return a truthy mock and break
+        # the cap comparison (fake-fidelity rule).
+        _arch_attempts: dict[int, int] = {}
+
+        def _get_arch_attempts(pr_number: int) -> int:
+            return _arch_attempts.get(pr_number, 0)
+
+        def _bump_arch_attempts(pr_number: int) -> int:
+            _arch_attempts[pr_number] = _arch_attempts.get(pr_number, 0) + 1
+            return _arch_attempts[pr_number]
+
+        state.get_dependabot_arch_refresh_attempts.side_effect = _get_arch_attempts
+        state.bump_dependabot_arch_refresh_attempts.side_effect = _bump_arch_attempts
         ports["dependabot_state"] = state
     return DependabotMergeLoop(
         config=config,

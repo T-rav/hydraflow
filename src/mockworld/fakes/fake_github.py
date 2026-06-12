@@ -99,6 +99,14 @@ class FakeGitHub:
         self._default_pr_diff: str | None = None
         # Per-PR CI failure log text for fetch_ci_failure_logs.
         self._ci_failure_logs: dict[int, str] = {}
+        # Arch-staleness self-heal (DependabotMergeLoop). Per-PR count of
+        # refresh_pr_branch_with_arch_regen calls, and per-PR override of the
+        # bool it returns. When a PR is registered in _arch_refresh_outcome it
+        # uses that value (and, when True, enqueues a fresh green CI result so
+        # the next wait_for_ci tick sees the heal land); otherwise the call
+        # defaults to True (a successful refresh) and enqueues green.
+        self._arch_refresh_calls: dict[int, int] = {}
+        self._arch_refresh_outcome: dict[int, bool] = {}
         # Mirrors PRManager._repo. Some loops (StaleIssueLoop) read this
         # attribute directly when constructing `gh` CLI args via _run_gh.
         # The value never reaches a real GitHub API in the sandbox.
@@ -187,6 +195,22 @@ class FakeGitHub:
 
     def script_ci(self, pr_number: int, results: list[tuple[bool, str]]) -> None:
         self._ci_scripts[pr_number] = deque(results)
+
+    def script_arch_refresh(self, pr_number: int, *, succeeds: bool = True) -> None:
+        """Script the outcome of ``refresh_pr_branch_with_arch_regen`` for a PR.
+
+        ``succeeds=True`` (default): the next refresh returns True and enqueues a
+        fresh ``(True, "All checks passed")`` CI result so the following
+        ``wait_for_ci`` tick sees the heal land green (the stale-arch happy
+        path). ``succeeds=False``: the refresh returns False without changing CI
+        (e.g. a real non-generated conflict), so the caller falls through to its
+        failure strategy.
+        """
+        self._arch_refresh_outcome[pr_number] = succeeds
+
+    def arch_refresh_call_count(self, pr_number: int) -> int:
+        """Return how many times the loop arch-refreshed *pr_number*."""
+        return self._arch_refresh_calls.get(pr_number, 0)
 
     def set_ci_main_status(self, conclusion: str, url: str = "") -> None:
         """Script the response for get_latest_ci_status (main branch CI)."""
@@ -514,6 +538,27 @@ class FakeGitHub:
         if pr_number in self._prs:
             self._prs[pr_number].merged = True
         return True
+
+    async def refresh_pr_branch_with_arch_regen(
+        self, pr_number: int, branch: str, **_kw: Any
+    ) -> bool:
+        """Fake of the arch-staleness self-heal.
+
+        Records the call. Returns the scripted outcome (default True). On a
+        successful refresh, enqueues a fresh green CI result so the next
+        ``wait_for_ci`` tick sees the heal land — mirroring production, where
+        the merge+regen+push re-triggers CI which then passes.
+        """
+        self._maybe_rate_limit()
+        self._arch_refresh_calls[pr_number] = (
+            self._arch_refresh_calls.get(pr_number, 0) + 1
+        )
+        succeeds = self._arch_refresh_outcome.get(pr_number, True)
+        if succeeds:
+            self._ci_scripts.setdefault(pr_number, deque()).append(
+                (True, "All checks passed")
+            )
+        return succeeds
 
     # --- Loop-required PRPort methods ---
 
