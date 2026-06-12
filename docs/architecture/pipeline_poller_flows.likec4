@@ -1,0 +1,45 @@
+// Issue #9441 — Dynamic views: how pipeline_poller is exercised in each tier.
+
+specification {
+  element actor
+  element component
+}
+
+model {
+  parityTest = component 'test_sandbox_parity'
+  mockworld = component 'MockWorld.run_pipeline_poller [NEW]'
+  wired = component 'MockWorld._build_wired_orchestrator'
+  orch = component 'HydraFlowOrchestrator.emit_pipeline_stats'
+  bus1 = component 'EventBus (in-process)'
+
+  sandboxMain = component 'mockworld.sandbox_main (docker)'
+  orchRun = component 'HydraFlowOrchestrator.run -> _pipeline_stats_loop'
+  emit2 = component 'emit_pipeline_stats'
+  bus2 = component 'EventBus (container)'
+  api = component 'GET /api/events'
+  assertOutcome = component 's54.assert_outcome (Playwright/httpx)'
+}
+
+views {
+  // Tier-1 in-process parity
+  dynamic view tier1Parity {
+    title 'Tier-1 parity — orchestrator-driven shim (no docker)'
+
+    parityTest -> mockworld 'seed.loops_enabled == {"pipeline_poller"}'
+    mockworld -> wired 'build wired orchestrator over fakes (once)'
+    mockworld -> orch 'await emit_pipeline_stats() x cycles'
+    orch -> bus1 'publish PIPELINE_STATS'
+    mockworld -> parityTest 'return {"pipeline_poller": stats} (truthy)'
+  }
+
+  // Tier-2 docker e2e
+  dynamic view tier2Docker {
+    title 'Tier-2 docker — real stack emits PIPELINE_STATS'
+
+    sandboxMain -> orchRun 'orch.run() starts pipeline_poller (BGWorkerManager-enabled by default)'
+    orchRun -> emit2 'each 5s cycle, emits immediately on first iteration'
+    emit2 -> bus2 'publish PIPELINE_STATS (retained in history)'
+    assertOutcome -> api 'poll until any event.type == "pipeline_stats"'
+    api -> bus2 'get_history()'
+  }
+}

@@ -1,0 +1,109 @@
+// Issue #9441 — Sandbox e2e scenario for pipeline_poller (non-BaseBackgroundLoop harness gap)
+// Captures the two test tiers and the harness shim that lets the
+// orchestrator-level pipeline_poller be driven in-process (Tier-1 parity).
+
+specification {
+  element system
+  element container
+  element component
+  element store
+  element test
+
+  relationship drives
+  relationship publishes
+  relationship reads
+}
+
+model {
+  // ---------------------------------------------------------------
+  // Production runtime (what Tier-2 boots inside docker)
+  // ---------------------------------------------------------------
+  orchestrator = container 'HydraFlowOrchestrator' {
+    description 'src/orchestrator.py — owns the pipeline_poller worker'
+
+    statsLoop = component '_pipeline_stats_loop' {
+      description 'loop_factories ("pipeline_poller"). NOT a BaseBackgroundLoop. Gated by BGWorkerManager.is_enabled.'
+    }
+    emit = component 'emit_pipeline_stats()' {
+      description 'build_pipeline_stats() -> publish PIPELINE_STATS on the bus'
+    }
+    build = component 'build_pipeline_stats()' {
+      description 'Reads store queue stats + state session/lifetime counters'
+    }
+    bgWorker = component 'BGWorkerManager.update_status' {
+      description 'src/bg_worker_manager.py — mutates state only, does NOT publish an event'
+    }
+  }
+
+  bus = container 'EventBus' {
+    description 'src/events.py — PIPELINE_STATS is retained in history (not ephemeral)'
+  }
+
+  dashboard = container 'HydraFlowDashboard' {
+    description 'src/dashboard_routes/_routes.py'
+    eventsApi = component 'GET /api/events' {
+      description 'Returns bus.get_history() — includes pipeline_stats events'
+    }
+  }
+
+  state = store 'StateTracker' {
+    description 'session counters, lifetime stats, bg worker states'
+  }
+
+  // ---------------------------------------------------------------
+  // Test harness
+  // ---------------------------------------------------------------
+  scenario = test 's54_pipeline_poller_emits_stats' {
+    description 'tests/sandbox_scenarios/scenarios/ — seed(loops_enabled=["pipeline_poller"]) + assert_outcome polls /api/events for pipeline_stats'
+  }
+
+  parity = test 'test_sandbox_parity' {
+    description 'tests/scenarios/test_sandbox_parity.py — Tier-1 in-process parity gate'
+  }
+
+  mockworld = container 'MockWorld' {
+    description 'tests/scenarios/fakes/mock_world.py'
+    runWithLoops = component 'run_with_loops()' {
+      description 'Instantiates BaseBackgroundLoop subclasses via LoopCatalog — CANNOT build pipeline_poller'
+    }
+    runPoller = component 'run_pipeline_poller()  [NEW]' {
+      description 'Builds wired orchestrator, calls emit_pipeline_stats() per cycle, returns {"pipeline_poller": stats}'
+    }
+    wired = component '_build_wired_orchestrator()' {
+      description 'Existing: constructs real HydraFlowOrchestrator over fakes'
+    }
+  }
+
+  catalog = container 'LoopCatalog' {
+    description 'tests/scenarios/catalog — instantiate("pipeline_poller") raises Unknown loop (by design)'
+  }
+
+  // --- Tier-2 (docker) relationships ---
+  scenario -> eventsApi 'polls for pipeline_stats' 'reads'
+  statsLoop -> emit 'each cycle' 'drives'
+  statsLoop -> bgWorker 'heartbeat (no event)' 'drives'
+  emit -> build 'reads'
+  build -> state 'reads'
+  emit -> bus 'PIPELINE_STATS' 'publishes'
+  eventsApi -> bus 'get_history()' 'reads'
+
+  // --- Tier-1 (parity) relationships ---
+  parity -> runWithLoops 'catalog loops' 'drives'
+  parity -> runPoller 'loops_enabled == {pipeline_poller}' 'drives'
+  runWithLoops -> catalog 'instantiate()' 'drives'
+  runPoller -> wired 'build once' 'drives'
+  wired -> orchestrator 'constructs'
+  runPoller -> emit 'per cycle' 'drives'
+}
+
+views {
+  view index {
+    title 'pipeline_poller scenario — Tier-1 parity shim + Tier-2 docker'
+    include *
+  }
+
+  view orchestratorDetail of orchestrator {
+    title 'pipeline_poller internals'
+    include *
+  }
+}
