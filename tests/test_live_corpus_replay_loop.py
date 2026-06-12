@@ -619,6 +619,100 @@ async def test_escalation_dedups_on_subsequent_ticks(tmp_path: Path) -> None:
     assert pr.create_issue.await_count == 2
 
 
+# ---------------------------------------------------------------------------
+# VOLATILE shape suppression (issue #9354): raw-value drift on live-state
+# queries must not generate drift signals; only shape validation failures do.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_volatile_sample_raw_value_diff_does_not_file_issue(
+    tmp_path: Path,
+) -> None:
+    """gh issue list value changes every time an issue is filed.  A dispatcher
+    returning a different dict (raw-value divergence) on a VOLATILE shape must
+    NOT count as drift — it's expected non-determinism, not a fake gap."""
+    loop, corpus, pr, _state = _build_loop(tmp_path)
+    corpus.record(
+        adapter="github",
+        command="gh",
+        args=["issue", "list", "--json", "number,title"],
+        stdout='[{"number":1,"title":"old title"}]\n',
+        stderr="",
+        exit_code=0,
+    )
+
+    async def live_value_changed(_sample):  # noqa: ANN001
+        # Returns a different value — simulates live list changing.
+        return [{"number": 1, "title": "new title"}, {"number": 2, "title": "extra"}]
+
+    loop.register("github", "gh", live_value_changed)
+    result = await loop._do_work()
+
+    assert result["drifted"] == 0
+    pr.create_issue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_volatile_sample_shape_failure_does_file_issue(tmp_path: Path) -> None:
+    """A shape validation failure on a VOLATILE sample IS real drift — the gh
+    schema changed.  The loop must still file an issue when SHAPE_VERDICT_KEY
+    is present in the dispatcher output."""
+    from contracts.shadow_classifier import SHAPE_VERDICT_KEY
+
+    loop, corpus, pr, _state = _build_loop(tmp_path)
+    corpus.record(
+        adapter="github",
+        command="gh",
+        args=["issue", "list", "--json", "number,title"],
+        stdout='[{"number":1,"title":"x"}]\n',
+        stderr="",
+        exit_code=0,
+    )
+
+    async def shape_failure_dispatcher(_sample):  # noqa: ANN001
+        # Simulates gh_shape_validator returning a shape failure.
+        return {
+            SHAPE_VERDICT_KEY: True,
+            "shape": "GhIssueListItem",
+            "subcommand": "issue-list",
+            "failure_count": 1,
+            "failures": [{"loc": "number", "type": "int_type", "msg": "not int"}],
+        }
+
+    loop.register("github", "gh", shape_failure_dispatcher)
+    result = await loop._do_work()
+
+    assert result["drifted"] == 1
+    pr.create_issue.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_deterministic_sample_value_diff_still_files_issue(
+    tmp_path: Path,
+) -> None:
+    """DETERMINISTIC shapes (gh pr view) preserve the existing full value-compare
+    behaviour — a raw-value difference must still file a drift issue."""
+    loop, corpus, pr, _state = _build_loop(tmp_path)
+    corpus.record(
+        adapter="github",
+        command="gh",
+        args=["pr", "view", "42", "--json", "state,number"],
+        stdout='{"number":42,"state":"OPEN"}\n',
+        stderr="",
+        exit_code=0,
+    )
+
+    async def stale_fake(_sample):  # noqa: ANN001
+        return {"number": 42, "state": "MERGED"}  # value divergence
+
+    loop.register("github", "gh", stale_fake)
+    result = await loop._do_work()
+
+    assert result["drifted"] == 1
+    pr.create_issue.assert_awaited_once()
+
+
 @pytest.mark.asyncio
 async def test_clean_tick_resets_escalation_dedup(tmp_path: Path) -> None:
     """After a clean tick the escalation is cleared so a future recurrence of

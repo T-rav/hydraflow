@@ -34,6 +34,7 @@ from typing import Literal
 import yaml
 
 from contracts._schema import apply_normalizers
+from contracts.shadow_classifier import ShapeClass, classify
 
 logger = logging.getLogger("hydraflow.contracts.shadow")
 
@@ -106,12 +107,19 @@ def _call_hash(adapter: str, command: str, args: list[str]) -> str:
 class ShadowCorpus:
     """Bounded, normalized, PII-scrubbed storage for live subprocess samples."""
 
-    def __init__(self, root: Path, *, max_per_adapter: int = 100) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        max_per_adapter: int = 100,
+        exclude_mutating: bool = False,
+    ) -> None:
         if max_per_adapter < 1:
             msg = f"max_per_adapter must be >= 1, got {max_per_adapter}"
             raise ValueError(msg)
         self._root = root
         self._max_per_adapter = max_per_adapter
+        self._exclude_mutating = exclude_mutating
 
     def record(
         self,
@@ -136,6 +144,12 @@ class ShadowCorpus:
                 f"{sorted(_KNOWN_ADAPTERS)}"
             )
             raise ValueError(msg)
+
+        if (
+            self._exclude_mutating
+            and classify(adapter, command, args) is ShapeClass.MUTATING
+        ):
+            return None
 
         adapter_dir = self._root / adapter
         adapter_dir.mkdir(parents=True, exist_ok=True)

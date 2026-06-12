@@ -31,6 +31,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
+from contracts.shadow_classifier import SHAPE_VERDICT_KEY, classify, is_value_comparable
 from models import WorkCycleResult  # noqa: TCH001
 from state import StateTracker  # noqa: TCH001
 
@@ -141,6 +142,16 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
 
             compared += 1
             if fake_output is None:
+                continue
+
+            shape_class = classify(sample.adapter, sample.command, sample.args)
+            # VOLATILE/MUTATING: only count as drift when the dispatcher signals a
+            # real schema failure via SHAPE_VERDICT_KEY. Raw-value differences on
+            # live-state queries are expected non-determinism, not a fake gap.
+            if (
+                not is_value_comparable(shape_class)
+                and SHAPE_VERDICT_KEY not in fake_output
+            ):
                 continue
 
             signature = _drift_signature(sample, fake_output)
