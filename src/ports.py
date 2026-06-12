@@ -399,7 +399,7 @@ class PRPort(Protocol):
         """Scan open PRs for cross-entity label drift vs their linked issues.
 
         Returns a list of :class:`LabelDrift` records — one per drifted
-        (issue, PR) pair. See ADR-0056 for the drift kinds and the
+        (issue, PR) pair. See ADR-0088 for the drift kinds and the
         ``LabelDriftWatcherLoop`` reconciliation policy.
         """
         ...

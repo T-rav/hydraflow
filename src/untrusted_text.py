@@ -10,7 +10,7 @@ This module is the single trust boundary: wrap every untrusted region with
 :func:`fence_untrusted`, and include :data:`UNTRUSTED_DATA_PREAMBLE` once near the
 top of the prompt so the agent knows fenced content is DATA, never instructions.
 
-See ADR-0084 (untrusted-text trust boundary). The fence is defence-in-depth
+See ADR-0092 (untrusted-text trust boundary). The fence is defence-in-depth
 alongside the runtime tool allowlist / egress restriction on issue-derived spawns.
 """
 
