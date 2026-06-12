@@ -93,9 +93,9 @@ Everything else loops inside the auto-agent until resolved.
 
 ## Rollout (staged; each stage is independently shippable)
 
-1. **PR-1 — Cycle safety:** `human-required` filtering in core phases + added to `all_pipeline_labels`; global escalation counter → forced true-HITL at cap. (Highest value, lowest risk.)
+1. **PR-1 — Cycle safety (re-entry break):** `human-required` filtering in core phases (skip in `IssueStore._take_from_queue`) + added to `all_pipeline_labels` so it clears on a successful HITL correction. This alone eliminates the unbounded autonomous cycle (a corrected issue re-enters clean; a blocked one is never re-pulled). (Highest value, lowest risk.)
 2. **PR-2 — Convergence:** `retry` outcome + `confidence`/`blocked_reason` + intra-issue retry; parse robustness.
-3. **PR-3 — Universal routing:** `BaseEscalationMixin` + central stuck-label registry + bypass-validator; deny-list shrink.
+3. **PR-3 — Universal routing + global cap:** `BaseEscalationMixin` + central stuck-label registry + bypass-validator; deny-list shrink. The shared mixin is the single escalation chokepoint, so the **global per-issue escalation counter → forced true-HITL at cap** lands here (where it can count *every* escalation cleanly) rather than being bolted onto the ~7 current escalation sites.
 4. **PR-4 — Novel resolver + learning:** generic root-cause persona + domain context packs + learned-playbook wiki cache.
 
 Each stage ships the full test pyramid (unit + MockWorld scenario + sandbox e2e) per `docs/standards/testing/`.
