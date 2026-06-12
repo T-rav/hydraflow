@@ -32,6 +32,7 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
 from trust_fleet_anomaly_detectors import (
+    REPAIRED_SUCCESS_KEYS,
     TRUST_LOOP_WORKERS,
     detect_cost_spike,
     detect_issues_per_hour,
@@ -239,28 +240,33 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
             if breached:
                 per_worker_breaches.append(("issues_per_hour", details))
 
-            breached, details = detect_repair_ratio(
-                worker,
-                metrics,
-                threshold=cfg.loop_anomaly_repair_ratio,
-            )
-            if breached:
-                per_worker_breaches.append(("repair_ratio", details))
-
-            breached, details = detect_tick_error_ratio(
-                worker,
-                metrics,
-                threshold=cfg.loop_anomaly_tick_error_ratio,
-            )
-            if breached:
-                per_worker_breaches.append(("tick_error_ratio", details))
-
-            # Staleness only applies to registered trust-loop workers.
-            # Non-trust loops (e.g. report_issue) have long-running LLM
-            # work cycles that legitimately exceed 2 × their polling
-            # interval, causing false-positive staleness alerts. Staleness
-            # for non-trust loops is out of scope for this detector.
+            # The repair_ratio, tick_error_ratio, cost_spike, and staleness
+            # detectors only apply to *registered trust-loop workers*. The
+            # collector accumulates BACKGROUND_WORKER_STATUS events for any
+            # worker on the bus, but non-trust loops (e.g. pr_unsticker,
+            # dependabot_merge) emit `failed` with no repair-success key and
+            # have long-running cycles — running these detectors against them
+            # produces false-positive HITLs on any routine CI / bot-PR failure
+            # (#9458). Issues-per-hour stays unscoped: an issue flood from any
+            # loop is a legitimate fleet-wide signal.
             if worker in TRUST_LOOP_WORKERS:
+                breached, details = detect_repair_ratio(
+                    worker,
+                    metrics,
+                    threshold=cfg.loop_anomaly_repair_ratio,
+                    min_sample=cfg.loop_anomaly_repair_min_sample,
+                )
+                if breached:
+                    per_worker_breaches.append(("repair_ratio", details))
+
+                breached, details = detect_tick_error_ratio(
+                    worker,
+                    metrics,
+                    threshold=cfg.loop_anomaly_tick_error_ratio,
+                )
+                if breached:
+                    per_worker_breaches.append(("tick_error_ratio", details))
+
                 hb = heartbeats.get(worker) or {}
                 last_run_iso = hb.get("last_run") if isinstance(hb, dict) else None
                 bg = self._bg_workers
@@ -281,13 +287,13 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                 if breached:
                     per_worker_breaches.append(("staleness", details))
 
-            breached, details = detect_cost_spike(
-                worker,
-                reader=cost_reader,
-                threshold=cfg.loop_anomaly_cost_spike_ratio,
-            )
-            if breached:
-                per_worker_breaches.append(("cost_spike", details))
+                breached, details = detect_cost_spike(
+                    worker,
+                    reader=cost_reader,
+                    threshold=cfg.loop_anomaly_cost_spike_ratio,
+                )
+                if breached:
+                    per_worker_breaches.append(("cost_spike", details))
 
             for kind, det in per_worker_breaches:
                 key = f"trust_fleet_sanity:{kind}:{worker}"
@@ -506,7 +512,13 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
             bucket["issues_filed_day"] += filed
             if ts >= hour_cutoff:
                 bucket["issues_filed_hour"] += filed
-            bucket["repaired_day"] += int(details.get("repaired", 0) or 0)
+            # Credit every per-loop success-outcome key toward repaired_day.
+            # No production trust loop emits a literal ``repaired`` key, so
+            # reading only that left repaired_day permanently 0 (#9458 root
+            # cause B). Sum across the known success keys instead.
+            bucket["repaired_day"] += sum(
+                int(details.get(key, 0) or 0) for key in REPAIRED_SUCCESS_KEYS
+            )
             bucket["failed_day"] += int(details.get("failed", 0) or 0)
             seen = bucket["last_seen_iso"]
             if seen is None or (isinstance(ts_raw, str) and ts_raw > seen):

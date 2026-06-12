@@ -112,7 +112,7 @@ class TestBuildCommand:
         """Codex backend builds a non-interactive codex exec command.
 
         The implementer is an issue-derived spawn, so it runs in restricted mode
-        (ADR-0084): the network-blocked ``workspace-write`` sandbox, not
+        (ADR-0092): the network-blocked ``workspace-write`` sandbox, not
         ``danger-full-access``.
         """
         cfg = ConfigFactory.create(
@@ -137,7 +137,7 @@ class TestBuildCommand:
     def test_build_command_claude_restricted_against_injection(
         self, config, event_bus: EventBus, tmp_path: Path
     ) -> None:
-        """ADR-0084 / W7-TA-2: the implementer is an issue-derived spawn, so the
+        """ADR-0092 / W7-TA-2: the implementer is an issue-derived spawn, so the
         default claude command goes through the real runner._build_command in
         restricted mode — --permission-mode acceptEdits, an --allowedTools
         allowlist, and NO bypassPermissions. Symmetric with the codex

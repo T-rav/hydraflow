@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `ea1cf32` — feat(auto-agent): rescue stuck pipeline PRs — diagnose-route + credit-transient (ADR-0084) *(2026-06-12)*
 - `2d8bd40` — feat(auto-agent): converge via retry instead of one-shot needs_human (ADR-0084 PR-2) (#9467) (#9467) *(2026-06-12)*
 - `725f5a8` — fix(pipeline): break the human-required escalation cycle (ADR-0084 PR-1) (#9439) (#9439) *(2026-06-12)*
 - `5ae5f3b` — Fixes #9100: entry_evidence_loop swallows CreditExhaustedError and ... (#9451) (#9451) *(2026-06-12)*

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,16 +22,47 @@ logger = logging.getLogger("hydraflow.review_insights")
 # Category keyword mapping
 # ---------------------------------------------------------------------------
 
+# Keywords are matched on whole-word / phrase boundaries (see
+# ``extract_categories``), NOT as bare substrings.  The 3-char keyword "type"
+# was the worst offender: as a substring it matched ``TypeError``,
+# ``"type":"error"``, "type of", etc., so API-error / credit-exhaustion
+# telemetry was mis-categorized as a reviewer verdict (#9426).  It is now
+# replaced by explicit type-annotation phrases.  "name" was similarly dropped
+# (matched "filename"/"username") in favor of the actionable "rename".
 CATEGORY_KEYWORDS: dict[str, list[str]] = {
-    "missing_tests": ["test", "coverage", "untested", "no tests"],
-    "type_annotations": ["type", "annotation", "typing", "hint"],
+    "missing_tests": ["test", "tests", "coverage", "untested", "no tests"],
+    "type_annotations": [
+        "type hint",
+        "type hints",
+        "type annotation",
+        "type annotations",
+        "annotation",
+        "annotations",
+        "typing",
+        "type hinting",
+        "return type",
+    ],
     "security": ["security", "injection", "secret", "vulnerability"],
-    "naming": ["naming", "name", "rename", "convention"],
+    "naming": ["naming", "rename", "convention"],
     "edge_cases": ["edge case", "boundary", "empty", "null", "none"],
     "error_handling": ["error handling", "exception", "try/except"],
     "code_quality": ["complexity", "refactor", "SRP", "duplication"],
     "lint_format": ["lint", "format", "ruff", "style"],
 }
+
+# Summaries beginning with one of these markers are infra/telemetry noise
+# (an API call failed, credits ran out) rather than a reviewer verdict.
+# Recording them as review feedback poisons the per-category frequency
+# counts (#9426), so ``extract_categories`` returns no categories for them
+# and the recorder skips the append entirely.
+_INFRA_FAILURE_PREFIXES: tuple[str, ...] = (
+    "api error",
+    "credit",
+    "credit limit",
+    "credit exhaust",
+    "rate limit",
+    "authentication error",
+)
 
 CATEGORY_ESCALATIONS: dict[str, dict[str, str | list[str]]] = {
     "missing_tests": {
@@ -183,17 +215,48 @@ class ProposalMetadata(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def is_infra_failure_summary(summary: str) -> bool:
+    """True if *summary* is an infra/telemetry failure, not a reviewer verdict.
+
+    API-error and credit-exhaustion summaries (e.g. ``API Error: 400 {...}``)
+    are produced by the agent layer when a call fails — they are noise, not
+    review feedback, and must not be categorized or counted (#9426).
+    """
+    lowered = summary.strip().lower()
+    return lowered.startswith(_INFRA_FAILURE_PREFIXES)
+
+
+def _keyword_matches(keyword: str, lowered_summary: str) -> bool:
+    """Whole-word / phrase match of *keyword* against *lowered_summary*.
+
+    Uses ``\\b`` boundaries around the keyword's leading/trailing word
+    characters so the 3-char "test" matches "test"/"tests" but not "latest",
+    and so dropped-but-historically-broad terms can never match inside a
+    larger identifier (e.g. "type" inside ``TypeError``). Non-word characters
+    inside a keyword (``try/except``) are matched literally.
+    """
+    pattern = r"\b" + re.escape(keyword) + r"\b"
+    return re.search(pattern, lowered_summary) is not None
+
+
 def extract_categories(summary: str) -> list[str]:
     """Extract feedback categories from a review summary using keyword matching.
 
     Scans *summary* (case-insensitive) against :data:`CATEGORY_KEYWORDS`
-    and returns all matching category keys.
+    using whole-word / phrase boundaries (not bare substring) and returns all
+    matching category keys.
+
+    Infra/telemetry failure summaries (API errors, credit exhaustion) are
+    treated as noise and yield no categories — see
+    :func:`is_infra_failure_summary` (#9426).
     """
+    if is_infra_failure_summary(summary):
+        return []
     lower = summary.lower()
     return [
         cat
         for cat, keywords in CATEGORY_KEYWORDS.items()
-        if any(kw.lower() in lower for kw in keywords)
+        if any(_keyword_matches(kw.lower(), lower) for kw in keywords)
     ]
 
 

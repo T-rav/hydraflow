@@ -66,7 +66,7 @@ class FakePR:
     # PR author login (e.g. "dependabot[bot]"). Drives DependabotMergeLoop's
     # bot-PR eligibility (it matches pr.author against the configured bots).
     author: str = "fake-author"
-    # Commit count used by ``find_label_drift`` (ADR-0056) to distinguish
+    # Commit count used by ``find_label_drift`` (ADR-0088) to distinguish
     # zero-commit PRs from real ones. Defaults to 1 so seeded PRs look
     # "real" without explicit setup.
     commits: int = 1
@@ -581,7 +581,7 @@ class FakeGitHub:
         return out
 
     async def find_label_drift(self) -> list[LabelDrift]:
-        """In-memory mirror of :meth:`PRPort.find_label_drift` (ADR-0056).
+        """In-memory mirror of :meth:`PRPort.find_label_drift` (ADR-0088).
 
         Walks open, non-merged PRs and pairs each with its linked issue;
         classifies drift kinds the same way ``PRManager.find_label_drift``

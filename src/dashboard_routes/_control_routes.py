@@ -248,7 +248,7 @@ _bg_worker_defs = [
     (
         "label_drift_watcher",
         "Label Drift Watcher",
-        "Periodic scan for cross-entity issue/PR label drift (e.g., issue at hydraflow-ready while linked PR at hydraflow-review with commits); reconciles via per-entity swap_pipeline_labels. See ADR-0056.",
+        "Periodic scan for cross-entity issue/PR label drift (e.g., issue at hydraflow-ready while linked PR at hydraflow-review with commits); reconciles via per-entity swap_pipeline_labels. See ADR-0088.",
     ),
     (
         "live_corpus_replay",
