@@ -342,9 +342,14 @@ def _escalate_log_pattern(
     pattern: LogPattern,
     known: KnownLogPattern,
     config: HydraFlowConfig,
-    obs: ObservabilityPort | None = None,
 ) -> None:
-    """Write a HITL recommendation for an escalating log pattern."""
+    """Write a HITL recommendation for an escalating log pattern.
+
+    The escalation is persisted to hitl_recommendations.jsonl and logged. It is
+    operational signal, not a code bug, so it is deliberately NOT captured to
+    Sentry (Sentry's contract is real code bugs only) — that previously flooded
+    the project with one event per escalation tick.
+    """
     title = f"[Health Monitor] Log pattern escalating: {pattern.fingerprint[:60]}"
     body = _build_escalation_body(pattern, known)
     try:
@@ -361,12 +366,6 @@ def _escalate_log_pattern(
         logger.warning("HITL recommendation: %s", title)
     except OSError:
         logger.debug("Failed to write HITL recommendation", exc_info=True)
-
-    if obs is not None:
-        obs.capture_message(
-            f"Log pattern escalating: {pattern.fingerprint[:60]}",
-            level="warning",
-        )
 
 
 async def file_log_patterns(
@@ -415,7 +414,7 @@ async def file_log_patterns(
             # Known pattern — check for escalation (3x increase over filed baseline)
             known = known_patterns[key]
             if pattern.count >= known.filed_count * 3:
-                _escalate_log_pattern(pattern, known, config, obs)
+                _escalate_log_pattern(pattern, known, config)
                 escalated += 1
             known.last_count = pattern.count
 

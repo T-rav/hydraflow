@@ -692,8 +692,13 @@ class TestFileLogPatterns:
         assert "level" in bc
 
     @pytest.mark.asyncio
-    async def test_sentry_capture_message_called_on_escalation(self) -> None:
-        """ObservabilityPort capture_message is called when a pattern escalates."""
+    async def test_escalation_does_not_capture_sentry_message(self) -> None:
+        """Escalation is operational signal, not a code bug — no Sentry capture.
+
+        The recommendation is persisted to hitl_recommendations.jsonl and logged;
+        capturing it to Sentry previously flooded the project with one ``warning``
+        event per escalation tick. Sentry's contract is real code bugs only.
+        """
         from mockworld.fakes.fake_sentry import FakeSentry
 
         config = _make_config()
@@ -711,12 +716,11 @@ class TestFileLogPatterns:
         }
 
         fake_obs = FakeSentry()
-        await file_log_patterns([pattern], known, config, fake_obs)
+        result = await file_log_patterns([pattern], known, config, fake_obs)
 
+        assert result.escalated == 1
         msg_events = [e for e in fake_obs.events if e["type"] == "message"]
-        assert len(msg_events) >= 1
-        assert "escalating" in msg_events[0]["message"].lower()
-        assert msg_events[0]["level"] == "warning"
+        assert msg_events == []
 
 
 # ---------------------------------------------------------------------------

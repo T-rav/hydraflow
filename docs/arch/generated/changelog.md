@@ -6,8 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
-- `74bef31` — Merge remote-tracking branch 'origin/staging' into feat/dependabot-autoheal-stale-arch *(2026-06-12)*
-- `bb21b12` — feat(dependabot-merge): auto-heal bot PRs stuck on stale arch artifacts *(2026-06-12)*
+- `e654a48` — feat(dependabot-merge): auto-heal bot PRs stuck on stale arch artifacts (#9475) (#9475) *(2026-06-12)*
+- `8572c35` — fix(pr-unsticker): rebase PRs that went DIRTY after escalation (live merge state) (#9476) (#9476) *(2026-06-12)*
 - `124b2e8` — feat(ul): entry-evidence — 20 new entry links across 11 terms (#9423) (#9423) *(2026-06-12)*
 - `076ee8f` — feat(ul): edge-proposer — 107 new edges across 30 terms (#9422) (#9422) *(2026-06-12)*
 - `a293ffc` — feat(ul): term-proposer batch — 1 drafts (#9424) (#9424) *(2026-06-12)*
