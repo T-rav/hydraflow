@@ -260,6 +260,31 @@ class PRUnsticker:
 
         return merged
 
+    async def _effective_cause(
+        self, cause: FailureCause, pr_number: int | None
+    ) -> FailureCause:
+        """Override the stored-cause classification with the live merge state.
+
+        A PR that became conflicting *after* its original escalation — e.g. a
+        code-complete PR that went DIRTY when the base branch advanced (the
+        recurring regenerated-artifact conflict) — carries a stale cause string
+        that never mentions a conflict. Routed by that string it would get a
+        no-op code fix and stay DIRTY forever. If GitHub reports the PR as
+        conflicting now, treat it as a ``MERGE_CONFLICT`` so it is rebased
+        first (ADR-0084: rescue stuck PRs).
+        """
+        if cause == FailureCause.MERGE_CONFLICT or not pr_number or pr_number <= 0:
+            return cause
+        if await self._prs.get_pr_mergeable(pr_number) is False:
+            logger.info(
+                "PR #%d is conflicting now — resolving the conflict before the "
+                "stored cause (%s)",
+                pr_number,
+                cause.value,
+            )
+            return FailureCause.MERGE_CONFLICT
+        return cause
+
     async def _process_item(self, item: HITLItem) -> bool:
         """Attempt to resolve issues for a single HITL item.
 
@@ -268,7 +293,7 @@ class PRUnsticker:
         issue_number = item.issue
         branch = self._config.branch_for_issue(issue_number)
         cause_str = self._state.get_hitl_cause(issue_number) or ""
-        cause = _classify_cause(cause_str)
+        cause = await self._effective_cause(_classify_cause(cause_str), item.pr)
 
         # Claim: swap labels
         claim_kwargs: dict[str, int] = {}

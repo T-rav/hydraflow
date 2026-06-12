@@ -6,7 +6,14 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `74bef31` — Merge remote-tracking branch 'origin/staging' into feat/dependabot-autoheal-stale-arch *(2026-06-12)*
 - `bb21b12` — feat(dependabot-merge): auto-heal bot PRs stuck on stale arch artifacts *(2026-06-12)*
+- `124b2e8` — feat(ul): entry-evidence — 20 new entry links across 11 terms (#9423) (#9423) *(2026-06-12)*
+- `076ee8f` — feat(ul): edge-proposer — 107 new edges across 30 terms (#9422) (#9422) *(2026-06-12)*
+- `a293ffc` — feat(ul): term-proposer batch — 1 drafts (#9424) (#9424) *(2026-06-12)*
+- `e201308` — feat(ul): entry-evidence — 2 new entry links across 2 terms (#9428) (#9428) *(2026-06-12)*
+- `d296730` — feat(ul): edge-proposer — 3 new edges across 2 terms (#9427) (#9427) *(2026-06-12)*
+- `39b48b2` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9425) (#9425) *(2026-06-12)*
 - `9ed1b39` — feat(auto-agent): rescue stuck pipeline PRs — diagnose-route + credit-transient (ADR-0084) (#9473) (#9473) *(2026-06-12)*
 - `44d1957` — Fixes #8693: "Recorder-side `gh issue close` support for cassette r... (#9446) (#9446) *(2026-06-12)*
 - `1a7071a` — fix(trust): min-sample guard + repaired semantics + trust-loop scoping for repair_ratio (#9458) (#9470) (#9470) *(2026-06-12)*
