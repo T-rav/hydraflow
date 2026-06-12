@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `2263ab8` — Fixes #9080: Provision isolated GitHub contracts sandbox *(2026-06-12)*
 - `05141e8` — Fixes #9080: Provision isolated GitHub contracts sandbox *(2026-06-12)*
 - `d0f190f` — docs(adr): ADR-0084 — Auto-Agent as a universal root-cause HITL gate (Proposed) (#9435) (#9435) *(2026-06-12)*
 - `0c3c314` — fix(retrospective): route stale review-insights to the factory, not HITL (#9227) (#9431) (#9431) *(2026-06-11)*
