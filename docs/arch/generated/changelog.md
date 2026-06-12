@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `3b90164` — Fixes #9080: Provision isolated GitHub contracts sandbox *(2026-06-12)*
 - `b9e8a81` — Fixes #9080: Provision isolated GitHub contracts sandbox *(2026-06-12)*
 - `2263ab8` — Fixes #9080: Provision isolated GitHub contracts sandbox *(2026-06-12)*
 - `05141e8` — Fixes #9080: Provision isolated GitHub contracts sandbox *(2026-06-12)*
