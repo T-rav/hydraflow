@@ -57,23 +57,27 @@ def _split_path_symbol(entry: str) -> tuple[str, str | None]:
     return entry, None
 
 
-# Cross-cutting infrastructure modules — bare-cited (file-granular) by ≥5
-# Accepted ADRs as of 2026-06: the config dataclass, shared Pydantic models,
-# the Port protocols, and the post-merge handler. Every feature touches these,
-# so a file-level touch is implementation churn, not a semantic change to any
-# one ADR's decision. They are the dominant source of ADR-drift false positives
-# (e.g. src/config.py absorbed ~20 merged PRs in two weeks, tripping every ADR
-# that lists it as a dependency). #9176 already suppressed the symbol-cited
-# case; this handles the residual *bare-cited* case for these shared modules.
-# An ADR that genuinely owns one of these must cite the specific symbol
-# (``src/config.py:HydraFlowConfig``) to drift — a bare citation is read as a
-# dependency mention and does not drift.
+# Cross-cutting infrastructure modules — bare-cited (file-granular) as a
+# *dependency* by many Accepted ADRs: the config dataclass, shared Pydantic
+# models, the Port protocols, the post-merge handler, and the GitHub PR/issue
+# port wrapper. Every feature touches these, so a file-level touch is
+# implementation churn, not a semantic change to any one ADR's decision. They
+# are the dominant source of ADR-drift false positives (e.g. src/config.py
+# absorbed ~20 merged PRs in two weeks, and src/pr_manager.py is bare-cited by
+# ADR-0005/0018/0045/0056 while changing on nearly every PR that files an issue
+# or PR). #9176 already suppressed the symbol-cited case; #9397 added the first
+# four modules here for the residual *bare-cited* case; pr_manager.py joins them
+# as the next-highest-churn dependency. An ADR that genuinely owns one of these
+# must cite the specific symbol (``src/config.py:HydraFlowConfig``,
+# ``src/pr_manager.py:PRManager.upload_screenshot_gist``) to drift — a bare
+# citation is read as a dependency mention and does not drift.
 _SHARED_INFRA_MODULES = frozenset(
     {
         "src/config.py",
         "src/models.py",
         "src/ports.py",
         "src/post_merge_handler.py",
+        "src/pr_manager.py",
     }
 )
 

@@ -4,7 +4,7 @@
 - **Date:** 2026-05-07
 - **Supersedes:** none
 - **Superseded by:** none
-- **Related:** [ADR-0002](0002-labels-as-state-machine.md) (label state machine), [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker-loop pattern), [ADR-0049](0049-trust-loop-kill-switch-convention.md) (kill-switch convention). Code: `src/label_drift_watcher_loop.py`, `src/pr_manager.py` (`find_label_drift`), `src/models.py` (`LabelDrift`).
+- **Related:** [ADR-0002](0002-labels-as-state-machine.md) (label state machine), [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker-loop pattern), [ADR-0049](0049-trust-loop-kill-switch-convention.md) (kill-switch convention). Code: `src/label_drift_watcher_loop.py:LabelDriftWatcherLoop`, `src/pr_manager.py` (`find_label_drift`; shared-infra dependency), `src/models.py:LabelDrift`.
 
 ## Context
 

@@ -38,7 +38,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0029 | — |
 | ADR-0030 | `src.dashboard_routes._routes` |
 | ADR-0031 | `src.config`, `src.discover_phase`, `src.discover_runner`, `src.models`, `src.plan_phase`, `src.review_phase`, `src.shape_phase`, `src.shape_runner`, `src.triage_phase` |
-| ADR-0032 | `src.base_runner`, `src.hindsight`, `src.path`, `src.repo_wiki`, `src.repo_wiki_loop`, `src.wiki_compiler` |
+| ADR-0032 | `src.base_runner`, `src.repo_wiki`, `src.repo_wiki_loop`, `src.wiki_compiler` |
 | ADR-0033 | `src.adr_reviewer`, `src.config` |
 | ADR-0034 | `src.adr_reviewer`, `src.config` |
 | ADR-0035 | `src.config` |
@@ -159,7 +159,6 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.hf_cli.__main__` | ADR-0036 |
 | `src.hf_cli.supervisor_client` | ADR-0007 |
 | `src.hf_cli.supervisor_service` | ADR-0006, ADR-0007, ADR-0008 |
-| `src.hindsight` | ADR-0032 |
 | `src.implement_phase` | ADR-0005, ADR-0014, ADR-0024, ADR-0063 |
 | `src.issue_cache` | ADR-0041 |
 | `src.issue_fetcher` | ADR-0019, ADR-0067 |
@@ -176,7 +175,6 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.mockworld.sandbox_main` | ADR-0052 |
 | `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0056, ADR-0064 |
 | `src.orchestrator` | ADR-0006, ADR-0009, ADR-0014, ADR-0044, ADR-0045 |
-| `src.path` | ADR-0032 |
 | `src.pending_concerns` | ADR-0064 |
 | `src.plan_council` | ADR-0064 |
 | `src.plan_council_prompts` | ADR-0064 |

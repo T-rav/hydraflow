@@ -153,6 +153,49 @@ def test_bare_citation_of_shared_infra_module_does_not_drift(tmp_path: Path) -> 
     assert findings == []
 
 
+def test_bare_citation_of_pr_manager_does_not_drift(tmp_path: Path) -> None:
+    # src/pr_manager.py is the GitHub PR/issue port wrapper — bare-cited as a
+    # dependency by ADR-0005/0018/0045/0056 and touched by nearly every PR that
+    # files an issue or PR. It is shared-infra: a file-level touch must NOT drift
+    # (the residual false-positive source after #9397; resolves the stuck
+    # ADR-0005/0018/0056 drift escalations). Owning a pr_manager symbol still
+    # requires a :Symbol citation to drift (see test below).
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_adr(
+        adr_dir,
+        number=53,
+        title="depends on pr_manager",
+        status="Accepted",
+        related_files=["src/pr_manager.py"],
+    )
+    findings = compute_drift(
+        ADRIndex(adr_dir), pr_number=1, changed_files=["src/pr_manager.py"]
+    )
+    assert findings == []
+
+
+def test_symbol_citation_of_pr_manager_still_drifts(tmp_path: Path) -> None:
+    # An ADR that genuinely owns a pr_manager symbol (e.g. ADR-0018 cites
+    # PRManager.upload_screenshot_gist) still drifts when that symbol changes.
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_adr(
+        adr_dir,
+        number=54,
+        title="owns a pr_manager symbol",
+        status="Accepted",
+        related_files=["src/pr_manager.py:PRManager.upload_screenshot_gist"],
+    )
+    findings = compute_drift(
+        ADRIndex(adr_dir),
+        pr_number=1,
+        changed_files=["src/pr_manager.py:PRManager.upload_screenshot_gist"],
+    )
+    assert len(findings) == 1
+    assert findings[0].adr.number == 54
+
+
 def test_symbol_citation_of_shared_infra_module_still_drifts(tmp_path: Path) -> None:
     # An ADR that genuinely owns a shared-infra symbol cites it at :Symbol
     # granularity and still drifts when that symbol changes.

@@ -4,7 +4,7 @@
 - **Date:** 2026-05-06
 - **Supersedes:** none (the gate it replaces was a piece of CI tooling, not an ADR-blessed decision)
 - **Superseded by:** none
-- **Related:** [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker-loop pattern), [ADR-0045](0045-trust-architecture-hardening.md) (trust-architecture hardening, which originally floated `Skip-ADR:` as a convention). Code: `src/adr_touchpoint_auditor_loop.py`, `src/adr_drift.py`, `src/state/_adr_audit.py`.
+- **Related:** [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker-loop pattern), [ADR-0045](0045-trust-architecture-hardening.md) (trust-architecture hardening, which originally floated `Skip-ADR:` as a convention). Code: `src/adr_touchpoint_auditor_loop.py:AdrTouchpointAuditorLoop`, `src/adr_drift.py:compute_drift`, `src/state/_adr_audit.py:AdrAuditStateMixin`.
 - **Enforced by:** `tests/test_adr_touchpoint_auditor_loop.py`, `tests/test_adr_drift.py`, `tests/test_loop_wiring_completeness.py` (auto-discovery confirms the loop is wired in all 5 checkpoints).
 
 ## Context

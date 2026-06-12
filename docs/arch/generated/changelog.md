@@ -6,7 +6,12 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
-- `96310e4` — fix(trust): right-size FakeCoverageAuditorLoop to cassette-capable adapters *(2026-06-11)*
+- `dc7e09b` — fix(trust): right-size FakeCoverageAuditorLoop to cassette-capable adapters (#9403) (#9403) *(2026-06-11)*
+- `d0ad6db` — fix(dashboard): aggregate /api/timeline* under __all__, repo-tag each item (#9402) (#9402) *(2026-06-11)*
+- `0f9b7fa` — fix(dashboard): aggregate /api/metrics/github under __all__; tag single-repo workers with canonical slug (#9399) (#9399) *(2026-06-10)*
+- `58bf543` — fix(dashboard): route intent + request-changes to the selected/row repo; clear repo-scoped state on switch (#9398) (#9398) *(2026-06-10)*
+- `a0d630c` — test(dashboard): MockWorld scenarios for Phase 2/3 aggregate endpoints (#9392) (#9392) *(2026-06-09)*
+- `56bb8a8` — test(dashboard): multi-repo aggregation e2e + MockWorld scenarios (Phase 4-c) (#9391) (#9391) *(2026-06-09)*
 - `bc3049c` — feat(dashboard): repo-qualify live worker/PR cards for repo=__all__ (Phase 4-b2) (#9390) (#9390) *(2026-06-09)*
 - `2f1c343` — feat(dashboard): merged WebSocket + /api/events backfill for repo=__all__ (Phase 4-a) (#9387) (#9387) *(2026-06-09)*
 - `b05bc76` — fix(dashboard): scope bare /api/sessions + pipeline-active to default repo (Phase 6) (#9386) (#9386) *(2026-06-09)*
