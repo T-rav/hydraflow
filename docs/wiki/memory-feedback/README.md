@@ -6,7 +6,7 @@ from Claude's session-memory directory
 candidate for promotion into a structurally-enforced rule (test,
 fixture, lint, loop) per `docs/wiki/dark-factory.md` §6.
 
-`MemoryBacklogLoop` (`src/memory_backlog_loop.py`, ADR-0057) walks this
+`MemoryBacklogLoop` (`src/memory_backlog_loop.py`, ADR-0089) walks this
 directory on its tick and files `hydraflow-find` issues for any entry
 with `status: pending`.
 
@@ -75,4 +75,4 @@ If you ever need to (re)mirror manually:
 uv run python scripts/mirror_feedback_memory.py ~/.claude/projects/<encoded>/memory/feedback_<slug>.md
 ```
 
-See ADR-0057 for the design rationale.
+See ADR-0089 for the design rationale.

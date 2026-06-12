@@ -1758,7 +1758,7 @@ class PRManager:
         """Scan open PRs for cross-entity label drift vs their linked issues.
 
         Returns a list of :class:`LabelDrift` records, one per drifted pair.
-        See ADR-0056 for the drift kinds and reconciliation policy.
+        See ADR-0088 for the drift kinds and reconciliation policy.
 
         Each tick: fetch open PRs (any state), parse ``Fixes #N`` from the
         body, fetch the linked issue's labels, then classify the pair.

@@ -26,13 +26,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.retrospective_loop")
 
-# Window (#8988): once a HITL stale-insight issue is filed for a category,
-# do not refile (or recomment) within this window even if the open-issue
-# GitHub lookup races and returns 0.  An hour is much shorter than the
-# 30-minute retrospective_interval default cadence, but long enough to
-# survive back-to-back ticks that hit GitHub before its search index
-# catches up to a freshly-created issue.
-_HITL_DEDUP_WINDOW = timedelta(hours=1)
+# Window (#8988): once a stale-insight escalation is filed for a category,
+# do not refile within this window even if the open-issue GitHub lookup races
+# and returns 0.  An hour is much shorter than the 30-minute
+# retrospective_interval default cadence, but long enough to survive
+# back-to-back ticks that hit GitHub before its search index catches up to a
+# freshly-created issue.
+_INSIGHT_DEDUP_WINDOW = timedelta(hours=1)
 
 
 def _now_utc() -> datetime:
@@ -62,10 +62,10 @@ class RetrospectiveLoop(BaseBackgroundLoop):
         self._insights = insights
         self._queue = queue
         self._prs = prs
-        # Per-category last-filed timestamps for HITL stale-insight dedup
+        # Per-category last-escalated timestamps for stale-insight dedup
         # (#8988).  Lives in-memory; the open-issue GitHub lookup is the
         # cross-restart authority.  This dict is the race-safety net.
-        self._hitl_filed_at: dict[str, datetime] = {}
+        self._insight_escalated_at: dict[str, datetime] = {}
 
     def _get_default_interval(self) -> int:
         return self._config.retrospective_interval
@@ -160,151 +160,147 @@ class RetrospectiveLoop(BaseBackgroundLoop):
         return {"patterns_filed": filed}
 
     async def _handle_verify_proposals(self) -> dict[str, int]:
-        """Verify improvement proposal outcomes and escalate stale ones.
+        """Verify improvement-proposal outcomes and route stale ones to the factory.
+
+        A *stale* proposal means the factory's first pass at a recurring review
+        finding (filed by :meth:`_handle_review_patterns`) did not reduce its
+        frequency after ``_PROPOSAL_STALE_DAYS``. Rather than a ``hydraflow-hitl``
+        dead-end, file an actionable ``find_label`` issue (#9227) so the pipeline
+        (triage → plan → implement → review → merge) takes another, better-informed
+        pass at the root cause. The proposal auto-verifies — and this escalation
+        stops — once the pattern frequency drops >50% (see :func:`verify_proposals`).
 
         Dedup rules (issue #8988):
 
-        - **Open issue exists** for the same category → post a comment
-          carrying the new tick's evidence instead of opening a duplicate.
-        - **Closed issue exists** for the same category → treat the human
-          close as a re-arm signal: clear the in-memory window-tracker so
-          the next stale signal files fresh.  Mirrors
+        - **Open escalation exists** for the category → skip. The factory is
+          already working it; no duplicate, and no comment spam.
+        - **Closed escalation exists** → treat the close (factory merged a fix,
+          or a human dismissed it) as a re-arm signal: clear the in-memory
+          window-tracker so a still-stale proposal files fresh. Mirrors
           ``FakeCoverageAuditorLoop._reconcile_closed_escalations``.
-        - **In-memory window guard** (:data:`_HITL_DEDUP_WINDOW`): if this
-          category was filed within the window, skip entirely.  Catches
+        - **In-memory window guard** (:data:`_INSIGHT_DEDUP_WINDOW`): if this
+          category was escalated within the window, skip entirely. Catches
           races where GitHub's search index has not caught up to a
           freshly-created issue.
         """
         from review_insights import (  # noqa: PLC0415
             _PROPOSAL_STALE_DAYS,
             CATEGORY_DESCRIPTIONS,
+            PERSISTENT_FINDING_PREFIX,
+            build_persistent_finding_body,
             verify_proposals,
         )
 
-        records = self._insights.load_recent(50)
+        # Sample current_count over the SAME window the baseline pre_count was
+        # measured over (review_insight_window). Hardcoding 50 here while
+        # pre_count is captured over review_insight_window (default 10) makes
+        # current_count >= pre_count permanently true for high-frequency
+        # categories, so verify_proposals could never observe improvement and
+        # re-filed false stale-insight HITL issues forever (#9444). This
+        # mirrors ReviewPhase._record_review_insight's correct window usage.
+        records = self._insights.load_recent(self._config.review_insight_window)
         stale = verify_proposals(self._insights, records)
 
         if not stale:
             return {"stale_proposals": 0}
 
         if self._prs is None:
-            logger.warning("Retrospective: cannot file HITL issue — no PRPort")
+            logger.warning(
+                "Retrospective: cannot file review-insight issue — no PRPort"
+            )
             return {"stale_proposals": len(stale)}
 
-        # Re-arm: any closed HITL stale-insight issue clears its category
-        # from the in-memory window-tracker so the next stale tick files
-        # fresh.  Cheap; runs once per verify-proposals tick.
-        await self._reconcile_closed_hitl_issues()
+        # Re-arm: any closed escalation clears its category from the in-memory
+        # window-tracker so the next stale tick files fresh.  Cheap; runs once
+        # per verify-proposals tick.
+        await self._reconcile_closed_insight_escalations()
 
         now = _now_utc()
         for category in stale:
             desc = CATEGORY_DESCRIPTIONS.get(category, category)
-            title = f"[HITL] Stale review insight: {desc}"
+            title = f"{PERSISTENT_FINDING_PREFIX}{desc}"
 
             # 1. Window guard — protects against races where GitHub's
             #    search index has not surfaced our just-filed issue yet.
-            last = self._hitl_filed_at.get(category)
-            if last is not None and (now - last) < _HITL_DEDUP_WINDOW:
+            last = self._insight_escalated_at.get(category)
+            if last is not None and (now - last) < _INSIGHT_DEDUP_WINDOW:
                 logger.debug(
-                    "Retrospective: skipping HITL stale-insight refile for "
+                    "Retrospective: skipping stale-insight refile for "
                     "category=%s — within %s dedup window",
                     category,
-                    _HITL_DEDUP_WINDOW,
+                    _INSIGHT_DEDUP_WINDOW,
                 )
                 continue
 
-            # 2. Open-issue lookup — if one is open, comment instead of
-            #    filing a duplicate.
+            # 2. Open-issue lookup — if the factory is already working a routed
+            #    issue, skip (no duplicate, no comment spam).
             existing = await self._prs.find_existing_issue(title)
             if existing:
-                tick_evidence = self._build_stale_tick_comment(
-                    category, desc, _PROPOSAL_STALE_DAYS
-                )
-                await self._prs.post_comment(existing, tick_evidence)
-                # Touch the window-tracker so we don't immediately re-comment.
-                self._hitl_filed_at[category] = now
+                # Touch the window-tracker so we keep skipping cheaply.
+                self._insight_escalated_at[category] = now
                 continue
 
-            # 3. File a fresh HITL issue. Set the window-tracker BEFORE
-            #    the await so a crash between issue creation and the
-            #    assignment doesn't strand the freshly-filed issue with
-            #    no in-memory guard — protects against the cross-tick
-            #    race where ``find_existing_issue`` may not yet see the
-            #    just-filed issue via GitHub's search index.
-            body = (
-                f"## Stale Improvement Proposal\n\n"
-                f"The improvement proposal for **{category}** ({desc}) "
-                f"was filed over {_PROPOSAL_STALE_DAYS} days ago but the "
-                f"pattern frequency has not decreased. Human intervention is "
-                f"required to resolve this recurring feedback loop.\n\n"
-                f"---\n*Auto-escalated by HydraFlow review insight verification.*"
-            )
-            hitl_labels = list(self._config.hitl_label)
-            self._hitl_filed_at[category] = now
+            # 3. File a fresh actionable find-queue issue. Set the window-tracker
+            #    BEFORE the await so a crash between issue creation and the
+            #    assignment doesn't strand the freshly-filed issue with no
+            #    in-memory guard — protects against the cross-tick race where
+            #    ``find_existing_issue`` may not yet see the just-filed issue via
+            #    GitHub's search index.
+            body = build_persistent_finding_body(category, desc, _PROPOSAL_STALE_DAYS)
+            labels = self._config.find_label[:1]
+            self._insight_escalated_at[category] = now
             try:
-                await self._prs.create_issue(title, body, hitl_labels)
+                await self._prs.create_issue(title, body, labels)
             except Exception:
                 # Filing failed — clear the optimistic guard so the next
                 # tick can retry. Re-raise to preserve normal error flow.
-                self._hitl_filed_at.pop(category, None)
+                self._insight_escalated_at.pop(category, None)
                 raise
 
         return {"stale_proposals": len(stale)}
 
-    @staticmethod
-    def _build_stale_tick_comment(category: str, desc: str, stale_days: int) -> str:
-        """Comment body posted to an existing open HITL stale-insight issue.
-
-        Carries the tick context so a human grooming the issue can see the
-        signal is still recurring rather than letting duplicates pile up.
-        """
-        return (
-            f"Still stale — pattern frequency for **{category}** ({desc}) "
-            f"has not decreased after {stale_days}+ days.  This is a "
-            f"recurring tick from `RetrospectiveLoop`; the underlying "
-            f"escalation remains open.\n\n"
-            f"_Auto-comment by HydraFlow review insight verification._"
-        )
-
-    async def _reconcile_closed_hitl_issues(self) -> None:
-        """Clear the in-memory window-tracker for closed HITL stale-insight issues.
+    async def _reconcile_closed_insight_escalations(self) -> None:
+        """Clear the in-memory window-tracker for closed stale-insight escalations.
 
         Mirrors :meth:`FakeCoverageAuditorLoop._reconcile_closed_escalations`:
-        a human-closed HITL issue is the re-arm signal — the next stale
-        tick should be free to file fresh.
+        a closed escalation (the factory merged a fix, or a human dismissed it)
+        is the re-arm signal — the next stale tick should be free to file fresh.
 
-        Only inspects closed issues carrying the configured ``hitl_label``;
-        matches by title prefix ``[HITL] Stale review insight:`` to scope
-        the clear to this loop's own escalations.
+        Inspects closed issues carrying the configured ``find_label`` and
+        matches by title prefix :data:`PERSISTENT_FINDING_PREFIX` to scope the
+        clear to this loop's own escalations.
         """
         if self._prs is None:
             return
-        if not self._hitl_filed_at:
+        if not self._insight_escalated_at:
             return  # Nothing to re-arm.
 
-        hitl_labels = list(self._config.hitl_label)
-        if not hitl_labels:
+        find_labels = list(self._config.find_label)
+        if not find_labels:
             return
 
         try:
-            closed = await self._prs.list_closed_issues_by_label(hitl_labels[0])
+            closed = await self._prs.list_closed_issues_by_label(find_labels[0])
         except Exception as exc:  # noqa: BLE001
             reraise_on_credit_or_bug(exc)
             # The lookup is best-effort; reraising would block the entire
             # verify-proposals tick on a transient GitHub fault.
             logger.debug(
-                "Retrospective: could not list closed HITL issues for re-arm",
+                "Retrospective: could not list closed find issues for re-arm",
                 exc_info=True,
             )
             return
 
-        from review_insights import CATEGORY_DESCRIPTIONS  # noqa: PLC0415
+        from review_insights import (  # noqa: PLC0415
+            CATEGORY_DESCRIPTIONS,
+            PERSISTENT_FINDING_PREFIX,
+        )
 
-        prefix = "[HITL] Stale review insight: "
+        prefix = PERSISTENT_FINDING_PREFIX
         # Build desc → category reverse lookup once.
         desc_to_category = {
             CATEGORY_DESCRIPTIONS.get(cat, cat): cat
-            for cat in list(self._hitl_filed_at.keys())
+            for cat in list(self._insight_escalated_at.keys())
         }
 
         cleared: list[str] = []
@@ -314,13 +310,13 @@ class RetrospectiveLoop(BaseBackgroundLoop):
                 continue
             desc = title[len(prefix) :]
             category = desc_to_category.get(desc) or desc
-            if category in self._hitl_filed_at:
-                del self._hitl_filed_at[category]
+            if category in self._insight_escalated_at:
+                del self._insight_escalated_at[category]
                 cleared.append(category)
 
         if cleared:
             logger.info(
-                "Retrospective: re-armed HITL stale-insight tracker for %s",
+                "Retrospective: re-armed stale-insight tracker for %s",
                 cleared,
             )
 

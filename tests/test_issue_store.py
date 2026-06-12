@@ -240,6 +240,32 @@ class TestQueueAccessors:
         assert len(result) == 1
         assert result[0].id == 4
 
+    def test_get_plannable_skips_human_required(self) -> None:
+        # An issue escalated out to human-required must not re-enter a core
+        # phase — else it re-fails and re-escalates forever (ADR-0084, C).
+        store = _make_store()
+        store._route_issues(
+            [TaskFactory.create(id=20, tags=["hydraflow-plan", "human-required"])]
+        )
+        assert store.get_plannable(10) == []
+
+    def test_get_reviewable_skips_human_required(self) -> None:
+        store = _make_store()
+        store._route_issues(
+            [TaskFactory.create(id=21, tags=["hydraflow-review", "human-required"])]
+        )
+        assert store.get_reviewable(10) == []
+
+    def test_human_required_skipped_but_clean_sibling_returned(self) -> None:
+        store = _make_store()
+        store._route_issues(
+            [
+                TaskFactory.create(id=22, tags=["hydraflow-plan", "human-required"]),
+                TaskFactory.create(id=23, tags=["hydraflow-plan"]),
+            ]
+        )
+        assert [t.id for t in store.get_plannable(10)] == [23]
+
     def test_get_implementable_excludes_active_issues(self) -> None:
         store = _make_store()
         store._route_issues(

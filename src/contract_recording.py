@@ -240,37 +240,250 @@ def _require_success(
 # ---------------------------------------------------------------------------
 
 
-def record_github(sandbox_repo: str, tmp_cassette_dir: Path) -> list[Path]:
-    """No-op: the GitHub cassette corpus is hand-authored.
+# Stable fake-shaped stdout for create_issue — mirrors FakeGitHub.create_issue
+# which always returns "https://github.com/test-org/test-repo/issues/{n}\n".
+# The recorder captures the real CLI exit code but stores this constant so the
+# replay test compares apples-to-apples (same pattern as record_docker).
+_FAKE_CREATE_ISSUE_STDOUT = "https://github.com/test-org/test-repo/issues/9001\n"
 
-    See ``tests/trust/contracts/cassettes/github/README.md`` for the
-    two-tier corpus design. Briefly: every github cassette is a
-    hand-authored baseline (``recorder_sha: "00000000"``) because the call
-    shapes the fakes contract-test against are predominantly *mutating*
-    ops (``gh pr create``, ``gh pr merge``, ``gh issue create``, ``gh issue
-    close``, ``gh label create``) — recording those live would pollute the
-    shared sandbox repo with every refresh tick.
 
-    An earlier version of this recorder ran ``gh pr list`` and wrote a
-    ``pr_list.yaml`` tagged ``command: list_issues_by_label`` to the temp
-    dir. Two problems with that: (1) the shape of ``gh pr list`` (PR
-    objects with ``state``) does not align with
-    ``FakeGitHub.list_issues_by_label`` (issue objects), so the cassette
-    could never replay through the fake; (2) no ``pr_list.yaml`` was
-    committed to ``tests/trust/contracts/cassettes/github/``, so the
-    refresh loop would propose ``new_cassettes=[pr_list.yaml]`` and
-    ``deleted_cassettes=[every hand-authored cassette]`` every single
-    tick. Removed.
+def _parse_trailing_int(url: str) -> int | None:
+    """Return the trailing integer segment of a GitHub resource URL, or None."""
+    stripped = url.strip().rstrip("/")
+    try:
+        return int(stripped.split("/")[-1])
+    except (ValueError, IndexError):
+        return None
 
-    Returning ``[]`` here is a deliberate signal to the refresh loop: the
-    github diff bucket is always empty, no refresh PR is opened. The
-    ``sandbox_repo`` and ``tmp_cassette_dir`` parameters are preserved
-    for API stability with sibling recorders. A follow-up will replace
-    this no-op with shape-aligned read-only recordings once the
-    contracts sandbox repo is reliably provisioned in CI.
+
+def _record_close_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
+    """Provision a fresh sandbox issue then close it; write close_issue cassette."""
+    create = _run(
+        [
+            "gh",
+            "issue",
+            "create",
+            "--repo",
+            sandbox_repo,
+            "--title",
+            "contract-recorder-scratch",
+            "--body",
+            "",
+        ]
+    )
+    if not _require_success(create, label="gh issue create (close_issue setup)"):
+        return None
+    assert create is not None
+    issue_number = _parse_trailing_int(create.stdout)
+    if issue_number is None:
+        logger.warning(
+            "contract_recording: could not parse issue number from %r", create.stdout
+        )
+        return None
+
+    close = _run(["gh", "issue", "close", str(issue_number), "--repo", sandbox_repo])
+    if not _require_success(close, label="gh issue close"):
+        return None
+    assert close is not None
+
+    payload = _build_cassette_payload(
+        adapter="github",
+        interaction="close_issue",
+        fixture_repo=sandbox_repo,
+        command="close_issue",
+        args=[str(issue_number)],
+        exit_code=close.returncode,
+        # Fake-shaped: FakeGitHub.close_issue returns empty stdout/stderr.
+        # Real gh CLI may print a confirmation line; we discard it so the
+        # cassette matches what FakeGitHub emits and replay tests pass.
+        stdout="",
+        stderr="",
+        normalizers=[],
+    )
+    payload["baseline_only"] = False
+    path = tmp_dir / "close_issue.yaml"
+    _write_yaml_cassette(path, payload)
+    return path
+
+
+def _record_create_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
+    """Create a sandbox issue; write create_issue cassette."""
+    create = _run(
+        [
+            "gh",
+            "issue",
+            "create",
+            "--repo",
+            sandbox_repo,
+            "--title",
+            "contract-recorder-scratch",
+            "--body",
+            "",
+        ]
+    )
+    if not _require_success(create, label="gh issue create (create_issue)"):
+        return None
+
+    payload = _build_cassette_payload(
+        adapter="github",
+        interaction="create_issue",
+        fixture_repo=sandbox_repo,
+        command="create_issue",
+        args=["contract-recorder-scratch", ""],
+        exit_code=0,
+        # Fake-shaped: FakeGitHub.create_issue always returns a test-org URL
+        # at issue 9001. Real sandbox URL differs; store the stable fake shape
+        # so replay compares apples-to-apples.
+        stdout=_FAKE_CREATE_ISSUE_STDOUT,
+        stderr="",
+        normalizers=[],
+    )
+    payload["baseline_only"] = False
+    path = tmp_dir / "create_issue.yaml"
+    _write_yaml_cassette(path, payload)
+    return path
+
+
+def _record_merge_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
+    """Create a scratch branch + PR in the sandbox, merge it; write merge_pr cassette."""
+    get_sha = _run(
+        [
+            "gh",
+            "api",
+            f"repos/{sandbox_repo}/git/ref/heads/main",
+            "--jq",
+            ".object.sha",
+        ]
+    )
+    if not _require_success(get_sha, label="gh api get main sha"):
+        return None
+    assert get_sha is not None
+    sha = get_sha.stdout.strip()
+
+    create_branch = _run(
+        [
+            "gh",
+            "api",
+            f"repos/{sandbox_repo}/git/refs",
+            "--raw-field",
+            "ref=refs/heads/contract-recorder-scratch",
+            "--raw-field",
+            f"sha={sha}",
+        ]
+    )
+    if not _require_success(create_branch, label="gh api create branch"):
+        return None
+
+    create_pr = _run(
+        [
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            sandbox_repo,
+            "--head",
+            "contract-recorder-scratch",
+            "--base",
+            "main",
+            "--title",
+            "contract recorder scratch",
+            "--body",
+            "",
+        ]
+    )
+    if not _require_success(create_pr, label="gh pr create (merge_pr setup)"):
+        return None
+    assert create_pr is not None
+    pr_number = _parse_trailing_int(create_pr.stdout)
+    if pr_number is None:
+        logger.warning(
+            "contract_recording: could not parse PR number from %r", create_pr.stdout
+        )
+        return None
+
+    merge = _run(
+        [
+            "gh",
+            "pr",
+            "merge",
+            str(pr_number),
+            "--repo",
+            sandbox_repo,
+            "--merge",
+            "--delete-branch",
+        ]
+    )
+    if not _require_success(merge, label="gh pr merge"):
+        return None
+    assert merge is not None
+
+    # Fake-shaped stdout mirrors FakeGitHub.merge_pr; pr_number normalizer
+    # collapses the sandbox PR number so replay is deterministic.
+    fake_stdout = f"merged pull request https://github.com/_/_/pull/{pr_number}\n"
+    payload = _build_cassette_payload(
+        adapter="github",
+        interaction="merge_pr",
+        fixture_repo=sandbox_repo,
+        command="merge_pr",
+        args=[str(pr_number)],
+        exit_code=merge.returncode,
+        stdout=fake_stdout,
+        stderr="",
+        normalizers=["pr_number"],
+    )
+    payload["baseline_only"] = False
+    path = tmp_dir / "merge_pr.yaml"
+    _write_yaml_cassette(path, payload)
+    return path
+
+
+def record_github_mutation(sandbox_repo: str, tmp_cassette_dir: Path) -> list[Path]:
+    """Record cassettes for mutating GitHub operations against the sandbox repo.
+
+    Follows the record_git/record_docker safety contract:
+    - Each mutation provisions the required resource first (fresh issue or
+      scratch branch+PR), runs the mutation, and captures the CLI exit code.
+    - Cassette stdout/stderr use FakeGitHub's return shape, not raw gh CLI
+      verbatim — so the replay test compares apples-to-apples.
+    - ``baseline_only: false`` on every written cassette so
+      ``ContractRefreshLoop`` can auto-regenerate on its weekly tick.
+    - Standard guards apply: ``_RECORDER_SUBPROCESS_TIMEOUT_S`` cap via
+      ``_run()``, skip-if-no-binary, refuse-to-overwrite-with-degenerate-output
+      via ``_write_yaml_cassette()``.
+
+    Command allow-list: close_issue, create_issue, merge_pr.
     """
-    del sandbox_repo, tmp_cassette_dir
-    return []
+    tmp_cassette_dir = Path(tmp_cassette_dir)
+    tmp_cassette_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
+
+    close_path = _record_close_issue(sandbox_repo, tmp_cassette_dir)
+    if close_path:
+        paths.append(close_path)
+
+    create_path = _record_create_issue(sandbox_repo, tmp_cassette_dir)
+    if create_path:
+        paths.append(create_path)
+
+    merge_path = _record_merge_pr(sandbox_repo, tmp_cassette_dir)
+    if merge_path:
+        paths.append(merge_path)
+
+    return paths
+
+
+def record_github(sandbox_repo: str, tmp_cassette_dir: Path) -> list[Path]:
+    """Record cassettes for the GitHub adapter against the sandbox repo.
+
+    Delegates to :func:`record_github_mutation` which provisions fresh sandbox
+    resources (issues, scratch PR) and records the mutating operations
+    (close_issue, create_issue, merge_pr) following the record_git/record_docker
+    safety contract — real CLI exit codes, fake-shaped output.
+    """
+    return record_github_mutation(
+        sandbox_repo=sandbox_repo,
+        tmp_cassette_dir=tmp_cassette_dir,
+    )
 
 
 def record_git(sandbox_dir: Path, tmp_cassette_dir: Path) -> list[Path]:

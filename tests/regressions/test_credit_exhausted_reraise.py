@@ -262,7 +262,7 @@ class TestMetricsManagerCreditExhaustedReraise:
 
 # ---------------------------------------------------------------------------
 # RetrospectiveLoop — _do_work catches process-item exceptions, and
-# _reconcile_closed_hitl_issues catches list_closed_issues_by_label
+# _reconcile_closed_insight_escalations catches list_closed_issues_by_label
 # ---------------------------------------------------------------------------
 
 
@@ -316,7 +316,7 @@ class TestRetrospectiveLoopCreditExhaustedReraise:
             await loop._do_work()
 
     @pytest.mark.asyncio
-    async def test_credit_exhausted_propagates_through_reconcile_closed_hitl(
+    async def test_credit_exhausted_propagates_through_reconcile_closed_escalations(
         self, tmp_path: Path
     ) -> None:
         from datetime import UTC, datetime
@@ -328,13 +328,13 @@ class TestRetrospectiveLoopCreditExhaustedReraise:
             )
         )
         # Seed the in-memory window so the early-return on empty doesn't fire.
-        loop._hitl_filed_at["recurring_feedback"] = datetime.now(UTC)
+        loop._insight_escalated_at["recurring_feedback"] = datetime.now(UTC)
 
         with pytest.raises(
             CreditExhaustedError,
             match="credits exhausted in list_closed_issues_by_label",
         ):
-            await loop._reconcile_closed_hitl_issues()
+            await loop._reconcile_closed_insight_escalations()
 
 
 # ---------------------------------------------------------------------------

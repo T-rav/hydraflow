@@ -17,7 +17,7 @@ The loop delegates to `RetrospectiveCollector` for:
 - Pattern detection across the recent merge history.
 - Review-insight proposal verification against current state.
 
-Events are published to the dashboard via `EventType`. The loop deduplicates HITL stale-insight filings within a 1-hour window (`_HITL_DEDUP_WINDOW`) to avoid issue spam when the GitHub search index lags a freshly-created issue.
+Events are published to the dashboard via `EventType`. The loop deduplicates stale-insight escalation filings within a 1-hour window (`_INSIGHT_DEDUP_WINDOW`) to avoid issue spam when the GitHub search index lags a freshly-created issue. Stale proposals are now routed to the factory as `[Review Insight] Persistent finding:` find-queue issues rather than HITL escalations (see #9227).
 
 Kill-switch: `enabled_cb("retrospective")` (ADR-0049). Default interval: `config.retrospective_interval`.
 

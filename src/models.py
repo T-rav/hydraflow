@@ -893,7 +893,7 @@ class PRInfo(BaseModel):
 class LabelDrift(BaseModel):
     """Cross-entity label drift between an issue and its PR.
 
-    See ADR-0056 for the kinds and reconciliation policy. The
+    See ADR-0088 for the kinds and reconciliation policy. The
     ``LabelDriftWatcherLoop`` emits one record per drifted (issue, PR)
     pair on each tick.
 
@@ -912,7 +912,7 @@ class LabelDrift(BaseModel):
     issue_label: str = Field(description="Current pipeline label on the issue")
     pr_label: str = Field(description="Current pipeline label on the PR")
     kind: Literal["pr_ahead_of_issue", "pr_at_pre_pr_stage"] = Field(
-        description="Drift category — see ADR-0056"
+        description="Drift category — see ADR-0088"
     )
     detected_at: datetime = Field(
         description="UTC timestamp when the drift was observed"
