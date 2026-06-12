@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/repo_wiki.py:RepoWikiStore"
 aliases: ["repo wiki store", "wiki store", "per-repo wiki"]
 related: []
-evidence: []
+evidence: ["01KRBX2N4QP7VW8FGH3J5YD0M3"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668780+00:00"
-updated_at: "2026-05-05T03:35:36.668781+00:00"
+updated_at: "2026-06-12T04:18:46.416686+00:00"
 ---
 
 ## Definition

@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `bb21b12` — feat(dependabot-merge): auto-heal bot PRs stuck on stale arch artifacts *(2026-06-12)*
 - `9ed1b39` — feat(auto-agent): rescue stuck pipeline PRs — diagnose-route + credit-transient (ADR-0084) (#9473) (#9473) *(2026-06-12)*
 - `44d1957` — Fixes #8693: "Recorder-side `gh issue close` support for cassette r... (#9446) (#9446) *(2026-06-12)*
 - `1a7071a` — fix(trust): min-sample guard + repaired semantics + trust-loop scoping for repair_ratio (#9458) (#9470) (#9470) *(2026-06-12)*
