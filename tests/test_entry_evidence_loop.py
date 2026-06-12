@@ -383,6 +383,9 @@ class TestEntryEvidenceLoopCreditPropagation:
         with pytest.raises(AuthenticationError):
             await loop._do_work()  # noqa: SLF001
 
+        pr_port_capturing.open_bot_pr.assert_not_awaited()
+        assert "ev-001" not in loop._dedup.get()  # noqa: SLF001
+
     @pytest.mark.asyncio
     async def test_soft_llm_failure_does_not_poison_dedup_cache(
         self, tmp_path: Path, pr_port_capturing
