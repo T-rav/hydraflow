@@ -522,11 +522,20 @@ class IssueStore:
         while q and len(result) < max_count:
             task = q.popleft()
             self._queue_members[stage].discard(task.id)
-            if task.id in self._active or (
-                stage != STAGE_FIND
-                and self._crate_manager is not None
-                and self._crate_manager.active_crate_number is not None
-                and not self._crate_manager.is_in_active_crate(task)
+            if (
+                task.id in self._active
+                # ``human-required`` issues have been escalated out of the
+                # pipeline; core phases must not re-pull them, or they re-fail
+                # and re-escalate forever. The label is cleared on a successful
+                # HITL correction (it is in ``all_pipeline_labels``), after which
+                # the issue re-enters the queue clean (ADR-0084, pillar C).
+                or "human-required" in task.tags
+                or (
+                    stage != STAGE_FIND
+                    and self._crate_manager is not None
+                    and self._crate_manager.active_crate_number is not None
+                    and not self._crate_manager.is_in_active_crate(task)
+                )
             ):
                 skipped.append(task)
             else:

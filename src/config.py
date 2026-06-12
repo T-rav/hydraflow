@@ -3019,6 +3019,11 @@ class HydraFlowConfig(BaseModel):
             self.verify_label,
         ):
             result.extend(labels)
+        # ``human-required`` is orthogonal to the stage machine, but listing it
+        # here ensures ``swap_pipeline_labels`` clears it on a successful HITL
+        # correction — so a corrected issue re-enters the pipeline clean instead
+        # of carrying a stale blocker forever (ADR-0084, pillar C / anti-cycle).
+        result.append("human-required")
         return result
 
     @property
