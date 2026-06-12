@@ -6,12 +6,20 @@ bounded_context: "shared-kernel"
 code_anchor: "src/base_background_loop.py:BaseBackgroundLoop"
 aliases: ["base background loop", "loop base class"]
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}]
+<<<<<<< HEAD
+evidence: ["01KQNYZRM4B7DX9MWDQFHF488H", "01KQP0XFBGMB32VFGNPV8GZ268", "01KQP0XFBGMB32VFGNPV8GZ26F", "01KQP0XFBGMB32VFGNPV8GZ26P"]
+=======
 evidence: ["01KQNYZRM4B7DX9MWDQFHF488H", "01KQP0R43781VJFJ9HZRWQCZPQ", "01KQP0XFBGMB32VFGNPV8GZ268", "01KQP0XFBGMB32VFGNPV8GZ26F", "01KQP0XFBGMB32VFGNPV8GZ26P"]
+>>>>>>> origin/staging
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668776+00:00"
+<<<<<<< HEAD
+updated_at: "2026-06-12T04:18:46.416686+00:00"
+=======
 updated_at: "2026-06-12T04:22:53.198214+00:00"
+>>>>>>> origin/staging
 ---
 
 ## Definition

@@ -6,12 +6,20 @@ bounded_context: "shared-kernel"
 code_anchor: "src/ports.py:AgentPort"
 aliases: ["agent port", "agent runner port"]
 related: [{"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}]
+<<<<<<< HEAD
+evidence: ["01KQNYZRM4B7DX9MWDQFHF488F"]
+=======
 evidence: []
+>>>>>>> origin/staging
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T00:00:00.000000+00:00"
+<<<<<<< HEAD
+updated_at: "2026-06-12T04:18:46.416686+00:00"
+=======
 updated_at: "2026-06-12T04:17:13.434460+00:00"
+>>>>>>> origin/staging
 ---
 
 ## Definition

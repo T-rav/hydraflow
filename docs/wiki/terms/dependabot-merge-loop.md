@@ -6,12 +6,20 @@ bounded_context: "caretaker"
 code_anchor: "src/dependabot_merge_loop.py:DependabotMergeLoop"
 aliases: ["dependabot merge loop", "bot pr merge loop", "auto-merge bot PRs loop"]
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K7"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
+<<<<<<< HEAD
+evidence: ["01KRBX2N4QP7VW8FGH3J5YD0M5"]
+=======
 evidence: []
+>>>>>>> origin/staging
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T20:00:00.000000+00:00"
+<<<<<<< HEAD
+updated_at: "2026-06-12T04:18:46.416686+00:00"
+=======
 updated_at: "2026-06-12T04:17:13.434460+00:00"
+>>>>>>> origin/staging
 ---
 
 ## Definition

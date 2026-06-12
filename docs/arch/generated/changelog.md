@@ -6,11 +6,12 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
-- `8b73f1c` — Merge remote-tracking branch 'origin/staging' into ul-edges/7ab6376c *(2026-06-12)*
+- `5570ec9` — Merge remote-tracking branch 'origin/staging' into ul-evidence/f65e78b1 *(2026-06-12)*
+- `a293ffc` — feat(ul): term-proposer batch — 1 drafts (#9424) (#9424) *(2026-06-12)*
 - `e201308` — feat(ul): entry-evidence — 2 new entry links across 2 terms (#9428) (#9428) *(2026-06-12)*
 - `d296730` — feat(ul): edge-proposer — 3 new edges across 2 terms (#9427) (#9427) *(2026-06-12)*
 - `39b48b2` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9425) (#9425) *(2026-06-12)*
-- `88702a9` — Merge remote-tracking branch 'origin/staging' into ul-edges/7ab6376c *(2026-06-12)*
+- `f634533` — Merge remote-tracking branch 'origin/staging' into ul-evidence/f65e78b1 *(2026-06-12)*
 - `9ed1b39` — feat(auto-agent): rescue stuck pipeline PRs — diagnose-route + credit-transient (ADR-0084) (#9473) (#9473) *(2026-06-12)*
 - `44d1957` — Fixes #8693: "Recorder-side `gh issue close` support for cassette r... (#9446) (#9446) *(2026-06-12)*
 - `1a7071a` — fix(trust): min-sample guard + repaired semantics + trust-loop scoping for repair_ratio (#9458) (#9470) (#9470) *(2026-06-12)*
@@ -22,7 +23,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `5ae5f3b` — Fixes #9100: entry_evidence_loop swallows CreditExhaustedError and ... (#9451) (#9451) *(2026-06-12)*
 - `d0f190f` — docs(adr): ADR-0084 — Auto-Agent as a universal root-cause HITL gate (Proposed) (#9435) (#9435) *(2026-06-12)*
 - `0c3c314` — fix(retrospective): route stale review-insights to the factory, not HITL (#9227) (#9431) (#9431) *(2026-06-11)*
-- `13fac5e` — feat(ul): edge-proposer — 107 new edges across 30 terms *(2026-06-11)*
+- `a13f2db` — feat(ul): entry-evidence — 20 new entry links across 11 terms *(2026-06-11)*
 - `3f90a67` — fix(adr-drift): symbol-qualify owned citations + pr_manager shared-infra (#9405) (#9405) *(2026-06-11)*
 - `bc00ebe` — fix(mockworld): re-export FakeRouteBackCounter so its marker is actually verified (#8809) (#9408) (#9408) *(2026-06-11)*
 - `9685284` — docs(wiki): correct EpicMonitorLoop entry — it writes, not read-only (#8764) (#9407) (#9407) *(2026-06-11)*
