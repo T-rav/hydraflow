@@ -1,0 +1,110 @@
+// Issue #9443 — Explicit claude-opus-4-6 / claude-opus-4-8 pricing entries
+// C4 model of the model-pricing resolution path and the change area.
+
+specification {
+  element system
+  element container
+  element component
+  element asset
+  element actor
+
+  relationship resolves
+  relationship reads
+  relationship refreshes
+}
+
+model {
+  factory = system 'HydraFlow Factory' {
+
+    pricingAsset = asset 'model_pricing.json' {
+      description '
+        src/assets/model_pricing.json
+        CHANGE AREA: add explicit
+        claude-opus-4-6 and claude-opus-4-8
+        entries ($5/$25/$6.25/$0.50).
+      '
+    }
+
+    pricingTable = component 'ModelPricingTable' {
+      description '
+        src/model_pricing.py
+        get_rate(model): exact-id -> alias -> FUZZY substring.
+        Today opus-4-8/4-6 hit the fuzzy "opus" fallback
+        (resolves to opus-4-7 price by accident).
+      '
+    }
+
+    loadPricing = component 'load_pricing()' {
+      description 'src/model_pricing.py factory fn'
+    }
+
+    refreshLoop = component 'PricingRefreshLoop' {
+      description '
+        src/pricing_refresh_loop.py
+        Daily caretaker; only ADDs upstream-published models
+        and UPDATES cost fields. Never deletes local-only
+        entries -> manual entries are safe.
+      '
+    }
+
+    // Cost-attribution consumers that call get_rate / estimate_cost
+    telemetry = component 'PromptTelemetry' {
+      description 'src/prompt_telemetry.py — parses modelUsage key (e.g. claude-opus-4-8[1m])'
+    }
+    runner = component 'BaseSubprocessRunner' {
+      description 'src/runners/base_subprocess_runner.py — _estimate_cost(self._config.model)'
+    }
+    costRollups = component 'cost_rollups / waterfall_builder' {
+      description 'src/dashboard_routes/_cost_rollups.py, _waterfall_builder.py'
+    }
+    prManager = component 'PRManager.issue cost alert' {
+      description 'src/pr_manager.py:1144'
+    }
+  }
+
+  litellm = system 'LiteLLM upstream JSON' {
+    description 'raw.githubusercontent.com/BerriAI/litellm — source for auto-refresh'
+  }
+
+  // Relationships
+  pricingTable .reads pricingAsset
+  loadPricing .resolves pricingTable
+
+  telemetry .resolves loadPricing 'estimate_cost(model)'
+  runner .resolves loadPricing 'estimate_cost(config.model)'
+  costRollups .resolves loadPricing 'estimate_cost(model)'
+  prManager .resolves loadPricing 'estimate_cost(model)'
+
+  refreshLoop .reads pricingAsset 'read local models'
+  refreshLoop .refreshes pricingAsset 'merge added/updated, never delete'
+  refreshLoop .reads litellm 'fetch upstream prices'
+}
+
+views {
+  view context {
+    title 'Model-pricing resolution — context'
+    include *
+  }
+
+  view changeArea {
+    title 'Change area — explicit opus entries vs fuzzy fallback'
+    include
+      pricingAsset,
+      pricingTable,
+      loadPricing,
+      telemetry,
+      runner,
+      costRollups,
+      prManager,
+      refreshLoop,
+      litellm
+  }
+
+  dynamic view resolutionFlow {
+    title 'get_rate("claude-opus-4-8[1m]") resolution order'
+    telemetry -> loadPricing 'estimate_cost("claude-opus-4-8[1m]", in, out)'
+    loadPricing -> pricingTable 'get_rate(...)'
+    pricingTable -> pricingTable '1. exact id? 2. exact alias? 3. fuzzy substring'
+    pricingTable -> pricingAsset 'after fix: exact alias "claude-opus-4-8[1m]" -> opus-4-8 entry ($5/$25)'
+  }
+}
