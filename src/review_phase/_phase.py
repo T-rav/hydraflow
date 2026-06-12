@@ -113,8 +113,10 @@ from repo_wiki import (
 from review_insights import (
     _PROPOSAL_STALE_DAYS,
     CATEGORY_DESCRIPTIONS,
+    PERSISTENT_FINDING_PREFIX,
     ReviewRecord,
     build_insight_issue_body,
+    build_persistent_finding_body,
     extract_categories,
     verify_proposals,
 )
@@ -138,13 +140,13 @@ from ._common import (
 
 logger = logging.getLogger("hydraflow.review_phase")
 
-# Mirrors ``retrospective_loop._HITL_DEDUP_WINDOW``. Two PR reviews
+# Mirrors ``retrospective_loop._INSIGHT_DEDUP_WINDOW``. Two PR reviews
 # completing back-to-back for the same stale category could otherwise
 # both call ``find_existing_issue`` before either write is indexed by
 # GitHub search, and both file. The window is intentionally identical
 # between sites so behavior is uniform whether the loop or the fallback
 # fires (#8988).
-_HITL_DEDUP_WINDOW = timedelta(hours=1)
+_INSIGHT_DEDUP_WINDOW = timedelta(hours=1)
 
 
 class ReviewPhase:
@@ -192,12 +194,12 @@ class ReviewPhase:
         self._insights: ReviewInsightStorePort = review_insights
         self._active_issues_cb = active_issues_cb
         self._active_issues: set[int] = set()
-        # In-memory window guard for the stale-HITL fallback branch
-        # (mirror of ``RetrospectiveLoop._hitl_filed_at``). Two PR
+        # In-memory window guard for the stale-insight fallback branch
+        # (mirror of ``RetrospectiveLoop._insight_escalated_at``). Two PR
         # reviews completing back-to-back for the same stale category
         # could otherwise both call ``find_existing_issue`` before
         # either write is indexed by GitHub search, and both file.
-        self._hitl_filed_at: dict[str, datetime] = {}
+        self._insight_escalated_at: dict[str, datetime] = {}
         self._active_issues_lock = asyncio.Lock()
         self._conflict_resolver = conflict_resolver
         self._post_merge = post_merge
@@ -3265,51 +3267,38 @@ class ReviewPhase:
 
                 stale = verify_proposals(self._insights, recent)
                 # Dedup mirror of RetrospectiveLoop._handle_verify_proposals
-                # (#8988). This fallback branch fires only when no
-                # retrospective_queue is wired, but it MUST avoid filing a
-                # duplicate `[HITL] Stale review insight: <category>` when
-                # one is already open — same anti-pattern as the loop site.
-                now_hitl = datetime.now(UTC)
+                # (#8988). This fallback fires only when no retrospective_queue
+                # is wired. Like the loop site it routes a stale proposal to the
+                # factory as an actionable `find_label` issue (#9227) — not a
+                # HITL dead-end — and skips (no duplicate, no comment spam) when
+                # one is already open.
+                now_escalated = datetime.now(UTC)
                 for category in stale:
                     desc = CATEGORY_DESCRIPTIONS.get(category, category)
-                    title = f"[HITL] Stale review insight: {desc}"
-                    hitl_labels = list(self._config.hitl_label)
+                    title = f"{PERSISTENT_FINDING_PREFIX}{desc}"
+                    find_labels = self._config.find_label[:1]
                     # Window guard — protects against back-to-back PR
                     # reviews racing the GitHub search index, same shape
                     # as ``RetrospectiveLoop._handle_verify_proposals``.
-                    last = self._hitl_filed_at.get(category)
-                    if last is not None and (now_hitl - last) < _HITL_DEDUP_WINDOW:
+                    last = self._insight_escalated_at.get(category)
+                    if (
+                        last is not None
+                        and (now_escalated - last) < _INSIGHT_DEDUP_WINDOW
+                    ):
                         continue
                     existing = await self._prs.find_existing_issue(title)
                     if existing:
-                        await self._prs.post_comment(
-                            existing,
-                            (
-                                f"Still stale — pattern frequency for "
-                                f"**{category}** ({desc}) has not decreased "
-                                f"after {_PROPOSAL_STALE_DAYS}+ days. "
-                                f"Recurring tick from `ReviewPhase` fallback "
-                                f"(retrospective queue not wired); the "
-                                f"underlying escalation remains open.\n\n"
-                                f"_Auto-comment by HydraFlow review insight "
-                                f"verification._"
-                            ),
-                        )
-                        self._hitl_filed_at[category] = now_hitl
+                        # Factory is already working the routed issue — skip.
+                        self._insight_escalated_at[category] = now_escalated
                         continue
-                    body = (
-                        f"## Stale Improvement Proposal\n\n"
-                        f"The improvement proposal for **{category}** ({desc}) "
-                        f"was filed over {_PROPOSAL_STALE_DAYS} days ago but the "
-                        f"pattern frequency has not decreased. Human intervention is "
-                        f"required to resolve this recurring feedback loop.\n\n"
-                        f"---\n*Auto-escalated by HydraFlow review insight verification.*"
+                    body = build_persistent_finding_body(
+                        category, desc, _PROPOSAL_STALE_DAYS
                     )
-                    self._hitl_filed_at[category] = now_hitl
+                    self._insight_escalated_at[category] = now_escalated
                     try:
-                        await self._transitioner.create_task(title, body, hitl_labels)
+                        await self._transitioner.create_task(title, body, find_labels)
                     except Exception:
-                        self._hitl_filed_at.pop(category, None)
+                        self._insight_escalated_at.pop(category, None)
                         raise
         except (RuntimeError, OSError):
             status = "error"

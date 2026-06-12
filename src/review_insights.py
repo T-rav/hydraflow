@@ -608,3 +608,42 @@ def verify_proposals(
         logger.warning("Error during proposal verification", exc_info=True)
 
     return stale_categories
+
+
+# ---------------------------------------------------------------------------
+# Stale-proposal escalation → factory routing (#9227)
+# ---------------------------------------------------------------------------
+#
+# When the factory's first pass at a recurring review finding hasn't reduced
+# its frequency after ``_PROPOSAL_STALE_DAYS``, the stale proposal is routed
+# back to the factory as an actionable ``find_label`` issue — the pipeline
+# takes another, better-informed pass — instead of a ``hydraflow-hitl``
+# dead-end that only nags a human. The shared title prefix (the dedup key) and
+# body live here so the two writers (``RetrospectiveLoop`` and the
+# ``ReviewPhase`` fallback) can never drift apart.
+PERSISTENT_FINDING_PREFIX = "[Review Insight] Persistent finding: "
+
+
+def build_persistent_finding_body(category: str, desc: str, stale_days: int) -> str:
+    """Body for a stale review-insight routed to the factory find-queue.
+
+    Frames the recurring finding as an actionable task the pipeline can plan
+    and implement, with an acceptance criterion (>50% frequency drop) that
+    ``verify_proposals`` auto-verifies — which stops the escalation.
+    """
+    return (
+        f"## Persistent review finding — factory action requested\n\n"
+        f"Reviews keep flagging **{category}** ({desc}). The improvement "
+        f"proposal was filed over {stale_days} days ago, but the pattern "
+        f"frequency has not decreased — the factory's first pass did not "
+        f"resolve the recurring root cause.\n\n"
+        f"**Task:** investigate the root cause and implement a *structural* "
+        f"fix that reduces this class of review finding — strengthen the "
+        f"relevant gate, check, or agent prompt so it is caught or prevented "
+        f"earlier.\n\n"
+        f"**Acceptance:** the `{category}` review-finding frequency drops by "
+        f">50%; `RetrospectiveLoop` auto-marks the proposal resolved once it "
+        f"does, which stops this escalation.\n\n"
+        f"---\n*Auto-filed by HydraFlow review-insight verification — routed "
+        f"to the factory (previously a HITL escalation, #9227).*"
+    )
