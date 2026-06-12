@@ -127,6 +127,7 @@ class TestPRPortMethods:
         "delete_branch",
         "get_pr_diff",
         "wait_for_ci",
+        "refresh_pr_branch_with_arch_regen",
         "add_labels",
         "remove_label",
         # PR label methods
@@ -259,6 +260,7 @@ class TestPRPortSignatures:
         "delete_branch",
         "get_pr_diff",
         "wait_for_ci",
+        "refresh_pr_branch_with_arch_regen",
         "add_labels",
         "remove_label",
         # PR label methods

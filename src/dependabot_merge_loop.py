@@ -25,6 +25,39 @@ logger = logging.getLogger("hydraflow.dependabot_merge_loop")
 # (``agent/issue-N``), so matching on it is safe.
 _AUTO_AGENT_BRANCH_PREFIX = "agent/auto-agent-"
 
+# Markers in ``wait_for_ci``'s ``summary`` that identify an arch-staleness CI
+# failure. ``wait_for_ci`` returns ``"Failed checks: <name>, ..."`` where each
+# ``<name>`` is the GitHub check (job) name (see ``PRManager._evaluate_ci_checks``
+# / ``get_pr_checks``). The two jobs that run the drift check + architecture
+# tests (which include ``test_curated_generated_is_in_sync_with_source``) are
+# ``arch-check`` (.github/workflows/arch-regen.yml) and ``Architecture Check``
+# (.github/workflows/ci.yml job ``arch``). We also tolerate the deeper marker
+# strings in case a caller threads richer failure context into ``summary``.
+# Matching is lenient by design: the per-PR refresh cap (config
+# ``dependabot_arch_autoheal_max_attempts``) is the real safety net — a false
+# positive merely costs at most that many no-op regen pushes before the normal
+# ``failure_strategy`` applies.
+_ARCH_STALENESS_MARKERS = (
+    "arch-check",
+    "architecture check",
+    "test_curated_generated_is_in_sync_with_source",
+    "is stale relative to source",
+    "make arch-regen",
+)
+
+
+def _is_arch_staleness_failure(summary: str) -> bool:
+    """True when a CI-failure ``summary`` looks like stale-arch-artifact drift.
+
+    Pure + case-insensitive so it is unit-testable in isolation. Returns False
+    for an empty summary or a non-arch failure (e.g. ``"Failed checks: lint,
+    test"``).
+    """
+    if not summary:
+        return False
+    lowered = summary.lower()
+    return any(marker in lowered for marker in _ARCH_STALENESS_MARKERS)
+
 
 class DependabotMergeLoop(BaseBackgroundLoop):
     """Polls open PRs and auto-merges configured bot PRs + Auto-Agent PRs after CI passes."""
@@ -108,6 +141,42 @@ class DependabotMergeLoop(BaseBackgroundLoop):
                     "Bot PR #%d CI still pending — will retry next cycle", pr.pr
                 )
                 continue
+
+            # CI truly failed. Before applying the failure strategy, try to
+            # self-heal the common stuck-pile case: a bot PR red purely on
+            # stale docs/arch/generated/ artifacts (another bot PR advanced the
+            # base, so this PR's committed generated files went stale even on
+            # files it never touched). Merge the base + regenerate + push so CI
+            # re-runs; the next tick re-evaluates. Bounded by
+            # ``dependabot_arch_autoheal_max_attempts`` (0 = disabled): if regen
+            # does not make it green, the cap is hit and the normal
+            # ``failure_strategy`` applies. Detection can be lenient — the cap
+            # is the safety net.
+            heal_cap = self._config.dependabot_arch_autoheal_max_attempts
+            if (
+                heal_cap > 0
+                and _is_arch_staleness_failure(summary)
+                and self._state.get_dependabot_arch_refresh_attempts(pr.pr) < heal_cap
+            ):
+                refreshed = await self._prs.refresh_pr_branch_with_arch_regen(
+                    pr.pr, pr.branch
+                )
+                if refreshed:
+                    self._state.bump_dependabot_arch_refresh_attempts(pr.pr)
+                    skipped += 1
+                    logger.info(
+                        "Bot PR #%d CI failed on stale arch artifacts — "
+                        "merged base + regenerated; CI will re-run (attempt %d/%d)",
+                        pr.pr,
+                        self._state.get_dependabot_arch_refresh_attempts(pr.pr),
+                        heal_cap,
+                    )
+                    continue
+                logger.info(
+                    "Bot PR #%d arch self-heal did not push — applying "
+                    "failure strategy",
+                    pr.pr,
+                )
 
             # CI truly failed — apply failure strategy
             strategy = settings.failure_strategy

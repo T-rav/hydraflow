@@ -160,6 +160,27 @@ def test_parse_agent_response_needs_human() -> None:
     assert out["pr_url"] is None
 
 
+def test_parse_agent_response_parses_confidence_and_blocked_reason() -> None:
+    out = parse_agent_response(
+        "<status>retry</status><confidence>Medium</confidence>"
+        "<blocked_reason>Insufficient_Context</blocked_reason>"
+        "<diagnosis>try again</diagnosis>"
+    )
+    assert out["status"] == "retry"
+    # Normalised to lower-case for the convergence comparison.
+    assert out["confidence"] == "medium"
+    assert out["blocked_reason"] == "insufficient_context"
+
+
+def test_parse_agent_response_missing_status_is_none_not_needs_human() -> None:
+    # A garbled response leaves status None so the caller can retry rather than
+    # defaulting straight to a human escalation (ADR-0084 pillar B).
+    out = parse_agent_response("no tags at all")
+    assert out["status"] is None
+    assert out["confidence"] is None
+    assert out["blocked_reason"] is None
+
+
 def test_prompt_template_with_unknown_field_raises_keyerror(
     tmp_path, monkeypatch
 ) -> None:

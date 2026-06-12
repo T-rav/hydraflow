@@ -1,7 +1,7 @@
 """LabelDriftWatcherLoop — periodic detect-and-reconcile of cross-entity
 issue/PR label drift.
 
-Per ADR-0056. The loop scans for drift via :meth:`PRPort.find_label_drift`
+Per ADR-0088. The loop scans for drift via :meth:`PRPort.find_label_drift`
 and reconciles each pair by per-entity ``swap_pipeline_labels`` calls
 (mirroring the Phase D split-call pattern: issue gets one label, PR gets
 ``hydraflow-review``).
@@ -100,7 +100,7 @@ class LabelDriftWatcherLoop(BaseBackgroundLoop):
             (
                 f"**LabelDriftWatcher** reconciled label drift "
                 f"(kind=`{d.kind}`). {moved_clause}\n\n"
-                "---\n*Automated by HydraFlow Label Drift Watcher (ADR-0056)*"
+                "---\n*Automated by HydraFlow Label Drift Watcher (ADR-0088)*"
             ),
         )
         logger.info(

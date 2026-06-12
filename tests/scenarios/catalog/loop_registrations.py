@@ -41,6 +41,21 @@ def _build_dependabot_merge(ports: dict[str, Any], config: Any, deps: Any) -> An
         state = MagicMock()
         state.get_dependabot_merge_settings.return_value = DependabotMergeSettings()
         state.get_dependabot_merge_processed.return_value = set()
+        # Arch-staleness self-heal counter backed by a real dict so the loop's
+        # ``get < cap`` / ``bump`` logic behaves like the real StateTracker
+        # across ticks. A bare MagicMock would return a truthy mock and break
+        # the cap comparison (fake-fidelity rule).
+        _arch_attempts: dict[int, int] = {}
+
+        def _get_arch_attempts(pr_number: int) -> int:
+            return _arch_attempts.get(pr_number, 0)
+
+        def _bump_arch_attempts(pr_number: int) -> int:
+            _arch_attempts[pr_number] = _arch_attempts.get(pr_number, 0) + 1
+            return _arch_attempts[pr_number]
+
+        state.get_dependabot_arch_refresh_attempts.side_effect = _get_arch_attempts
+        state.bump_dependabot_arch_refresh_attempts.side_effect = _bump_arch_attempts
         ports["dependabot_state"] = state
     return DependabotMergeLoop(
         config=config,
@@ -743,7 +758,7 @@ def _build_gate_activator(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 
 
 def _build_memory_backlog(ports: dict[str, Any], config: Any, deps: Any) -> Any:
-    """Build MemoryBacklogLoop for scenarios (ADR-0057).
+    """Build MemoryBacklogLoop for scenarios (ADR-0089).
 
     Files hydraflow-find issues for pending entries in
     ``docs/wiki/memory-feedback/``. ``state`` and ``dedup`` default to
@@ -1219,7 +1234,7 @@ def _build_entry_evidence(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 
 
 def _build_label_drift_watcher(ports: dict[str, Any], config: Any, deps: Any) -> Any:
-    """Build LabelDriftWatcherLoop for scenarios (ADR-0056).
+    """Build LabelDriftWatcherLoop for scenarios (ADR-0088).
 
     Minimal builder: the loop takes only ``pr_manager``; no state or dedup.
     The ``pr_manager`` port falls back to ``ports['github']`` so the standard
@@ -1460,7 +1475,7 @@ _BUILDERS: dict[str, Any] = {
     "entry_evidence": _build_entry_evidence,
     "term_proposer": _build_term_proposer,
     "term_pruner": _build_term_pruner,
-    # label drift (ADR-0056)
+    # label drift (ADR-0088)
     "label_drift_watcher": _build_label_drift_watcher,
     # staging promotion (ADR-0042)
     "staging_promotion": _build_staging_promotion,

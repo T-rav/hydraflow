@@ -130,6 +130,56 @@ class TestPRUnstickerInternals:
         assert "Falling back to 'general' language classification" in caplog.text
 
 
+class TestEffectiveCauseLiveMergeState:
+    """_effective_cause overrides a stale stored cause with the live merge state
+    so a PR that went DIRTY *after* escalation gets rebased, not a no-op fix."""
+
+    @pytest.mark.asyncio
+    async def test_live_conflict_overrides_non_conflict_cause(
+        self, tmp_path: Path
+    ) -> None:
+        h = _make_unsticker(tmp_path)
+        h.prs.get_pr_mergeable = AsyncMock(return_value=False)  # conflicting now
+        out = await h.unsticker._effective_cause(FailureCause.GENERIC, pr_number=99)
+        assert out == FailureCause.MERGE_CONFLICT
+        h.prs.get_pr_mergeable.assert_awaited_once_with(99)
+
+    @pytest.mark.asyncio
+    async def test_mergeable_pr_keeps_stored_cause(self, tmp_path: Path) -> None:
+        h = _make_unsticker(tmp_path)
+        h.prs.get_pr_mergeable = AsyncMock(return_value=True)
+        out = await h.unsticker._effective_cause(FailureCause.CI_FAILURE, pr_number=99)
+        assert out == FailureCause.CI_FAILURE
+
+    @pytest.mark.asyncio
+    async def test_unknown_mergeable_keeps_stored_cause(self, tmp_path: Path) -> None:
+        # None = unknown; don't override on uncertainty.
+        h = _make_unsticker(tmp_path)
+        h.prs.get_pr_mergeable = AsyncMock(return_value=None)
+        out = await h.unsticker._effective_cause(FailureCause.GENERIC, pr_number=99)
+        assert out == FailureCause.GENERIC
+
+    @pytest.mark.asyncio
+    async def test_already_merge_conflict_skips_live_check(
+        self, tmp_path: Path
+    ) -> None:
+        h = _make_unsticker(tmp_path)
+        h.prs.get_pr_mergeable = AsyncMock(return_value=True)
+        out = await h.unsticker._effective_cause(
+            FailureCause.MERGE_CONFLICT, pr_number=99
+        )
+        assert out == FailureCause.MERGE_CONFLICT
+        h.prs.get_pr_mergeable.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_pr_number_skips_live_check(self, tmp_path: Path) -> None:
+        h = _make_unsticker(tmp_path)
+        h.prs.get_pr_mergeable = AsyncMock(return_value=False)
+        out = await h.unsticker._effective_cause(FailureCause.GENERIC, pr_number=None)
+        assert out == FailureCause.GENERIC
+        h.prs.get_pr_mergeable.assert_not_awaited()
+
+
 class TestCauseClassification:
     """Test _classify_cause() with various cause strings."""
 

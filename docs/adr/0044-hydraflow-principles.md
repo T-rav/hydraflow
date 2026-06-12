@@ -269,7 +269,7 @@ audit output that P6 is optional for the repo type and skip the failures.
 
 | check_id | type | source | what | remediation |
 |---|---|---|---|---|
-| P6.1 | STRUCTURAL | ADR-0001 | `src/orchestrator.py` exists with concurrent loop structure | Only applicable to orchestration-shaped projects; mark N/A otherwise |
+| P6.1 | STRUCTURAL | ADR-0001 | `src/orchestrator.py:HydraFlowOrchestrator` exists with concurrent loop structure | Only applicable to orchestration-shaped projects; mark N/A otherwise |
 | P6.2 | STRUCTURAL | ADR-0002 | Label names are centralised in config (not scattered strings) | Collect labels into a single config module or dataclass |
 | P6.3 | STRUCTURAL | ADR-0029 | `BaseBackgroundLoop` base class exists | Port from HydraFlow when the first long-running job appears |
 | P6.4 | BEHAVIORAL | docs/wiki/architecture.md | Loop-wiring completeness test covers all five checkpoints (service registry, orchestrator dict, UI constants, dashboard-route bounds, config interval + env override) | Port HydraFlow's `test_loop_wiring_completeness.py`; half-wired loops run but vanish from the dashboard |

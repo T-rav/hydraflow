@@ -1857,7 +1857,7 @@ def create_router(
 
     _register_wiki(router, ctx)
 
-    # --- Atlas routes (ADR-0059) ---
+    # --- Atlas routes (ADR-0090) ---
     from dashboard_routes._atlas_routes import register as _register_atlas
 
     _register_atlas(router, ctx)

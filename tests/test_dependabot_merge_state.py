@@ -63,3 +63,43 @@ def test_state_tracker_dependabot_merge_processed(tmp_path):
     state.add_dependabot_merge_processed(42)
     state.add_dependabot_merge_processed(101)
     assert state.get_dependabot_merge_processed() == {42, 101}
+
+
+def test_arch_refresh_attempts_bump_get_clear(tmp_path):
+    config = HydraFlowConfig(repo_root=str(tmp_path))
+    state = StateTracker(config.state_file)
+
+    assert state.get_dependabot_arch_refresh_attempts(9422) == 0
+    assert state.bump_dependabot_arch_refresh_attempts(9422) == 1
+    assert state.bump_dependabot_arch_refresh_attempts(9422) == 2
+    assert state.get_dependabot_arch_refresh_attempts(9422) == 2
+    # An unrelated PR is independent.
+    assert state.get_dependabot_arch_refresh_attempts(9423) == 0
+
+    state.clear_dependabot_arch_refresh_attempts(9422)
+    assert state.get_dependabot_arch_refresh_attempts(9422) == 0
+    # Clearing an absent key is a no-op.
+    state.clear_dependabot_arch_refresh_attempts(9999)
+
+
+def test_arch_refresh_counter_cleared_when_pr_processed(tmp_path):
+    config = HydraFlowConfig(repo_root=str(tmp_path))
+    state = StateTracker(config.state_file)
+
+    state.bump_dependabot_arch_refresh_attempts(9422)
+    assert state.get_dependabot_arch_refresh_attempts(9422) == 1
+
+    # Merging/closing/escalating the PR clears its self-heal counter so a future
+    # re-stuck PR is not permanently capped.
+    state.add_dependabot_merge_processed(9422)
+    assert state.get_dependabot_arch_refresh_attempts(9422) == 0
+
+
+def test_arch_refresh_attempts_persist_across_reload(tmp_path):
+    config = HydraFlowConfig(repo_root=str(tmp_path))
+    state = StateTracker(config.state_file)
+    state.bump_dependabot_arch_refresh_attempts(9422)
+    state.bump_dependabot_arch_refresh_attempts(9422)
+
+    reloaded = StateTracker(config.state_file)
+    assert reloaded.get_dependabot_arch_refresh_attempts(9422) == 2

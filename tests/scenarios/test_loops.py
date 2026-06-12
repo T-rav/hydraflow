@@ -387,3 +387,80 @@ class TestL7bAutoAgentPrMerges:
 
         assert stats["dependabot_merge"]["merged"] == 0
         assert world.github.pr(701).merged is False
+
+
+# ---------------------------------------------------------------------------
+# L7c: Dependabot Merge self-heals a bot PR stuck on stale arch artifacts
+# ---------------------------------------------------------------------------
+
+
+class TestL7cDependabotArchSelfHeal:
+    """L7c: A UL bot PR red purely on stale docs/arch/generated/ artifacts is
+    self-healed (merge base + arch-regen + push) instead of skipped, then merges
+    once CI re-runs green. Models the #9422-#9428 stuck-pile."""
+
+    async def test_stale_arch_bot_pr_refreshed_then_merged(self, tmp_path):
+        world = MockWorld(tmp_path)
+
+        from mockworld.fakes.fake_github import FakePR
+        from models import PRListItem
+
+        bot_pr = PRListItem(
+            pr=9422,
+            title="UL: add edge candidate",
+            author="hydraflow-ul-bot",
+            branch="ul-edge-9422",
+        )
+        world.github._prs[9422] = FakePR(
+            number=9422, issue_number=0, branch="ul-edge-9422"
+        )
+        # First CI tick is red purely on the arch-check job (stale generated
+        # artifacts). The fake's refresh enqueues a green follow-up.
+        world.github.script_ci(9422, [(False, "Failed checks: arch-check")])
+        world.github.script_arch_refresh(9422, succeeds=True)
+
+        await world.run_with_loops(["dependabot_merge"], cycles=1)
+        world._dependabot_cache.get_open_prs.return_value = [bot_pr]
+        world._dependabot_cache.get_all_open_prs.return_value = [bot_pr]
+
+        # Tick 1: red-on-stale-arch → refresh attempted, PR left open (skipped).
+        stats1 = await world.run_with_loops(["dependabot_merge"], cycles=1)
+        assert stats1["dependabot_merge"]["skipped"] == 1
+        assert stats1["dependabot_merge"]["merged"] == 0
+        assert world.github.arch_refresh_call_count(9422) == 1
+        assert world.github.pr(9422).merged is False
+
+        # Tick 2: CI re-ran green (enqueued by the refresh) → approve + merge.
+        stats2 = await world.run_with_loops(["dependabot_merge"], cycles=1)
+        assert stats2["dependabot_merge"]["merged"] == 1
+        assert world.github.pr(9422).merged is True
+        # No further refresh needed.
+        assert world.github.arch_refresh_call_count(9422) == 1
+
+    async def test_real_failure_not_arch_falls_through_to_skip(self, tmp_path):
+        """A non-arch CI failure must NOT trigger the arch self-heal."""
+        world = MockWorld(tmp_path)
+
+        from mockworld.fakes.fake_github import FakePR
+        from models import PRListItem
+
+        bot_pr = PRListItem(
+            pr=9428,
+            title="UL: add edge candidate",
+            author="hydraflow-ul-bot",
+            branch="ul-edge-9428",
+        )
+        world.github._prs[9428] = FakePR(
+            number=9428, issue_number=0, branch="ul-edge-9428"
+        )
+        world.github.script_ci(9428, [(False, "Failed checks: lint, test")])
+
+        await world.run_with_loops(["dependabot_merge"], cycles=1)
+        world._dependabot_cache.get_open_prs.return_value = [bot_pr]
+        world._dependabot_cache.get_all_open_prs.return_value = [bot_pr]
+
+        stats = await world.run_with_loops(["dependabot_merge"], cycles=1)
+
+        assert stats["dependabot_merge"]["skipped"] == 1
+        assert world.github.arch_refresh_call_count(9428) == 0
+        assert world.github.pr(9428).merged is False
