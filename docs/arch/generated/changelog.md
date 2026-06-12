@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `9256e43` — Fixes #9100: entry_evidence_loop swallows CreditExhaustedError and poisons the zero-match dedup cache *(2026-06-12)*
 - `f38b4e9` — Fixes #9100: entry_evidence_loop swallows CreditExhaustedError and poisons the zero-match dedup cache *(2026-06-12)*
 - `43c7357` — Fixes #9100: entry_evidence_loop swallows CreditExhaustedError and poisons the zero-match dedup cache *(2026-06-12)*
 - `d0f190f` — docs(adr): ADR-0084 — Auto-Agent as a universal root-cause HITL gate (Proposed) (#9435) (#9435) *(2026-06-12)*
