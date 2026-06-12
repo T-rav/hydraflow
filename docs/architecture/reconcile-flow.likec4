@@ -1,0 +1,37 @@
+// Issue #9437 — Dynamic view: a reconcile tick with the bot-vs-human guard.
+
+specification {
+  element actor
+  element loop
+  element helper
+  element port
+  element store
+}
+
+model {
+  tick = actor 'reconcile tick'
+
+  loopX = loop 'CaretakerLoop._reconcile_closed_escalations'
+  fetch = port 'closed-escalation source (gh / PRPort)'
+  guard = helper 'was_auto_resolved(label_names(issue))'
+  dedup = store 'dedup tracker + attempt counters'
+
+  // Happy path: human close → re-arm
+  tick -> loopX 'tick (bounded by loop interval)'
+  loopX -> fetch 'list closed escalations by label (now incl. labels)'
+  fetch -> loopX 'closed issues [{title, labels}]'
+  loopX -> guard 'per closed issue: marked?'
+  guard -> loopX 'human close (no marker) → re-arm'
+  loopX -> dedup 'discard dedup key + clear attempts (RE-FILE allowed)'
+
+  // Defensive path: bot/programmatic close → skip
+  guard -> loopX 'bot close (HITL_AUTO_RESOLVED_LABEL) → skip'
+  loopX -> dedup 'leave dedup key intact (NO duplicate re-file)'
+}
+
+views {
+  view reconcileFlow {
+    title 'Reconcile tick — re-arm only on human close'
+    include *
+  }
+}

@@ -1,106 +1,108 @@
-// Component view: makefile_scaffold module after refactor of merge_makefile()
-// Issue #7644 — Code Quality: Break down merge_makefile() (146 lines, 24 branches)
+// Issue #9437 — Generalize bot-vs-human close detection across caretaker reconcile loops
+// C4 Component view: the shared close-marker guard and its adopters.
 
 specification {
-  element module {
-    style {
-      shape: rectangle
-    }
-  }
-  element function {
-    style {
-      shape: rectangle
-    }
-  }
-  element private_function {
-    style {
-      shape: rectangle
-      color: gray
-    }
-  }
+  element module
+  element loop
+  element port
+  element adapter
+  element fake
   element constant
-  element caller {
-    style {
-      shape: person
-    }
-  }
+
+  tag new
+  tag modified
+  tag unchanged
 }
 
 model {
-  // Public surface — three names imported across the codebase. Do not rename.
-  parse_makefile = function 'parse_makefile' {
-    description: 'text -> dict[name, recipe]; only loop over lines, no I/O'
-  }
-  generate_makefile = function 'generate_makefile' {
-    description: 'language -> full Makefile string'
-  }
-  merge_makefile = function 'merge_makefile' {
-    description: 'After refactor: ~34 lines, orchestrator only'
+
+  shared = module 'escalation_close_markers' {
+    #new
+    description '
+      NEW shared helper (src/escalation_close_markers.py).
+      HITL_AUTO_RESOLVED_LABEL + was_auto_resolved() guard +
+      label_names() normalizer + close_auto_resolved() write helper.
+    '
+
+    marker = constant 'HITL_AUTO_RESOLVED_LABEL' {
+      #new
+      description '"hitl-auto-resolved" — marker label applied on programmatic close'
+    }
+    guard = constant 'was_auto_resolved(labels)' {
+      #new
+      description 'predicate: skip dedup re-arm when marker present'
+    }
+    closer = constant 'close_auto_resolved(pr, n)' {
+      #new
+      description 'add marker label then close (canonical programmatic close)'
+    }
   }
 
-  // New private helpers (module-level, prefix _) — extracted from merge_makefile.
-  diff_targets = private_function '_diff_targets' {
-    description: '(existing_targets: dict, all_template: dict) -> (targets_to_add, warnings)'
-  }
-  check_prereq_deps = private_function '_check_prereq_deps' {
-    description: 'Check prerequisite deps for smoke/quality-lite/quality; called from merge_makefile'
-  }
-  append_missing = private_function '_append_missing_targets' {
-    description: 'Two-pass: recipe-bearing first, prerequisite-only last'
-  }
-  update_phony = private_function '_update_phony' {
-    description: 'Rewrite or prepend .PHONY preserving include-defined names'
-  }
-  ensure_default_goal = private_function '_ensure_default_goal' {
-    description: 'Prepend .DEFAULT_GOAL if absent'
-  }
-  normalize_recipe = private_function '_normalize_recipe' {
-    description: 'Promoted from closure; line-by-line strip, NOT whole-string strip'
-  }
-  targets_for_language = private_function '_targets_for_language' {
-    description: 'Existing; unchanged. Returns base templates + coverage-check.'
+  // --- Reconcile loops that adopt the read-side guard ---
+  directGhLoops = loop 'direct-gh reconcile loops (9)' {
+    #modified
+    description '
+      adr_touchpoint, fake_coverage, flake_tracker, memory_backlog,
+      rc_budget, skill_prompt_eval, trust_fleet_sanity, wiki_rot,
+      corpus_learning. Shell out to `gh issue list --json title` →
+      add `labels`; skip re-arm on marker.
+    '
   }
 
-  // Constants (module-level recipe templates and quality lines)
-  templates = constant 'recipe templates' {
-    description: '_PYTHON_TARGETS, _JS_TARGETS, ..., _COVERAGE_CHECK_RECIPE, _HELP_RECIPE'
-  }
-  quality_lines = constant 'quality / smoke / default goal lines' {
-    description: '_QUALITY_LITE_LINE, _SMOKE_LINE, _QUALITY_LINE, _DEFAULT_GOAL_LINE'
+  principles = loop 'principles_audit_loop' {
+    #modified
+    description 'Reconciles via PRPort.list_closed_issues_by_label; reads new labels field'
   }
 
-  // Callers
-  contract = caller 'makefile_contract.validate_and_repair' {
-    description: 'Lazy import (noqa: PLC0415); only production caller'
-  }
-  tests = caller 'tests/test_makefile_scaffold.py' {
-    description: 'TestParseMakefile, TestGenerateMakefile, TestMergeMakefile'
+  triageRetry = loop 'triage_retry_loop' {
+    #modified
+    description '_reconcile_closed_parked uses per-issue get_issue_state → add get_issue_labels guard (P6)'
   }
 
-  // Public entry points
-  contract -> merge_makefile 'merge_makefile(content, language)'
-  contract -> generate_makefile 'generate_makefile(language)'
-  tests -> parse_makefile
-  tests -> generate_makefile
-  tests -> merge_makefile
+  retro = loop 'retrospective_loop (#8996)' {
+    #unchanged
+    description 'First adopter / template — out of scope here, hardened separately'
+  }
 
-  // Internal composition (NEW after refactor)
-  merge_makefile -> targets_for_language 'language -> template_targets; early-return if empty'
-  merge_makefile -> parse_makefile 'existing_content -> existing_targets'
-  merge_makefile -> diff_targets 'compute targets_to_add + warnings'
-  merge_makefile -> check_prereq_deps 'smoke / quality-lite / quality prereq warnings'
-  merge_makefile -> append_missing 'append recipe + prerequisite-only'
-  merge_makefile -> update_phony 'rewrite or prepend .PHONY'
-  merge_makefile -> ensure_default_goal 'prepend .DEFAULT_GOAL if absent'
+  // --- Ports / adapters / fakes ---
+  prPort = port 'PRPort' {
+    #modified
+    description 'add_labels, close_issue, post_comment (existing) + list_closed_issues_by_label now returns labels + NEW get_issue_labels'
+  }
 
-  diff_targets -> normalize_recipe 'compare recipe equality'
+  prManager = adapter 'PRManager' {
+    #modified
+    description 'list_closed_issues_by_label: --json adds labels; new get_issue_labels'
+  }
 
-  generate_makefile -> targets_for_language
+  shapes = module 'contracts.shapes / models' {
+    #modified
+    description 'GhIssueListItem gains labels:list[GhLabel]; GitHubIssueSummary gains labels:NotRequired[list[str]]'
+  }
+
+  fakeGh = fake 'FakeGitHub (MockWorld)' {
+    #modified
+    description 'list_closed_issues_by_label returns labels; new get_issue_labels'
+  }
+
+  // --- relationships ---
+  directGhLoops -> shared.guard 'was_auto_resolved(label_names(issue))'
+  principles -> shared.guard 'was_auto_resolved(label_names(issue))'
+  triageRetry -> shared.guard 'was_auto_resolved(...)'
+
+  principles -> prPort 'list_closed_issues_by_label'
+  triageRetry -> prPort 'get_issue_state + get_issue_labels'
+  retro -> shared.closer 'programmatic HITL close (#8996)'
+
+  shared.closer -> prPort 'add_labels + close_issue'
+  prPort -> prManager 'protocol'
+  prManager -> shapes 'parses gh --json into typed shapes'
+  prPort -> fakeGh 'MockWorld test double'
 }
 
 views {
-  view component_view of merge_makefile {
-    title 'merge_makefile decomposition (Issue #7644)'
+  view component {
+    title 'Issue #9437 — bot-vs-human close guard adoption'
     include *
   }
 }
