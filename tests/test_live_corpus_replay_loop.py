@@ -122,6 +122,7 @@ async def test_empty_corpus_returns_ok_with_zero_compared(tmp_path: Path) -> Non
         "status": "ok",
         "compared": 0,
         "skipped_no_dispatcher": 0,
+        "skipped_volatile": 0,
         "drifted": 0,
         "errors": 0,
         "filed_issue": None,
@@ -763,3 +764,84 @@ async def test_clean_tick_resets_escalation_dedup(tmp_path: Path) -> None:
     assert len(escalation_calls) == 2, (
         "clean tick should clear the escalation so recurrence can re-escalate"
     )
+
+
+# ---------------------------------------------------------------------------
+# skipped_volatile counter (issue #9354): the result dict must expose how many
+# samples were suppressed due to VOLATILE/MUTATING shape (no schema failure).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_volatile_sample_increments_skipped_volatile(tmp_path: Path) -> None:
+    """A VOLATILE sample (gh issue list) that returns a raw-value difference
+    from the dispatcher must appear in skipped_volatile, not drifted."""
+    loop, corpus, pr, _state = _build_loop(tmp_path)
+    corpus.record(
+        adapter="github",
+        command="gh",
+        args=["issue", "list", "--json", "number,title"],
+        stdout='[{"number":1,"title":"old"}]\n',
+        stderr="",
+        exit_code=0,
+    )
+
+    async def live_changed(_sample):  # noqa: ANN001
+        return [{"number": 1, "title": "new"}, {"number": 2, "title": "extra"}]
+
+    loop.register("github", "gh", live_changed)
+    result = await loop._do_work()
+
+    assert result["skipped_volatile"] == 1
+    assert result["drifted"] == 0
+    pr.create_issue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mutating_sample_increments_skipped_volatile(tmp_path: Path) -> None:
+    """MUTATING samples persisted from before the record-time guard was wired
+    must also be suppressed at replay time and counted in skipped_volatile."""
+    loop, corpus, pr, _state = _build_loop(tmp_path)
+    corpus.record(
+        adapter="github",
+        command="gh",
+        args=["issue", "create", "--title", "x"],
+        stdout="https://github.com/x/y/issues/1\n",
+        stderr="",
+        exit_code=0,
+    )
+
+    async def dispatcher(_sample):  # noqa: ANN001
+        return {"url": "https://github.com/x/y/issues/99"}
+
+    loop.register("github", "gh", dispatcher)
+    result = await loop._do_work()
+
+    assert result["skipped_volatile"] == 1
+    assert result["drifted"] == 0
+    pr.create_issue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_skipped_volatile_zero_for_deterministic_shape(tmp_path: Path) -> None:
+    """DETERMINISTIC shapes (gh pr view) must not appear in skipped_volatile."""
+    loop, corpus, pr, _state = _build_loop(tmp_path)
+    payload = {"state": "OPEN", "number": 1}
+    corpus.record(
+        adapter="github",
+        command="gh",
+        args=["pr", "view", "1", "--json", "state,number"],
+        stdout='{"state":"OPEN","number":1}\n',
+        stderr="",
+        exit_code=0,
+    )
+
+    async def dispatcher(_sample):  # noqa: ANN001
+        return payload
+
+    loop.register("github", "gh", dispatcher)
+    result = await loop._do_work()
+
+    assert result["skipped_volatile"] == 0
+    assert result["compared"] == 1
+    assert result["drifted"] == 0
