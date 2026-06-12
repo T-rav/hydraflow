@@ -1,0 +1,72 @@
+// Issue #9100 — EntryEvidenceLoop swallows CreditExhaustedError and poisons the
+// zero-match dedup cache. Sibling of the WS-2.2 M1 credit-swallow bug class
+// already fixed in TermProposerLoop and AdrReviewer.
+
+specification {
+  element zone
+  element loop
+  element method
+  element store
+  element port
+  element client
+  element exception
+}
+
+model {
+  factory = zone 'HydraFlow Factory' {
+    style { color muted }
+
+    baseLoop = loop 'BaseBackgroundLoop' {
+      description '_execute_cycle re-raises (AuthenticationError, CreditExhaustedError) → run-loop pause handler'
+    }
+
+    entryLoop = loop 'EntryEvidenceLoop' {
+      description 'ADR-0062: links wiki entries to Term.evidence via one LLM call per uncached entry'
+
+      doWork = method '_do_work()' {
+        description 'Iterates topic entries; on empty refs writes entry id to the zero-match dedup cache'
+      }
+      matchEntry = method '_match_entry()' {
+        description 'BUG: except (RuntimeError, json.JSONDecodeError) swallows CreditExhaustedError (a RuntimeError subclass) and returns []'
+      }
+    }
+
+    dedup = store 'DedupStore (zero-match cache)' {
+      description 'entry_evidence dedup.json — entry ids the LLM said match no term; poisoned by transient failures returning []'
+    }
+
+    llm = client 'LLMClient.complete_structured' {
+      description 'Production ClaudeCLIClient raises CreditExhaustedError via raise_if_credit_exhausted on billing-out'
+    }
+
+    creditExc = exception 'CreditExhaustedError / AuthenticationError' {
+      description 'Both subclass RuntimeError (subprocess_util.py:295,313)'
+    }
+  }
+
+  // structural
+  baseLoop -> entryLoop 'supervises (_execute_cycle)'
+  entryLoop -> doWork
+  doWork -> matchEntry 'per entry'
+  matchEntry -> llm 'await complete_structured'
+  doWork -> dedup 'add(entry.id) on empty refs'
+
+  // dynamic — the bug path
+  llm -> creditExc 'raises on credit-out'
+  creditExc -> matchEntry 'caught by broad except → returns []'
+  matchEntry -> doWork 'returns [] (looks like genuine zero match)'
+  doWork -> dedup 'POISONS: caches entry as permanent zero-match'
+}
+
+views {
+  view bug of entryLoop {
+    title 'Issue #9100 — credit-swallow + dedup poisoning (current, buggy)'
+    include *
+    include creditExc, llm, dedup, baseLoop
+  }
+
+  view context {
+    title 'EntryEvidenceLoop credit-handling context'
+    include factory.*
+  }
+}
