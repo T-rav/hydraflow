@@ -136,13 +136,14 @@ class TestL11RetrospectiveLoop:
         fake_queue.acknowledge.assert_called_once_with([item.id])
         fake_retro._load_recent.assert_called_once()
 
-    async def test_stale_hitl_dedup_across_ticks(self, tmp_path) -> None:
-        """Issue #8988: ``RetrospectiveLoop`` must not file duplicate
-        ``[HITL] Stale review insight:`` issues on repeated stale ticks.
+    async def test_stale_insight_dedup_across_ticks(self, tmp_path) -> None:
+        """Issue #8988 / #9227: ``RetrospectiveLoop`` must not file duplicate
+        ``[Review Insight] Persistent finding:`` issues on repeated stale ticks.
 
-        Drives the real loop against FakeGitHub for three ticks of the
-        same stale category and asserts the FakeGitHub issue count caps
-        at 1 with follow-up comments on the existing issue.
+        Drives the real loop against FakeGitHub for three ticks of the same
+        stale category and asserts the FakeGitHub issue count caps at 1 and
+        that subsequent ticks skip silently (no comment spam — the factory is
+        already working the routed find-queue issue).
         """
         from datetime import UTC, datetime, timedelta
         from unittest.mock import patch  # noqa: PLC0415
@@ -165,8 +166,8 @@ class TestL11RetrospectiveLoop:
             insights=fake_insights,
         )
 
-        # Snapshot FakeGitHub HITL title count.
-        hitl_title = "[HITL] Stale review insight: Missing test coverage"
+        # Snapshot FakeGitHub routed-issue title count.
+        insight_title = "[Review Insight] Persistent finding: Missing test coverage"
 
         with (
             patch(
@@ -180,35 +181,35 @@ class TestL11RetrospectiveLoop:
             patch("review_insights._PROPOSAL_STALE_DAYS", 30),
         ):
             base = datetime(2026, 5, 19, 0, 0, 0, tzinfo=UTC)
-            # Tick 1: file
+            # Tick 1: file the routed find-queue issue
             with patch("retrospective_loop._now_utc", return_value=base):
                 await world.run_with_loops(["retrospective"], cycles=1)
-            # Tick 2: comment
+            # Tick 2: skip (issue already open — factory is working it)
             with patch(
                 "retrospective_loop._now_utc",
                 return_value=base + timedelta(hours=2),
             ):
                 await world.run_with_loops(["retrospective"], cycles=1)
-            # Tick 3: comment
+            # Tick 3: skip
             with patch(
                 "retrospective_loop._now_utc",
                 return_value=base + timedelta(hours=4),
             ):
                 await world.run_with_loops(["retrospective"], cycles=1)
 
-        hitl_issues = [
+        insight_issues = [
             issue
             for issue in world._github._issues.values()
-            if issue.title == hitl_title
+            if issue.title == insight_title
         ]
-        assert len(hitl_issues) == 1, (
-            f"expected 1 HITL issue, got {len(hitl_issues)}: "
-            f"{[i.number for i in hitl_issues]}"
+        assert len(insight_issues) == 1, (
+            f"expected 1 routed issue, got {len(insight_issues)}: "
+            f"{[i.number for i in insight_issues]}"
         )
-        # And the loop should have posted 2 follow-up comments on the
-        # one open HITL issue.
-        assert len(hitl_issues[0].comments) == 2, (
-            f"expected 2 follow-up comments, got {len(hitl_issues[0].comments)}"
+        # No comment spam: subsequent ticks skip the open issue silently
+        # (the routed find-queue issue is already in the factory pipeline).
+        assert len(insight_issues[0].comments) == 0, (
+            f"expected 0 follow-up comments, got {len(insight_issues[0].comments)}"
         )
 
 

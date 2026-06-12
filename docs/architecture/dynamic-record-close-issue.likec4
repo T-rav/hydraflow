@@ -1,0 +1,28 @@
+// Dynamic view — the setup -> mutate -> terminal recording flow for close_issue.
+specification {
+  element actor
+  element step
+  element external
+}
+
+model {
+  caller = actor 'record_github(record_mutations=True)' {}
+  recipe = step '_record_close_issue(repo, tmp_dir)' {}
+  gh = external 'gh CLI -> sandbox repo' {}
+  corpus = external 'tests/.../cassettes/github/close_issue.yaml' {}
+
+  // Ordered interactions (LikeC4 dynamic view).
+  caller -> recipe 'invoke recipe'
+  recipe -> gh '1. SETUP: gh issue create --title "contract-recording close_issue <ts>" -> issue #N'
+  recipe -> gh '2. MUTATE: gh issue close N --repo <sandbox>  (require exit 0 = contract proof)'
+  recipe -> gh '3. TERMINAL: leave #N closed (no delete; closed throwaway = clean state)'
+  recipe -> corpus '4. WRITE canonical: args=["42"], empty stdout/stderr, baseline_only=false'
+  recipe -> caller 'return [close_issue.yaml] (or [] + WARN on any failure)'
+}
+
+views {
+  dynamic view recordCloseIssue {
+    title 'Recording close_issue: setup -> mutate -> terminal -> stable write'
+    include *
+  }
+}

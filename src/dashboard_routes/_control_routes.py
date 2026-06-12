@@ -248,7 +248,7 @@ _bg_worker_defs = [
     (
         "label_drift_watcher",
         "Label Drift Watcher",
-        "Periodic scan for cross-entity issue/PR label drift (e.g., issue at hydraflow-ready while linked PR at hydraflow-review with commits); reconciles via per-entity swap_pipeline_labels. See ADR-0056.",
+        "Periodic scan for cross-entity issue/PR label drift (e.g., issue at hydraflow-ready while linked PR at hydraflow-review with commits); reconciles via per-entity swap_pipeline_labels. See ADR-0088.",
     ),
     (
         "live_corpus_replay",
@@ -451,15 +451,24 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
 
     @router.post("/api/control/start")
     async def start_orchestrator() -> JSONResponse:
-        """Start the entire factory — the host orchestrator and every line.
+        """Start the factory — the host line only.
 
-        The factory-level Start starts every registered repo runtime
-        (``registry.start_all``), including the host. Starting a single line
-        is handled by ``POST /api/runtimes/{slug}/start``.
+        The factory-level Start brings up the **host** orchestrator line and
+        nothing else. Registered repos are independent factory lines that the
+        operator turns on individually via ``POST /api/runtimes/{slug}/start``
+        once the factory is running — the factory runs fine with zero repos and
+        must never force them all on. (Previously this called
+        ``registry.start_all`` and booted every registered repo.)
         """
         registry = ctx.registry
         if registry is not None:
-            await registry.start_all()
+            host_rt = registry.get(ctx._default_slug())
+            if host_rt is None:
+                return JSONResponse(
+                    {"error": "No host runtime registered"}, status_code=501
+                )
+            if not host_rt.running:
+                await host_rt.start()
             await ctx.event_bus.publish(
                 HydraFlowEvent(
                     type=EventType.ORCHESTRATOR_STATUS,

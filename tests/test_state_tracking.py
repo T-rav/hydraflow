@@ -149,7 +149,7 @@ class TestInitialization:
             # Per-ADR rollup tracking (#8987) — see ADR-0056 amendment.
             "adr_rollup_issues",
             "rollup_issues",
-            # MemoryBacklogLoop (ADR-0057)
+            # MemoryBacklogLoop (ADR-0089)
             "memory_backlog_attempts",
             # TriageRetryLoop (ADR-0063 W2)
             "triage_retry_attempts",

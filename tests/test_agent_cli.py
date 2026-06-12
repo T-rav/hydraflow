@@ -29,7 +29,7 @@ class TestBuildAgentCommand:
         assert cmd[cmd.index("--permission-mode") + 1] == "bypassPermissions"
 
     def test_claude_restricted_hardens_against_injection(self) -> None:
-        """ADR-0084: restricted mode drops bypassPermissions and blocks egress tools."""
+        """ADR-0092: restricted mode drops bypassPermissions and blocks egress tools."""
         cmd = build_agent_command(tool="claude", model="opus", restricted=True)
         assert cmd[cmd.index("--permission-mode") + 1] == "acceptEdits"
         assert "bypassPermissions" not in cmd

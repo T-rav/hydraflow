@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from dedup_store import DedupStore
 from repo_wiki import RepoWikiStore
+from subprocess_util import AuthenticationError, CreditExhaustedError
 from term_proposer_llm import LLMClient
 from term_proposer_loop import BotPRPort, _render_term_file_str
 from ubiquitous_language import Term, TermStore, _slugify_term_name
@@ -155,6 +156,10 @@ class EntryEvidenceLoop(BaseBackgroundLoop):
                     terms=terms,
                     valid_term_ids=valid_term_ids,
                 )
+                if refs is None:
+                    # Soft LLM/parse failure — retry next tick; do not poison
+                    # the negative cache. Fatal signals already propagated above.
+                    continue
                 if refs:
                     for term_id in refs:
                         new_links.setdefault(term_id, set()).add(entry.id)
@@ -249,19 +254,29 @@ class EntryEvidenceLoop(BaseBackgroundLoop):
         entry_text: str,
         terms: list[Term],
         valid_term_ids: set[str],
-    ) -> list[str]:
+    ) -> list[str] | None:
         """Return validated term IDs the LLM says the entry discusses.
 
-        Soft-failure on LLM/parse error: log and return [] so the next tick
-        retries this entry (no DedupStore needed — the set-difference write
-        path is the dedup mechanism).
+        Returns:
+            list[str]: genuine zero match (empty) or matched IDs — safe to
+                write to the negative dedup cache when empty.
+            None: soft LLM/parse failure — caller must NOT cache the entry;
+                a future tick will retry.
+
+        Fatal billing/auth signals (AuthenticationError, CreditExhaustedError)
+        propagate to BaseBackgroundLoop's pause handler instead of being
+        swallowed. Both subclass RuntimeError, so this re-raise MUST precede
+        the broad clause below (mirrors term_proposer_loop.py WS-2.2 M1).
         """
+
         prompt = _build_prompt(entry_text, terms)
         try:
             raw = await self._llm.complete_structured(prompt=prompt, schema={})
+        except (AuthenticationError, CreditExhaustedError):
+            raise
         except (RuntimeError, json.JSONDecodeError) as exc:
             logger.warning("LLM call failed for entry %s: %s", entry_id, exc)
-            return []
+            return None
         candidates = raw.get("term_ids") or []
         return [
             tid for tid in candidates if isinstance(tid, str) and tid in valid_term_ids
