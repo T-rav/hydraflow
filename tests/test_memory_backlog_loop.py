@@ -1,4 +1,4 @@
-"""Tests for MemoryBacklogLoop (ADR-0057)."""
+"""Tests for MemoryBacklogLoop (ADR-0089)."""
 
 from __future__ import annotations
 
@@ -212,7 +212,7 @@ def test_default_interval_matches_config(env) -> None:
 async def test_filing_commits_frontmatter_to_git(env) -> None:
     """The pending → issue-open frontmatter update lands as a git commit.
 
-    Per ADR-0057, status transitions live in git history — not just on
+    Per ADR-0089, status transitions live in git history — not just on
     disk. Without the commit, frontmatter edits accumulate as unstaged
     modifications in the orchestrator's working tree.
     """

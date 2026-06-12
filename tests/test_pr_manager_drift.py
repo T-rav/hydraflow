@@ -1,6 +1,6 @@
 """PRManager.find_label_drift — detects cross-entity issue/PR drift.
 
-See ADR-0056. Two drift kinds:
+See ADR-0088. Two drift kinds:
 - ``pr_ahead_of_issue``: issue at ready/plan, PR at review with commits
 - ``pr_at_pre_pr_stage``: PR labelled ready/plan but has commits
 

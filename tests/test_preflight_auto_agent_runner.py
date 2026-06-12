@@ -90,7 +90,7 @@ async def test_run_passes_disallowed_tools_to_command(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_run_builds_restricted_claude_command(tmp_path: Path) -> None:
-    """ADR-0084 / W7-OC-1: the auto-agent runs on attacker-reachable input, so
+    """ADR-0092 / W7-OC-1: the auto-agent runs on attacker-reachable input, so
     its built claude command MUST be hardened by default — acceptEdits (NOT
     bypassPermissions), an explicit --allowedTools allowlist, and the egress
     tools (WebFetch/WebSearch) on --disallowedTools. Mirrors
@@ -122,7 +122,7 @@ async def test_run_builds_restricted_claude_command(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_run_unrestricted_escape_hatch_reverts_to_bypass(tmp_path: Path) -> None:
-    """agent_unrestricted_tools=True is the ADR-0084 escape hatch: it reverts
+    """agent_unrestricted_tools=True is the ADR-0092 escape hatch: it reverts
     the auto-agent claude command to the legacy bypassPermissions mode.
     """
     captured: dict[str, Any] = {}
@@ -132,7 +132,7 @@ async def test_run_unrestricted_escape_hatch_reverts_to_bypass(tmp_path: Path) -
         return ""
 
     # ConfigFactory.create() has an explicit kwarg allowlist that doesn't cover
-    # the ADR-0084 escape hatch, so set the field via model_copy on the built
+    # the ADR-0092 escape hatch, so set the field via model_copy on the built
     # config (HydraFlowConfig is not frozen but copying is the cleanest path).
     config = ConfigFactory.create(implementation_tool="claude")
     config = config.model_copy(update={"agent_unrestricted_tools": True})

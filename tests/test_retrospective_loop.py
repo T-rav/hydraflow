@@ -226,10 +226,10 @@ class TestReviewPatternIssueFiling:
 
 
 class TestVerifyProposalEscalation:
-    """_handle_verify_proposals escalates stale proposals to HITL."""
+    """_handle_verify_proposals routes stale proposals to the factory (#9227)."""
 
     @pytest.mark.asyncio
-    async def test_files_hitl_issue_for_stale_proposal(self, tmp_path: Path) -> None:
+    async def test_routes_stale_proposal_to_factory(self, tmp_path: Path) -> None:
         from unittest.mock import patch
 
         loop, _, insights, queue, prs = _make_loop(tmp_path, with_prs=True)
@@ -252,9 +252,13 @@ class TestVerifyProposalEscalation:
             await loop._do_work()
 
         prs.create_issue.assert_awaited_once()
-        call_args = prs.create_issue.call_args
-        assert "HITL" in call_args[0][0]
-        assert "missing_tests" in call_args[0][1]
+        title, body, labels = prs.create_issue.call_args[0][:3]
+        # Routed to the factory find-queue as an actionable task, not a HITL
+        # dead-end.
+        assert title.startswith("[Review Insight] Persistent finding:")
+        assert "HITL" not in title
+        assert labels == loop._config.find_label[:1]
+        assert "missing_tests" in body
 
     @pytest.mark.asyncio
     async def test_no_prs_logs_warning_no_crash(self, tmp_path: Path) -> None:
@@ -300,22 +304,21 @@ class TestMultipleItemBatch:
         queue.acknowledge.assert_called_once_with([items[0].id, items[1].id])
 
 
-class TestStaleHITLDedup:
-    """Issue #8988 — dedup [HITL] Stale review insight: <category> filings.
+class TestStaleInsightDedup:
+    """Issue #8988 — dedup [Review Insight] Persistent finding: <category> filings.
 
-    Behaviors guarded:
-      1. Same category stale across N ticks → 1 open issue + N-1 comments.
-      2. Closed-and-re-armed: stale → file → human closes → stale again → new file.
-      3. In-memory `_hitl_filed_at` window guard prevents same-tick double-file
-         even when the open-issue lookup races.
+    Behaviors guarded (post-#9227 — routed to the factory, not HITL):
+      1. Same category stale across N ticks → exactly 1 open issue, no comment
+         spam (skip while the factory works the open one).
+      2. Closed-and-re-armed: stale → file → closed → stale again → new file.
+      3. In-memory `_insight_escalated_at` window guard prevents same-tick
+         double-file even when the open-issue lookup races.
     """
 
     @pytest.mark.asyncio
-    async def test_five_stale_ticks_one_issue_four_comments(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_five_stale_ticks_one_issue_no_comments(self, tmp_path: Path) -> None:
         """5 ticks of the same stale category → create_issue called once,
-        post_comment called 4 times (ticks 2..5 comment on the open one)."""
+        post_comment never called (ticks 2..5 skip the open one — no spam)."""
         from unittest.mock import patch
 
         loop, _, insights, queue, prs = _make_loop(tmp_path, with_prs=True)
@@ -368,16 +371,14 @@ class TestStaleHITLDedup:
         assert prs.create_issue.await_count == 1, (
             f"expected exactly 1 create_issue, got {prs.create_issue.await_count}"
         )
-        assert prs.post_comment.await_count == 4, (
-            f"expected 4 follow-up comments, got {prs.post_comment.await_count}"
+        # No comment spam: the factory works the open issue; ticks 2..5 skip it.
+        assert prs.post_comment.await_count == 0, (
+            f"expected 0 follow-up comments, got {prs.post_comment.await_count}"
         )
-        # The four comments must target the open issue #4242
-        for call in prs.post_comment.await_args_list:
-            assert call.args[0] == 4242
 
     @pytest.mark.asyncio
     async def test_closed_then_re_armed_files_new_issue(self, tmp_path: Path) -> None:
-        """Closed HITL issue → category stale again → 1 NEW issue filed.
+        """Closed escalation → category stale again → 1 NEW issue filed.
 
         Mirrors FakeCoverageAuditorLoop._reconcile_closed_escalations:
         a closed escalation resets dedup so the category re-arms.
@@ -414,7 +415,7 @@ class TestStaleHITLDedup:
             assert prs.create_issue.await_count == 1
             assert prs.post_comment.await_count == 0
 
-            # ---- Tick 2: human has closed #5000 ----
+            # ---- Tick 2: the escalation #5000 has been closed ----
             # find_existing_issue now returns 0 (no OPEN one), but the loop
             # also checks list_closed_issues_by_label to re-arm the in-memory
             # window-tracker.
@@ -423,7 +424,7 @@ class TestStaleHITLDedup:
             prs.list_closed_issues_by_label.return_value = [
                 {
                     "number": 5000,
-                    "title": "[HITL] Stale review insight: Missing test coverage",
+                    "title": "[Review Insight] Persistent finding: Missing test coverage",
                     "body": "",
                     "updated_at": "2026-05-19T01:00:00Z",
                 }

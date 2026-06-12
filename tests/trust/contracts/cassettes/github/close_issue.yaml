@@ -14,4 +14,4 @@ output:
   stdout: ""
   stderr: ""
 normalizers: []
-baseline_only: true
+baseline_only: false

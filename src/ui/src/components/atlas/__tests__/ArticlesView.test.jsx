@@ -32,7 +32,7 @@ const ADR_DETAIL = {
   title: 'Atlas knowledge graph dashboard',
   status: 'Accepted',
   date: '2026-05-08',
-  body: '# ADR-0059: Atlas\n\nDecision body content.',
+  body: '# ADR-0090: Atlas\n\nDecision body content.',
   related: [],
 }
 const REPOS = [{ owner: 'acme', repo: 'widget' }]
@@ -117,7 +117,7 @@ describe('ArticlesView', () => {
     await waitFor(() => screen.getByText(/atlas knowledge graph/i))
     fireEvent.click(screen.getByText(/atlas knowledge graph/i))
     await waitFor(() => {
-      const heading = screen.getByRole('heading', { level: 1, name: /adr-0059/i })
+      const heading = screen.getByRole('heading', { level: 1, name: /adr-0090/i })
       expect(heading.tagName).toBe('H1')
     })
   })

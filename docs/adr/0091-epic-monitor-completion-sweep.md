@@ -1,4 +1,4 @@
-# ADR-0064: Fold Epic Completion Sweep into Epic Monitor
+# ADR-0091: Fold Epic Completion Sweep into Epic Monitor
 
 Date: 2026-05-22
 

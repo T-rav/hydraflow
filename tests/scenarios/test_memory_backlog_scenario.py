@@ -1,4 +1,4 @@
-"""MockWorld scenario for `MemoryBacklogLoop` (ADR-0057).
+"""MockWorld scenario for `MemoryBacklogLoop` (ADR-0089).
 
 Tier-3 expansion: the existing builder lives in
 ``tests/scenarios/catalog/loop_registrations.py`` but no scenario test
