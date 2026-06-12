@@ -19,6 +19,18 @@ import pytest
 # dedicated `sandbox` job (`scripts/sandbox_scenario.py`).
 collect_ignore_glob = ["sandbox_scenarios/*"]
 
+# The test suite and MockWorld scenarios run with fixture data — issue #42,
+# PR #101, "boom" failure sentinels, AsyncMock collaborators. None of it must
+# ever reach the real Sentry project. A real SENTRY_DSN in the ambient env
+# (e.g. loaded from .env on a developer/CI box) would otherwise let any test
+# that spins up the server or logs an error ship that fixture noise to
+# production Sentry. Neutralise it at import time — before collection — so the
+# guard holds regardless of which test triggers init. `_init_sentry` also
+# honours HYDRAFLOW_SENTRY_DISABLED; the Sentry integration tests opt back in
+# explicitly via `force=True` against a mock SDK.
+os.environ["HYDRAFLOW_SENTRY_DISABLED"] = "1"
+os.environ.pop("SENTRY_DSN", None)
+
 
 def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> None:  # noqa: ARG001 — nextitem required by pytest hook signature
     """Fail any test that leaves a ``MagicMock/`` directory in the repo root.

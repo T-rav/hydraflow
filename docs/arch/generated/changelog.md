@@ -6,10 +6,25 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
-- `cdce17b` — chore: salvage uncommitted changes for issue #9354 *(2026-06-12)*
-- `f3547cf` — fix(#9354): expose skipped_volatile counter and add scenario + unit tests *(2026-06-12)*
-- `3525a6a` — chore: salvage uncommitted changes for issue #9354 *(2026-06-12)*
-- `4c75e32` — Fixes #9354: exclude non-deterministic corpus samples from value comparison *(2026-06-12)*
+- `f4219db` — fix(observability): suppress Sentry noise — bugs-only filter + test init guard *(2026-06-12)*
+- `e654a48` — feat(dependabot-merge): auto-heal bot PRs stuck on stale arch artifacts (#9475) (#9475) *(2026-06-12)*
+- `8572c35` — fix(pr-unsticker): rebase PRs that went DIRTY after escalation (live merge state) (#9476) (#9476) *(2026-06-12)*
+- `124b2e8` — feat(ul): entry-evidence — 20 new entry links across 11 terms (#9423) (#9423) *(2026-06-12)*
+- `076ee8f` — feat(ul): edge-proposer — 107 new edges across 30 terms (#9422) (#9422) *(2026-06-12)*
+- `a293ffc` — feat(ul): term-proposer batch — 1 drafts (#9424) (#9424) *(2026-06-12)*
+- `e201308` — feat(ul): entry-evidence — 2 new entry links across 2 terms (#9428) (#9428) *(2026-06-12)*
+- `d296730` — feat(ul): edge-proposer — 3 new edges across 2 terms (#9427) (#9427) *(2026-06-12)*
+- `39b48b2` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9425) (#9425) *(2026-06-12)*
+- `9ed1b39` — feat(auto-agent): rescue stuck pipeline PRs — diagnose-route + credit-transient (ADR-0084) (#9473) (#9473) *(2026-06-12)*
+- `44d1957` — Fixes #8693: "Recorder-side `gh issue close` support for cassette r... (#9446) (#9446) *(2026-06-12)*
+- `1a7071a` — fix(trust): min-sample guard + repaired semantics + trust-loop scoping for repair_ratio (#9458) (#9470) (#9470) *(2026-06-12)*
+- `db883f4` — fix(review-insights): word-boundary category match + matched verification window (#9426, #9444) (#9469) (#9469) *(2026-06-12)*
+- `030bd7a` — fix(adr): right-size bare citations for 5 stuck-HITL drift ADRs (#9417/#9419/#9420/#9421/#9447) (#9472) (#9472) *(2026-06-12)*
+- `aaa7a02` — fix(adr): resolve 6 duplicate ADR-number collisions (#9406) — unblocks the drift auditor (#9471) (#9471) *(2026-06-12)*
+- `2d8bd40` — feat(auto-agent): converge via retry instead of one-shot needs_human (ADR-0084 PR-2) (#9467) (#9467) *(2026-06-12)*
+- `725f5a8` — fix(pipeline): break the human-required escalation cycle (ADR-0084 PR-1) (#9439) (#9439) *(2026-06-12)*
+- `5ae5f3b` — Fixes #9100: entry_evidence_loop swallows CreditExhaustedError and ... (#9451) (#9451) *(2026-06-12)*
+- `d0f190f` — docs(adr): ADR-0084 — Auto-Agent as a universal root-cause HITL gate (Proposed) (#9435) (#9435) *(2026-06-12)*
 - `0c3c314` — fix(retrospective): route stale review-insights to the factory, not HITL (#9227) (#9431) (#9431) *(2026-06-11)*
 - `3f90a67` — fix(adr-drift): symbol-qualify owned citations + pr_manager shared-infra (#9405) (#9405) *(2026-06-11)*
 - `bc00ebe` — fix(mockworld): re-export FakeRouteBackCounter so its marker is actually verified (#8809) (#9408) (#9408) *(2026-06-11)*
