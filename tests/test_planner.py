@@ -273,13 +273,16 @@ async def test_build_prompt_omits_comments_section_when_empty(config, event_bus,
 async def test_build_prompt_truncates_long_body(config, event_bus):
     task = TaskFactory.create(id=1, title="Big issue", body="X" * 20_000, tags=[])
     runner = _make_runner(config, event_bus)
+    # Null the ADR index so this test stays stable as the ADR corpus grows.
+    # Body-truncation behaviour is independent of ADR injection size.
+    runner._adr_index = None
     prompt, _ = await runner._build_prompt_with_stats(task)
 
     assert "…(truncated)" in prompt
-    # Well under original 20k body. Upper bound accommodates the ADR titles
-    # index (now ~2k chars for ~41 ADRs) and the ADR-0044 principles checklist
-    # (~900 chars) that the plan prompt now injects.
-    assert len(prompt) < 15_500
+    # Well under original 20k body. Upper bound covers fixed-content sections
+    # (instructions, schema, principles checklist ~900 chars) only — ADR index
+    # excluded above so the threshold doesn't need updating per new ADR.
+    assert len(prompt) < 14_000
 
 
 @pytest.mark.asyncio
