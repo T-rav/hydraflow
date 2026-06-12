@@ -79,6 +79,37 @@ async def test_flaky_test_resolved(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_low_confidence_bail_retries_without_paging_human(tmp_path: Path) -> None:
+    # A `needs_human` bail with a transient / low-confidence signal must NOT
+    # page a human — the loop converges via `retry`, leaving the issue eligible
+    # for the next cycle (ADR-0084 pillar B; the #9275 failure mode).
+    loop, _state, pr, _audit = _make_loop(tmp_path)
+    pr.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 1,
+                "body": "x",
+                "labels": [
+                    {"name": "hitl-escalation"},
+                    {"name": "flaky-test-stuck"},
+                ],
+            },
+        ]
+    )
+    _stub_spawn(
+        loop,
+        "<status>needs_human</status><confidence>low</confidence>"
+        "<blocked_reason>insufficient_context</blocked_reason>"
+        "<diagnosis>need more context</diagnosis>",
+    )
+    result = await loop._do_work()
+    assert result["result_status"] == "retry"
+    # No human escalation: nothing the loop added may include human-required.
+    for call in pr.add_labels.await_args_list:
+        assert "human-required" not in call.args[1]
+
+
+@pytest.mark.asyncio
 async def test_subprocess_fatal(tmp_path: Path) -> None:
     loop, _state, pr, _audit = _make_loop(tmp_path)
     pr.list_issues_by_label = AsyncMock(

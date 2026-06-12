@@ -74,7 +74,7 @@ ADR and that named test files actually exist.
 | [0040](0040-adr-reviewer-proposed-only-filter.md) | ADR Reviewer Proposed-Only Filter and Validator Scope | Rejected |
 | [0041](0041-github-source-of-truth-cache-as-sidecar.md) | GitHub as Source of Truth, Local Cache as Sidecar | Accepted |
 | [0042](0042-two-tier-branch-release-promotion.md) | Two-tier branch model with automated release-candidate promotion | Accepted |
-| [0043](0043-prompt-structure-standard.md) | Prompt structure standard (XML tags, 8-criterion rubric, mechanical scoring) | Proposed |
+| [0043](0043-dynamic-plugin-skill-loading.md) | Dynamic plugin skill loading — install at boot, discipline in the prompt, filtered per phase | Accepted |
 | [0044](0044-hydraflow-principles.md) | HydraFlow Principles — the audit contract for new and existing repos | Proposed |
 | [0045](0045-trust-architecture-hardening.md) | Trust Architecture Hardening — Lights-Off Trust Fleet (10 loops + 2 non-loop subsystems) | Accepted |
 | [0046](0046-meta-observability-bounded-recursion.md) | Meta-observability with bounded recursion — one layer of meta, no more | Proposed |
@@ -87,6 +87,7 @@ ADR and that named test files actually exist.
 | [0053](0053-ubiquitous-language-as-living-artifact.md) | Ubiquitous Language as a Living Artifact | Accepted |
 | [0054](0054-term-auto-proposer-loop.md) | Term Auto-Proposer Loop (Dark-Factory Glossary Growth) | Accepted |
 | [0055](0055-otel-honeycomb-instrumentation.md) | OpenTelemetry Instrumentation as the Telemetry Layer | Accepted |
+| [0056](0056-adr-touchpoint-gate-to-caretaker-loop.md) | ADR touchpoint enforcement — synchronous gate → asynchronous caretaker loop | Accepted |
 | [0057](0057-term-pruner-loop.md) | Term-Pruner Loop (Dark-Factory Glossary Hygiene) | Accepted |
 | [0058](0058-edge-proposer-loop.md) | Edge-Proposer Loop (Dark-Factory Graph Densification) | Accepted |
 | [0059](0059-advisor-pattern-self-repairing-review.md) | Advisor Pattern — Self-Repairing Review | Proposed |
@@ -114,9 +115,15 @@ ADR and that named test files actually exist.
 | [0081](0081-epic-sweeper-loop.md) | EpicSweeperLoop: Autonomous Completion-Based Epic Auto-Close | Proposed |
 | [0082](0082-declarative-gate-contract.md) | Declarative Gate Contract for Branch Protection | Proposed |
 | [0083](0083-no-ignored-test-gates.md) | No ignored automated test gates | Accepted |
-| [0084](0084-untrusted-text-trust-boundary.md) | Untrusted-text trust boundary for agent prompts | Accepted |
+| [0084](0084-auto-agent-universal-root-cause-gate.md) | Auto-Agent as a Universal, Persistent, Root-Cause HITL Gate | Proposed |
 | [0085](0085-secrets-never-persist-in-audit-stream.md) | Secrets never persist in the canonical audit stream | Accepted |
 | [0086](0086-live-corpus-replay-loop.md) | LiveCorpusReplayLoop: Shadow-Corpus Drift Detection | Proposed |
+| [0087](0087-prompt-structure-standard.md) | Prompt structure standard (XML tags, 8-criterion rubric, mechanical scoring) | Proposed |
+| [0088](0088-label-drift-caretaker-loop.md) | LabelDriftWatcherLoop — Cross-Entity State-Machine Drift Caretaker | Accepted |
+| [0089](0089-memory-backlog-loop.md) | MemoryBacklogLoop — promote session-memory feedback to the find queue | Accepted |
+| [0090](0090-atlas-knowledge-graph-dashboard.md) | Atlas — Knowledge Graph Dashboard Surface | Accepted |
+| [0091](0091-epic-monitor-completion-sweep.md) | Fold Epic Completion Sweep into Epic Monitor | Accepted |
+| [0092](0092-untrusted-text-trust-boundary.md) | Untrusted-text trust boundary for agent prompts | Accepted |
 
 ## Adding a new ADR
 

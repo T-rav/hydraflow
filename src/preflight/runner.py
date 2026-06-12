@@ -67,7 +67,7 @@ def render_prompt(
     # Substitute fields. issue_body is attacker-controllable → fence it; the
     # *_block values are already fenced by render_blocks. Prepend the standing
     # untrusted-data preamble so the agent treats every <untrusted_*> region as
-    # data, not instructions (ADR-0084).
+    # data, not instructions (ADR-0092).
     rendered = content.format(
         persona=persona,
         issue_number=issue_number,
@@ -95,7 +95,7 @@ def render_blocks(
     prior_attempts: list,
 ) -> dict[str, str]:
     """Render the structured-block strings injected into the prompt."""
-    # Attacker-reachable blocks are fenced as untrusted data (ADR-0084). The
+    # Attacker-reachable blocks are fenced as untrusted data (ADR-0092). The
     # escalation context is fenced too: cause/origin_phase/pr_number are
     # system-set, but agent_transcript and ci_logs are attacker-derived, so the
     # whole rendered block is wrapped (W7FR-3). The prior-attempts block is
@@ -173,10 +173,19 @@ _TAG_RE = re.compile(r"<(\w+)>(.*?)</\1>", re.DOTALL)
 
 
 def parse_agent_response(text: str) -> dict[str, str | None]:
-    """Parse <status>...</status> + <pr_url>...</pr_url> + <diagnosis>...</diagnosis>."""
+    """Parse the agent's response tags.
+
+    Recognises ``<status>``, ``<pr_url>``, ``<confidence>``, ``<blocked_reason>``
+    and ``<diagnosis>``. A missing ``status`` is returned as ``None`` (not
+    ``needs_human``) so the caller can apply convergence-aware fallback — a
+    malformed response is a ``retry``, not an instant human escalation
+    (ADR-0084 pillar B).
+    """
     tags = {m.group(1): m.group(2).strip() for m in _TAG_RE.finditer(text)}
     return {
-        "status": tags.get("status", "needs_human"),
+        "status": tags.get("status") or None,
         "pr_url": tags.get("pr_url") or None,
+        "confidence": (tags.get("confidence") or "").lower() or None,
+        "blocked_reason": (tags.get("blocked_reason") or "").lower() or None,
         "diagnosis": tags.get("diagnosis", text.strip()),
     }

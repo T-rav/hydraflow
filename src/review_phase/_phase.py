@@ -118,6 +118,7 @@ from review_insights import (
     build_insight_issue_body,
     build_persistent_finding_body,
     extract_categories,
+    is_infra_failure_summary,
     verify_proposals,
 )
 from reviewer import ReviewRunner
@@ -3218,6 +3219,23 @@ class ReviewPhase:
             "issue_number": result.issue_number,
             "pr_number": result.pr_number,
         }
+        # API-error / credit-exhaustion summaries are agent-layer telemetry,
+        # not a reviewer verdict. Recording them as review feedback poisons
+        # the per-category counts (e.g. ``"type":"error"`` was mis-read as a
+        # type-annotation flag) and drives perpetual false stale-insight HITL
+        # escalations (#9426). Skip the append for these.
+        if is_infra_failure_summary(result.summary):
+            details["skipped"] = "infra_failure_summary"
+            if self._update_bg_worker_status:
+                try:
+                    self._update_bg_worker_status("retrospective", "ok", details)
+                except (RuntimeError, OSError):
+                    logger.warning(
+                        "retrospective status callback failed for PR #%d",
+                        result.pr_number,
+                        exc_info=True,
+                    )
+            return
         try:
             record = ReviewRecord(
                 pr_number=result.pr_number,

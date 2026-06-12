@@ -1,4 +1,4 @@
-"""State accessors for MemoryBacklogLoop (ADR-0057)."""
+"""State accessors for MemoryBacklogLoop (ADR-0089)."""
 
 from __future__ import annotations
 

@@ -9,6 +9,7 @@ import pytest
 from preflight.agent import (
     PreflightAgentDeps,
     PreflightSpawn,
+    _derive_status,
     hash_prompt,
     run_preflight,
 )
@@ -228,7 +229,10 @@ async def test_unspecialised_sublabel_uses_deps_persona() -> None:
 
 
 @pytest.mark.asyncio
-async def test_unparseable_response_falls_back_to_needs_human() -> None:
+async def test_unparseable_response_falls_back_to_retry() -> None:
+    # A garbled/missing status is a recoverable failure, not a human blocker —
+    # the loop retries with broader context rather than paging a human on a
+    # parse glitch (ADR-0084 pillar B, the #9275 failure mode).
     spawn_fn = AsyncMock(
         return_value=PreflightSpawn(
             process=None,
@@ -247,4 +251,37 @@ async def test_unparseable_response_falls_back_to_needs_human() -> None:
     out = await run_preflight(
         context=_ctx(), repo_slug="x/y", worktree_path="/tmp", deps=deps
     )
-    assert out.status == "needs_human"
+    assert out.status == "retry"
+
+
+@pytest.mark.parametrize(
+    ("raw_status", "confidence", "blocked_reason", "pr_url", "expected"),
+    [
+        # Resolved with / without a PR.
+        ("resolved", "high", "none", "https://x/pr/1", "resolved"),
+        ("resolved", "high", "none", None, "pr_failed"),
+        # Genuine human-only blockers at high confidence → needs_human.
+        ("needs_human", "high", "needs_human_decision", None, "needs_human"),
+        ("needs_human", "high", "needs_credentials", None, "needs_human"),
+        ("needs_human", "high", "needs_permissions", None, "needs_human"),
+        ("needs_human", "high", "unsafe", None, "needs_human"),
+        # Same blocker but LOW confidence → retry (don't page a human yet).
+        ("needs_human", "low", "needs_human_decision", None, "retry"),
+        # Recoverable blockers → retry regardless of confidence.
+        ("needs_human", "high", "transient", None, "retry"),
+        ("needs_human", "high", "insufficient_context", None, "retry"),
+        # Missing / garbled status → retry (the #9275 parse-glitch case).
+        ("", "low", "none", None, "retry"),
+        ("needs_human", "high", "none", None, "retry"),
+    ],
+)
+def test_derive_status_matrix(
+    raw_status: str,
+    confidence: str,
+    blocked_reason: str,
+    pr_url: str | None,
+    expected: str,
+) -> None:
+    # ADR-0084 pillar B: needs_human is honored only for a real human-only
+    # blocker at high confidence; everything else converges via retry.
+    assert _derive_status(raw_status, confidence, blocked_reason, pr_url) == expected

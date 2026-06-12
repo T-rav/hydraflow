@@ -722,7 +722,7 @@ class HydraFlowConfig(BaseModel):
     agent_unrestricted_tools: bool = Field(
         default=False,
         description=(
-            "Escape hatch (ADR-0084): when True, issue-derived implementer/auto-agent "
+            "Escape hatch (ADR-0092): when True, issue-derived implementer/auto-agent "
             "spawns use the legacy bypassPermissions/danger-full-access mode instead of "
             "the hardened acceptEdits + tool-allowlist + WebFetch/WebSearch-disallow "
             "mode. Leave False unless the restricted allowlist breaks a backend."
@@ -2334,7 +2334,7 @@ class HydraFlowConfig(BaseModel):
         description="Labels for stuck ADR drift escalations (paired with hitl_escalation_label)",
     )
 
-    # Trust fleet — MemoryBacklogLoop (ADR-0057)
+    # Trust fleet — MemoryBacklogLoop (ADR-0089)
     memory_backlog_interval_seconds: int = Field(
         default=86_400,
         ge=3_600,

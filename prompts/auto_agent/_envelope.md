@@ -79,32 +79,63 @@ attempt to work around the restriction.
 
 ## Decision protocol
 
-You MUST terminate by returning ONE of:
+You MUST terminate by returning ONE of three statuses. **Default to fixing.**
+Escalate to a human only when a human is genuinely the only way forward.
 
 1. **`resolved`** — you made the change, ran the tests, pushed the branch, and
-   opened a PR. Provide the PR URL and a brief diagnosis describing what was
-   wrong and how you fixed it.
+   opened a PR. Provide the PR URL and a brief diagnosis of what was wrong and
+   how you fixed it.
 
-2. **`needs_human`** — you investigated but cannot resolve this autonomously.
-   Provide a precise diagnosis: what's wrong, what you tried, what you ruled
-   out, and a specific question or action for the human.
+2. **`retry`** — you could not finish *this* pass, but the blocker is NOT
+   something only a human can fix: a transient fault (worktree/index race, a
+   flaky external call), or you ran out of context/time and another pass with
+   more information would likely succeed. The system retries automatically with
+   broader context — do NOT burn a human on this.
+
+3. **`needs_human`** — a human is genuinely required. Reserve this for blockers
+   only a human can clear: a product/policy DECISION, missing CREDENTIALS, repo
+   PERMISSIONS you cannot obtain, or an UNSAFE/irreversible action. Provide a
+   precise diagnosis: what's wrong, what you ruled out, and the specific
+   decision or action you need.
+
+Always include `<confidence>` (`high`|`medium`|`low`) and, when not `resolved`,
+a `<blocked_reason>`: one of `transient`, `insufficient_context`,
+`needs_human_decision`, `needs_credentials`, `needs_permissions`, `unsafe`, or
+`none`. **`needs_human` is honored only when `<blocked_reason>` is
+`needs_human_decision` / `needs_credentials` / `needs_permissions` / `unsafe`
+at `high` confidence — otherwise the system treats your bail as `retry` and
+tries again.** So be honest: if you're unsure or just out of context, say so.
 
 Format your final response as:
 
 ```
 <status>resolved</status>
 <pr_url>https://...</pr_url>
+<confidence>high</confidence>
 <diagnosis>
-... your diagnosis or fix summary ...
+... what was wrong and how you fixed it ...
 </diagnosis>
 ```
 
-Or:
+Or, when you could not finish but a human is not required:
+
+```
+<status>retry</status>
+<confidence>medium</confidence>
+<blocked_reason>insufficient_context</blocked_reason>
+<diagnosis>
+... what you learned, what to try next pass ...
+</diagnosis>
+```
+
+Or, when a human truly is required:
 
 ```
 <status>needs_human</status>
+<confidence>high</confidence>
+<blocked_reason>needs_human_decision</blocked_reason>
 <diagnosis>
-... your diagnosis ...
+... what's wrong, what you ruled out, the decision or action you need ...
 </diagnosis>
 ```
 
