@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo, lazy, Suspense } from 'react'
 import { theme } from '../theme'
-import { BACKGROUND_WORKERS, WORKER_GROUPS, INTERVAL_PRESETS, WORKER_PRESETS, EDITABLE_INTERVAL_WORKERS, SYSTEM_WORKER_INTERVALS, UNSTICK_BATCH_OPTIONS } from '../constants'
+import { BACKGROUND_WORKERS, WORKER_GROUPS, INTERVAL_PRESETS, WORKER_PRESETS, EDITABLE_INTERVAL_WORKERS, SYSTEM_WORKER_INTERVALS, UNSTICK_BATCH_OPTIONS, REPO_ALL } from '../constants'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { Livestream } from './Livestream'
 import { PipelineControlPanel } from './PipelineControlPanel'
@@ -70,7 +70,13 @@ function formatTimestamp(ts) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval, events, extraContent }) {
+// Worker mutations target a single orchestrator, so under "All repos" the
+// backend rejects them and the context handlers are no-ops. Disable the
+// controls visibly (rather than letting clicks silently do nothing) and tell
+// the operator how to act.
+const AGGREGATE_EDIT_TIP = 'Select a specific repo to edit worker settings'
+
+function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval, events, extraContent, isAggregate }) {
   const [showIntervalEditor, setShowIntervalEditor] = useState(false)
   const [triggerLoading, setTriggerLoading] = useState(false)
   const isPipelinePoller = def.key === 'pipeline_poller'
@@ -177,7 +183,12 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
         )}
         {showToggle && (
           <button
-            style={enabled ? styles.toggleOn : styles.toggleOff}
+            style={{
+              ...(enabled ? styles.toggleOn : styles.toggleOff),
+              ...(isAggregate ? styles.controlDisabled : {}),
+            }}
+            disabled={isAggregate}
+            title={isAggregate ? AGGREGATE_EDIT_TIP : undefined}
             onClick={() => onToggleBgWorker(def.key, !enabled)}
           >
             {enabled ? 'On' : 'Off'}
@@ -185,8 +196,12 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
         )}
         {onTriggerBgWorker && orchRunning && !isPipelinePoller && (
           <button
-            style={triggerLoading ? styles.runNowLoading : styles.runNow}
-            disabled={triggerLoading}
+            style={{
+              ...(triggerLoading ? styles.runNowLoading : styles.runNow),
+              ...(isAggregate ? styles.controlDisabled : {}),
+            }}
+            disabled={triggerLoading || isAggregate}
+            title={isAggregate ? AGGREGATE_EDIT_TIP : undefined}
             data-testid={`run-now-${def.key}`}
             onClick={async () => {
               setTriggerLoading(true)
@@ -219,7 +234,7 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
               {' \u00b7 Next '}{formatNextRun(lastRun, effectiveInterval)}
             </span>
           )}
-          {isEditable && onUpdateInterval && (
+          {isEditable && onUpdateInterval && !isAggregate && (
             <span
               style={styles.editIntervalLink}
               onClick={() => setShowIntervalEditor(!showIntervalEditor)}
@@ -273,11 +288,14 @@ const WORKERS_BY_GROUP = WORKER_GROUPS.map(group => ({
 
 function UnstickWorkersDropdown() {
   const { config, selectedRepoSlug } = useHydraFlow()
+  const isAggregate = selectedRepoSlug === REPO_ALL
   const [localValue, setLocalValue] = useState(null)
 
   const currentValue = localValue !== null ? localValue : (config?.pr_unstick_batch_size ?? 3)
 
   const handleChange = useCallback(async (e) => {
+    // Config writes target a single repo; the backend 400s repo=__all__.
+    if (selectedRepoSlug === REPO_ALL) return
     const newValue = parseInt(e.target.value, 10)
     setLocalValue(newValue)
     try {
@@ -308,7 +326,9 @@ function UnstickWorkersDropdown() {
       <select
         value={currentValue}
         onChange={handleChange}
-        style={styles.workersSelect}
+        disabled={isAggregate}
+        title={isAggregate ? AGGREGATE_EDIT_TIP : undefined}
+        style={{ ...styles.workersSelect, ...(isAggregate ? styles.controlDisabled : {}) }}
         data-testid="unstick-workers-dropdown"
       >
         {UNSTICK_BATCH_OPTIONS.map(n => (
@@ -525,6 +545,7 @@ function StagingPromotionStatusRow() {
 
 function StagingPromotionSettingsPanel() {
   const { config, selectedRepoSlug } = useHydraFlow()
+  const isAggregate = selectedRepoSlug === REPO_ALL
   const [local, setLocal] = useState(null)
   const [savingField, setSavingField] = useState(null)
   const [error, setError] = useState(null)
@@ -537,6 +558,8 @@ function StagingPromotionSettingsPanel() {
   }
 
   const patchField = useCallback(async (field, value) => {
+    // Config writes target a single repo; the backend 400s repo=__all__.
+    if (selectedRepoSlug === REPO_ALL) return
     const prev = current[field]
     setLocal({ ...current, [field]: value })
     setSavingField(field)
@@ -571,7 +594,8 @@ function StagingPromotionSettingsPanel() {
           <input
             type="checkbox"
             checked={!!current.staging_enabled}
-            disabled={savingField === 'staging_enabled'}
+            disabled={isAggregate || savingField === 'staging_enabled'}
+            title={isAggregate ? AGGREGATE_EDIT_TIP : undefined}
             onChange={e => patchField('staging_enabled', e.target.checked)}
             data-testid="staging-enabled-toggle"
           />
@@ -585,7 +609,8 @@ function StagingPromotionSettingsPanel() {
         <input
           type="text"
           value={current.main_branch}
-          disabled={savingField === 'main_branch'}
+          disabled={isAggregate || savingField === 'main_branch'}
+          title={isAggregate ? AGGREGATE_EDIT_TIP : undefined}
           onChange={e => setLocal({ ...current, main_branch: e.target.value })}
           onBlur={e => {
             const val = e.target.value.trim()
@@ -600,7 +625,8 @@ function StagingPromotionSettingsPanel() {
         <input
           type="text"
           value={current.staging_branch}
-          disabled={savingField === 'staging_branch'}
+          disabled={isAggregate || savingField === 'staging_branch'}
+          title={isAggregate ? AGGREGATE_EDIT_TIP : undefined}
           onChange={e => setLocal({ ...current, staging_branch: e.target.value })}
           onBlur={e => {
             const val = e.target.value.trim()
@@ -617,7 +643,8 @@ function StagingPromotionSettingsPanel() {
           min="1"
           max="168"
           value={current.rc_cadence_hours}
-          disabled={savingField === 'rc_cadence_hours'}
+          disabled={isAggregate || savingField === 'rc_cadence_hours'}
+          title={isAggregate ? AGGREGATE_EDIT_TIP : undefined}
           onChange={e => setLocal({ ...current, rc_cadence_hours: Number(e.target.value) })}
           onBlur={e => {
             const val = Number(e.target.value)
@@ -692,7 +719,7 @@ function StagingBranchSetupButton() {
 }
 
 
-function WorkerGroupSection({ group, backgroundWorkers, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval, events }) {
+function WorkerGroupSection({ group, backgroundWorkers, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval, events, isAggregate }) {
   const [collapsed, setCollapsed] = useState(false)
   const workerCount = group.workers.length
   const activeCount = group.workers.filter(w => {
@@ -730,6 +757,7 @@ function WorkerGroupSection({ group, backgroundWorkers, pipelinePollerLastRun, p
                 onTriggerBgWorker={onTriggerBgWorker}
                 onUpdateInterval={onUpdateInterval}
                 events={events}
+                isAggregate={isAggregate}
                 extraContent={
                   def.key === 'dependabot_merge' ? <DependabotMergeSettingsPanel /> :
                   def.key === 'pr_unsticker' ? <UnstickWorkersDropdown /> :
@@ -746,8 +774,31 @@ function WorkerGroupSection({ group, backgroundWorkers, pipelinePollerLastRun, p
 }
 
 export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval }) {
-  const { pipelinePollerLastRun, orchestratorStatus, events, pipelineIssues } = useHydraFlow()
+  const { pipelinePollerLastRun, orchestratorStatus, events, pipelineIssues, selectedRepoSlug } = useHydraFlow()
   const [activeSubTab, setActiveSubTab] = useState('workers')
+  const isAggregate = selectedRepoSlug === REPO_ALL
+
+  // Under "All repos" the worker list carries a `repo` per entry — render one
+  // group layout per repo so two repos' same-named workers don't collapse.
+  const reposInWorkers = isAggregate
+    ? [...new Set(backgroundWorkers.map(w => w.repo).filter(Boolean))].sort()
+    : []
+
+  const renderGroup = (group, workers, keyPrefix = '') => (
+    <WorkerGroupSection
+      key={`${keyPrefix}${group.key}`}
+      group={group}
+      backgroundWorkers={workers}
+      pipelinePollerLastRun={pipelinePollerLastRun}
+      pipelineIssues={pipelineIssues}
+      orchestratorStatus={orchestratorStatus}
+      onToggleBgWorker={onToggleBgWorker}
+      onTriggerBgWorker={onTriggerBgWorker}
+      onUpdateInterval={onUpdateInterval}
+      events={events}
+      isAggregate={isAggregate}
+    />
+  )
 
   return (
     <div style={styles.container}>
@@ -768,20 +819,27 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWo
       <div style={styles.subTabContent} data-testid="system-subtab-content">
         {activeSubTab === 'workers' && (
           <div style={styles.workersContent}>
-            {WORKERS_BY_GROUP.map((group) => (
-              <WorkerGroupSection
-                key={group.key}
-                group={group}
-                backgroundWorkers={backgroundWorkers}
-                pipelinePollerLastRun={pipelinePollerLastRun}
-                pipelineIssues={pipelineIssues}
-                orchestratorStatus={orchestratorStatus}
-                onToggleBgWorker={onToggleBgWorker}
-                onTriggerBgWorker={onTriggerBgWorker}
-                onUpdateInterval={onUpdateInterval}
-                events={events}
-              />
-            ))}
+            {isAggregate && (
+              <div style={styles.aggregateNotice} data-testid="workers-aggregate-notice">
+                Showing worker status across all repos. Worker controls are
+                per-repo — select a specific repo to toggle, trigger, or
+                reschedule a worker.
+              </div>
+            )}
+            {isAggregate
+              ? reposInWorkers.map((repo) => (
+                  <div key={repo} data-testid={`workers-repo-${repo}`} style={styles.repoSection}>
+                    <div style={styles.repoSectionLabel}>{repo}</div>
+                    {WORKERS_BY_GROUP.map((group) =>
+                      renderGroup(
+                        group,
+                        backgroundWorkers.filter((w) => w.repo === repo),
+                        `${repo}-`,
+                      ),
+                    )}
+                  </div>
+                ))
+              : WORKERS_BY_GROUP.map((group) => renderGroup(group, backgroundWorkers))}
           </div>
         )}
         {activeSubTab === 'pipeline' && (
@@ -840,6 +898,31 @@ const styles = {
     flex: 1,
     overflowY: 'auto',
     padding: 20,
+  },
+  aggregateNotice: {
+    background: theme.surfaceInset,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 6,
+    padding: '8px 12px',
+    marginBottom: 16,
+    color: theme.textMuted,
+    fontSize: 12,
+    lineHeight: 1.5,
+  },
+  repoSection: {
+    marginBottom: 20,
+  },
+  repoSectionLabel: {
+    color: theme.textBright,
+    fontSize: 13,
+    fontWeight: 600,
+    margin: '4px 0 10px',
+    paddingBottom: 6,
+    borderBottom: `1px solid ${theme.border}`,
+  },
+  controlDisabled: {
+    opacity: 0.45,
+    cursor: 'not-allowed',
   },
   diagnosticsLoading: {
     padding: 32,

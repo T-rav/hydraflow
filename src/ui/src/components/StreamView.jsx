@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useState } from 'react'
 import { theme } from '../theme'
-import { useHydraFlow } from '../context/HydraFlowContext'
+import { useHydraFlow, workerKey } from '../context/HydraFlowContext'
 import { StreamCard } from './StreamCard'
 import { PIPELINE_STAGES, PRODUCT_TRACK_KEYS, PULSE_ANIMATION } from '../constants'
 import { STAGE_KEYS } from '../hooks/useTimeline'
@@ -202,7 +202,7 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
                 intent={intentMap.get(issue.issueNumber)}
                 defaultExpanded={issue.overallStatus === 'active'}
                 onRequestChanges={onRequestChanges}
-                transcript={findWorkerTranscript(workers, prs, stage.key, issue.issueNumber)}
+                transcript={findWorkerTranscript(workers, prs, stage.key, issue.issueNumber, issue.repo)}
               />
             ))}
             {Object.entries(epicGroups).map(([epicNum, epicIssues]) => (
@@ -214,7 +214,7 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
                     intent={intentMap.get(issue.issueNumber)}
                     defaultExpanded={issue.overallStatus === 'active'}
                     onRequestChanges={onRequestChanges}
-                    transcript={findWorkerTranscript(workers, prs, stage.key, issue.issueNumber)}
+                    transcript={findWorkerTranscript(workers, prs, stage.key, issue.issueNumber, issue.repo)}
                   />
                 ))}
               </EpicContainer>
@@ -254,8 +254,11 @@ export function toStreamIssue(pipeIssue, stageKey, prs) {
     }
   }
 
-  // Match PR from prs array
-  const matchedPr = (prs || []).find(p => p.issue === pipeIssue.issue_number)
+  // Match PR from prs array — repo-qualified so two repos' same issue number
+  // don't resolve to the wrong repo's PR under repo=__all__.
+  const matchedPr = (prs || []).find(
+    p => p.issue === pipeIssue.issue_number && (p.repo ?? null) === (pipeIssue.repo ?? null),
+  )
   const pr = matchedPr ? { number: matchedPr.pr, url: matchedPr.url || null } : null
 
   return {
@@ -283,23 +286,25 @@ export function toStreamIssue(pipeIssue, stageKey, prs) {
  * Find the transcript array for a given issue in a pipeline stage.
  * Worker keys vary by stage: triage-{issue}, plan-{issue}, {issue} (implement), review-{pr}.
  */
-export function findWorkerTranscript(workers, prs, stageKey, issueNumber) {
+export function findWorkerTranscript(workers, prs, stageKey, issueNumber, repo = null) {
   if (!workers) return []
   let key
   switch (stageKey) {
     case 'triage':
-      key = `triage-${issueNumber}`
+      key = `triage-${workerKey(repo, issueNumber)}`
       break
     case 'plan':
-      key = `plan-${issueNumber}`
+      key = `plan-${workerKey(repo, issueNumber)}`
       break
     case 'implement':
-      key = String(issueNumber)
+      key = workerKey(repo, issueNumber)
       break
     case 'review': {
-      const pr = (prs || []).find(p => p.issue === issueNumber)
+      const pr = (prs || []).find(
+        p => p.issue === issueNumber && (p.repo ?? null) === (repo ?? null),
+      )
       if (!pr) return []
-      key = `review-${pr.pr}`
+      key = `review-${workerKey(repo, pr.pr)}`
       break
     }
     default:

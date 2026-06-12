@@ -25,4 +25,20 @@ describe('IssueTable', () => {
     render(<IssueTable rows={[]} onRowClick={() => {}} />)
     expect(screen.getByText(/No data/i)).toBeInTheDocument()
   })
+
+  it('omits the repo column for single-repo rows', () => {
+    render(<IssueTable rows={sample} onRowClick={() => {}} />)
+    expect(screen.queryByText('Repo')).not.toBeInTheDocument()
+  })
+
+  it('shows a repo column when rows are repo-attributed', () => {
+    const repoRows = [
+      { ...sample[0], repo: 'org-a' },
+      { ...sample[1], repo: 'org-b' },
+    ]
+    render(<IssueTable rows={repoRows} onRowClick={() => {}} />)
+    expect(screen.getByText('Repo')).toBeInTheDocument()
+    expect(screen.getByText('org-a')).toBeInTheDocument()
+    expect(screen.getByText('org-b')).toBeInTheDocument()
+  })
 })

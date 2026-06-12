@@ -7,10 +7,11 @@ from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
-from dedup_store import DedupStore
+from rollup_issue_manager import RollupIssueManager
 
 if TYPE_CHECKING:
     from ports import PRPort
+    from state import StateTracker
 
 logger = logging.getLogger("hydraflow.security_patch_loop")
 
@@ -22,30 +23,54 @@ _SEVERITY_RANK: dict[str, int] = {
     "low": 3,
 }
 
+# Dependabot alert states that mean "no longer an open vulnerability". Querying
+# these explicitly (rather than closing "every tracked issue not in the open
+# set") is what makes recovery safe: ``get_dependabot_alerts`` returns ``[]`` on
+# a transient API error, so an open-set reconcile would mass-close every
+# security issue. A resolved-state query that errors also returns ``[]`` — which
+# closes nothing.
+_RESOLVED_STATES: tuple[str, ...] = ("fixed", "dismissed", "auto_dismissed")
+
 
 class SecurityPatchLoop(BaseBackgroundLoop):
     """Periodically polls Dependabot alerts and files issues for fixable vulnerabilities.
 
     Only processes alerts at or above the configured severity threshold and
-    that have a ``first_patched_version`` available.  Uses :class:`DedupStore`
-    to avoid filing duplicate issues for the same alert number.
+    that have a ``first_patched_version`` available.  One open issue is kept per
+    alert via :class:`RollupIssueManager` (namespace ``security_patch``); when
+    GitHub reports the alert ``fixed``/``dismissed`` the issue is auto-closed
+    (#9359).
     """
 
     def __init__(
         self,
         config: HydraFlowConfig,
         pr_manager: PRPort,
+        state: StateTracker,
         deps: LoopDeps,
     ) -> None:
         super().__init__(worker_name="security_patch", config=config, deps=deps)
         self._pr_manager = pr_manager
-        self._dedup = DedupStore(
-            "security_patch_alerts",
-            config.data_root / "memory" / "security_patch_dedup.json",
-        )
+        self._state = state
 
     def _get_default_interval(self) -> int:
         return self._config.security_patch_interval
+
+    def _rollups(self) -> RollupIssueManager:
+        """One open ``security`` issue per Dependabot alert number.
+
+        ``RollupIssueManager`` subsumes the old local ``DedupStore`` *and* the
+        GitHub-side dedup backstop: ``ensure`` tracks the issue number in
+        ``state.rollup_issues`` and, if that state is lost, ``create_issue``'s
+        exact-title dedup returns the existing number so the issue is re-adopted
+        rather than duplicated.
+        """
+        return RollupIssueManager(
+            pr=self._pr_manager,
+            state=self._state,
+            namespace="security_patch",
+            labels=["security"],
+        )
 
     def _meets_severity(self, severity: str) -> bool:
         """Return True if *severity* meets or exceeds the configured threshold."""
@@ -84,23 +109,17 @@ class SecurityPatchLoop(BaseBackgroundLoop):
         if self._config.dry_run:
             return None
 
+        rollup = self._rollups()
         alerts = await self._pr_manager.get_dependabot_alerts(state="open")
-        seen = self._dedup.get()
 
         filed = 0
         skipped_dedup = 0
-        skipped_existing = 0
         skipped_unfixable = 0
         skipped_severity = 0
 
         for alert in alerts:
             alert_key = str(alert.get("number", ""))
             if not alert_key:
-                continue
-
-            # Skip already-processed alerts
-            if alert_key in seen:
-                skipped_dedup += 1
                 continue
 
             # Skip unfixable alerts
@@ -124,41 +143,62 @@ class SecurityPatchLoop(BaseBackgroundLoop):
                 f"A patched version is available. Please update the dependency.\n"
             )
 
-            # GitHub-side backstop: the local dedup file can lose an entry if a
-            # prior tick crashed between create_issue and dedup.add, which would
-            # otherwise re-file a duplicate security issue. GitHub is the durable
-            # source of truth — if an open issue with this exact title already
-            # exists, skip the create and heal the local dedup. find_existing_issue
-            # returns 0 when none is found (the common path), so creation proceeds.
-            existing = await self._pr_manager.find_existing_issue(title)
-            if existing:
-                self._dedup.add(alert_key)
-                skipped_existing += 1
-                logger.info(
-                    "Security issue for alert #%s already open as #%s; "
-                    "skipping duplicate and healing local dedup",
-                    alert_key,
-                    existing,
-                )
-                continue
-
-            await self._pr_manager.create_issue(title, body, labels=["security"])
-            self._dedup.add(alert_key)
-            filed += 1
-
-            logger.info(
-                "Filed security issue for alert #%s: %s in %s (%s)",
-                alert_key,
-                summary,
-                pkg,
-                severity,
+            # ensure() creates one issue per alert and is a no-op when it is
+            # already tracked (or already open on GitHub by title) — so the old
+            # local-dedup + find_existing_issue backstop are both internal now.
+            already = (
+                self._state.get_rollup_issue(f"security_patch:{alert_key}") is not None
             )
+            await rollup.ensure(alert_key, title=title, body=body)
+            if already:
+                skipped_dedup += 1
+            else:
+                filed += 1
+                logger.info(
+                    "Filed security issue for alert #%s: %s in %s (%s)",
+                    alert_key,
+                    summary,
+                    pkg,
+                    severity,
+                )
+
+        closed = await self._close_resolved(rollup)
 
         return {
             "total_alerts": len(alerts),
             "filed": filed,
+            "closed": closed,
             "skipped_dedup": skipped_dedup,
-            "skipped_existing": skipped_existing,
             "skipped_unfixable": skipped_unfixable,
             "skipped_severity": skipped_severity,
         }
+
+    async def _close_resolved(self, rollup: RollupIssueManager) -> int:
+        """Close security issues for alerts GitHub now reports as resolved (#9359).
+
+        Queries the resolved alert states explicitly (``fixed`` / ``dismissed``
+        / ``auto_dismissed``) and ``resolve``\\ s only the tracked subjects in
+        that set. ``resolve`` is a no-op for an untracked alert, so this never
+        touches an issue we did not file, and a failed (``[]``) query closes
+        nothing — sidestepping the mass-close hazard of an open-set reconcile.
+        """
+        resolved_keys: set[str] = set()
+        for resolved_state in _RESOLVED_STATES:
+            for alert in await self._pr_manager.get_dependabot_alerts(
+                state=resolved_state
+            ):
+                key = str(alert.get("number", ""))
+                if key:
+                    resolved_keys.add(key)
+
+        closed = 0
+        for key in sorted(resolved_keys):
+            if await rollup.resolve(
+                key,
+                comment=(
+                    "Dependabot alert resolved — auto-closing security issue (#9359)."
+                ),
+            ):
+                closed += 1
+                logger.info("Closed security issue for resolved alert #%s", key)
+        return closed

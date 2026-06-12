@@ -16,8 +16,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import ci_sentinels
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from rollup_issue_manager import RollupIssueManager
 
 if TYPE_CHECKING:
     from ports import PRPort
@@ -43,6 +45,20 @@ class StagingPromotionLoop(BaseBackgroundLoop):
 
     def _get_default_interval(self) -> int:
         return self._config.staging_promotion_interval
+
+    def _rollups(self) -> RollupIssueManager | None:
+        """One rolling "promotion CI is failing" issue, auto-closed on a green
+        promotion — replaces the per-PR ``RC promotion #N failed CI`` pile-up
+        (#9219..#9342). ``None`` when state is absent (unit tests fall back to
+        create_issue's stable-title dedup)."""
+        if self._state is None:
+            return None
+        return RollupIssueManager(
+            pr=self._prs,
+            state=self._state,
+            namespace="staging_promotion",
+            labels=list(self._config.find_label or ["hydraflow-find"]),
+        )
 
     async def _do_work(self) -> dict[str, Any] | None:
         if not self._enabled_cb(self._worker_name):
@@ -89,23 +105,32 @@ class StagingPromotionLoop(BaseBackgroundLoop):
                     if head_sha:
                         self._state.set_last_green_rc_sha(head_sha)
                         self._state.reset_auto_reverts_in_cycle()
+                    # A green promotion clears the consecutive-failure streak so
+                    # a future stall re-escalates from scratch (#9359 hardening).
+                    self._state.reset_consecutive_rc_failures()
+                    # CI is green again — close the single rolling "promotion CI
+                    # failing" issue if one is open (#9359 issue-hygiene).
+                    rollups = self._rollups()
+                    if rollups is not None:
+                        await rollups.resolve(
+                            "rc_ci",
+                            comment=(
+                                f"RC promotion to {self._config.main_branch} "
+                                "succeeded — auto-closing."
+                            ),
+                        )
                 return {"status": "promoted", "pr": pr_number}
             logger.warning("Promotion merge failed for PR #%d", pr_number)
             return {"status": "merge_failed", "pr": pr_number}
 
-        # wait_for_ci returns "Timeout after {N}s" when CI is still running past
-        # the poll window, and "Stopped" when the kill-switch fires mid-poll.
-        # Neither is a real CI failure — leave the PR open for the next cadence
-        # tick rather than force-closing a still-green RC PR. The old guard only
-        # matched the literal substring "timed out", which "Timeout after 60s"
-        # does NOT contain, so every slow-CI tick closed a passing PR and filed a
-        # noise issue — issues #9219..#9342, ~3 days of stalled main promotion.
-        summary_lower = summary.lower()
-        if (
-            summary_lower.startswith("timeout")
-            or "timed out" in summary_lower
-            or summary == "Stopped"
-        ):
+        # wait_for_ci can return WITHOUT a CI verdict: a timeout (the poll window
+        # elapsed while CI was still running) or "Stopped" (kill-switch fired
+        # mid-poll). Neither is a CI failure — leave the PR open for the next
+        # cadence tick rather than force-closing a still-green RC PR. The
+        # sentinel + "incomplete" classification are single-sourced in
+        # ci_sentinels so the producer (pr_manager) and this consumer can't drift
+        # again — that drift stalled main promotion ~3 days (#9219..#9342, #9351).
+        if ci_sentinels.is_ci_incomplete(summary):
             return {"status": "ci_pending", "pr": pr_number}
 
         issue_number = await self._file_failure_issue(pr_number, summary)
@@ -132,6 +157,15 @@ class StagingPromotionLoop(BaseBackgroundLoop):
                 red_sha = ""
             if red_sha:
                 self._state.set_last_rc_red_sha_and_bump_cycle(red_sha)
+            # Repeated-failure escalation: one per-PR find-issue per failure
+            # gives no signal that the WHOLE pipeline is stuck. After N
+            # consecutive failures escalate ONCE to a human, so a multi-day stall
+            # (like #9219..#9342, where main silently didn't advance for ~3 days)
+            # can't pass unnoticed. Fires exactly once per streak (== threshold);
+            # the next green promotion resets the counter. #9359 hardening.
+            failures = self._state.increment_consecutive_rc_failures()
+            if failures == self._config.rc_consecutive_failure_escalation_threshold:
+                await self._file_repeated_failure_escalation(pr_number, failures)
         return {
             "status": "ci_failed",
             "pr": pr_number,
@@ -139,21 +173,70 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         }
 
     async def _file_failure_issue(self, pr_number: int, summary: str) -> int:
-        labels = self._config.find_label or ["hydraflow-find"]
-        title = f"RC promotion #{pr_number} failed CI"
+        # STABLE title (no PR number) so a single rolling issue tracks "promotion
+        # CI is currently failing", updated in place each cadence tick and closed
+        # automatically on the next green promotion. The old per-PR title filed a
+        # brand-new issue every tick (#9219..#9342). #9359 issue-hygiene.
+        labels = list(self._config.find_label or ["hydraflow-find"])
+        title = f"RC promotion to {self._config.main_branch} failing CI"
         body = (
             f"Automated promotion PR #{pr_number} failed CI and was closed.\n\n"
-            f"The StagingPromotionLoop will retry on the next cadence tick.\n\n"
+            f"The StagingPromotionLoop retries on each cadence tick; this issue "
+            f"updates in place while staging→{self._config.main_branch} CI stays "
+            f"red, and auto-closes on the next green promotion.\n\n"
             "Investigate whether the failure is:\n"
             "- a real regression → fix before the next cadence\n"
             "- a flake → re-open the PR or wait for the next cycle\n"
             "- an environmental issue → fix CI config\n\n"
             f"```\n{summary}\n```"
         )
+        rollups = self._rollups()
+        if rollups is not None:
+            return await rollups.ensure("rc_ci", title=title, body=body)
+        # State-less fallback (unit tests): create_issue's exact-title dedup on
+        # the now-stable title still prevents per-tick pile-up.
         try:
             return await self._prs.create_issue(title, body, labels)
         except Exception:  # noqa: BLE001
             logger.exception("Failed to file hydraflow-find issue for PR %d", pr_number)
+            return 0
+
+    async def _file_repeated_failure_escalation(
+        self, pr_number: int, failures: int
+    ) -> int:
+        """Escalate to a human when promotions fail repeatedly.
+
+        Per-PR ``RC promotion #N failed CI`` find-issues give no signal that the
+        WHOLE staging→main pipeline is stuck — exactly how the #9351 timeout bug
+        stalled ``main`` for ~3 days unnoticed. After
+        ``rc_consecutive_failure_escalation_threshold`` consecutive failures we
+        file ONE ``hitl-escalation`` issue so a human looks at the pipeline, not
+        just the latest red PR.
+        """
+        labels = list(self._config.hitl_escalation_label or ["hitl-escalation"])
+        for lbl in self._config.rc_promotion_stuck_label:
+            if lbl not in labels:
+                labels.append(lbl)
+        title = f"staging→main promotion stuck: {failures} consecutive RC failures"
+        body = (
+            f"The StagingPromotionLoop has failed to promote `staging` → "
+            f"`{self._config.main_branch}` **{failures} times in a row** "
+            f"(latest: RC PR #{pr_number}). `main` is not advancing.\n\n"
+            "A single rolling `RC promotion to main failing CI` issue tracks the "
+            "red state, but this escalation means the pipeline needs a human:\n"
+            "- a real regression on `staging` blocking every RC (run the failing "
+            "gate locally to bisect), or\n"
+            "- a systemic CI/promotion-loop defect (e.g. the #9351 timeout "
+            "misclassification that silently force-closed green PRs).\n\n"
+            "This fires once per failure streak; the next successful promotion "
+            "clears the counter."
+        )
+        try:
+            return await self._prs.create_issue(title, body, labels)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Failed to file repeated-failure escalation (failures=%d)", failures
+            )
             return 0
 
     async def _cut_new_rc(self) -> dict[str, Any]:

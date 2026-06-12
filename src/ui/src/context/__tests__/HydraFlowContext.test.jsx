@@ -114,6 +114,129 @@ describe('HydraFlowContext reducer', () => {
     expect(next.pipelineIssues.plan[0].repo).toBe('owner-a')
   })
 
+  // --- Phase 4: merged repo=__all__ realtime dedup -------------------------
+
+  it('__all__ keeps two events with the same id but different repo', () => {
+    const state = {
+      ...initialState,
+      selectedRepoSlug: '__all__',
+      events: [{ type: 'log', timestamp: 't1', data: {}, id: 5, repo: 'owner-a' }],
+    }
+    const next = reducer(state, { type: 'log', timestamp: 't2', data: {}, id: 5, repo: 'owner-b' })
+    expect(next.events).toHaveLength(2)
+    expect(next.events.map(e => e.repo).sort()).toEqual(['owner-a', 'owner-b'])
+  })
+
+  it('__all__ drops an exact (repo, id) duplicate', () => {
+    const state = {
+      ...initialState,
+      selectedRepoSlug: '__all__',
+      events: [{ type: 'log', timestamp: 't1', data: {}, id: 5, repo: 'owner-a' }],
+    }
+    const next = reducer(state, { type: 'log', timestamp: 't2', data: {}, id: 5, repo: 'owner-a' })
+    expect(next.events).toHaveLength(1)
+  })
+
+  it('single-repo still drops an event whose id is at/below the watermark', () => {
+    const state = { ...initialState, selectedRepoSlug: null, lastSeenId: 5, events: [] }
+    const next = reducer(state, { type: 'log', timestamp: 't', data: {}, id: 3 })
+    expect(next.events).toHaveLength(0)
+  })
+
+  it('addEvent carries the event repo onto the stored event', () => {
+    const next = reducer(
+      { ...initialState, selectedRepoSlug: '__all__' },
+      { type: 'log', timestamp: 't', data: {}, id: 1, repo: 'owner-z' },
+    )
+    expect(next.events[0].repo).toBe('owner-z')
+  })
+
+  it('BACKFILL keeps cross-repo same type+timestamp frames and preserves repo', () => {
+    const next = reducer(initialState, {
+      type: 'BACKFILL_EVENTS',
+      data: [
+        { type: 'log', timestamp: 'tX', data: {}, id: 1, repo: 'owner-a' },
+        { type: 'log', timestamp: 'tX', data: {}, id: 1, repo: 'owner-b' },
+      ],
+    })
+    expect(next.events).toHaveLength(2)
+    expect(next.events.map(e => e.repo).sort()).toEqual(['owner-a', 'owner-b'])
+  })
+
+  it('__all__ does not advance the single-repo watermark', () => {
+    const state = { ...initialState, selectedRepoSlug: '__all__', lastSeenId: -1 }
+    const next = reducer(state, { type: 'log', timestamp: 't', data: {}, id: 900, repo: 'owner-a' })
+    expect(next.lastSeenId).toBe(-1)
+  })
+
+  it('SELECT_REPO resets the dedup watermark on a scope change', () => {
+    const state = { ...initialState, selectedRepoSlug: 'owner-a', lastSeenId: 50 }
+    const next = reducer(state, { type: 'SELECT_REPO', data: { slug: 'owner-b' } })
+    expect(next.lastSeenId).toBe(-1)
+  })
+
+  it('SELECT_REPO clears prior-scope background workers on a change', () => {
+    const state = {
+      ...initialState,
+      selectedRepoSlug: 'owner-a',
+      backgroundWorkers: [{ name: 'pr_unsticker', status: 'ok', repo: '' }],
+    }
+    const next = reducer(state, { type: 'SELECT_REPO', data: { slug: '__all__' } })
+    expect(next.backgroundWorkers).toEqual([])
+  })
+
+  it('SELECT_REPO clears repo-scoped human-input / intents / escalation on a change', () => {
+    const state = {
+      ...initialState,
+      selectedRepoSlug: 'owner-a',
+      humanInputRequests: { 42: { issue: 42 } },
+      intents: [{ text: 'do a thing', status: 'pending' }],
+      hitlEscalation: { issue: 42 },
+    }
+    const next = reducer(state, { type: 'SELECT_REPO', data: { slug: 'owner-b' } })
+    expect(next.humanInputRequests).toEqual({})
+    expect(next.intents).toEqual([])
+    expect(next.hitlEscalation).toBeNull()
+  })
+
+  // --- Phase 4-b2: worker/PR card composite-keying ------------------------
+
+  it('worker_update keys by repo so same-issue cards across repos coexist (__all__)', () => {
+    let s = { ...initialState, selectedRepoSlug: '__all__' }
+    s = reducer(s, { type: 'worker_update', repo: 'owner-a', data: { issue: 5, status: 'active', worker: 1 } })
+    s = reducer(s, { type: 'worker_update', repo: 'owner-b', data: { issue: 5, status: 'active', worker: 1 } })
+    expect(Object.keys(s.workers).sort()).toEqual(['owner-a#5', 'owner-b#5'])
+  })
+
+  it('triage_update keys by repo (cross-repo same issue coexist)', () => {
+    let s = { ...initialState, selectedRepoSlug: '__all__' }
+    s = reducer(s, { type: 'triage_update', repo: 'owner-a', data: { issue: 5, status: 'active', worker: 1 } })
+    s = reducer(s, { type: 'triage_update', repo: 'owner-b', data: { issue: 5, status: 'active', worker: 1 } })
+    expect(Object.keys(s.workers).sort()).toEqual(['triage-owner-a#5', 'triage-owner-b#5'])
+  })
+
+  it('pr_created keeps cross-repo same PR number distinct (__all__)', () => {
+    let s = { ...initialState, selectedRepoSlug: '__all__' }
+    s = reducer(s, { type: 'pr_created', repo: 'owner-a', data: { pr: 7, issue: 5 } })
+    s = reducer(s, { type: 'pr_created', repo: 'owner-b', data: { pr: 7, issue: 5 } })
+    expect(s.prs).toHaveLength(2)
+    expect(s.prs.map(p => p.repo).sort()).toEqual(['owner-a', 'owner-b'])
+  })
+
+  it('merge_update marks the matching repo PR, not a same-number PR in another repo', () => {
+    let s = { ...initialState, selectedRepoSlug: '__all__' }
+    s = reducer(s, { type: 'pr_created', repo: 'owner-a', data: { pr: 7, issue: 5 } })
+    s = reducer(s, { type: 'pr_created', repo: 'owner-b', data: { pr: 7, issue: 5 } })
+    s = reducer(s, { type: 'merge_update', repo: 'owner-b', data: { pr: 7, status: 'merged' } })
+    expect(s.prs.find(p => p.repo === 'owner-a').merged).toBeUndefined()
+    expect(s.prs.find(p => p.repo === 'owner-b').merged).toBe(true)
+  })
+
+  it('single-repo worker_update still uses the bare issue key', () => {
+    const next = reducer(initialState, { type: 'worker_update', data: { issue: 5, status: 'active', worker: 1 } })
+    expect(Object.keys(next.workers)).toEqual(['5'])
+  })
+
   it('GITHUB_METRICS action sets githubMetrics state', () => {
     const data = {
       open_by_label: { 'hydraflow-plan': 3, 'hydraflow-ready': 1 },
@@ -707,6 +830,46 @@ describe('startRuntime compatibility flow', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ slug: 'demo' }),
     })
+  })
+
+  it('threads the selected repo to bg-worker mutations and no-ops in all-mode', async () => {
+    vi.resetModules()
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    })
+
+    const { HydraFlowProvider, useHydraFlow } = await import('../HydraFlowContext')
+    let cap = null
+    function Cap() {
+      cap = useHydraFlow()
+      return <div>ready</div>
+    }
+    await act(async () => {
+      render(
+        <HydraFlowProvider>
+          <Cap />
+        </HydraFlowProvider>
+      )
+    })
+
+    // A specific repo selected → the bg-worker POST carries ?repo=.
+    await act(async () => { cap.selectRepo('org-b') })
+    await act(async () => { await cap.toggleBgWorker('pr_unsticker', false) })
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/control/bg-worker?repo=org-b',
+      expect.objectContaining({ method: 'POST' })
+    )
+
+    // Aggregate mode → worker mutations are no-ops (backend rejects __all__).
+    fetchSpy.mockClear()
+    await act(async () => { cap.selectRepo('__all__') })
+    await act(async () => { await cap.toggleBgWorker('pr_unsticker', true) })
+    const bgCalls = fetchSpy.mock.calls.filter(c =>
+      String(c[0]).includes('/api/control/bg-worker')
+    )
+    expect(bgCalls).toHaveLength(0)
   })
   it('falls back to /api/repos/add by path when POST /api/repos is not supported', async () => {
     vi.resetModules()
@@ -1352,6 +1515,22 @@ describe('background_worker_status action', () => {
     })
     const worker = result.backgroundWorkers.find(w => w.name === 'memory_sync')
     expect(worker.interval_seconds).toBeNull()
+  })
+
+  it('__all__ keeps two repos same-named worker (keyed by repo,name)', () => {
+    let s = { ...initialState, selectedRepoSlug: '__all__' }
+    s = reducer(s, { type: 'background_worker_status', repo: 'org-a', data: { worker: 'pr_unsticker', status: 'ok', details: {} } })
+    s = reducer(s, { type: 'background_worker_status', repo: 'org-b', data: { worker: 'pr_unsticker', status: 'ok', details: {} } })
+    expect(s.backgroundWorkers).toHaveLength(2)
+    expect(s.backgroundWorkers.map(w => w.repo).sort()).toEqual(['org-a', 'org-b'])
+  })
+
+  it('single-repo still replaces a same-named worker (name-only keying)', () => {
+    let s = { ...initialState, selectedRepoSlug: null }
+    s = reducer(s, { type: 'background_worker_status', repo: 'org-a', data: { worker: 'pr_unsticker', status: 'ok', details: {} } })
+    s = reducer(s, { type: 'background_worker_status', repo: 'org-a', data: { worker: 'pr_unsticker', status: 'error', details: {} } })
+    expect(s.backgroundWorkers).toHaveLength(1)
+    expect(s.backgroundWorkers[0].status).toBe('error')
   })
 })
 

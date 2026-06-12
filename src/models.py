@@ -1889,6 +1889,12 @@ class StateData(BaseModel):
     # rollup issue number + the set of PR numbers currently listed in the body.
     # Used so subsequent ticks update the body in-place rather than re-filing.
     adr_rollup_issues: dict[str, dict] = Field(default_factory=dict)
+    # Generic rollup tracking for RollupIssueManager (#9359 hygiene). Keyed by
+    # "{namespace}:{subject}" (e.g. "staging_promotion:rc_ci"); value is
+    # {"issue_number": int, "content_hash": str}. Lets any loop keep ONE open
+    # issue per subject (create-once, update_issue_body on change) and close it
+    # on resolve — so resolved conditions stop accumulating stale find-issues.
+    rollup_issues: dict[str, dict] = Field(default_factory=dict)
     memory_backlog_attempts: dict[str, int] = Field(default_factory=dict)
     # TriageRetryLoop (ADR-0063 W2) — per-issue retry counters and the
     # ISO-8601 timestamp of the last retry attempt, used to honour the
@@ -1929,6 +1935,11 @@ class StateData(BaseModel):
     last_green_rc_sha: str = ""
     last_rc_red_sha: str = ""
     rc_cycle_id: int = 0
+    # StagingPromotionLoop consecutive-failure streak. Incremented on each RC
+    # promotion CI failure, reset to 0 on a green promotion. Crossing
+    # ``rc_consecutive_failure_escalation_threshold`` files one HITL escalation
+    # so a multi-day pipeline stall can't pass unnoticed (#9359 hardening).
+    consecutive_rc_failures: int = 0
     auto_reverts_in_cycle: int = 0
     auto_reverts_successful: int = 0
     flake_reruns_total: int = 0
@@ -3204,6 +3215,11 @@ class IssueTimeline(BaseModel):
     pr_number: int | None = None
     pr_url: HttpUrl = ""
     branch: str = ""
+    # Dash slug of the owning repo. Empty in single-repo responses (the default
+    # scope); populated only when an aggregate (``repo=__all__``) response
+    # unions timelines across repos, so a same-numbered issue in two repos
+    # stays distinguishable. Not persisted — set at the API layer.
+    repo: str = ""
 
 
 class CompletedTimeline(BaseModel):
@@ -3218,6 +3234,9 @@ class CompletedTimeline(BaseModel):
     total_duration_seconds: float = 0.0
     phase_durations: dict[str, float] = Field(default_factory=dict)
     pr_number: int | None = None
+    # Dash slug of the owning repo — populated only in aggregate
+    # (``repo=__all__``) responses; empty when stored or served single-repo.
+    repo: str = ""
 
 
 # --- Repo Audit ---

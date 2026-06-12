@@ -122,3 +122,39 @@ class TestFakeCoverageAuditor:
         assert "hydraflow-test-helper" in issue.labels
         assert "hydraflow-fake-coverage-gap" in issue.labels
         assert "hydraflow-find" in issue.labels
+
+    async def test_unregistered_fake_files_no_adapter_gap(self, tmp_path) -> None:
+        """A fake absent from _FAKE_TO_CASSETTE_DIR (no recordable cassette
+        surface) must not produce an adapter-surface gap — no cassette-root
+        fallback flagging every public method (auditor right-sizing)."""
+        world = MockWorld(tmp_path)
+
+        repo = tmp_path / "repo"
+        fake_dir = repo / "src" / "mockworld" / "fakes"
+        fake_dir.mkdir(parents=True)
+        # FakeBeads is not a cassette-capable adapter (no recorder/cassette dir).
+        (fake_dir / "fake_beads.py").write_text(
+            "class FakeBeads:\n"
+            "    async def claim(self, n): ...\n"
+            "    async def close(self, n): ...\n"
+        )
+        # A real github cassette dir exists; pre-fix this is what the root
+        # fallback scanned, flagging FakeBeads.claim/close as "uncovered".
+        (repo / "tests" / "trust" / "contracts" / "cassettes" / "github").mkdir(
+            parents=True
+        )
+
+        _seed_ports(
+            world,
+            fake_coverage_reconcile_closed=AsyncMock(return_value=None),
+            fake_coverage_grep=AsyncMock(return_value=True),
+        )
+
+        await world.run_with_loops(["fake_coverage_auditor"], cycles=1)
+
+        assert (
+            await world.github.list_issues_by_label("hydraflow-adapter-surface") == []
+        )
+        assert (
+            await world.github.list_issues_by_label("hydraflow-fake-coverage-gap") == []
+        )

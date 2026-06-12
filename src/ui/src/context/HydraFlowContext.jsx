@@ -68,16 +68,32 @@ function normalizeRepoSlug(value) {
 
 function isDuplicate(state, action) {
   const eventId = action.id ?? -1
-  return eventId !== -1 && eventId <= state.lastSeenId
+  if (eventId === -1) return false
+  // Aggregate (repo=__all__) view: event ids only approximate order across
+  // buses and collide across repos' persisted history, so the monotonic
+  // watermark would wrongly drop a lagging bus's lower id. De-collide on
+  // (repo, id) against the bounded event log instead.
+  if (state.selectedRepoSlug === REPO_ALL) {
+    const repo = action.repo ?? null
+    return state.events.some(e => e.id === eventId && (e.repo ?? null) === repo)
+  }
+  // Single-repo: ids are monotonic, the watermark is the cheap correct dedup.
+  return eventId <= state.lastSeenId
 }
 
 function addEvent(state, action) {
   const eventId = action.id ?? -1
   if (isDuplicate(state, action)) return state
-  const event = { type: action.type, timestamp: action.timestamp, data: action.data, id: eventId }
+  // Carry the event's repo so the aggregate view can badge it and de-collide
+  // cross-repo events that share an issue/pr/id.
+  const event = { type: action.type, timestamp: action.timestamp, data: action.data, id: eventId, repo: action.repo ?? null }
   return {
     ...state,
-    lastSeenId: eventId !== -1 ? eventId : state.lastSeenId,
+    // lastSeenId is the single-repo watermark only. In the aggregate view dedup
+    // is (repo, id)-based, so leave the watermark untouched there — advancing it
+    // would wrongly gate a later single-repo session's lower ids.
+    lastSeenId:
+      eventId !== -1 && state.selectedRepoSlug !== REPO_ALL ? eventId : state.lastSeenId,
     events: [event, ...state.events].slice(0, MAX_EVENTS),
   }
 }
@@ -86,6 +102,17 @@ function addEvent(state, action) {
 // Single-repo items carry their own repo slug, so the key is stable there too.
 function issueKey(item) {
   return `${item?.repo ?? ''}#${item?.issue_number}`
+}
+
+// Repo-qualified worker-state key. Live worker/transcript/activity reducers key
+// their map by this so two repos' same issue/pr number render as distinct cards
+// under repo=__all__. The role-prefixed keys (triage-/plan-/review-) compose on
+// top of it. Exported so StreamView's transcript lookup builds the same key.
+export function workerKey(repo, id) {
+  // Degrade to the bare id when there's no repo (single-repo events were not
+  // repo-tagged pre-multi-repo) so the key is stable; a real slug (host or an
+  // aggregated repo) qualifies it as `${repo}#${id}` to de-collide under __all__.
+  return repo ? `${repo}#${id}` : String(id)
 }
 
 function mergeStageIssues(existingIssues, incomingIssues) {
@@ -169,7 +196,9 @@ export function reducer(state, action) {
 
     case 'worker_update': {
       const { issue, status, worker, role } = action.data
-      const existing = state.workers[issue] || {
+      const repo = action.repo ?? null
+      const key = workerKey(repo, issue)
+      const existing = state.workers[key] || {
         status: 'queued',
         worker,
         role: role || 'implementer',
@@ -177,28 +206,31 @@ export function reducer(state, action) {
         branch: `agent/issue-${issue}`,
         transcript: [],
         pr: null,
+        ...(repo ? { repo } : {}),
       }
       return {
         ...state,
         workers: {
           ...state.workers,
-          [issue]: { ...existing, status, worker, role: role || existing.role },
+          [key]: { ...existing, status, worker, role: role || existing.role },
         },
       }
     }
 
     case 'transcript_line': {
       if (isDuplicate(state, action)) return state
-      let key = action.data.issue || action.data.pr
+      const repo = action.repo ?? null
+      const baseId = action.data.issue || action.data.pr
+      let key = baseId ? workerKey(repo, baseId) : null
       let role = 'implementer'
       if (action.data.source === 'triage') {
-        key = `triage-${action.data.issue}`
+        key = `triage-${workerKey(repo, action.data.issue)}`
         role = 'triage'
       } else if (action.data.source === 'planner') {
-        key = `plan-${action.data.issue}`
+        key = `plan-${workerKey(repo, action.data.issue)}`
         role = 'planner'
       } else if (action.data.source === 'reviewer') {
-        key = `review-${action.data.pr}`
+        key = `review-${workerKey(repo, action.data.pr)}`
         role = 'reviewer'
       }
       if (!key) return addEvent(state, action)
@@ -210,6 +242,7 @@ export function reducer(state, action) {
         branch: '',
         transcript: [],
         pr: action.data.pr || null,
+        ...(repo ? { repo } : {}),
       }
       return {
         ...addEvent(state, action),
@@ -223,10 +256,12 @@ export function reducer(state, action) {
     case 'agent_activity': {
       if (isDuplicate(state, action)) return state
       const { source } = action.data
-      let actKey = action.data.issue || action.data.pr
-      if (source === 'triage') actKey = `triage-${action.data.issue}`
-      else if (source === 'planner') actKey = `plan-${action.data.issue}`
-      else if (source === 'reviewer') actKey = `review-${action.data.pr}`
+      const repo = action.repo ?? null
+      const baseId = action.data.issue || action.data.pr
+      let actKey = baseId ? workerKey(repo, baseId) : null
+      if (source === 'triage') actKey = `triage-${workerKey(repo, action.data.issue)}`
+      else if (source === 'planner') actKey = `plan-${workerKey(repo, action.data.issue)}`
+      else if (source === 'reviewer') actKey = `review-${workerKey(repo, action.data.pr)}`
       if (!actKey) return addEvent(state, action)
       const actWorker = state.workers[actKey]
       if (!actWorker) return addEvent(state, action)
@@ -249,16 +284,18 @@ export function reducer(state, action) {
     }
 
     case 'pr_created': {
-      const exists = state.prs.some(p => p.pr === action.data.pr)
+      const repo = action.repo ?? action.data.repo ?? null
+      const exists = state.prs.some(p => p.pr === action.data.pr && (p.repo ?? null) === repo)
       return {
         ...addEvent(state, action),
-        prs: exists ? state.prs : [...state.prs, action.data],
+        prs: exists ? state.prs : [...state.prs, { ...action.data, ...(repo ? { repo } : {}) }],
         sessionPrsCount: exists ? state.sessionPrsCount : state.sessionPrsCount + 1,
       }
     }
 
     case 'triage_update': {
-      const triageKey = `triage-${action.data.issue}`
+      const repo = action.repo ?? null
+      const triageKey = `triage-${workerKey(repo, action.data.issue)}`
       const triageStatus = action.data.status
       const triageWorker = {
         status: triageStatus,
@@ -268,6 +305,7 @@ export function reducer(state, action) {
         branch: '',
         transcript: [],
         pr: null,
+        ...(repo ? { repo } : {}),
       }
       const existingTriage = state.workers[triageKey]
       return {
@@ -282,7 +320,8 @@ export function reducer(state, action) {
     }
 
     case 'planner_update': {
-      const planKey = `plan-${action.data.issue}`
+      const repo = action.repo ?? null
+      const planKey = `plan-${workerKey(repo, action.data.issue)}`
       const planStatus = action.data.status
       const planWorker = {
         status: planStatus,
@@ -292,6 +331,7 @@ export function reducer(state, action) {
         branch: '',
         transcript: [],
         pr: null,
+        ...(repo ? { repo } : {}),
       }
       const existingPlanner = state.workers[planKey]
       return {
@@ -306,7 +346,8 @@ export function reducer(state, action) {
     }
 
     case 'review_update': {
-      const reviewKey = `review-${action.data.pr}`
+      const repo = action.repo ?? null
+      const reviewKey = `review-${workerKey(repo, action.data.pr)}`
       const reviewStatus = action.data.status
       const reviewWorker = {
         status: reviewStatus,
@@ -316,6 +357,7 @@ export function reducer(state, action) {
         branch: '',
         transcript: [],
         pr: action.data.pr,
+        ...(repo ? { repo } : {}),
       }
       const existingReviewer = state.workers[reviewKey]
       const updatedWorkers = {
@@ -335,14 +377,16 @@ export function reducer(state, action) {
     }
 
     case 'merge_update': {
+      const repo = action.repo ?? action.data.repo ?? null
       const isMerged = action.data.status === 'merged'
       if (!isMerged || !action.data.pr) {
         return { ...addEvent(state, action), prs: state.prs }
       }
-      const found = state.prs.some(p => p.pr === action.data.pr)
+      const matchesPr = p => p.pr === action.data.pr && (p.repo ?? null) === repo
+      const found = state.prs.some(matchesPr)
       const updatedPrs = found
         ? state.prs.map(p => {
-            if (p.pr !== action.data.pr) return p
+            if (!matchesPr(p)) return p
             const updates = { ...p, merged: true }
             if (action.data.title) updates.title = action.data.title
             return updates
@@ -350,6 +394,7 @@ export function reducer(state, action) {
         : [...state.prs, {
             pr: action.data.pr,
             merged: true,
+            ...(repo ? { repo } : {}),
             ...(action.data.title ? { title: action.data.title } : {}),
             ...(action.data.issue ? { issue: action.data.issue } : {}),
           }]
@@ -385,16 +430,18 @@ export function reducer(state, action) {
     }
 
     case 'hitl_escalation': {
-      // Automated escalation: worker is keyed by `review-<pr>`
-      // Manual escalation (request-changes): no pr, worker keyed by issue number
-      const hitlReviewKey = `review-${action.data.pr}`
+      // Automated escalation: worker is keyed by `review-<repo>#<pr>`
+      // Manual escalation (request-changes): no pr, worker keyed by <repo>#<issue>
+      const repo = action.repo ?? null
+      const hitlReviewKey = `review-${workerKey(repo, action.data.pr)}`
+      const hitlIssueKey = workerKey(repo, action.data.issue)
       const hitlReviewWorker = action.data.pr != null ? state.workers[hitlReviewKey] : null
-      const hitlIssueWorker = action.data.issue != null ? state.workers[action.data.issue] : null
+      const hitlIssueWorker = action.data.issue != null ? state.workers[hitlIssueKey] : null
       let hitlWorkers = state.workers
       if (hitlReviewWorker) {
         hitlWorkers = { ...state.workers, [hitlReviewKey]: { ...hitlReviewWorker, status: 'escalated' } }
       } else if (hitlIssueWorker) {
-        hitlWorkers = { ...state.workers, [action.data.issue]: { ...hitlIssueWorker, status: 'escalated' } }
+        hitlWorkers = { ...state.workers, [hitlIssueKey]: { ...hitlIssueWorker, status: 'escalated' } }
       }
       return {
         ...addEvent(state, action),
@@ -417,15 +464,23 @@ export function reducer(state, action) {
 
     case 'background_worker_status': {
       const { worker, status, last_run, details } = action.data
-      const prev = state.backgroundWorkers.find(w => w.name === worker)
-      const rest = state.backgroundWorkers.filter(w => w.name !== worker)
+      const repo = action.repo ?? null
+      // Aggregate view: two repos' same-named workers must coexist, so key by
+      // (repo, name). Single-repo keeps name-only keying — the backend tags the
+      // WS frame (dash slug) and the REST list (empty) inconsistently outside
+      // __all__, and one repo can't collide with itself.
+      const sameWorker = state.selectedRepoSlug === REPO_ALL
+        ? (w => w.name === worker && (w.repo ?? null) === repo)
+        : (w => w.name === worker)
+      const prev = state.backgroundWorkers.find(sameWorker)
+      const rest = state.backgroundWorkers.filter(w => !sameWorker(w))
       // Preserve local enabled flag if backend doesn't send one
       const enabled = action.data.enabled !== undefined ? action.data.enabled : (prev?.enabled ?? true)
       // Heartbeat events don't carry interval_seconds — preserve from prior state
       const interval_seconds = action.data.interval_seconds ?? prev?.interval_seconds ?? null
       return {
         ...addEvent(state, action),
-        backgroundWorkers: [...rest, { name: worker, status, last_run, details, enabled, interval_seconds }],
+        backgroundWorkers: [...rest, { name: worker, status, last_run, details, enabled, interval_seconds, repo }],
       }
     }
 
@@ -448,13 +503,17 @@ export function reducer(state, action) {
     }
 
     case 'BACKGROUND_WORKERS': {
-      // Merge backend data with local toggle overrides
+      // Merge backend data with local toggle overrides — keyed by (repo, name)
+      // in the aggregate view so two repos' same-named workers don't share an
+      // override; name-only in single-repo (unchanged).
+      const isAgg = state.selectedRepoSlug === REPO_ALL
+      const keyOf = w => (isAgg ? `${w.repo ?? ''}#${w.name}` : w.name)
       const localOverrides = Object.fromEntries(
-        state.backgroundWorkers.map(w => [w.name, w.enabled])
+        state.backgroundWorkers.map(w => [keyOf(w), w.enabled])
       )
       const merged = action.data.map(w => ({
         ...w,
-        enabled: localOverrides[w.name] !== undefined ? localOverrides[w.name] : w.enabled,
+        enabled: localOverrides[keyOf(w)] !== undefined ? localOverrides[keyOf(w)] : w.enabled,
       }))
       return { ...state, backgroundWorkers: merged }
     }
@@ -560,12 +619,14 @@ export function reducer(state, action) {
       return addEvent(state, action)
 
     case 'BACKFILL_EVENTS': {
-      const existingKeys = new Set(
-        state.events.map(e => `${e.type}|${e.timestamp}`)
-      )
+      // Key on repo too so two repos' same-type/same-timestamp frames don't
+      // collide under repo=__all__; preserve id + repo so the merged log can
+      // badge and (repo, id)-dedup live events that re-arrive.
+      const keyOf = e => `${e.type}|${e.timestamp}|${e.repo ?? ''}`
+      const existingKeys = new Set(state.events.map(keyOf))
       const newEvents = action.data
-        .map(e => ({ type: e.type, timestamp: e.timestamp, data: e.data }))
-        .filter(e => !existingKeys.has(`${e.type}|${e.timestamp}`))
+        .map(e => ({ type: e.type, timestamp: e.timestamp, data: e.data, id: e.id ?? -1, repo: e.repo ?? null }))
+        .filter(e => !existingKeys.has(keyOf(e)))
       const merged = [...state.events, ...newEvents]
         .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
         .slice(0, MAX_EVENTS)
@@ -739,6 +800,19 @@ export function reducer(state, action) {
           reviews: [],
           sessionPrsCount: 0,
           events: [],
+          // Drop the prior scope's background workers — they carry the old
+          // repo tagging (single-repo uses "") and would otherwise be filtered
+          // out of the aggregate grid until the next REST poll repopulates them.
+          backgroundWorkers: [],
+          // These are repo-scoped too — clear them so the prior repo's prompts /
+          // pending intents / escalation context don't flash in the new scope
+          // until their next poll refetches.
+          humanInputRequests: {},
+          intents: [],
+          hitlEscalation: null,
+          // Reset the dedup watermark — the new scope's events restart from a
+          // fresh id space (else lower ids would be watermark-dropped).
+          lastSeenId: -1,
         }),
       }
     }
@@ -969,6 +1043,9 @@ export function HydraFlowProvider({ children }) {
   }, [fetchWithRepo])
 
   const selectRepo = useCallback((slug) => {
+    // Reset the reconnect backfill cursor: the new scope's event timeline is
+    // independent, so the old since= watermark must not gate it.
+    lastEventTsRef.current = null
     dispatch({ type: 'SELECT_REPO', data: { slug } })
   }, [])
 
@@ -1236,7 +1313,9 @@ export function HydraFlowProvider({ children }) {
   const submitIntent = useCallback(async (text) => {
     dispatch({ type: 'INTENT_SUBMITTED', data: { text } })
     try {
-      const res = await fetch('/api/intent', {
+      // Create the issue in the SELECTED repo. Under repo=__all__ the backend
+      // rejects (an issue needs a specific repo) and the optimistic entry fails.
+      const res = await fetchWithRepo('/api/intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
@@ -1252,7 +1331,7 @@ export function HydraFlowProvider({ children }) {
       dispatch({ type: 'INTENT_FAILED', data: { text } })
       return null
     }
-  }, [])
+  }, [fetchWithRepo])
 
   const submitReport = useCallback(async ({ description, screenshot_base64 }) => {
     const pi = state.pipelineIssues || {}
@@ -1307,21 +1386,25 @@ export function HydraFlowProvider({ children }) {
     dispatch({ type: 'SESSION_RESET' })
   }, [])
 
+  // Worker controls act on ONE repo (the selected one), so they are no-ops in
+  // aggregate mode — the backend rejects repo=__all__ for these mutations.
   const toggleBgWorker = useCallback(async (name, enabled) => {
+    if (state.selectedRepoSlug === REPO_ALL) return
     // Optimistic local update — works even when backend is down
     dispatch({ type: 'TOGGLE_BG_WORKER', data: { name, enabled } })
     try {
-      await fetch('/api/control/bg-worker', {
+      await fetch(applyRepoParam('/api/control/bg-worker'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, enabled }),
       })
     } catch { /* ignore — local state already updated */ }
-  }, [])
+  }, [applyRepoParam, state.selectedRepoSlug])
 
   const triggerBgWorker = useCallback(async (name) => {
+    if (state.selectedRepoSlug === REPO_ALL) return false
     try {
-      const resp = await fetch('/api/control/bg-worker/trigger', {
+      const resp = await fetch(applyRepoParam('/api/control/bg-worker/trigger'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -1330,23 +1413,29 @@ export function HydraFlowProvider({ children }) {
     } catch {
       return false
     }
-  }, [])
+  }, [applyRepoParam, state.selectedRepoSlug])
 
   const updateBgWorkerInterval = useCallback(async (name, intervalSeconds) => {
+    if (state.selectedRepoSlug === REPO_ALL) return
     // Optimistic local update
     dispatch({ type: 'UPDATE_BG_WORKER_INTERVAL', data: { name, interval_seconds: intervalSeconds } })
     try {
-      await fetch('/api/control/bg-worker/interval', {
+      await fetch(applyRepoParam('/api/control/bg-worker/interval'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, interval_seconds: intervalSeconds }),
       })
     } catch { /* ignore — local state already updated */ }
-  }, [])
+  }, [applyRepoParam, state.selectedRepoSlug])
 
-  const requestChanges = useCallback(async (issueNumber, feedback, stage) => {
+  const requestChanges = useCallback(async (issueNumber, feedback, stage, repo) => {
     try {
-      const resp = await fetch('/api/request-changes', {
+      // Escalate against the ROW's repo (not the aggregate selection) so the
+      // label swap + HITL cause land on the right line under repo=__all__.
+      const url = repo
+        ? `/api/request-changes?repo=${encodeURIComponent(repo)}`
+        : '/api/request-changes'
+      const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ issue_number: issueNumber, feedback, stage }),
@@ -1404,6 +1493,21 @@ export function HydraFlowProvider({ children }) {
       return { ok: false, status: 'error' }
     }
   }, [fetchWithRepo])
+
+  // Force-clear a credit pause (manual override; credit-refresh only resumes
+  // when probing finds credits restored). Scoped to the selected repo via
+  // fetchWithRepo; under "All repos" the backend fans out to every paused repo.
+  const clearCreditPause = useCallback(async () => {
+    try {
+      const res = await fetchWithRepo('/api/control/clear-credit-pause', { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok: false, status: data.error || 'error' }
+      await refreshControlStatus()
+      return { ok: true, status: data.status || 'cleared' }
+    } catch {
+      return { ok: false, status: 'error' }
+    }
+  }, [fetchWithRepo, refreshControlStatus])
 
   const startOrchestrator = useCallback(async () => {
     if (state.selectedRepoSlug) {
@@ -1473,13 +1577,15 @@ export function HydraFlowProvider({ children }) {
       fetchWithRepo('/api/system/workers')
         .then(r => r.json())
         .then(data => {
-          // Sync local toggle overrides to backend
+          // Sync local toggle overrides to the backend — but only when a
+          // single repo is selected; worker mutations are per-repo and the
+          // backend rejects repo=__all__, so skip the push in aggregate mode.
           const localWorkers = bgWorkersRef.current
-          if (localWorkers.length > 0 && data.workers) {
+          if (state.selectedRepoSlug !== REPO_ALL && localWorkers.length > 0 && data.workers) {
             const backendMap = Object.fromEntries(data.workers.map(w => [w.name, w.enabled]))
             for (const lw of localWorkers) {
               if (lw.enabled !== undefined && backendMap[lw.name] !== undefined && lw.enabled !== backendMap[lw.name]) {
-                fetch('/api/control/bg-worker', {
+                fetch(applyRepoParam('/api/control/bg-worker'), {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ name: lw.name, enabled: lw.enabled }),
@@ -1574,7 +1680,7 @@ export function HydraFlowProvider({ children }) {
       console.warn('[HydraFlow] WebSocket error; awaiting close for reconnect', err)
     }
     wsRef.current = ws
-  }, [state.selectedRepoSlug, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo])
+  }, [state.selectedRepoSlug, applyRepoParam, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo])
 
   useEffect(() => {
     const poll = () => {
@@ -1716,6 +1822,7 @@ export function HydraFlowProvider({ children }) {
     updateBgWorkerInterval,
     dismissSystemAlert: useCallback(() => dispatch({ type: 'CLEAR_SYSTEM_ALERT' }), [dispatch]),
     refreshCreditStatus,
+    clearCreditPause,
     refreshHitl: fetchHitlItems,
     selectRepo,
     addRepoBySlug,
@@ -1728,6 +1835,7 @@ export function HydraFlowProvider({ children }) {
     stopOrchestrator,
     releaseEpic,
     refreshControlStatus,
+    fetchWithRepo,
   }
 
   return (

@@ -6,7 +6,10 @@ import { STAGE_KEYS } from '../../hooks/useTimeline'
 
 const mockUseHydraFlow = vi.fn()
 
-vi.mock('../../context/HydraFlowContext', () => ({
+// Mock only useHydraFlow; pass through the real module's other exports (e.g.
+// workerKey, used by findWorkerTranscript) so they don't drift from the source.
+vi.mock('../../context/HydraFlowContext', async (importOriginal) => ({
+  ...(await importOriginal()),
   useHydraFlow: (...args) => mockUseHydraFlow(...args),
 }))
 
@@ -900,6 +903,24 @@ describe('findWorkerTranscript', () => {
   it('matches triage worker by triage-{issueNumber} key', () => {
     const result = findWorkerTranscript(workers, prs, 'triage', 42)
     expect(result).toEqual(['triaging issue 42'])
+  })
+
+  it('finds the repo-qualified transcript under __all__ (same issue, two repos)', () => {
+    const repoWorkers = {
+      'owner-a#42': { transcript: ['a-line'] },
+      'owner-b#42': { transcript: ['b-line'] },
+    }
+    expect(findWorkerTranscript(repoWorkers, [], 'implement', 42, 'owner-a')).toEqual(['a-line'])
+    expect(findWorkerTranscript(repoWorkers, [], 'implement', 42, 'owner-b')).toEqual(['b-line'])
+  })
+
+  it('matches the review transcript by (issue, repo), not the first same-issue PR', () => {
+    const repoWorkers = { 'review-owner-b#7': { transcript: ['rev-b'] } }
+    const repoPrs = [
+      { pr: 7, issue: 42, repo: 'owner-a' },
+      { pr: 7, issue: 42, repo: 'owner-b' },
+    ]
+    expect(findWorkerTranscript(repoWorkers, repoPrs, 'review', 42, 'owner-b')).toEqual(['rev-b'])
   })
 
   it('matches plan worker by plan-{issueNumber} key', () => {

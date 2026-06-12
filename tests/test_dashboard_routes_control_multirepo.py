@@ -341,3 +341,34 @@ async def test_credit_refresh_fans_out(config, event_bus, state, tmp_path):
         data = json.loads((await endpoint(repo=REPO_ALL)).body)
     assert data["status"] == "resuming"
     assert set(data["repos"]) == {"org-a", "org-b"}
+
+
+@pytest.mark.asyncio
+async def test_bg_worker_toggle_targets_row_repo(config, event_bus, state, tmp_path):
+    orch_b = MagicMock()
+    registry = _two_repo_registry(event_bus, tmp_path, MagicMock(), orch_b)
+    router = _router(config, event_bus, state, tmp_path, registry)
+    toggle = find_endpoint(router, "/api/control/bg-worker", "POST")
+    resp = await toggle({"name": "pr_unsticker", "enabled": False}, repo="org-b")
+    assert json.loads(resp.body)["status"] == "ok"
+    orch_b.set_bg_worker_enabled.assert_called_once_with("pr_unsticker", False)
+
+
+@pytest.mark.asyncio
+async def test_bg_worker_toggle_rejects_all_repos(config, event_bus, state, tmp_path):
+    router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+    toggle = find_endpoint(router, "/api/control/bg-worker", "POST")
+    resp = await toggle({"name": "pr_unsticker", "enabled": True}, repo=REPO_ALL)
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_bg_worker_trigger_targets_row_repo(config, event_bus, state, tmp_path):
+    orch_b = MagicMock()
+    orch_b.trigger_bg_worker.return_value = True
+    registry = _two_repo_registry(event_bus, tmp_path, MagicMock(), orch_b)
+    router = _router(config, event_bus, state, tmp_path, registry)
+    trigger = find_endpoint(router, "/api/control/bg-worker/trigger", "POST")
+    resp = await trigger({"name": "pr_unsticker"}, repo="org-b")
+    assert json.loads(resp.body)["status"] == "ok"
+    orch_b.trigger_bg_worker.assert_called_once_with("pr_unsticker")

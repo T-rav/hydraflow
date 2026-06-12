@@ -301,6 +301,132 @@ def _is_likely_disconnect(exc: BaseException) -> bool:
     }
 
 
+# Per-bus subscriber queue depth; the merged ``repo=__all__`` socket sizes its
+# shared fan-in queue at ``N × this`` so a busy line can't starve the others.
+_WS_MERGED_PER_BUS_QUEUE = 500
+
+# A resolve_runtimes 5-tuple: (config, state, event_bus, get_orch, slug).
+_Runtime = tuple[Any, Any, Any, Callable[[], Any], str]
+
+
+def _merge_sorted_history(runtimes: list[_Runtime]) -> list[HydraFlowEvent]:
+    """Merge every runtime's event history into one ``(timestamp, id)``-sorted list.
+
+    Each event is stamped with its bus's repo slug when it isn't already tagged
+    (``set_repo`` tags live events, but legacy/untagged history is normalized
+    here). A bus that fails to yield history (a down/unstarted repo) is skipped —
+    a single bad line must never sink the merged backfill. The id is the tie
+    breaker because the module-global ``_event_counter`` only approximates
+    wall-clock order across buses.
+    """
+    events: list[HydraFlowEvent] = []
+    for _cfg, _state, bus, _get_orch, slug in runtimes:
+        try:
+            history = bus.get_history()
+        except Exception:  # noqa: BLE001 — a down repo must not sink the merge
+            logger.warning("merged WS: skipping history for repo %s", slug)
+            continue
+        for event in history:
+            events.append(
+                event
+                if event.repo is not None
+                else event.model_copy(update={"repo": slug})
+            )
+    events.sort(key=lambda e: (e.timestamp, e.id))
+    return events
+
+
+async def _forward_to_merged(
+    src: asyncio.Queue[HydraFlowEvent],
+    dst: asyncio.Queue[HydraFlowEvent],
+    slug: str,
+) -> None:
+    """Forward live frames from one bus's queue into the shared merged queue.
+
+    Stamps the repo slug when missing and drops the oldest frame on a full
+    shared queue (mirroring ``EventBus.publish``'s slow-subscriber policy) so a
+    single repo can't block the fan-in. Cancelled when the socket closes.
+    """
+    while True:
+        event = await src.get()
+        if event.repo is None:
+            event = event.model_copy(update={"repo": slug})
+        try:
+            dst.put_nowait(event)
+        except asyncio.QueueFull:
+            with contextlib.suppress(asyncio.QueueEmpty):
+                dst.get_nowait()
+            with contextlib.suppress(asyncio.QueueFull):
+                dst.put_nowait(event)
+
+
+async def _serve_merged_ws(ws: WebSocket, runtimes: list[_Runtime]) -> None:
+    """Stream a merged, repo-tagged event feed across every runtime's bus.
+
+    Sends a ``(timestamp, id)``-sorted history backfill, then fans every bus's
+    live subscription into one shared queue. A repo whose subscription fails is
+    skipped (never a 1008 close — that would stop the frontend reconnect for the
+    whole aggregate view). The single-repo fast path is handled by the caller.
+
+    Note on ordering/dedup: ``event.id`` is unique only within a process'
+    *live* stream (one shared counter), but persisted history from independent
+    past sessions can reuse ids across repos. The merged feed therefore streams
+    every frame repo-tagged and lets the client de-collide on ``(repo, id)`` —
+    it never drops a frame here. Timestamps are uniformly UTC ISO-8601, so the
+    lexicographic ``(timestamp, id)`` sort is chronological.
+    """
+    await ws.accept()
+    if not runtimes:
+        # Degenerate empty-aggregate view (no registered runtimes): close
+        # cleanly instead of holding a socket the out-queue can never feed.
+        # In practice the empty-registry guard (#9359) yields the default
+        # runtime, so this only triggers defensively.
+        with contextlib.suppress(Exception):
+            await ws.close(code=1000)
+        return
+    history = _merge_sorted_history(runtimes)
+    out_queue: asyncio.Queue[HydraFlowEvent] = asyncio.Queue(
+        maxsize=max(1, len(runtimes)) * _WS_MERGED_PER_BUS_QUEUE
+    )
+    forwarders: list[asyncio.Task[None]] = []
+    async with contextlib.AsyncExitStack() as stack:
+        for _cfg, _state, bus, _get_orch, slug in runtimes:
+            try:
+                queue = await stack.enter_async_context(bus.subscription())
+            except Exception:  # noqa: BLE001 — skip a down repo, keep the socket
+                logger.warning("merged WS: skipping live feed for repo %s", slug)
+                continue
+            forwarders.append(
+                asyncio.create_task(_forward_to_merged(queue, out_queue, slug))
+            )
+        try:
+            for event in history:
+                await ws.send_text(event.model_dump_json())
+            while True:
+                event = await out_queue.get()
+                await ws.send_text(event.model_dump_json())
+        except WebSocketDisconnect:
+            pass
+        except Exception as exc:  # noqa: BLE001
+            if _is_likely_disconnect(exc):
+                logger.warning(
+                    "WebSocket disconnect during merged streaming: %s",
+                    exc.__class__.__name__,
+                )
+            else:
+                logger.error(
+                    "WebSocket error during merged streaming: %s",
+                    exc.__class__.__name__,
+                    exc_info=True,
+                )
+        finally:
+            for task in forwarders:
+                task.cancel()
+            # Await the cancellations so the buses are unsubscribed (AsyncExitStack
+            # exit) only after their forwarders have actually stopped reading.
+            await asyncio.gather(*forwarders, return_exceptions=True)
+
+
 @dataclass
 class RouteContext:
     """Bundles all dependencies needed by dashboard route handlers.
@@ -379,17 +505,34 @@ class RouteContext:
             return False
         return orch.pipeline_enabled
 
+    def _default_slug(self) -> str:
+        """Canonical dash slug for the default (host) repo.
+
+        Prefers the explicitly-wired ``default_repo_slug``, else derives it from
+        the host config (``owner/repo`` → ``owner-repo``, or the repo-root name).
+        """
+        return self.default_repo_slug or (
+            self.config.repo.replace("/", "-")
+            if self.config.repo
+            else self.config.repo_root.name
+        )
+
     def is_repo_pipeline_active(self, slug: str | None) -> bool:
         """Return whether the resolved repo's pipeline is actively processing.
 
         The host repo is a registered runtime like any other, so this resolves
-        purely through the registry. When *slug* is ``None`` or the ``REPO_ALL``
-        sentinel (All repos view), returns True if ANY line is running.
+        purely through the registry. Per the ``None``=default invariant, a
+        ``None`` *slug* scopes to the **default** repo; only the ``REPO_ALL``
+        sentinel (All repos view) returns True if ANY line is running.
         """
         if self.registry is not None:
-            if slug is None or slug.strip().lower() == REPO_ALL:
+            if slug is not None and slug.strip().lower() == REPO_ALL:
                 return any(getattr(rt, "running", False) for rt in self.registry.all)
-            rt = self.registry.get(slug)
+            # None ⇒ the default repo; a slug ⇒ that line. The host repo is a
+            # registered runtime, so the default resolves through the registry
+            # like any other (absent ⇒ not running).
+            resolved = slug if slug is not None else self._default_slug()
+            rt = self.registry.get(resolved)
             return getattr(rt, "running", False) if rt is not None else False
         # No registry (single-repo/test wiring): fall back to the host orch.
         return self._host_pipeline_active()
@@ -461,11 +604,7 @@ class RouteContext:
         ``None`` while registry runtimes yield their live orchestrator —
         consumers must handle ``None``.
         """
-        default_slug = self.default_repo_slug or (
-            self.config.repo.replace("/", "-")
-            if self.config.repo
-            else self.config.repo_root.name
-        )
+        default_slug = self._default_slug()
 
         if slug is not None and slug.strip().lower() == REPO_ALL:
             if self.registry is not None:
@@ -793,9 +932,9 @@ def create_router(
     def _is_pipeline_active(slug: str | None) -> bool:
         """Check if the selected repo's pipeline is running.
 
-        When no repo is selected (All repos view), checks the default
-        repo's pipeline state — data only shows when something is
-        actually running.
+        A bare ``None`` slug checks the default repo's pipeline state; only the
+        ``__all__`` sentinel (All repos view) returns True if any line is
+        running. Data only shows when something is actually running.
         """
         return ctx.is_repo_pipeline_active(slug)
 
@@ -1624,70 +1763,84 @@ def create_router(
     ) -> JSONResponse:
         """Return event history, optionally filtered by a since timestamp.
 
-        Resolves the per-repo event bus via ``_resolve_runtime(repo)`` (matching
-        the adjacent operational routes) so the reconnect ``?since=`` backfill
-        returns the requested repo's events in a multi-repo deployment, not the
-        module-level default bus's.
+        Resolves the per-repo event bus via ``_resolve_runtimes(repo)`` so the
+        reconnect ``?since=`` backfill returns the requested repo's events in a
+        multi-repo deployment. For ``repo=__all__`` it unions every runtime's
+        events, repo-tags each, and merge-sorts by ``(timestamp, id)`` — the REST
+        twin of the merged ``/ws`` stream.
         """
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
+        since_dt: datetime | None = None
         if since is not None:
             try:
                 since_dt = datetime.fromisoformat(since)
                 if since_dt.tzinfo is None:
                     since_dt = since_dt.replace(tzinfo=UTC)
-                events = await _bus.load_events_since(since_dt)
-                if events is not None:
-                    return JSONResponse([e.model_dump() for e in events])
             except (ValueError, TypeError):
-                pass  # Fall through to in-memory history
-        history = _bus.get_history()
-        return JSONResponse([e.model_dump() for e in history])
+                since_dt = None  # Fall through to in-memory history
+
+        merged: list[HydraFlowEvent] = []
+        for _cfg, _state, _bus, _get_orch, slug in _resolve_runtimes(repo):
+            events: list[HydraFlowEvent] | None = None
+            if since_dt is not None:
+                events = await _bus.load_events_since(since_dt)
+            if events is None:
+                events = _bus.get_history()
+            for event in events:
+                merged.append(
+                    event
+                    if event.repo is not None
+                    else event.model_copy(update={"repo": slug})
+                )
+        merged.sort(key=lambda e: (e.timestamp, e.id))
+        return JSONResponse([e.model_dump() for e in merged])
 
     @router.get("/api/prs")
     async def get_prs(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Fetch all open HydraFlow PRs from GitHub."""
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        # Use cached data when orchestrator has a github cache
-        orch = _get_orch()
-        if orch and isinstance(getattr(orch, "github_cache", None), GitHubDataCache):
-            items = orch.github_cache.get_open_prs()
-        else:
-            # ``list_open_prs`` is a dashboard helper on the concrete
-            # PRManager, not on PRPort.
-            manager = cast("PRManager", _pr_manager_for(_cfg, _bus))
-            all_labels = list(
-                {
-                    *_cfg.ready_label,
-                    *_cfg.review_label,
-                    *_cfg.fixed_label,
-                    *_cfg.hitl_label,
-                    *_cfg.hitl_active_label,
-                    *_cfg.planner_label,
-                }
-            )
-            items = await manager.list_open_prs(all_labels)
-        # Overlay merged flag from IssueStore so the frontend has
-        # authoritative merged state instead of session-volatile flags.
-        if not orch:
+        """Fetch all open HydraFlow PRs from GitHub.
+
+        For ``repo=__all__`` this unions every runtime's open PRs; each item is
+        tagged with its repo slug so the frontend de-collides same-number PRs
+        across repos and matches them to repo-qualified live ``pr_created`` /
+        ``merge_update`` frames (else REST-loaded PRs would duplicate).
+        """
+        result: list[dict[str, Any]] = []
+        for _cfg, _state, _bus, _get_orch, slug in _resolve_runtimes(repo):
             orch = _get_orch()
-        if orch:
-            merged_numbers = orch.issue_store.get_merged_numbers()
-            for item in items:
-                issue_num = (
-                    item.get("issue")
-                    if isinstance(item, dict)
-                    else getattr(item, "issue", None)
+            if orch and isinstance(
+                getattr(orch, "github_cache", None), GitHubDataCache
+            ):
+                items = orch.github_cache.get_open_prs()
+            else:
+                # ``list_open_prs`` is a dashboard helper on the concrete
+                # PRManager, not on PRPort.
+                manager = cast("PRManager", _pr_manager_for(_cfg, _bus))
+                all_labels = list(
+                    {
+                        *_cfg.ready_label,
+                        *_cfg.review_label,
+                        *_cfg.fixed_label,
+                        *_cfg.hitl_label,
+                        *_cfg.hitl_active_label,
+                        *_cfg.planner_label,
+                    }
                 )
+                items = await manager.list_open_prs(all_labels)
+            # Overlay merged flag from IssueStore so the frontend has
+            # authoritative merged state instead of session-volatile flags.
+            merged_numbers = (
+                orch.issue_store.get_merged_numbers() if orch else frozenset()
+            )
+            for item in items:
+                data = item if isinstance(item, dict) else item.model_dump()
+                issue_num = data.get("issue")
                 if issue_num in merged_numbers:
-                    if isinstance(item, dict):
-                        item["merged"] = True
-                    else:
-                        item.merged = True
-        return JSONResponse(
-            [item if isinstance(item, dict) else item.model_dump() for item in items]
-        )
+                    data["merged"] = True
+                # Tag with the runtime's canonical slug (matches live event.repo).
+                data["repo"] = slug
+                result.append(data)
+        return JSONResponse(result)
 
     # --- Epic routes (extracted to _epic_routes.py) ---
     from dashboard_routes._epic_routes import register as _register_epics
@@ -1729,7 +1882,7 @@ def create_router(
     # --- Diagnostics routes (factory metrics + trace artifacts) ---
     from dashboard_routes._diagnostics_routes import build_diagnostics_router
 
-    router.include_router(build_diagnostics_router(config))
+    router.include_router(build_diagnostics_router(config, ctx))
 
     # --- Trust-fleet routes (§12.1; Plan 5b-3 schema) -----------------------
     from types import SimpleNamespace  # noqa: PLC0415
@@ -1757,7 +1910,7 @@ def create_router(
     # --- Factory health routes (longitudinal retrospective analysis) ---
     from dashboard_routes._factory_health_routes import build_factory_health_router
 
-    router.include_router(build_factory_health_router(config))
+    router.include_router(build_factory_health_router(config, ctx))
 
     # --- Issue history cache ---
     # Cache the aggregated issue_rows + pr_to_issue for the unfiltered case.
@@ -2075,7 +2228,20 @@ def create_router(
 
     @router.get("/api/timeline")
     async def get_timeline(repo: RepoSlugParam = None) -> JSONResponse:
-        """Return timelines for all tracked issues (repo-scoped)."""
+        """Return timelines for all tracked issues (repo-scoped).
+
+        For ``repo=__all__`` this unions every runtime's timelines and tags
+        each item with its dash slug, so a same-numbered issue in two repos
+        stays distinct.
+        """
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            merged: list[dict[str, Any]] = []
+            for _cfg, _st, _bus, _get_orch, slug in _resolve_runtimes(repo):
+                for timeline in TimelineBuilder(_bus).build_all():
+                    merged.append(
+                        timeline.model_copy(update={"repo": slug}).model_dump()
+                    )
+            return JSONResponse(merged)
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         builder = TimelineBuilder(_bus)
         timelines = builder.build_all()
@@ -2085,7 +2251,20 @@ def create_router(
     async def get_timeline_issue(
         issue_number: int, repo: RepoSlugParam = None
     ) -> JSONResponse:
-        """Return the event timeline for a single issue (repo-scoped)."""
+        """Return the event timeline for a single issue (repo-scoped).
+
+        For ``repo=__all__`` this searches every runtime and returns the first
+        match (repo-tagged). Issue numbers aren't globally unique, so the first
+        registered repo carrying the issue wins; 404 if no repo has it.
+        """
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            for _cfg, _st, _bus, _get_orch, slug in _resolve_runtimes(repo):
+                timeline = TimelineBuilder(_bus).build_for_issue(issue_number)
+                if timeline is not None:
+                    return JSONResponse(
+                        timeline.model_copy(update={"repo": slug}).model_dump()
+                    )
+            return JSONResponse({"error": "Issue not found"}, status_code=404)
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         builder = TimelineBuilder(_bus)
         timeline = builder.build_for_issue(issue_number)
@@ -2098,8 +2277,17 @@ def create_router(
         """Return persisted timelines for completed (merged) issues (repo-scoped).
 
         Unlike /api/timeline which derives from ephemeral events,
-        these survive event log rotation.
+        these survive event log rotation. For ``repo=__all__`` it unions every
+        runtime's persisted timelines, each tagged with its dash slug.
         """
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            merged: list[dict[str, Any]] = []
+            for _cfg, _st, _bus, _get_orch, slug in _resolve_runtimes(repo):
+                for timeline in _st.get_all_completed_timelines().values():
+                    merged.append(
+                        timeline.model_copy(update={"repo": slug}).model_dump()
+                    )
+            return JSONResponse(merged)
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         timelines = _state.get_all_completed_timelines()
         return JSONResponse([t.model_dump() for t in timelines.values()])
@@ -2117,7 +2305,16 @@ def create_router(
 
         Repo-scoped: the issue is created in the SELECTED repo (and its URL
         points there), not the default repo, in a multi-repo deployment.
+        ``repo=__all__`` is rejected — issue creation needs a specific repo.
         """
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "detail": "issue creation requires a specific repo",
+                },
+                status_code=400,
+            )
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         title = request.text[:120]
         body = request.text
@@ -2156,13 +2353,19 @@ def create_router(
         for _cfg, _state, _bus, _get_orch, _slug in _resolve_runtimes(repo):
             sessions.extend(_state.load_sessions())
         repo_filter = (repo or "").strip()
-        if repo_filter and repo_filter.lower() != REPO_ALL and registry is None:
-            # Legacy no-registry wiring: load_sessions returns ALL; filter by tag.
-            normalized = repo_filter.lower()
+        if repo_filter.lower() != REPO_ALL and registry is None:
+            # Legacy no-registry wiring: the single state holds sessions for
+            # every repo. Scope to the requested repo — and per the None=default
+            # invariant, a bare request scopes to the DEFAULT repo, not the
+            # whole set. Normalize slash/dash so a dash-form query slug
+            # ("owner-x") matches a slash-form SessionLog.repo ("owner/x").
+            target = (
+                (repo_filter or _resolve_runtimes(None)[0][4]).replace("/", "-").lower()
+            )
             sessions = [
                 session
                 for session in sessions
-                if (session.repo or "").lower() == normalized
+                if (session.repo or "").replace("/", "-").lower() == target
             ]
         return JSONResponse([s.model_dump() for s in sessions])
 
@@ -2193,7 +2396,14 @@ def create_router(
         """Stream event history then live events over a WebSocket connection."""
         repo_slug: str | None = ws.query_params.get("repo")
 
-        # Resolve the correct event bus for the requested repo.
+        # Aggregate view: fan every registered repo's bus into one socket. Branch
+        # BEFORE _resolve_runtime — it would treat "__all__" as an unknown slug
+        # and 1008-close, streaming one repo mislabeled as the aggregate.
+        if (repo_slug or "").strip().lower() == REPO_ALL:
+            await _serve_merged_ws(ws, _resolve_runtimes(REPO_ALL))
+            return
+
+        # Single-repo fast path (None / specific slug) — unchanged.
         try:
             _cfg, _state, bus, _get_orch = _resolve_runtime(repo_slug)
         except (ValueError, HTTPException):

@@ -47,6 +47,11 @@ HYDRAFLOW_LABELS: tuple[tuple[str, str, str], ...] = (
         "Fake coverage gap unresolved after retries",
     ),
     (
+        "rc_promotion_stuck_label",
+        "b60205",
+        "staging→main promotion stuck (repeated RC failures)",
+    ),
+    (
         "adr_drift_label",
         "5319e7",
         "ADR drift — cited modules changed without ADR update",

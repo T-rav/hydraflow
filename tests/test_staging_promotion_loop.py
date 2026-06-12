@@ -13,6 +13,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from base_background_loop import LoopDeps
+from ci_sentinels import ci_timeout
 from config import HydraFlowConfig
 from events import EventBus
 from models import PRInfo
@@ -291,7 +292,10 @@ class TestOpenPromotionFailing:
         prs.create_issue.assert_called_once()
         args, _kwargs = prs.create_issue.call_args
         title, body, labels = args
-        assert "RC promotion #99 failed CI" in title
+        # Stable title (no PR number) so one rolling issue dedups across ticks;
+        # the PR number + failure summary live in the body (#9359).
+        assert title == "RC promotion to main failing CI"
+        assert "#99" in body
         assert "scenario suite failed" in body
         assert labels == ["hydraflow-find"]
 
@@ -478,3 +482,142 @@ class TestStateWritesOnCIFailed:
         assert result["status"] == "ci_pending"
         assert state.get_last_rc_red_sha() == ""
         assert state.get_rc_cycle_id() == 0
+
+
+def _escalation_calls(prs: MagicMock) -> list:
+    """create_issue calls whose labels include the rc-promotion-stuck escalation."""
+    out = []
+    for call in prs.create_issue.await_args_list:
+        labels = call.kwargs.get("labels") or (
+            call.args[2] if len(call.args) > 2 else []
+        )
+        if "rc-promotion-stuck" in labels:
+            out.append(call)
+    return out
+
+
+class TestRepeatedFailureEscalation:
+    """#9359 hardening: repeated RC-promotion failures escalate ONCE to a human
+    so a multi-day pipeline stall (like #9219..#9342) can't pass unnoticed."""
+
+    @pytest.mark.asyncio
+    async def test_escalates_once_when_streak_hits_threshold(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_RC_CONSECUTIVE_FAILURE_ESCALATION_THRESHOLD", "2")
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(number=70),
+            ci_result=(False, "ci failed: scenario tests"),
+        )
+        state = StateTracker(state_file=tmp_path / "s.json")
+        loop._state = state  # type: ignore[attr-defined]
+
+        # Two consecutive failing promotions reach the threshold.
+        await loop._do_work()
+        assert state.get_consecutive_rc_failures() == 1
+        assert _escalation_calls(prs) == []  # not yet
+
+        await loop._do_work()
+        assert state.get_consecutive_rc_failures() == 2
+        escalations = _escalation_calls(prs)
+        assert len(escalations) == 1
+        assert "hydraflow-hitl-escalation" in (
+            escalations[0].kwargs.get("labels") or escalations[0].args[2]
+        )
+
+        # A third failure must NOT re-escalate (fires once per streak).
+        await loop._do_work()
+        assert state.get_consecutive_rc_failures() == 3
+        assert len(_escalation_calls(prs)) == 1
+
+    @pytest.mark.asyncio
+    async def test_green_promotion_resets_the_streak(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(number=71),
+            ci_result=(False, "boom"),
+        )
+        state = StateTracker(state_file=tmp_path / "s.json")
+        loop._state = state  # type: ignore[attr-defined]
+
+        await loop._do_work()
+        assert state.get_consecutive_rc_failures() == 1
+
+        # Next tick: CI is green and the promotion merges -> streak resets.
+        prs.wait_for_ci.return_value = (True, "ok")
+        prs.merge_promotion_pr = AsyncMock(return_value=True)
+        prs.get_pr_head_sha = AsyncMock(return_value="greensha")
+        result = await loop._do_work()
+
+        assert result["status"] == "promoted"
+        assert state.get_consecutive_rc_failures() == 0
+
+
+class TestSentinelFidelity:
+    @pytest.mark.asyncio
+    async def test_producer_timeout_sentinel_is_pending_not_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Feed the loop the EXACT symbol pr_manager.wait_for_ci emits on timeout
+        (ci_timeout) — it must classify as pending, never a failure. Couples the
+        consumer to the real producer string, not a hand-written literal."""
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(number=72),
+            ci_result=(False, ci_timeout(60)),
+        )
+        state = StateTracker(state_file=tmp_path / "s.json")
+        loop._state = state  # type: ignore[attr-defined]
+
+        result = await loop._do_work()
+
+        assert result == {"status": "ci_pending", "pr": 72}
+        prs.close_issue.assert_not_called()
+        assert state.get_consecutive_rc_failures() == 0
+        assert _escalation_calls(prs) == []
+
+
+class TestRollingFailureIssue:
+    """#9359 issue-hygiene: one rolling 'promotion CI failing' issue, auto-closed
+    on the next green promotion (replaces the per-PR pile-up #9219..#9342)."""
+
+    @pytest.mark.asyncio
+    async def test_red_then_green_files_one_issue_and_auto_closes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(number=99),
+            ci_result=(False, "boom"),
+        )
+        prs.create_issue = AsyncMock(return_value=7001)
+        prs.update_issue_body = AsyncMock()
+        state = StateTracker(state_file=tmp_path / "s.json")
+        loop._state = state  # type: ignore[attr-defined]
+
+        # Red tick: files exactly ONE rolling issue, tracked in state.
+        r1 = await loop._do_work()
+        assert r1["status"] == "ci_failed"
+        prs.create_issue.assert_awaited_once()
+        assert state.get_rollup_issue("staging_promotion:rc_ci")["issue_number"] == 7001
+
+        # Second red tick (same body) must NOT file a new issue.
+        await loop._do_work()
+        prs.create_issue.assert_awaited_once()
+
+        # Green tick: promotion succeeds → the rolling issue auto-closes.
+        prs.wait_for_ci.return_value = (True, "ok")
+        prs.merge_promotion_pr = AsyncMock(return_value=True)
+        prs.get_pr_head_sha = AsyncMock(return_value="greensha")
+        r2 = await loop._do_work()
+
+        assert r2["status"] == "promoted"
+        prs.close_issue.assert_any_await(7001)
+        assert state.get_rollup_issue("staging_promotion:rc_ci") is None

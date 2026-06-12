@@ -22,6 +22,13 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Query
 
 import dashboard_routes._cost_rollups as _cost_rollups_mod
+from dashboard_routes._cost_merge import (
+    merge_by_loop,
+    merge_cost_by_model,
+    merge_per_loop_cost,
+    merge_rolling_24h,
+    merge_top_issues,
+)
 from dashboard_routes._cost_rollups import (
     _parse_range,
     build_by_loop,
@@ -40,9 +47,11 @@ from factory_metrics import (
     issues_table,
     load_metrics,
 )
+from route_types import REPO_ALL, RepoSlugParam
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
+    from dashboard_routes._routes import RouteContext
     from events import EventBus
     from issue_fetcher import IssueFetcher
 
@@ -197,30 +206,84 @@ def _issue_meta_from_github_issue(issue_number: int, gh_issue: Any) -> dict[str,
     }
 
 
-def build_diagnostics_router(config: HydraFlowConfig) -> APIRouter:
+def build_diagnostics_router(
+    config: HydraFlowConfig, ctx: RouteContext | None = None
+) -> APIRouter:
     """Build the ``/api/diagnostics`` router.
 
     The returned router exposes GET endpoints that read from the factory
     metrics JSONL store, the per-run trace artifact directory, and the
     shared cost-rollup aggregator.
+
+    When *ctx* is provided the factory-metrics endpoints honor a ``repo``
+    query param: ``repo=__all__`` unions every repo's factory-metrics events
+    before aggregating, and a specific slug scopes to that repo; per-issue
+    endpoints resolve that single repo's config. Without *ctx* (legacy
+    single-repo callers) every endpoint reads the bare *config*.
     """
 
     router = APIRouter(prefix="/api/diagnostics", tags=["diagnostics"])
 
-    def _load(time_range: str) -> list[dict[str, Any]]:
-        return load_metrics(config.factory_metrics_path, time_range=time_range)
+    def _config_for(repo: str | None) -> HydraFlowConfig:
+        """The single resolved config for per-issue trace endpoints.
+
+        Per-issue traces live under exactly one repo's ``data_root``, so a
+        concrete slug is required. ``__all__`` has no single home and is
+        rejected — the UI scopes each drill-down to the row's owning repo
+        (carried on the issues-table row), never the aggregate sentinel.
+        """
+        if ctx is None:
+            return config
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            raise HTTPException(
+                status_code=400,
+                detail="repo=__all__ is not valid for per-issue endpoints; pass a repo slug",
+            )
+        cfg, _s, _b, _g = ctx.resolve_runtime(repo)
+        return cfg
+
+    def _load(time_range: str, repo: str | None = None) -> list[dict[str, Any]]:
+        """Load factory-metrics events, unioned across the resolved repos.
+
+        Each event is tagged with its owning repo slug so downstream rows (the
+        per-issue table in particular) stay attributable when ``__all__`` unions
+        repos whose issue numbers collide. Legacy single-repo callers (``ctx is
+        None``) read the bare config and leave events untagged.
+        """
+        if ctx is None:
+            return load_metrics(config.factory_metrics_path, time_range=time_range)
+        events: list[dict[str, Any]] = []
+        for cfg, _s, _b, _g, slug in ctx.resolve_runtimes(repo):
+            for event in load_metrics(cfg.factory_metrics_path, time_range=time_range):
+                event["repo"] = slug
+                events.append(event)
+        return events
+
+    def _runtimes(repo: str | None) -> list[tuple[HydraFlowConfig, str]]:
+        """``(config, slug)`` pairs for cost rollups to aggregate over.
+
+        One element for a concrete slug or ``None`` (the default repo), every
+        registered repo for ``__all__``. Callers guard ``ctx is None`` first and
+        read the bare config, so this is only reached in the multi-repo path.
+        """
+        if ctx is None:
+            return [(config, "")]
+        return [(cfg, slug) for cfg, _s, _b, _g, slug in ctx.resolve_runtimes(repo)]
 
     @router.get("/overview")
-    def overview(range: str = Query("7d")) -> dict[str, Any]:
-        events = _load(range)
+    def overview(
+        range: str = Query("7d"), repo: RepoSlugParam = None
+    ) -> dict[str, Any]:
+        events = _load(range, repo)
         return headline_metrics(events)
 
     @router.get("/tools")
     def tools(
         range: str = Query("7d"),
         top_n: int = Query(10, ge=1, le=100),
+        repo: RepoSlugParam = None,
     ) -> list[dict[str, Any]]:
-        events = _load(range)
+        events = _load(range, repo)
         return [
             {"name": name, "count": count}
             for name, count in aggregate_top_tools(events, top_n=top_n)
@@ -230,16 +293,18 @@ def build_diagnostics_router(config: HydraFlowConfig) -> APIRouter:
     def skills(
         range: str = Query("7d"),
         top_n: int = Query(10, ge=1, le=100),
+        repo: RepoSlugParam = None,
     ) -> list[dict[str, Any]]:
-        events = _load(range)
+        events = _load(range, repo)
         return aggregate_top_skills(events, top_n=top_n)
 
     @router.get("/subagents")
     def subagents(
         range: str = Query("7d"),
         top_n: int = Query(10, ge=1, le=100),
+        repo: RepoSlugParam = None,
     ) -> list[dict[str, Any]]:
-        events = _load(range)
+        events = _load(range, repo)
         # aggregate_top_subagents returns list[tuple[str, int]] — currently
         # always [] until per-subagent name attribution lands in the
         # collector. The wrapping below assumes the tuple shape and will
@@ -250,23 +315,27 @@ def build_diagnostics_router(config: HydraFlowConfig) -> APIRouter:
         ]
 
     @router.get("/cost-by-phase")
-    def cost_by_phase_route(range: str = Query("7d")) -> dict[str, int]:
-        events = _load(range)
+    def cost_by_phase_route(
+        range: str = Query("7d"), repo: RepoSlugParam = None
+    ) -> dict[str, int]:
+        events = _load(range, repo)
         return cost_by_phase(events)
 
     @router.get("/issues")
     def issues(
         range: str = Query("7d"),
         sort: str = Query("tokens"),
+        repo: RepoSlugParam = None,
     ) -> list[dict[str, Any]]:
-        events = _load(range)
+        events = _load(range, repo)
         rows = issues_table(events)
         return _sort_issues(rows, sort)
 
     @router.get("/issue/{issue}/waterfall")
-    def issue_waterfall(issue: int) -> dict[str, Any]:
+    def issue_waterfall(issue: int, repo: RepoSlugParam = None) -> dict[str, Any]:
         """Return the per-issue cost/phase waterfall (spec §4.11 point 1)."""
-        fetcher = _build_issue_fetcher(config)
+        cfg = _config_for(repo)
+        fetcher = _build_issue_fetcher(cfg)
         try:
             gh_issue = asyncio.run(fetcher.fetch_issue_by_number(issue))
         except Exception:
@@ -277,13 +346,15 @@ def build_diagnostics_router(config: HydraFlowConfig) -> APIRouter:
             )
             gh_issue = None
         issue_meta = _issue_meta_from_github_issue(issue, gh_issue)
-        return build_waterfall(config, issue=issue, issue_meta=issue_meta)
+        return build_waterfall(cfg, issue=issue, issue_meta=issue_meta)
 
     @router.get("/issue/{issue}/{phase}")
-    def issue_phase(issue: int, phase: str) -> list[dict[str, Any]]:
+    def issue_phase(
+        issue: int, phase: str, repo: RepoSlugParam = None
+    ) -> list[dict[str, Any]]:
         if not _PHASE_PATTERN.fullmatch(phase):
             raise HTTPException(status_code=404, detail="not found")
-        phase_dir = _safe_traces_subdir(config.data_root, issue, phase)
+        phase_dir = _safe_traces_subdir(_config_for(repo).data_root, issue, phase)
         if phase_dir is None or not phase_dir.is_dir():
             raise HTTPException(status_code=404, detail="not found")
         summaries: list[dict[str, Any]] = []
@@ -299,10 +370,14 @@ def build_diagnostics_router(config: HydraFlowConfig) -> APIRouter:
         return summaries
 
     @router.get("/issue/{issue}/{phase}/{run_id}")
-    def issue_phase_run(issue: int, phase: str, run_id: int) -> dict[str, Any]:
+    def issue_phase_run(
+        issue: int, phase: str, run_id: int, repo: RepoSlugParam = None
+    ) -> dict[str, Any]:
         if not _PHASE_PATTERN.fullmatch(phase):
             raise HTTPException(status_code=404, detail="not found")
-        run_dir = _safe_traces_subdir(config.data_root, issue, phase, f"run-{run_id}")
+        run_dir = _safe_traces_subdir(
+            _config_for(repo).data_root, issue, phase, f"run-{run_id}"
+        )
         if run_dir is None or not run_dir.is_dir():
             raise HTTPException(status_code=404, detail="not found")
         summary_path = run_dir / "summary.json"
@@ -319,21 +394,47 @@ def build_diagnostics_router(config: HydraFlowConfig) -> APIRouter:
         return {"summary": summary, "subprocesses": subprocesses}
 
     @router.get("/cache")
-    def cache(range: str = Query("7d")) -> list[dict[str, Any]]:
-        events = _load(range)
+    def cache(
+        range: str = Query("7d"), repo: RepoSlugParam = None
+    ) -> list[dict[str, Any]]:
+        events = _load(range, repo)
         return _cache_hit_rate_buckets(events)
 
     # --- Cost-rollup endpoints (§4.11 points 4–5) ---------------------------
+    # Repo-aware (Phase 3c-2): with ``ctx`` each endpoint builds per repo over
+    # ``resolve_runtimes(repo)`` and folds the results (group-by-sum on the
+    # phase/loop/model dimensions; per-issue rows carry a repo tag). ``ctx is
+    # None`` keeps the bare single-repo builder. ``/auto-agent`` (Phase 3c-4)
+    # reads ONE shared audit.jsonl and filters by each entry's ``repo`` stamp
+    # rather than unioning per-repo files.
+
+    def _audit_repos(repo: str | None) -> frozenset[str] | None:
+        """Acceptable ``entry.repo`` values for the requested scope (``None`` =
+        every repo). Legacy entries (``repo == ""``) were written by the single
+        pre-multi-repo host, so they fold into the host/default repo's scope.
+        """
+        if ctx is None:
+            return None
+        if repo is not None and repo.strip().lower() == REPO_ALL:
+            return None
+        default = ctx.resolve_runtimes(None)[0][4]
+        slug = default if repo is None else ctx.resolve_runtimes(repo)[0][4]
+        return frozenset({slug, ""}) if slug == default else frozenset({slug})
 
     @router.get("/cost/rolling-24h")
-    def cost_rolling_24h() -> dict[str, Any]:
+    def cost_rolling_24h(repo: RepoSlugParam = None) -> dict[str, Any]:
         """Total cost burned in the last 24h, grouped by phase and loop (§4.11 point 4)."""
-        return build_rolling_24h(config)
+        if ctx is None:
+            return build_rolling_24h(config)
+        return merge_rolling_24h(
+            [build_rolling_24h(cfg) for cfg, _slug in _runtimes(repo)]
+        )
 
     @router.get("/cost/top-issues")
     def cost_top_issues(
         range: str = Query("7d"),
         limit: int = Query(10, ge=1, le=100),
+        repo: RepoSlugParam = None,
     ) -> list[dict[str, Any]]:
         """Most expensive issues in the window (§4.11 point 4)."""
         try:
@@ -341,53 +442,97 @@ def build_diagnostics_router(config: HydraFlowConfig) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         now = datetime.now(UTC)
-        return build_top_issues(config, since=now - window, until=now, limit=limit)
+        if ctx is None:
+            return build_top_issues(config, since=now - window, until=now, limit=limit)
+        per_repo = [
+            (slug, build_top_issues(cfg, since=now - window, until=now, limit=limit))
+            for cfg, slug in _runtimes(repo)
+        ]
+        return merge_top_issues(per_repo, limit=limit)
 
     @router.get("/cost/by-loop")
-    def cost_by_loop_route(range: str = Query("7d")) -> list[dict[str, Any]]:
+    def cost_by_loop_route(
+        range: str = Query("7d"), repo: RepoSlugParam = None
+    ) -> list[dict[str, Any]]:
         """Per-loop tick and wall-clock share over the range (§4.11 point 4)."""
         try:
             window = _parse_range(range)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         now = datetime.now(UTC)
-        return build_by_loop(config, since=now - window, until=now)
+        if ctx is None:
+            return build_by_loop(config, since=now - window, until=now)
+        return merge_by_loop(
+            [
+                build_by_loop(cfg, since=now - window, until=now)
+                for cfg, _slug in _runtimes(repo)
+            ]
+        )
 
     @router.get("/cost/by-model")
-    def cost_by_model_route(range: str = Query("7d")) -> list[dict[str, Any]]:
+    def cost_by_model_route(
+        range: str = Query("7d"), repo: RepoSlugParam = None
+    ) -> list[dict[str, Any]]:
         """Cross-loop spend broken out by model over the range."""
         try:
             window = _parse_range(range)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         now = _cost_rollups_mod._utcnow()
-        return build_cost_by_model(config, since=now - window, until=now)
+        if ctx is None:
+            return build_cost_by_model(config, since=now - window, until=now)
+        return merge_cost_by_model(
+            [
+                build_cost_by_model(cfg, since=now - window, until=now)
+                for cfg, _slug in _runtimes(repo)
+            ]
+        )
 
     @router.get("/loops/cost")
-    def loops_cost(range: str = Query("7d")) -> list[dict[str, Any]]:
+    def loops_cost(
+        range: str = Query("7d"), repo: RepoSlugParam = None
+    ) -> list[dict[str, Any]]:
         """Per-loop machinery-level cost dashboard (§4.11 point 5)."""
         try:
             window = _parse_range(range)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         now = datetime.now(UTC)
-        event_bus = _event_bus_for_rollup(config)
-        return build_per_loop_cost(
-            config,
-            since=now - window,
-            until=now,
-            event_bus=event_bus,
+        if ctx is None:
+            return build_per_loop_cost(
+                config,
+                since=now - window,
+                until=now,
+                event_bus=_event_bus_for_rollup(config),
+            )
+        return merge_per_loop_cost(
+            [
+                build_per_loop_cost(
+                    cfg,
+                    since=now - window,
+                    until=now,
+                    event_bus=_event_bus_for_rollup(cfg),
+                )
+                for cfg, _slug in _runtimes(repo)
+            ]
         )
 
     @router.get("/auto-agent")
-    def auto_agent_stats() -> dict[str, Any]:
-        """Auto-agent dashboard payload (spec §6.2)."""
+    def auto_agent_stats(repo: RepoSlugParam = None) -> dict[str, Any]:
+        """Auto-agent dashboard payload (spec §6.2).
+
+        The preflight audit is ONE shared JSONL whose rows carry a ``repo``
+        stamp, so scoping filters by that stamp rather than unioning per-repo
+        files: ``repo=__all__`` keeps every row, a slug (or the default repo)
+        keeps its rows plus legacy unattributed rows for the host.
+        """
         from preflight.audit import PreflightAuditStore  # noqa: PLC0415
 
+        repos = _audit_repos(repo)
         audit = PreflightAuditStore(config.data_root)
-        today = audit.query_24h()
-        week = audit.query_7d()
-        top = audit.top_spend(n=5)
+        today = audit.query_24h(repos)
+        week = audit.query_7d(repos)
+        top = audit.top_spend(n=5, repos=repos)
         return {
             "today": _stats_payload(today),
             "last_7d": _stats_payload(week),

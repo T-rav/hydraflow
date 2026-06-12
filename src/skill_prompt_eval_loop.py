@@ -111,11 +111,26 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             logger.warning("trust-adversarial non-JSON response")
             return []
 
-    async def _file_drift_issue(self, case: dict[str, Any], last_status: str) -> int:
-        title = (
+    @staticmethod
+    def _drift_title(case: dict[str, Any]) -> str:
+        # Single source so the file path and the close-on-recovery path can never
+        # drift apart (#9359 / fake-fidelity lesson).
+        return (
             f"Skill prompt drift: {case.get('skill', '?')} "
             f"missed {case.get('case_id', '?')}"
         )
+
+    async def _resolve_drift_issue(self, case: dict[str, Any]) -> None:
+        """Close the open drift issue when a case is passing again (#9359)."""
+        existing = await self._pr.find_existing_issue(self._drift_title(case))
+        if existing:
+            await self._pr.post_comment(
+                existing, "Skill-prompt case is passing again — auto-closing."
+            )
+            await self._pr.close_issue(existing)
+
+    async def _file_drift_issue(self, case: dict[str, Any], last_status: str) -> int:
+        title = self._drift_title(case)
         body = (
             f"## Regression\n\n"
             f"Case `{case.get('case_id')}` regressed "
@@ -253,6 +268,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         }
         filed = 0
         escalated = 0
+        resolved = 0
         dedup = self._dedup.get()
         # Per-tick seed: stable within one invocation, diverse across ticks
         # (matches plan decision #5 — seed-stable per workflow run).
@@ -263,8 +279,8 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                 continue
             was = last_green.get(case_id, "PASS")
             now = case.get("status")
+            key = f"skill_prompt_eval:{case_id}"
             if was == "PASS" and now == "FAIL":
-                key = f"skill_prompt_eval:{case_id}"
                 if key in dedup:
                     continue
                 attempts = self._state.inc_skill_prompt_attempts(case_id)
@@ -276,6 +292,15 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                     filed += 1
                 dedup.add(key)
                 self._dedup.set_all(dedup)
+            elif now == "PASS" and key in dedup:
+                # Recovery — the case passes again. Close the open drift issue
+                # and clear its dedup/attempts so a future regression re-files
+                # (#9359 issue-hygiene).
+                await self._resolve_drift_issue(case)
+                dedup.discard(key)
+                self._dedup.set_all(dedup)
+                self._state.clear_skill_prompt_attempts(case_id)
+                resolved += 1
 
         # Save the new snapshot — tests that currently PASS become the
         # new last-green. Tests that remain FAIL stay in the dedup set.
@@ -305,6 +330,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             "status": "ok",
             "filed": filed,
             "escalated": escalated,
+            "resolved": resolved,
             "weak_cases_flagged": weak_flagged,
             "cases_seen": len(cases),
         }

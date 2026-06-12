@@ -93,6 +93,10 @@ class BranchProtectionAuditorLoop(BaseBackgroundLoop):
             return {"error": True}
 
         if report.clean:
+            # Drift resolved — close the open drift issue and clear the dedup so
+            # a future drift re-files (#9359 issue-hygiene). The dedup store is
+            # dedicated to this loop, so clearing it is safe.
+            await self._resolve_drift_issue(report.repo)
             return {"status": "clean"}
 
         key = _drift_key(report)
@@ -124,3 +128,16 @@ class BranchProtectionAuditorLoop(BaseBackgroundLoop):
             "branch-protection auditor: filed issue #%d for ruleset drift", issue
         )
         return {"status": "drift", "issue_created": issue}
+
+    async def _resolve_drift_issue(self, repo: str) -> None:
+        """Close the open ruleset-drift issue and clear the dedup on recovery."""
+        title = f"[branch-protection] ruleset drift on {repo}"
+        existing = await self._prs.find_existing_issue(title)
+        if existing:
+            await self._prs.post_comment(
+                existing,
+                "Branch-protection ruleset drift resolved — auto-closing.",
+            )
+            await self._prs.close_issue(existing)
+        if self._dedup.get():
+            self._dedup.set_all(set())

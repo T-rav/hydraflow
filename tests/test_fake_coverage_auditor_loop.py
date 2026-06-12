@@ -14,6 +14,7 @@ from base_background_loop import LoopDeps
 from config import HydraFlowConfig
 from events import EventBus
 from fake_coverage_auditor_loop import (
+    _FAKE_TO_CASSETTE_DIR,
     FakeCoverageAuditorLoop,
     _is_helper,
     catalog_cassette_methods,
@@ -164,6 +165,48 @@ async def test_do_work_files_surface_gap(loop_env, monkeypatch, tmp_path) -> Non
     labels = pr.create_issue.await_args.args[2]
     assert "hydraflow-adapter-surface" in labels
     assert "hydraflow-fake-coverage-gap" in labels
+
+
+async def test_do_work_skips_surface_audit_for_unmapped_fake(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """A fake NOT registered in ``_FAKE_TO_CASSETTE_DIR`` must not file an
+    adapter-surface gap.
+
+    Internal-port fakes (a clock, in-memory stores, assertion helpers) have no
+    recordable external I/O, so no cassette can ever cover them. The empty-string
+    fallback (``_FAKE_TO_CASSETTE_DIR.get(fake, "")``) previously audited such a
+    fake against the cassette *root* — flagging every public method as a false
+    gap (the dominant fake-coverage false positive).
+    """
+    cfg, state, pr, dedup = loop_env
+    state.get_fake_coverage_rollup_issue.return_value = None
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    # FakeClock is not in _FAKE_TO_CASSETTE_DIR; now/monotonic are surface methods.
+    (fake_dir / "fake_clock.py").write_text(
+        "class FakeClock:\n    def now(self): ...\n    def monotonic(self): ...\n"
+    )
+    (tmp_path / "tests" / "trust" / "contracts" / "cassettes").mkdir(parents=True)
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_reconcile():
+        return None
+
+    async def fake_list_titles():
+        return set()
+
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    stats = await loop._do_work()
+
+    assert stats["filed"] == 0
+    pr.create_issue.assert_not_awaited()
 
 
 async def test_do_work_files_helper_gap(loop_env, monkeypatch, tmp_path) -> None:
@@ -822,3 +865,116 @@ async def test_helper_rollup_same_shape(loop_env, monkeypatch, tmp_path) -> None
     assert "3 methods" in title
     for helper in ("script_a", "script_b", "script_c"):
         assert helper in body
+
+
+# --- Right-sizing (fix/rightsize-fake-coverage-auditor) ----------------------
+# ADR-0047 scopes cassette contract testing to the adapters with a real
+# recorder in src/contract_recording.py (github/git/docker/claude). The
+# auditor must (1) only adapter-surface audit those cassette-capable fakes,
+# and (2) treat in-memory fake scaffolding (methods with no real-adapter
+# counterpart) as neither adapter-surface nor test-helper.
+
+
+def test_registry_contains_only_cassette_capable_adapters() -> None:
+    """Only adapters with a real recorder + YAML cassette dir are audited."""
+    assert set(_FAKE_TO_CASSETTE_DIR) == {"FakeGitHub", "FakeGit", "FakeDocker"}
+
+
+def test_catalog_drops_scaffolding_via_real_adapter(tmp_path: Path) -> None:
+    """A FakeGitHub public method absent from the real PRManager/PRPort surface
+    is scaffolding, not adapter-surface — it has no recordable gh counterpart."""
+    src = tmp_path / "src"
+    fake_dir = src / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    (src / "pr_manager.py").write_text(
+        "class PRManager:\n"
+        "    async def create_issue(self, title, body, labels): ...\n"
+        "    async def close_issue(self, n): ...\n"
+        "    async def ensure_labels_exist(self, labels): ...\n"
+    )
+    (src / "ports.py").write_text(
+        "class PRPort:\n    async def create_issue(self, title, body, labels): ...\n"
+    )
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n"
+        "    async def create_issue(self, title, body, labels): ...\n"
+        "    async def close_issue(self, n): ...\n"
+        "    async def ensure_labels_exist(self, labels): ...\n"
+        "    def add_issue(self, issue): ...\n"
+        "    def from_seed(self, seed): ...\n"
+        "    def script_ci(self, events): ...\n"
+    )
+
+    cat = catalog_fake_methods(fake_dir, repo_root=tmp_path)
+
+    assert set(cat["FakeGitHub"]["adapter-surface"]) == {
+        "create_issue",
+        "close_issue",
+        "ensure_labels_exist",
+    }
+    assert set(cat["FakeGitHub"]["scaffolding"]) == {"add_issue", "from_seed"}
+    assert set(cat["FakeGitHub"]["test-helper"]) == {"script_ci"}
+
+
+def test_catalog_real_adapter_filter_skips_when_adapter_missing(
+    tmp_path: Path,
+) -> None:
+    """If the real adapter module can't be resolved, fall back to legacy
+    classification rather than nuking the whole surface to scaffolding."""
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n"
+        "    async def create_issue(self, title): ...\n"
+        "    def add_issue(self, issue): ...\n"
+    )
+    # No src/pr_manager.py or src/ports.py under repo_root → no filtering.
+    cat = catalog_fake_methods(fake_dir, repo_root=tmp_path)
+    assert set(cat["FakeGitHub"]["adapter-surface"]) == {"create_issue", "add_issue"}
+    assert cat["FakeGitHub"]["scaffolding"] == []
+
+
+async def test_helper_coverage_counts_any_test_not_just_scenarios(
+    loop_env, tmp_path
+) -> None:
+    """A helper exercised by a unit test (outside tests/scenarios/) is part of
+    the working contract — the auditor must treat it as covered."""
+    cfg, state, pr, dedup = loop_env
+    # A non-scenario unit test calls the helper; no tests/scenarios/ at all.
+    unit_tests = tmp_path / "tests"
+    unit_tests.mkdir(parents=True)
+    (unit_tests / "test_fake_llm_phase_scripts.py").write_text(
+        "def test_x():\n    fake.script_discover(['a'])\n"
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    assert await loop._grep_scenario_for_helper("script_discover") is True
+
+
+@pytest.mark.asyncio
+async def test_grep_helper_uses_stdlib_fallback_when_ripgrep_absent(
+    loop_env, tmp_path, monkeypatch
+) -> None:
+    """With ripgrep off PATH (CI runners, bare deploy hosts), the helper search
+    falls back to a stdlib scan with the same fixed-string semantics."""
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+
+    cfg, state, pr, dedup = loop_env
+    unit_tests = tmp_path / "tests"
+    unit_tests.mkdir(parents=True)
+    (unit_tests / "test_fake_agent.py").write_text(
+        "def test_x():\n    fake.script_ci(['ok'])\n"
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    # Present in a unit test → found via the fallback; absent → not found.
+    assert await loop._grep_scenario_for_helper("script_ci") is True
+    assert await loop._grep_scenario_for_helper("never_called_helper") is False

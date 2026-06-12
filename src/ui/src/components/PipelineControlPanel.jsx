@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { theme } from '../theme'
-import { PIPELINE_LOOPS, PIPELINE_STAGES, ACTIVE_STATUSES, WORKER_COUNT_MIN, WORKER_COUNT_MAX } from '../constants'
+import { PIPELINE_LOOPS, PIPELINE_STAGES, ACTIVE_STATUSES, WORKER_COUNT_MIN, WORKER_COUNT_MAX, REPO_ALL } from '../constants'
 import { useHydraFlow } from '../context/HydraFlowContext'
 
 function formatDuration(startTime) {
@@ -95,8 +95,13 @@ function PipelineWorkerCard({ workerKey, worker }) {
   )
 }
 
+// Worker mutations target one orchestrator, so under "All repos" the backend
+// rejects config writes — disable the per-repo controls and tell the operator.
+const AGGREGATE_EDIT_TIP = 'Select a specific repo to edit worker settings'
+
 export function PipelineControlPanel({ onToggleBgWorker }) {
   const { workers, stageStatus, hitlItems, refreshControlStatus, selectedRepoSlug } = useHydraFlow()
+  const isAggregate = selectedRepoSlug === REPO_ALL
   const workerCaps = stageStatus?.workerCaps || {}
 
   const [localCaps, setLocalCaps] = useState({})
@@ -117,6 +122,8 @@ export function PipelineControlPanel({ onToggleBgWorker }) {
   }, [workerCapsKey])
 
   const updateWorkerCount = useCallback(async (loopKey, configKey, newValue) => {
+    // Config writes target a single repo; the backend 400s repo=__all__.
+    if (selectedRepoSlug === REPO_ALL) return
     setLocalCaps(caps => ({ ...caps, [loopKey]: newValue }))
     try {
       const url = selectedRepoSlug
@@ -168,8 +175,9 @@ export function PipelineControlPanel({ onToggleBgWorker }) {
               {loop.configKey && effectiveMax != null ? (
                 <>
                   <button
-                    style={effectiveMax <= WORKER_COUNT_MIN ? capBtnDisabled : capBtn}
-                    disabled={effectiveMax <= WORKER_COUNT_MIN}
+                    style={(isAggregate || effectiveMax <= WORKER_COUNT_MIN) ? capBtnDisabled : capBtn}
+                    disabled={isAggregate || effectiveMax <= WORKER_COUNT_MIN}
+                    title={isAggregate ? AGGREGATE_EDIT_TIP : undefined}
                     onClick={() => updateWorkerCount(loop.key, loop.configKey, effectiveMax - 1)}
                     data-testid={`dec-${loop.key}`}
                     aria-label={`Decrease ${loop.label} workers`}
@@ -183,8 +191,9 @@ export function PipelineControlPanel({ onToggleBgWorker }) {
                     {effectiveMax}
                   </span>
                   <button
-                    style={effectiveMax >= WORKER_COUNT_MAX ? capBtnDisabled : capBtn}
-                    disabled={effectiveMax >= WORKER_COUNT_MAX}
+                    style={(isAggregate || effectiveMax >= WORKER_COUNT_MAX) ? capBtnDisabled : capBtn}
+                    disabled={isAggregate || effectiveMax >= WORKER_COUNT_MAX}
+                    title={isAggregate ? AGGREGATE_EDIT_TIP : undefined}
                     onClick={() => updateWorkerCount(loop.key, loop.configKey, effectiveMax + 1)}
                     data-testid={`inc-${loop.key}`}
                     aria-label={`Increase ${loop.label} workers`}
@@ -203,7 +212,12 @@ export function PipelineControlPanel({ onToggleBgWorker }) {
               <span style={styles.loopCountLabel}>workers</span>
               {onToggleBgWorker && (
                 <button
-                  style={enabled ? styles.toggleOn : styles.toggleOff}
+                  style={{
+                    ...(enabled ? styles.toggleOn : styles.toggleOff),
+                    ...(isAggregate ? { opacity: 0.45, cursor: 'not-allowed' } : {}),
+                  }}
+                  disabled={isAggregate}
+                  title={isAggregate ? AGGREGATE_EDIT_TIP : undefined}
                   onClick={() => onToggleBgWorker(loop.key, !enabled)}
                 >
                   {enabled ? 'On' : 'Off'}

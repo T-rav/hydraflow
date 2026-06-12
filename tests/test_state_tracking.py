@@ -114,6 +114,7 @@ class TestInitialization:
             "last_green_audit",
             "last_green_rc_sha",
             "last_rc_red_sha",
+            "consecutive_rc_failures",
             "managed_repos_onboarding_status",
             "onboarding_drafts",
             "principles_drift_attempts",
@@ -147,6 +148,7 @@ class TestInitialization:
             "adr_audit_attempts",
             # Per-ADR rollup tracking (#8987) — see ADR-0056 amendment.
             "adr_rollup_issues",
+            "rollup_issues",
             # MemoryBacklogLoop (ADR-0057)
             "memory_backlog_attempts",
             # TriageRetryLoop (ADR-0063 W2)

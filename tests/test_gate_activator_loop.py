@@ -38,6 +38,9 @@ def _build(
     )
     pr = MagicMock()
     pr.create_issue = AsyncMock(return_value=4242)
+    pr.find_existing_issue = AsyncMock(return_value=0)
+    pr.close_issue = AsyncMock()
+    pr.post_comment = AsyncMock()
     dedup = DedupStore("ga", tmp_path / "ga.json")
     detector = AsyncMock(return_value=proposals)
     loop = GateActivatorLoop(
@@ -118,3 +121,19 @@ async def test_detector_failure_is_caught(tmp_path: Path) -> None:
 async def test_default_interval_from_config(tmp_path: Path) -> None:
     loop, _pr, _dedup, _detector = _build(tmp_path, proposals=_NONE)
     assert loop._get_default_interval() == loop._config.gate_activator_interval
+
+
+async def test_clean_closes_open_issue_and_clears_dedup(tmp_path: Path) -> None:
+    """#9359: when no proposals remain, close the open activation issue and
+    clear the dedup so a future proposal re-files."""
+    loop, pr, dedup, _detector = _build(tmp_path, proposals=_PROPOSALS)
+    # First tick files + dedups.
+    await loop._do_work()
+    assert len(dedup.get()) == 1
+    # Now the gates are activated → detector returns no proposals.
+    loop._detector = AsyncMock(return_value=_NONE)  # type: ignore[attr-defined]
+    pr.find_existing_issue = AsyncMock(return_value=4242)
+    result = await loop._do_work()
+    assert result == {"status": "clean"}
+    pr.close_issue.assert_awaited_once_with(4242)
+    assert dedup.get() == set()

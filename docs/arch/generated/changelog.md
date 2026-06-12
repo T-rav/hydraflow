@@ -6,6 +6,28 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `dc7e09b` — fix(trust): right-size FakeCoverageAuditorLoop to cassette-capable adapters (#9403) (#9403) *(2026-06-11)*
+- `d0ad6db` — fix(dashboard): aggregate /api/timeline* under __all__, repo-tag each item (#9402) (#9402) *(2026-06-11)*
+- `0f9b7fa` — fix(dashboard): aggregate /api/metrics/github under __all__; tag single-repo workers with canonical slug (#9399) (#9399) *(2026-06-10)*
+- `58bf543` — fix(dashboard): route intent + request-changes to the selected/row repo; clear repo-scoped state on switch (#9398) (#9398) *(2026-06-10)*
+- `a0d630c` — test(dashboard): MockWorld scenarios for Phase 2/3 aggregate endpoints (#9392) (#9392) *(2026-06-09)*
+- `56bb8a8` — test(dashboard): multi-repo aggregation e2e + MockWorld scenarios (Phase 4-c) (#9391) (#9391) *(2026-06-09)*
+- `bc3049c` — feat(dashboard): repo-qualify live worker/PR cards for repo=__all__ (Phase 4-b2) (#9390) (#9390) *(2026-06-09)*
+- `2f1c343` — feat(dashboard): merged WebSocket + /api/events backfill for repo=__all__ (Phase 4-a) (#9387) (#9387) *(2026-06-09)*
+- `b05bc76` — fix(dashboard): scope bare /api/sessions + pipeline-active to default repo (Phase 6) (#9386) (#9386) *(2026-06-09)*
+- `9a46933` — feat(atlas): ArticlesView + wiki entries scope by operated repo (Phase 5c-2) (#9385) (#9385) *(2026-06-09)*
+- `6aeec86` — feat(atlas): thread operated repo into the graph cluster + namespaced node ids (Phase 5c-1) (#9383) (#9383) *(2026-06-09)*
+- `e6e3269` — fix(loops): auto-close SecurityPatch issues when the alert resolves (#9359) (#9382) (#9382) *(2026-06-09)*
+- `99f1f27` — feat(wiki): /api/wiki/* maintenance surface scopes by repo (Phase 5b) (#9379) (#9379) *(2026-06-09)*
+- `af05e0c` — feat(atlas): /api/atlas/* endpoints scope by repo (Phase 5a) (#9377) (#9377) *(2026-06-08)*
+- `1f68711` — feat(system): aggregate-mode worker affordances + force-clear-credit button (Phase 3b-fe polish) (#9374) (#9374) *(2026-06-08)*
+- `91b6227` — feat(diagnostics): auto-agent stats scope by repo (Phase 3c-4) (#9371) (#9371) *(2026-06-08)*
+- `0be9dbc` — feat(diagnostics): factory-health summary aggregates across repos (Phase 3c-3) (#9369) (#9369) *(2026-06-08)*
+- `98b2773` — feat(loops): RollupIssueManager + migrate StagingPromotionLoop to auto-close (#9359) (#9368) (#9368) *(2026-06-08)*
+- `ec58ffb` — feat(diagnostics): Factory Cost rollup endpoints aggregate across repos (Phase 3c-2) (#9367) (#9367) *(2026-06-08)*
+- `b5c9aa6` — feat(diagnostics): factory-metrics endpoints aggregate across repos (Phase 3c-1) (#9366) (#9366) *(2026-06-08)*
+- `b207b54` — feat(system): target the selected repo for bg-worker controls (Phase 3b-fe) (#9363) (#9363) *(2026-06-08)*
+- `5d58cdb` — feat(system): aggregate control status/workers + fan-out credit + config guards (Phase 3b backend) (#9360) (#9360) *(2026-06-08)*
 - `d8df0e1` — feat(hitl): aggregate HITL across repos + row-scoped mutations (Phase 3a) (#9358) (#9358) *(2026-06-08)*
 - `4069df7` — feat(persistence): repo-scope per-repo operational stores under shared data_root (ADR-0021 D2) (#9355) (#9355) *(2026-06-08)*
 

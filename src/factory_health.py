@@ -101,23 +101,30 @@ def compute_cohorts(
 ) -> dict[str, dict[str, Any]]:
     """Split retrospective entries into memory-available and memory-unavailable cohorts.
 
-    Joins on ``issue_number``. An issue is "memory available" if any
-    matching telemetry record has ``context_chars_before > 0``.
+    Joins on ``(repo, issue_number)``. An issue is "memory available" if any
+    matching telemetry record has ``context_chars_before > 0``. The ``repo`` key
+    keeps the join correct when entries are unioned across repos (issue numbers
+    collide — every repo numbers from 1); single-repo entries carry no ``repo``
+    tag (``None``), so they key uniformly and behave exactly as before.
     """
-    # Build lookup: issue_number → max context_chars_before
-    context_by_issue: dict[int, int] = {}
+    # Build lookup: (repo, issue_number) → max context_chars_before
+    context_by_issue: dict[tuple[Any, int], int] = {}
     for t in telemetry_entries:
         issue = t.get("issue_number")
         chars = t.get("context_chars_before", 0)
         if isinstance(issue, int) and isinstance(chars, int | float):
-            context_by_issue[issue] = max(context_by_issue.get(issue, 0), int(chars))
+            key = (t.get("repo"), issue)
+            context_by_issue[key] = max(context_by_issue.get(key, 0), int(chars))
 
     available: list[dict[str, Any]] = []
     unavailable: list[dict[str, Any]] = []
 
     for entry in retro_entries:
         issue = entry.get("issue_number")
-        if isinstance(issue, int) and context_by_issue.get(issue, 0) > 0:
+        if (
+            isinstance(issue, int)
+            and context_by_issue.get((entry.get("repo"), issue), 0) > 0
+        ):
             available.append(entry)
         else:
             unavailable.append(entry)

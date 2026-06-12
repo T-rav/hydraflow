@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { theme } from '../../theme'
+import { useHydraFlow } from '../../context/HydraFlowContext'
 import { HeadlineCards } from './HeadlineCards'
 import { TopBarChart } from './TopBarChart'
 import { CostByPhaseChart } from './CostByPhaseChart'
@@ -11,6 +12,7 @@ import { FactoryCostTab } from './FactoryCostTab'
 import { AutoAgentStats } from './AutoAgentStats'
 
 export function DiagnosticsTab() {
+  const { fetchWithRepo, selectedRepoSlug } = useHydraFlow()
   const [range, setRange] = useState('7d')
   const [subTab, setSubTab] = useState('overview')
   const [overview, setOverview] = useState(null)
@@ -29,13 +31,13 @@ export function DiagnosticsTab() {
     const params = `?range=${encodeURIComponent(range)}`
     setLoading(true)
     Promise.all([
-      fetch(`/api/diagnostics/overview${params}`).then((r) => r.json()),
-      fetch(`/api/diagnostics/tools${params}`).then((r) => r.json()),
-      fetch(`/api/diagnostics/skills${params}`).then((r) => r.json()),
-      fetch(`/api/diagnostics/subagents${params}`).then((r) => r.json()),
-      fetch(`/api/diagnostics/cost-by-phase${params}`).then((r) => r.json()),
-      fetch(`/api/diagnostics/cache${params}`).then((r) => r.json()),
-      fetch(`/api/diagnostics/issues${params}`).then((r) => r.json()),
+      fetchWithRepo(`/api/diagnostics/overview${params}`).then((r) => r.json()),
+      fetchWithRepo(`/api/diagnostics/tools${params}`).then((r) => r.json()),
+      fetchWithRepo(`/api/diagnostics/skills${params}`).then((r) => r.json()),
+      fetchWithRepo(`/api/diagnostics/subagents${params}`).then((r) => r.json()),
+      fetchWithRepo(`/api/diagnostics/cost-by-phase${params}`).then((r) => r.json()),
+      fetchWithRepo(`/api/diagnostics/cache${params}`).then((r) => r.json()),
+      fetchWithRepo(`/api/diagnostics/issues${params}`).then((r) => r.json()),
     ])
       .then(([ov, tl, sk, sa, cbp, ch, is]) => {
         if (cancelled) return
@@ -58,12 +60,18 @@ export function DiagnosticsTab() {
     return () => {
       cancelled = true
     }
-  }, [range, subTab])
+  }, [range, subTab, selectedRepoSlug, fetchWithRepo])
 
   const handleRowClick = useCallback(async (row) => {
-    const url = `/api/diagnostics/issue/${row.issue}/${row.phase}/${row.run_id}`
+    const base = `/api/diagnostics/issue/${row.issue}/${row.phase}/${row.run_id}`
+    // Each row carries its owning repo (under "All repos" the table unions
+    // several repos whose issue numbers may collide), so scope the drill-down
+    // to that row's repo explicitly rather than the globally-selected slug —
+    // letting fetchWithRepo append __all__ here would resolve the wrong traces.
     try {
-      const r = await fetch(url)
+      const r = row.repo
+        ? await fetch(`${base}?repo=${encodeURIComponent(row.repo)}`)
+        : await fetchWithRepo(base)
       if (!r.ok) {
         setSelectedRun({
           summary: null,
@@ -76,7 +84,7 @@ export function DiagnosticsTab() {
     } catch (err) {
       setSelectedRun({ summary: null, subprocesses: [], error: String(err) })
     }
-  }, [])
+  }, [fetchWithRepo])
 
   return (
     <div style={styles.tab}>

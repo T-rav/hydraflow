@@ -27,6 +27,7 @@ def hm_env(tmp_path: Path):
     )
     prs = AsyncMock()
     prs.create_issue = AsyncMock(return_value=42)
+    prs.list_issues_by_label = AsyncMock(return_value=[])
     hm = HealthMonitorLoop.__new__(HealthMonitorLoop)
     hm._config = cfg
     hm._prs = prs
@@ -120,3 +121,21 @@ async def test_no_prs_dependency_is_silent_noop(hm_env) -> None:
     log_path.write_text("{}\n")
     _set_mtime(log_path, age_days=10)
     await hm._check_wiki_freshness()
+
+
+async def test_recovery_closes_open_wiki_stale_issue(hm_env) -> None:
+    """#9359: when the wiki log moves again, the open wiki-stale issue closes."""
+    hm, prs, repo_root = hm_env
+    log_path = repo_root / "docs" / "wiki" / "log.jsonl"
+    log_path.write_text("{}\n")
+    _set_mtime(log_path, age_days=10)
+    await hm._check_wiki_freshness()
+    assert prs.create_issue.await_count == 1
+
+    # Recovery — log is fresh again AND an issue is open.
+    _set_mtime(log_path, age_days=0)
+    prs.list_issues_by_label = AsyncMock(
+        return_value=[{"number": 73, "title": "x", "body": "", "updated_at": ""}]
+    )
+    await hm._check_wiki_freshness()
+    prs.close_issue.assert_awaited_once_with(73)

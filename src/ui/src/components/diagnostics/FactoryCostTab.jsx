@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { theme } from '../../theme'
+import { REPO_ALL } from '../../constants'
+import { useHydraFlow } from '../../context/HydraFlowContext'
 import { CostByModelChart } from './CostByModelChart'
 import { FactoryCostSummary } from './FactoryCostSummary'
 import { PerLoopCostTable } from './PerLoopCostTable'
@@ -19,6 +21,7 @@ import { WaterfallView } from './WaterfallView'
  */
 
 export function FactoryCostTab({ range = '7d' }) {
+  const { fetchWithRepo, selectedRepoSlug } = useHydraFlow()
   const [rolling24h, setRolling24h] = useState(null)
   const [rollingError, setRollingError] = useState(null)
   const [topIssues, setTopIssues] = useState([])
@@ -33,10 +36,10 @@ export function FactoryCostTab({ range = '7d' }) {
     let cancelled = false
     const q = `?range=${encodeURIComponent(range)}`
     Promise.allSettled([
-      fetch('/api/diagnostics/cost/rolling-24h').then((r) => r.json()),
-      fetch(`/api/diagnostics/cost/top-issues${q}&limit=10`).then((r) => r.json()),
-      fetch(`/api/diagnostics/loops/cost${q}`).then((r) => r.json()),
-      fetch(`/api/diagnostics/cost/by-model${q}`).then((r) => r.json()),
+      fetchWithRepo('/api/diagnostics/cost/rolling-24h').then((r) => r.json()),
+      fetchWithRepo(`/api/diagnostics/cost/top-issues${q}&limit=10`).then((r) => r.json()),
+      fetchWithRepo(`/api/diagnostics/loops/cost${q}`).then((r) => r.json()),
+      fetchWithRepo(`/api/diagnostics/cost/by-model${q}`).then((r) => r.json()),
     ]).then((results) => {
       if (cancelled) return
       const [rolling, top, loops, byModel] = results
@@ -60,33 +63,48 @@ export function FactoryCostTab({ range = '7d' }) {
     return () => {
       cancelled = true
     }
-  }, [range])
+  }, [range, selectedRepoSlug, fetchWithRepo])
 
-  const loadWaterfall = useCallback(async (issueNumber) => {
-    const n = Number(issueNumber)
-    if (!n || !Number.isFinite(n) || n <= 0) {
-      setWaterfallError(new Error('Enter a positive issue number'))
-      setWaterfallPayload(null)
-      return
-    }
-    setSelectedIssue(n)
-    setWaterfallError(null)
-    try {
-      const r = await fetch(`/api/diagnostics/issue/${n}/waterfall`)
-      if (!r.ok) {
-        throw new Error(`waterfall ${r.status}`)
+  const loadWaterfall = useCallback(
+    async (issueNumber, repo) => {
+      const n = Number(issueNumber)
+      if (!n || !Number.isFinite(n) || n <= 0) {
+        setWaterfallError(new Error('Enter a positive issue number'))
+        setWaterfallPayload(null)
+        return
       }
-      setWaterfallPayload(await r.json())
-    } catch (err) {
-      setWaterfallError(err)
-      setWaterfallPayload(null)
-    }
-  }, [])
+      // A waterfall resolves a single repo's traces. Top-issue rows carry their
+      // own repo (under "All repos" the list unions several); manual input uses
+      // the selected repo. The aggregate sentinel has no single home, so ask
+      // the operator to pick one rather than silently hitting the default repo.
+      const scope = repo || selectedRepoSlug
+      if (scope === REPO_ALL) {
+        setWaterfallError(new Error('Select a specific repo to load a waterfall'))
+        setWaterfallPayload(null)
+        return
+      }
+      setSelectedIssue(n)
+      setWaterfallError(null)
+      const base = `/api/diagnostics/issue/${n}/waterfall`
+      const url = scope ? `${base}?repo=${encodeURIComponent(scope)}` : base
+      try {
+        const r = await fetch(url)
+        if (!r.ok) {
+          throw new Error(`waterfall ${r.status}`)
+        }
+        setWaterfallPayload(await r.json())
+      } catch (err) {
+        setWaterfallError(err)
+        setWaterfallPayload(null)
+      }
+    },
+    [selectedRepoSlug],
+  )
 
   const handleTopIssueClick = useCallback(
     (row) => {
       setWaterfallInput(String(row.issue))
-      loadWaterfall(row.issue)
+      loadWaterfall(row.issue, row.repo)
     },
     [loadWaterfall],
   )
@@ -118,7 +136,7 @@ export function FactoryCostTab({ range = '7d' }) {
           ) : (
             <ul style={styles.ul}>
               {topIssues.map((row) => (
-                <li key={row.issue} style={styles.li}>
+                <li key={`${row.repo || ''}#${row.issue}`} style={styles.li}>
                   <button
                     type="button"
                     style={styles.link}
@@ -126,6 +144,7 @@ export function FactoryCostTab({ range = '7d' }) {
                   >
                     #{row.issue}
                   </button>
+                  {row.repo ? <span style={styles.repoBadge}>{row.repo}</span> : null}
                   <span style={styles.liMeta}>
                     ${Number(row.cost_usd || 0).toFixed(4)} ·{' '}
                     {Number(row.wall_clock_seconds || 0)}s
@@ -208,6 +227,15 @@ const styles = {
   },
   liMeta: {
     color: theme.textMuted,
+    fontFamily: 'monospace',
+  },
+  repoBadge: {
+    fontSize: 10,
+    color: theme.textMuted,
+    background: theme.surface,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 4,
+    padding: '1px 5px',
     fontFamily: 'monospace',
   },
   link: {

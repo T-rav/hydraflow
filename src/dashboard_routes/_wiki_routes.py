@@ -17,17 +17,20 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
+from route_types import REPO_ALL, RepoSlugParam
 from wiki_maint_queue import MaintenanceTask
 
 if TYPE_CHECKING:
     from fastapi import APIRouter
 
+    from config import HydraFlowConfig
     from dashboard_routes._routes import RouteContext
 
 logger = logging.getLogger("hydraflow.dashboard.wiki")
@@ -63,14 +66,16 @@ class RebuildIndexPayload(BaseModel):
     repo: str = Field(min_length=1)
 
 
-def _wiki_loop(ctx: RouteContext):
-    """Return the ``RepoWikiLoop`` from the running orchestrator, or None.
+def _wiki_loop(get_orch: Callable[[], Any]):
+    """Return the ``RepoWikiLoop`` from the resolved orchestrator, or None.
 
-    Services live inside ``ServiceRegistry`` on the orchestrator, which
-    is constructed after the dashboard.  Looking them up lazily keeps
-    the route module decoupled from ``service_registry`` import order.
+    Takes the repo's zero-arg orchestrator getter (``resolve_runtime(repo)``'s
+    4th element) rather than ``ctx`` so each repo's own loop/queue is reached.
+    Services live inside ``ServiceRegistry`` on the orchestrator, which is
+    constructed after the dashboard.  Looking them up lazily keeps the route
+    module decoupled from ``service_registry`` import order.
     """
-    orch = ctx.get_orchestrator()
+    orch = get_orch()
     if orch is None:
         return None
     svc = getattr(orch, "_svc", None)
@@ -79,37 +84,37 @@ def _wiki_loop(ctx: RouteContext):
     return getattr(svc, "repo_wiki_loop", None)
 
 
-def _maintenance_queue(ctx: RouteContext):
+def _maintenance_queue(get_orch: Callable[[], Any]):
     """Return the loop's ``MaintenanceQueue``, or None if loop is down."""
-    loop = _wiki_loop(ctx)
+    loop = _wiki_loop(get_orch)
     if loop is None:
         return None
     return getattr(loop, "_queue", None)
 
 
-def _wiki_root(ctx: RouteContext) -> Path:
-    """Absolute path to the tracked ``repo_wiki/`` directory.
+def _wiki_root(cfg: HydraFlowConfig) -> Path:
+    """Absolute path to a repo's tracked ``repo_wiki/`` directory.
 
     Reads from ``config.repo_root / config.repo_wiki_path`` so the API
     sees what the migration script and phase runners wrote, not the
     legacy ``.hydraflow/repo_wiki/`` layout.
     """
-    return (ctx.config.repo_root / ctx.config.repo_wiki_path).resolve()
+    return (cfg.repo_root / cfg.repo_wiki_path).resolve()
 
 
-def _repo_dir(ctx: RouteContext, owner: str, repo: str) -> Path | None:
+def _repo_dir(cfg: HydraFlowConfig, owner: str, repo: str) -> Path | None:
     """Return the tracked dir for ``{owner}/{repo}`` or None when absent.
 
     Prevents path traversal via ``..`` or absolute paths in owner/repo.
     """
     if "/" in owner or "/" in repo or ".." in owner or ".." in repo:
         return None
-    candidate = _wiki_root(ctx) / owner / repo
+    candidate = _wiki_root(cfg) / owner / repo
     try:
         candidate_resolved = candidate.resolve()
     except OSError:
         return None
-    root = _wiki_root(ctx)
+    root = _wiki_root(cfg)
     if not str(candidate_resolved).startswith(str(root)):
         return None
     if not candidate_resolved.is_dir():
@@ -202,25 +207,44 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
     mutate the wiki directly.
     """
 
+    def _is_all(repo: str | None) -> bool:
+        return repo is not None and repo.strip().lower() == REPO_ALL
+
+    def _resolve(repo: str | None) -> tuple[HydraFlowConfig, Callable[[], Any]]:
+        """``(config, get_orch)`` for the selected repo.
+
+        ``__all__`` and ``None`` resolve the default/host runtime; a specific
+        slug resolves that repo's config + orchestrator (so its own wiki dir
+        and RepoWikiLoop/queue are reached).
+        """
+        cfg, _s, _b, get_orch = ctx.resolve_runtime(None if _is_all(repo) else repo)
+        return cfg, get_orch
+
+    def _reject_all(repo: str | None) -> None:
+        if _is_all(repo):
+            raise HTTPException(
+                status_code=400,
+                detail="repo=__all__ is not valid for wiki admin actions; pass a repo slug",
+            )
+
     @router.get("/api/wiki/metrics")
-    async def get_wiki_metrics() -> dict:
-        """Return current knowledge-system counters as a JSON snapshot."""
+    async def get_wiki_metrics(repo: RepoSlugParam = None) -> dict:
+        """Return current knowledge-system counters as a JSON snapshot.
+
+        ``knowledge_metrics`` is a process-wide singleton — its snapshot already
+        spans every repo's activity, so ``repo`` is accepted for API symmetry
+        but does NOT scope the counters (a per-repo split would need a
+        knowledge_metrics refactor, out of scope for this slice).
+        """
         from knowledge_metrics import metrics as _metrics  # noqa: PLC0415
 
         return _metrics.snapshot()
 
-    @router.get("/api/wiki/health")
-    async def get_wiki_health() -> dict:
-        """Report wiki + tribal store presence and rough sizing.
-
-        Reads the RepoWikiLoop's store and tribal_store attributes so the
-        dashboard can show whether the knowledge system is populated.
-        """
+    def _health_snapshot(get_orch: Callable[[], Any]) -> dict:
         result: dict = {"store": "unconfigured", "tribal": "unconfigured"}
-        loop = _wiki_loop(ctx)
+        loop = _wiki_loop(get_orch)
         if loop is None:
             return result
-
         store = getattr(loop, "_wiki_store", None)
         if store is not None:
             try:
@@ -229,7 +253,6 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
                 repos = []
             result["store"] = "populated" if repos else "empty"
             result["repos"] = len(repos)
-
         tribal = getattr(loop, "_tribal_store", None)
         if tribal is not None:
             try:
@@ -239,35 +262,76 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
             result["tribal"] = "populated" if out else "empty"
         return result
 
-    @router.get("/api/wiki/repos")
-    def list_wiki_repos() -> list[dict[str, str]]:
-        root = _wiki_root(ctx)
-        if not root.is_dir():
-            return []
-        out: list[dict[str, str]] = []
-        for owner_dir in sorted(root.iterdir()):
-            if not owner_dir.is_dir():
-                continue
-            for repo_dir in sorted(owner_dir.iterdir()):
-                if not repo_dir.is_dir():
-                    continue
-                if (repo_dir / "index.md").exists() or (
-                    repo_dir / "index.json"
-                ).exists():
-                    out.append({"owner": owner_dir.name, "repo": repo_dir.name})
-        return out
+    @router.get("/api/wiki/health")
+    async def get_wiki_health(repo: RepoSlugParam = None) -> dict:
+        """Report wiki + tribal store presence and rough sizing.
 
-    @router.get("/api/wiki/repos/{owner}/{repo}/entries")
+        ``repo=__all__`` aggregates across every repo's RepoWikiLoop (summed
+        ``repos`` count; a state is ``populated`` if any repo is); a specific
+        slug (or ``None``) reports that repo's loop.
+        """
+        if _is_all(repo):
+            _precedence = {"populated": 2, "empty": 1, "unconfigured": 0}
+            total = 0
+            store_state = "unconfigured"
+            tribal_state = "unconfigured"
+            for _c, _s, _b, get_orch, _slug in ctx.resolve_runtimes(repo):
+                snap = _health_snapshot(get_orch)
+                total += int(snap.get("repos", 0) or 0)
+                if _precedence[snap["store"]] > _precedence[store_state]:
+                    store_state = snap["store"]
+                if _precedence[snap["tribal"]] > _precedence[tribal_state]:
+                    tribal_state = snap["tribal"]
+            return {"store": store_state, "tribal": tribal_state, "repos": total}
+        return _health_snapshot(_resolve(repo)[1])
+
+    @router.get("/api/wiki/repos")
+    def list_wiki_repos(repo: RepoSlugParam = None) -> list[dict[str, str]]:
+        def _repos(cfg: HydraFlowConfig) -> list[dict[str, str]]:
+            root = _wiki_root(cfg)
+            if not root.is_dir():
+                return []
+            out: list[dict[str, str]] = []
+            for owner_dir in sorted(root.iterdir()):
+                if not owner_dir.is_dir():
+                    continue
+                for repo_dir in sorted(owner_dir.iterdir()):
+                    if not repo_dir.is_dir():
+                        continue
+                    if (repo_dir / "index.md").exists() or (
+                        repo_dir / "index.json"
+                    ).exists():
+                        out.append({"owner": owner_dir.name, "repo": repo_dir.name})
+            return out
+
+        if _is_all(repo):
+            seen: set[tuple[str, str]] = set()
+            out: list[dict[str, str]] = []
+            for cfg, _s, _b, _g, _slug in ctx.resolve_runtimes(repo):
+                for row in _repos(cfg):
+                    key = (row["owner"], row["repo"])
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    out.append(row)
+            return out
+        return _repos(_resolve(repo)[0])
+
+    # The wiki-SUBJECT repo is the `{owner}/{wiki_repo}` path; the OPERATED repo
+    # is the `repo` query (which wiki store to read), resolved via _resolve. The
+    # path placeholder is `wiki_repo` (not `repo`) so the two don't collide.
+    @router.get("/api/wiki/repos/{owner}/{wiki_repo}/entries")
     def list_wiki_entries(
         owner: str,
-        repo: str,
+        wiki_repo: str,
         topic: str | None = None,
         status: str | None = None,
         q: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        repo: RepoSlugParam = None,
     ) -> list[dict[str, Any]]:
-        repo_dir = _repo_dir(ctx, owner, repo)
+        repo_dir = _repo_dir(_resolve(repo)[0], owner, wiki_repo)
         if repo_dir is None:
             return []
         topics: tuple[str, ...] = (topic,) if topic else _TOPICS
@@ -278,7 +342,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
                 continue
             for entry_path in sorted(topic_dir.glob("*.md")):
                 summary = _entry_summary_from_path(
-                    topic=t, path=entry_path, owner=owner, repo=repo
+                    topic=t, path=entry_path, owner=owner, repo=wiki_repo
                 )
                 if summary is None:
                     continue
@@ -294,9 +358,11 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
         limit = max(limit, 0)
         return out[offset : offset + limit]
 
-    @router.get("/api/wiki/repos/{owner}/{repo}/entries/{entry_id}")
-    def get_wiki_entry(owner: str, repo: str, entry_id: str) -> dict[str, Any]:
-        repo_dir = _repo_dir(ctx, owner, repo)
+    @router.get("/api/wiki/repos/{owner}/{wiki_repo}/entries/{entry_id}")
+    def get_wiki_entry(
+        owner: str, wiki_repo: str, entry_id: str, repo: RepoSlugParam = None
+    ) -> dict[str, Any]:
+        repo_dir = _repo_dir(_resolve(repo)[0], owner, wiki_repo)
         if repo_dir is None:
             raise HTTPException(status_code=404, detail="repo not found")
         if not re.fullmatch(r"\d{1,6}", entry_id):
@@ -313,21 +379,22 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
                     "id": entry_id,
                     "topic": topic,
                     "owner": owner,
-                    "repo": repo,
+                    "repo": wiki_repo,
                     "filename": match.name,
                     "frontmatter": frontmatter,
                     "body": body,
                 }
         raise HTTPException(status_code=404, detail="entry not found")
 
-    @router.get("/api/wiki/repos/{owner}/{repo}/log")
+    @router.get("/api/wiki/repos/{owner}/{wiki_repo}/log")
     def get_wiki_log(
         owner: str,
-        repo: str,
+        wiki_repo: str,
         issue: int | None = None,
         limit: int = 200,
+        repo: RepoSlugParam = None,
     ) -> list[dict[str, Any]]:
-        repo_dir = _repo_dir(ctx, owner, repo)
+        repo_dir = _repo_dir(_resolve(repo)[0], owner, wiki_repo)
         if repo_dir is None:
             return []
         log_dir = repo_dir / "log"
@@ -355,9 +422,13 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
         return records[-limit:] if limit else []
 
     @router.get("/api/wiki/maintenance/status")
-    def get_maintenance_status() -> dict[str, Any]:
-        loop = _wiki_loop(ctx)
-        queue = _maintenance_queue(ctx)
+    def get_maintenance_status(repo: RepoSlugParam = None) -> dict[str, Any]:
+        # Maintenance is a single-orchestrator concept (one queue + open PR per
+        # repo); ``__all__``/``None`` report the host/default repo's loop, a
+        # specific slug reports that repo's.
+        cfg, get_orch = _resolve(repo)
+        loop = _wiki_loop(get_orch)
+        queue = _maintenance_queue(get_orch)
         queue_path = (
             queue._path  # noqa: SLF001 — read-only diagnostics
             if queue is not None
@@ -368,17 +439,24 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
             "open_pr_branch": getattr(loop, "_open_pr_branch", None) if loop else None,
             "queue_depth": len(queue.peek()) if queue is not None else 0,
             "queue_path": str(queue_path) if queue_path else None,
-            "interval_seconds": ctx.config.repo_wiki_interval,
-            "auto_merge": ctx.config.repo_wiki_maintenance_auto_merge,
-            "coalesce": ctx.config.repo_wiki_maintenance_pr_coalesce,
+            "interval_seconds": cfg.repo_wiki_interval,
+            "auto_merge": cfg.repo_wiki_maintenance_auto_merge,
+            "coalesce": cfg.repo_wiki_maintenance_pr_coalesce,
         }
 
-    @router.post("/api/wiki/admin/force-compile")
-    def admin_force_compile(payload: ForceCompilePayload) -> dict[str, str]:
-        queue = _maintenance_queue(ctx)
+    def _admin_queue(repo: str | None):
+        """The selected repo's maintenance queue; admin actions reject __all__."""
+        _reject_all(repo)
+        queue = _maintenance_queue(_resolve(repo)[1])
         if queue is None:
             raise HTTPException(status_code=503, detail="wiki queue unavailable")
-        queue.enqueue(
+        return queue
+
+    @router.post("/api/wiki/admin/force-compile")
+    def admin_force_compile(
+        payload: ForceCompilePayload, repo: RepoSlugParam = None
+    ) -> dict[str, str]:
+        _admin_queue(repo).enqueue(
             MaintenanceTask(
                 kind="force-compile",
                 repo_slug=f"{payload.owner}/{payload.repo}",
@@ -388,11 +466,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
         return {"status": "queued"}
 
     @router.post("/api/wiki/admin/mark-stale")
-    def admin_mark_stale(payload: MarkStalePayload) -> dict[str, str]:
-        queue = _maintenance_queue(ctx)
-        if queue is None:
-            raise HTTPException(status_code=503, detail="wiki queue unavailable")
-        queue.enqueue(
+    def admin_mark_stale(
+        payload: MarkStalePayload, repo: RepoSlugParam = None
+    ) -> dict[str, str]:
+        _admin_queue(repo).enqueue(
             MaintenanceTask(
                 kind="mark-stale",
                 repo_slug=f"{payload.owner}/{payload.repo}",
@@ -405,11 +482,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
         return {"status": "queued"}
 
     @router.post("/api/wiki/admin/rebuild-index")
-    def admin_rebuild_index(payload: RebuildIndexPayload) -> dict[str, str]:
-        queue = _maintenance_queue(ctx)
-        if queue is None:
-            raise HTTPException(status_code=503, detail="wiki queue unavailable")
-        queue.enqueue(
+    def admin_rebuild_index(
+        payload: RebuildIndexPayload, repo: RepoSlugParam = None
+    ) -> dict[str, str]:
+        _admin_queue(repo).enqueue(
             MaintenanceTask(
                 kind="rebuild-index",
                 repo_slug=f"{payload.owner}/{payload.repo}",
@@ -419,15 +495,16 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
         return {"status": "queued"}
 
     @router.post("/api/wiki/admin/run-now")
-    def admin_run_now() -> dict[str, str]:
+    def admin_run_now(repo: RepoSlugParam = None) -> dict[str, str]:
         """Request that ``RepoWikiLoop`` runs on the next event-loop iteration.
 
         The loop itself decides timing — this endpoint only flips a flag
         the loop observes; it does not bypass the interval directly.
         Phase 5 delivers the queued-for-soon semantics; Phase 6 may add
-        an interrupt path.
+        an interrupt path. ``repo=__all__`` is rejected (admin mutation).
         """
-        loop = _wiki_loop(ctx)
+        _reject_all(repo)
+        loop = _wiki_loop(_resolve(repo)[1])
         if loop is None:
             raise HTTPException(status_code=503, detail="wiki loop unavailable")
         # BaseBackgroundLoop exposes ``trigger_now`` / ``force_tick`` on

@@ -47,14 +47,17 @@ function formatResumeAt(isoString) {
   return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-function SystemAlertBanner({ alert, onDismiss, onRefreshCredit }) {
+function SystemAlertBanner({ alert, onDismiss, onRefreshCredit, onClearCredit }) {
   const [refreshState, setRefreshState] = useState('idle') // idle | checking | still_exhausted | error
+  const [clearState, setClearState] = useState('idle') // idle | clearing | error
   const timerRef = useRef(null)
+  const clearTimerRef = useRef(null)
   const isCreditAlert = alert?.message?.toLowerCase().includes('credit limit')
 
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
+      if (clearTimerRef.current) clearTimeout(clearTimerRef.current)
     }
   }, [])
 
@@ -80,6 +83,20 @@ function SystemAlertBanner({ alert, onDismiss, onRefreshCredit }) {
     }
   }, [onRefreshCredit, refreshState])
 
+  const handleClear = useCallback(async () => {
+    if (!onClearCredit || clearState === 'clearing') return
+    setClearState('clearing')
+    if (clearTimerRef.current) clearTimeout(clearTimerRef.current)
+    const result = await onClearCredit()
+    if (result.ok) {
+      // Cleared — banner will be removed by the status event.
+      setClearState('idle')
+    } else {
+      setClearState('error')
+      clearTimerRef.current = setTimeout(() => setClearState('idle'), 5000)
+    }
+  }, [onClearCredit, clearState])
+
   if (!alert) return null
   const resumeTime = formatResumeAt(alert.resume_at)
   return (
@@ -93,6 +110,9 @@ function SystemAlertBanner({ alert, onDismiss, onRefreshCredit }) {
       {refreshState === 'error' && (
         <span style={styles.alertStillExhausted}>Refresh failed</span>
       )}
+      {clearState === 'error' && (
+        <span style={styles.alertStillExhausted}>Clear failed</span>
+      )}
       {isCreditAlert && onRefreshCredit && (
         <button
           onClick={handleRefresh}
@@ -100,6 +120,17 @@ function SystemAlertBanner({ alert, onDismiss, onRefreshCredit }) {
           style={refreshState === 'checking' ? styles.alertRefreshDisabled : styles.alertRefresh}
         >
           {refreshState === 'checking' ? 'Checking...' : 'Refresh'}
+        </button>
+      )}
+      {isCreditAlert && onClearCredit && (
+        <button
+          onClick={handleClear}
+          disabled={clearState === 'clearing'}
+          title="Force-clear the credit pause without probing (manual override)"
+          style={clearState === 'clearing' ? styles.alertRefreshDisabled : styles.alertRefresh}
+          data-testid="credit-force-clear"
+        >
+          {clearState === 'clearing' ? 'Clearing...' : 'Force clear'}
         </button>
       )}
       {onDismiss && (
@@ -157,7 +188,7 @@ function AppContent() {
   const {
     connected, orchestratorStatus, workers, prs,
     hitlItems, humanInputRequests, submitHumanInput, refreshHitl,
-    backgroundWorkers, systemAlert, dismissSystemAlert, refreshCreditStatus, intents, toggleBgWorker, triggerBgWorker, updateBgWorkerInterval,
+    backgroundWorkers, systemAlert, dismissSystemAlert, refreshCreditStatus, clearCreditPause, intents, toggleBgWorker, triggerBgWorker, updateBgWorkerInterval,
     requestChanges,
     config,
     reporterId,
@@ -198,7 +229,7 @@ function AppContent() {
       <SessionSidebar />
 
       <div style={styles.main}>
-        <SystemAlertBanner alert={systemAlert} onDismiss={dismissSystemAlert} onRefreshCredit={refreshCreditStatus} />
+        <SystemAlertBanner alert={systemAlert} onDismiss={dismissSystemAlert} onRefreshCredit={refreshCreditStatus} onClearCredit={clearCreditPause} />
         <ConfigWarningBanner warning={configWarning} />
         <HumanInputBanner requests={humanInputRequests} onSubmit={submitHumanInput} />
         <ProjectView project={selectedProject} />

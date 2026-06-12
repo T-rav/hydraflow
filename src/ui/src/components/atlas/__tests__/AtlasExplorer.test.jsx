@@ -1,6 +1,16 @@
 import React from 'react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+// MaintenanceView (rendered under the Maintenance sub-tab) reads useHydraFlow.
+// A stable hoisted fetchWithRepo delegates to the per-test global.fetch stub.
+const { fetchWithRepo } = vi.hoisted(() => ({
+  fetchWithRepo: (url, opts) => global.fetch(url, opts),
+}))
+vi.mock('../../../context/HydraFlowContext', () => ({
+  useHydraFlow: () => ({ selectedRepoSlug: null, fetchWithRepo }),
+}))
+
 import { AtlasExplorer } from '../AtlasExplorer'
 
 beforeEach(() => {

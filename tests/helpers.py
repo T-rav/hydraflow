@@ -1846,11 +1846,3 @@ def make_pr_manager(config: Any, event_bus: Any) -> Any:
     from pr_manager import PRManager
 
     return PRManager(config=config, event_bus=event_bus)
-
-
-# ---------------------------------------------------------------------------
-# Route-back counter stub (#6423) — canonical location: mockworld/fakes/
-# ---------------------------------------------------------------------------
-
-# Re-exported under the old name for backward compatibility.  New code should
-# import FakeRouteBackCounter from mockworld.fakes directly.

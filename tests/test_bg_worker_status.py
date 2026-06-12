@@ -347,6 +347,25 @@ class TestSystemWorkersEndpoint:
         )
 
     @pytest.mark.asyncio
+    async def test_single_repo_workers_carry_canonical_slug_not_empty(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """A bare (single-repo) request tags workers with the resolved slug.
+
+        Previously the single-repo path tagged ``repo=""``; now it resolves the
+        canonical dash slug like every other repo-tagged payload.
+        """
+        router = self._make_router(config, event_bus, state, tmp_path)
+        endpoint = self._find_endpoint(router, "/api/system/workers")
+        assert endpoint is not None
+
+        workers = json.loads((await endpoint()).body)["workers"]
+
+        assert workers
+        assert all(w["repo"] for w in workers)
+        assert all(w["repo"] == config.repo.replace("/", "-") for w in workers)
+
+    @pytest.mark.asyncio
     async def test_returns_disabled_when_no_orchestrator(
         self, config, event_bus: EventBus, state, tmp_path: Path
     ) -> None:

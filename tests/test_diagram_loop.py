@@ -112,3 +112,40 @@ async def test_regen_pr_uses_config_base_branch_staging(
     monkeypatch.setattr(_auto_pr_mod, "open_automated_pr_async", intercept)
     await loop._open_or_update_regen_pr(["M docs/arch/generated/loops.md"])
     assert captured["base"] == "staging"
+
+
+@pytest.mark.asyncio
+async def test_coverage_issue_auto_closes_when_all_assigned(loop_deps, monkeypatch):
+    """#9359: when no loops/ports are unassigned, the open coverage issue closes."""
+    pr_manager = MagicMock()
+    pr_manager.find_existing_issue = AsyncMock(return_value=55)
+    pr_manager.post_comment = AsyncMock()
+    pr_manager.close_issue = AsyncMock()
+    pr_manager.create_issue = AsyncMock(return_value=0)
+    loop = DiagramLoop(config=MagicMock(), pr_manager=pr_manager, deps=loop_deps)
+
+    monkeypatch.setattr(
+        loop, "_unassigned_items", AsyncMock(return_value={"loops": [], "ports": []})
+    )
+    await loop._ensure_coverage_issue()
+
+    pr_manager.close_issue.assert_awaited_once_with(55)
+    pr_manager.create_issue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_coverage_issue_noop_when_resolved_and_none_open(loop_deps, monkeypatch):
+    """All assigned AND no open issue → nothing closed, nothing filed."""
+    pr_manager = MagicMock()
+    pr_manager.find_existing_issue = AsyncMock(return_value=0)
+    pr_manager.close_issue = AsyncMock()
+    pr_manager.create_issue = AsyncMock(return_value=0)
+    loop = DiagramLoop(config=MagicMock(), pr_manager=pr_manager, deps=loop_deps)
+
+    monkeypatch.setattr(
+        loop, "_unassigned_items", AsyncMock(return_value={"loops": [], "ports": []})
+    )
+    await loop._ensure_coverage_issue()
+
+    pr_manager.close_issue.assert_not_awaited()
+    pr_manager.create_issue.assert_not_awaited()

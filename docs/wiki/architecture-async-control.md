@@ -382,19 +382,19 @@ All LLM invocations from HydraFlow runtime (advisor included) go through Claude 
 
 ## EpicMonitorLoop — stale epic detection and progress refresh
 
-`EpicMonitorLoop` is a caretaker background loop (tick default 30 min, `HYDRAFLOW_EPIC_MONITOR_INTERVAL`) that detects stale epics and refreshes the in-memory progress cache. Each cycle it calls `EpicManager.check_stale_epics()` to flag epics with no recent child-issue movement, then `EpicManager.refresh_cache()` to pull current state for all tracked epics. The result dict exposes `stale_count` and `tracked_epics` for telemetry.
+`EpicMonitorLoop` is a caretaker background loop (tick default 30 min, `HYDRAFLOW_EPIC_MONITOR_INTERVAL`) that warns on stale epics and refreshes the in-memory progress cache. Each cycle it calls `EpicManager.check_stale_epics()` to find epics whose own `last_activity` timestamp is older than `epic_stale_days` (default 7, `HYDRAFLOW_EPIC_STALE_DAYS`), then `EpicManager.refresh_cache()` to rebuild current state for all tracked epics. The result dict exposes `stale_count` and `tracked_epics` for telemetry. See ADR-0080.
 
-**When it runs:** Every `epic_monitor_interval` seconds (default 1800). Honoured by the ADR-0049 kill-switch gate at the top of `_do_work`; set `HYDRAFLOW_EPIC_MONITOR_ENABLED=false` for deploy-time disable.
+**When it runs:** Every `epic_monitor_interval` seconds (default 1800). Two ADR-0049 kill-switch gates open `_do_work`: the runtime `enabled_cb("epic_monitor")` gate (returns `{"status": "disabled"}`) and the deploy-time `epic_monitor_loop_enabled` config flag (env `HYDRAFLOW_EPIC_MONITOR_LOOP_ENABLED`, returns `{"status": "config_disabled"}`).
 
-**What it produces:** No label mutations or GitHub API writes — this loop is read-only. It updates the in-memory `EpicManager` cache that `EpicSweeperLoop` and the dashboard epic-progress route rely on.
+**What it produces:** This loop is **not** read-only. For each stale epic, `check_stale_epics()` posts a "Stale epic warning" comment to the epic issue via `PRPort` (a GitHub API write) and publishes a `SYSTEM_ALERT` event (`source="epic_monitor"`). `refresh_cache()` publishes `EPIC_PROGRESS` for every non-closed epic and a conditional `EPIC_READY` when an epic's readiness criteria are all met. What it does **not** do is mutate labels, close, or merge epics — those writes belong to `EpicSweeperLoop`.
 
-**How it interacts:** Feeds the `EpicSweeperLoop` indirectly via the shared `EpicManager` cache. The sweeper decides whether to close; the monitor decides whether to mark stale. Separating them means stale detection can run twice as often as the heavier sweep operation.
+**How it interacts:** Shares the `EpicManager` cache with `EpicSweeperLoop` and the dashboard epic-progress route. Division of labour: the **monitor** detects staleness and *warns* (comment + alert) while refreshing progress events; the **sweeper** is the only loop that *closes* a completed epic. Separating them lets stale detection run on a tighter cadence (30 min) than the heavier hourly sweep.
 
-**Gotchas:** `refresh_cache()` is async; forgetting the `await` returns an unawaited coroutine with no error, silently leaving the cache stale. The loop does not publish events — dashboard consumers poll `EpicManager.get_all_progress()` directly.
+**Gotchas:** `refresh_cache()` is async; forgetting the `await` returns an unawaited coroutine with no error, silently leaving the cache stale. Both side-effects in `check_stale_epics()` (the warning comment and the `SYSTEM_ALERT` publish) are wrapped in `try/except` that calls `reraise_on_credit_or_bug(exc)` before logging and continuing, so one epic's failed comment or alert does not abort the tick.
 
 
 ```json:entry
-{"id":"01KRBX2N4QP7VW8FGH3J5YD0M1","title":"EpicMonitorLoop — stale epic detection and progress refresh","topic":null,"source_type":"compiled","source_issue":8764,"source_repo":null,"created_at":"2026-05-12T00:00:00.000000+00:00","updated_at":"2026-05-12T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+{"id":"01KRBX2N4QP7VW8FGH3J5YD0M1","title":"EpicMonitorLoop — stale epic detection and progress refresh","topic":null,"source_type":"compiled","source_issue":8764,"source_repo":null,"created_at":"2026-05-12T00:00:00.000000+00:00","updated_at":"2026-06-11T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":2}
 ```
 
 
