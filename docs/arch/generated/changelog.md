@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `f0974e5` — fix(wiki): resolve committed conflict markers in 11 term files (#9482) (#9484) (#9484) *(2026-06-12)*
 - `79662e5` — fix(observability): suppress Sentry noise — bugs-only filter + test init guard (#9481) (#9481) *(2026-06-12)*
 - `cadb008` — Fixes #9354: Shadow-drift: exclude non-deterministic corpus samples... (#9445) (#9445) *(2026-06-12)*
 - `e654a48` — feat(dependabot-merge): auto-heal bot PRs stuck on stale arch artifacts (#9475) (#9475) *(2026-06-12)*
