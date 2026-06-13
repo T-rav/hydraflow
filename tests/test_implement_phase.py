@@ -1870,6 +1870,68 @@ class TestHandleImplementationResult:
         assert phase._state.to_dict()["processed_issues"].get(str(42)) == "success"
         assert returned is result
 
+    @pytest.mark.asyncio
+    async def test_null_delivery_diagrams_only_blocks_pr(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A diagrams/auto-generated-only diff must not push or open a PR (issue #9480)."""
+        issue = TaskFactory.create()
+        result = WorkerResultFactory.create(
+            issue_number=42,
+            success=True,
+            commits=1,
+            workspace_path=str(config.workspace_path_for_issue(42)),
+        )
+
+        phase, _, mock_prs = make_implement_phase(
+            config, [issue], create_pr_return=PRInfoFactory.create()
+        )
+        phase._branch_changed_files = AsyncMock(
+            return_value=[
+                "docs/architecture/model_pricing.likec4",
+                "repo_wiki/T-rav/hydraflow/log/9443.jsonl",
+            ]
+        )
+
+        returned = await phase._handle_implementation_result(issue, result, False)
+
+        mock_prs.push_branch.assert_not_awaited()
+        mock_prs.create_pr.assert_not_awaited()
+        assert returned.success is False
+        assert phase._state.to_dict()["processed_issues"].get(str(42)) == "failed"
+        comment_bodies = [c.args[1] for c in mock_prs.post_comment.call_args_list]
+        assert any("Null Delivery" in body for body in comment_bodies)
+
+    @pytest.mark.asyncio
+    async def test_diff_with_real_code_is_not_blocked(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A diff containing src/tests must pass the null-delivery guard and create a PR."""
+        issue = TaskFactory.create()
+        result = WorkerResultFactory.create(
+            issue_number=42,
+            success=True,
+            commits=1,
+            workspace_path=str(config.workspace_path_for_issue(42)),
+        )
+
+        phase, _, mock_prs = make_implement_phase(
+            config, [issue], create_pr_return=PRInfoFactory.create()
+        )
+        phase._branch_changed_files = AsyncMock(
+            return_value=[
+                "src/contracts/shadow_classifier.py",
+                "tests/test_shadow_classifier.py",
+                "docs/architecture/01-component-shadow-classifier.likec4",
+            ]
+        )
+
+        returned = await phase._handle_implementation_result(issue, result, False)
+
+        mock_prs.create_pr.assert_awaited_once()
+        assert returned.pr_info is not None
+        assert phase._state.to_dict()["processed_issues"].get(str(42)) == "success"
+
 
 class TestWorkerInner:
     """Unit tests for the _worker_inner coordinator method."""

@@ -24,7 +24,7 @@ graph LR
     src_state["src.state"]
     src_telemetry["src.telemetry"]
     src -- "4" --> src_arch
-    src -- "25" --> src_contracts
+    src -- "26" --> src_contracts
     src -- "4" --> src_dashboard_routes
     src -- "1" --> src_observability
     src -- "12" --> src_preflight

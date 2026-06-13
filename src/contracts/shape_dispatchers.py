@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ValidationError
 
+from contracts.shadow_classifier import SHAPE_VERDICT_KEY
 from contracts.shapes import (
     GhCheckRun,
     GhIssueListItem,
@@ -227,7 +228,7 @@ async def gh_shape_validator(sample: ShadowSample) -> dict[str, object] | None: 
     if not failures:
         return None
     return {
-        "shape_validation_failed": True,
+        SHAPE_VERDICT_KEY: True,
         "shape": shape_cls.__name__,
         "subcommand": subcommand,
         "failure_count": len(failures),

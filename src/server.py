@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import signal
+import sys
 from pathlib import Path
 
 from config import HydraFlowConfig, build_credentials
@@ -15,10 +16,24 @@ from runtime_config import DEFAULT_LOG_FILE, load_runtime_config
 logger = logging.getLogger("hydraflow.server")
 
 
-def _init_sentry() -> None:
-    """Initialize Sentry SDK if SENTRY_DSN is configured."""
+def _init_sentry(*, force: bool = False) -> None:
+    """Initialize Sentry SDK if SENTRY_DSN is configured.
+
+    Skips initialisation entirely under the test suite (``pytest``) or when
+    ``HYDRAFLOW_SENTRY_DISABLED=1``. Tests and MockWorld scenarios run with
+    fixture data (issue #42, PR #101, ``boom`` failure sentinels); without this
+    guard that fixture noise initialises the *real* client and ships straight to
+    production Sentry. ``force=True`` bypasses the guard and is used only by the
+    Sentry integration tests to exercise the init machinery against a mock SDK.
+    """
     dsn = os.environ.get("SENTRY_DSN", "")
     if not dsn:
+        return
+    if not force and (
+        os.environ.get("HYDRAFLOW_SENTRY_DISABLED") == "1"
+        or os.environ.get("PYTEST_CURRENT_TEST")
+        or "pytest" in sys.modules
+    ):
         return
 
     import re  # noqa: PLC0415
@@ -53,28 +68,39 @@ def _init_sentry() -> None:
     )
 
     def _before_send(event, hint):  # type: ignore[no-untyped-def]
-        """Drop transient errors, fingerprint bugs, scrub credentials."""
+        """Keep only real code bugs; drop all operational noise; scrub creds.
+
+        Sentry's contract here is "real code bugs only" (the SentryLoop files a
+        GitHub issue per ingested bug). A real bug is an exception whose type is
+        in ``_BUG_TYPES`` — raised unhandled (caught by FastApiIntegration) or
+        logged with ``exc_info`` / ``logger.exception``. Everything else is
+        dropped:
+
+        * transient / infra exceptions (network, auth, Docker, subprocess);
+        * message-only events — plain ``logger.error(...)`` and direct
+          ``capture_message(...)`` from operational code paths (rate-limit
+          back-offs, gh failures, HITL recommendations, log-pattern escalations).
+
+        This stops operational log lines from flooding Sentry as "errors".
+        """
         exc_info = hint.get("exc_info")
-        if exc_info:
-            exc_type = exc_info[0]
-            if exc_type and not issubclass(exc_type, _BUG_TYPES):
-                return None  # Drop transient errors (network, auth, Docker, etc.)
-            # Fingerprint by exception type + module to collapse duplicates
-            exc_name = exc_type.__name__ if exc_type else "Unknown"
-            module = getattr(exc_info[1], "__module__", "") or ""
-            event["fingerprint"] = [exc_name, module]
+        if not exc_info:
+            # LoggingIntegration events carry the record; an exception may hang
+            # off it (logger.exception / exc_info=True). Plain logger.error has
+            # none, so such events are message-only and get dropped below.
+            log_record = hint.get("log_record")
+            exc_info = getattr(log_record, "exc_info", None) if log_record else None
 
-        # Check log-record events (from LoggingIntegration)
-        log_record = hint.get("log_record")
-        if log_record and not exc_info:
-            record_exc = getattr(log_record, "exc_info", None)
-            if (
-                record_exc
-                and record_exc[0]
-                and not issubclass(record_exc[0], _BUG_TYPES)
-            ):
-                return None  # Drop transient errors logged via logger.exception()
+        if not exc_info:
+            return None  # Message-only event (logger.error / capture_message) — drop.
 
+        exc_type = exc_info[0]
+        if exc_type is None or not issubclass(exc_type, _BUG_TYPES):
+            return None  # Transient / infra exception — not a code bug, drop.
+
+        # Fingerprint by exception type + module to collapse duplicates.
+        module = getattr(exc_info[1], "__module__", "") or ""
+        event["fingerprint"] = [exc_type.__name__, module]
         return _scrub(event)
 
     sentry_sdk.init(

@@ -912,11 +912,10 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                         logger.debug(
                             "Failed to write HITL recommendation", exc_info=True
                         )
-                    if self._obs is not None:
-                        self._obs.capture_message(
-                            f"Health monitor filed HITL recommendation: {metric_name}",
-                            level="warning",
-                        )
+                    # NB: filing a HITL recommendation is normal operation — it is
+                    # already persisted to hitl_recommendations.jsonl and logged.
+                    # It is NOT a code bug, so it is deliberately NOT captured to
+                    # Sentry (Sentry's contract is real code bugs only).
                 except Exception:  # noqa: BLE001
                     logger.warning(
                         "Failed to file HITL recommendation for %s",

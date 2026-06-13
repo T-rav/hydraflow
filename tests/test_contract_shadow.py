@@ -369,3 +369,94 @@ def test_load_round_trips_a_sample(tmp_path: Path) -> None:
     assert sample.args == ["status", "--porcelain"]
     assert sample.exit_code == 0
     assert sample.stdout == " M src/x.py\n"
+
+
+# ---------------------------------------------------------------------------
+# exclude_mutating flag — drops MUTATING shapes at record time
+# ---------------------------------------------------------------------------
+
+
+def test_exclude_mutating_false_by_default_records_mutating(tmp_path: Path) -> None:
+    """Without exclude_mutating, mutating shapes are persisted normally."""
+    from contracts.shadow import ShadowCorpus
+
+    corpus = ShadowCorpus(tmp_path)
+    path = corpus.record(
+        adapter="github",
+        command="gh",
+        args=["issue", "create", "--title", "x"],
+        stdout="https://github.com/x/y/issues/1\n",
+        stderr="",
+        exit_code=0,
+    )
+    assert path is not None
+    assert path.exists()
+
+
+def test_exclude_mutating_skips_gh_issue_create(tmp_path: Path) -> None:
+    from contracts.shadow import ShadowCorpus
+
+    corpus = ShadowCorpus(tmp_path, exclude_mutating=True)
+    path = corpus.record(
+        adapter="github",
+        command="gh",
+        args=["issue", "create", "--title", "x"],
+        stdout="https://github.com/x/y/issues/1\n",
+        stderr="",
+        exit_code=0,
+    )
+    assert path is None
+    assert (
+        not list((tmp_path / "github").glob("*.yaml"))
+        if (tmp_path / "github").exists()
+        else True
+    )
+
+
+def test_exclude_mutating_skips_git_push(tmp_path: Path) -> None:
+    from contracts.shadow import ShadowCorpus
+
+    corpus = ShadowCorpus(tmp_path, exclude_mutating=True)
+    path = corpus.record(
+        adapter="git",
+        command="git",
+        args=["push", "origin", "main"],
+        stdout="",
+        stderr="",
+        exit_code=0,
+    )
+    assert path is None
+
+
+def test_exclude_mutating_still_records_volatile(tmp_path: Path) -> None:
+    """VOLATILE shapes (gh issue list) are kept for shape validation."""
+    from contracts.shadow import ShadowCorpus
+
+    corpus = ShadowCorpus(tmp_path, exclude_mutating=True)
+    path = corpus.record(
+        adapter="github",
+        command="gh",
+        args=["issue", "list", "--json", "number,title,state"],
+        stdout='[{"number":1,"title":"x","state":"OPEN"}]\n',
+        stderr="",
+        exit_code=0,
+    )
+    assert path is not None
+    assert path.exists()
+
+
+def test_exclude_mutating_still_records_deterministic(tmp_path: Path) -> None:
+    """DETERMINISTIC shapes (gh pr view) are kept for value comparison."""
+    from contracts.shadow import ShadowCorpus
+
+    corpus = ShadowCorpus(tmp_path, exclude_mutating=True)
+    path = corpus.record(
+        adapter="github",
+        command="gh",
+        args=["pr", "view", "42", "--json", "state,number"],
+        stdout='{"number":42,"state":"OPEN"}\n',
+        stderr="",
+        exit_code=0,
+    )
+    assert path is not None
+    assert path.exists()
