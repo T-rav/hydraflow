@@ -5,7 +5,7 @@
 - **Supersedes:** none
 - **Superseded by:** none
 - **Related:** [ADR-0045](0045-trust-architecture-hardening.md) (establishes the trust fleet that this ADR supervises)
-- **Enforced by:** `src/trust_fleet_sanity_loop.py` (the meta-observer); `src/health_monitor_loop.py::_check_sanity_loop_staleness` (the dead-man-switch watching the meta-observer); `tests/test_health_monitor_sanity_stall.py` (runtime enforcement test).
+- **Enforced by:** `src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop` (the meta-observer); `src/health_monitor_loop.py::_check_sanity_loop_staleness` (the dead-man-switch watching the meta-observer); `tests/test_health_monitor_sanity_stall.py` (runtime enforcement test).
 
 ## Context
 

@@ -236,6 +236,66 @@ def test_bare_citation_of_non_infra_module_still_drifts(tmp_path: Path) -> None:
     assert findings[0].adr.number == 52
 
 
+@pytest.mark.parametrize(
+    "module",
+    [
+        "src/dashboard.py",
+        "src/server.py",
+        "src/repo_runtime.py",
+        "src/contract_recording.py",
+        "src/contract_diff.py",
+        "src/contract_refresh_loop.py",
+    ],
+)
+def test_recurring_fp_module_bare_citation_does_not_drift(
+    tmp_path: Path, module: str
+) -> None:
+    # 2026-06-13: these high-churn modules are bare-cited as dependency pointers
+    # by their pattern ADRs (dashboard/server/repo_runtime by the dashboard +
+    # multi-repo ADRs; contract_* by ADR-0047/0052). A bare file-level touch is
+    # implementation churn and must NOT drift — the recurring source of the
+    # "ADR drift unresolved after 3" HITL escalations. An ADR that genuinely
+    # owns a symbol in one of these still cites it at :Symbol granularity.
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_adr(
+        adr_dir,
+        number=60,
+        title="depends on infra",
+        status="Accepted",
+        related_files=[module],
+    )
+    findings = compute_drift(ADRIndex(adr_dir), pr_number=1, changed_files=[module])
+    assert findings == []
+
+
+def test_real_adrs_do_not_drift_on_dependency_only_touches() -> None:
+    # End-to-end regression for the recurring ADR-drift false positives that
+    # filled the HITL queue (#9526/#9514/#9513/#9488 + the dashboard cluster
+    # #9497/#9507/#9418/#9414). Touching these modules in the production case
+    # (bare paths, no symbol evidence) must NOT drift the Accepted/Proposed ADRs
+    # that merely cite them as dependencies. A new ADR that bare-cites one of
+    # these (instead of a :Symbol) will trip this guard — by design.
+    repo_root = Path(__file__).resolve().parents[1]
+    idx = ADRIndex(repo_root / "docs" / "adr")
+    touches = [
+        "src/agent_cli.py",
+        "src/dashboard.py",
+        "src/server.py",
+        "src/repo_runtime.py",
+        "src/trust_fleet_sanity_loop.py",
+        "src/contract_recording.py",
+        "src/contract_diff.py",
+        "src/contract_refresh_loop.py",
+    ]
+    findings = compute_drift(idx, pr_number=9999, changed_files=touches)
+    drifted = sorted({f.adr.number for f in findings})
+    assert drifted == [], (
+        f"dependency-only touches drifted ADRs {drifted}; the cited module(s) "
+        "must be shared-infra or symbol-qualified in the owning ADR"
+    )
+
+
 def test_adr_file_in_diff_helper(adr_index: ADRIndex) -> None:
     adr = next(a for a in adr_index.adrs() if a.number == 1)
     assert _adr_file_in_diff(adr, ["docs/adr/0001-alpha.md"])
