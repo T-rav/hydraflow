@@ -310,7 +310,7 @@ class RCBudgetLoop(BaseBackgroundLoop):
             results: list[tuple[str, float]] = []
             for xml_path in Path(td).rglob("*.xml"):
                 try:
-                    root = ET.fromstring(  # nosec B314 — JUnit XML from trusted CI artifacts
+                    root = ET.fromstring(  # nosec B314  # JUnit XML from trusted CI artifacts
                         xml_path.read_bytes()
                     )
                 except ET.ParseError:
