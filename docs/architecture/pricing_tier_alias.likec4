@@ -1,0 +1,115 @@
+// Issue #9499 — PricingRefreshLoop bare-tier alias must track the newest model per tier.
+// C4 model of the pricing-refresh subsystem and the data-integrity invariant
+// being added: each bare tier alias ("opus"/"sonnet"/"haiku") owned by the
+// highest-version entry for that tier.
+
+specification {
+  element system
+  element container
+  element component
+  element store
+  element externalSystem
+
+  tag changed       // touched by this issue
+  tag new           // added by this issue
+  tag invariant     // the property being enforced
+}
+
+model {
+  litellm = externalSystem 'LiteLLM upstream' {
+    description 'Raw model_prices_and_context_window.json fetched over https'
+  }
+
+  hydraflow = system 'HydraFlow' {
+
+    pricingRefresh = container 'Pricing-refresh subsystem' {
+
+      loop = component 'PricingRefreshLoop' {
+        #changed
+        description '''
+          Daily caretaker (src/pricing_refresh_loop.py).
+          Fetch upstream -> diff -> bounds-guard -> write file -> open human-reviewed PR.
+          CHANGE: after merging the diff, reconcile bare tier aliases onto the
+          newest entry per tier, then surface the moves in the PR body.
+        '''
+      }
+
+      diffHelpers = component 'pricing_refresh_diff (pure helpers)' {
+        #changed
+        description '''
+          Pure functions, no IO (src/pricing_refresh_diff.py).
+          Existing: normalize_litellm_key, filter_anthropic_entries,
+          map_litellm_to_local_costs, compute_pricing_diff.
+          NEW: tier_of, version_key, newest_per_tier,
+          tier_alias_violations (read-only detector),
+          reconcile_bare_tier_aliases (mutating fixer).
+        '''
+      }
+
+      loader = component 'ModelPricingTable.get_rate' {
+        description '''
+          src/model_pricing.py. Resolves a model id to a ModelRate by
+          exact id -> alias -> fuzzy substring. The bare tier aliases are
+          load-bearing for the fuzzy fallback (issue #9466). Read-only here;
+          benefits because the bare alias now always points at the newest rate.
+        '''
+      }
+
+      pricingAsset = store 'model_pricing.json' {
+        #invariant
+        description '''
+          src/assets/model_pricing.json — committed pricing data.
+          INVARIANT: each bare tier alias is owned by the newest entry for its tier.
+        '''
+      }
+
+      autoPr = component 'auto_pr.open_automated_pr_async' {
+        description 'Opens/updates the pricing-refresh-auto PR (auto_merge=False).'
+      }
+    }
+
+    guardTest = component 'tier-alias data-integrity guard' {
+      #new
+      description '''
+        tests/architecture/test_model_pricing_tier_aliases.py.
+        Loads the live asset and asserts tier_alias_violations(...) == [].
+        Fails CI if any bare tier alias lags the newest entry.
+      '''
+    }
+  }
+
+  // ---- data / control flow ----
+  loop -> litellm 'fetch upstream JSON (urllib, 30s)'
+  loop -> diffHelpers 'filter + compute_pricing_diff'
+  loop -> diffHelpers 'reconcile_bare_tier_aliases(models)' #changed
+  loop -> pricingAsset 'read + write merged file'
+  loop -> autoPr 'open/update human-reviewed PR'
+  loader -> pricingAsset 'read on first get_rate()'
+  guardTest -> pricingAsset 'assert invariant on committed asset' #new
+  guardTest -> diffHelpers 'tier_alias_violations(...)' #new
+}
+
+views {
+  view context {
+    title 'Pricing refresh — context'
+    include hydraflow, litellm
+  }
+
+  view subsystem {
+    title 'Pricing-refresh components (#9499 change area)'
+    include pricingRefresh, pricingRefresh.*, litellm, guardTest
+  }
+
+  // Dynamic view: a tick that ADDS a new newest model (e.g. claude-opus-4-8).
+  dynamic view addNewestModel {
+    title 'Tick adds claude-opus-4-8 -> bare "opus" alias re-points'
+    loop -> litellm 'GET upstream'
+    litellm -> loop 'claude-opus-4-8 present, not local'
+    loop -> diffHelpers 'compute_pricing_diff'
+    diffHelpers -> loop 'diff.added = {claude-opus-4-8: aliases:[]}'
+    loop -> diffHelpers 'reconcile_bare_tier_aliases(models)'
+    diffHelpers -> loop 'move "opus": claude-opus-4-7 -> claude-opus-4-8'
+    loop -> pricingAsset 'write merged + re-pointed file'
+    loop -> autoPr 'open PR (lists added model + alias move)'
+  }
+}
