@@ -511,11 +511,11 @@ def _build_rc_budget(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_wiki_rot_detector(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build WikiRotDetectorLoop for scenarios (spec §4.9).
 
-    The loop's external surface — ``_gh_closed_escalations`` (``gh issue
-    list`` subprocess) and the ``RepoWikiStore`` / ``StateTracker`` /
-    ``DedupStore`` ports — cannot run live inside a scenario. Tests
-    pre-seed three port keys which this builder reads and wires into the
-    constructor:
+    The loop's external surface — ``PRPort.list_closed_issues_by_label``
+    (reconcile, exercised via FakeGitHub) and the ``RepoWikiStore`` /
+    ``StateTracker`` / ``DedupStore`` ports — cannot run live inside a
+    scenario. Tests pre-seed three port keys which this builder reads and
+    wires into the constructor:
 
     * ``wiki_rot_state`` → ``state``
     * ``wiki_rot_dedup`` → ``dedup``
