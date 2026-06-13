@@ -83,12 +83,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.contract_refresh_loop")
 
-# The committed sandbox repo the GitHub recorder targets. Centralised here
-# so tests (and the eventual config field in Task 18+) can override in one
-# place. Matches ``docs/superpowers/plans/2026-04-22-fake-contract-tests.md``
-# Task 0.
-_SANDBOX_GITHUB_REPO = "T-rav-Hydra-Ops/hydraflow-contracts-sandbox"
-
 # Hard cap on the replay-gate subprocess — defends the async event loop
 # when a recorder hangs on network I/O or a zombie subprocess.
 _REPLAY_GATE_TIMEOUT_SECONDS = 300
@@ -230,7 +224,7 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             await self._record_with_trace(
                 "contract_recording.record_github",
                 record_github,
-                _SANDBOX_GITHUB_REPO,
+                self._config.contracts_sandbox_repo,
                 tmp_root / "github",
             )
             if external
