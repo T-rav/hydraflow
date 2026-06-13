@@ -168,7 +168,7 @@ class TestWikiRotDetectorScenario:
             f"Repo: `{slug}`",
             labels=["hitl-escalation", "wiki-rot-stuck"],
         )
-        world.github._issues[901].state = "closed"
+        await world.github.close_issue(901)
 
         dedup_key = f"wiki_rot_detector:{slug}:src/foo.py:bar"
         fake_dedup = MagicMock()
