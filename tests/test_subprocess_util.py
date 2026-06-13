@@ -1228,6 +1228,29 @@ class TestIsCreditExhaustion:
             "You reached your usage limits set in the test config."
         )
 
+    def test_matches_claude_code_session_limit(self) -> None:
+        """Claude Code subscription session-cap message (2026-06-13 incident).
+
+        The overnight 2026-06-13 run hit this exact phrasing on every agent;
+        because 'session' sits between 'hit your' and 'limit', none of the
+        legacy substrings matched and the credit-pause never fired.
+        """
+        assert is_credit_exhaustion(
+            "You've hit your session limit · resets 5:50am (America/Denver)"
+        )
+
+    def test_matches_session_limit_reached_phrasing(self) -> None:
+        """The alternate 'Session limit reached' rendering must also match."""
+        assert is_credit_exhaustion("Session limit reached. Try again later.")
+
+    def test_does_not_false_match_configured_session_count(self) -> None:
+        """A config statement about the session count is NOT an exhaustion
+        signal — CreditExhaustedError is non-retryable, so this must stay False.
+        """
+        assert not is_credit_exhaustion(
+            "The session limit is configured to 10 sessions per repo."
+        )
+
 
 class TestParseCreditResumeTime:
     """parse_credit_resume_time must recognize Anthropic's ISO-style resume format."""
@@ -1256,6 +1279,28 @@ class TestParseCreditResumeTime:
         resume = parse_credit_resume_time("resets at 3pm")
         assert resume is not None
         assert resume.hour in {15, 22, 23, 0, 1, 2, 7, 8}  # tz-dependent
+
+    def test_parses_am_pm_with_minutes_and_tz(self) -> None:
+        """Claude Code prints H:MM ('resets 5:50am'); the old regex only took
+        whole hours and returned None. 5:50am MDT (June, America/Denver UTC-6)
+        is 11:50 UTC — independent of 'now' because the roll-forward to the next
+        day preserves the wall-clock time.
+        """
+        resume = parse_credit_resume_time(
+            "You've hit your session limit · resets 5:50am (America/Denver)"
+        )
+        assert resume is not None
+        assert (resume.hour, resume.minute) == (11, 50)
+
+    def test_parses_am_pm_with_minutes_no_tz(self) -> None:
+        """Minutes must be honoured even without a timezone suffix (local fallback)."""
+        resume = parse_credit_resume_time("resets 5:50am")
+        assert resume is not None
+        assert resume.minute == 50
+
+    def test_rejects_out_of_range_minutes(self) -> None:
+        """A bogus minute value must fail-to-parse, not roll over into the hour."""
+        assert parse_credit_resume_time("resets 5:99am") is None
 
     def test_returns_none_for_non_matching_text(self) -> None:
         assert parse_credit_resume_time("no date here") is None
