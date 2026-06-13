@@ -93,6 +93,22 @@ jobs:
               - 'tests/scenarios/browser/**'
               - 'tests/scenarios/fakes/mock_world.py'
 
+  # Universal backstop (#9482): reject leftover git conflict markers on EVERY
+  # PR/push, ungated by `changes` — a docs-only commit (e.g. a bot wiki write)
+  # must not bypass it. #9422 merged raw markers into 11 wiki-term files because
+  # no gate inspected a docs-only change. stdlib-only; no uv sync needed.
+  conflict-markers:
+    name: Conflict Markers
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Scan tracked files for git conflict markers
+        run: python3 scripts/check_conflict_markers.py --tracked
+
   lint:
     name: Lint & Format
     needs: changes
