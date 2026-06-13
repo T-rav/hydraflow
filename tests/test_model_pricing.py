@@ -234,3 +234,43 @@ class TestLoadPricing:
         path.write_text(json.dumps({"schema_version": 1, "models": {}}))
         table = load_pricing(path)
         assert isinstance(table, ModelPricingTable)
+
+
+class TestRealAssetOpusExplicitEntries:
+    """Verify the shipped asset has explicit claude-opus-4-6 and claude-opus-4-8 entries at $5/$25."""
+
+    def test_claude_opus_4_8_input_rate_is_5_not_opus_4_7_rate(self):
+        table = load_pricing()
+        rate = table.get_rate("claude-opus-4-8")
+        assert rate is not None
+        assert rate.input_cost_per_million == 5.0
+        assert rate.output_cost_per_million == 25.0
+        assert rate.cache_write_cost_per_million == 6.25
+        assert rate.cache_read_cost_per_million == 0.50
+
+    def test_claude_opus_4_6_input_rate_is_5_not_opus_4_7_rate(self):
+        table = load_pricing()
+        rate = table.get_rate("claude-opus-4-6")
+        assert rate is not None
+        assert rate.input_cost_per_million == 5.0
+        assert rate.output_cost_per_million == 25.0
+        assert rate.cache_write_cost_per_million == 6.25
+        assert rate.cache_read_cost_per_million == 0.50
+
+    def test_claude_opus_4_8_1m_alias_resolves_to_5_dollar_rate(self):
+        table = load_pricing()
+        rate = table.get_rate("claude-opus-4-8[1m]")
+        assert rate is not None
+        assert rate.input_cost_per_million == 5.0
+
+    def test_claude_opus_4_6_1m_alias_resolves_to_5_dollar_rate(self):
+        table = load_pricing()
+        rate = table.get_rate("claude-opus-4-6[1m]")
+        assert rate is not None
+        assert rate.input_cost_per_million == 5.0
+
+    def test_new_opus_entries_do_not_clobber_bare_opus_alias_on_4_7(self):
+        table = load_pricing()
+        rate = table.get_rate("opus")
+        assert rate is not None
+        assert rate.input_cost_per_million == 15.0

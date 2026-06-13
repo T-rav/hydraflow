@@ -28,6 +28,22 @@
       "cache_write_cost_per_million": 18.75,
       "cache_read_cost_per_million": 1.50
     },
+    "claude-opus-4-8": {
+      "provider": "anthropic",
+      "aliases": ["claude-opus-4-8", "claude-4-8-opus", "claude-opus-4-8[1m]"],
+      "input_cost_per_million": 5.00,
+      "output_cost_per_million": 25.00,
+      "cache_write_cost_per_million": 6.25,
+      "cache_read_cost_per_million": 0.50
+    },
+    "claude-opus-4-6": {
+      "provider": "anthropic",
+      "aliases": ["claude-opus-4-6", "claude-4-6-opus", "claude-opus-4-6[1m]"],
+      "input_cost_per_million": 5.00,
+      "output_cost_per_million": 25.00,
+      "cache_write_cost_per_million": 6.25,
+      "cache_read_cost_per_million": 0.50
+    },
     "claude-3-5-haiku-20241022": {
       "provider": "anthropic",
       "aliases": ["claude-3-5-haiku", "claude-3.5-haiku"],
