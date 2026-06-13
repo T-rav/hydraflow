@@ -280,6 +280,11 @@ lint-check: deps
 test-sludge-check: deps
 	@cd $(HYDRAFLOW_DIR) && $(UV) python scripts/strip_test_sludge.py --check $(FILES)
 
+# Reject leftover git conflict markers (#9482). stdlib-only — no deps needed.
+# FILES is space-separated; defaults to all tracked files (--tracked).
+conflict-check:
+	@cd $(HYDRAFLOW_DIR) && python3 scripts/check_conflict_markers.py $(if $(FILES),$(FILES),--tracked)
+
 lint-fix: lint
 	@echo "$(GREEN)Auto-repair complete$(RESET)"
 

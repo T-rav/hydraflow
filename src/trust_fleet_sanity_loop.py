@@ -121,6 +121,10 @@ Implementation notes for Plan 6b:
 _MAX_ATTEMPTS = 1  # spec §12.1 — the anomaly IS the escalation.
 _HOUR_SECONDS = 3600
 _DAY_SECONDS = 86_400
+# Hard cap on the `gh issue list` reconcile subprocess. Unbounded, a wedged
+# `gh` (auth prompt, network black-hole, hung child) stalls the whole
+# trust_fleet_sanity cycle forever and trips the dead-man-switch (#9410).
+_RECONCILE_GH_TIMEOUT_SECONDS = 30
 _ANOMALY_KINDS: tuple[str, ...] = (
     "issues_per_hour",
     "repair_ratio",
@@ -409,7 +413,21 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _ = await proc.communicate()
+            try:
+                stdout, _ = await asyncio.wait_for(
+                    proc.communicate(), timeout=_RECONCILE_GH_TIMEOUT_SECONDS
+                )
+            except TimeoutError:
+                # Kill the orphaned `gh` and skip this reconcile pass rather
+                # than hang the cycle forever; the next tick retries. A visible
+                # warning (not debug) is deliberate — the original failure was a
+                # *silent* stall that only the dead-man-switch caught (#9410).
+                proc.kill()
+                logger.warning(
+                    "gh issue list timed out after %ss; skipping reconcile pass",
+                    _RECONCILE_GH_TIMEOUT_SECONDS,
+                )
+                return
         except Exception as exc:  # noqa: BLE001
             reraise_on_credit_or_bug(exc)
             logger.debug("gh issue list failed", exc_info=True)
