@@ -195,4 +195,8 @@ class TestWikiRotDetectorScenario:
         assert remaining_calls, (
             "dedup.set_all not invoked — reconcile should clear the key"
         )
-        assert dedup_key not in remaining_calls[-1]
+        # Verify the matched key is specifically removed; set must be exactly
+        # empty (one key seeded → cleared → nothing remaining).
+        assert remaining_calls[-1] == set(), (
+            f"expected dedup store cleared to empty, got {remaining_calls[-1]}"
+        )
