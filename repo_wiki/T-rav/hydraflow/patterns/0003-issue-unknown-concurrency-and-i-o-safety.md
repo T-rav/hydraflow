@@ -4,7 +4,8 @@ topic: patterns
 source_issue: unknown
 source_phase: synthesis
 created_at: 2026-04-18T15:38:18.766127+00:00
-status: active
+status: superseded
+superseded_by: 0008
 ---
 
 # Concurrency and I/O safety
