@@ -332,6 +332,13 @@ _CREDIT_PATTERNS = (
     "credit balance is too low",
     "you've hit your limit",
     "hit your usage limit",
+    # Claude Code subscription *session*-cap message
+    # ("You've hit your session limit · resets 5:50am"). The word "session"
+    # sits between "hit your" and "limit", so none of the usage-limit
+    # substrings above match it — both renderings are pinned here.
+    # (2026-06-13 incident; see tests/regressions/test_session_limit_credit_pause.py.)
+    "hit your session limit",
+    "session limit reached",
     # Anthropic API spend-cap rejection (HTTP 400 invalid_request_error).
     # Full phrase — narrower patterns would false-match conversational
     # transcript text like "reached your specified goals" and trigger a
@@ -341,9 +348,11 @@ _CREDIT_PATTERNS = (
 )
 
 # Matches e.g. "reset at 3pm (America/New_York)", "reset at 3am",
-# "resets 5am (America/Denver)", "resets at 5am"
+# "resets 5am (America/Denver)", "resets at 5am", "resets 5:50am (America/Denver)".
+# The minutes group is optional so both whole-hour and H:MM renderings parse —
+# Claude Code's session-limit line carries minutes ("resets 5:50am").
 _RESET_TIME_RE = re.compile(
-    r"resets?\s+(?:at\s+)?(\d{1,2})\s*(am|pm)"
+    r"resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)"
     r"(?:\s*\(([^)]+)\))?",
     re.IGNORECASE,
 )
@@ -473,11 +482,13 @@ def parse_credit_resume_time(text: str) -> datetime | None:
         return None
 
     hour = int(match.group(1))
-    ampm = match.group(2).lower()
-    tz_name = match.group(3)
+    minute = int(match.group(2)) if match.group(2) else 0
+    ampm = match.group(3).lower()
+    tz_name = match.group(4)
 
-    # Validate 12-hour clock range (1–12)
-    if hour < 1 or hour > 12:
+    # Validate 12-hour clock range (1–12) and minutes (0–59). A bogus minute
+    # ("5:99am") fails to parse rather than rolling over into the next hour.
+    if hour < 1 or hour > 12 or minute > 59:
         return None
 
     # Convert 12-hour to 24-hour
@@ -498,7 +509,7 @@ def parse_credit_resume_time(text: str) -> datetime | None:
             tz = datetime.now().astimezone().tzinfo or UTC
 
     now = datetime.now(tz=tz)
-    reset = now.replace(hour=hour_24, minute=0, second=0, microsecond=0)
+    reset = now.replace(hour=hour_24, minute=minute, second=0, microsecond=0)
 
     # If the reset time is already past, assume it means tomorrow
     if reset <= now:
