@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 7644
 source_phase: review
 created_at: 2026-05-07T07:44:17.831282+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0012
 ---
 
 # Verify implementation files are modified before merging a feature PR
