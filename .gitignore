@@ -252,3 +252,12 @@ MagicMock/
 .superpowers/
 
 .tmp/
+
+# RepoWikiLoop runtime caches — rewritten every loop tick, regenerated on
+# demand and read from disk at runtime. Tracking them left the factory's
+# working tree permanently dirty (the maintenance PR is built in an ephemeral
+# worktree and never cleans the originals). Keep them out of git; see
+# tests/architecture/test_wiki_runtime_caches_untracked.py.
+docs/wiki/log.jsonl
+docs/wiki/ingest_dedup.json
+docs/wiki/index.json
