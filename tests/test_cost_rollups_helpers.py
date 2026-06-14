@@ -566,18 +566,13 @@ def test_per_loop_cost_includes_model_breakdown_for_mixed_models(
         cache_read_input_tokens=0,
         cache_creation_input_tokens=0,
     )
-    _write_loop_trace(
-        config,
-        "implementer",
-        started_at=started.isoformat(),
-        duration_ms=60_000,
-    )
 
     rows = build_per_loop_cost(config, since=now - timedelta(hours=1), until=now)
 
     assert len(rows) == 1
     row = rows[0]
-    assert row["loop"] == "implementer"
+    # source "implementer" folds to its canonical phase-loop name "implement".
+    assert row["loop"] == "implement"
     breakdown = row["model_breakdown"]
     assert set(breakdown.keys()) == {"claude-opus-4-7", "claude-sonnet-4-6"}
     opus = breakdown["claude-opus-4-7"]
@@ -611,12 +606,6 @@ def test_per_loop_cost_buckets_missing_model_under_unknown(
         input_tokens=100,
         output_tokens=50,
     )
-    _write_loop_trace(
-        config,
-        "implementer",
-        started_at=started.isoformat(),
-        duration_ms=60_000,
-    )
 
     rows = build_per_loop_cost(config, since=now - timedelta(hours=1), until=now)
 
@@ -640,12 +629,6 @@ def test_per_loop_cost_existing_fields_unchanged(tmp_path) -> None:
         model="claude-opus-4-7",
         input_tokens=1_000,
         output_tokens=200,
-    )
-    _write_loop_trace(
-        config,
-        "implementer",
-        started_at=started.isoformat(),
-        duration_ms=60_000,
     )
 
     rows = build_per_loop_cost(config, since=now - timedelta(hours=1), until=now)
@@ -672,3 +655,154 @@ def test_per_loop_cost_existing_fields_unchanged(tmp_path) -> None:
     assert row["tokens_in"] == 1_000
     assert row["tokens_out"] == 200
     assert row["llm_calls"] == 1
+
+
+# ---------------------------------------------------------------------------
+# build_per_loop_cost — source-based cost attribution (issue: bg-worker cost)
+# ---------------------------------------------------------------------------
+#
+# Cost is attributed to a loop by the inference ``source`` field, not by
+# temporal overlap with a loop-trace window. The traced caretaker loops are
+# LLM-free (they shell out to gh/git), while the LLM-spending bg workers emit
+# no loop trace at all — so a trace-window join attributes $0 to everything.
+
+
+def test_per_loop_cost_attributes_bg_worker_by_source(config) -> None:
+    """A bg worker that records inferences but emits no loop trace still gets
+    its LLM cost attributed via the inference ``source`` field."""
+    now = datetime(2026, 4, 22, 12, tzinfo=UTC)
+    _write_inference(
+        config,
+        timestamp=(now - timedelta(minutes=1)).isoformat(),
+        source="pr_unsticker",
+        model="claude-sonnet-4-6",
+        input_tokens=1_000,
+        output_tokens=200,
+    )
+    # An unrelated LLM-free caretaker loop emits a trace in the same window.
+    _write_loop_trace(
+        config,
+        "trust_fleet_sanity",
+        started_at=(now - timedelta(minutes=2)).isoformat(),
+        duration_ms=1_000,
+    )
+    pricing = MagicMock()
+    pricing.estimate_cost.return_value = 0.05
+
+    rows = build_per_loop_cost(
+        config, since=now - timedelta(hours=1), until=now, pricing=pricing
+    )
+
+    by_loop = {r["loop"]: r for r in rows}
+    assert "pr_unsticker" in by_loop
+    assert by_loop["pr_unsticker"]["cost_usd"] == pytest.approx(0.05)
+    assert by_loop["pr_unsticker"]["llm_calls"] == 1
+
+
+def test_per_loop_cost_does_not_misattribute_overlapping_inference(config) -> None:
+    """A pipeline inference that happens *during* a caretaker loop's trace
+    window must NOT be charged to that caretaker loop — attribution is by
+    source, not by clock overlap."""
+    now = datetime(2026, 4, 22, 12, tzinfo=UTC)
+    started = now - timedelta(minutes=5)
+    _write_loop_trace(
+        config,
+        "trust_fleet_sanity",
+        started_at=started.isoformat(),
+        duration_ms=60_000,
+    )
+    _write_inference(
+        config,
+        timestamp=(started + timedelta(seconds=10)).isoformat(),
+        source="implementer",
+        model="claude-sonnet-4-6",
+        input_tokens=1_000,
+        output_tokens=200,
+    )
+    pricing = MagicMock()
+    pricing.estimate_cost.return_value = 0.05
+
+    rows = build_per_loop_cost(
+        config, since=now - timedelta(hours=1), until=now, pricing=pricing
+    )
+
+    by_loop = {r["loop"]: r for r in rows}
+    assert by_loop["trust_fleet_sanity"]["cost_usd"] == 0.0
+    assert by_loop["trust_fleet_sanity"]["llm_calls"] == 0
+
+
+def test_per_loop_cost_folds_source_aliases_to_worker(config) -> None:
+    """Telemetry sources whose name differs from the loop's worker_name fold
+    to the worker (wiki_compilation→repo_wiki, unsticker→pr_unsticker)."""
+    now = datetime(2026, 4, 22, 12, tzinfo=UTC)
+    for src in ("wiki_compilation", "unsticker"):
+        _write_inference(
+            config,
+            timestamp=(now - timedelta(minutes=1)).isoformat(),
+            source=src,
+            model="claude-sonnet-4-6",
+            input_tokens=1_000,
+            output_tokens=200,
+        )
+    pricing = MagicMock()
+    pricing.estimate_cost.return_value = 0.05
+
+    rows = build_per_loop_cost(
+        config, since=now - timedelta(hours=1), until=now, pricing=pricing
+    )
+
+    loops = {r["loop"] for r in rows}
+    assert "repo_wiki" in loops
+    assert "pr_unsticker" in loops
+    assert "wiki_compilation" not in loops
+    assert "unsticker" not in loops
+
+
+def test_per_loop_cost_folds_pipeline_source_to_phase(config) -> None:
+    """Pipeline-runner sources fold to their canonical phase name so the
+    per-loop table matches the loop/worker names used elsewhere."""
+    now = datetime(2026, 4, 22, 12, tzinfo=UTC)
+    _write_inference(
+        config,
+        timestamp=(now - timedelta(minutes=1)).isoformat(),
+        source="implementer",
+        model="claude-sonnet-4-6",
+        input_tokens=1_000,
+        output_tokens=200,
+    )
+    pricing = MagicMock()
+    pricing.estimate_cost.return_value = 0.05
+
+    rows = build_per_loop_cost(
+        config, since=now - timedelta(hours=1), until=now, pricing=pricing
+    )
+
+    loops = {r["loop"] for r in rows}
+    assert "implement" in loops
+    assert "implementer" not in loops
+
+
+def test_per_loop_cost_excludes_non_loop_sources(config) -> None:
+    """Telemetry artifacts that name no loop (token-source markers, the
+    design-time onboarding agent, empty source) produce no row."""
+    now = datetime(2026, 4, 22, 12, tzinfo=UTC)
+    for src in ("estimated", "claude", ""):
+        _write_inference(
+            config,
+            timestamp=(now - timedelta(minutes=1)).isoformat(),
+            source=src,
+            model="claude-sonnet-4-6",
+            input_tokens=1_000,
+            output_tokens=200,
+        )
+    pricing = MagicMock()
+    pricing.estimate_cost.return_value = 0.05
+
+    rows = build_per_loop_cost(
+        config, since=now - timedelta(hours=1), until=now, pricing=pricing
+    )
+
+    loops = {r["loop"] for r in rows}
+    assert "estimated" not in loops
+    assert "claude" not in loops
+    assert "" not in loops
