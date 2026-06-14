@@ -17,14 +17,37 @@
 # Usage:  scripts/run-factory-isolated.sh        (or: make factory)
 set -euo pipefail
 
-DEV_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEV_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 WORKSPACE="${HYDRAFLOW_FACTORY_WORKSPACE:-$HOME/.hydraflow/factory-workspace/hydraflow}"
 BRANCH="${HYDRAFLOW_FACTORY_BRANCH:-main}"
 
-if [ "$(cd "$DEV_ROOT" && git rev-parse --show-toplevel 2>/dev/null)" = "$WORKSPACE" ]; then
-  echo "[factory] ERROR: workspace ($WORKSPACE) is the current checkout." >&2
-  echo "[factory] Point HYDRAFLOW_FACTORY_WORKSPACE elsewhere, or run from your dev checkout." >&2
+# Canonicalize WORKSPACE to an absolute, symlink-resolved path BEFORE the
+# safety guard — otherwise a relative value ('.', '../hydraflow') would slip
+# past the comparison below and the later `git reset --hard` could wipe the dev
+# checkout. An existing dir is resolved via cd+pwd; a not-yet-created path is
+# made absolute against its (existing) parent. Dangerous aliases of the dev
+# checkout ('.', '..') always already exist, so the cd+pwd branch catches them.
+if [ -d "$WORKSPACE" ]; then
+  WORKSPACE="$(cd "$WORKSPACE" && pwd -P)"
+else
+  _ws_parent="$(dirname "$WORKSPACE")"
+  if [ -d "$_ws_parent" ]; then
+    WORKSPACE="$(cd "$_ws_parent" && pwd -P)/$(basename "$WORKSPACE")"
+  fi
+fi
+
+_abort_in_place() {
+  echo "[factory] ERROR: workspace ($WORKSPACE) is the dev checkout itself." >&2
+  echo "[factory] Set HYDRAFLOW_FACTORY_WORKSPACE to a separate path." >&2
   exit 1
+}
+# Guard 1: resolved paths must differ.
+[ "$WORKSPACE" = "$DEV_ROOT" ] && _abort_in_place
+# Guard 2: even via symlink/nested layout, the workspace must not be the dev
+# repo's git toplevel.
+if [ -e "$WORKSPACE/.git" ]; then
+  _ws_top="$(git -C "$WORKSPACE" rev-parse --show-toplevel 2>/dev/null || true)"
+  [ -n "$_ws_top" ] && [ "$_ws_top" = "$DEV_ROOT" ] && _abort_in_place
 fi
 
 ORIGIN_URL="$(git -C "$DEV_ROOT" remote get-url origin)"
