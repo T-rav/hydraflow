@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 from dashboard_routes._waterfall_builder import _phase_for_source
 from model_pricing import ModelPricingTable, load_pricing
 from trace_collector import _slug_for_loop
+from tracing_context import source_to_phase
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -396,6 +397,47 @@ def _tally_worker_events(events: list[Any]) -> dict[str, dict[str, Any]]:
     return out
 
 
+# Inference ``source`` values that name no loop: char-estimate token-source
+# markers, the design-time onboarding agent, synchronous post-merge hooks, and
+# empty sources. These never represent a background-worker/pipeline loop, so
+# they are dropped from the per-loop cost view rather than surfacing a spurious
+# row.
+_NON_LOOP_COST_SOURCES: frozenset[str] = frozenset(
+    {"", "estimated", "claude", "post_merge_hook", "threshold_check"}
+)
+
+# Background-loop sources whose telemetry ``source`` differs from the loop's
+# ``worker_name``. Pipeline-runner sources (implementer→implement, …) are
+# folded by ``source_to_phase``; only the genuine bg-loop mismatches live here.
+_COST_SOURCE_TO_WORKER: dict[str, str] = {
+    "unsticker": "pr_unsticker",  # pr_unsticker conflict-transcript label
+    "wiki_compilation": "repo_wiki",  # wiki_compiler.py, driven by RepoWikiLoop
+    # DiagnosticLoop's runner emits two source values — "diagnostic" (diagnose
+    # stage) and "diagnostic_fix" (fix stage). Pin BOTH to the loop explicitly
+    # so a future ``source_to_phase`` entry for "diagnostic" can't split the
+    # diagnose-stage spend (the larger of the two) into a separate row.
+    "diagnostic": "diagnostic",  # diagnostic_runner.py diagnose stage
+    "diagnostic_fix": "diagnostic",  # diagnostic_runner.py fix stage
+}
+
+
+def _worker_for_cost_source(source: str) -> str | None:
+    """Map an inference ``source`` to the loop/worker it should bill to.
+
+    Returns ``None`` for sources that name no loop (telemetry artifacts and
+    synchronous hooks). Background-loop sources whose name differs from the
+    loop's ``worker_name`` are remapped via :data:`_COST_SOURCE_TO_WORKER`;
+    pipeline-runner sources fold to their canonical phase via
+    :func:`source_to_phase`; everything else passes through unchanged.
+    """
+    normalized = (source or "").strip()
+    if normalized in _NON_LOOP_COST_SOURCES:
+        return None
+    if normalized in _COST_SOURCE_TO_WORKER:
+        return _COST_SOURCE_TO_WORKER[normalized]
+    return source_to_phase(normalized)
+
+
 def build_per_loop_cost(
     config: HydraFlowConfig,
     *,
@@ -410,55 +452,60 @@ def build_per_loop_cost(
     issues_filed, issues_closed, escalations, ticks, tick_cost_avg_usd,
     wall_clock_seconds, tick_cost_avg_usd_prev_period, model_breakdown.
 
+    Cost / tokens / llm_calls / model_breakdown are attributed to a loop by the
+    inference ``source`` field (see :func:`_worker_for_cost_source`), **not** by
+    temporal overlap with a loop-trace window: the loops that emit loop traces
+    are LLM-free caretaker loops (gh/git shell-outs), while the LLM-spending
+    background workers emit no loop trace at all — so a trace-window join bills
+    ``$0`` to every loop and, when windows do coincide, mis-attributes pipeline
+    spend to whichever caretaker tick it overlapped. Tick counts and wall-clock
+    still come from loop traces; filed / closed / escalation / errored-tick
+    counters still come from ``BACKGROUND_WORKER_STATUS`` events.
+
     ``model_breakdown`` is a dict keyed by model name (or "unknown" for
     records missing the field), with nested {cost_usd, calls, input_tokens,
     output_tokens, cache_read_tokens, cache_write_tokens}.
     """
     pricing = pricing or load_pricing()
 
-    # Attribution from loop-trace temporal overlap with inference rows.
-    loop_ticks: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    # Tick count + wall-clock from loop traces, keyed by worker_name. (Loops
+    # emit traces under ``self._worker_name``; ``_slug_for_loop`` is a no-op on
+    # an already-snake-case name but normalises any legacy ClassName trace.)
+    per_loop_ticks: dict[str, int] = defaultdict(int)
+    per_loop_wall: dict[str, int] = defaultdict(int)
     for tr in iter_loop_traces(config, since=since, until=until):
-        loop_ticks[str(tr.get("loop", "?"))].append(tr)
+        worker = _slug_for_loop(str(tr.get("loop", "?")))
+        per_loop_ticks[worker] += 1
+        per_loop_wall[worker] += int(tr.get("duration_ms", 0) or 0) // 1000
 
-    inferences = list(
-        iter_priced_inferences(config, since=since, until=until, pricing=pricing)
-    )
-
+    # Cost / tokens / calls / model-breakdown attributed by inference source.
     per_loop_cost: dict[str, float] = defaultdict(float)
     per_loop_tokens_in: dict[str, int] = defaultdict(int)
     per_loop_tokens_out: dict[str, int] = defaultdict(int)
     per_loop_llm_calls: dict[str, int] = defaultdict(int)
-    per_loop_wall: dict[str, int] = defaultdict(int)
     per_loop_model: dict[str, dict[str, dict[str, float | int]]] = defaultdict(
         lambda: defaultdict(_empty_model_bucket)
     )
-
-    for name, ticks in loop_ticks.items():
-        for tick in ticks:
-            per_loop_wall[name] += int(tick.get("duration_ms", 0) or 0) // 1000
-            started = tick["ts"]
-            ended = started + timedelta(
-                milliseconds=int(tick.get("duration_ms", 0) or 0)
-            )
-            for rec in inferences:
-                if started <= rec["ts"] <= ended:
-                    per_loop_cost[name] += rec["cost_usd"]
-                    per_loop_tokens_in[name] += int(rec.get("input_tokens", 0) or 0)
-                    per_loop_tokens_out[name] += int(rec.get("output_tokens", 0) or 0)
-                    per_loop_llm_calls[name] += 1
-                    model_key = str(rec.get("model") or "").strip() or "unknown"
-                    bucket = per_loop_model[name][model_key]
-                    bucket["cost_usd"] += float(rec["cost_usd"])
-                    bucket["calls"] += 1
-                    bucket["input_tokens"] += int(rec.get("input_tokens", 0) or 0)
-                    bucket["output_tokens"] += int(rec.get("output_tokens", 0) or 0)
-                    bucket["cache_read_tokens"] += int(
-                        rec.get("cache_read_input_tokens", 0) or 0
-                    )
-                    bucket["cache_write_tokens"] += int(
-                        rec.get("cache_creation_input_tokens", 0) or 0
-                    )
+    for rec in iter_priced_inferences(
+        config, since=since, until=until, pricing=pricing
+    ):
+        worker = _worker_for_cost_source(str(rec.get("source", "")))
+        if worker is None:
+            continue
+        per_loop_cost[worker] += rec["cost_usd"]
+        per_loop_tokens_in[worker] += int(rec.get("input_tokens", 0) or 0)
+        per_loop_tokens_out[worker] += int(rec.get("output_tokens", 0) or 0)
+        per_loop_llm_calls[worker] += 1
+        model_key = str(rec.get("model") or "").strip() or "unknown"
+        bucket = per_loop_model[worker][model_key]
+        bucket["cost_usd"] += float(rec["cost_usd"])
+        bucket["calls"] += 1
+        bucket["input_tokens"] += int(rec.get("input_tokens", 0) or 0)
+        bucket["output_tokens"] += int(rec.get("output_tokens", 0) or 0)
+        bucket["cache_read_tokens"] += int(rec.get("cache_read_input_tokens", 0) or 0)
+        bucket["cache_write_tokens"] += int(
+            rec.get("cache_creation_input_tokens", 0) or 0
+        )
 
     # Event-based counters (filed / closed / escalations / errored ticks).
     worker_stats: dict[str, dict[str, Any]] = {}
@@ -471,36 +518,17 @@ def build_per_loop_cost(
             events = []
         worker_stats = _tally_worker_events(events or [])
 
-    # Prior-period loop-tick counts (rough signal for > 2× highlight).
-    prev_until = since
-    prev_since = since - (until - since)
-    prev_loop_ticks: dict[str, int] = defaultdict(int)
-    for tr in iter_loop_traces(config, since=prev_since, until=prev_until):
-        prev_loop_ticks[str(tr.get("loop", "?"))] += 1
-    prev_loop_cost: dict[str, float] = defaultdict(float)
-
-    # Combine trace + event names. Trace names are ClassName (e.g.
-    # "RCBudgetLoop"); event names are worker_name (e.g. "rc_budget").
-    # Normalise to worker_name for the final output.
-    name_set: set[str] = set()
-    for name in loop_ticks:
-        name_set.add(_slug_for_loop(name))
-    name_set.update(worker_stats.keys())
+    # Union of every worker seen via traces, inferences, or events. All three
+    # key spaces are worker_name, so they merge into one row per worker.
+    name_set: set[str] = set(per_loop_ticks) | set(per_loop_cost) | set(worker_stats)
 
     rows: list[dict[str, Any]] = []
     for worker in sorted(name_set):
-        class_name = next(
-            (n for n in loop_ticks if _slug_for_loop(n) == worker),
-            worker,
-        )
         stats = worker_stats.get(worker, {})
-        ticks = int(stats.get("ticks", 0) or len(loop_ticks.get(class_name, [])))
-        cost = per_loop_cost.get(class_name, 0.0)
+        ticks = int(stats.get("ticks", 0) or per_loop_ticks.get(worker, 0))
+        cost = per_loop_cost.get(worker, 0.0)
         avg_cost = round(cost / ticks, 6) if ticks else 0.0
-        prev_ticks = prev_loop_ticks.get(class_name, 0)
-        prev_cost = prev_loop_cost.get(class_name, 0.0)
-        prev_avg = round(prev_cost / prev_ticks, 6) if prev_ticks else 0.0
-        breakdown_raw = per_loop_model.get(class_name, {})
+        breakdown_raw = per_loop_model.get(worker, {})
         model_breakdown = {
             model: {
                 "cost_usd": round(float(b["cost_usd"]), 6),
@@ -516,18 +544,21 @@ def build_per_loop_cost(
             {
                 "loop": worker,
                 "cost_usd": round(cost, 6),
-                "tokens_in": per_loop_tokens_in.get(class_name, 0),
-                "tokens_out": per_loop_tokens_out.get(class_name, 0),
-                "llm_calls": per_loop_llm_calls.get(class_name, 0),
+                "tokens_in": per_loop_tokens_in.get(worker, 0),
+                "tokens_out": per_loop_tokens_out.get(worker, 0),
+                "llm_calls": per_loop_llm_calls.get(worker, 0),
                 "issues_filed": int(stats.get("issues_filed", 0) or 0),
                 "issues_closed": int(stats.get("issues_closed", 0) or 0),
                 "escalations": int(stats.get("escalations", 0) or 0),
                 "ticks": ticks,
                 "ticks_errored": int(stats.get("ticks_errored", 0) or 0),
                 "tick_cost_avg_usd": avg_cost,
-                "wall_clock_seconds": per_loop_wall.get(class_name, 0),
+                "wall_clock_seconds": per_loop_wall.get(worker, 0),
                 "last_tick_at": stats.get("last_tick_at", "") or None,
-                "tick_cost_avg_usd_prev_period": prev_avg,
+                # Reserved 0.0 stub: the client-side spike highlight is gated on
+                # ``prev > 0`` (PerLoopCostTable.isSpike), so a future change can
+                # populate this from the prior window without a UI change.
+                "tick_cost_avg_usd_prev_period": 0.0,
                 "model_breakdown": model_breakdown,
             }
         )
