@@ -157,7 +157,11 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         try:
             emit_loop_subprocess_trace(
                 loop=self._worker_name,
-                command=["gh", "issue", "list", "--label", "wiki-rot-stuck"],
+                command=[
+                    "PRPort.list_closed_issues_by_label",
+                    "wiki-rot-stuck",
+                    "limit=50",
+                ],
                 exit_code=0,
                 duration_ms=duration_ms,
                 stderr_excerpt=(
