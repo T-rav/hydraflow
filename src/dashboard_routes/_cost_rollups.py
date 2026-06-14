@@ -410,8 +410,13 @@ _NON_LOOP_COST_SOURCES: frozenset[str] = frozenset(
 # ``worker_name``. Pipeline-runner sources (implementer→implement, …) are
 # folded by ``source_to_phase``; only the genuine bg-loop mismatches live here.
 _COST_SOURCE_TO_WORKER: dict[str, str] = {
-    "unsticker": "pr_unsticker",  # pr_unsticker.py work-item path
+    "unsticker": "pr_unsticker",  # pr_unsticker conflict-transcript label
     "wiki_compilation": "repo_wiki",  # wiki_compiler.py, driven by RepoWikiLoop
+    # DiagnosticLoop's runner emits two source values — "diagnostic" (diagnose
+    # stage) and "diagnostic_fix" (fix stage). Pin BOTH to the loop explicitly
+    # so a future ``source_to_phase`` entry for "diagnostic" can't split the
+    # diagnose-stage spend (the larger of the two) into a separate row.
+    "diagnostic": "diagnostic",  # diagnostic_runner.py diagnose stage
     "diagnostic_fix": "diagnostic",  # diagnostic_runner.py fix stage
 }
 

@@ -735,7 +735,7 @@ def test_per_loop_cost_folds_source_aliases_to_worker(config) -> None:
     """Telemetry sources whose name differs from the loop's worker_name fold
     to the worker (wiki_compilation→repo_wiki, unsticker→pr_unsticker)."""
     now = datetime(2026, 4, 22, 12, tzinfo=UTC)
-    for src in ("wiki_compilation", "unsticker"):
+    for src in ("wiki_compilation", "unsticker", "diagnostic_fix"):
         _write_inference(
             config,
             timestamp=(now - timedelta(minutes=1)).isoformat(),
@@ -754,8 +754,10 @@ def test_per_loop_cost_folds_source_aliases_to_worker(config) -> None:
     loops = {r["loop"] for r in rows}
     assert "repo_wiki" in loops
     assert "pr_unsticker" in loops
+    assert "diagnostic" in loops
     assert "wiki_compilation" not in loops
     assert "unsticker" not in loops
+    assert "diagnostic_fix" not in loops
 
 
 def test_per_loop_cost_folds_pipeline_source_to_phase(config) -> None:
