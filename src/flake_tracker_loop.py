@@ -45,7 +45,7 @@ def parse_junit_xml(xml_bytes: bytes) -> dict[str, str]:
     treated as ``pass`` (skipped tests are not flakes).
     """
     results: dict[str, str] = {}
-    root = ET.fromstring(xml_bytes)  # nosec B314 — JUnit XML from trusted CI artifacts
+    root = ET.fromstring(xml_bytes)  # nosec B314  # JUnit XML from trusted CI artifacts
     for case in root.iter("testcase"):
         cls = case.get("classname") or ""
         name = case.get("name") or ""
