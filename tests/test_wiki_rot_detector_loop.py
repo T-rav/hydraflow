@@ -219,6 +219,27 @@ async def test_reconcile_tolerates_port_failure(loop_env) -> None:
     state.clear_wiki_rot_attempts.assert_not_called()
 
 
+async def test_reconcile_reraises_credit_exhausted(loop_env) -> None:
+    """CreditExhaustedError from the port must propagate out of reconcile.
+
+    reraise_on_credit_or_bug is a load-bearing call — billing signals must
+    not be swallowed by the broad except block (wiki entry 0012 / CLAUDE.md).
+    """
+    from subprocess_util import CreditExhaustedError
+
+    cfg, state, pr, dedup, wiki_store = loop_env
+    pr.list_closed_issues_by_label = AsyncMock(
+        side_effect=CreditExhaustedError("exhausted", resume_at=None)
+    )
+
+    loop = _loop(loop_env)
+    with pytest.raises(CreditExhaustedError):
+        await loop._reconcile_closed_escalations()
+
+    dedup.set_all.assert_not_called()
+    state.clear_wiki_rot_attempts.assert_not_called()
+
+
 async def test_kill_switch_short_circuits_tick(loop_env) -> None:
     """Disabled kill-switch → no-op, no reconcile, no emission (spec §12.2)."""
     loop = _loop(loop_env, enabled=False)
