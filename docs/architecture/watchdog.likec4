@@ -1,0 +1,127 @@
+// Issue #9556 — Re-land the #9455 per-loop max-cycle watchdog
+// C4 model of the change area: config-driven cycle bound enforced inside
+// BaseBackgroundLoop._execute_cycle, with a forward-compatible timeout_cb seam
+// that #9503 will later wire to the System tab.
+
+specification {
+  element system
+  element container
+  element component
+  element classvar
+  element exception
+  tag changed       // touched by #9556
+  tag forward       // forward-compatible seam consumed by #9503
+  tag unchanged
+}
+
+model {
+  system hydraflow 'HydraFlow Orchestrator' {
+
+    container config 'HydraFlowConfig' 'src/config.py' {
+      component wd_default 'loop_watchdog_default_seconds = 1800' {
+        #changed
+        description 'Mechanical-loop cycle bound (30 min). New Field + _ENV_INT_OVERRIDES entry.'
+      }
+      component wd_llm 'loop_watchdog_llm_seconds = 7200' {
+        #changed
+        description 'LLM-loop cycle bound (2 h). New Field + _ENV_INT_OVERRIDES entry.'
+      }
+    }
+
+    container base 'BaseBackgroundLoop ABC' 'src/base_background_loop.py' {
+      component loopdeps 'LoopDeps (frozen dataclass)' {
+        description 'enabled_cb, interval_cb, sleep_fn ...'
+        component timeout_cb 'timeout_cb: Callable[[str],int] | None = None' {
+          #changed
+          #forward
+          description 'Forward-compatible, defaults None. Unwired in #9556; #9503 wires it.'
+        }
+      }
+      classvar long_llm 'LONG_LLM_CYCLE: ClassVar[bool] = False' {
+        #changed
+        description 'Subclasses flip True to opt into the LLM bound.'
+      }
+      exception timeout_err 'LoopCycleTimeoutError(Exception)' {
+        #changed
+        description 'NOT a TimeoutError subclass — distinguishes watchdog fire from in-cycle timeouts.'
+      }
+      component get_timeout '_get_watchdog_timeout()' {
+        #changed
+        description 'timeout_cb override > LONG_LLM_CYCLE ? llm_seconds : default_seconds.'
+      }
+      component execute_cycle '_execute_cycle()  @loop_span' {
+        #changed
+        description 'Wraps _do_work in create_task; asyncio.wait(timeout=...); cancel + raise LoopCycleTimeoutError on overrun.'
+      }
+      component do_work '_do_work() (abstract)' {
+        description 'Domain logic, implemented per loop.'
+      }
+      component run 'run()' {
+        description 'Polling loop; calls _execute_cycle each cycle.'
+      }
+    }
+
+    container subclasses 'BaseBackgroundLoop subclasses (~47)' 'src/*_loop.py' {
+      component llm_loops 'LLM-agent loops' {
+        #changed
+        description 'ReportIssueLoop, CorpusLearningLoop, DiagnosticLoop, ... set LONG_LLM_CYCLE = True.'
+      }
+      component caretaker_loops 'caretaker / GC / watcher loops' {
+        description 'Default False (30 min). e.g. TrustFleetSanityLoop, WorkspaceGCLoop, LogIngestLoop (explicitly excluded).'
+      }
+    }
+
+    container supervisor 'LoopSupervisor' 'src/orchestrator.py' {
+      #unchanged
+      component supervise '_supervise_loops()' {
+        description 'Reschedules on COMPLETE/RAISE only. PENDING (stuck on await) was invisible (#9486 14h stall).'
+      }
+    }
+
+    container sysregistry 'service_registry.build_*' 'src/service_registry.py' {
+      component loopdeps_build 'LoopDeps(...) construction' {
+        description 'Passes existing cbs; timeout_cb left None in #9556.'
+      }
+    }
+
+    // --- relationships ---
+    run -> execute_cycle 'each cycle'
+    execute_cycle -> get_timeout 'resolve bound'
+    get_timeout -> wd_default 'when LONG_LLM_CYCLE == False'
+    get_timeout -> wd_llm 'when LONG_LLM_CYCLE == True'
+    get_timeout -> timeout_cb 'override if present (#9503)'
+    get_timeout -> long_llm 'reads flag'
+    execute_cycle -> do_work 'create_task + asyncio.wait(timeout)'
+    execute_cycle -> timeout_err 'raises on overrun -> ERROR status -> next cycle'
+    llm_loops -> long_llm 'set True'
+    caretaker_loops -> long_llm 'inherit False'
+    supervise -> run 'schedules loop task'
+    loopdeps_build -> loopdeps 'builds'
+    loopdeps -> timeout_cb 'carries (None in #9556)'
+  }
+}
+
+views {
+  view watchdog_component {
+    title 'Per-loop watchdog — component view (#9556)'
+    include *
+    include hydraflow.base.*
+    include hydraflow.config.*
+    include hydraflow.subclasses.*
+  }
+
+  view watchdog_dynamic {
+    title 'Cycle execution with watchdog enforcement'
+    include hydraflow.base.run, hydraflow.base.execute_cycle,
+            hydraflow.base.get_timeout, hydraflow.base.do_work,
+            hydraflow.base.timeout_err, hydraflow.config.wd_default
+
+    hydraflow.base.run -> hydraflow.base.execute_cycle 'awaits cycle'
+    hydraflow.base.execute_cycle -> hydraflow.base.get_timeout 'resolve bound'
+    hydraflow.base.get_timeout -> hydraflow.config.wd_default 'default 1800s'
+    hydraflow.base.execute_cycle -> hydraflow.base.do_work 'create_task + asyncio.wait(timeout)'
+    hydraflow.base.do_work -> hydraflow.base.execute_cycle 'returns OR hangs'
+    hydraflow.base.execute_cycle -> hydraflow.base.timeout_err 'cancel task + raise on overrun'
+    hydraflow.base.timeout_err -> hydraflow.base.run 'caught -> ERROR status -> next cycle'
+  }
+}
