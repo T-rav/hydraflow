@@ -1,0 +1,96 @@
+// Issue #9542 — README "Future work" + auditor issue-body conflate
+// baseline coverage (sandbox-free, working) with live-refresh (deferred, #9080).
+//
+// Two distinct paths close/maintain a FakeGitHub adapter-surface gap:
+//
+//   PATH A — Baseline coverage (WORKS TODAY, no sandbox):
+//     hand-author a YAML cassette (recorder_sha 00000000, baseline_only: true)
+//     + add a dispatcher entry in _invoke_fake_github. The replay test then
+//     contract-checks the fake against the cassette. This is ALL that is
+//     required to close a fake-coverage-gap issue.
+//
+//   PATH B — Live re-recording (DEFERRED, blocked on #9080):
+//     a real record_github() that drives the gh CLI against a provisioned
+//     sandbox repo, refreshed by ContractRefreshLoop. Needs sandbox #9080.
+//
+// The conflation: issue #9183 was triaged "blocked on sandbox #9080" — but
+// it only needed PATH A. The README "Future work" section and the auditor's
+// _render_surface_body "Repair:" text don't make the A-vs-B split explicit,
+// so future runs mis-triage Path-A gaps as Path-B-blocked.
+
+specification {
+  element system
+  element container
+  element component
+  element doc
+}
+
+model {
+  hydraflow = system 'HydraFlow' {
+
+    auditor = container 'FakeCoverageAuditorLoop' {
+      description: 'Audits FakeGitHub surface; files fake-coverage-gap rollup issues'
+
+      surface_body = component '_render_surface_body' {
+        description: 'Builds the gap issue body — "Repair:" line currently says only "record a cassette"'
+      }
+      file_surface = component '_file_surface_gap' {
+        description: 'Creates the hydraflow-find / fake-coverage-gap / adapter-surface issue'
+      }
+    }
+
+    docs = container 'github cassette docs' {
+      readme = doc 'cassettes/github/README.md' {
+        description: '"Future work" describes live read-only recording needs; does NOT say baselines close gaps without a sandbox'
+      }
+      adr = doc 'ADR-0047 §Auditor scope' {
+        description: 'Line: github adapter-surface debt "blocked on isolated recording sandbox (#9080)" — imprecise wrt baselines'
+      }
+    }
+
+    pathA = container 'PATH A — baseline coverage (sandbox-free)' {
+      cassette = component 'hand-authored YAML cassette' {
+        description: 'recorder_sha 00000000, baseline_only: true'
+      }
+      dispatcher = component '_invoke_fake_github dispatcher entry' {
+        description: 'Maps cassette input.command → FakeGitHub call for the replay test'
+      }
+      replay_test = component 'test_fake_github_contract.py' {
+        description: 'Replays each cassette through FakeGitHub — the contract gate'
+      }
+    }
+
+    pathB = container 'PATH B — live re-recording (deferred, #9080)' {
+      record_github = component 'record_github (no-op today)' {
+        description: 'Real gh-CLI recorder; needs a provisioned sandbox repo'
+      }
+      sandbox = component 'sandbox repo #9080' {
+        description: 'CI/dev-accessible sandbox for live mutating gh calls'
+      }
+    }
+
+    // The gap-closing relationship the docs should make explicit:
+    auditor.file_surface -> hydraflow 'files fake-coverage-gap issue'
+    auditor.surface_body -> docs.readme 'should point readers to PATH A'
+
+    pathA.cassette -> pathA.replay_test 'replayed by'
+    pathA.dispatcher -> pathA.replay_test 'wires fake call'
+    pathA.replay_test -> auditor 'closes the gap (covers input.command)'
+
+    pathB.record_github -> pathB.sandbox 'requires'
+    docs.adr -> pathB 'the ONLY thing blocked on #9080'
+    docs.readme -> pathB '"Future work" = PATH B only'
+  }
+}
+
+views {
+  view index {
+    title 'Issue #9542 — baseline coverage vs live-refresh paths'
+    include *
+  }
+
+  view fix_targets {
+    title 'Fix targets — clarify A-vs-B in README + auditor body'
+    include hydraflow.auditor.*, hydraflow.docs.*, hydraflow.pathA, hydraflow.pathB
+  }
+}
