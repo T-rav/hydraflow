@@ -1,0 +1,115 @@
+// Issue #9554 — Route caretaker-loop gh/git subprocesses through the bounded
+// run_subprocess helper instead of raw create_subprocess_exec.
+//
+// Captures the topology BEFORE (raw create_subprocess_exec per loop) and the
+// TARGET (loops call a new non-raising run_subprocess_result that shares all
+// hardening — timeout, semaphore, rate-limit cooldown, circuit breaker — with
+// the existing run_subprocess).
+
+specification {
+  element module
+  element function
+  element state
+  element loop
+  element external
+
+  tag new
+  tag refactor
+  tag unchanged
+  tag excluded
+}
+
+model {
+  // ---- Infrastructure / cross-cutting subprocess boundary ----
+  subprocessUtil = module 'subprocess_util.py' {
+    description 'Shared async subprocess boundary: hardening lives here'
+
+    runSubprocess = function 'run_subprocess()' {
+      #unchanged
+      description 'Raising variant → str. Raises on non-zero exit.'
+    }
+    runSubprocessResult = function 'run_subprocess_result()' {
+      #new
+      description 'NEW non-raising variant → SimpleResult(rc, stdout, stderr). Raises only on timeout / breaker-open.'
+    }
+    runGated = function '_run_gated()' {
+      #refactor
+      description 'NEW shared core: semaphore + rate-limit wait + breaker gate + shadow sample. check=True raises, check=False returns.'
+    }
+    rateLimit = state 'rate-limit cooldown state' {
+      description '_rate_limit_until + exponential backoff (global)'
+    }
+    semaphore = state 'gh/git concurrency semaphore' {
+      description '_gh_semaphore (process-global)'
+    }
+  }
+
+  circuitBreaker = module 'circuit_breaker.py' {
+    description 'gh-only CircuitBreaker: opens after N outages, fails fast'
+    #unchanged
+  }
+
+  execution = module 'execution.py' {
+    description 'SubprocessRunner port (host vs docker)'
+    runSimple = function 'HostRunner.run_simple()' {
+      #unchanged
+      description 'asyncio.create_subprocess_exec + wait_for(timeout) + kill. Returns SimpleResult.'
+    }
+  }
+
+  github = external 'gh / git / make / rg CLI' {
+    description 'Host subprocesses'
+  }
+
+  // ---- Caretaker loops (the 9 migration targets) ----
+  loops = module 'caretaker loops (src/*_loop.py)' {
+    flake = loop 'flake_tracker_loop' { description 'gh run list / download (3 sites)' }
+    rcBudget = loop 'rc_budget_loop' { description 'gh run list/view/download (4 sites)' }
+    adr = loop 'adr_touchpoint_auditor_loop' { description 'gh pr/issue list (2 sites)' }
+    fakeCov = loop 'fake_coverage_auditor_loop' { description 'rg + gh issue list (3 sites)' }
+    corpus = loop 'corpus_learning_loop' { description 'gh issue list (1 site)' }
+    memBacklog = loop 'memory_backlog_loop' { description 'git add/commit + gh issue list (3 sites)' }
+    principles = loop 'principles_audit_loop' { description 'make audit-json + git combined-output (2 sites)' }
+    skillEval = loop 'skill_prompt_eval_loop' { description 'make trust-adversarial w/ custom env (1) + gh issue list (1)' }
+    bisect = loop 'staging_bisect_loop' {
+      description 'make bisect-probe + gh (migrate 2); _run_git keeps cooperative cancellation (excluded)'
+    }
+  }
+
+  // ---- TARGET edges: loops → new bounded helper → port → CLI ----
+  loops -> runSubprocessResult 'await (non-raising, rc-branch preserved)'
+  bisect -> runSubprocess 'staging_bisect._run_gh → raising variant'
+
+  runSubprocess -> runGated 'check=True'
+  runSubprocessResult -> runGated 'check=False'
+  runGated -> semaphore 'gh/git only'
+  runGated -> rateLimit 'wait + trigger cooldown'
+  runGated -> circuitBreaker 'gh only, opt-in'
+  runGated -> runSimple 'execute with timeout bound'
+  runSimple -> github 'create_subprocess_exec'
+
+  // excluded site keeps raw exec (kill-switch mid-run polling)
+  bisect -> github 'staging_bisect._run_git (raw, cooperative cancel — EXCLUDED)' {
+    #excluded
+  }
+}
+
+views {
+  view index {
+    title 'Issue #9554 — Bounded subprocess helper for caretaker loops'
+    include *
+    autoLayout TopBottom
+  }
+
+  view helperCore {
+    title 'Shared gating core (run_subprocess + run_subprocess_result)'
+    include subprocessUtil.*, circuitBreaker, execution.*, github
+    autoLayout LeftRight
+  }
+
+  view loopsTarget {
+    title 'Caretaker loops → bounded helper (target state)'
+    include loops.*, runSubprocessResult, runSubprocess, github
+    autoLayout TopBottom
+  }
+}

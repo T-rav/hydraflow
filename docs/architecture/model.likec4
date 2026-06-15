@@ -1,0 +1,131 @@
+// Issue #9554 — Route caretaker-loop gh/git subprocesses through the bounded
+// run_subprocess helper instead of raw create_subprocess_exec.
+//
+// This model captures the subprocess-execution chokepoint as it exists today
+// (raw asyncio.create_subprocess_exec scattered across ~9 caretaker loops) and
+// the target state (every loop call funneled through subprocess_util, which owns
+// timeout/kill, the gh/git semaphore, the rate-limit cooldown, and the circuit
+// breaker).
+
+specification {
+  element zone
+  element module
+  element fn
+  element external
+
+  tag today        // current (bypassing) call path
+  tag target       // desired (hardened) call path
+  tag new          // code added by this issue
+}
+
+model {
+
+  caretakers = zone 'Caretaker Loops (src/*_loop.py)' {
+    description 'Background BaseBackgroundLoop subclasses that poll gh/git/make/rg.'
+
+    rcBudget        = module 'rc_budget_loop'            'gh run list/view/download'
+    adrTouch        = module 'adr_touchpoint_auditor_loop' 'gh pr list / gh issue list'
+    flake           = module 'flake_tracker_loop'        'gh run list / download junit'
+    corpus          = module 'corpus_learning_loop'      'gh issue list (reconcile)'
+    memBacklog      = module 'memory_backlog_loop'       'git add/commit + gh issue list'
+    fakeCov         = module 'fake_coverage_auditor_loop' 'rg test-helper scan + gh issue list'
+    skillEval       = module 'skill_prompt_eval_loop'    'make trust-adversarial (rc 0|1)'
+    prinAudit       = module 'principles_audit_loop'     'make audit-json + git fetch/clone'
+    bisect          = module 'staging_bisect_loop'       'gh (_run_gh) + bespoke git bisect'
+  }
+
+  subprocUtil = zone 'subprocess_util.py' {
+    description 'The shared subprocess hardening layer (semaphore, cooldown, breaker).'
+
+    runSubprocess = fn 'run_subprocess()' {
+      description 'Raises RuntimeError on non-zero; SubprocessTimeoutError on timeout. Returns stripped stdout.'
+    }
+    runResult = fn 'run_subprocess_result()' {
+      #target #new
+      description 'NEW non-raising, returncode-exposing variant. Returns SimpleResult; on timeout kills child + returns sentinel returncode. Same gh/git hardening as run_subprocess.'
+    }
+    sideEffects = fn '_apply_post_run_side_effects()' {
+      #new
+      description 'NEW factored helper: rate-limit cooldown trigger, circuit-breaker success/outage accounting, shadow sampling. Shared by both run_subprocess and run_subprocess_result.'
+    }
+    semaphore = fn '_get_gh_semaphore()' 'global gh/git concurrency gate'
+    cooldown  = fn '_wait_for_rate_limit_cooldown()' 'global 403/429 backoff pause'
+    breaker   = fn 'gh circuit breaker' 'OPEN after consecutive gh outages (kill-switch gated)'
+    cleanEnv  = fn 'make_clean_env()' 'strips CLAUDECODE / GIT_WORK_TREE / GIT_DIR'
+  }
+
+  execution = zone 'execution.py' {
+    description 'Host vs Docker subprocess abstraction (SubprocessRunner Protocol).'
+
+    runner    = fn 'HostRunner.run_simple()' {
+      description 'asyncio.wait_for(proc.communicate(), timeout); kills proc on TimeoutError. Returns SimpleResult(stdout, stderr, returncode).'
+    }
+    simpleResult = module 'SimpleResult' 'dataclass: stdout, stderr, returncode'
+  }
+
+  host = external 'Host OS / subprocess' {
+    description 'gh, git, make, rg child processes.'
+  }
+
+  // ---- TODAY: loops bypass the hardening layer entirely ----
+  rcBudget   -> host 'raw create_subprocess_exec + bare communicate()' #today
+  adrTouch   -> host 'raw create_subprocess_exec + bare communicate()' #today
+  flake      -> host 'raw create_subprocess_exec + bare communicate()' #today
+  corpus     -> host 'raw create_subprocess_exec + bare communicate()' #today
+  memBacklog -> host 'raw create_subprocess_exec + bare communicate()' #today
+  fakeCov    -> host 'raw create_subprocess_exec + bare communicate()' #today
+  skillEval  -> host 'raw create_subprocess_exec + bare communicate()' #today
+  prinAudit  -> host 'raw create_subprocess_exec + bare communicate()' #today
+  bisect     -> host '_run_gh raw create_subprocess_exec' #today
+
+  // ---- TARGET: loops call the returncode-exposing helper ----
+  rcBudget   -> runResult 'branch on result.returncode' #target
+  adrTouch   -> runResult 'branch on result.returncode' #target
+  flake      -> runResult 'branch on result.returncode' #target
+  corpus     -> runResult 'branch on result.returncode' #target
+  memBacklog -> runResult 'branch on result.returncode' #target
+  fakeCov    -> runResult 'rg rc==0/1; gh-list rc!=0' #target
+  skillEval  -> runResult 'extra_env + cwd; rc in {0,1}' #target
+  prinAudit  -> runResult 'cwd; rc in {0,1}; emit trace' #target
+  bisect     -> runSubprocess '_run_gh -> raising variant' #target
+
+  // ---- internal wiring ----
+  runResult     -> sideEffects 'cooldown/breaker/sampling'
+  runSubprocess -> sideEffects 'cooldown/breaker/sampling'
+  runResult     -> semaphore 'gate gh/git'
+  runResult     -> cooldown 'pause if rate-limited'
+  runResult     -> breaker 'allow_request / record'
+  runResult     -> cleanEnv 'env (+ extra_env merge)'
+  runResult     -> runner 'await run_simple(timeout)'
+  runSubprocess -> runner 'await run_simple(timeout)'
+  runner        -> simpleResult 'returns'
+  runner        -> host 'create_subprocess_exec + wait_for(communicate)'
+}
+
+views {
+  view context {
+    title 'Issue #9554 — Subprocess hardening: today vs target'
+    include *
+    style element.kind = zone {
+      color muted
+    }
+    style * {
+      opacity 30%
+    }
+    style element.tag = #today {
+      color red
+    }
+    style element.tag = #target {
+      color green
+    }
+    style element.tag = #new {
+      color amber
+    }
+  }
+
+  view subprocessUtil of subprocUtil {
+    title 'subprocess_util internals (run_subprocess_result + factored side effects)'
+    include *
+    include runner, simpleResult, host
+  }
+}

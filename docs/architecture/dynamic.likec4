@@ -1,51 +1,46 @@
-// Dynamic view: control flow through refactored merge_makefile()
-// Sequence reflects load-bearing ordering invariants asserted by tests:
-//   - existing-targets-first (test_preserves_existing_content_order)
-//   - prerequisite-only targets last in fixed order (smoke, quality-lite, quality)
-//   - .PHONY rewrite preserves include-defined names
-//   - trailing newline always
+// Issue #9554 — Dynamic view of one caretaker-loop subprocess call after migration.
+// Shows a representative "best-effort gh list" call (e.g. rc_budget._fetch_recent_runs)
+// flowing through the bounded helper, including the timeout / non-zero branches the
+// loops rely on (they branch on returncode rather than seeing a RuntimeError).
 
 specification {
-  element actor {
-    style { shape: person }
-  }
-  element step {
-    style { shape: rectangle }
-  }
+  element participant
 }
 
 model {
-  caller = actor 'makefile_contract.validate_and_repair'
-  m = step 'merge_makefile(existing_content, language)'
-  resolve = step '_targets_for_language(language)'
-  early_unknown = step 'early-return (existing_content, []) if unknown language'
-  parse = step 'parse_makefile(existing_content)'
-  diff = step '_diff_targets(existing, template) -> (targets_to_add, warnings)'
-  prereq_check = step '_check_prereq_deps(existing_content, existing_targets)'
-  early_nothing = step 'early-return (existing_content, warnings) if to_add empty'
-  append = step '_append_missing_targets(content, template, to_add)'
-  phony = step '_update_phony(body, existing_content, existing, to_add)'
-  default_goal = step '_ensure_default_goal(body, existing_content)'
-  trailing = step 'ensure trailing newline'
-  done = step 'return (new_content, warnings)'
+  loop    = participant 'Caretaker loop _do_work()'
+  result  = participant 'run_subprocess_result()'
+  side    = participant '_apply_post_run_side_effects()'
+  cb      = participant 'gh circuit breaker'
+  rl      = participant 'rate-limit cooldown'
+  runner  = participant 'HostRunner.run_simple()'
+  child   = participant 'gh/git/make/rg child'
 
-  caller -> m 'merge_makefile(content, "python")'
-  m -> resolve
-  resolve -> early_unknown 'language not in templates'
-  resolve -> parse 'template resolved'
-  parse -> diff 'existing_targets ready'
-  diff -> prereq_check 'collect prereq warnings'
-  prereq_check -> early_nothing 'no targets to add'
-  prereq_check -> append 'targets_to_add non-empty'
-  append -> phony 'body has new target lines appended'
-  phony -> default_goal 'body has updated .PHONY'
-  default_goal -> trailing
-  trailing -> done
-}
+  dynamic view callFlow {
+    title 'Bounded subprocess call: success, non-zero, and timeout branches'
 
-views {
-  view flow of m {
-    title 'merge_makefile happy path'
-    include *
+    loop -> result 'run_subprocess_result("gh","run","list",...,timeout=120)'
+    result -> cb 'allow_request()? (gh only, if enabled)'
+    result -> rl 'await _wait_for_rate_limit_cooldown()'
+    result -> runner 'run_simple(cmd, env, timeout) [inside gh/git semaphore]'
+    runner -> child 'create_subprocess_exec + wait_for(communicate, timeout)'
+
+    child -> runner 'rc=0, stdout (happy path)'
+    runner -> result 'SimpleResult(stdout, stderr, 0)'
+    result -> side 'rc==0: reset backoff, breaker.record_success(), shadow-sample'
+    result -> loop 'return SimpleResult -> json.loads(stdout)'
+
+    // non-zero exit (e.g. GitHub 404 / business error) — NO raise
+    child -> runner 'rc!=0, stderr'
+    runner -> result 'SimpleResult(stdout, stderr, rc!=0)'
+    result -> side 'sample; if rate-limited -> cooldown; elif gh outage -> breaker.record_failure()'
+    result -> loop 'return SimpleResult -> loop logs + returns [] (skip tick)'
+
+    // timeout — child killed by runner, sentinel returned (non-raising variant)
+    child -> runner 'communicate() exceeds timeout'
+    runner -> runner 'proc.kill(); raise TimeoutError'
+    runner -> result 'TimeoutError'
+    result -> side 'breaker.record_failure() (gh only)'
+    result -> loop 'return SimpleResult(returncode=-1, stderr="...timed out") -> skip tick'
   }
 }

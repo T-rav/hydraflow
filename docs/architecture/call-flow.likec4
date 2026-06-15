@@ -1,0 +1,46 @@
+// Issue #9554 — Dynamic view: a caretaker loop tick fetching gh data via the
+// new non-raising bounded helper, including the timeout + rate-limit paths.
+
+specification {
+  element participant
+}
+
+model {
+  loop = participant 'caretaker loop._do_work()'
+  rsr = participant 'run_subprocess_result()'
+  gated = participant '_run_gated(check=False)'
+  rl = participant 'rate-limit / semaphore state'
+  breaker = participant 'gh circuit breaker'
+  runner = participant 'HostRunner.run_simple()'
+  cli = participant 'gh / git / make / rg'
+}
+
+views {
+  dynamic view happyPath {
+    title '#9554 — Non-raising fetch: rc-branch preserved'
+    loop -> rsr 'await run_subprocess_result("gh","issue","list",...)'
+    rsr -> gated 'env = make_clean_env(+extra_env)'
+    gated -> breaker 'allow_request()? (gh, opt-in)'
+    gated -> rl 'wait_for_rate_limit_cooldown(); acquire semaphore'
+    gated -> runner 'run_simple(cmd, cwd, env, timeout)'
+    runner -> cli 'create_subprocess_exec + wait_for(timeout)'
+    cli -> runner 'rc=1, stdout, stderr'
+    runner -> gated 'SimpleResult(rc=1,...)'
+    gated -> rl 'reset backoff on rc==0 / trigger cooldown if rate-limited'
+    gated -> rsr 'return SimpleResult (NO raise on non-zero)'
+    rsr -> loop 'result.returncode → existing rc-branch (e.g. accept {0,1})'
+  }
+
+  dynamic view timeoutPath {
+    title '#9554 — Timeout backstop replaces unbounded communicate()'
+    loop -> rsr 'await run_subprocess_result("make","audit-json",timeout=1800)'
+    rsr -> gated 'check=False'
+    gated -> runner 'run_simple(timeout=1800)'
+    runner -> cli 'create_subprocess_exec + wait_for(1800)'
+    cli -> runner 'no output within 1800s'
+    runner -> runner 'proc.kill(); await proc.wait()'
+    runner -> gated 'raise TimeoutError'
+    gated -> rsr 'raise SubprocessTimeoutError'
+    rsr -> loop 'caught by loop try/except or base-loop _execute_cycle (retry next tick)'
+  }
+}
