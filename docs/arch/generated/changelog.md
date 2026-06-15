@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `8c77fa9` — chore(arch): regen artifacts after wiki-rot fix (9b18cb0) *(2026-06-14)*
 - `618591e` — fix(wiki-rot): add CreditExhaustedError re-raise test + regression + FakeGitHub limit fix (#9442) (#9442) *(2026-06-14)*
 - `f0012a4` — chore(arch): regen artifacts after staging merge (023b379) *(2026-06-14)*
 - `023b379` — Merge remote-tracking branch 'origin/staging' into agent/issue-9442 *(2026-06-14)*
