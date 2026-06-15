@@ -1,0 +1,141 @@
+// Issue #9544 — MockWorldSeed active-trigger fields for time/anomaly loops
+// C4 model of how the new seed fields (issue updated_at, worker-status event
+// history, repo-wiki fixture entries) flow from the seed JSON into the sandbox
+// boot path and reach the three caretaker loops they unblock.
+
+specification {
+  element system
+  element container
+  element component
+  element datastore
+
+  tag new        // introduced/extended by this issue
+  tag existing
+}
+
+model {
+  author = element {
+    title 'Scenario author'
+    description 'Writes a sandbox scenario module: seed() + assert_outcome(api, page)'
+  }
+
+  sandbox = system 'HydraFlow Sandbox (Tier-2 e2e)' {
+
+    seed = container 'MockWorldSeed' {
+      description 'Serializable scenario initial state (src/mockworld/seed.py)'
+      technology 'frozen dataclass + to_json/from_json'
+
+      f_issues = component 'issues[].updated_at' {
+        #new
+        description 'NEW: optional per-issue updated_at timestamp'
+      }
+      f_events = component 'worker_status_events[]' {
+        #new
+        description 'NEW: seeded BACKGROUND_WORKER_STATUS history (age_seconds + details)'
+      }
+      f_wiki = component 'wiki_entries[]' {
+        #new
+        description 'NEW: repo-wiki fixture entries (slug, topic, title, content w/ broken cite)'
+      }
+    }
+
+    loader = container 'sandbox_main' {
+      description 'Sandbox entrypoint — builds Fakes + services from the seed (src/mockworld/sandbox_main.py)'
+      technology 'asyncio main()'
+
+      seed_evlog = component '_seed_event_log()' {
+        #new
+        description 'NEW: writes aged worker-status events into the EventLog JSONL'
+      }
+      seed_wiki = component '_seed_wiki_entries()' {
+        #new
+        description 'NEW: writes fixture entries via RepoWikiStore.write_entry'
+      }
+    }
+
+    fakegithub = container 'FakeGitHub' {
+      description 'Stateful GitHub fake (src/mockworld/fakes/fake_github.py)'
+      from_seed = component 'from_seed()' {
+        #existing
+        description 'EXTENDED: applies issues[].updated_at via set_issue_updated_at'
+      }
+      fakeissue = component 'FakeIssue.updated_at' {
+        #existing
+        description 'EXISTING field (default 2026-01-01); now seedable per issue'
+      }
+    }
+
+    evlog = datastore 'EventLog (JSONL)' {
+      #existing
+      description 'On-disk event history; read by load_events_since()'
+    }
+    wikistore = datastore 'RepoWikiStore' {
+      #existing
+      description 'Per-repo wiki on disk; scanned by WikiRotDetectorLoop'
+    }
+
+    stale = container 'StaleIssueGCLoop' {
+      #existing
+      description 'Closes HITL issues stale > threshold_days; reads get_issue_updated_at'
+    }
+    trust = container 'TrustFleetSanityLoop' {
+      #existing
+      description 'Anomaly detectors over 24h worker-status history (load_events_since)'
+    }
+    wikirot = container 'WikiRotDetectorLoop' {
+      #existing
+      description 'Files issues on broken wiki code cites (scans RepoWikiStore)'
+    }
+  }
+
+  // --- authoring + boot flow ---
+  author -> seed 'declares fields in seed()'
+  seed -> loader 'to_json() → from_json() at boot'
+
+  loader.seed_evlog -> evlog 'append aged events'
+  loader.seed_wiki -> wikistore 'write_entry(fixture)'
+  loader -> fakegithub 'FakeGitHub.from_seed(seed)'
+
+  fakegithub.from_seed -> fakegithub.fakeissue 'set_issue_updated_at'
+
+  // --- active-trigger reads ---
+  stale -> fakegithub 'list_issues_by_label + get_issue_updated_at'
+  trust -> evlog 'load_events_since(now-24h)'
+  wikirot -> wikistore 'list_repos + repo_dir(slug)'
+
+  // field → consumer provenance
+  seed.f_issues -> fakegithub.from_seed 'updated_at'
+  seed.f_events -> loader.seed_evlog 'worker_status_events'
+  seed.f_wiki -> loader.seed_wiki 'wiki_entries'
+}
+
+views {
+  view index {
+    title 'Issue #9544 — seed fields → sandbox loaders → loops'
+    include *
+    include sandbox.seed.*
+    include sandbox.loader.*
+    include sandbox.fakegithub.*
+  }
+
+  view dynamic_stale {
+    title 'Dynamic — stale_issue_gc fresh-vs-stale active trigger'
+    include author, sandbox.seed, sandbox.loader, sandbox.fakegithub, sandbox.stale
+
+    author -> sandbox.seed 'issues=[{updated_at: now-20d}, {updated_at: now-1d}]'
+    sandbox.seed -> sandbox.loader 'boot'
+    sandbox.loader -> sandbox.fakegithub 'from_seed → set_issue_updated_at'
+    sandbox.stale -> sandbox.fakegithub 'get_issue_updated_at'
+    sandbox.stale -> sandbox.fakegithub 'close stale (20d), skip fresh (1d)'
+  }
+
+  view dynamic_trust {
+    title 'Dynamic — trust_fleet_sanity issues_per_hour active trigger'
+    include author, sandbox.seed, sandbox.loader, sandbox.trust
+
+    author -> sandbox.seed 'worker_status_events=12×{worker:corpus_learning, details.filed:1, age:600s}'
+    sandbox.seed -> sandbox.loader 'boot'
+    sandbox.loader -> sandbox.trust 'EventLog seeded + EventBus(event_log)'
+    sandbox.trust -> sandbox.trust 'detect_issues_per_hour ≥ 10 → file hitl-escalation'
+  }
+}
