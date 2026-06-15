@@ -311,5 +311,9 @@ async def test_trace_emission_invoked_on_tick_end(
     assert len(calls) == 1, calls
     assert calls[0]["loop"] == "wiki_rot_detector"
     assert calls[0]["exit_code"] == 0
-    assert isinstance(calls[0]["command"], list)
+    assert calls[0]["command"] == [
+        "PRPort.list_closed_issues_by_label",
+        "wiki-rot-stuck",
+        "limit=50",
+    ]
     assert isinstance(calls[0]["duration_ms"], int)
