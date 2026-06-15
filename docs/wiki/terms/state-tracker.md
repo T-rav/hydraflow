@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/state/__init__.py:StateTracker"
 aliases: ["state tracker", "state facade", "state mixin facade"]
 related: []
-evidence: ["01KQP0DZNDCVJVV0YHTG430T31"]
+evidence: ["01KQP0AJ4Y4348S0D9AKRTCPP7", "01KQP0AJ4Z2MY1EXMWW9BTXN97", "01KQP0DZNDCVJVV0YHTG430T31", "01KQP0V9KK99G77287P414NFQY", "01KQP0V9KK99G77287P414NFRQ", "01KV2R9KH9H5QWCWT9K2NEYR0W", "01KV39FHAZ2B41CZDYQSKXQ4E4", "01KV39FHAZ2B41CZDYQSKXQ4EX", "01KV39FHAZ2B41CZDYQSKXQ4EY"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668771+00:00"
-updated_at: "2026-06-12T04:22:53.198214+00:00"
+updated_at: "2026-06-15T05:22:05.863616+00:00"
 ---
 
 ## Definition
