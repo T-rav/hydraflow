@@ -1,0 +1,144 @@
+// Issue #9543 — Active-trigger sandbox scenarios for governance loops
+// C4 specification + model for the change area:
+// MockWorldSeed → sandbox_main composition root → governance loops →
+// Ports/State → EventBus → dashboard /api/events → sandbox scenario assertion.
+
+specification {
+  element system
+  element container
+  element component
+  element datastore
+  element actor
+
+  tag changed       // files modified by this issue
+  tag added         // files/elements added by this issue
+  tag unchanged     // observed but not modified
+}
+
+model {
+  scenarioAuthor = actor 'Sandbox Scenario Runner' {
+    description 'scripts/sandbox_scenario.py — boots docker stack, runs one scenario'
+  }
+
+  hydraflow = system 'HydraFlow (sandbox tier)' {
+
+    seed = container 'MockWorldSeed' {
+      description 'Serializable scenario seed (src/mockworld/seed.py)'
+      technology 'frozen dataclass + to_json/from_json'
+
+      staleWorkspaces = component 'stale_workspaces[]' {
+        #added
+        description 'NEW field: pre-populate state.active_workspaces for GC'
+      }
+      gateActivations = component 'gate_activations[]' {
+        #added
+        description 'NEW field: ActivationProposal kwargs for fake detector'
+      }
+      issueState = component 'issues[].state' {
+        #added
+        description 'NEW key honored: "closed" marks an issue resolved'
+      }
+    }
+
+    sandboxMain = container 'sandbox_main (composition root)' {
+      #changed
+      description 'src/mockworld/sandbox_main.py — wires Fakes + loops from seed'
+      technology 'asyncio entrypoint'
+
+      seedWorkspaces = component '_seed_stale_workspaces()' {
+        #added
+        description 'NEW: state.set_workspace/set_branch from seed.stale_workspaces'
+      }
+      overrideDetector = component 'gate detector override' {
+        #added
+        description 'NEW: svc.gate_activator_loop._detector = seeded detector'
+      }
+    }
+
+    workspaceGc = container 'WorkspaceGCLoop' {
+      #changed
+      description 'src/workspace_gc_loop.py — GCs stale worktrees/branches'
+      technology 'BaseBackgroundLoop'
+
+      getIssueState = component '_get_issue_state()' {
+        #changed
+        description 'CHANGED: shell-out gh → self._prs.get_issue_state() + map GraphQL→REST'
+      }
+      isSafeToGc = component '_is_safe_to_gc()' {
+        #unchanged
+        description 'unchanged comparison ("closed"/"open"); fed by mapped state'
+      }
+    }
+
+    gateActivator = container 'GateActivatorLoop' {
+      #unchanged
+      description 'src/gate_activator_loop.py — files gate-activation issue (no prod change)'
+      technology 'BaseBackgroundLoop'
+    }
+
+    prPort = container 'PRPort / FakeGitHub' {
+      #changed
+      description 'src/ports.py (protocol) + src/mockworld/fakes/fake_github.py'
+      technology 'hexagonal port + in-memory fake'
+
+      getStatePort = component 'get_issue_state()' {
+        #unchanged
+        description 'existing port method — returns OPEN/COMPLETED/NOT_PLANNED'
+      }
+      fromSeed = component 'from_seed()/add_issue()' {
+        #changed
+        description 'CHANGED: honor issue_dict["state"] (default "open")'
+      }
+      createIssue = component 'create_issue()' {
+        #unchanged
+        description 'gate_activator files the proposal here'
+      }
+    }
+
+    state = datastore 'StateTracker' {
+      #unchanged
+      description 'src/state/_workspace.py — active_workspaces / active_branches'
+    }
+
+    eventBus = container 'EventBus' {
+      #unchanged
+      description 'BACKGROUND_WORKER_STATUS carries _do_work() return as data.details'
+    }
+
+    api = container 'Dashboard /api/events' {
+      #unchanged
+      description 'src/dashboard_routes/_routes.py — model_dump() includes data.details'
+    }
+  }
+
+  s50 = container 's50 workspace_gc collects stale' {
+    #added
+    description 'NEW sandbox scenario: assert details.collected >= 1'
+  }
+  s51 = container 's51 gate_activator files proposal' {
+    #added
+    description 'NEW sandbox scenario: assert details.issue_created present'
+  }
+
+  // --- relationships ---
+  scenarioAuthor -> seed 'computes seed()'
+  scenarioAuthor -> s50 'runs assert_outcome'
+  scenarioAuthor -> s51 'runs assert_outcome'
+
+  seed -> sandboxMain 'from_json on boot'
+  sandboxMain.seedWorkspaces -> state 'set_workspace / set_branch'
+  sandboxMain.overrideDetector -> gateActivator 'inject seeded detector'
+  sandboxMain -> prPort 'FakeGitHub.from_seed (with state)'
+
+  workspaceGc.getIssueState -> prPort.getStatePort 'await get_issue_state()'
+  workspaceGc.isSafeToGc -> state 'read active_workspaces'
+  workspaceGc -> state 'remove_workspace / remove_branch'
+  workspaceGc -> eventBus 'publish details.collected'
+
+  gateActivator -> prPort.createIssue 'file gate-activation issue'
+  gateActivator -> eventBus 'publish details.issue_created'
+
+  eventBus -> api 'history → model_dump'
+  s50 -> api 'GET /api/events (poll)'
+  s51 -> api 'GET /api/events (poll)'
+}

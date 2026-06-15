@@ -1,0 +1,67 @@
+// Views for issue #9543 — container/component context + two dynamic flows.
+
+views {
+
+  view index {
+    title 'Issue #9543 — Active-trigger sandbox scenarios (landscape)'
+    include *
+  }
+
+  view changeArea {
+    title 'Change area — seed → sandbox_main → loops → ports/state → events → api'
+    include
+      scenarioAuthor,
+      hydraflow,
+      hydraflow.seed,
+      hydraflow.seed.*,
+      hydraflow.sandboxMain,
+      hydraflow.sandboxMain.*,
+      hydraflow.workspaceGc,
+      hydraflow.workspaceGc.*,
+      hydraflow.gateActivator,
+      hydraflow.prPort,
+      hydraflow.prPort.*,
+      hydraflow.state,
+      hydraflow.eventBus,
+      hydraflow.api,
+      s50,
+      s51
+
+    style hydraflow.seed.* {
+      color green
+    }
+    style hydraflow.sandboxMain.* {
+      color amber
+    }
+  }
+
+  // Dynamic view — WorkspaceGCLoop actively collects a seeded stale worktree.
+  dynamic view workspaceGcActiveGc {
+    title 'Dynamic — workspace_gc collects a stale worktree (closed issue)'
+
+    scenarioAuthor -> hydraflow.seed 'seed(): stale_workspaces=[{number:N}], issues=[{number:N, state:"closed"}], loops_enabled=["workspace_gc"]'
+    hydraflow.seed -> hydraflow.sandboxMain 'boot: from_json'
+    hydraflow.sandboxMain -> hydraflow.state 'set_workspace(N, path)'
+    hydraflow.sandboxMain -> hydraflow.prPort 'FakeGitHub.from_seed → issue N state=closed'
+    hydraflow.workspaceGc -> hydraflow.state 'cycle: get_active_workspaces() → {N}'
+    hydraflow.workspaceGc -> hydraflow.prPort 'get_issue_state(N) → COMPLETED → "closed"'
+    hydraflow.workspaceGc -> hydraflow.state 'remove_workspace(N) / remove_branch(N)'
+    hydraflow.workspaceGc -> hydraflow.eventBus 'publish details={collected:1}'
+    hydraflow.eventBus -> hydraflow.api 'GET /api/events'
+    hydraflow.api -> s50 'assert any(event.data.details.collected >= 1)'
+  }
+
+  // Dynamic view — GateActivatorLoop files a proposal from a seeded detector.
+  dynamic view gateActivatorActiveProposal {
+    title 'Dynamic — gate_activator files a proposal (seeded detector)'
+
+    scenarioAuthor -> hydraflow.seed 'seed(): gate_activations=[{name,dimension,...}], loops_enabled=["gate_activator"]'
+    hydraflow.seed -> hydraflow.sandboxMain 'boot: from_json'
+    hydraflow.sandboxMain -> hydraflow.gateActivator 'override _detector → returns seeded proposals'
+    hydraflow.gateActivator -> hydraflow.gateActivator 'cycle: _detector() → [proposal]'
+    hydraflow.gateActivator -> hydraflow.prPort 'create_issue(title, body, labels) → #M'
+    hydraflow.gateActivator -> hydraflow.eventBus 'publish details={status:"proposals", issue_created:M}'
+    hydraflow.eventBus -> hydraflow.api 'GET /api/events'
+    hydraflow.api -> s51 'assert any(event.data.details.issue_created)'
+  }
+}
