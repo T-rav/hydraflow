@@ -1,0 +1,104 @@
+// Issue #9540 — Stale ADR reference in spawn-contract ratchet docstrings
+// ADR-0086 is "LiveCorpusReplayLoop: Shadow-Corpus Drift Detection" — UNRELATED
+// to the WS-2.2 telemetry/credit spawn contract. The correct provenance is
+// docs/wiki/dark-factory.md §2.2 (subprocess runner conventions) and §6
+// (conventions made "remembered -> structurally enforced").
+//
+// This is a documentation/provenance correction only: no runtime behavior
+// changes. The diagram captures the citation topology (who points at what)
+// so the fix can be verified to repoint every citing file at the right source.
+
+specification {
+  element doc {
+    style { color muted }
+  }
+  element testFile {
+    style { color green }
+  }
+  element srcFile {
+    style { color blue }
+  }
+  element wrongTarget {
+    style { color red }
+  }
+  element guard {
+    style { color amber }
+  }
+  relationship cites
+  relationship guards
+  relationship enforces
+}
+
+model {
+  // ---- The decision sources (citation targets) ----
+  darkFactory = doc 'dark-factory.md' {
+    description 'docs/wiki/dark-factory.md §2.2 (subprocess runner telemetry/credit conventions) + §6 (remembered -> structurally enforced). The CORRECT provenance.'
+  }
+  exceptionClassify = srcFile 'exception_classify.py' {
+    description 'src/exception_classify.py — credit/auth fatal-hierarchy convention (reraise_on_credit_or_bug).'
+  }
+  adr0086 = wrongTarget 'ADR-0086 (live-corpus-replay-loop)' {
+    description 'docs/adr/0086-live-corpus-replay-loop.md — LiveCorpusReplayLoop / Shadow-Corpus drift. WRONG target currently cited by the spawn-contract files (ADR-number renumbering churn casualty).'
+  }
+
+  // ---- The spawn-contract ratchet files carrying the stale citation ----
+  telemetrySrc = testFile 'test_telemetry_source_completeness.py' {
+    description 'Ratchet: no module spawns an LLM outside the telemetry-recording seam.'
+  }
+  subprocContract = testFile 'test_subprocess_runner_contract_completeness.py' {
+    description 'Ratchet: every lightweight (run_simple) LLM spawn detects credit exhaustion.'
+  }
+  spawnAudit = testFile '_spawn_audit.py' {
+    description 'Shared AST discovery feeding both ratchets (iter_module_facts).'
+  }
+  lightweightRegr = testFile 'test_lightweight_spawn_credit_telemetry.py' {
+    description 'Behavioral regression: lightweight path detects credit + records telemetry.'
+  }
+  runnerUtils = srcFile 'runner_utils.py' {
+    description 'Defines stream_claude_with_telemetry + run_lightweight_agent (the contract home). Carries the stale citation in a section comment.'
+  }
+
+  // ---- The new provenance guard ----
+  provenanceGuard = guard 'test_issue_9540.py' {
+    description 'New regression: any ADR-NNNN cited by a spawn-contract file must NOT resolve to the LiveCorpusReplayLoop ADR.'
+  }
+
+  // ---- Current (WRONG) citations ----
+  telemetrySrc -> adr0086 'cites (stale)'
+  subprocContract -> adr0086 'cites (stale)'
+  spawnAudit -> adr0086 'cites (stale)'
+  lightweightRegr -> adr0086 'cites (stale)'
+  runnerUtils -> adr0086 'cites (stale)'
+
+  // ---- Target (CORRECT) citations after the fix ----
+  telemetrySrc -> darkFactory 'repoint to §2.2/§6'
+  subprocContract -> darkFactory 'repoint to §2.2/§6'
+  subprocContract -> exceptionClassify 'credit/auth hierarchy'
+  spawnAudit -> darkFactory 'repoint to §2.2/§6'
+  lightweightRegr -> darkFactory 'repoint to §2.2'
+  runnerUtils -> darkFactory 'repoint to §2.2'
+
+  // ---- The guard enforces correct provenance ----
+  provenanceGuard -> telemetrySrc 'guards'
+  provenanceGuard -> subprocContract 'guards'
+  provenanceGuard -> spawnAudit 'guards'
+  provenanceGuard -> lightweightRegr 'guards'
+  provenanceGuard -> runnerUtils 'guards'
+}
+
+views {
+  view index {
+    title 'Issue #9540 — spawn-contract citation provenance'
+    include *
+  }
+
+  view currentState {
+    title 'Before: all spawn-contract files cite the WRONG ADR-0086'
+    include telemetrySrc, subprocContract, spawnAudit, lightweightRegr, runnerUtils, adr0086
+  }
+
+  view targetState {
+    title 'After: files repointed at dark-factory §2.2/§6; guard enforces it'
+    include telemetrySrc, subprocContract, spawnAudit, lightweightRegr, runnerUtils, darkFactory, exceptionClassify, provenanceGuard
+  }
+}
