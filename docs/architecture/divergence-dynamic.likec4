@@ -1,0 +1,53 @@
+// Issue #9557 — Dynamic view of the divergence footgun.
+// Walks one malformed citation `src/foo.py::bar` through all three parsers,
+// showing how it vanishes from two indexes but is silently recorded by the third.
+
+specification {
+  element actor
+  element parser
+  element output
+  relationship step
+}
+
+model {
+
+  author = actor 'ADR author' {
+    description 'Writes a malformed citation: `src/foo.py::bar` (double colon)'
+  }
+
+  indexRe   = parser 'adr_index regex (strict)'
+  preValRe  = parser 'adr_pre_validator regex (strict)'
+  xrefRe    = parser 'adr_xref regex (lenient)'
+
+  driftView = output 'Drift / P2 touchpoint gate' {
+    description 'sees ZERO citations -> file invisible, no drift, no gate fire'
+  }
+  phantomView = output 'phantom_source_symbol check' {
+    description 'sees ZERO symbol -> no validation, malformation passes silently'
+  }
+  moduleGraph = output 'adr_xref.md module graph' {
+    description 'records src.foo as OWNED by the ADR (strips `::bar`)'
+  }
+
+  // The divergence: same input, three different outcomes
+  author -> indexRe  'step 1: `src/foo.py::bar`'
+  author -> preValRe 'step 2: `src/foo.py::bar`'
+  author -> xrefRe   'step 3: `src/foo.py::bar`'
+
+  indexRe  -> driftView   'step 4: NO MATCH -> dropped'
+  preValRe -> phantomView 'step 5: NO MATCH -> dropped'
+  xrefRe   -> moduleGraph 'step 6: matches src.foo -> RECORDED'
+}
+
+views {
+  dynamic view divergence {
+    title 'The #9557 footgun — one malformed citation, three outcomes (latent #9514 bug)'
+    author -> indexRe
+    indexRe -> driftView
+    author -> preValRe
+    preValRe -> phantomView
+    author -> xrefRe
+    xrefRe -> moduleGraph
+    autoLayout TopBottom
+  }
+}

@@ -1,0 +1,120 @@
+// Issue #9557 — Unify ADR source-citation parsing
+// Captures the current divergent-parser topology and the target unified topology
+// for the three regexes that read ADR `src/...py[:Symbol]` citations.
+
+specification {
+  element system
+  element subsystem
+  element component
+  element datastore
+  element regex {
+    style {
+      shape rectangle
+      color amber
+    }
+  }
+  element sharedparser {
+    style {
+      shape storage
+      color green
+    }
+  }
+  relationship parses
+  relationship feeds
+}
+
+model {
+
+  // ---------------------------------------------------------------
+  // Source of truth: ADR markdown files with backtick citations
+  // ---------------------------------------------------------------
+  adrFiles = datastore 'ADR markdown' {
+    description 'docs/adr/NNNN-*.md — cite source files as `src/foo.py` or `src/foo.py:Symbol`'
+  }
+
+  // ---------------------------------------------------------------
+  // CURRENT STATE — three independent regexes (divergent)
+  // ---------------------------------------------------------------
+  current = system 'Current: three divergent parsers' {
+
+    indexParser = regex 'adr_index._SOURCE_FILE_CITATION_RE' {
+      description 'STRICT: backtick-anchored, single colon, optional dotted symbol. `::` matches NOTHING.'
+    }
+    preValParser = regex 'adr_pre_validator._SOURCE_SYMBOL_RE' {
+      description 'STRICT: backtick-anchored, single colon, required single-segment symbol. Dotted + `::` match NOTHING.'
+    }
+    xrefParser = regex 'adr_xref._PATH_REF_RE' {
+      description 'LENIENT: word-boundary (no backtick anchor), strips `:sym`. `::` -> records bare module.'
+    }
+
+    indexConsumer = component 'ADR.source_files / source_symbols' {
+      description 'Drives compute_drift (AdrTouchpointAuditorLoop) + the P2 touchpoint gate'
+    }
+    preValConsumer = component 'phantom_source_symbol check' {
+      description 'ADRPreValidator structural gate before council review'
+    }
+    xrefConsumer = component 'ADR->module graph (adr_xref.md)' {
+      description 'docs/arch/generated/adr_xref.md ownership index'
+    }
+
+    adrFiles -> indexParser 'parses'
+    adrFiles -> preValParser 'parses'
+    adrFiles -> xrefParser 'parses'
+    indexParser -> indexConsumer 'feeds'
+    preValParser -> preValConsumer 'feeds'
+    xrefParser -> xrefConsumer 'feeds'
+  }
+
+  // ---------------------------------------------------------------
+  // TARGET STATE — one shared parser
+  // ---------------------------------------------------------------
+  target = system 'Target: one shared citation parser' {
+
+    shared = sharedparser 'src/adr_citations.py' {
+      description 'CITATION_RE + parse_citations / cited_modules / module_name / malformed_citations'
+    }
+
+    tIndex = component 'adr_index.parse_adr_file' {
+      description 'uses parse_citations() -> source_files / source_symbols (behaviour unchanged)'
+    }
+    tPreVal = component 'ADRPreValidator' {
+      description 'uses parse_citations() for phantom check + malformed_citations() for the new loud check'
+    }
+    tXref = component 'adr_xref.extract_adr_refs' {
+      description 'uses cited_modules() — now strict, agrees with the gate'
+    }
+    crossCheck = component 'tests/regressions/test_issue_9557' {
+      description 'asserts index source_files == xref cited_modules for every real ADR'
+    }
+
+    adrFiles -> shared 'parses'
+    shared -> tIndex 'feeds'
+    shared -> tPreVal 'feeds'
+    shared -> tXref 'feeds'
+    crossCheck -> tIndex 'pins'
+    crossCheck -> tXref 'pins'
+  }
+}
+
+views {
+
+  view current_topology {
+    title 'Current — divergent ADR citation parsers (#9557 bug surface)'
+    include current.*
+    include adrFiles
+    autoLayout TopBottom
+  }
+
+  view target_topology {
+    title 'Target — single shared citation parser'
+    include target.*
+    include adrFiles
+    autoLayout TopBottom
+  }
+
+  view index_path {
+    title 'Drift/touchpoint path (strict — silently drops `::`)'
+    include adrFiles, current.indexParser, current.indexConsumer
+    autoLayout LeftRight
+  }
+}
