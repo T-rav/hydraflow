@@ -1,0 +1,38 @@
+// Issue #9555 — Dynamic view: a heavy `make` subprocess wedges and the
+// operator-tunable timeout bounds it instead of stalling the loop forever.
+
+specification {
+  element actor
+  element component
+  tag timeout
+}
+
+model {
+  tick = component 'Loop tick (_do_work)'
+  wrap = component 'asyncio.wait_for(proc.communicate(), timeout=cfg knob)'
+  proc = component 'make trust-adversarial / make audit-json (child proc)'
+  cfg  = component 'HydraFlowConfig live knob'
+  base = component 'BaseBackgroundLoop._execute_cycle'
+
+  dynamic view timeoutFlow {
+    title 'Issue #9555 — bounded heavy-make timeout (dynamic)'
+
+    tick -> cfg 'read *_subprocess_timeout_seconds (live, operator-tuned)'
+    tick -> wrap 'invoke with timeout=knob'
+    wrap -> proc 'create_subprocess_exec + communicate()'
+    proc -> wrap 'wedges — pipe never drains' {
+      tag timeout
+    }
+    wrap -> wrap 'TimeoutError after knob seconds' {
+      tag timeout
+    }
+    wrap -> proc 'proc.kill() — reap orphaned child' {
+      tag timeout
+    }
+    // skill_prompt_eval: graceful no-op (return []); principles_audit: emit
+    // 124 trace + raise RuntimeError, caught by the loop and retried next tick.
+    wrap -> tick 'return [] (skill) / raise (audit)'
+    tick -> base 'cycle returns or raises'
+    base -> base 'logs + retries next cycle — heartbeat preserved'
+  }
+}

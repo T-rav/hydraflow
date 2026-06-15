@@ -1,0 +1,117 @@
+// Issue #9555 — Operator-tunable subprocess timeouts for heavy make-invoking loops
+// C4 model: the config plumbing that surfaces two new timeout knobs to the System
+// tab and wires them into the two heavy `make`-invoking caretaker loops.
+
+specification {
+  element person
+  element system
+  element container
+  element component
+  element store
+  tag new       // elements/relations added by this issue
+  tag existing
+}
+
+model {
+  operator = person 'Operator' {
+    description 'Tunes runtime knobs from the System tab without a code change'
+  }
+
+  hydraflow = system 'HydraFlow' {
+
+    ui = container 'Dashboard UI (React)' {
+      technology 'React / Vite'
+
+      systemPanel = component 'SystemPanel.jsx' {
+        description 'System tab — renders runtime-tunable config controls'
+      }
+      timeoutInputs = component 'HeavyLoopTimeoutInputs (NEW)' {
+        #new
+        description 'Two numeric inputs: skill-prompt-eval + principles-audit make timeout (seconds). PATCH /api/control/config'
+      }
+    }
+
+    api = container 'Dashboard API (FastAPI)' {
+      technology 'FastAPI'
+
+      controlRoutes = component '_control_routes.py' {
+        description 'PATCH /api/control/config + GET /api/control/status'
+      }
+      mutableFields = component '_MUTABLE_FIELDS allowlist' {
+        description 'Whitelist of fields PATCH may mutate at runtime'
+      }
+      statusConfig = component 'ControlStatusConfig DTO (models.py)' {
+        description 'Config subset serialized to the UI on GET status'
+      }
+    }
+
+    config = container 'HydraFlowConfig (config.py)' {
+      technology 'Pydantic'
+
+      fields = component 'Timeout Fields (NEW)' {
+        #new
+        description 'skill_prompt_eval_subprocess_timeout_seconds, principles_audit_subprocess_timeout_seconds (default 1800, ge=60, le=21600)'
+      }
+      envOverrides = component '_ENV_INT_OVERRIDES (NEW rows)' {
+        #new
+        description 'HYDRAFLOW_*_SUBPROCESS_TIMEOUT env bootstrap; default MUST equal Field default'
+      }
+    }
+
+    skillLoop = container 'SkillPromptEvalLoop' {
+      technology 'BaseBackgroundLoop'
+      runCorpus = component '_run_corpus()' {
+        description 'await asyncio.wait_for(proc.communicate(), timeout=config knob) → kill + [] on TimeoutError'
+      }
+    }
+
+    auditLoop = container 'PrinciplesAuditLoop' {
+      technology 'BaseBackgroundLoop'
+      runAudit = component '_run_audit()' {
+        description 'await asyncio.wait_for(proc.communicate(), timeout=config knob) → kill + emit 124 trace + raise on TimeoutError'
+      }
+    }
+
+    makeTrust = store 'make trust-adversarial' {
+      description 'Heavy LLM-backed adversarial corpus run (minutes)'
+    }
+    makeAudit = store 'make audit-json' {
+      description 'Heavy ADR-0044 principles audit (minutes)'
+    }
+  }
+
+  // --- UI → API → Config flow ---
+  operator -> timeoutInputs 'sets timeout (s)'
+  timeoutInputs -> controlRoutes 'PATCH /api/control/config' #new
+  controlRoutes -> mutableFields 'validates key in allowlist'
+  controlRoutes -> config 'object.__setattr__ live value'
+  controlRoutes -> statusConfig 'serializes on GET status'
+  statusConfig -> systemPanel 'config?.* current value'
+  envOverrides -> fields 'bootstraps at construction (if at default)'
+
+  // --- Loops read the live config knob each tick ---
+  runCorpus -> fields 'reads skill_prompt_eval_subprocess_timeout_seconds' #new
+  runAudit  -> fields 'reads principles_audit_subprocess_timeout_seconds' #new
+
+  // --- Bounded subprocess invocation ---
+  runCorpus -> makeTrust 'create_subprocess_exec (bounded)' #new
+  runAudit  -> makeAudit 'create_subprocess_exec (bounded)' #new
+}
+
+views {
+  view index {
+    title 'Issue #9555 — tunable heavy-make timeouts (container)'
+    include *
+    include operator, hydraflow.*
+  }
+
+  view components {
+    title 'Issue #9555 — config plumbing (component)'
+    include operator,
+      ui.systemPanel, ui.timeoutInputs,
+      api.controlRoutes, api.mutableFields, api.statusConfig,
+      config.fields, config.envOverrides,
+      skillLoop.runCorpus, auditLoop.runAudit,
+      hydraflow.makeTrust, hydraflow.makeAudit
+  }
+}

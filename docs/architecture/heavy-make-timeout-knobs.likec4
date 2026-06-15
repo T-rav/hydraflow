@@ -1,0 +1,128 @@
+// Issue #9555 — Heavy make-invoking loop subprocess timeouts as operator-tunable knobs
+// Change area: two trust-fleet caretaker loops whose heavy `make` subprocess calls
+// must be bounded by a TUNABLE HydraFlowConfig knob (not a hardcoded constant), while
+// their incidental gh/git calls are bounded by FIXED module-tier constants.
+
+specification {
+  element system
+  element container
+  element component
+  element store
+  element external
+
+  relationship invokes
+  relationship reads
+  relationship bounds
+}
+
+model {
+  operator = external 'Operator' {
+    description 'Tunes runtime caps live via the System tab'
+  }
+
+  hydraflow = system 'HydraFlow' {
+
+    config = container 'HydraFlowConfig' {
+      description 'Pydantic settings — single source of truth for tunable knobs'
+      technology 'src/config.py'
+
+      skillCap = component 'skill_prompt_eval_runtime_cap_seconds' {
+        description 'NEW tunable Field (default 1800, ge=300, le=14400) + _ENV_INT_OVERRIDES entry'
+      }
+      auditCap = component 'principles_audit_runtime_cap_seconds' {
+        description 'NEW tunable Field (default 1800, ge=300, le=14400) + _ENV_INT_OVERRIDES entry'
+      }
+    }
+
+    controlRoutes = container 'Control Routes' {
+      description 'PATCH /api/control/config — System-tab live config mutation'
+      technology 'src/dashboard_routes/_control_routes.py'
+
+      mutableFields = component '_MUTABLE_FIELDS allowlist' {
+        description 'Gains the two new cap fields so they are live-PATCH tunable'
+      }
+    }
+
+    skillLoop = container 'SkillPromptEvalLoop' {
+      description 'Weekly corpus backstop + weak-case audit (spec §4.6)'
+      technology 'src/skill_prompt_eval_loop.py'
+
+      runCorpus = component '_run_corpus()' {
+        description 'Invokes `make trust-adversarial FORMAT=json` — HEAVY, repo-size-dependent'
+      }
+      reconcileSkill = component '_reconcile_closed_escalations()' {
+        description 'Invokes `gh issue list` — incidental, FIXED tier'
+      }
+    }
+
+    auditLoop = container 'PrinciplesAuditLoop' {
+      description 'Weekly ADR-0044 drift detector + onboarding gate (spec §4.4)'
+      technology 'src/principles_audit_loop.py'
+
+      runAudit = component '_run_audit()' {
+        description 'Invokes `make audit-json DIR=...` — HEAVY, repo-size-dependent'
+      }
+      runGit = component '_run_git()' {
+        description 'Invokes `git fetch/clone/reset` for managed-repo checkouts — FIXED tier'
+      }
+    }
+
+    subprocessUtil = container 'subprocess_util' {
+      description 'SubprocessTimeoutError + shared timeout idioms'
+      technology 'src/subprocess_util.py'
+    }
+
+    regressionGuard = store 'test_issue_9454.py' {
+      description 'AST guard: every proc.communicate() must be bounded by wait_for/create_task'
+      technology 'tests/regressions/'
+    }
+  }
+
+  make = external 'make targets' {
+    description 'trust-adversarial / audit-json — heavy, may run several minutes'
+  }
+
+  // --- Live tuning path ---
+  operator -> controlRoutes 'PATCH cap value'
+  mutableFields -> config 'object.__setattr__ live'
+
+  // --- Read path: loops read the cap fresh each cycle ---
+  runCorpus -> skillCap 'reads cap each tick'
+  runAudit -> auditCap 'reads cap each tick'
+
+  // --- Bounded subprocess invocations ---
+  runCorpus -> make 'asyncio.wait_for(communicate(), timeout=cap) + proc.kill()'
+  runAudit -> make 'asyncio.wait_for(communicate(), timeout=cap) + proc.kill()'
+  reconcileSkill -> subprocessUtil 'bounded by fixed _RECONCILE_GH_TIMEOUT_SECONDS=30'
+  runGit -> subprocessUtil 'bounded by fixed _GIT_OP_TIMEOUT_SECONDS=300'
+
+  // --- Guard ---
+  regressionGuard -> skillLoop 'asserts all communicate() bounded'
+  regressionGuard -> auditLoop 'asserts all communicate() bounded'
+}
+
+views {
+  view index {
+    title 'Issue #9555 — Heavy-make timeout knobs (context)'
+    include *
+    autoLayout TopBottom
+  }
+
+  view skillLoopDetail of skillLoop {
+    title 'SkillPromptEvalLoop — bounded subprocess calls'
+    include skillLoop.*, config.skillCap, make, subprocessUtil
+    autoLayout LeftRight
+  }
+
+  view auditLoopDetail of auditLoop {
+    title 'PrinciplesAuditLoop — bounded subprocess calls'
+    include auditLoop.*, config.auditCap, make, subprocessUtil
+    autoLayout LeftRight
+  }
+
+  view tuningFlow {
+    title 'Operator live-tuning data flow'
+    include operator, controlRoutes, controlRoutes.mutableFields, config, config.skillCap, config.auditCap, skillLoop, auditLoop
+    autoLayout TopBottom
+  }
+}
