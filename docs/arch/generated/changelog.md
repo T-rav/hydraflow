@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `618591e` — fix(wiki-rot): add CreditExhaustedError re-raise test + regression + FakeGitHub limit fix (#9442) (#9442) *(2026-06-14)*
 - `f0012a4` — chore(arch): regen artifacts after staging merge (023b379) *(2026-06-14)*
 - `023b379` — Merge remote-tracking branch 'origin/staging' into agent/issue-9442 *(2026-06-14)*
 - `283301b` — fix(credit-pause): detect session-limit cap + expand ADR-drift infra allowlist *(2026-06-14)*
@@ -450,10 +451,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `582338b` — Fixes #3222: [ADR Duplicate] ADR-0023 (#3243) (#3243) *(2026-03-18)*
 - `674566d` — Fixes #3213: [ADR Follow-up] ADR-0023: Council recommends rejection (#3234) (#3234) *(2026-03-18)*
 - `687783d` — Fixes #3229: [ADR Follow-up] ADR-0022: Council requests changes (#3248) (#3248) *(2026-03-18)*
-- `ea5cda4` — Fixes #3183: [Memory] Symmetric field assertion checklist for share... (#3192) (#3192) *(2026-03-16)*
-- `9cb0bb0` — Fixes #3097: [Memory] ADR pre-validator lacks source function name ... (#3130) (#3130) *(2026-03-16)*
-- `0001d59` — Fixes #3021: [ADR Follow-up] ADR-0021: Council requests changes (#3113) (#3113) *(2026-03-16)*
-- `b1ec5e3` — Fixes #3017: [ADR Follow-up] ADR-0021: Council requests changes (#3108) (#3108) *(2026-03-16)*
 
 
 <!-- arch:generated -->
