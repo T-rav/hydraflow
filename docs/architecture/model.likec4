@@ -1,0 +1,114 @@
+// Issue #9541 — FakeCoverageAuditorLoop auto-close rollups on full recovery
+// C4 model: specification + model + views for the recovery (auto-close) path.
+
+specification {
+  element system
+  element container
+  element component
+  element store
+  element external
+
+  tag changed       // elements directly modified by this issue
+  tag unchanged
+  tag test
+}
+
+model {
+  factory = system 'HydraFlow Factory' {
+    description 'Multi-agent GitHub issue lifecycle orchestration'
+
+    auditor = container 'FakeCoverageAuditorLoop' {
+      description 'Weekly fake-surface coverage auditor (spec §4.7). BaseBackgroundLoop subclass.'
+      technology 'Python async loop'
+
+      doWork = component '_do_work' {
+        description 'Per-tick orchestrator: scan fakes, diff vs cassettes/grep, file/update/clear rollups'
+      }
+      catalogFakes = component 'catalog_fake_methods' {
+        description 'AST scan of src/mockworld/fakes/*.py → {fake: {adapter-surface, test-helper, scaffolding}}'
+      }
+      catalogCassettes = component 'catalog_cassette_methods' {
+        description 'YAML scan of cassettes → set of recorded input.command method names'
+      }
+      handleRollup = component '_handle_rollup' {
+        description 'Gap OPEN path: file / update body / 3-strikes escalate'
+      }
+      clearRollup = component '_clear_rollup_state' {
+        #changed
+        description 'Gap CLOSED path. TODAY: repaint body + clear state, leave issue OPEN. CHANGE: repaint + comment + close_issue + clear state (#9359 convention).'
+      }
+      listOpenTitles = component '_list_open_rollup_titles' {
+        description 'gh issue list --state open --label fake-coverage-gap (zombie-state probe)'
+      }
+    }
+
+    state = store 'StateTracker (FakeCoverageStateMixin)' {
+      description 'rollup_issue mapping {Fake}:{kind}→issue#, attempt counters, last-known uncovered sets'
+      technology 'state.json'
+    }
+    dedup = store 'DedupStore' {
+      description 'Set of fake_coverage_auditor:{Fake}:{kind} keys'
+    }
+
+    prport = container 'PRPort / PRManager' {
+      description 'Hexagonal GitHub adapter: create_issue, update_issue_body, post_comment, close_issue'
+      technology 'gh CLI'
+    }
+    gh = external 'GitHub Issues' {
+      description 'find-issue rollups (fake-coverage-gap) + HITL escalations'
+    }
+
+    // --- relationships ---
+    doWork -> catalogFakes 'scan fake surface'
+    doWork -> catalogCassettes 'scan cassette coverage'
+    doWork -> listOpenTitles 'snapshot open rollups'
+    doWork -> handleRollup 'when uncovered non-empty'
+    doWork -> clearRollup 'when uncovered EMPTY (recovery)'
+
+    handleRollup -> prport 'create_issue / update_issue_body'
+    handleRollup -> state 'set/inc rollup# + attempts'
+    handleRollup -> dedup 'add key'
+
+    clearRollup -> prport 'update_issue_body + post_comment + close_issue [CHANGED]'
+    clearRollup -> state 'clear rollup# + attempts'
+    clearRollup -> dedup 'discard key'
+
+    prport -> gh 'gh issue create/edit/comment/close'
+  }
+
+  // --- test elements ---
+  unitTests = element 'tests/test_fake_coverage_auditor_loop.py' {
+    #test
+    description 'Unit layer: recovery closes tracked rollup; idempotent on no-tracked-issue'
+  }
+  scenarioTests = element 'tests/scenarios/test_fake_coverage_auditor_scenario.py' {
+    #test
+    description 'MockWorld layer: file→recover→close end-to-end through FakeGitHub'
+  }
+  unitTests -> auditor 'exercises'
+  scenarioTests -> auditor 'exercises via MockWorld'
+}
+
+views {
+  view context {
+    title 'Context — FakeCoverageAuditorLoop and its dependencies'
+    include factory, auditor, state, dedup, prport, gh
+  }
+
+  view components {
+    title 'Components — auditor internals (recovery path highlighted)'
+    include auditor.*, state, dedup, prport, gh
+  }
+
+  view recoveryFlow {
+    title 'Dynamic — gap fully recovers, rollup auto-closes (#9541)'
+    include doWork, clearRollup, state, prport, gh
+
+    doWork -> clearRollup 'uncovered == [] AND rollup# tracked'
+    clearRollup -> prport 'update_issue_body(all-covered view)'
+    clearRollup -> prport 'post_comment("auto-closing #9359")'
+    clearRollup -> prport 'close_issue(rollup#)'
+    prport -> gh 'issue → CLOSED'
+    clearRollup -> state 'clear rollup# + attempts'
+  }
+}
