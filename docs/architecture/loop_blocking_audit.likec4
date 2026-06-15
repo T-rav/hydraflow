@@ -1,0 +1,147 @@
+// Issue #9568 — Audit & move synchronous blocking calls out of background-loop
+// `_do_work` paths. Captures the event-loop / supervisor topology, the offending
+// loops, the blocking sinks they hit, and the remediation (asyncio.to_thread →
+// worker thread pool).
+
+specification {
+  element system
+  element container
+  element component
+  element sink
+  tag offender
+  tag compliant
+  tag remediation
+}
+
+model {
+  hydra = system 'HydraFlow Orchestrator' {
+
+    eventloop = container 'asyncio Event Loop (main thread)' {
+      description 'Single event-loop thread. Any synchronous blocking call here
+        starves every other loop + pipeline phase until it returns.'
+
+      supervisor = component 'LoopSupervisor (_supervise_loops)' {
+        description 'orchestrator.py: asyncio.wait over ~55 loop tasks;
+          only reschedules on COMPLETE/RAISE — a cycle hung sync stays PENDING.'
+      }
+      base = component 'BaseBackgroundLoop._execute_cycle → _do_work' {
+        description 'base_background_loop.py: awaits _do_work() each cycle.'
+      }
+
+      // ---- offenders: heavy CPU code-graph builds on the loop thread ----
+      edge = component 'EdgeProposerLoop._do_work' {
+        #offender
+        description 'build_import_graph(src) + per-term ast.parse loop'
+      }
+      termP = component 'TermProposerLoop._do_work' {
+        #offender
+        description 'TermStore.list + build_symbol_index + build_import_graph + detect_candidates'
+      }
+      termR = component 'TermPrunerLoop._do_work' {
+        #offender
+        description 'TermStore.list + build_symbol_index'
+      }
+      fakecov = component 'FakeCoverageAuditorLoop._do_work' {
+        #offender
+        description 'catalog_fake_methods (ast.parse) + catalog_cassette_methods (yaml)'
+      }
+
+      // ---- offenders: corpus / drift reads on the loop thread ----
+      wikirot = component 'WikiRotDetectorLoop._load_wiki_entries' {
+        #offender
+        description 'rglob("*.md") + read_text over whole wiki corpus (360+ entries)'
+      }
+      evidence = component 'EntryEvidenceLoop._do_work' {
+        #offender
+        description 'TermStore.list + wiki_store._load_topic_entries'
+      }
+      adrrev = component 'AdrReviewerLoop.review_proposed_adrs' {
+        #offender
+        description 'read_text over the ADR corpus'
+      }
+      contract = component 'ContractRefreshLoop._do_work' {
+        #offender
+        description 'detect_fleet_drift: glob + read_text over cassette fleet'
+      }
+
+      // ---- offenders: large JSONL / log file I/O on the loop thread ----
+      health = component 'HealthMonitorLoop._do_work' {
+        #offender
+        description 'compute_trend_metrics (JSONL reads) + harness-suggestion read/write'
+      }
+      logingest = component 'LogIngestLoop._do_work' {
+        #offender
+        description '_read_new_lines (fh.read of log files) + _persist_cursors'
+      }
+
+      // ---- already-correct reference pattern ----
+      diagram = component 'DiagramLoop._do_work' {
+        #compliant
+        description 'arch emit + git status already wrapped in asyncio.to_thread'
+      }
+    }
+
+    pool = container 'Worker Thread Pool (asyncio default executor)' {
+      #remediation
+      description 'asyncio.to_thread / run_in_executor target. Blocking work runs
+        here so the event loop stays responsive (target < few hundred ms on-loop).'
+    }
+  }
+
+  // Blocking sinks the offenders touch
+  fs_codegraph = sink 'src/*.py code graph (AST parse)'
+  fs_corpus    = sink 'docs/wiki + docs/adr + term store (filesystem)'
+  fs_jsonl     = sink 'data_root JSONL logs / cursors / cassettes'
+  git_cli      = sink 'git / gh subprocess'
+
+  // Supervision wiring
+  supervisor -> base 'schedules per-loop task'
+  base -> edge ; base -> termP ; base -> termR ; base -> fakecov
+  base -> wikirot ; base -> evidence ; base -> adrrev ; base -> contract
+  base -> health ; base -> logingest ; base -> diagram
+
+  // Current (offending) synchronous reach into blocking sinks
+  edge -> fs_codegraph 'BLOCKS loop'
+  termP -> fs_codegraph 'BLOCKS loop'
+  termR -> fs_codegraph 'BLOCKS loop'
+  fakecov -> fs_codegraph 'BLOCKS loop'
+  wikirot -> fs_corpus 'BLOCKS loop'
+  evidence -> fs_corpus 'BLOCKS loop'
+  adrrev -> fs_corpus 'BLOCKS loop'
+  contract -> fs_jsonl 'BLOCKS loop'
+  health -> fs_jsonl 'BLOCKS loop'
+  logingest -> fs_jsonl 'BLOCKS loop'
+
+  // Remediation: route the blocking work through the worker pool
+  diagram -> pool 'await asyncio.to_thread(...)'
+  pool -> git_cli 'subprocess off-loop'
+  pool -> fs_codegraph 'AST parse off-loop'
+  pool -> fs_corpus 'corpus read off-loop'
+  pool -> fs_jsonl 'JSONL read/write off-loop'
+}
+
+views {
+  view index {
+    title 'Issue #9568 — blocking calls on the event-loop thread'
+    include *
+    include hydra.eventloop.*
+    autoLayout TopBottom
+  }
+
+  view offenders of hydra.eventloop {
+    title 'Offending _do_work paths and their blocking sinks'
+    include *
+    include fs_codegraph, fs_corpus, fs_jsonl, git_cli, pool
+    autoLayout LeftRight
+  }
+
+  dynamic view remediation {
+    title 'Dynamic — remediated cycle (work offloaded)'
+    base -> wikirot 'await _do_work()'
+    wikirot -> pool 'await asyncio.to_thread(self._load_wiki_entries, slug)'
+    pool -> fs_corpus 'rglob + read_text (worker thread)'
+    pool -> wikirot 'entries'
+    wikirot -> base 'returns; loop stayed responsive'
+    autoLayout TopBottom
+  }
+}
