@@ -1,8 +1,8 @@
 """Scenario: WikiRotDetectorLoop fires on a seeded wiki with a broken cite.
 
 Fabricates a one-entry wiki whose cite points at a real module but a
-symbol that does not exist, stubs ``gh issue list`` to return empty
-(no prior escalations to reconcile), and asserts one ``hydraflow-find``
+symbol that does not exist, exercises PRPort.list_closed_issues_by_label
+via FakeGitHub (no raw subprocess), and asserts one ``hydraflow-find``
 + ``wiki-rot`` issue is filed via the bot's ``create_issue`` port.
 
 Follows the F7 FlakeTracker (``eac5fc72``), S6 SkillPromptEval
@@ -15,7 +15,6 @@ wires them into the constructor before the loop is instantiated.
 
 from __future__ import annotations
 
-import asyncio as _asyncio
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -31,15 +30,6 @@ pytestmark = pytest.mark.scenario_loops
 # its ``config.repo_root`` + ``config.repo`` against real files on disk.
 _SLUG = "test-org/test-repo"
 _REPO_SUBDIR = "repo"
-
-
-class _FakeProc:
-    def __init__(self, stdout: bytes, exit_code: int = 0) -> None:
-        self._stdout = stdout
-        self.returncode = exit_code
-
-    async def communicate(self) -> tuple[bytes, bytes]:
-        return self._stdout, b""
 
 
 def _seed_wiki(tmp_path: Path, slug: str) -> Path:
@@ -75,7 +65,6 @@ class TestWikiRotDetectorScenario:
     async def test_fires_on_broken_cite(
         self,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Seeded broken cite ⇒ exactly one ``hydraflow-find`` + ``wiki-rot`` fire.
 
@@ -107,13 +96,6 @@ class TestWikiRotDetectorScenario:
             wiki_store=fake_wiki_store,
         )
 
-        # Stub ``gh issue list`` (reconcile) → empty. Any other subprocess
-        # call inside the loop falls through the same empty-JSON path.
-        async def fake_subproc(*_argv: str, **_kwargs: object) -> _FakeProc:
-            return _FakeProc(b"[]")
-
-        monkeypatch.setattr(_asyncio, "create_subprocess_exec", fake_subproc)
-
         stats = await world.run_with_loops(["wiki_rot_detector"], cycles=1)
 
         assert stats["wiki_rot_detector"]["status"] == "fired", stats
@@ -134,7 +116,6 @@ class TestWikiRotDetectorScenario:
     async def test_no_fire_when_cite_resolves(
         self,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Cite pointing at a real symbol ⇒ no find filed, ``status=noop``."""
         world = MockWorld(tmp_path)
@@ -164,13 +145,58 @@ class TestWikiRotDetectorScenario:
             wiki_store=fake_wiki_store,
         )
 
-        async def fake_subproc(*_argv: str, **_kwargs: object) -> _FakeProc:
-            return _FakeProc(b"[]")
-
-        monkeypatch.setattr(_asyncio, "create_subprocess_exec", fake_subproc)
-
         stats = await world.run_with_loops(["wiki_rot_detector"], cycles=1)
 
         assert stats["wiki_rot_detector"]["status"] == "noop", stats
         assert stats["wiki_rot_detector"]["issues_filed"] == 0, stats
         assert await world.github.list_issues_by_label("wiki-rot") == []
+
+    async def test_reconcile_clears_closed_escalation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Closed wiki-rot-stuck in FakeGitHub ⇒ dedup key cleared via PRPort."""
+        world = MockWorld(tmp_path)
+        slug = _SLUG
+
+        # Seed a closed escalation issue through FakeGitHub so that
+        # list_closed_issues_by_label returns it without any subprocess.
+        escalation_title = f"Wiki rot stuck: {slug} cites missing src/foo.py:bar"
+        world.github.add_issue(
+            901,
+            escalation_title,
+            f"Repo: `{slug}`",
+            labels=["hitl-escalation", "wiki-rot-stuck"],
+        )
+        await world.github.close_issue(901)
+
+        dedup_key = f"wiki_rot_detector:{slug}:src/foo.py:bar"
+        fake_dedup = MagicMock()
+        fake_dedup.get.return_value = {dedup_key}
+
+        fake_state = MagicMock()
+        fake_state.get_wiki_rot_attempts.return_value = 0
+        fake_state.inc_wiki_rot_attempts.return_value = 1
+
+        fake_wiki_store = MagicMock()
+        fake_wiki_store.list_repos.return_value = []  # no wiki scanning, just reconcile
+
+        _seed_ports(
+            world,
+            wiki_rot_state=fake_state,
+            wiki_rot_dedup=fake_dedup,
+            wiki_store=fake_wiki_store,
+        )
+
+        await world.run_with_loops(["wiki_rot_detector"], cycles=1)
+
+        fake_state.clear_wiki_rot_attempts.assert_any_call(f"{slug}:src/foo.py:bar")
+        remaining_calls = [c.args[0] for c in fake_dedup.set_all.call_args_list]
+        assert remaining_calls, (
+            "dedup.set_all not invoked — reconcile should clear the key"
+        )
+        # Verify the matched key is specifically removed; set must be exactly
+        # empty (one key seeded → cleared → nothing remaining).
+        assert remaining_calls[-1] == set(), (
+            f"expected dedup store cleared to empty, got {remaining_calls[-1]}"
+        )
