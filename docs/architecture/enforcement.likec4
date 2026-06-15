@@ -1,0 +1,106 @@
+// Issue #9411 — Promote feedback_make_quality_green_neq_ci_green into a
+// structurally-enforced rule: production/loop code that shells out to a
+// non-portable external CLI (e.g. ripgrep `rg`) MUST shutil.which-guard + fall back.
+//
+// The promotion has two deliverables:
+//   1. A pure-stdlib AST guard test (release-gating, runs identically on the
+//      lean CI/Tests runner AND the Quality runner — that is the whole point).
+//   2. The memory-backlog mirror entry advanced to status: promoted.
+
+specification {
+  element system
+  element zone
+  element component
+  element file
+  element ci
+
+  relationship scans
+  relationship guards
+  relationship promotes
+}
+
+model {
+  ci quality = "Quality workflow" {
+    description "GitHub Actions runner — HAS ripgrep (rg)"
+  }
+  ci tests = "CI / Tests workflow" {
+    description "Leaner GitHub Actions runner — does NOT have rg"
+  }
+
+  system hydraflow = "HydraFlow src/" {
+
+    zone prodCode = "Production / loop code (src/**)" {
+      component fakeCovLoop = "FakeCoverageAuditorLoop" {
+        description "_grep_scenario_for_helper: canonical guarded pattern
+          `if shutil.which(\"rg\"): create_subprocess_exec(\"rg\",...) else: stdlib rglob`"
+      }
+      component otherSubprocCallers = "Other subprocess callers" {
+        description "git / gh / docker spawns — baseline tools, intentionally NOT flagged"
+      }
+    }
+
+    zone enforcement = "Enforcement layer (tests/architecture/)" {
+      file guardTest = "test_subprocess_cli_portability.py" {
+        description "Pure ast.parse scan of src/**/*.py.
+          Flags a non-portable CLI in command program-position
+          that lacks a matching shutil.which(<tool>) guard."
+      }
+      component finder = "_UnguardedCliFinder (ast.NodeVisitor)" {
+        description "NON_PORTABLE program-position literal in a List/Tuple or
+          spawn first-arg, with no which(<tool>) in the same module = violation"
+      }
+    }
+
+    zone backlog = "Memory-backlog bookkeeping (ADR-0089)" {
+      file mirror = "docs/wiki/memory-feedback/feedback-make-quality-green-neq-ci-green.md" {
+        description "Mirror entry. status: pending -> promoted, promoted_in: <PR>, issue: 9411"
+      }
+      component backlogLoop = "MemoryBacklogLoop" {
+        description "pending_entries() skips status: promoted -> no re-file"
+      }
+    }
+  }
+
+  // Enforcement relationships
+  guardTest -> finder "delegates AST walk"
+  finder -> prodCode "scans (program-position CLI literals)" {
+    kind scans
+  }
+  guardTest -> fakeCovLoop "asserts rg call stays which-guarded" {
+    kind guards
+  }
+  backlogLoop -> mirror "reads status"
+  mirror -> backlogLoop "promoted -> excluded from pending" {
+    kind promotes
+  }
+
+  // Why the guard must be tool-free
+  tests -> guardTest "runs (no rg needed — pure stdlib)"
+  quality -> guardTest "runs (identical result)"
+  tests -> fakeCovLoop "FileNotFoundError 'rg' if unguarded (the #9403->#9404 red)"
+}
+
+views {
+  view context {
+    title "Issue #9411 — convention enforcement context"
+    include *
+  }
+
+  view enforcement_zone {
+    title "AST guard scans production code for unguarded non-portable CLIs"
+    include
+      hydraflow,
+      prodCode, fakeCovLoop, otherSubprocCallers,
+      enforcement, guardTest, finder,
+      backlog, mirror, backlogLoop
+  }
+
+  dynamic view promotionFlow {
+    title "Promotion flow: enforce rule, then mark mirror promoted"
+    guardTest -> finder "1. walk src/**/*.py AST"
+    finder -> prodCode "2. collect program-position CLI literals + which() guards"
+    finder -> guardTest "3. violations = unguarded non-portable tools"
+    guardTest -> tests "4. green on lean runner (pure stdlib)"
+    mirror -> backlogLoop "5. status: promoted -> no re-file; issue #9411 closed"
+  }
+}
