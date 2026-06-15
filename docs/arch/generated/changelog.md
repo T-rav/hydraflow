@@ -4,6 +4,10 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W25
+
+- `67da8db` — Fixes #9567: Add a deterministic coverage-delta cross-check to the test-adequacy verifier *(2026-06-15)*
+
 ## 2026-W24
 
 - `e79114c` — chore(wiki): untrack RepoWikiLoop runtime caches to stop perpetual tree-dirt (#9537) (#9537) *(2026-06-14)*
