@@ -9,13 +9,15 @@ Speaker deck for "When Code Becomes Fluid." Story-driven, not a patterns dump.
 Slides are deliberately sparse; the narrative lives in the speaker notes.
 Default Marp theme — brand visuals to be layered later.
 
-ARCHITECTURE (v3): provocation cold open → three-stage motive arc → ending shot.
-The motive matures across the talk: (1) need — maintain what I vibed; (2) question —
-Gas Town: how much human can you pull out, and what breaks; (3) meaning — her.
-Act 2 is the answer to motive 2. The ending shot is motive 3.
+ARCHITECTURE (v4): provocation cold open, three-stage motive arc, ending shot.
+The motive matures across the talk: (1) need, maintain what I vibed; (2) question,
+Gas Town: how much human can you pull out and what breaks; (3) consequence, when making
+gets cheap, judgment and governance become the job. Act 2 answers motive 2. The back third
+(the gaps machinery, then the SignalRoom/DealIQ handoff experiment) answers motive 3.
+Daughter is a grace note now, not the ending shot. The 3D-printer metaphor is cut.
 
 PRODUCTION NOTES:
-- Daughter appears as "Z" (initial only) on slides and stage — full name stays out (minor, public stage).
+- Daughter is a grace note only (one slide near the close). Refer to her as "my daughter," no name or initial on slides or stage (minor, public stage).
 - DEMO IS A VIDEO — one pre-recorded screencap of a real cycle at 2–4× speed (issue filed →
   loop claims it → PR opens → checks green → label trail walks → merge), ~60–90s, played in
   silence and landed on the merged freeze-frame; a recording can't demoware-fail on stage.
@@ -29,7 +31,7 @@ PRODUCTION NOTES:
   1. "Testing this used to mean an environment" (speak the pain over the MockWorld slide instead)
   2. "The factory red-teams itself" (point at the provocateur cell on the taxonomy grid)
   3. "The encoding has a size" (speak two of the four numbers over the social→structural slide)
-  Never cut: the scar slide, gate erosion, the fork, the turn, the close.
+  Never cut: the scar slide, the gaps framing, the SignalRoom/DealIQ handoff, the fork, the close.
 - Numbers verified 2026-06-09: 47 loops (docs/arch/generated/loops.md), 1,644 merged PRs
   (gh search), first commit 2026-02-18. REFRESH BOTH before the stage — the loop registry
   is public on hydraflow.ai and the room will check.
@@ -47,8 +49,18 @@ PRODUCTION NOTES:
   "$297 vs $50k MVP" receipt are from secondary sources; verify against primary
   (ghuntley.com/ralph, his own posts) or soften to "it went around the industry in a day"
   and "a fraction of the quoted cost."
-- The her-and-Claude ritual has NOT run yet. Keep it future tense on stage. The close is
-  "I'll let you know," and that only stays true if nothing earlier pretends it already happened.
+- DEALIQ HANDOFF + the her-and-Claude creative space have NOT run yet. Keep BOTH future tense on
+  stage. The close is "I'll let you know," and that only stays true if nothing earlier pretends it
+  already happened. Do NOT claim the factory has maintained DealIQ; it is "built in the lineage,
+  handoff is the experiment."
+- SIGNALROOM / DEALIQ lineage (back-third payoff of the Act-1 InsightMesh thread):
+  InsightMesh v1 died (Aug 2025) -> v2 got guardrails -> v3 IS SignalRoom, a dynamic-MCP platform of
+  manifest-based apps that expose APIs and agents as role-gated tools (capability registry + ACL +
+  control plane + service accounts; see apps/dealiq/manifest.json: 8 tools, mutating/exposed flags,
+  dealiq-users vs dealiq-admins roles). DealIQ is an app ON SignalRoom: exec/sales company
+  intelligence, buy signals, prospecting, deep-research agents in LangGraph. ALL 100% vibe-coded.
+  HydraFlow (the factory) was born from InsightMesh and is the candidate to maintain its descendant:
+  "the child maintains the parent." [FILL real receipts: in-prod-since, who uses it.]
 - InsightMesh chronology VERIFIED from git (2026-06-09):
   · v1 → v2 rewrite began 2025-08-28 (v2 repo first commit: "ported slackbot from insightmesh").
   · v1 was Cursor-built, ~no human review, no guardrails — died. v2: still all vibe-coded, still
@@ -332,26 +344,38 @@ A real scene, not a pattern citation — timestamps verified against the PRs (#8
 #### The loops did what loops do. All of them. At once.
 
 <!--
-THE SCAR SLIDE — the credibility purchase. [VERIFY THE DETAILS OR SWAP IN YOUR TRUE WORST DAY — the shape below is reconstructed from the failure mode documented in the repo's own rules (CLAUDE.md: CreditExhaustedError silently eaten → "the loop burns attempt budget against an exhausted billing signal"). Tell it with the real specifics only you have: when, how long, what it cost, how you found it.] The relatable shape: "The billing API said no. But the error came back wrapped as a generic failure — and loops do what loops do with generic failures. They retried. Every loop, independently, burning its attempt budget against an account that could not say yes. Anyone who's been paged for a retry storm knows exactly what this looks like. My factory built me one." The recovery, briefly: the fix wasn't heroics, it was a rule — every subprocess runner now re-raises credit exhaustion past the generic handler, and that rule lives in the repo where every future agent inherits it. The lesson, plainly: "The factory doesn't fail like a junior engineer. It fails like a distributed system — dumb, persistent, parallel. The walls held: budgets capped it, nothing was destroyed, everything was reversible. But I want you to have the real picture: this thing has bad days, and the bad days are why half those forty-seven loops exist." This slide buys more trust than every green checkmark in the deck. Don't rush it, don't soften it. Then the handoff into the artifact: "And the day after a bad day, this is the kind of thing the factory leaves behind."
+THE SCAR SLIDE — the credibility purchase. [VERIFY THE DETAILS OR SWAP IN YOUR TRUE WORST DAY — the shape below is reconstructed from the failure mode documented in the repo's own rules (CLAUDE.md: CreditExhaustedError silently eaten → "the loop burns attempt budget against an exhausted billing signal"). Tell it with the real specifics only you have: when, how long, what it cost, how you found it.] The relatable shape: "The billing API said no. But the error came back wrapped as a generic failure — and loops do what loops do with generic failures. They retried. Every loop, independently, burning its attempt budget against an account that could not say yes. Anyone who's been paged for a retry storm knows exactly what this looks like. My factory built me one." The recovery, briefly: the fix wasn't heroics, it was a rule — every subprocess runner now re-raises credit exhaustion past the generic handler, and that rule lives in the repo where every future agent inherits it. The lesson, plainly: "The factory doesn't fail like a junior engineer. It fails like a distributed system — dumb, persistent, parallel. The walls held: budgets capped it, nothing was destroyed, everything was reversible. But I want you to have the real picture: this thing has bad days, and the bad days are why half those forty-seven loops exist." This slide buys more trust than every green checkmark in the deck. Don't rush it, don't soften it. Then the handoff into the gaps: "A system that rewrites itself daily opens gaps ordinary software never has. The next few minutes are the machinery I built to fill them."
 -->
 
 ---
 
-## The artifact I trust most
+## A system that rewrites itself opens gaps normal software never has.
+
+#### Comprehension. Meaning. Judgment. Erosion.
+
+<!--
+The framing slide, and the pivot off the bad day. "Half of those forty-seven loops exist because of days like that. A system that edits itself daily opens four gaps ordinary software never faces. Nobody can read it, comprehension. The words quietly change meaning. A fluent machine is persuasive even when it's wrong, judgment. The walls soften one reasonable change at a time, erosion. The rest of this act is the machinery that fills them, and the one I haven't filled yet. I'll start with the dangerous one."
+-->
+
+---
+
+## Judgment gap: the factory stays skeptical of itself.
+
+Advisor pattern, a second opinion wired into review and verify · Corpus-learning loop mines past failures into fresh attacks · Provocateurs run them weekly
+
+#### The artifact: a test that resists the system's own future laziness.
 
 > *"activate it in gates.toml rather than deleting this test"*
 
-#### A test written to resist the system's own future laziness.
-
-<!-- (quote verified verbatim: tests/test_gates_activation.py:148 — option: cite file:line on the slide as documentary texture) -->
+<!-- (hero quote verified verbatim: tests/test_gates_activation.py:148 — option: cite file:line on the slide as documentary texture) -->
 
 <!--
-The hero slide — and the payoff of the identity beat. "I spent years teaching people to write the test first. This is the first test I've ever seen that teaches the NEXT developer — a test written to resist the system's own future laziness, telling whoever comes after to fix reality instead of the test." Not a passing test; a self-defending one. When the codebase fills with artifacts like this, the discipline is real without me enforcing it. TDD didn't get abandoned when I stopped reviewing code. It got projected up a level — from a practice I performed to a property the system defends. This is what "solid" looks like up close. Hold it a beat; it's the emotional center of the middle act. Then the turn into the last move: "I can't read the code that grows artifacts like this — so I stopped trying. I read what the code says about itself instead."
+The judgment gap is the dangerous one: a fluent machine is persuasive even when it is wrong, and my own 2025 chat data proved I would believe it. The 98% number from the receipts slide is this gap, measured. So the factory is built to distrust itself. The advisor pattern wires a skeptical second opinion into PR review and verification. The corpus-learning loop mines past failures and synthesizes fresh adversarial cases from them. The provocateurs run that hostile corpus weekly. And the artifact those three produce is the emotional center of the act, and the payoff of the identity beat: "I spent years teaching people to write the test first. This is the first test I have ever seen that teaches the NEXT developer, a test written to resist the system's own future laziness, telling whoever comes after to fix reality instead of the test." Not a passing test, a self-defending one. TDD did not get abandoned when I stopped reviewing code. It got projected up a level, from a practice I performed to a property the system defends. Hold it a beat. Then the turn: "I cannot read the code that grows artifacts like this, so I stopped trying. I read what the code says about itself instead." (Provocateurs are introduced earlier on the taxonomy slide; this is the deeper machinery, and the 98% receipt makes it personal.)
 -->
 
 ---
 
-## I don't read the code. I read what it says about itself.
+## Comprehension gap: I don't read the code, I read what it says about itself.
 
 314 wiki entries, regenerated from live pipeline events · 91 ADRs · architecture diagrams regenerated on every PR
 
@@ -361,7 +385,7 @@ The living-knowledge layer — HydraFlow's answer to comprehension debt. Nobody 
 
 ---
 
-## The vocabulary is load-bearing.
+## Meaning gap: the vocabulary is load-bearing.
 
 41 domain terms live as files in the repo. The glossary auto-extracts from code.
 
@@ -373,11 +397,11 @@ The sharpest claim in the knowledge layer — give it its own slide because no o
 
 ---
 
-## What I expect to break
+## Erosion gap: a softened gate looks like a routine change.
 
-# The container itself going fluid.
+A CI workflow named **gates-drift** checks that the walls still match their source of truth.
 
-#### A softened gate looks like a routine change.
+#### What I haven't filled yet: held-out evals.
 
 <!--
 The honest slide — deliver with conviction, not hedging; the room trusts everything else more after this. The scariest failure isn't a breach. It's a slow softening: a threshold lowered, a skip added, each one defensible, each approved by an agent judging against standards the same drift is relaxing. Gate erosion reads as routine, so it never trips the wire that pulls me in. And yes — I've built a tripwire: there is literally a CI workflow named gates-drift that verifies the branch-protection artifacts still match the gates.toml source of truth and every active gate maps to a real job. But notice what that is: a watcher for the watchers, and it's code too. And name the sharper version of the same problem before someone in row three does: "My test scenarios live in the repo the factory edits. StrongDM holds their evaluations OUTSIDE the system so it can't optimize against them. Mine are inside. What I have today: fresh-eyes review by subagents with no conversation context, conformance contracts the fakes can't dodge, a sandbox tier with real dependencies. What I don't have yet: held-out evals. It's the next wall I owe the system." Saying the gap out loud is the credibility move — this room can smell an unaddressed weakness from the lobby. Turtles, all the way down to one place: the walls cap the damage, and the conventions are mine to keep sound. That's the one job I can't delegate. That's where "stay the engineer" actually bites.
@@ -409,86 +433,70 @@ Close the loop on motive two, honestly scoped. Legible software: a bad commit is
 
 ---
 
-## Somewhere in those four months, the reason changed.
+## The platform that died in Act One didn't stay dead.
 
-# My daughter — Z — wants to make a game.
+# InsightMesh v3 is SignalRoom.
+
+#### Dynamic MCP. Manifest-based apps. Every tool permission-gated.
 
 <!--
-The turn — pay off the plant from the Gas Town slide. Introduce her by initial only: "my daughter — Z." Say it plain and a little proud: it's called Poop Scoop Hero. It's real — we have a name, a concept, and she has strong opinions about the dog. Let the room smile; the smile is the door. I started building to maintain a platform. I kept building to answer Steve's question. And then I realized what I was actually holding: not a thing that makes ME better — a thing that could let HER make. (She's "Z" everywhere on slides and stage — minor, public stage.)
+Pay off the InsightMesh thread the room has been holding since "v1 died." v1 died, v2 came back with guardrails, and it kept evolving. v3 is SignalRoom: a platform where each app is a manifest that exposes its own APIs and its own agents as role-gated tools, a capability registry, an ACL, the control plane, service accounts. Say the line that matters and let it land: it is 100% vibe-coded, not a line of it written by a human. And keep the stack name, it grounds the claim: the deep-research agents run in their own framework, LangGraph, executed in-framework. This is the same walls-over-vigilance bet from the fork slide, now running a real production platform.
 -->
 
 ---
 
-## The game won't start from zero.
+## It runs DealIQ for our sales team.
 
-It's born inside the format: one Makefile, the same security, quality, and testing standards, the same CI walls.
+Exec-level company intelligence, buy signals, prospecting. Deep-research agents in LangGraph. 100% vibe-coded.
 
-#### A blueprint for printing. Follow the spec, get the thing.
+# Can the child maintain the parent?
 
 <!--
-The lessons roll forward — third time now, and say so; the motif pays off here. "v1's collapse became v2's guardrails. v2's guardrails became the factory. And now the factory's discipline becomes the game's birthright." Every HydraFlow-format project inherits the container on day one: the shared make targets, the quality gates, the test pyramid, the CI checks, the walls. Four months of the factory teaching itself discipline, compiled into a blueprint any new repo starts inside. The game gets all of it for free — builds, deploys, regressions, security, every legible failure already guarded. (beat) "Which means the experiment is clean. Every variable the format can check is controlled. There's exactly one it can't." Next slide.
+The experiment, and keep it FUTURE TENSE, because the close depends on it. DealIQ is a real production app on SignalRoom: company intelligence for the sales team, buy-signal detection, prospecting profiles, deep-research LangGraph agents, every tool permission-gated right in its manifest. Real users, in production, and I have no time to feed it. So here is the next experiment: hand its maintenance to the factory. The thing born inside InsightMesh, that escaped in three days, goes home to keep alive InsightMesh's own descendant. The child maintains the parent. I am running it now. I do not have the result yet. Keep it qualitative on stage: real users, in production, the sales team. Do NOT name the host URL, no audience value and it is an internal box. If you want a sharper receipt, drop in an in-production-since date you can stand behind.
 -->
 
 ---
 
-## The format checks everything — except the thing that matters most.
+## When making is cheap, judgment is scarce.
 
-# Fun is not a unit test.
+The constraint stops being "can we build it." It becomes "should we, and is it any good."
 
 <!--
-Games dynamite the legibility assumption the whole field shares — that's why this is the frontier and not a hobby footnote. Success is aesthetic. Content is generated, not implemented. "Right" means "this feels good," and there is no green checkmark for a seven-year-old laughing. Every peer on the earlier axis works above the line of legible failure. This experiment goes below it — with everything legible already controlled by the inherited container, so the open question is isolated to exactly the part no test can reach.
+The pivot into the close, the consequence motive 3 resolves to. If the factory builds anything I can specify, skill at building stops being the bottleneck. What's scarce is deciding what's worth building and telling whether it's good. I learned to make by struggling with the making; the next people may learn to make by directing and judging, never touching syntax. New literacy or lost craft, I genuinely don't know, and I'm the one responsible for getting it right.
 -->
 
 ---
 
-## Evening: Z tells it what she wants.
-## Overnight: the factory builds.
-## Morning: Z plays what it made.
+## The same handoff, somewhere quieter.
+
+#### My daughter and I are starting to explore it as a creative space. We describe, it builds, we judge what came back.
 
 <!--
-The image of the close — keep it future tense, this hasn't run yet. "The plan is a ritual: in the evening Z and I describe the thing — instruct Claude, queue the work. The factory prints overnight. In the morning she plays the build and tells it what's wrong." And the symmetry, said quietly: that's already MY morning. The factory runs while I sleep; I wake to what it made and extend what it can do. The experiment is whether that morning can belong to a kid who can't code.
--->
-
----
-
-# A 3D printer for ideas.
-
-#### Except this printer maintains what it prints.
-
-<!--
-Name the metaphor alone, then inoculate it in the same breath — someone in the room is already thinking "3D printing was supposed to democratize manufacturing and mostly made trinkets." Own it: "I know what happened to desktop 3D printing. The difference between a trinket machine and a real tool was always the rigor of the machine. And there's one more difference here: a 3D printer hands you an object and walks away. This printer maintains what it printed — patches, balance, live ops, forever. That's the part desktop printing never had, and it's the part that was the whole problem to begin with." Maintain — the tagline word, closing its own loop from the InsightMesh slide.
--->
-
----
-
-## When making is free, judging is scarce.
-
-Z's "is it fun?" becomes the spec.
-
-<!--
-Second-order effect one. If the factory builds anything I can specify, the constraint stops being skill at building — it's knowing what's worth building and whether it's good. For her game that signal lives in her face, not a test suite. And fold the inheritance question in here, spoken: I learned to make by struggling with the making. She might learn to make by directing and judging, never touching syntax. New literacy or lost craft — I genuinely don't know, and I'm the one responsible for getting it right.
+The grace note, ONE breath, future tense, no printer and no "she ships software." Said plain and a little warm: the same handoff I'm testing on DealIQ, I'm also starting to explore with my daughter, as a creative space we share. We describe a thing, the factory builds it, and the part that stays ours is judging what came back. That's it. Don't oversell it, don't linger; the warmth is in the restraint. (She stays a grace note, minor, public stage, no full name.)
 -->
 
 ---
 
 ## My walls protect my repo.
 
-# They don't protect the players.
+# They don't protect the org.
+
+#### Who answers for what a factory built and a human shipped?
 
 <!--
-End the second-order beats on the gut-punch, not a list. Hooks, credit caps, immutable state — those keep the factory from hurting itself. They say nothing about a shipped experience that's bad, unfair, or worse, for the people on the other end. Who is accountable for software a factory built and a kid published? The floor I built guards the system. It does not guard the player. I don't have an answer. That's why it's here.
+End the second-order beats on the gut-punch, not a list. Hooks, credit caps, immutable state, those keep the factory from hurting itself. They say nothing about software that's wrong, unfair, or worse for the people downstream of it. When a factory builds it and a human ships it, who is accountable? The floor I built guards the system. It does not guard the org, or the customer. I don't have a clean answer. That's why it's the last thing before the close.
 -->
 
 ---
 
 # Where does the engineer go?
 
-## Into the printer.
+## Into judgment and governance.
 
-#### We'll find out together. I'll let you know.
+#### Making got cheap. Deciding what's worth making, holding the standards, owning what ships. That's the job that's left, and the one I can't hand off.
 
 <!--
-Answer the title — for THEM, not just for you. The craft doesn't disappear; it becomes the machine. Everything that made the factory safe — the walls, the gates, the tests that defend themselves — is SOLID-era engineering, projected up a level. Only people with the craft can build a printer worth trusting. "I spent years teaching the craft one engineer at a time. The factory is the same teaching, compiled." So the direction, plainly: "Go build one. It starts smaller than you think — a format: shared make targets, quality gates, a test pyramid, CI walls that every new repo inherits. A blueprint for printing. For your team. For someone who can't code. The engineer goes into the printer — that's where the craft lives now." Then home: "Mine is for Z, and a game about scooping poop. We'll find out together. I'll let you know." Walk off on that.
+Answer the title, for THEM, not just for me. The craft doesn't disappear, it moves up a level. Everything that made the factory safe, the walls, the gates, the tests that defend themselves, is SOLID-era engineering projected up a level. Only people with the craft can build a factory worth trusting. "I spent years teaching the craft one engineer at a time. The factory is the same teaching, compiled." So the direction, plainly: "Go build the container. Shared make targets, quality gates, a test pyramid, CI walls every new repo inherits. Then hand the keystrokes to the machine and keep the judgment for yourself. That's where the engineer goes." Then home, brief and true: "I'm running the experiment right now, on a platform called SignalRoom and an app called DealIQ, and quietly, with my daughter. I'll let you know." Walk off on that.
 -->
 
 ---
@@ -517,12 +525,13 @@ References, contact, the essay link. Keep it short; the last real slide was the 
    spent on inference." If pressed on whether it scales: the caps are the answer — the factory
    cannot outspend its budget by construction; cost is a wall, not a hope.
 
-3. "You're going to let a factory with no human review ship software your KID publishes?" —
-   Don't dodge; this is the player-blast-radius slide restated as an accusation. "That's exactly
-   the right question, and it's why the experiment is the talk's ending and not its victory lap.
-   The walls protect my repo today. Before anything she makes reaches another player, the walls
-   have to reach the player too — that's a prerequisite of the experiment, not an afterthought.
-   And the only test that gates a release is the one that can't be automated: us, playing it."
+3. "You're going to let a factory with no human review maintain a product real users depend on?" —
+   Don't dodge; this is the accountability slide restated as an accusation. "That's exactly the
+   right question, and it's why DealIQ is an experiment I'm narrating, not a victory lap. The walls
+   protect the repo today: nothing destructive, nothing irreversible, everything in budget. What
+   they don't yet protect is the user on the other end of a shipped change. Reaching the user with
+   the same guarantees is a prerequisite of the handoff, not an afterthought. And the release gate
+   that can't be automated stays human: someone who owns the outcome decides it ships."
 
 4. "Aren't 47 loops just sprawl? / cron jobs with opinions?" — "Fair — count alone isn't
    capability. Two things keep it from being sprawl: every loop honors one cross-cutting
