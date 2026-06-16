@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Self-Building Software — Lessons from the HydraFlow Experiment</title>
+<!--
+  Self-contained talk deck. No build, no server. Open in any browser.
+  Simple + clean. OFFLINE: open once online so the font caches, or it falls back to a system stack.
+  KEYS:  ->/space next · <- prev · Home/End first/last · N notes · T theme · F fullscreen · ? help
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#f7f5ef;
+    --ink:#181a1d;
+    --dim:#73767c;
+    --line:#e4e0d6;
+    --accent:#c0552f;
+    --mono:"Space Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --disp:"Archivo","Helvetica Neue",system-ui,sans-serif;
+    --statement:clamp(2.1rem,6vw,5.2rem);
+    --pad:clamp(40px,7vw,120px);
+  }
+  [data-theme="dark"]{
+    --bg:#16171b; --ink:#edeae3; --dim:#9499a1; --line:#2a2c32; --accent:#e07a52;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--disp);
+    overflow:hidden; -webkit-font-smoothing:antialiased;
+    transition:background .35s ease, color .35s ease;
+  }
+
+  .progress{position:fixed;top:0;left:0;height:2px;background:var(--accent);z-index:10;width:0;transition:width .45s cubic-bezier(.2,.8,.2,1);}
+
+  .hud{position:fixed;z-index:8;font-family:var(--mono);color:var(--dim);font-size:clamp(.62rem,.95vw,.78rem);letter-spacing:.14em;text-transform:uppercase;}
+  .kicker{top:var(--pad);left:var(--pad);}
+  .count{bottom:var(--pad);right:var(--pad);}
+  .count b{color:var(--ink);font-weight:700}
+
+  .stage{position:fixed;inset:0;display:flex;align-items:center;z-index:2;padding:var(--pad);}
+  .slides{width:100%;max-width:1120px;margin:0 auto;}
+  .slide{display:none}
+  .slide.active{display:block}
+  .slide.active .inner{animation:rise .5s cubic-bezier(.2,.8,.2,1) both}
+  @keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+
+  .eyebrow{font-size:clamp(.95rem,1.7vw,1.45rem);font-weight:500;color:var(--dim);margin-bottom:.7em;max-width:30ch;line-height:1.3}
+  .headline{font-size:var(--statement);font-weight:800;line-height:1.0;letter-spacing:-.03em;max-width:17ch}
+  .headline.tight{max-width:14ch}
+  .headline + .headline{margin-top:.05em}
+  .sub{font-size:clamp(.95rem,1.7vw,1.4rem);color:var(--dim);margin-top:1em;max-width:44ch;font-weight:400;line-height:1.4}
+  .lede{font-size:clamp(1rem,1.9vw,1.55rem);color:var(--ink);margin-top:.7em;max-width:46ch;line-height:1.4;font-weight:500}
+  em{font-style:normal;color:var(--accent)}
+
+  .meta{font-family:var(--mono);margin-top:1.3em;display:flex;flex-direction:column;gap:.7em;max-width:62ch}
+  .meta .row{font-size:clamp(.8rem,1.3vw,1.02rem);color:var(--ink);line-height:1.45;padding-left:1em;border-left:2px solid var(--line)}
+  .meta .row b{color:var(--accent);font-weight:700}
+  .meta .row span{color:var(--dim)}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:.6em 2.4em;margin-top:1.4em;font-family:var(--mono);max-width:64ch}
+  .grid .g{font-size:clamp(.78rem,1.2vw,1rem);color:var(--dim);line-height:1.5}
+  .grid .g b{color:var(--ink);font-weight:700}
+  .grid .g.hot b{color:var(--accent)}
+
+  blockquote{font-family:var(--mono);font-size:clamp(1.05rem,2.3vw,1.9rem);line-height:1.45;color:var(--ink);border-left:3px solid var(--accent);padding-left:.8em;max-width:25ch;font-weight:400}
+  blockquote.small{font-size:clamp(.95rem,1.6vw,1.25rem);color:var(--accent);max-width:42ch}
+  cite{display:block;font-family:var(--mono);font-style:normal;color:var(--dim);font-size:clamp(.7rem,1.05vw,.88rem);letter-spacing:.05em;margin-top:1.1em;text-transform:uppercase}
+
+  .slide.title .role{font-family:var(--mono);color:var(--dim);letter-spacing:.2em;text-transform:uppercase;font-size:clamp(.7rem,1.15vw,.92rem);margin-bottom:1.5em}
+  .slide.title .headline{font-size:clamp(2.8rem,8.5vw,7.5rem);line-height:.94}
+  .slide.title .q{font-size:clamp(1rem,2vw,1.65rem);color:var(--ink);margin-top:1.1em;font-weight:600;max-width:30ch}
+  .slide.title .where{font-family:var(--mono);color:var(--dim);margin-top:2.4em;letter-spacing:.08em;font-size:clamp(.72rem,1.05vw,.9rem)}
+
+  .slide.demo .headline{font-size:clamp(3rem,11vw,9rem);letter-spacing:-.01em}
+
+  .notes{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--bg);border-top:2px solid var(--accent);
+    padding:clamp(22px,3vh,34px) var(--pad) clamp(28px,4vh,40px);transform:translateY(110%);transition:transform .3s cubic-bezier(.2,.8,.2,1);max-height:46vh;overflow:auto}
+  .notes.show{transform:none;box-shadow:0 -24px 60px rgba(0,0,0,.18)}
+  .notes .nlabel{font-family:var(--mono);color:var(--accent);letter-spacing:.16em;text-transform:uppercase;font-size:.72rem;margin-bottom:.7em}
+  .notes .ntext{color:var(--ink);font-size:clamp(.95rem,1.6vw,1.3rem);line-height:1.55;max-width:92ch}
+  .notes .ntext em{color:var(--accent)}
+
+  .help{position:fixed;inset:0;z-index:30;background:var(--bg);display:none;align-items:center;justify-content:center;font-family:var(--mono)}
+  .help.show{display:flex}
+  .help .card{max-width:520px;width:90%}
+  .help h3{font-family:var(--disp);font-weight:800;font-size:1.5rem;margin-bottom:1.2em;letter-spacing:-.02em}
+  .help .k{display:flex;justify-content:space-between;gap:2em;padding:.55em 0;border-bottom:1px solid var(--line);color:var(--dim)}
+  .help .k b{color:var(--ink)}
+  .help kbd{border:1px solid var(--line);border-radius:5px;padding:.12em .5em;color:var(--accent)}
+
+  @media (max-width:760px){ .headline{max-width:none} .grid{grid-template-columns:1fr} .kicker{display:none} }
+  @media (prefers-reduced-motion:reduce){ .slide.active .inner{animation:none} }
+</style>
+</head>
+<body>
+  <div class="progress" id="progress"></div>
+  <div class="hud kicker" id="kicker">COLD OPEN</div>
+  <div class="hud count"><b id="cnum">01</b> / <span id="ctot">37</span></div>
+
+  <div class="stage"><div class="slides" id="slides"></div></div>
+
+  <div class="notes" id="notes"><div class="nlabel" id="nlabel">Speaker note</div><div class="ntext" id="ntext"></div></div>
+
+  <div class="help" id="help"><div class="card">
+    <h3>Controls</h3>
+    <div class="k"><span>Next</span><b><kbd>&rarr;</kbd> <kbd>space</kbd></b></div>
+    <div class="k"><span>Previous</span><b><kbd>&larr;</kbd></b></div>
+    <div class="k"><span>First / last</span><b><kbd>Home</kbd> <kbd>End</kbd></b></div>
+    <div class="k"><span>Speaker notes</span><b><kbd>N</kbd></b></div>
+    <div class="k"><span>Light / dark</span><b><kbd>T</kbd></b></div>
+    <div class="k"><span>Fullscreen</span><b><kbd>F</kbd></b></div>
+    <div class="k"><span>This help</span><b><kbd>?</kbd></b></div>
+  </div></div>
+
+<script>
+const DECK = [
+ {act:"COLD OPEN", cls:"title", html:`
+   <div class="role">Accelerate Chicago 2026</div>
+   <div class="headline">Self&#8209;Building<br>Software</div>
+   <div class="q">Lessons from the HydraFlow Experiment</div>
+   <div class="where">When code becomes fluid, where does the engineer go?</div>`,
+  note:`15-20s intro only: name, warmth, the promise of a story. "I'm Travis Frisinger... the strangest thing I've ever built. It starts four months ago, with a folder." Advance on "a folder."`},
+
+ {act:"COLD OPEN", html:`<div class="inner">
+   <div class="eyebrow">Four months ago, I made a folder inside another repo.</div>
+   <div class="headline tight">Three days later, <em>it left.</em></div></div>`,
+  note:`Say it slow, slightly unsettled. The folder was dx/hydra, inside a platform I'd vibe-coded. It has been building itself ever since. Don't explain yet, let the room want the chronology.`},
+
+ {act:"COLD OPEN", html:`<div class="inner">
+   <div class="eyebrow">It has been building itself ever since.</div>
+   <div class="headline"><em>47</em> loops. <em>1,600+</em> merged PRs.</div>
+   <div class="sub">No human reviews its code. None ever has.</div></div>`,
+  note:`Numbers like evidence at trial, one at a time. Land the claim flat: "No human reviews its code. None ever has. I haven't read a line in a year." The flinch IS the talk. Preempt the math: the factory is four months old; the not-reading habit is a year, it started with the platform before it. REFRESH the numbers before stage.`},
+
+ {act:"COLD OPEN", html:`<div class="inner">
+   <div class="eyebrow">I know what that sentence does to a room like this.</div>
+   <div class="headline tight">Code was <em>identity.</em></div>
+   <div class="sub">I taught TDD to hundreds of engineers. Red, green, refactor was how I proved I was good.</div></div>`,
+  note:`The empathy beat, within a minute of the claim, or it reads as a flex. Testimony, not observation: "that sentence cost ME first." The anxiety in our industry isn't productivity, it's identity. Plants the self-defending-test payoff later.`},
+
+ {act:"ACT I · THE MOTIVE", html:`<div class="inner">
+   <div class="eyebrow">It started as a maintenance problem.</div>
+   <div class="lede">An internal platform, AI-built. Agents, retrieval, scheduled tasks, observability. No guardrails.</div>
+   <div class="headline tight" style="margin-top:.6em">August 28, 2025: <em>v1 died.</em></div></div>`,
+  note:`Motive one, a confession. InsightMesh, built the way most of this room builds now. The word AI changed most isn't ship or own. It's MAINTAIN. I didn't need to write code faster, I needed help keeping what I'd written alive.`},
+
+ {act:"ACT I · THE MOTIVE", html:`<div class="inner">
+   <div class="eyebrow">The fork: put the human back in, or build walls?</div>
+   <div class="lede">v2 is still entirely AI-written. Still almost no human review. What changed was the guardrails.</div>
+   <div class="headline tight" style="margin-top:.6em">Less structure <em>died.</em> More structure <em>lives.</em></div></div>`,
+  note:`The talk in miniature, deliver slow. The obvious fix was to put the human back. I did the opposite: walls over vigilance. That bet was made HERE, ten months before the factory. Roll number one. (V2V: the journey, three characters.)`},
+
+ {act:"ACT I · THE MOTIVE", html:`<div class="inner">
+   <div class="eyebrow">The bet had receipts.</div>
+   <div class="meta">
+     <div class="row"><b>FLUID</b> <span>· Mar 2025 ·</span> principles for code that mutates</div>
+     <div class="row"><b>2,500 conversations</b> <span>· Mar 2025 ·</span> a third never made it past the AI's first response</div>
+     <div class="row"><b>AI Coherence</b> <span>· Apr 2025 ·</span> models produce plausibility, not truth</div>
+   </div>
+   <div class="sub">Vigilance measurably fails. Models can't supply truth. Verification has to be structural.</div></div>`,
+  note:`Personal data, not opinion. I scored 2,443 of my own sessions: 34% never went past the first answer; 27% of completed loops skipped evaluation. My validation discipline failed a third of the time. One behavior fixed it: asking the AI to critique itself, 98% completion. Hold that number. Papers at aibuddy.software/papers.`},
+
+ {act:"ACT I · THE MOTIVE", html:`<div class="inner">
+   <div class="eyebrow">Then Steve Yegge published <em>Gas Town.</em></div>
+   <div class="sub" style="margin-top:.2em">January 1, 2026.</div>
+   <div class="headline" style="margin-top:.7em">How much of the human can you pull out, <em>and what breaks?</em></div></div>`,
+  note:`Motive two, the question. Gas Town was the catalyst, be honest. Seven weeks later: first commit, Feb 18, inside InsightMesh. Walls went up in ten minutes. PLANT, one line, move on: "somewhere in the four months since, the reason I was building changed. I'll get there."`},
+
+ {act:"ACT I · THE MOTIVE", html:`<div class="inner">
+   <div class="eyebrow">So I didn't hire help.</div>
+   <div class="headline tight">I built a <em>factory.</em></div>
+   <div class="sub">Intent in. Software out.</div></div>`,
+  note:`Name HydraFlow as the answer to the question. You file intent. It plans, implements, tests, reviews, merges. Humans provide exactly two things: intent and tests. Dark factory mode, I get paged for fires, not reviews.`},
+
+ {act:"ACT I · THE MOTIVE", cls:"demo", html:`<div class="inner">
+   <div class="headline">DEMO</div>
+   <div class="sub" style="margin-top:1.1em;font-size:clamp(1rem,1.9vw,1.5rem);color:var(--ink)">One real cycle. Filed to merged. No human in the path.</div></div>`,
+  note:`Pre-recorded, 2-4x. Frame it: "I filed the intent, that's my whole contribution." Hit play, hand off the clicker, stay SILENT. Land on the merged frame: "An agent planned it, implemented it, wrote the tests, reviewed it, merged it. Notice what's missing: me. It did this sixteen hundred times in four months."`},
+
+ {act:"ACT II · THE MACHINE", html:`<div class="inner">
+   <div class="headline">The container is <em>solid.</em></div>
+   <div class="headline">The code inside it is <em>fluid.</em></div>
+   <div class="sub">The container is what makes fluidity safe.</div></div>`,
+  note:`The thesis. Let it sit in silence first. Pour code fast with nothing underneath and you get the flood, not agility. Fluidity is structure moved out of the code and into the vessel. Heritage: Cockburn's hexagon (2005) + North's BDD (2003) at autonomous scale. "Your craft isn't the casualty of this shift. It's the material."`},
+
+ {act:"ACT II · THE MACHINE", html:`<div class="inner">
+   <div class="headline tight">I hold the <em>walls,</em><br>not the keyboard.</div>
+   <div class="sub">No human approval in the routine loop.</div></div>`,
+  note:`The lean-back line, let it cost. Pulled out: code review, PR approval, planning of routine work. Every approval in the pipeline is made by another agent. So if I'm not watching the code, what is? Hold that question, the rest of the act is the answer.`},
+
+ {act:"ACT II · THE MACHINE", html:`<div class="inner">
+   <div class="eyebrow">Three weeks ago, the man who built Claude Code said it out loud.</div>
+   <blockquote>"I don't prompt Claude anymore. I have loops that are running &mdash; they're the ones prompting Claude. My job is to write loops."</blockquote>
+   <cite>Boris Cherny, Head of Claude Code · June 2, 2026</cite></div>`,
+  note:`Let them recognize it before you speak. Move 1: prompting didn't disappear, it got compiled, I prompt once when I file intent. Move 2: a Ralph loop is a harness around ONE task, it finishes; mine never finish. Move 3 (contemporary anchor, lands double at a CRAFT conference): the field named it this week, LOOPCRAFT, "the art of stacking loops." "Cherny said it three weeks ago. The field named it this week. I've been running it four months." -> Forty-seven of what? VERIFY quotes before stage.`},
+
+ {act:"ACT II · THE MACHINE", html:`<div class="inner">
+   <div class="eyebrow">Forty-seven of what, exactly?</div>
+   <div class="grid">
+     <div class="g"><b>Maintainers</b> keep state fresh</div>
+     <div class="g"><b>Proposers</b> grow it</div>
+     <div class="g"><b>Pruners</b> shrink it</div>
+     <div class="g"><b>Auditors</b> verify invariants</div>
+     <div class="g"><b>Repairers</b> fix what broke</div>
+     <div class="g"><b>Watchers</b> budget &amp; escalate</div>
+     <div class="g"><b>Promoters</b> move work through tiers</div>
+     <div class="g hot"><b>Provocateurs</b> attack on purpose</div>
+   </div></div>`,
+  note:`The factory's workforce. Walk fast, one breath each, don't lecture the grid. "I designed the first couple. The rest accreted, one at a time, and the categories weren't in my sketch, they emerged." Point at the last cell: "that one deserves its own slide."`},
+
+ {act:"ACT II · THE MACHINE", html:`<div class="inner">
+   <div class="headline tight">The factory <em>red-teams</em> itself.</div>
+   <div class="sub">Provocateurs synthesize adversarial cases from past failures, run them weekly, and challenge the system's assumptions before reality does.</div></div>`,
+  note:`The sit-up beat: it employs agents whose whole job is to ATTACK it. CorpusLearningLoop mines past failures into adversarial cases; the advisor pattern wires a skeptical second opinion into review. The 98% finding from act one, hired full-time. Nobody told it to be paranoid; I encoded the paranoia once and it became a job category.`},
+
+ {act:"ACT II · THE MACHINE", html:`<div class="inner">
+   <div class="headline tight">Quality moved from <em>social</em> to <em>structural.</em></div>
+   <div class="sub">Senior reviewers, tribal knowledge, manual discipline: none of it scales to a system that mutates daily.</div></div>`,
+  note:`The unifying reframe, give it a breath. Quality used to be social: the reviewer who catches it, the discipline you hope survives. A system that rewrites itself daily outruns all of that. So I don't lower the bar, I move it INTO the system. Hear "fluid" and think "lower standards" and you've got it backwards. The receipts slide already proved the social version fails.`},
+
+ {act:"ACT II · THE MACHINE", html:`<div class="inner">
+   <div class="eyebrow">The encoding has a size.</div>
+   <div class="meta">
+     <div class="row"><b>15,800+</b> <span>tests</span></div>
+     <div class="row"><b>70%</b> <span>coverage floor, CI-enforced</span></div>
+     <div class="row"><b>478</b> <span>world-scenario tests</span></div>
+     <div class="row"><b>176</b> <span>regression tests &mdash; every bug that ever bit</span></div>
+   </div>
+   <div class="sub">The gates are habits. The blast radius is a wall.</div></div>`,
+  note:`Numbers, trial cadence. COVERAGE: get the real number before stage; if it's well above 70 say both, if near the floor drop it. The hinge of the act: the gates are habits, code the factory can edit. The walls are NOT. What are the walls? Next slide.`},
+
+ {act:"ACT II · THE MACHINE", html:`<div class="inner">
+   <div class="eyebrow">Why it can't run away</div>
+   <div class="meta">
+     <div class="row"><span>Per loop:</span> attempt budgets · kill switches · credit-aware yield</div>
+     <div class="row"><span>Across loops:</span> one owner per work item · dedup · watchers</div>
+     <div class="row"><span>Beyond its reach:</span> <b>destructive ops blocked by hooks</b> · can't raise its own budget · can't touch persisted state</div>
+   </div></div>`,
+  note:`Containment by construction, three rings. The hard walls live OUTSIDE the code the factory may edit: it cannot take an action it can't take back. Misbehavior is bounded, reversible, in-budget, by construction. But that's a CLAIM. How do you test it without a staging org, real tokens, and a live bill? Next move.`},
+
+ {act:"ACT II · THE MACHINE", html:`<div class="inner">
+   <div class="eyebrow">Testing this used to mean an <em>environment.</em></div>
+   <div class="lede">A staging GitHub org. Real tokens. Rate limits. Flaky networks. An LLM bill.</div></div>`,
+  note:`The pain everyone knows. "A test run measured in minutes, if it didn't fall over first." Let them nod. The next slide is the escape.`},
+
+ {act:"ACT II · THE MACHINE", html:`<div class="inner">
+   <div class="headline tight">MockWorld:<br>the test chamber</div>
+   <div class="sub" style="color:var(--ink)">GitHub, git, Docker, the LLM itself &mdash; <em>12 Ports, 34 Fakes,</em> each pinned to its real adapter by a conformance contract.</div>
+   <div class="sub" style="margin-top:.5em">A mock fakes a response. A Fake world has state, time, and failure modes.</div></div>`,
+  note:`Every dependency enters through a typed Port; MockWorld swaps a Fake in at that boundary. Not mocks, fake WORLDS: state that persists, time that passes, failure modes you can program. Whole factory runs on a laptop in seconds, no tokens. The fakes can't lie: conformance contracts pin each to its real adapter. "How do you know the fake matches reality?" The contract knows.`},
+
+ {act:"ACT II · THE MACHINE", html:`<div class="inner">
+   <div class="headline">Given&#8209;When&#8209;Then was always pointing at the <em>world.</em></div></div>`,
+  note:`Boldest claim, alone, give it room. "Given GitHub is rate-limiting. Given the budget is capped. WHEN the loop ticks, THEN it yields its attempt budget." The Given was never just user flows, it always pointed at the whole operating environment. 478 scenario tests run the factory through hostile worlds. Cockburn's ports + North's scenarios. Does it actually hold? Two days from the log answer it.`},
+
+ {act:"ACT II · THE MACHINE", html:`<div class="inner">
+   <div class="eyebrow">Merged 21:43. Hotfix open 22:07. Merged 22:25.</div>
+   <div class="headline tight">Broken to fixed: <em>42 minutes.</em></div>
+   <div class="sub">No human in that story.</div></div>`,
+  note:`A real scene. Cleanup PR merged, 211 tests green; main went red on two files it hadn't accounted for; 42 minutes later, fixed, while I did something else. Read it as failure and you miss it: validation didn't gate, it PUSHED. The wrong-but-specific first pass got driven toward right. "That was the good day. I owe you a bad one."`},
+
+ {act:"ACT II · THE MACHINE", html:`<div class="inner">
+   <div class="eyebrow">The bad day</div>
+   <div class="headline tight">It burned its retry budgets against an <em>empty credit account.</em></div>
+   <div class="sub">The loops did what loops do. All of them. At once.</div></div>`,
+  note:`THE SCAR SLIDE [swap in your TRUE worst day]. The billing error came back generic; loops retried, every one, against an account that couldn't say yes. "The factory doesn't fail like a junior engineer. It fails like a distributed system: dumb, persistent, parallel." The walls held: capped, nothing destroyed, reversible. The bad days are why half those loops exist. Don't rush it, this buys the most trust in the deck. -> the gaps.`},
+
+ {act:"ACT II · THE GAPS", html:`<div class="inner">
+   <div class="headline tight">A system that rewrites itself opens gaps normal software never has.</div>
+   <div class="sub" style="font-family:var(--mono);letter-spacing:.04em;color:var(--accent)">Comprehension. Meaning. Judgment. Erosion.</div></div>`,
+  note:`The framing slide, pivot off the bad day. Four gaps ordinary software never faces: nobody can read it; the words drift; a fluent machine is persuasive even when wrong; the walls soften one reasonable change at a time. "I'll start with the dangerous one."`},
+
+ {act:"ACT II · THE GAPS", html:`<div class="inner">
+   <div class="eyebrow"><em>Judgment gap:</em> the factory stays skeptical of itself.</div>
+   <div class="meta"><div class="row">Advisor pattern &mdash; a second opinion wired into review and verify</div>
+   <div class="row">Corpus-learning loop &mdash; mines past failures into fresh attacks</div>
+   <div class="row">Provocateurs run them weekly</div></div>
+   <blockquote class="small" style="margin-top:1.1em">"activate it in gates.toml rather than deleting this test"</blockquote>
+   <div class="sub">The artifact: a test that resists the system's own future laziness.</div></div>`,
+  note:`The dangerous gap, and the emotional center. A fluent machine is persuasive even when wrong, and my own data proved I'd believe it (the 98% number, measured). So the factory distrusts itself. The artifact and the payoff of the identity beat: "the first test I've ever seen that teaches the NEXT developer to fix reality instead of the test." TDD didn't get abandoned, it got projected up a level. Hold it a beat. "I stopped reading the code. I read what it says about itself."`},
+
+ {act:"ACT II · THE GAPS", html:`<div class="inner">
+   <div class="eyebrow"><em>Comprehension gap:</em> I don't read the code, I read what it says about itself.</div>
+   <div class="meta"><div class="row"><b>314</b> <span>wiki entries, regenerated from live pipeline events</span></div>
+   <div class="row"><b>91</b> <span>ADRs</span></div>
+   <div class="row"><span>architecture diagrams regenerated on every PR</span></div></div></div>`,
+  note:`The living-knowledge layer. Nobody can read a codebase that rewrites itself daily, Yegge admits he's never read his own 225k lines. Mine is REQUIRED to keep explaining itself: the wiki regenerates from live events, not memory. Static documentation died; what replaced it has a pulse, maintained by the same factory it describes.`},
+
+ {act:"ACT II · THE GAPS", html:`<div class="inner">
+   <div class="eyebrow"><em>Meaning gap:</em> the vocabulary is load-bearing.</div>
+   <div class="lede">41 domain terms live as files in the repo. The glossary auto-extracts from code.</div>
+   <div class="headline tight" style="margin-top:.6em">If the code and the glossary disagree, <em>the build fails.</em></div></div>`,
+  note:`Words drift in every codebase, six months later the names lie. Here they can't: 41 terms as files, glossary extracts from live code, CI fails on disagreement. Eric Evans' ubiquitous language made executable. The factory can't redefine a word without telling me.`},
+
+ {act:"ACT II · THE GAPS", html:`<div class="inner">
+   <div class="eyebrow"><em>Erosion gap:</em> a softened gate looks like a routine change.</div>
+   <div class="lede">A CI workflow named <span style="font-family:var(--mono);color:var(--accent)">gates-drift</span> checks that the walls still match their source of truth.</div>
+   <div class="sub" style="margin-top:.7em">What I haven't filled yet: held-out evals.</div></div>`,
+  note:`The honest slide, deliver with conviction. The scariest failure isn't a breach, it's a slow softening, each step defensible, approved by an agent judging against standards the same drift is relaxing. gates-drift is a watcher for the watchers, and it's code too. Name the gap before row three does: my scenarios live in the repo it edits; StrongDM holds theirs OUTSIDE. Held-out evals are the next wall I owe it. Naming the gap is the credibility move.`},
+
+ {act:"WHERE IT HOLDS", html:`<div class="inner">
+   <div class="eyebrow">I'm not out here alone.</div>
+   <div class="meta" style="gap:.45em">
+     <div class="row">Huntley trusts the rerun. &nbsp; Steinberger trusts the tests.</div>
+     <div class="row">Cherny keeps a gate. &nbsp; Yegge babysits the fleet.</div>
+     <div class="row"><b>I trust the walls.</b></div>
+   </div>
+   <div class="sub">Different bets on one question: what holds when you step back?</div></div>`,
+  note:`40 seconds, peers not foils. Each made a different bet; none is finished. Set up the close: "Every one of us works where failure is LEGIBLE, a red test, a bad diff. The walls handle the legible part. What no wall catches, is it any good, is it worth building, who does it hurt, is the illegible part. Hold that, it's the judgment the close lands on."`},
+
+ {act:"WHERE IT HOLDS", html:`<div class="inner">
+   <div class="eyebrow">So: how much of the human comes out?</div>
+   <div class="headline">For legible software, <em>almost all of it.</em></div></div>`,
+  note:`Close motive two, honestly scoped. Legible software: a bad commit detectable, a failing test observable, side effects reversible. That's the class HydraFlow lives in, and the evidence says yes. (beat) "And that's where I expected this talk to end, when I started writing it."`},
+
+ {act:"THE EXPERIMENT", html:`<div class="inner">
+   <div class="eyebrow">The platform that died in Act One didn't stay dead.</div>
+   <div class="headline tight">InsightMesh v3 is <em>SignalRoom.</em></div>
+   <div class="sub">Dynamic MCP. Manifest-based apps. Every tool permission-gated.</div></div>`,
+  note:`Close the lineage loop OUT LOUD so "child/parent" is earned: "Remember the repo HydraFlow was born inside and walked out of in three days? That was InsightMesh. It didn't stay dead." v3 is SignalRoom, a platform of manifest-based apps exposing APIs and agents as role-gated tools. 100% vibe-coded, not a line by a human. Deep-research agents run in LangGraph. Same walls-over-vigilance bet, now a real production platform.`},
+
+ {act:"THE EXPERIMENT", html:`<div class="inner">
+   <div class="eyebrow">It runs DealIQ for our sales team.</div>
+   <div class="lede">Exec-level company intelligence, buy signals, prospecting. Deep-research agents in LangGraph. 100% vibe-coded.</div>
+   <div class="headline tight" style="margin-top:.6em">Can the <em>child</em> maintain the <em>parent?</em></div></div>`,
+  note:`Keep it FUTURE TENSE, the close depends on it. A real production app, real users, and I have no time to feed it. The next experiment: hand its maintenance to the factory. The thing born inside InsightMesh goes home to keep its descendant alive. The child maintains the parent. I'm running it now. I don't have the result yet.`},
+
+ {act:"THE CONSEQUENCE", html:`<div class="inner">
+   <div class="headline tight">When making is cheap, <em>judgment</em> is scarce.</div>
+   <div class="lede">The constraint stops being "can we build it." It becomes "should we, and is it any good."</div></div>`,
+  note:`CASH THE "REASON CHANGED" PLANT, first thing, out loud: "I told you the reason I was building changed. Here it is. I started to maintain what I'd vibed. I kept building because when making gets this cheap, the one thing still scarce, and still mine, is judgment." Without this line the back third reads as epilogue. Then: skill at building stops being the bottleneck; deciding what's worth building, and whether it's good, is what's left.`},
+
+ {act:"THE CONSEQUENCE", html:`<div class="inner">
+   <div class="eyebrow">The same handoff, somewhere quieter.</div>
+   <div class="headline" style="font-size:clamp(1.4rem,3.2vw,2.6rem);max-width:30ch;line-height:1.15">My daughter and I are starting to explore it as a creative space. We describe, it builds, we judge what came back.</div></div>`,
+  note:`The grace note, ONE breath, future tense, warm, restrained. The same handoff I'm testing on DealIQ, I'm starting to explore with my daughter, a creative space we share. The part that stays ours is judging what came back. Don't oversell it; the warmth is in the restraint. (No name, no printer, no "she ships software.")`},
+
+ {act:"THE CONSEQUENCE", html:`<div class="inner">
+   <div class="eyebrow">My walls protect my repo.</div>
+   <div class="headline tight">They don't protect <em>the org.</em></div>
+   <div class="sub">Who answers for what a factory built and a human shipped?</div></div>`,
+  note:`The gut-punch, end the second-order beats here, not on a list. Hooks, credit caps, immutable state keep the factory from hurting itself. They say nothing about software that's wrong, unfair, or worse for the people downstream. The floor I built guards the system. It does not guard the org, or the customer. I don't have a clean answer. That's why it's the last thing before the close.`},
+
+ {act:"THE CLOSE", html:`<div class="inner">
+   <div class="headline">Where does the engineer go?</div>
+   <div class="headline" style="font-size:clamp(1.7rem,4.4vw,3.8rem);color:var(--accent);margin-top:.25em">Into judgment and governance.</div>
+   <div class="sub">Making got cheap. Deciding what's worth making, holding the standards, owning what ships. That's the job that's left, and the one I can't hand off.</div></div>`,
+  note:`Answer the title, for THEM. The craft doesn't disappear, it moves up a level, all of it is SOLID-era engineering projected up. CRAFT-CONFERENCE TIE: "The craft didn't die. It got a new material, the loop. The field's already named it: loopcraft. Same craft, one level up." Land the VERBS (deciding, holding, owning), not the noun. "Go build the container... then hand the keystrokes to the machine and keep the judgment for yourself." Home: "I'm running the experiment now, on SignalRoom and DealIQ, and quietly, with my daughter. I'll let you know." Walk off on that.`},
+
+ {act:"THE CLOSE", cls:"title", html:`
+   <div class="role">Thank you</div>
+   <div class="headline" style="font-size:clamp(2rem,6vw,5rem)">I'll let you<br>know.</div>
+   <div class="where" style="margin-top:2em">HydraFlow · the FLUID principles · V2V · the papers: aibuddy.software/papers</div>`,
+  note:`Short. The close was the real ending; this is just contact and references.`},
+];
+
+const slidesEl=document.getElementById('slides');
+DECK.forEach((s)=>{const d=document.createElement('div');d.className='slide '+(s.cls||'');d.innerHTML=s.html;slidesEl.appendChild(d);});
+const slides=[...document.querySelectorAll('.slide')];
+const total=DECK.length;
+document.getElementById('ctot').textContent=String(total).padStart(2,'0');
+
+let cur=0, notesOpen=false;
+function show(n,push){
+  cur=Math.max(0,Math.min(total-1,n));
+  slides.forEach((s,i)=>s.classList.toggle('active',i===cur));
+  const a=slides[cur]; const inner=a.querySelector('.inner')||a; inner.style.animation='none'; void inner.offsetWidth; inner.style.animation='';
+  document.getElementById('kicker').textContent=DECK[cur].act||'';
+  document.getElementById('cnum').textContent=String(cur+1).padStart(2,'0');
+  document.getElementById('progress').style.width=(cur/(total-1)*100)+'%';
+  document.getElementById('ntext').innerHTML=DECK[cur].note||'';
+  document.getElementById('nlabel').textContent='Note · '+(DECK[cur].act||'');
+  if(push!==false) history.replaceState(null,'','#'+(cur+1));
+  document.title=(cur+1)+'/'+total+' — Self-Building Software';
+}
+const next=()=>show(cur+1), prev=()=>show(cur-1);
+const toggleNotes=()=>{notesOpen=!notesOpen;document.getElementById('notes').classList.toggle('show',notesOpen);};
+function setTheme(t){document.documentElement.dataset.theme=t;try{localStorage.setItem('deck-theme',t)}catch(e){}}
+setTheme((()=>{try{return localStorage.getItem('deck-theme')||'light'}catch(e){return 'light'}})());
+
+document.addEventListener('keydown',e=>{
+  const k=e.key;
+  if(k==='ArrowRight'||k==='PageDown'||k===' '||k==='Spacebar'||k==='ArrowDown'){e.preventDefault();next();}
+  else if(k==='ArrowLeft'||k==='PageUp'||k==='ArrowUp'){e.preventDefault();prev();}
+  else if(k==='Home'){e.preventDefault();show(0);}
+  else if(k==='End'){e.preventDefault();show(total-1);}
+  else if(k==='n'||k==='N'||k==='s'||k==='S'){toggleNotes();}
+  else if(k==='t'||k==='T'){setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');}
+  else if(k==='f'||k==='F'){ if(!document.fullscreenElement) document.documentElement.requestFullscreen?.(); else document.exitFullscreen?.(); }
+  else if(k==='?'){ document.getElementById('help').classList.toggle('show'); }
+  else if(k==='Escape'){ document.getElementById('help').classList.remove('show'); if(notesOpen) toggleNotes(); }
+});
+document.querySelector('.stage').addEventListener('click',e=>{ if(notesOpen) return; if(e.clientX<window.innerWidth*0.3) prev(); else next(); });
+document.getElementById('help').addEventListener('click',()=>document.getElementById('help').classList.remove('show'));
+
+const start=parseInt((location.hash||'').replace('#',''),10);
+show(Number.isFinite(start)&&start>=1?start-1:0,false);
+</script>
+</body>
+</html>
