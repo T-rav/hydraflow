@@ -108,7 +108,7 @@ Say it slow, like you're still slightly unsettled by it — picking up directly 
 
 # 47 loops. 1,600+ merged PRs.
 
-#### No human reviews its code — none ever has.
+#### No human reviews its code. None ever has.
 
 <!--
 Stage the numbers one at a time, like evidence at trial, not a LinkedIn cadence. "Forty-seven autonomous loops. (beat) More than sixteen hundred merged pull requests. (beat) Four months." Then land the claim flat and let it cost something: "No human reviews its code. None ever has. (beat) I haven't read a line of this code in a year." Don't soften it, don't qualify it — the flinch in the room IS the talk, and the next forty minutes earn the right to have said it. (The "year" reaches back through InsightMesh v2, also entirely vibe-coded with no review — the no-review bet predates the factory, and the next slides pay that off.) Relatability beat, optional: "And before you ask — no, not all sixteen hundred are glamorous. A lot of them are dependency bumps and housekeeping. That's the point. Maintenance is most of software. It does the boring part too." Owning the boring PRs buys more trust than the big number does. If a principal pulls the git log and sees early commits under my name, the answer is precise, not a walk-back: commit identity is not human review — I directed and committed work I never read, and vibe-authoring is not reviewing. The handover curve is still the deepest cut: "Two out of every three commits in the factory were authored by the factory; last month they out-committed me three to one." (Receipts: 1,227 of 1,790 non-merge commits by agent identities; last 30 days agents 305 vs Travis 116. STRONG CANDIDATE for a slide visual — monthly stacked bar, human vs agent commits, the flip is the picture of 'self-building'.) REFRESH NUMBERS before stage — loops from docs/arch/generated/loops.md, PR count from gh. The claim must match the public registry exactly, because someone in row three will pull it up.
@@ -140,7 +140,7 @@ Motive one — the relatable one, a confession. InsightMesh: a real internal sal
 
 ---
 
-## The fork: put the human back in — or build walls?
+## The fork: put the human back in, or build walls?
 
 v2 is still entirely AI-written. Still almost no human review. What changed was the guardrails.
 
@@ -170,7 +170,7 @@ The credentials beat, and it's personal data, not opinion — walk it slow, beca
 
 #### January 1, 2026.
 
-# How much of the human can you pull out — and what breaks?
+# How much of the human can you pull out, and what breaks?
 
 <!--
 Motive two — the question. Be honest: Gas Town was the catalyst, not a parallel discovery. Steve showed the operational thing was buildable — a fleet of agents, an orchestrator, a human babysitting the swarm. I couldn't put the question down. Seven weeks later: first commit, February 18 — inside the InsightMesh repo, because it was born as a maintenance helper for the thing I'd vibed, carrying v2's guardrail lessons with it. Roll number two, and you can see it in the log: within ten minutes of the orchestrator arriving in the new repo, it had CI and quality gates. The walls went up first. Three days later it outgrew its host and moved into its own repo — and InsightMesh carried a vendored copy of its offspring for three more months before the umbilical was fully cut in May. Then the plant, one line, move on: "And somewhere in the four months since, the reason I was building changed. I'll get there."
@@ -263,7 +263,7 @@ The sit-up beat — the factory employs agents whose whole job is to ATTACK it. 
 
 ## Quality moved from **social** to **structural**.
 
-Senior reviewers, tribal knowledge, manual discipline — none of it scales to a system that mutates daily.
+Senior reviewers, tribal knowledge, manual discipline: none of it scales to a system that mutates daily.
 
 <!--
 The unifying reframe — give it its own breath before the numbers. Quality enforcement used to be social: the senior reviewer who catches it, the tribal knowledge of who-knows-what, the discipline you hope survives the sprint. A system that rewrites itself daily outruns all of that. So HydraFlow doesn't lower the quality bar — it moves the bar INTO the system: validation continuous, governance executable, scenarios authoritative. If you hear "fluid" and think "lower standards," you've got it exactly backwards. And this isn't post-hoc reasoning: the receipts slide in act one is the proof. The social version was measured failing, in me, in March 2025, before the structural version was ever built.
@@ -307,7 +307,7 @@ Start with the pain everyone in the room knows: "Testing a system like this used
 
 ## MockWorld: the test chamber
 
-GitHub, git, Docker, the LLM itself — **12 Ports, 34 Fakes**, each pinned to its real adapter by a conformance contract.
+GitHub, git, Docker, the LLM itself: **12 Ports, 34 Fakes**, each pinned to its real adapter by a conformance contract.
 
 #### A mock fakes a response. A Fake world has state, time, and failure modes.
 
@@ -425,7 +425,7 @@ Forty seconds, peers not foils. Huntley first, one breath: the Ralph loop bets o
 
 ## So: how much of the human comes out?
 
-### For legible software — almost all of it.
+### For legible software, almost all of it.
 
 <!--
 Close the loop on motive two, honestly scoped. Legible software: a bad commit is detectable, a failing test observable, drift auditable, side effects reversible. The factory has something concrete to be sharper about. That's the class HydraFlow lives in, and within it the evidence says yes — the human time per unit of value dropped far enough to change the economics. (beat) "And that's where I expected this talk to end, when I started writing it."
