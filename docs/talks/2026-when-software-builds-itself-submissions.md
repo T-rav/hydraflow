@@ -86,6 +86,30 @@ re-verify each live page before relying on a deadline.
 - The CTO Craft entry above used the older bio (tddbuddy / "principal-level"); this Head-of-Agentic-AI bio is the current positioning. If reusing materials, prefer this one.
 - Refresh numbers + verify quotes (Cherny, Yegge, Gabriel) before stage.
 
+### Platform Engineering Day @ KubeCon + CloudNativeCon NA 2026
+- **Status:** Submitted 2026-06-18 (CFP closed Jun 21). **25-min Presentation.** Awaiting selection (they only contact selected speakers).
+- **Conference:** Co-located event at KubeCon NA. Salt Lake City, UT, Nov 9 2026. Platform-engineering audience.
+- **CFP:** https://events.linuxfoundation.org/kubecon-cloudnativecon-north-america/co-located-events/cfp-colocated-events/
+- **Co-located event:** Platform Engineering Day · **Primary topic:** Platform Engineering · **Sub-topic:** Day 2 and beyond
+
+**Title submitted:** When Software Builds Itself: The Paved Path That Lets a Machine Ship
+
+**Description (930 chars):**
+
+> Platform engineering makes the safe way the easy way: paved paths and guardrails. I took that to its limit. Since early this year, the developer on my paved path has been a machine.
+>
+> I built an internal system that takes intent and then designs, tests, implements, reviews, and ships, with no human in the loop and no one reading the code. It works because the paved path is complete: tests and standards define what "working" means before any code exists, guardrails bound what a bad run can do, and the pipeline reviews itself adversarially, since a fluent agent convinces even when wrong.
+>
+> But shipping was never the hard part. Day 2 is. This is a case study in operating an autonomous consumer of your platform: keeping it on the path, catching it when it drifts, and the night it failed anyway and recovered without me. You will leave with a model for guardrails strong enough to stop watching, and where mine are still thin.
+
+**Benefits to the ecosystem (as submitted):**
+
+> Platform teams are being asked to support AI coding agents, and most are improvising. This session offers a transferable model: treat the agent as a consumer of the paved path, make guardrails load-bearing enough that you can stop watching, and design for Day 2, because an autonomous system has to keep running, recover, and stay safe long after it ships. Attendees leave with a way to reason about paved paths, golden tests, and containment when the developer is a machine, plus an honest account of the failure modes and where my guardrails are still thin.
+
+**Form answers (for the record):** Case study = Yes (single-org internal tooling). End-user company = No (8th Light is a consultancy/service provider, not a CNCF end user). Given before = No (not yet delivered; reframed version scheduled at Accelerate Chicago). Open-source projects = list only what's actually referenced on stage (git, pytest, Docker, etc.; OpenTelemetry only if the monitoring beat names it; do not pad with CNCF projects).
+
+**Follow-ups:** build the 25-min cut only if accepted (separate from the 45-min Accelerate deck). Refresh numbers + verify quotes before stage.
+
 ---
 
 ## ShipItCon (Dublin) — not submitted
@@ -114,8 +138,8 @@ Three framings depending on audience: leadership (judgment/governance), AI engin
 - **Build Stuff** — Vilnius, LT — **SUBMITTED 2026-06-18, 45-min slot** (see Submitted section above).
 
 ### Act-soon (imminent deadlines)
-- **Platform Engineering Day @ KubeCon NA** — Salt Lake City, US · CFP **Jun 21** · 25-min, paved paths/guardrails.
-- **BeyondConf** — Detroit, US · CFP **Jun 30** · "beyond the AI hype," real deployments (fits "not toy apps"). 45-min.
+- **Platform Engineering Day @ KubeCon NA** — Salt Lake City, US — **SUBMITTED 2026-06-18, 25-min** (see Submitted section above).
+- **BeyondConf** — Detroit, US · CFP **Jun 30** · "beyond the AI hype," real deployments (fits "not toy apps"). 45-min. *(Title + description drafted; submit if pursuing.)*
 - **Code Europe** — Warsaw, PL · CFP **Jun 30** · AI Engineering + staff+ track.
 
 ### Comfortable runway
