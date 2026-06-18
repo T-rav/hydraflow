@@ -2,8 +2,14 @@
 
 The friction/leadership-framed spinoff of the Accelerate Chicago talk
 ("Self-Building Software / When Code Becomes Fluid"). This file tracks where the
-talk has been submitted and the open CFP pipeline. CFP statuses change weekly,
-re-verify each live page before relying on a deadline.
+talk has been submitted and the open CFP pipeline, plus a second talk
+("Observability is the Control Plane for Agent Systems," AGNTCon + MCPCon).
+CFP statuses change weekly, re-verify each live page before relying on a deadline.
+
+**Submitted as of 2026-06-18:** CTO Craft Con (leadership), Build Stuff (45-min),
+BeyondConf (45-min), Platform Engineering Day @ KubeCon NA (25-min) for "When Software
+Builds Itself"; AGNTCon + MCPCon Europe and North America for "Observability is the
+Control Plane for Agent Systems." Six submissions, two talks.
 
 ---
 
@@ -110,6 +116,37 @@ re-verify each live page before relying on a deadline.
 
 **Follow-ups:** build the 25-min cut only if accepted (separate from the 45-min Accelerate deck). Refresh numbers + verify quotes before stage.
 
+### BeyondConf 2026: Detroit
+- **Status:** Submitted 2026-06-18. **In Evaluation** (per Sessionize). 45-min session. CFP closes Jun 30.
+- **Conference:** Detroit, MI, Sep 10 2026. AI-in-production, real-deployments-over-hype audience. $250 honorarium + registration; travel not covered.
+- **Track:** How It Works.
+- **CFP:** https://sessionize.com/beyondconf-2026
+
+**Title submitted:** When Software Builds Itself: How the Engineering Gets Encoded *(the title on the Sessionize dashboard; the 909-char description below was drafted under the working title "How to Ship Code No One Reviews" and reads fine under either)*
+
+**Description (909 chars):**
+
+> I built a system that ships software with no human in the loop and no one reading the code. Here's how it works, and why it isn't slop.
+>
+> Intent comes in as an issue. An autonomous pipeline moves it through the stages a careful engineer would: design, tests first, build, review, merge. No human reviews the diff. What makes it safe isn't better code generation, it's everything wrapped around it.
+>
+> I'll walk the scaffolding: how tests and standards become the spec, so "working" is defined before any code exists; how quality is enforced structurally, not by a reviewer's attention; how it reviews itself adversarially, since a fluent machine convinces even when wrong; and the hard limits that bound a bad run. Plus the night it failed anyway.
+>
+> The takeaway: when code is nearly free, the engineering moves out of the typing and into the structure that decides what ships. That's the part you actually build.
+
+**Follow-ups:** refresh numbers + verify quotes before stage.
+
+---
+
+## Separate talk: "Observability is the Control Plane for Agent Systems" (AGNTCon + MCPCon)
+
+A different talk from "When Software Builds Itself," logged here so all CFP activity lives in one place. Submitted directly via Sessionize (not drafted in these sessions); pull the canonical title/abstract from the Sessionize submission.
+
+- **AGNTCon + MCPCon Europe 2026** — In Evaluation — 17–18 Sep 2026.
+- **AGNTCon + MCPCon North America 2026** — In Evaluation — 22–23 Oct 2026.
+
+**To confirm:** is this a reframe of the autonomous-engineering / HydraFlow talk (the observability-as-control-plane angle for an agent + MCP audience), or a genuinely separate talk? That determines whether the trust-fleet / OpenTelemetry / "how it knows when something's wrong" material is shared with the other talk or kept distinct.
+
 ---
 
 ## ShipItCon (Dublin) — not submitted
@@ -139,7 +176,7 @@ Three framings depending on audience: leadership (judgment/governance), AI engin
 
 ### Act-soon (imminent deadlines)
 - **Platform Engineering Day @ KubeCon NA** — Salt Lake City, US — **SUBMITTED 2026-06-18, 25-min** (see Submitted section above).
-- **BeyondConf** — Detroit, US · CFP **Jun 30** · "beyond the AI hype," real deployments (fits "not toy apps"). 45-min. *(Title + description drafted; submit if pursuing.)*
+- **BeyondConf** — Detroit, US — **SUBMITTED 2026-06-18, In Evaluation** (see Submitted section above).
 - **Code Europe** — Warsaw, PL · CFP **Jun 30** · AI Engineering + staff+ track.
 
 ### Comfortable runway
