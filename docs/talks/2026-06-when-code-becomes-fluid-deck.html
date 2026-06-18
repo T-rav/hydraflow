@@ -99,7 +99,6 @@
 </head>
 <body>
   <div class="progress" id="progress"></div>
-  <div class="hud kicker" id="kicker">COLD OPEN</div>
   <div class="hud count"><b id="cnum">01</b> / <span id="ctot">37</span></div>
 
   <div class="stage"><div class="slides" id="slides"></div></div>
@@ -133,7 +132,7 @@ const DECK = [
 
  {act:"COLD OPEN", html:`<div class="inner">
    <div class="eyebrow">It has been building itself ever since.</div>
-   <div class="headline"><em>47</em> loops. <em>1,600+</em> merged PRs.</div>
+   <div class="headline"><em>47</em> loops. <em>1,700+</em> merged PRs.</div>
    <div class="sub">No human reviews its code. None ever has.</div></div>`,
   note:`Numbers like evidence at trial, one at a time. Land the claim flat: "No human reviews its code. None ever has. I haven't read a line in a year." The flinch IS the talk. Preempt the math: the factory is four months old; the not-reading habit is a year, it started with the platform before it. REFRESH the numbers before stage.`},
 
@@ -146,14 +145,14 @@ const DECK = [
  {act:"ACT I · THE MOTIVE", html:`<div class="inner">
    <div class="eyebrow">It started as a maintenance problem.</div>
    <div class="lede">An internal platform, AI-built. Agents, retrieval, scheduled tasks, observability. No guardrails.</div>
-   <div class="headline tight" style="margin-top:.6em">August 28, 2025: <em>v1 died.</em></div></div>`,
+   <div class="headline tight" style="margin-top:.6em">August 28, 2025: <em>v1 became unmaintainable.</em></div></div>`,
   note:`Motive one, a confession. InsightMesh, built the way most of this room builds now. The word AI changed most isn't ship or own. It's MAINTAIN. I didn't need to write code faster, I needed help keeping what I'd written alive.`},
 
  {act:"ACT I · THE MOTIVE", html:`<div class="inner">
-   <div class="eyebrow">The fork: put the human back in, or build walls?</div>
+   <div class="eyebrow">The fork: put the human back in, or build the structure?</div>
    <div class="lede">v2 is still entirely AI-written. Still almost no human review. What changed was the guardrails.</div>
    <div class="headline tight" style="margin-top:.6em">Less structure <em>died.</em> More structure <em>lives.</em></div></div>`,
-  note:`The talk in miniature, deliver slow. The obvious fix was to put the human back. I did the opposite: walls over vigilance. That bet was made HERE, ten months before the factory. Roll number one. (V2V: the journey, three characters.)`},
+  note:`The talk in miniature, deliver slow. The obvious fix was to put the human back. I did the opposite: structure over vigilance. That bet was made HERE, ten months before the factory. Roll number one. (V2V: the journey, three characters.)`},
 
  {act:"ACT I · THE MOTIVE", html:`<div class="inner">
    <div class="eyebrow">The bet had receipts.</div>
@@ -169,7 +168,7 @@ const DECK = [
    <div class="eyebrow">Then Steve Yegge published <em>Gas Town.</em></div>
    <div class="sub" style="margin-top:.2em">January 1, 2026.</div>
    <div class="headline" style="margin-top:.7em">How much of the human can you pull out, <em>and what breaks?</em></div></div>`,
-  note:`Motive two, the question. Gas Town was the catalyst, be honest. Seven weeks later: first commit, Feb 18, inside InsightMesh. Walls went up in ten minutes. PLANT, one line, move on: "somewhere in the four months since, the reason I was building changed. I'll get there."`},
+  note:`Motive two, the question. Gas Town was the catalyst, be honest. Seven weeks later: first commit, Feb 18, inside InsightMesh. The gates went up in ten minutes. PLANT, one line, move on: "somewhere in the four months since, the reason I was building changed. I'll get there."`},
 
  {act:"ACT I · THE MOTIVE", html:`<div class="inner">
    <div class="eyebrow">So I didn't hire help.</div>
@@ -180,7 +179,7 @@ const DECK = [
  {act:"ACT I · THE MOTIVE", cls:"demo", html:`<div class="inner">
    <div class="headline">DEMO</div>
    <div class="sub" style="margin-top:1.1em;font-size:clamp(1rem,1.9vw,1.5rem);color:var(--ink)">One real cycle. Filed to merged. No human in the path.</div></div>`,
-  note:`Pre-recorded, 2-4x. Frame it: "I filed the intent, that's my whole contribution." Hit play, hand off the clicker, stay SILENT. Land on the merged frame: "An agent planned it, implemented it, wrote the tests, reviewed it, merged it. Notice what's missing: me. It did this sixteen hundred times in four months."`},
+  note:`Pre-recorded, 2-4x. Frame it: "I filed the intent, that's my whole contribution." Hit play, hand off the clicker, stay SILENT. Land on the merged frame: "An agent planned it, implemented it, wrote the tests, reviewed it, merged it. Notice what's missing: me. It did this seventeen hundred times in four months."`},
 
  {act:"ACT II · THE MACHINE", html:`<div class="inner">
    <div class="headline">The container is <em>solid.</em></div>
@@ -189,9 +188,9 @@ const DECK = [
   note:`The thesis. Let it sit in silence first. Pour code fast with nothing underneath and you get the flood, not agility. Fluidity is structure moved out of the code and into the vessel. Heritage: Cockburn's hexagon (2005) + North's BDD (2003) at autonomous scale. "Your craft isn't the casualty of this shift. It's the material."`},
 
  {act:"ACT II · THE MACHINE", html:`<div class="inner">
-   <div class="headline tight">I hold the <em>walls,</em><br>not the keyboard.</div>
-   <div class="sub">No human approval in the routine loop.</div></div>`,
-  note:`The lean-back line, let it cost. Pulled out: code review, PR approval, planning of routine work. Every approval in the pipeline is made by another agent. So if I'm not watching the code, what is? Hold that question, the rest of the act is the answer.`},
+   <div class="headline tight">The conveyor runs <em>without me.</em></div>
+   <div class="sub">I cut the dies. The crew keeps it honest. The interlocks keep it safe. None of that is the keyboard.</div></div>`,
+  note:`The lean-back line, let it cost. The line runs without me: the conveyor is the label state machine, every work item rides it from intent to merged, each loop a station that claims it, does one job, sends it on. I do three things, none of them the keyboard. I cut the dies, the workflow that shapes every part. The crew, the loops, keeps it honest: tending, documenting, attacking, reviewing. And the interlocks make the unsafe move impossible. No human approval in the routine loop. The rest of this act is those three forces, one at a time.`},
 
  {act:"ACT II · THE MACHINE", html:`<div class="inner">
    <div class="eyebrow">Three weeks ago, the man who built Claude Code said it out loud.</div>
@@ -229,10 +228,10 @@ const DECK = [
      <div class="row"><b>15,800+</b> <span>tests</span></div>
      <div class="row"><b>70%</b> <span>coverage floor, CI-enforced</span></div>
      <div class="row"><b>478</b> <span>world-scenario tests</span></div>
-     <div class="row"><b>176</b> <span>regression tests &mdash; every bug that ever bit</span></div>
+     <div class="row"><b>590+</b> <span>regression tests, every bug that ever bit</span></div>
    </div>
-   <div class="sub">The gates are habits. The blast radius is a wall.</div></div>`,
-  note:`Numbers, trial cadence. COVERAGE: get the real number before stage; if it's well above 70 say both, if near the floor drop it. The hinge of the act: the gates are habits, code the factory can edit. The walls are NOT. What are the walls? Next slide.`},
+   <div class="sub">Gates you can edit. Interlocks you can't. The factory caps what it can break.</div></div>`,
+  note:`Numbers, trial cadence. COVERAGE: get the real number before stage; if it's well above 70 say both, if near the floor drop it. The hinge of the act: gates are habits, code the factory can edit. Interlocks are NOT. What are the interlocks? Next slide.`},
 
  {act:"ACT II · THE MACHINE", html:`<div class="inner">
    <div class="eyebrow">Why it can't run away</div>
@@ -241,7 +240,7 @@ const DECK = [
      <div class="row"><span>Across loops:</span> one owner per work item · dedup · watchers</div>
      <div class="row"><span>Beyond its reach:</span> <b>destructive ops blocked by hooks</b> · can't raise its own budget · can't touch persisted state</div>
    </div></div>`,
-  note:`Containment by construction, three rings. The hard walls live OUTSIDE the code the factory may edit: it cannot take an action it can't take back. Misbehavior is bounded, reversible, in-budget, by construction. But that's a CLAIM. How do you test it without a staging org, real tokens, and a live bill? Next move.`},
+  note:`Containment by construction, three rings. The interlocks live OUTSIDE the code the factory may edit: it cannot take an action it can't take back. Misbehavior is bounded, reversible, in-budget, by construction. But that's a CLAIM. How do you test it without a staging org, real tokens, and a live bill? Next move.`},
 
  {act:"ACT II · THE MACHINE", html:`<div class="inner">
    <div class="eyebrow">Testing this used to mean an <em>environment.</em></div>
@@ -250,8 +249,9 @@ const DECK = [
 
  {act:"ACT II · THE MACHINE", html:`<div class="inner">
    <div class="headline tight">MockWorld:<br>the test chamber</div>
-   <div class="sub" style="color:var(--ink)">GitHub, git, Docker, the LLM itself &mdash; <em>12 Ports, 34 Fakes,</em> each pinned to its real adapter by a conformance contract.</div>
-   <div class="sub" style="margin-top:.5em">A mock fakes a response. A Fake world has state, time, and failure modes.</div></div>`,
+   <div class="sub" style="color:var(--ink)">GitHub, git, Docker, the LLM itself: <em>12 Ports, 25+ Fakes,</em> each pinned to its real adapter by a conformance contract.</div>
+   <div class="sub" style="margin-top:.5em">A mock fakes a response. A Fake world has state, time, and failure modes.</div>
+   <div class="sub" style="margin-top:.5em">A type check once said the fakes matched. They didn't. Now the contract checks signatures too.</div></div>`,
   note:`Every dependency enters through a typed Port; MockWorld swaps a Fake in at that boundary. Not mocks, fake WORLDS: state that persists, time that passes, failure modes you can program. Whole factory runs on a laptop in seconds, no tokens. The fakes can't lie: conformance contracts pin each to its real adapter. "How do you know the fake matches reality?" The contract knows.`},
 
  {act:"ACT II · THE MACHINE", html:`<div class="inner">
@@ -268,12 +268,12 @@ const DECK = [
    <div class="eyebrow">The bad day</div>
    <div class="headline tight">It burned its retry budgets against an <em>empty credit account.</em></div>
    <div class="sub">The loops did what loops do. All of them. At once.</div></div>`,
-  note:`THE SCAR SLIDE [swap in your TRUE worst day]. The billing error came back generic; loops retried, every one, against an account that couldn't say yes. "The factory doesn't fail like a junior engineer. It fails like a distributed system: dumb, persistent, parallel." The walls held: capped, nothing destroyed, reversible. The bad days are why half those loops exist. Don't rush it, this buys the most trust in the deck. -> the gaps.`},
+  note:`THE SCAR SLIDE [swap in your TRUE worst day]. The billing error came back generic; loops retried, every one, against an account that couldn't say yes. "The factory doesn't fail like a junior engineer. It fails like a distributed system: dumb, persistent, parallel." The interlocks held: capped, nothing destroyed, reversible. The bad days are why half those loops exist. Don't rush it, this buys the most trust in the deck. -> the gaps.`},
 
  {act:"ACT II · THE GAPS", html:`<div class="inner">
    <div class="headline tight">A system that rewrites itself opens gaps normal software never has.</div>
    <div class="sub" style="font-family:var(--mono);letter-spacing:.04em;color:var(--accent)">Comprehension. Meaning. Judgment. Erosion.</div></div>`,
-  note:`The framing slide, pivot off the bad day. Four gaps ordinary software never faces: nobody can read it; the words drift; a fluent machine is persuasive even when wrong; the walls soften one reasonable change at a time. "I'll start with the dangerous one."`},
+  note:`The framing slide, pivot off the bad day. Four gaps ordinary software never faces: nobody can read it; the words drift; a fluent machine is persuasive even when wrong; the structure softens one reasonable change at a time. "I'll start with the dangerous one."`},
 
  {act:"ACT II · THE GAPS", html:`<div class="inner">
    <div class="eyebrow"><em>Judgment gap:</em> the factory stays skeptical of itself.</div>
@@ -283,6 +283,11 @@ const DECK = [
    <blockquote class="small" style="margin-top:1.1em">"activate it in gates.toml rather than deleting this test"</blockquote>
    <div class="sub">The artifact: a test that resists the system's own future laziness.</div></div>`,
   note:`The dangerous gap, and the emotional center. A fluent machine is persuasive even when wrong, and my own data proved I'd believe it (the 98% number, measured). So the factory distrusts itself. The artifact and the payoff of the identity beat: "the first test I've ever seen that teaches the NEXT developer to fix reality instead of the test." TDD didn't get abandoned, it got projected up a level. Hold it a beat. "I stopped reading the code. I read what it says about itself."`},
+
+ {act:"ACT II · THE GAPS", html:`<div class="inner">
+   <div class="headline tight">The reviewer can't approve changes to <em>its own reviewing.</em></div>
+   <div class="sub">When a diff touches the review code, the veto is forced on. The factory is structurally forbidden from editing the thing that judges it.</div></div>`,
+  note:`The objection every engineer in the room is already forming: if an agent approves the code, and that judgment is itself code the factory can edit, what stops it from loosening its own standards? I had the same fear, so I made it impossible. One rule the reviewer can't vote its way around: when a change touches the reviewer's own files, its authority flips to veto, every time, no matter what the config says. It can block changes to its conscience; it can never approve them. I encoded the distrust once, and it became an interlock the system can't edit from the inside.`},
 
  {act:"ACT II · THE GAPS", html:`<div class="inner">
    <div class="eyebrow"><em>Comprehension gap:</em> I don't read the code, I read what it says about itself.</div>
@@ -299,19 +304,19 @@ const DECK = [
 
  {act:"ACT II · THE GAPS", html:`<div class="inner">
    <div class="eyebrow"><em>Erosion gap:</em> a softened gate looks like a routine change.</div>
-   <div class="lede">A CI workflow named <span style="font-family:var(--mono);color:var(--accent)">gates-drift</span> checks that the walls still match their source of truth.</div>
+   <div class="lede">A CI workflow named <span style="font-family:var(--mono);color:var(--accent)">gates-drift</span> checks that the interlocks still match their source of truth.</div>
    <div class="sub" style="margin-top:.7em">What I haven't filled yet: held-out evals.</div></div>`,
-  note:`The honest slide, deliver with conviction. The scariest failure isn't a breach, it's a slow softening, each step defensible, approved by an agent judging against standards the same drift is relaxing. gates-drift is a watcher for the watchers, and it's code too. Name the gap before row three does: my scenarios live in the repo it edits; StrongDM holds theirs OUTSIDE. Held-out evals are the next wall I owe it. Naming the gap is the credibility move.`},
+  note:`The honest slide, deliver with conviction. The scariest failure isn't a breach, it's a slow softening, each step defensible, approved by an agent judging against standards the same drift is relaxing. gates-drift is a watcher for the watchers, and it's code too. Name the gap before row three does: my scenarios live in the repo it edits; StrongDM holds theirs OUTSIDE. Held-out evals are the next interlock I owe it. Naming the gap is the credibility move.`},
 
  {act:"WHERE IT HOLDS", html:`<div class="inner">
    <div class="eyebrow">I'm not out here alone.</div>
    <div class="meta" style="gap:.45em">
      <div class="row">Huntley trusts the rerun. &nbsp; Steinberger trusts the tests.</div>
      <div class="row">Cherny keeps a gate. &nbsp; Yegge babysits the fleet.</div>
-     <div class="row"><b>I trust the walls.</b></div>
+     <div class="row"><b>I trust the standard: the craft, encoded and enforced.</b></div>
    </div>
    <div class="sub">Different bets on one question: what holds when you step back?</div></div>`,
-  note:`40 seconds, peers not foils. Each made a different bet; none is finished. Set up the close: "Every one of us works where failure is LEGIBLE, a red test, a bad diff. The walls handle the legible part. What no wall catches, is it any good, is it worth building, who does it hurt, is the illegible part. Hold that, it's the judgment the close lands on."`},
+  note:`40 seconds, peers not foils. Each made a different bet; none is finished. Shared starting point worth naming: Steve totaled a vibe-coded system and rebuilt it from scratch ("Joel Spolsky was wrong," his book's line); I totaled one too. He rebuilt freely and babysits the fleet; I rebuilt with the dies and interlocks so the next one can't total. Same wall, different bets. (Verify the Yegge quote before stage.) Set up the close: "Every one of us works where failure is LEGIBLE, a red test, a bad diff. The structure handles the legible part. What no structure catches, is it any good, is it worth building, who does it hurt, is the illegible part. Hold that, it's the judgment the close lands on."`},
 
  {act:"WHERE IT HOLDS", html:`<div class="inner">
    <div class="eyebrow">So: how much of the human comes out?</div>
@@ -319,15 +324,16 @@ const DECK = [
   note:`Close motive two, honestly scoped. Legible software: a bad commit detectable, a failing test observable, side effects reversible. That's the class HydraFlow lives in, and the evidence says yes. (beat) "And that's where I expected this talk to end, when I started writing it."`},
 
  {act:"THE EXPERIMENT", html:`<div class="inner">
-   <div class="eyebrow">The platform that died in Act One didn't stay dead.</div>
+   <div class="eyebrow">The platform that became unmaintainable in Act One didn't stay dead, and it didn't get rebuilt.</div>
    <div class="headline tight">InsightMesh v3 is <em>SignalRoom.</em></div>
-   <div class="sub">Dynamic MCP. Manifest-based apps. Every tool permission-gated.</div></div>`,
-  note:`Close the lineage loop OUT LOUD so "child/parent" is earned: "Remember the repo HydraFlow was born inside and walked out of in three days? That was InsightMesh. It didn't stay dead." v3 is SignalRoom, a platform of manifest-based apps exposing APIs and agents as role-gated tools. 100% vibe-coded, not a line by a human. Deep-research agents run in LangGraph. Same walls-over-vigilance bet, now a real production platform.`},
+   <div class="sub">Same repo, new name. Deploying a manifest.json deploys an app: its tools, its visibility, its permissions.</div></div>`,
+  note:`Close the lineage loop OUT LOUD so "child/parent" is earned: "Remember the repo HydraFlow was born inside and walked out of in three days? That was InsightMesh. It didn't stay dead, and here's the part people miss, it didn't get rebuilt either. Same repository, new name: SignalRoom." The mechanism lands in a craft room: an app is a checked-in manifest.json; merge it and the platform registers its tools, sets MCP visibility, and creates the role-based permissions, no wiring code. The gateway exposes four generic methods; everything else is discovered live and filtered to who you are. 100% vibe-coded, not a line by a human, because it's the same continuously-AI-built repo. Deep-research agents run in LangGraph. Same structure-over-vigilance bet, now a production platform.`},
 
  {act:"THE EXPERIMENT", html:`<div class="inner">
    <div class="eyebrow">It runs DealIQ for our sales team.</div>
    <div class="lede">Exec-level company intelligence, buy signals, prospecting. Deep-research agents in LangGraph. 100% vibe-coded.</div>
-   <div class="headline tight" style="margin-top:.6em">Can the <em>child</em> maintain the <em>parent?</em></div></div>`,
+   <div class="headline tight" style="margin-top:.6em">Can the <em>child</em> maintain the <em>parent?</em></div>
+   <div class="sub">The factory goes home to maintain the platform that raised it.</div></div>`,
   note:`Keep it FUTURE TENSE, the close depends on it. A real production app, real users, and I have no time to feed it. The next experiment: hand its maintenance to the factory. The thing born inside InsightMesh goes home to keep its descendant alive. The child maintains the parent. I'm running it now. I don't have the result yet.`},
 
  {act:"THE CONSEQUENCE", html:`<div class="inner">
@@ -341,7 +347,7 @@ const DECK = [
   note:`The grace note, ONE breath, future tense, warm, restrained. The same handoff I'm testing on DealIQ, I'm starting to explore with my daughter, a creative space we share. The part that stays ours is judging what came back. Don't oversell it; the warmth is in the restraint. (No name, no printer, no "she ships software.")`},
 
  {act:"THE CONSEQUENCE", html:`<div class="inner">
-   <div class="eyebrow">My walls protect my repo.</div>
+   <div class="eyebrow">My interlocks protect my repo.</div>
    <div class="headline tight">They don't protect <em>the org.</em></div>
    <div class="sub">Who answers for what a factory built and a human shipped?</div></div>`,
   note:`The gut-punch, end the second-order beats here, not on a list. Hooks, credit caps, immutable state keep the factory from hurting itself. They say nothing about software that's wrong, unfair, or worse for the people downstream. The floor I built guards the system. It does not guard the org, or the customer. I don't have a clean answer. That's why it's the last thing before the close.`},
@@ -370,7 +376,6 @@ function show(n,push){
   cur=Math.max(0,Math.min(total-1,n));
   slides.forEach((s,i)=>s.classList.toggle('active',i===cur));
   const a=slides[cur]; const inner=a.querySelector('.inner')||a; inner.style.animation='none'; void inner.offsetWidth; inner.style.animation='';
-  document.getElementById('kicker').textContent=DECK[cur].act||'';
   document.getElementById('cnum').textContent=String(cur+1).padStart(2,'0');
   document.getElementById('progress').style.width=(cur/(total-1)*100)+'%';
   document.getElementById('ntext').innerHTML=DECK[cur].note||'';

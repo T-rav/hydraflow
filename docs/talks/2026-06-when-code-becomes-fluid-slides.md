@@ -32,17 +32,19 @@ PRODUCTION NOTES:
   2. "The factory red-teams itself" (point at the provocateur cell on the taxonomy grid)
   3. "The encoding has a size" (speak two of the four numbers over the social→structural slide)
   Never cut: the scar slide, the gaps framing, the SignalRoom/DealIQ handoff, the fork, the close.
-- Numbers verified 2026-06-09: 47 loops (docs/arch/generated/loops.md), 1,644 merged PRs
-  (gh search), first commit 2026-02-18. REFRESH BOTH before the stage — the loop registry
+- Numbers verified 2026-06-09, refreshed 2026-06-17: 47 loops (docs/arch/generated/loops.md), 1,713 merged PRs
+  (gh search is:pr is:merged; the issue+PR counter is at #9586, which is NOT a merge count, do not say "9,500 PRs"),
+  first commit 2026-02-18. REFRESH BOTH before the stage, the loop registry
   is public on hydraflow.ai and the room will check.
-- Quality metrics verified 2026-06-09: 15,838 tests collected (pytest) / 839 test files;
-  12 Port classes, 34 Fake classes, per-fake conformance contracts in tests/trust/contracts/
+- Quality metrics verified 2026-06-09, refreshed 2026-06-17: 15,838 tests collected (pytest) / 839 test files;
+  12 Port classes, ~26 Fake classes (count drifted/ambiguous, lead with "12 Ports, conformance-pinned"), per-fake conformance contracts in tests/trust/contracts/
   (github, git, docker, llm, honeycomb, workspace); coverage
   fail-under 70 (pyproject + ci.yml); 478 scenario tests (tests/scenarios); 61 sandbox e2e
-  files; 176 regression tests; 314 wiki json:entry blocks; 41 term files; 91 ADRs; hero
+  files; 591 regression tests (tests/regressions); 314 wiki json:entry blocks; 41 term files; 90 ADRs; hero
   quote verbatim at tests/test_gates_activation.py:148; gates-drift.yml = watcher-for-the-
   watchers receipt; PR #8460 21:43:31Z → #8463 created 22:07:51, merged 22:25:14 (42 min
   break-to-fixed total).
+- New surfacing receipts (2026-06-17): self-modification guard (T29) = src/review_advisor.py + tests/test_review_advisor.py::TestSelfModificationGuard + ADR-0059; conformance scar = tests/test_mockworld_fakes_conformance.py (PR #8439 plural-typo remove_labels + nonexistent list_issue_comments); containment/interlock artifact = issue-reporter/services/tools.py "the client cannot opt out of scoping"; SignalRoom = rebrand of InsightMesh, same repo (FastMCP still names "InsightMesh"; only 7 commits mention SignalRoom, all June 2026); manifest loader = control_plane sync_apps_to_registry + apps/dealiq/manifest.json; gateway 4 meta-tools = mcp-gateway/mcp_server.py. The talk's DealIQ = the SignalRoom-hosted product, NOT the standalone deal-iq bonus-tracker repo (a side quest being renamed).
 - CHERNY QUOTE SLIDE: wording matches published transcriptions of Acquired Unplugged
   (WorkOS, June 2 2026, youtube.com/watch?v=RkQQ7WEor7w); CONFIRM verbatim against the video
   before stage, same flag as the essay. The "~700k views in a day" texture and Huntley's
@@ -54,7 +56,7 @@ PRODUCTION NOTES:
   already happened. Do NOT claim the factory has maintained DealIQ; it is "built in the lineage,
   handoff is the experiment."
 - SIGNALROOM / DEALIQ lineage (back-third payoff of the Act-1 InsightMesh thread):
-  InsightMesh v1 died (Aug 2025) -> v2 got guardrails -> v3 IS SignalRoom, a dynamic-MCP platform of
+  InsightMesh v1 became unmaintainable (Aug 2025) -> v2 got guardrails -> v3 is the SAME v2 codebase rebranded SignalRoom (rebrand, NOT a rewrite), a dynamic-MCP platform of
   manifest-based apps that expose APIs and agents as role-gated tools (capability registry + ACL +
   control plane + service accounts; see apps/dealiq/manifest.json: 8 tools, mutating/exposed flags,
   dealiq-users vs dealiq-admins roles). DealIQ is an app ON SignalRoom: exec/sales company
@@ -64,10 +66,10 @@ PRODUCTION NOTES:
 - InsightMesh chronology VERIFIED from git (2026-06-09):
   · v1 → v2 rewrite began 2025-08-28 (v2 repo first commit: "ported slackbot from insightmesh").
   · v1 was Cursor-built, ~no human review, no guardrails — died. v2: still all vibe-coded, still
-    ~no review, but WITH guardrails — alive today. The walls-over-vigilance bet predates the factory.
+    ~no review, but WITH guardrails — alive today. The structure-over-vigilance bet predates the factory.
   · HydraFlow born inside InsightMesh at dx/hydra/ on 2026-02-18, commit 542dcd6a
     "feat: Add Hydra — parallel Claude Code issue processor". Standalone repo init same day
-    08:57; orchestrator lands 2026-02-19 00:33; CI 00:38; quality hooks 00:40 (walls up in
+    08:57; orchestrator lands 2026-02-19 00:33; CI 00:38; quality hooks 00:40 (gates up in
     ten minutes); self-issue-fixing PRs #53–60 merged by ~17:00 Feb 19. InsightMesh then
     vendored hydraflow content back (subtree squashes FROM hydraflow commits) until fully
     removed 2026-05-21 (#722). Cold open uses "three days later, it left" (author's call);
@@ -99,19 +101,19 @@ Advance to the next slide ON "a folder" — the birth scene lands as the sentenc
 # Three days later, it left.
 
 <!--
-Say it slow, like you're still slightly unsettled by it — picking up directly from the intro's "...with a folder": "The folder lived inside an internal platform I'd vibe-coded. It was called dx/hydra. (beat) Three days later, what was in that folder left — into its own repository. (beat) It has been building itself ever since." Eerie, not boastful. Optional escalation texture, all receipt-backed if you want to layer it in: within ten minutes of its orchestrator landing in the new repo it had CI and pre-push quality gates — the walls went up before the machine turned on — and it was fixing its own issues and merging its own pull requests by the next afternoon (PRs #53–60, ~17:00 Feb 19). Receipts: born at dx/hydra Feb 18 (commit 542dcd6a, "feat: Add Hydra — parallel Claude Code issue processor"); standalone repo init Feb 18 08:57; orchestrator Feb 19 00:33; CI 00:38; quality hooks 00:40. (Option: put a commit line on the slide as documentary texture.) Don't explain yet. Let the room want the chronology.
+Say it slow, like you're still slightly unsettled by it — picking up directly from the intro's "...with a folder": "The folder lived inside an internal platform I'd vibe-coded. It was called dx/hydra. (beat) Three days later, what was in that folder left — into its own repository. (beat) It has been building itself ever since." Eerie, not boastful. Optional escalation texture, all receipt-backed if you want to layer it in: within ten minutes of its orchestrator landing in the new repo it had CI and pre-push quality gates — the gates went up before the machine turned on — and it was fixing its own issues and merging its own pull requests by the next afternoon (PRs #53–60, ~17:00 Feb 19). Receipts: born at dx/hydra Feb 18 (commit 542dcd6a, "feat: Add Hydra — parallel Claude Code issue processor"); standalone repo init Feb 18 08:57; orchestrator Feb 19 00:33; CI 00:38; quality hooks 00:40. (Option: put a commit line on the slide as documentary texture.) Don't explain yet. Let the room want the chronology.
 -->
 
 ---
 
 ## It has been building itself ever since.
 
-# 47 loops. 1,600+ merged PRs.
+# 47 loops. 1,700+ merged PRs.
 
 #### No human reviews its code. None ever has.
 
 <!--
-Stage the numbers one at a time, like evidence at trial, not a LinkedIn cadence. "Forty-seven autonomous loops. (beat) More than sixteen hundred merged pull requests. (beat) Four months." Then land the claim flat and let it cost something: "No human reviews its code. None ever has. (beat) I haven't read a line of this code in a year." Don't soften it, don't qualify it — the flinch in the room IS the talk, and the next forty minutes earn the right to have said it. (The "year" reaches back through InsightMesh v2, also entirely vibe-coded with no review — the no-review bet predates the factory, and the next slides pay that off.) ON STAGE, preempt the "but you said four months" beat in the same breath: "The factory is four months old. The habit of not reading is a year — it started with the platform before it." Relatability beat, optional: "And before you ask — no, not all sixteen hundred are glamorous. A lot of them are dependency bumps and housekeeping. That's the point. Maintenance is most of software. It does the boring part too." Owning the boring PRs buys more trust than the big number does. If a principal pulls the git log and sees early commits under my name, the answer is precise, not a walk-back: commit identity is not human review — I directed and committed work I never read, and vibe-authoring is not reviewing. The handover curve is still the deepest cut: "Two out of every three commits in the factory were authored by the factory; last month they out-committed me three to one." (Receipts: 1,227 of 1,790 non-merge commits by agent identities; last 30 days agents 305 vs Travis 116. STRONG CANDIDATE for a slide visual — monthly stacked bar, human vs agent commits, the flip is the picture of 'self-building'.) REFRESH NUMBERS before stage — loops from docs/arch/generated/loops.md, PR count from gh. The claim must match the public registry exactly, because someone in row three will pull it up.
+Stage the numbers one at a time, like evidence at trial, not a LinkedIn cadence. "Forty-seven autonomous loops. (beat) More than seventeen hundred merged pull requests. (beat) Four months." Then land the claim flat and let it cost something: "No human reviews its code. None ever has. (beat) I haven't read a line of this code in a year." Don't soften it, don't qualify it — the flinch in the room IS the talk, and the next forty minutes earn the right to have said it. (The "year" reaches back through InsightMesh v2, also entirely vibe-coded with no review — the no-review bet predates the factory, and the next slides pay that off.) ON STAGE, preempt the "but you said four months" beat in the same breath: "The factory is four months old. The habit of not reading is a year — it started with the platform before it." Relatability beat, optional: "And before you ask — no, not all seventeen hundred are glamorous. A lot of them are dependency bumps and housekeeping. That's the point. Maintenance is most of software. It does the boring part too." Owning the boring PRs buys more trust than the big number does. If a principal pulls the git log and sees early commits under my name, the answer is precise, not a walk-back: commit identity is not human review — I directed and committed work I never read, and vibe-authoring is not reviewing. The handover curve is still the deepest cut: "Two out of every three commits in the factory were authored by the factory; last month they out-committed me three to one." (Receipts: 1,227 of 1,790 non-merge commits by agent identities; last 30 days agents 305 vs Travis 116. STRONG CANDIDATE for a slide visual — monthly stacked bar, human vs agent commits, the flip is the picture of 'self-building'.) REFRESH NUMBERS before stage — loops from docs/arch/generated/loops.md, PR count from gh. The claim must match the public registry exactly, because someone in row three will pull it up.
 -->
 
 ---
@@ -132,7 +134,7 @@ The empathy beat — it MUST land within a minute of the claim, or the next fort
 
 An internal platform, AI-built. Agents, retrieval, scheduled tasks, observability. No guardrails.
 
-# August 28, 2025: v1 died.
+# August 28, 2025: v1 became unmaintainable.
 
 <!--
 Motive one — the relatable one, a confession. InsightMesh: a real internal sales-enablement platform, built the way most of this room is building right now — Cursor, fast, thrilling, barely any review, no strong guardrails. (Stack stays a spoken aside at most — "LangGraph agents, Langfuse traces, the stack you'd expect." Real, not a toy.) "And v1 collapsed under its own weight. I couldn't maintain what I'd made. So on August 28, 2025 — the date's in the git history — I did what every engineer in this room has done at least once: threw it away and started over." This conference's tagline is "you ship it, you own it, you maintain it" — and the word AI changed most isn't ship or own. It's maintain. I didn't need a faster way to write code. I needed help keeping what I'd written alive.
@@ -140,14 +142,14 @@ Motive one — the relatable one, a confession. InsightMesh: a real internal sal
 
 ---
 
-## The fork: put the human back in, or build walls?
+## The fork: put the human back in, or build the structure?
 
 v2 is still entirely AI-written. Still almost no human review. What changed was the guardrails.
 
 # The version with less structure died. The version with more structure lives.
 
 <!--
-The beat that carries the talk in miniature — deliver it slow. "Here's the fork in the road. The obvious fix was to put the human back in the loop — review everything, slow down. I did the opposite. v2 — the version alive today — is still entirely AI-written. What changed was the guardrails: standards, tests, CI walls." The bet — walls over vigilance — was made HERE, ten months before the factory existed. The lessons rolled forward — that's roll number one, and it won't be the last time you hear that phrase tonight. Vibe to Value — the methodology name is this journey, compressed to three characters.
+The beat that carries the talk in miniature — deliver it slow. "Here's the fork in the road. The obvious fix was to put the human back in the loop — review everything, slow down. I did the opposite. v2 — the version alive today — is still entirely AI-written. What changed was the guardrails: standards, tests, CI gates." The bet — structure over vigilance — was made HERE, ten months before the factory existed. The lessons rolled forward — that's roll number one, and it won't be the last time you hear that phrase tonight. Vibe to Value — the methodology name is this journey, compressed to three characters.
 -->
 
 ---
@@ -161,7 +163,7 @@ The beat that carries the talk in miniature — deliver it slow. "Here's the for
 #### Vigilance measurably fails. Models can't supply truth. Verification has to be structural.
 
 <!--
-The credentials beat, and it's personal data, not opinion — walk it slow, because this is where "walls over vigilance" stops being a temperament and becomes a conclusion. Before v1 died, I'd already spent the spring of 2025 doing the homework. The case study: I exported 2,443 of my own ChatGPT sessions going back to 2023 and scored them against a five-stage decision loop I defined — frame, generate, judge, verify, refine. The findings were self-incriminating. 34% of my sessions never went past the model's first response. Of the loops I did complete, 27% skipped the critical-evaluation step. Say the next line plainly: "I taught test-driven development for twenty years, and my own validation discipline failed a third of the time. That's not a character flaw. That's what sustained contact with a fluent machine does to vigilance." One behavior fixed it: sessions where I asked the AI to critique its own output completed the loop 98% of the time. Hold that number — it comes back later as a job category. The coherence paper is the theory underneath: LLMs are coherence machines, not truth machines; hallucination is incomplete anchoring, not malfunction; truth enters from outside, through grounding and verification. So when v1 died and the fork came, the data had already voted: if the model only produces plausibility and human vigilance measurably fails — even mine — then verification can't be a virtue. It has to be a wall. Both papers are at aibuddy.software/papers; the room can check. NUMBERS verified against the PDFs 2026-06-11: 2,443 sessions, 34% exit at step one, 27% of completed loops skipped validation, 98% completion for critique-involving sessions.
+The credentials beat, and it's personal data, not opinion — walk it slow, because this is where "structure over vigilance" stops being a temperament and becomes a conclusion. Before v1 became unmaintainable, I'd already spent the spring of 2025 doing the homework. The case study: I exported 2,443 of my own ChatGPT sessions going back to 2023 and scored them against a five-stage decision loop I defined — frame, generate, judge, verify, refine. The findings were self-incriminating. 34% of my sessions never went past the model's first response. Of the loops I did complete, 27% skipped the critical-evaluation step. Say the next line plainly: "I taught test-driven development for twenty years, and my own validation discipline failed a third of the time. That's not a character flaw. That's what sustained contact with a fluent machine does to vigilance." One behavior fixed it: sessions where I asked the AI to critique its own output completed the loop 98% of the time. Hold that number — it comes back later as a job category. The coherence paper is the theory underneath: LLMs are coherence machines, not truth machines; hallucination is incomplete anchoring, not malfunction; truth enters from outside, through grounding and verification. So when v1 became unmaintainable and the fork came, the data had already voted: if the model only produces plausibility and human vigilance measurably fails — even mine — then verification can't be a virtue. It has to be structural. Both papers are at aibuddy.software/papers; the room can check. NUMBERS verified against the PDFs 2026-06-11: 2,443 sessions, 34% exit at step one, 27% of completed loops skipped validation, 98% completion for critique-involving sessions.
 -->
 
 ---
@@ -173,7 +175,7 @@ The credentials beat, and it's personal data, not opinion — walk it slow, beca
 # How much of the human can you pull out, and what breaks?
 
 <!--
-Motive two — the question. Be honest: Gas Town was the catalyst, not a parallel discovery. Steve showed the operational thing was buildable — a fleet of agents, an orchestrator, a human babysitting the swarm. I couldn't put the question down. Seven weeks later: first commit, February 18 — inside the InsightMesh repo, because it was born as a maintenance helper for the thing I'd vibed, carrying v2's guardrail lessons with it. Roll number two, and you can see it in the log: within ten minutes of the orchestrator arriving in the new repo, it had CI and quality gates. The walls went up first. Three days later it outgrew its host and moved into its own repo — and InsightMesh carried a vendored copy of its offspring for three more months before the umbilical was fully cut in May. Then the plant, one line, move on: "And somewhere in the four months since, the reason I was building changed. I'll get there."
+Motive two — the question. Be honest: Gas Town was the catalyst, not a parallel discovery. Steve showed the operational thing was buildable — a fleet of agents, an orchestrator, a human babysitting the swarm. I couldn't put the question down. Seven weeks later: first commit, February 18 — inside the InsightMesh repo, because it was born as a maintenance helper for the thing I'd vibed, carrying v2's guardrail lessons with it. Roll number two, and you can see it in the log: within ten minutes of the orchestrator arriving in the new repo, it had CI and quality gates. The gates went up first. Three days later it outgrew its host and moved into its own repo — and InsightMesh carried a vendored copy of its offspring for three more months before the umbilical was fully cut in May. Then the plant, one line, move on: "And somewhere in the four months since, the reason I was building changed. I'll get there."
 -->
 
 ---
@@ -195,7 +197,7 @@ Name HydraFlow here — not as a product, as the answer to the question. You fil
 #### One real cycle. Filed to merged. No human in the path.
 
 <!--
-Restored to live motion — the stills went flat, and this is the one beat the room needs to SEE move. Pre-recorded screencap at 2–4× speed (a recording can't demoware-fail you on stage): a real issue filed → a loop claims it the moment the label lands → branch → PR opens → checks go green → the label trail walks → merge. Frame it before you hit play: "I filed the intent — that's my whole contribution to what you're about to watch. Everything after this is the factory." Then hand off the clicker, say "I'll let it run," and stay SILENT while it plays — the confidence is the whole move; narrating over it undercuts it. Land on the final merged frame and speak the punchline to the freeze: "Issue to merged production code. An agent planned it, implemented it, wrote the tests, reviewed it, merged it. Notice what's missing from that list: me. (beat) It did this sixteen hundred times in four months." Cut back to slides — don't linger past the punchline. (Pick a cycle whose issue title reads from the back row.)
+Restored to live motion — the stills went flat, and this is the one beat the room needs to SEE move. Pre-recorded screencap at 2–4× speed (a recording can't demoware-fail you on stage): a real issue filed → a loop claims it the moment the label lands → branch → PR opens → checks go green → the label trail walks → merge. Frame it before you hit play: "I filed the intent — that's my whole contribution to what you're about to watch. Everything after this is the factory." Then hand off the clicker, say "I'll let it run," and stay SILENT while it plays — the confidence is the whole move; narrating over it undercuts it. Land on the final merged frame and speak the punchline to the freeze: "Issue to merged production code. An agent planned it, implemented it, wrote the tests, reviewed it, merged it. Notice what's missing from that list: me. (beat) It did this seventeen hundred times in four months." Cut back to slides — don't linger past the punchline. (Pick a cycle whose issue title reads from the back row.)
 -->
 
 ---
@@ -211,12 +213,12 @@ The thesis. Let the slide sit in silence for a few seconds first. Pour code fast
 
 ---
 
-# I hold the walls, not the keyboard.
+# The conveyor runs without me.
 
-#### No human approval in the routine loop.
+#### I cut the dies. The crew keeps it honest. The interlocks keep it safe. None of that is the keyboard.
 
 <!--
-This is the lean-back line — say it plainly and let it cost something. What got pulled out: code review, PR approval, the planning of routine work. Every approval in the day-to-day pipeline is made by another agent. I'm pulled in for high-blast-radius decisions, and I verify direction on a pass — not line by line. My job is to author the conventions the system reviews against, and to hold the boundary it cannot cross. So the obvious question: if I'm not the one watching the code, what is? Hold that question — the rest of this act is the whole answer. And I'm not the only one whose job description rewrote itself this spring. Next slide.
+This is the lean-back line. Say it plainly and let it cost something. The line runs without me: the conveyor is the label state machine, every work item rides it from intent to merged, and each loop is a station that claims it, does one job, and sends it on. No hands. I do three things, and none of them is the keyboard. I cut the dies, the workflow that shapes every part so its choices are good by construction. The crew, the loops, keeps it honest: tending, documenting, attacking, reviewing. And the interlocks make the unsafe move impossible, the way a press cannot close on a hand. No human approval in the routine loop; every approval in the day-to-day pipeline is made by another agent. I'm pulled in for high-blast-radius decisions, and I verify direction on a pass, not line by line. So the obvious question: if I'm not the one watching the code, what is? Hold that question; the rest of this act is those three forces, one at a time. And I'm not the only one whose job description rewrote itself this spring. Next slide.
 -->
 
 ---
@@ -275,12 +277,12 @@ The unifying reframe — give it its own breath before the numbers. Quality enfo
 
 ## The encoding has a size.
 
-15,800+ tests · 70% coverage floor, CI-enforced · 478 world-scenario tests · 176 regression tests
+15,800+ tests · 70% coverage floor, CI-enforced · 478 world-scenario tests · 590+ regression tests
 
-#### The gates are habits. The blast radius is a wall.
+#### Gates you can edit. Interlocks you can't. The factory caps what it can break.
 
 <!--
-Numbers one at a time, same trial cadence as the cold open: nearly sixteen thousand tests. Four hundred seventy-eight scenario tests that exercise the system inside simulated worlds. A hundred seventy-six regression tests — every bug that ever bit lands with one, so it can never bite twice. (15,838 collected via pytest 2026-06-09; refresh with the others.) COVERAGE NOTE: to a room of principals, "70% floor" reads as "30% unwatched." Before stage, run coverage and get the ACTUAL number — if it's meaningfully above 70, say both ("the enforced floor is 70; actual is X"); if it's near 70, drop coverage from the slide entirely and let the test counts carry it. The floor's real story is structural anyway: the build fails below it, and the factory can't quietly lower it. Then the distinction the next slide depends on: the gates are habits — code the factory can edit. The walls are not. Hold that line; it's the hinge of the whole middle act — and it sets up the obvious question: what ARE the walls? The next slide names them.
+Numbers one at a time, same trial cadence as the cold open: nearly sixteen thousand tests. Four hundred seventy-eight scenario tests that exercise the system inside simulated worlds. A hundred seventy-six regression tests — every bug that ever bit lands with one, so it can never bite twice. (15,838 collected via pytest 2026-06-09; refresh with the others.) COVERAGE NOTE: to a room of principals, "70% floor" reads as "30% unwatched." Before stage, run coverage and get the ACTUAL number — if it's meaningfully above 70, say both ("the enforced floor is 70; actual is X"); if it's near 70, drop coverage from the slide entirely and let the test counts carry it. The floor's real story is structural anyway: the build fails below it, and the factory can't quietly lower it. Then the distinction the next slide depends on: the gates are habits — code the factory can edit. Interlocks are not. Hold that line; it's the hinge of the whole middle act — and it sets up the obvious question: what ARE the interlocks? The next slide names them.
 -->
 
 ---
@@ -292,7 +294,7 @@ Numbers one at a time, same trial cadence as the cold open: nearly sixteen thous
 **Beyond its reach:** destructive ops blocked by hooks · can't raise its own budget · can't touch persisted state
 
 <!--
-Containment by construction, three rings — this is the "preventing runaway loops and cascades" promise from the abstract, delivered. Per loop: budgets and kill switches mean no single loop spins forever. Across loops: the label state machine gives every work item exactly one owner, so a local change can't snowball into a storm. And the hard walls live OUTSIDE the code the factory is allowed to edit: it cannot take an action it can't take back. The point isn't that loops never misbehave. It's that misbehavior is bounded, reversible, and in-budget — by construction. But "bounded, reversible, in-budget" is a CLAIM. How do you test a claim like that — without a staging org, real tokens, and a live bill running while you do? That's the next move.
+Containment by construction, three rings — this is the "preventing runaway loops and cascades" promise from the abstract, delivered. Per loop: budgets and kill switches mean no single loop spins forever. Across loops: the label state machine gives every work item exactly one owner, so a local change can't snowball into a storm. And the interlocks live OUTSIDE the code the factory is allowed to edit: it cannot take an action it can't take back. The point isn't that loops never misbehave. It's that misbehavior is bounded, reversible, and in-budget — by construction. But "bounded, reversible, in-budget" is a CLAIM. How do you test a claim like that — without a staging org, real tokens, and a live bill running while you do? That's the next move.
 -->
 
 ---
@@ -309,9 +311,11 @@ Start with the pain everyone in the room knows: "Testing a system like this used
 
 ## MockWorld: the test chamber
 
-GitHub, git, Docker, the LLM itself: **12 Ports, 34 Fakes**, each pinned to its real adapter by a conformance contract.
+GitHub, git, Docker, the LLM itself: **12 Ports, 25+ Fakes**, each pinned to its real adapter by a conformance contract.
 
 #### A mock fakes a response. A Fake world has state, time, and failure modes.
+
+##### A type check once said the fakes matched. They didn't. Now the contract checks signatures too.
 
 <!--
 The move: every external dependency the factory touches enters through a typed Port — and MockWorld swaps a Fake in at that boundary. These aren't traditional mocks. A mock simulates a RESPONSE — one call, one canned answer. A Fake world simulates CONDITIONS: it has state that persists, time that passes, and failure modes you can program. The entire factory runs inside a simulated world, on a laptop, in seconds — no tokens, no staging org, no bill. And the fakes can't quietly lie: every one is held to a conformance contract test that pins its behavior to the real adapter's (tests/trust/contracts/ — fake_github, fake_git, fake_docker, fake_llm, all of them). That's the answer to the question someone's already drafting for Q&A: "how do you know the fake matches reality?" The contract knows. Pre-arm the sharper jab too — "you faked the LLM, the only dependency that matters": the fake LLM tests the ORCHESTRATION — what the loops do when the model is slow, wrong, or rate-limited. Agent quality itself is validated one tier up, in the sandbox layer, against real models. Different layer, different question, both covered.
@@ -346,7 +350,7 @@ A real scene, not a pattern citation — timestamps verified against the PRs (#8
 #### The loops did what loops do. All of them. At once.
 
 <!--
-THE SCAR SLIDE — the credibility purchase. [VERIFY THE DETAILS OR SWAP IN YOUR TRUE WORST DAY — the shape below is reconstructed from the failure mode documented in the repo's own rules (CLAUDE.md: CreditExhaustedError silently eaten → "the loop burns attempt budget against an exhausted billing signal"). Tell it with the real specifics only you have: when, how long, what it cost, how you found it.] The relatable shape: "The billing API said no. But the error came back wrapped as a generic failure — and loops do what loops do with generic failures. They retried. Every loop, independently, burning its attempt budget against an account that could not say yes. Anyone who's been paged for a retry storm knows exactly what this looks like. My factory built me one." The recovery, briefly: the fix wasn't heroics, it was a rule — every subprocess runner now re-raises credit exhaustion past the generic handler, and that rule lives in the repo where every future agent inherits it. The lesson, plainly: "The factory doesn't fail like a junior engineer. It fails like a distributed system — dumb, persistent, parallel. The walls held: budgets capped it, nothing was destroyed, everything was reversible. But I want you to have the real picture: this thing has bad days, and the bad days are why half those forty-seven loops exist." This slide buys more trust than every green checkmark in the deck. Don't rush it, don't soften it. Then the handoff into the gaps: "A system that rewrites itself daily opens gaps ordinary software never has. The next few minutes are the machinery I built to fill them."
+THE SCAR SLIDE — the credibility purchase. [VERIFY THE DETAILS OR SWAP IN YOUR TRUE WORST DAY — the shape below is reconstructed from the failure mode documented in the repo's own rules (CLAUDE.md: CreditExhaustedError silently eaten → "the loop burns attempt budget against an exhausted billing signal"). Tell it with the real specifics only you have: when, how long, what it cost, how you found it.] The relatable shape: "The billing API said no. But the error came back wrapped as a generic failure — and loops do what loops do with generic failures. They retried. Every loop, independently, burning its attempt budget against an account that could not say yes. Anyone who's been paged for a retry storm knows exactly what this looks like. My factory built me one." The recovery, briefly: the fix wasn't heroics, it was a rule — every subprocess runner now re-raises credit exhaustion past the generic handler, and that rule lives in the repo where every future agent inherits it. The lesson, plainly: "The factory doesn't fail like a junior engineer. It fails like a distributed system — dumb, persistent, parallel. The interlocks held: budgets capped it, nothing was destroyed, everything was reversible. But I want you to have the real picture: this thing has bad days, and the bad days are why half those forty-seven loops exist." This slide buys more trust than every green checkmark in the deck. Don't rush it, don't soften it. Then the handoff into the gaps: "A system that rewrites itself daily opens gaps ordinary software never has. The next few minutes are the machinery I built to fill them."
 -->
 
 ---
@@ -356,7 +360,7 @@ THE SCAR SLIDE — the credibility purchase. [VERIFY THE DETAILS OR SWAP IN YOUR
 #### Comprehension. Meaning. Judgment. Erosion.
 
 <!--
-The framing slide, and the pivot off the bad day. "Half of those forty-seven loops exist because of days like that. A system that edits itself daily opens four gaps ordinary software never faces. Nobody can read it, comprehension. The words quietly change meaning. A fluent machine is persuasive even when it's wrong, judgment. The walls soften one reasonable change at a time, erosion. The rest of this act is the machinery that fills them, and the one I haven't filled yet. I'll start with the dangerous one."
+The framing slide, and the pivot off the bad day. "Half of those forty-seven loops exist because of days like that. A system that edits itself daily opens four gaps ordinary software never faces. Nobody can read it, comprehension. The words quietly change meaning. A fluent machine is persuasive even when it's wrong, judgment. The structure softens one reasonable change at a time, erosion. The rest of this act is the machinery that fills them, and the one I haven't filled yet. I'll start with the dangerous one."
 -->
 
 ---
@@ -373,6 +377,16 @@ Advisor pattern, a second opinion wired into review and verify · Corpus-learnin
 
 <!--
 The judgment gap is the dangerous one: a fluent machine is persuasive even when it is wrong, and my own 2025 chat data proved I would believe it. The 98% number from the receipts slide is this gap, measured. So the factory is built to distrust itself. The advisor pattern wires a skeptical second opinion into PR review and verification. The corpus-learning loop mines past failures and synthesizes fresh adversarial cases from them. The provocateurs run that hostile corpus weekly. And the artifact those three produce is the emotional center of the act, and the payoff of the identity beat: "I spent years teaching people to write the test first. This is the first test I have ever seen that teaches the NEXT developer, a test written to resist the system's own future laziness, telling whoever comes after to fix reality instead of the test." Not a passing test, a self-defending one. TDD did not get abandoned when I stopped reviewing code. It got projected up a level, from a practice I performed to a property the system defends. Hold it a beat. Then the turn: "I cannot read the code that grows artifacts like this, so I stopped trying. I read what the code says about itself instead." (Provocateurs are introduced earlier on the taxonomy slide; this is the deeper machinery, and the 98% receipt makes it personal.)
+-->
+
+---
+
+## The reviewer can't approve changes to its own reviewing.
+
+When a diff touches the review code, the veto is forced on. The factory is structurally forbidden from editing the thing that judges it.
+
+<!--
+The objection every engineer in the room is already forming: if an agent approves the code, and that judgment is itself code the factory can edit, what stops it from loosening its own standards? I had the same fear, so I made it impossible. There is one rule the reviewer cannot vote its way around: when a change touches the reviewer's own files (src/review_advisor.py, src/review_phase/), its authority flips to veto, every time, no matter what the config says. It can block changes to its conscience; it can never approve them. This is the T29 self-modification guard (ADR-0059), tested at tests/test_review_advisor.py::TestSelfModificationGuard. I encoded the distrust once, and it became an interlock the system can't edit from the inside. Place it right after the judgment-gap slide: it is the deepest answer to "what stops it softening its own standards."
 -->
 
 ---
@@ -401,12 +415,12 @@ The sharpest claim in the knowledge layer — give it its own slide because no o
 
 ## Erosion gap: a softened gate looks like a routine change.
 
-A CI workflow named **gates-drift** checks that the walls still match their source of truth.
+A CI workflow named **gates-drift** checks that the interlocks still match their source of truth.
 
 #### What I haven't filled yet: held-out evals.
 
 <!--
-The honest slide — deliver with conviction, not hedging; the room trusts everything else more after this. The scariest failure isn't a breach. It's a slow softening: a threshold lowered, a skip added, each one defensible, each approved by an agent judging against standards the same drift is relaxing. Gate erosion reads as routine, so it never trips the wire that pulls me in. And yes — I've built a tripwire: there is literally a CI workflow named gates-drift that verifies the branch-protection artifacts still match the gates.toml source of truth and every active gate maps to a real job. But notice what that is: a watcher for the watchers, and it's code too. And name the sharper version of the same problem before someone in row three does: "My test scenarios live in the repo the factory edits. StrongDM holds their evaluations OUTSIDE the system so it can't optimize against them. Mine are inside. What I have today: fresh-eyes review by subagents with no conversation context, conformance contracts the fakes can't dodge, a sandbox tier with real dependencies. What I don't have yet: held-out evals. It's the next wall I owe the system." Saying the gap out loud is the credibility move — this room can smell an unaddressed weakness from the lobby. Turtles, all the way down to one place: the walls cap the damage, and the conventions are mine to keep sound. That's the one job I can't delegate. That's where "stay the engineer" actually bites.
+The honest slide — deliver with conviction, not hedging; the room trusts everything else more after this. The scariest failure isn't a breach. It's a slow softening: a threshold lowered, a skip added, each one defensible, each approved by an agent judging against standards the same drift is relaxing. Gate erosion reads as routine, so it never trips the wire that pulls me in. And yes — I've built a tripwire: there is literally a CI workflow named gates-drift that verifies the branch-protection artifacts still match the gates.toml source of truth and every active gate maps to a real job. But notice what that is: a watcher for the watchers, and it's code too. And name the sharper version of the same problem before someone in row three does: "My test scenarios live in the repo the factory edits. StrongDM holds their evaluations OUTSIDE the system so it can't optimize against them. Mine are inside. What I have today: fresh-eyes review by subagents with no conversation context, conformance contracts the fakes can't dodge, a sandbox tier with real dependencies. What I don't have yet: held-out evals. It's the next interlock I owe the system." Saying the gap out loud is the credibility move — this room can smell an unaddressed weakness from the lobby. Turtles, all the way down to one place: the interlocks cap the damage, and the conventions are mine to keep sound. That's the one job I can't delegate. That's where "stay the engineer" actually bites.
 -->
 
 ---
@@ -415,12 +429,12 @@ The honest slide — deliver with conviction, not hedging; the room trusts every
 
 Huntley trusts the rerun. Steinberger trusts the tests.
 Cherny keeps a gate. Yegge babysits the fleet.
-I trust the walls.
+I trust the standard: the craft, encoded and enforced.
 
 #### Different bets on one question: what holds when you step back?
 
 <!--
-Forty seconds, peers not foils. Huntley first, one breath: the Ralph loop bets on stateless brute force, rerun the same prompt until the work converges, the repo is the only memory, read the result in the morning. Cherny next, and the callback earns its keep: the write-loops quote from earlier in this talk is his, and the same man still keeps a brutal human review gate on his own loops. The engineer who stopped prompting did not stop reading. And Steve returns — I borrowed his question and made the opposite bet on the answer. He built my kind of machine, Gas Town, twenty or thirty agents over a memory system — and his answer is to babysit it; he literally retitled himself "AI babysitter" and gates it on staying vigilant. Mine is to move the watching into the structure so it doesn't depend on me being sharp. All of these are live experiments; none is finished. Then the line that sets up the close (NOT a cut payoff — it now points forward to judgment): "Every one of us is working where failure is LEGIBLE — a red test, a bad diff, a broken build. The walls handle the legible part. What no wall catches — is it any good, is it worth building, who does it hurt — is the illegible part. Hold that; it's the judgment the close lands on."
+Forty seconds, peers not foils. Huntley first, one breath: the Ralph loop bets on stateless brute force, rerun the same prompt until the work converges, the repo is the only memory, read the result in the morning. Cherny next, and the callback earns its keep: the write-loops quote from earlier in this talk is his, and the same man still keeps a brutal human review gate on his own loops. The engineer who stopped prompting did not stop reading. And Steve returns — I borrowed his question and made the opposite bet on the answer. We even started at the same wall: he totaled a vibe-coded system and rebuilt it from scratch (his book's line is "Joel Spolsky was wrong" — rewriting is cheap now), and I totaled one too. He built my kind of machine, Gas Town, twenty or thirty agents over a memory system — and his answer is to rewrite freely and babysit it; he literally retitled himself "AI babysitter" and gates it on staying vigilant. Mine is to rebuild with the dies and interlocks so the next one can't total, and move the watching into the structure so it doesn't depend on me being sharp. (VERIFY the "Joel Spolsky was wrong" line against the Vibe Coding book before stage.) All of these are live experiments; none is finished. Then the line that sets up the close (NOT a cut payoff — it now points forward to judgment): "Every one of us is working where failure is LEGIBLE — a red test, a bad diff, a broken build. The structure handles the legible part. What no structure catches — is it any good, is it worth building, who does it hurt — is the illegible part. Hold that; it's the judgment the close lands on."
 -->
 
 ---
@@ -435,14 +449,14 @@ Close the loop on motive two, honestly scoped. Legible software: a bad commit is
 
 ---
 
-## The platform that died in Act One didn't stay dead.
+## The platform that became unmaintainable in Act One didn't stay dead, and it didn't get rebuilt.
 
 # InsightMesh v3 is SignalRoom.
 
-#### Dynamic MCP. Manifest-based apps. Every tool permission-gated.
+#### Same repo, new name. Deploying a manifest.json deploys an app: its tools, its visibility, its permissions.
 
 <!--
-Pay off the InsightMesh thread the room has been holding since "v1 died," and CLOSE THE LINEAGE LOOP explicitly so "child/parent" on the next slide is earned, not inferred: "Remember the repo HydraFlow was born inside and walked out of in three days? That was InsightMesh. It didn't stay dead." v1 died, v2 came back with guardrails, and it kept evolving. v3 is SignalRoom: a platform where each app is a manifest that exposes its own APIs and its own agents as role-gated tools, a capability registry, an ACL, the control plane, service accounts. Say the line that matters and let it land: it is 100% vibe-coded, not a line of it written by a human. And keep the stack name, it grounds the claim: the deep-research agents run in their own framework, LangGraph, executed in-framework. This is the same walls-over-vigilance bet from the fork slide, now running a real production platform.
+Pay off the InsightMesh thread the room has been holding since "v1 became unmaintainable," and CLOSE THE LINEAGE LOOP explicitly so "child/parent" on the next slide is earned, not inferred: "Remember the repo HydraFlow was born inside and walked out of in three days? That was InsightMesh. It didn't stay dead, and here's the part people miss, it didn't get rebuilt either. Same repository, new name." v1 became unmaintainable, v2 came back with guardrails, and v3 is the same v2 codebase rebranded SignalRoom (the server still identifies as InsightMesh internally; only the brand changed, June 2026). The mechanism lands in a craft room: each app is a checked-in manifest.json, and merging it registers the app's tools, sets MCP visibility, and creates the role-based permission groups, with no wiring code. The gateway exposes four generic methods (search, list, describe, run); everything else is discovered live and filtered to who you are. Say the line that matters and let it land: it is 100% vibe-coded, not a line of it written by a human, because it's the same continuously-AI-built repo. And keep the stack name, it grounds the claim: the deep-research agents run in their own framework, LangGraph, executed in-framework. This is the same structure-over-vigilance bet from the fork slide, now running a real production platform.
 -->
 
 ---
@@ -452,6 +466,8 @@ Pay off the InsightMesh thread the room has been holding since "v1 died," and CL
 Exec-level company intelligence, buy signals, prospecting. Deep-research agents in LangGraph. 100% vibe-coded.
 
 # Can the child maintain the parent?
+
+#### The factory goes home to maintain the platform that raised it.
 
 <!--
 The experiment, and keep it FUTURE TENSE, because the close depends on it. DealIQ is a real production app on SignalRoom: company intelligence for the sales team, buy-signal detection, prospecting profiles, deep-research LangGraph agents, every tool permission-gated right in its manifest. Real users, in production, and I have no time to feed it. So here is the next experiment: hand its maintenance to the factory. The thing born inside InsightMesh, that escaped in three days, goes home to keep alive InsightMesh's own descendant. The child maintains the parent. I am running it now. I do not have the result yet. Keep it qualitative on stage: real users, in production, the sales team. Do NOT name the host URL, no audience value and it is an internal box. If you want a sharper receipt, drop in an in-production-since date you can stand behind.
@@ -479,7 +495,7 @@ The grace note, ONE breath, future tense, no printer and no "she ships software.
 
 ---
 
-## My walls protect my repo.
+## My interlocks protect my repo.
 
 # They don't protect the org.
 
@@ -498,7 +514,7 @@ End the second-order beats on the gut-punch, not a list. Hooks, credit caps, imm
 #### Making got cheap. Deciding what's worth making, holding the standards, owning what ships. That's the job that's left, and the one I can't hand off.
 
 <!--
-DELIVERY: "governance" is a flat noun, so land the VERBS on stage — deciding what's worth making, holding the standards, owning what ships — not the word itself. Answer the title, for THEM, not just for me. The craft doesn't disappear, it moves up a level. CRAFT-CONFERENCE TIE (land this, it's the room's whole reason for being): "The craft didn't die. It got a new material, the loop. The field's already named it: loopcraft. Same craft, one level up." Everything that made the factory safe, the walls, the gates, the tests that defend themselves, is SOLID-era engineering projected up a level. Only people with the craft can build a factory worth trusting. "I spent years teaching the craft one engineer at a time. The factory is the same teaching, compiled." So the direction, plainly: "Go build the container. Shared make targets, quality gates, a test pyramid, CI walls every new repo inherits. Then hand the keystrokes to the machine and keep the judgment for yourself. That's where the engineer goes." Then home, brief and true: "I'm running the experiment right now, on a platform called SignalRoom and an app called DealIQ, and quietly, with my daughter. I'll let you know." Walk off on that.
+DELIVERY: "governance" is a flat noun, so land the VERBS on stage — deciding what's worth making, holding the standards, owning what ships — not the word itself. Answer the title, for THEM, not just for me. The craft doesn't disappear, it moves up a level. CRAFT-CONFERENCE TIE (land this, it's the room's whole reason for being): "The craft didn't die. It got a new material, the loop. The field's already named it: loopcraft. Same craft, one level up." Everything that made the factory safe, the interlocks, the gates, the tests that defend themselves, is SOLID-era engineering projected up a level. Only people with the craft can build a factory worth trusting. "I spent years teaching the craft one engineer at a time. The factory is the same teaching, compiled." So the direction, plainly: "Go build the container. Shared make targets, quality gates, a test pyramid, CI gates every new repo inherits. Then hand the keystrokes to the machine and keep the judgment for yourself. That's where the engineer goes." Then home, brief and true: "I'm running the experiment right now, on a platform called SignalRoom and an app called DealIQ, and quietly, with my daughter. I'll let you know." Walk off on that.
 -->
 
 ---
@@ -516,7 +532,7 @@ References, contact, the essay link. Keep it short; the last real slide was the 
    Less than I want. My scenarios live in the repo it edits; StrongDM holds theirs outside the
    system, and that's the stricter discipline. What I have: fresh-eyes subagent review with no
    conversation context, conformance contracts pinning every fake to its real adapter, and a
-   sandbox tier with real dependencies. Held-out evals are the next wall I owe it." The
+   sandbox tier with real dependencies. Held-out evals are the next interlock I owe it." The
    concession IS the answer — this room trusts named gaps over claimed completeness.
 
 2. "What does it cost?" — Don't deflect; you have real numbers. "I'll give you an actual
@@ -525,11 +541,11 @@ References, contact, the essay link. Keep it short; the last real slide was the 
    source, and spend is attributed per-loop on the dashboard, so I always know that number. The honest pattern
    underneath it: we've spent more engineering on validation and governance than we've ever
    spent on inference." If pressed on whether it scales: the caps are the answer — the factory
-   cannot outspend its budget by construction; cost is a wall, not a hope.
+   cannot outspend its budget by construction; cost is an interlock, not a hope.
 
 3. "You're going to let a factory with no human review maintain a product real users depend on?" —
    Don't dodge; this is the accountability slide restated as an accusation. "That's exactly the
-   right question, and it's why DealIQ is an experiment I'm narrating, not a victory lap. The walls
+   right question, and it's why DealIQ is an experiment I'm narrating, not a victory lap. The interlocks
    protect the repo today: nothing destructive, nothing irreversible, everything in budget. What
    they don't yet protect is the user on the other end of a shipped change. Reaching the user with
    the same guarantees is a prerequisite of the handoff, not an afterthought. And the release gate
@@ -557,6 +573,6 @@ References, contact, the essay link. Keep it short; the last real slide was the 
    conversation (the provider-agnostic-harness thread). "No, by design. The factory reaches
    every model through a swappable agent-CLI backend — Claude, Codex, Gemini, Pi are a config
    field, not a rewrite. The lock-in in this world was never the model; it's the harness around
-   it. My moat isn't a vendor — it's the walls, the conventions, and the knowledge the factory
+   it. My moat isn't a vendor — it's the structure, the conventions, and the knowledge the factory
    keeps about itself, and none of that moves when the model does."
 -->
