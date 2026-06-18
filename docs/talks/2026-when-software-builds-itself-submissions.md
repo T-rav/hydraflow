@@ -39,6 +39,53 @@ re-verify each live page before relying on a deadline.
 
 **Follow-ups:** add previous-talk links (Accelerate Chicago, GOTO) if not already in; confirm deadline by email.
 
+### Build Stuff 2026: Vilnius
+- **Status:** Submitted 2026-06-18. **45-min slot** (full talk fits, no cut needed). Awaiting selection.
+- **Conference:** Vilnius, LT, Dec 2–4 2026. Builder/craft + AI-native + leadership audience. Tracks: AI-Native Software Development, Developer Craft & Code Quality, Engineering Leadership. Travel + lodging reportedly covered (verify).
+- **CFP:** https://buildstuff.events/pages/call-for-papers
+
+**Title submitted:** When Software Builds Itself: Someone Still Has to Engineer It
+
+**Speaker tagline (6 words, leadership + AI):** "Leading engineering in the agentic age" *(confirm which you actually used; alt offered: "AI ships code, leaders own it")*
+
+**Areas of expertise:** Software craft & code quality, AI agents & agentic systems, software architecture, engineering leadership
+
+**Target audience:** Senior engineers, architects, and engineering leaders (tech leads through CTO) bringing AI agents into how their teams build, who care about getting AI-built software to production safely, not just to a demo. Intermediate-to-senior; a field report and a way of thinking, not a hands-on tutorial.
+
+**Abstract (293 words):**
+
+> Generating code is easy now. Getting it to production safely is the hard part, and that part is still engineering.
+>
+> Since early this year I have run an experiment to prove it: I handed my engineering discipline to an autonomous system and stepped out of the loop. It files work, designs it, writes the tests, implements, reviews itself, and merges. No human in the routine path. No one reads the code it produces. It has shipped real software that way for months.
+>
+> It should have produced slop. It didn't, and the reason is the whole talk. When code generation becomes nearly free, the engineering does not disappear. It moves. It moves out of the typing and into the things that actually decide whether software is any good: the structure it has to fit, the tests that define what working means, the guardrails it cannot cross, and the judgment about whether it should ship at all. Take those away and you don't get speed. You get a confident machine shipping plausible, wrong code at scale.
+>
+> This is a field report from inside that system, built for people who care about craft, not hype. I will show you how the discipline gets encoded so it holds without a human watching, how quality moves from something a senior reviewer catches to something the system enforces, and the night it failed anyway and what that taught me. You will leave with a concrete model for where the engineering goes when the code writes itself, why "someone still has to engineer it" is the most important sentence in this shift, and an honest account of the parts I still have not solved.
+>
+> Whether you lead a team or write the code, the job is moving. This is where it goes.
+
+**Key takeaways:**
+- Where the engineering goes when code is nearly free: a concrete model of value moving out of typing and into the structure, tests, guardrails, and judgment that decide what ships.
+- How to make quality structural, not social: why reviewers and team discipline don't scale to a system that changes faster than anyone can review, and how to encode the bar so it holds without a human watching.
+- What it really takes to get AI-built code to production safely, and the failure mode when you skip it (a confident machine shipping plausible, wrong code at scale).
+- Where the human still owns the job: judgment on what's worth building and whether it's good, plus the accountability gap, who owns what a machine built and a human shipped.
+
+**Bio (292 words, "Head of Agentic AI" — current canonical version, timeline corrected):**
+
+> Travis Frisinger is Head of Agentic AI at 8th Light, where he helps teams get AI-built software to production, not demos, not prototypes, but systems real users depend on. He has built software for more than twenty years, and now works on the gap most teams hit the moment the novelty wears off: generating code is easy, and getting it to production safely is the hard part. Most "AI made me a developer" stories stall exactly there.
+>
+> Since early this year he has been running an unusual experiment to understand that gap from the inside. He handed his own engineering discipline to an autonomous system and stepped out of the loop. It files work, designs it, writes the tests, implements, reviews itself, and merges, with no human in the routine path and no one reading the code it produces. It has shipped real software that way for months. The interesting part was never the code generation. It was everything around it: the structure, the tests, the guardrails, and the judgment that decides whether any of it should ship.
+>
+> That experiment changed how he thinks about the work. When code becomes nearly free, quality stops being something a senior reviewer catches and has to become structural, encoded into the system itself. The engineer's value moves from producing code to exercising judgment, and a new question appears that no org chart answers yet: who is accountable for what a machine built and a human shipped?
+>
+> He speaks on agentic AI, software craft, architecture, and engineering leadership, drawing on both the production work and the experiment. Underneath all of it is the question he keeps chasing: when the machines build the software, what is left that is ours, and how do we lead through it?
+
+**Follow-ups:**
+- **Timeline flag:** the autonomous system is ~4 months old (born Feb 2026); the "year" only refers to the broader no-review habit. Abstract uses "since early this year" (correct). If the bio you submitted still said "for the past year he has been running an unusual experiment," fix it if the form allows edits (corrected version above).
+- Confirm the exact tagline used and the "Head of Agentic AI at 8th Light" title wording.
+- The CTO Craft entry above used the older bio (tddbuddy / "principal-level"); this Head-of-Agentic-AI bio is the current positioning. If reusing materials, prefer this one.
+- Refresh numbers + verify quotes (Cherny, Yegge, Gabriel) before stage.
+
 ---
 
 ## ShipItCon (Dublin) — not submitted
@@ -63,8 +110,8 @@ re-verify each live page before relying on a deadline.
 Three framings depending on audience: leadership (judgment/governance), AI engineering (autonomous agents), delivery/platform (friction/paved paths). Versions exist at 45, 30, and 15 min.
 
 ### Highest-fit, travel + lodging covered
-- **AI Engineering Summit** — Berlin, DE · conf Nov 16 · CFP **Jul 14** · bullseye (coding agents, prompt-to-PR, testing/review of AI-generated code, governance). Travel + lodging covered.
-- **Build Stuff** — Vilnius, LT · conf Dec 2 · CFP **Jul 19** · AI-Native Software Development + Craft + Leadership tracks. Travel + lodging covered.
+- **AI Engineering Summit** — Berlin, DE · conf Nov 16 · CFP **Jul 14** · strong on paper (coding agents, prompt-to-PR, testing/review of AI-generated code, governance). **CAVEAT:** could not independently confirm a conference by this exact name on a follow-up check (organizer site blocked automated verification); the lead came from a Sessionize listing. Verify it's real before relying. Travel + lodging reportedly covered.
+- **Build Stuff** — Vilnius, LT — **SUBMITTED 2026-06-18, 45-min slot** (see Submitted section above).
 
 ### Act-soon (imminent deadlines)
 - **Platform Engineering Day @ KubeCon NA** — Salt Lake City, US · CFP **Jun 21** · 25-min, paved paths/guardrails.
