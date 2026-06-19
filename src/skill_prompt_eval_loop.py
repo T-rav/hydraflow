@@ -16,6 +16,7 @@ Spec: `docs/superpowers/specs/2026-04-22-trust-architecture-hardening-design.md`
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import math
@@ -38,6 +39,31 @@ logger = logging.getLogger("hydraflow.skill_prompt_eval_loop")
 
 _MAX_ATTEMPTS = 3
 _WEAK_SAMPLE_RATE = 0.10
+
+# Hard caps on subprocess reads. A wedged child must not hang the loop cycle
+# forever and freeze its heartbeat — the #9410 silent-stall failure class
+# (#9454 / #9508). ``make trust-adversarial`` drives an LLM eval harness so it
+# gets a generous bound; the ``gh`` reconcile read gets the standard one.
+_ADVERSARIAL_TIMEOUT_SECONDS = 3600
+_GH_TIMEOUT_SECONDS = 120
+
+
+async def _communicate_bounded(
+    proc: asyncio.subprocess.Process, timeout: float
+) -> tuple[bytes, bytes]:
+    """``proc.communicate()`` bounded by *timeout* seconds.
+
+    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
+    the caller can treat it as a failed read (rather than hanging the loop
+    cycle indefinitely).
+    """
+    try:
+        return await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except TimeoutError:
+        proc.kill()
+        with contextlib.suppress(ProcessLookupError):
+            await proc.wait()
+        raise
 
 
 class SkillPromptEvalLoop(BaseBackgroundLoop):
@@ -93,7 +119,9 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
             )
-            stdout, stderr = await proc.communicate()
+            stdout, stderr = await _communicate_bounded(
+                proc, timeout=_ADVERSARIAL_TIMEOUT_SECONDS
+            )
         except Exception as exc:  # noqa: BLE001
             reraise_on_credit_or_bug(exc)
             logger.warning("trust-adversarial subprocess failed: %s", exc)
@@ -200,7 +228,10 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        try:
+            stdout, _ = await _communicate_bounded(proc, timeout=_GH_TIMEOUT_SECONDS)
+        except TimeoutError:
+            return
         if proc.returncode != 0:
             return
         try:

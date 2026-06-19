@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W25
 
+- `302df93` — feat(loops): per-loop work-cycle watchdog (closes #9556) *(2026-06-19)*
 - `9ce3101` — Fixes #9442: wiki_rot_detector _gh_closed_escalations bypasses PRPo... (#9509) (#9509) *(2026-06-15)*
 
 ## 2026-W24
