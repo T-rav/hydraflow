@@ -11,7 +11,7 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **ADVERSARIAL_STAGE_EXHAUSTED** ⚠️ | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_stage_exhausted` | — |
 | **ADVERSARIAL_STAGE_STARTED** ⚠️ | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_stage_started` | — |
 | **AGENT_ACTIVITY** ⚠️ | `src.runner_utils:_stream_and_collect` | — |
-| **BACKGROUND_WORKER_STATUS** ⚠️ | `src.base_background_loop:BaseBackgroundLoop._execute_cycle` | — |
+| **BACKGROUND_WORKER_STATUS** ⚠️ | `src.base_background_loop:BaseBackgroundLoop._execute_cycle`<br>`src.base_background_loop:BaseBackgroundLoop._report_cycle_failure` | — |
 | **BASELINE_UPDATE** ⚠️ | `src.baseline_policy:BaselinePolicy.check_approval`<br>`src.baseline_policy:BaselinePolicy.rollback` | — |
 | **CI_CHECK** ⚠️ | `src.pr_manager:PRManager.wait_for_ci`<br>`src.reviewer:ReviewRunner.fix_ci` | — |
 | **CONCERN_FORWARDED** ⚠️ | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_concerns_forwarded` | — |
@@ -24,7 +24,7 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **EPIC_RELEASED** ⚠️ | `src.epic:EpicManager._execute_release` | — |
 | **EPIC_RELEASING** ⚠️ | `src.epic:EpicManager._execute_release` | — |
 | **EPIC_UPDATE** ⚠️ | `src.epic:EpicManager._publish_update` | — |
-| **ERROR** ⚠️ | `src.base_background_loop:BaseBackgroundLoop._execute_cycle`<br>`src.orchestrator:HydraFlowOrchestrator._polling_loop`<br>`src.orchestrator:HydraFlowOrchestrator._restart_loop` | — |
+| **ERROR** ⚠️ | `src.base_background_loop:BaseBackgroundLoop._report_cycle_failure`<br>`src.orchestrator:HydraFlowOrchestrator._polling_loop`<br>`src.orchestrator:HydraFlowOrchestrator._restart_loop` | — |
 | **HITL_ESCALATION** ⚠️ | `src.dashboard_routes._routes:create_router.request_changes`<br>`src.review_phase._phase:ReviewPhase._escalate_to_hitl` | — |
 | **HITL_UPDATE** ⚠️ | `src.dashboard_routes._hitl_routes:register._resolve_hitl_item`<br>`src.dashboard_routes._hitl_routes:register.hitl_correct`<br>`src.hitl_phase:HITLPhase._process_one_hitl`<br>`src.hitl_runner:HITLRunner.run`<br>`src.pr_unsticker:PRUnsticker.unstick` | — |
 | **ISSUE_CREATED** ⚠️ | `src.pr_manager:PRManager.create_issue` | — |

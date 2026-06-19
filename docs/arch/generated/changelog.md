@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W25
 
+- `c1b363d` — Merge remote-tracking branch 'origin/staging' into feat/loop-watchdog-9556 *(2026-06-19)*
+- `1d8a175` — fix: close regression-test backlog from the 2026-06-13 session (10 issues) (#9592) (#9592) *(2026-06-19)*
+- `302df93` — feat(loops): per-loop work-cycle watchdog (closes #9556) *(2026-06-19)*
 - `9ce3101` — Fixes #9442: wiki_rot_detector _gh_closed_escalations bypasses PRPo... (#9509) (#9509) *(2026-06-15)*
 
 ## 2026-W24
