@@ -60,6 +60,11 @@ class RevertConflictError(RuntimeError):
 # a single poll interval; the trade-off is more wakeups for each bisect.
 _CANCELLATION_POLL_SECONDS = 5
 
+# Hard cap on the ``gh`` read used to look up the RC-red commit range. A wedged
+# ``gh`` (auth prompt, network black-hole) must not hang the loop cycle
+# forever and freeze its heartbeat (#9454 / #9508).
+_GH_TIMEOUT_SECONDS = 120
+
 
 class StagingBisectLoop(BaseBackgroundLoop):
     """Watchdog that reacts to RC-red state transitions. See ADR-0042 §4.3."""
@@ -573,7 +578,17 @@ class StagingBisectLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=_GH_TIMEOUT_SECONDS
+            )
+        except TimeoutError as exc:
+            proc.kill()
+            with contextlib.suppress(ProcessLookupError):
+                await proc.wait()
+            raise RuntimeError(
+                f"gh timed out after {_GH_TIMEOUT_SECONDS}s: {' '.join(cmd)}"
+            ) from exc
         if proc.returncode != 0:
             raise RuntimeError(f"gh failed: {stderr.decode()[:500]}")
         return stdout.decode()
