@@ -187,14 +187,11 @@ class BaseBackgroundLoop(abc.ABC):
         a hung loop surfaces as a cycle error and retries next tick instead of
         freezing its heartbeat forever (#9455 / #9556).
         """
+        timeout = self._cycle_timeout_seconds()
+        work_task = asyncio.create_task(self._do_work())
         try:
-            timeout = self._cycle_timeout_seconds()
-            work_task = asyncio.create_task(self._do_work())
             done, _pending = await asyncio.wait({work_task}, timeout=timeout)
             if work_task not in done:
-                work_task.cancel()
-                with contextlib.suppress(BaseException):
-                    await work_task
                 raise LoopCycleTimeoutError(self._worker_name, timeout)
             stats = work_task.result()
             details = self._build_details(stats)
@@ -216,10 +213,10 @@ class BaseBackgroundLoop(abc.ABC):
         except AuthenticationRetryError:
             raise
         except LoopCycleTimeoutError as exc:
-            # Watchdog fired: the cycle overran its bound and was cancelled.
-            # Surface it as a distinct WARNING (not a bug traceback) plus an
-            # error status, so a hung loop is visible in the dashboard / Sentry
-            # without masquerading as a code fault (#9556).
+            # Watchdog fired: the cycle overran its bound. Surface it as a
+            # distinct WARNING (not a bug traceback) plus an error status, so a
+            # hung loop is visible in the dashboard / Sentry without
+            # masquerading as a code fault (#9556).
             logger.warning("%s", exc)
             await self._report_cycle_failure(
                 f"{self._worker_name.replace('_', ' ').capitalize()} loop "
@@ -233,6 +230,16 @@ class BaseBackgroundLoop(abc.ABC):
             await self._report_cycle_failure(
                 f"{self._worker_name.replace('_', ' ').capitalize()} loop error"
             )
+        finally:
+            # Never let the work task outlive the cycle. On a watchdog timeout —
+            # or if _execute_cycle itself is cancelled (loop shutdown) while
+            # awaiting — an un-drained task orphans and blocks event-loop
+            # teardown's _cancel_all_tasks gather. Cancel + drain it here so the
+            # cycle owns its task's full lifecycle.
+            if not work_task.done():
+                work_task.cancel()
+                with contextlib.suppress(BaseException):
+                    await work_task
 
     async def _report_cycle_failure(self, message: str) -> None:
         """Publish the error status + ERROR event for a failed/timed-out cycle."""
