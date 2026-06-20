@@ -5,13 +5,13 @@ kind: "loop"
 bounded_context: "builder"
 code_anchor: "src/report_issue_loop.py:ReportIssueLoop"
 aliases: ["report issue loop", "bug report loop", "dashboard report processor"]
-related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KVHDB0GY6PSQPWY90DH8TNQS"}]
 evidence: ["01KQP0XFBGMB32VFGNPV8GZ26X"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T20:00:00.000000+00:00"
-updated_at: "2026-06-12T04:18:46.416686+00:00"
+updated_at: "2026-06-20T05:03:15.326246+00:00"
 ---
 
 ## Definition
