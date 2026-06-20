@@ -580,7 +580,7 @@ class FakeGitHub:
         self,
         label: str,
         *,
-        limit: int = 200,
+        limit: int = 100,
     ) -> list[dict[str, Any]]:
         """Return closed issues carrying *label* (most recent up to *limit*)."""
         self._maybe_rate_limit()

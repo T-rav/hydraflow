@@ -6,6 +6,15 @@ import { BugReportPanel } from './BugReportPanel'
 import { ReportIssueModal } from './ReportIssueModal'
 import html2canvasLib from 'html2canvas'
 
+// Terminal end-states = main-track stages with no processing role and no config
+// knob (hitl, merged). After REVIEW an issue forks to a human OR gets merged —
+// never both — so these render as parallel arms of a fork, not a linear chain
+// (#9224). Derived from PIPELINE_STAGES so adding/removing a terminal needs no
+// edit here; mirrors StreamView's PipelineFlow.
+const TERMINAL_STAGE_KEYS = new Set(
+  PIPELINE_STAGES.filter(s => !s.role && !s.configKey).map(s => s.key)
+)
+
 function isCrossOriginImage(el) {
   if (!el || el.tagName !== 'IMG') return false
   const src = el.getAttribute('src') || ''
@@ -259,7 +268,13 @@ export function Header({ connected, orchestratorStatus }) {
               )
               const arrow = <span style={styles.pipelineArrow}>→</span>
               const triageStage = mainTrack.find(s => s.key === 'triage')
-              const postTriage = mainTrack.filter(s => s.key !== 'triage')
+              // Post-triage main-track stages minus the terminal end-states
+              // (hitl, merged): those fork off REVIEW rather than chaining
+              // linearly after it (#9224).
+              const postTriage = mainTrack.filter(
+                s => s.key !== 'triage' && !TERMINAL_STAGE_KEYS.has(s.key)
+              )
+              const terminalStages = mainTrack.filter(s => TERMINAL_STAGE_KEYS.has(s.key))
               return (
                 <>
                   {triageStage && renderPill(triageStage)}
@@ -277,17 +292,31 @@ export function Header({ connected, orchestratorStatus }) {
                           <span style={styles.forkArrow}>↘</span>
                         </span>
                         <span style={styles.forkBottom}>
-                          <span style={styles.forkDirect}>direct</span>
+                          <span style={styles.forkDirect}>direct →</span>
                         </span>
                       </span>
                     </>
                   )}
-                  {postTriage.map((stage, index) => (
+                  {postTriage.map((stage) => (
                     <React.Fragment key={stage.key}>
                       {arrow}
                       {renderPill(stage)}
                     </React.Fragment>
                   ))}
+                  {terminalStages.length > 0 && (
+                    <span style={styles.pipelineFork} data-testid="review-terminal-fork">
+                      <span style={styles.forkTop}>
+                        <span style={styles.forkArrow}>↗</span>
+                        {renderPill(terminalStages[0])}
+                      </span>
+                      {terminalStages.slice(1).map((stage) => (
+                        <span style={styles.forkBottom} key={stage.key}>
+                          <span style={styles.forkArrow}>↘</span>
+                          {renderPill(stage)}
+                        </span>
+                      ))}
+                    </span>
+                  )}
                 </>
               )
             })()}

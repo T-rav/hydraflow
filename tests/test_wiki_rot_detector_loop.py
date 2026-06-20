@@ -165,9 +165,7 @@ async def test_tick_repo_escalates_on_third_attempt(
 
 
 async def test_reconcile_clears_dedup_and_attempts(
-    tmp_path: Path,
     loop_env,
-    monkeypatch,
 ) -> None:
     cfg, state, pr, dedup, wiki_store = loop_env
     slug = "hydra/hydraflow"
@@ -182,15 +180,12 @@ async def test_reconcile_clears_dedup_and_attempts(
             "body": f"Repo: `{slug}`",
         },
     ]
-
-    async def fake_list(*_a, **_kw):
-        return closed_payload
+    pr.list_closed_issues_by_label = AsyncMock(return_value=closed_payload)
 
     loop = _loop(loop_env)
-    monkeypatch.setattr(loop, "_gh_closed_escalations", fake_list)
-
     await loop._reconcile_closed_escalations()
 
+    pr.list_closed_issues_by_label.assert_awaited_once_with("wiki-rot-stuck", limit=50)
     state.clear_wiki_rot_attempts.assert_any_call(f"{slug}:src/foo.py:bar")
     # set_all called with the surviving key.
     remaining_calls = [c.args[0] for c in dedup.set_all.call_args_list]
@@ -199,16 +194,47 @@ async def test_reconcile_clears_dedup_and_attempts(
     assert f"wiki_rot_detector:{slug}:src/foo.py:other" in remaining_calls[-1]
 
 
-async def test_reconcile_noop_when_no_closed(loop_env, monkeypatch) -> None:
+async def test_reconcile_noop_when_no_closed(loop_env) -> None:
     cfg, state, pr, dedup, wiki_store = loop_env
-
-    async def fake_list(*_a, **_kw):
-        return []
+    pr.list_closed_issues_by_label = AsyncMock(return_value=[])
 
     loop = _loop(loop_env)
-    monkeypatch.setattr(loop, "_gh_closed_escalations", fake_list)
-
     await loop._reconcile_closed_escalations()
+
+    pr.list_closed_issues_by_label.assert_awaited_once_with("wiki-rot-stuck", limit=50)
+    dedup.set_all.assert_not_called()
+    state.clear_wiki_rot_attempts.assert_not_called()
+
+
+async def test_reconcile_tolerates_port_failure(loop_env) -> None:
+    """Port raises ⇒ reconcile returns without re-raising; no dedup mutation."""
+    cfg, state, pr, dedup, wiki_store = loop_env
+    pr.list_closed_issues_by_label = AsyncMock(side_effect=RuntimeError("gh down"))
+
+    loop = _loop(loop_env)
+    await loop._reconcile_closed_escalations()  # must not raise
+
+    pr.list_closed_issues_by_label.assert_awaited_once()
+    dedup.set_all.assert_not_called()
+    state.clear_wiki_rot_attempts.assert_not_called()
+
+
+async def test_reconcile_reraises_credit_exhausted(loop_env) -> None:
+    """CreditExhaustedError from the port must propagate out of reconcile.
+
+    reraise_on_credit_or_bug is a load-bearing call — billing signals must
+    not be swallowed by the broad except block (wiki entry 0012 / CLAUDE.md).
+    """
+    from subprocess_util import CreditExhaustedError
+
+    cfg, state, pr, dedup, wiki_store = loop_env
+    pr.list_closed_issues_by_label = AsyncMock(
+        side_effect=CreditExhaustedError("exhausted", resume_at=None)
+    )
+
+    loop = _loop(loop_env)
+    with pytest.raises(CreditExhaustedError):
+        await loop._reconcile_closed_escalations()
 
     dedup.set_all.assert_not_called()
     state.clear_wiki_rot_attempts.assert_not_called()
@@ -285,5 +311,9 @@ async def test_trace_emission_invoked_on_tick_end(
     assert len(calls) == 1, calls
     assert calls[0]["loop"] == "wiki_rot_detector"
     assert calls[0]["exit_code"] == 0
-    assert isinstance(calls[0]["command"], list)
+    assert calls[0]["command"] == [
+        "PRPort.list_closed_issues_by_label",
+        "wiki-rot-stuck",
+        "limit=50",
+    ]
     assert isinstance(calls[0]["duration_ms"], int)

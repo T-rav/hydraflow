@@ -22,6 +22,7 @@ Kill-switch: ``LoopDeps.enabled_cb("rc_budget")`` — **no
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import statistics
@@ -49,6 +50,29 @@ _HISTORY_CAP = 60
 _RECENT_N = 5
 _MIN_HISTORY = 5
 _WORKFLOW = "rc-promotion-scenario.yml"
+
+# Hard cap on each ``gh`` read/download. A wedged child must not hang the loop
+# cycle forever and freeze its heartbeat — the #9410 silent-stall failure
+# class (#9454 / #9508).
+_GH_TIMEOUT_SECONDS = 120
+
+
+async def _communicate_bounded(
+    proc: asyncio.subprocess.Process,
+) -> tuple[bytes, bytes]:
+    """``proc.communicate()`` bounded by ``_GH_TIMEOUT_SECONDS``.
+
+    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
+    the caller can treat it as a failed read (rather than hanging the loop
+    cycle indefinitely).
+    """
+    try:
+        return await asyncio.wait_for(proc.communicate(), timeout=_GH_TIMEOUT_SECONDS)
+    except TimeoutError:
+        proc.kill()
+        with contextlib.suppress(ProcessLookupError):
+            await proc.wait()
+        raise
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -179,7 +203,14 @@ class RCBudgetLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await _communicate_bounded(proc)
+        except TimeoutError:
+            logger.warning(
+                "gh run list timed out after %ss; returning empty",
+                _GH_TIMEOUT_SECONDS,
+            )
+            return []
         if proc.returncode != 0:
             logger.warning(
                 "gh run list exit=%d: %s",
@@ -259,7 +290,10 @@ class RCBudgetLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        try:
+            stdout, _ = await _communicate_bounded(proc)
+        except TimeoutError:
+            return []
         if proc.returncode != 0:
             return []
         try:
@@ -304,13 +338,16 @@ class RCBudgetLoop(BaseBackgroundLoop):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            await proc.communicate()
+            try:
+                await _communicate_bounded(proc)
+            except TimeoutError:
+                return []
             if proc.returncode != 0:
                 return []
             results: list[tuple[str, float]] = []
             for xml_path in Path(td).rglob("*.xml"):
                 try:
-                    root = ET.fromstring(  # nosec B314 — JUnit XML from trusted CI artifacts
+                    root = ET.fromstring(  # nosec B314  # JUnit XML from trusted CI artifacts
                         xml_path.read_bytes()
                     )
                 except ET.ParseError:
@@ -420,7 +457,10 @@ class RCBudgetLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        try:
+            stdout, _ = await _communicate_bounded(proc)
+        except TimeoutError:
+            return
         if proc.returncode != 0:
             return
         try:

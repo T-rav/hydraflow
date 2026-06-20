@@ -63,6 +63,11 @@ def build_rolling_24h(config: HydraFlowConfig) -> dict[str, Any]:
 class ReportIssueLoop(BaseBackgroundLoop):
     """Processes queued bug reports into GitHub issues via the configured agent."""
 
+    # Generates issues via an LLM agent — take the wider
+    # loop_watchdog_llm_seconds bound so a legitimately-long cycle is not
+    # false-killed by the watchdog (#9556).
+    LONG_LLM_CYCLE = True
+
     _ISSUE_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/issues/(\d+)")
 
     def __init__(

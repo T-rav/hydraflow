@@ -14,7 +14,9 @@ signal (so a spawner that hand-builds a ``["claude", "-p", ...]`` argv and calls
 caught). Modules are keyed by their path RELATIVE to ``src`` so a future
 ``src/<subdir>/runner_utils.py`` cannot silently inherit a top-level exemption.
 
-Ref: ADR-0086 (telemetry/credit contract for non-central spawn paths),
+Ref: ADR-0055 (OpenTelemetry Instrumentation as the Telemetry Layer — the
+telemetry/credit contract for spawn paths: ``stream_claude_process`` spans +
+``reraise_on_credit_or_bug`` credit/exception classification),
 ``docs/wiki/dark-factory.md`` §6 (conventions made structurally enforced).
 """
 
