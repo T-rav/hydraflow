@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_43 terms across 3 bounded contexts._
+_44 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -126,6 +126,17 @@ Trust-fleet loop that autonomously grows the adversarial test corpus from escape
 - All three validation gates must pass before a case reaches disk: harness accepts it, expected catcher trips, no other catcher also trips.
 - Cases that trip more than one catcher are rejected as ambiguous before they can corrupt the corpus.
 - No `corpus_learning_enabled` config field exists — kill-switch is purely via `enabled_cb("corpus_learning")` (spec §12.2, ADR-0049).
+
+## Credentials
+
+**Kind:** `value_object` · **Context:** `shared-kernel` · **Anchor:** `src/config.py:Credentials` · **Confidence:** `accepted`
+**Aliases:** `infrastructure credentials`, `secrets bundle`
+
+A frozen value object that bundles raw infrastructure secrets — GitHub token, Sentry auth token, and WhatsApp API credentials — needed by runners and loops to authenticate with external services. Explicitly separated from HydraFlowConfig to ensure secrets never appear in domain-model serialization. Built from environment variables at startup via build_credentials() and injected as a constructor parameter into every loop or runner that calls an authenticated external API.
+
+**Invariants:**
+- Immutable once constructed (frozen=True); no field may be mutated after build.
+- Never serialized as part of domain state — kept separate from HydraFlowConfig by design.
 
 ## DependabotMergeLoop
 
