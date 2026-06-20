@@ -26,14 +26,17 @@ def _module_from_path_ref(s: str) -> str:
 
 def extract_adr_refs(adr_dir: Path) -> ADRRefIndex:
     adr_dir = Path(adr_dir).resolve()
-    refs: list[ADRRef] = []
+    merged: dict[str, set[str]] = {}
     for md in sorted(adr_dir.glob("*.md")):
         m = _ADR_FILE_RE.match(md.name)
         if not m:
             continue
         adr_id = f"ADR-{m.group(1)}"
         text = md.read_text()
-        modules = sorted({_module_from_path_ref(s) for s in _PATH_REF_RE.findall(text)})
-        refs.append(ADRRef(adr_id=adr_id, cited_modules=modules))
-    refs.sort(key=lambda r: r.adr_id)
+        modules = {_module_from_path_ref(s) for s in _PATH_REF_RE.findall(text)}
+        merged.setdefault(adr_id, set()).update(modules)
+    refs = [
+        ADRRef(adr_id=adr_id, cited_modules=sorted(mods))
+        for adr_id, mods in sorted(merged.items())
+    ]
     return ADRRefIndex(adr_to_modules=refs)
