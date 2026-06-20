@@ -115,6 +115,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_diff_sanity_attempts", "HYDRAFLOW_MAX_DIFF_SANITY_ATTEMPTS", 1),
     ("max_scope_check_attempts", "HYDRAFLOW_MAX_SCOPE_CHECK_ATTEMPTS", 1),
     ("max_test_adequacy_attempts", "HYDRAFLOW_MAX_TEST_ADEQUACY_ATTEMPTS", 1),
+    (
+        "test_adequacy_coverage_timeout_secs",
+        "HYDRAFLOW_TEST_ADEQUACY_COVERAGE_TIMEOUT_SECS",
+        300,
+    ),
     ("max_plan_compliance_attempts", "HYDRAFLOW_MAX_PLAN_COMPLIANCE_ATTEMPTS", 1),
     ("max_discover_attempts", "HYDRAFLOW_MAX_DISCOVER_ATTEMPTS", 3),
     ("max_discover_expansions", "HYDRAFLOW_MAX_DISCOVER_EXPANSIONS", 1),
@@ -783,6 +788,12 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         le=3,
         description="Max test adequacy check passes (0 = disabled)",
+    )
+    test_adequacy_coverage_timeout_secs: int = Field(
+        default=300,
+        ge=0,
+        le=1800,
+        description="Timeout in seconds for the coverage-delta make coverage run (0 = no limit)",
     )
     max_plan_compliance_attempts: int = Field(
         default=1,

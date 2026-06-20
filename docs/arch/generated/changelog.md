@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W25
 
+- `7c5d918` — Fixes #9567: Add a deterministic coverage-delta cross-check to the test-adequacy verifier *(2026-06-15)*
 - `67da8db` — Fixes #9567: Add a deterministic coverage-delta cross-check to the test-adequacy verifier *(2026-06-15)*
 
 ## 2026-W24
@@ -437,19 +438,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 ## 2026-W13
 
 - `bbf7336` — docs: Add ADRs for report pipeline, caretaker loops, and routes decomposition (#5904) (#5904) *(2026-03-28)*
-
-## 2026-W12
-
-- `1448b26` — Fixes #3205: [ADR Follow-up] ADR-0022: Council requests changes (#3289) (#3289) *(2026-03-19)*
-- `b5f4f8f` — Fixes #3244: [ADR Follow-up] ADR-0023: Council requests changes (#3284) (#3284) *(2026-03-18)*
-- `b9d0cd2` — Fixes #3231: [ADR Follow-up] ADR-0015: Council requests changes (#3309) (#3309) *(2026-03-18)*
-- `b69cd2d` — hitl-fix: Fix ADR-0004 title mismatch in ADR-0023 citation (#3241) (#3278) (#3278) *(2026-03-18)*
-- `e08512e` — Fixes #3189: [Memory] Merge consecutive identical if-conditions ins... (#3221) (#3221) *(2026-03-18)*
-- `839ac7e` — Fixes #3233: [ADR Follow-up] ADR-0022: Council requests changes (#3254) (#3254) *(2026-03-18)*
-- `17bd4e2` — Fixes #3220: [ADR Pre-validation] ADR-0023: structural issues (#3242) (#3242) *(2026-03-18)*
-- `582338b` — Fixes #3222: [ADR Duplicate] ADR-0023 (#3243) (#3243) *(2026-03-18)*
-- `674566d` — Fixes #3213: [ADR Follow-up] ADR-0023: Council recommends rejection (#3234) (#3234) *(2026-03-18)*
-- `687783d` — Fixes #3229: [ADR Follow-up] ADR-0022: Council requests changes (#3248) (#3248) *(2026-03-18)*
 
 
 <!-- arch:generated -->

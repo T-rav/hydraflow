@@ -395,6 +395,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         "staging_branch",
         "main_branch",
         "rc_cadence_hours",
+        "test_adequacy_coverage_timeout_secs",
     }
 
     def _build_system_worker_inference_stats(
