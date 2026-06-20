@@ -1147,22 +1147,6 @@ SUMMARY: <one-line summary>
                 {"issue": issue.id, "source": "implementer"},
             )
             passed, summary, findings = skill.result_parser(transcript)
-            if passed and skill.coverage_check:
-                uncovered = await self._run_coverage_delta_check(
-                    worktree_path, diff, issue.id
-                )
-                if uncovered:
-                    passed = False
-                    summary = (
-                        f"Coverage delta: {len(uncovered)} uncovered changed line(s): "
-                        + "; ".join(uncovered[:5])
-                        + (
-                            f" (+ {len(uncovered) - 5} more)"
-                            if len(uncovered) > 5
-                            else ""
-                        )
-                    )
-                    findings = list(uncovered) + list(findings)
             if passed:
                 result = LoopResult(passed=True, summary=summary, attempts=attempt)
                 break
@@ -1175,6 +1159,30 @@ SUMMARY: <one-line summary>
                 )
         else:
             result = LoopResult(passed=False, summary=summary, attempts=max_attempts)
+
+        # Coverage delta runs once after the LLM attempt loop — not per-attempt.
+        # Running make coverage on each retry is expensive and redundant because
+        # the worktree code doesn't change between LLM attempts.
+        if result.passed and skill.coverage_check:
+            uncovered = await self._run_coverage_delta_check(
+                worktree_path, diff, issue.id
+            )
+            if uncovered:
+                cov_summary = (
+                    f"Coverage delta: {len(uncovered)} uncovered changed line(s): "
+                    + "; ".join(uncovered[:5])
+                    + (f" (+ {len(uncovered) - 5} more)" if len(uncovered) > 5 else "")
+                )
+                logger.info(
+                    "coverage-delta findings for #%d: %s",
+                    issue.id,
+                    "; ".join(uncovered[:5]),
+                )
+                result = LoopResult(
+                    passed=False,
+                    summary=cov_summary,
+                    attempts=result.attempts,
+                )
 
         # Append the skill result to run-N/skill_results.json alongside
         # the parent run. This is the source of truth for skill-effectiveness

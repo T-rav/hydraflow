@@ -397,6 +397,37 @@ def _tally_worker_events(events: list[Any]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def _event_timestamp(ev: Any) -> datetime | None:
+    """Best-effort parse of a worker-status event's wall-clock time."""
+    data = getattr(ev, "data", None)
+    if data is None and isinstance(ev, dict):
+        data = ev.get("data")
+    data = data if isinstance(data, dict) else {}
+    raw = data.get("last_run")
+    if not raw:
+        raw = getattr(ev, "timestamp", None)
+        if raw is None and isinstance(ev, dict):
+            raw = ev.get("timestamp")
+    return _parse_iso(raw) if isinstance(raw, str) else None
+
+
+def _split_events_on(
+    events: list[Any], *, boundary: datetime
+) -> tuple[list[Any], list[Any]]:
+    """Partition events into ``(current, prior)`` on a timestamp boundary.
+
+    An event strictly before ``boundary`` is prior; one at/after it — or whose
+    timestamp can't be parsed (preserving the old ``load_events_since(since)``
+    behavior, where every returned event was current) — is current.
+    """
+    current: list[Any] = []
+    prior: list[Any] = []
+    for ev in events:
+        ts = _event_timestamp(ev)
+        (prior if ts is not None and ts < boundary else current).append(ev)
+    return current, prior
+
+
 # Inference ``source`` values that name no loop: char-estimate token-source
 # markers, the design-time onboarding agent, synchronous post-merge hooks, and
 # empty sources. These never represent a background-worker/pipeline loop, so
@@ -507,16 +538,40 @@ def build_per_loop_cost(
             rec.get("cache_creation_input_tokens", 0) or 0
         )
 
-    # Event-based counters (filed / closed / escalations / errored ticks).
+    # Prior-period window of equal length immediately before ``since``. Used
+    # to populate ``tick_cost_avg_usd_prev_period`` so the client's >2x cost
+    # spike highlight (PerLoopCostTable.isSpike, gated on prev > 0) can fire.
+    prev_since = since - (until - since)
+
+    prev_loop_cost: dict[str, float] = defaultdict(float)
+    for rec in iter_priced_inferences(
+        config, since=prev_since, until=since, pricing=pricing
+    ):
+        worker = _worker_for_cost_source(str(rec.get("source", "")))
+        if worker is None:
+            continue
+        prev_loop_cost[worker] += rec["cost_usd"]
+
+    prev_loop_ticks: dict[str, int] = defaultdict(int)
+    for tr in iter_loop_traces(config, since=prev_since, until=since):
+        prev_loop_ticks[_slug_for_loop(str(tr.get("loop", "?")))] += 1
+
+    # Event-based counters (filed / closed / escalations / errored ticks). Load
+    # across both windows so prior-period tick counts are available, then split
+    # on the ``since`` boundary — the current half preserves the previous
+    # ``load_events_since(since)`` semantics exactly.
     worker_stats: dict[str, dict[str, Any]] = {}
+    prev_worker_stats: dict[str, dict[str, Any]] = {}
     if event_bus is not None:
         try:
-            events = asyncio.run(event_bus.load_events_since(since))
+            events = asyncio.run(event_bus.load_events_since(prev_since))
         except RuntimeError:
             # Called from an already-running event loop — fall back.
             logger.debug("build_per_loop_cost: nested event loop; skipping events")
             events = []
-        worker_stats = _tally_worker_events(events or [])
+        cur_events, prev_events = _split_events_on(events or [], boundary=since)
+        worker_stats = _tally_worker_events(cur_events)
+        prev_worker_stats = _tally_worker_events(prev_events)
 
     # Union of every worker seen via traces, inferences, or events. All three
     # key spaces are worker_name, so they merge into one row per worker.
@@ -528,6 +583,12 @@ def build_per_loop_cost(
         ticks = int(stats.get("ticks", 0) or per_loop_ticks.get(worker, 0))
         cost = per_loop_cost.get(worker, 0.0)
         avg_cost = round(cost / ticks, 6) if ticks else 0.0
+        prev_ticks = int(
+            prev_worker_stats.get(worker, {}).get("ticks", 0)
+            or prev_loop_ticks.get(worker, 0)
+        )
+        prev_cost = prev_loop_cost.get(worker, 0.0)
+        prev_avg = round(prev_cost / prev_ticks, 6) if prev_ticks else 0.0
         breakdown_raw = per_loop_model.get(worker, {})
         model_breakdown = {
             model: {
@@ -555,10 +616,9 @@ def build_per_loop_cost(
                 "tick_cost_avg_usd": avg_cost,
                 "wall_clock_seconds": per_loop_wall.get(worker, 0),
                 "last_tick_at": stats.get("last_tick_at", "") or None,
-                # Reserved 0.0 stub: the client-side spike highlight is gated on
-                # ``prev > 0`` (PerLoopCostTable.isSpike), so a future change can
-                # populate this from the prior window without a UI change.
-                "tick_cost_avg_usd_prev_period": 0.0,
+                # Prior-period avg $/tick — drives the client >2x spike
+                # highlight (PerLoopCostTable.isSpike, gated on prev > 0).
+                "tick_cost_avg_usd_prev_period": prev_avg,
                 "model_breakdown": model_breakdown,
             }
         )

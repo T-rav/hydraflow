@@ -15,6 +15,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `e79114c` — chore(wiki): untrack RepoWikiLoop runtime caches to stop perpetual tree-dirt (#9537) (#9537) *(2026-06-14)*
 - `5a715ac` — fix(adr-drift): stop recurring false-positive ADR-drift HITL escalations (#9530) (#9530) *(2026-06-13)*
 - `4e65ff6` — Fixes #9499: PricingRefreshLoop bare-tier alias may lag the newest ... (#9517) (#9517) *(2026-06-13)*
+- `0773c6d` — chore: salvage uncommitted changes for issue #9507 *(2026-06-13)*
 - `f0974e5` — fix(wiki): resolve committed conflict markers in 11 term files (#9482) (#9484) (#9484) *(2026-06-12)*
 - `79662e5` — fix(observability): suppress Sentry noise — bugs-only filter + test init guard (#9481) (#9481) *(2026-06-12)*
 - `cadb008` — Fixes #9354: Shadow-drift: exclude non-deterministic corpus samples... (#9445) (#9445) *(2026-06-12)*
