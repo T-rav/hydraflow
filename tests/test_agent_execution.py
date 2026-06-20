@@ -1649,3 +1649,62 @@ class TestCoverageDeltaIntegration:
         """HydraFlowConfig must expose test_adequacy_coverage_timeout_secs."""
         assert hasattr(config, "test_adequacy_coverage_timeout_secs")
         assert config.test_adequacy_coverage_timeout_secs == 300
+
+    @pytest.mark.asyncio
+    async def test_coverage_delta_uses_full_diff_when_prompt_is_truncated(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """Coverage mapper must use the untruncated diff even when the LLM prompt is truncated.
+
+        Regression guard for the in-place diff truncation bug: if `full_diff` is
+        reassigned to the truncated form before reaching `_run_coverage_delta_check`,
+        changed lines in the tail of a large diff are silently dropped and the check
+        false-passes.
+        """
+        from execution import SimpleResult
+        from skill_registry import BUILTIN_SKILLS
+
+        config.max_test_adequacy_attempts = 1
+        # Truncate to a prefix that strips the hunk header and changed lines
+        config.max_review_diff_chars = 30
+
+        self._write_coverage_xml(
+            tmp_path / "coverage.xml",
+            source=str(tmp_path),
+            # only line 1 covered; lines 2 and 3 NOT covered
+            covered_lines={1: 1, 2: 0, 3: 0},
+        )
+
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner, "_count_commits", new_callable=AsyncMock, return_value=1
+            ),
+            patch.object(
+                runner,
+                "_get_branch_diff",
+                new_callable=AsyncMock,
+                return_value=self._DIFF,
+            ),
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                return_value="TEST_ADEQUACY_RESULT: OK\nSUMMARY: adequate",
+            ),
+            patch.object(
+                runner._runner,
+                "run_simple",
+                new_callable=AsyncMock,
+                return_value=SimpleResult(returncode=0),
+            ),
+        ):
+            result = await runner._run_skill(
+                BUILTIN_SKILLS[3], agent_task, tmp_path, "branch", worker_id=0
+            )
+
+        # The full diff contains lines 2 and 3 as added; even though the LLM
+        # prompt only saw the first 30 chars, the coverage check must still
+        # detect the uncovered changed lines and override the LLM pass.
+        assert result.passed is False
+        assert "src/cov_subject.py" in result.summary

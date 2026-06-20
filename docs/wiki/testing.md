@@ -397,7 +397,7 @@ The `test-adequacy` skill in the implementer loop runs a deterministic cross-che
 
 The asymmetry is load-bearing: coverage proves *execution*, not *assertion*. A line executed at import time with zero assertions shows as covered. Therefore a deterministic GAPS signal → hard RETRY, but a deterministic CLEAN signal does **not** suppress an LLM RETRY — the model may still flag weak or missing assertions that execution traces cannot detect.
 
-The check is fail-open: when `make coverage 0` fails, times out, or produces no `coverage.xml`, the LLM verdict is preserved unchanged. New files absent from the coverage report are skipped (no data = no assertion). Set `HYDRAFLOW_TEST_ADEQUACY_COVERAGE_TIMEOUT_SECS=0` to disable the timeout bound; set `max_test_adequacy_attempts=0` to disable the skill entirely.
+The check is fail-open: when `make coverage 0` fails, times out, or produces no `coverage.xml`, the LLM verdict is preserved unchanged. New files absent from the coverage report are skipped (no data = no assertion). The timeout is configured via `HYDRAFLOW_TEST_ADEQUACY_COVERAGE_TIMEOUT_SECS` (default 300 s, minimum 60 s); set `max_test_adequacy_attempts=0` to disable the skill entirely.
 
 The interactive `hf.test-adequacy` slash command remains read-only and LLM-only — the coverage subprocess runs only inside the implementer loop.
 

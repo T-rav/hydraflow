@@ -797,9 +797,9 @@ class HydraFlowConfig(BaseModel):
     )
     test_adequacy_coverage_timeout_secs: int = Field(
         default=300,
-        ge=0,
+        ge=60,
         le=1800,
-        description="Timeout in seconds for the coverage-delta make coverage run (0 = no limit)",
+        description="Timeout in seconds for the coverage-delta make coverage run",
     )
     max_plan_compliance_attempts: int = Field(
         default=1,

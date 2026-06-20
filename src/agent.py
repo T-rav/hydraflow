@@ -1223,15 +1223,22 @@ SUMMARY: <one-line summary>
         )
 
         try:
+            timeout_secs = self._config.test_adequacy_coverage_timeout_secs
             cov_result = await self._runner.run_simple(
                 ["make", "coverage", "0"],
                 cwd=str(worktree_path),
-                timeout=self._config.test_adequacy_coverage_timeout_secs,
+                timeout=float(timeout_secs),
             )
         except (TimeoutError, FileNotFoundError):
             logger.warning(
                 "Coverage delta check failed for #%d (timeout or make not found)",
                 issue_id,
+            )
+            return []
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "Coverage delta check unexpected error for #%d: %s", issue_id, exc
             )
             return []
 
