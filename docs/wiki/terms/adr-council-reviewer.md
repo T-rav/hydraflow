@@ -5,13 +5,13 @@ kind: "service"
 bounded_context: "caretaker"
 code_anchor: "src/adr_reviewer.py:ADRCouncilReviewer"
 aliases: ["adr council reviewer", "council reviewer"]
-related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KVHDB0GY6PSQPWY90DH8TNQS"}]
 evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-06-12T04:19:40.947529+00:00"
-updated_at: "2026-06-12T04:21:53.179108+00:00"
+updated_at: "2026-06-20T07:11:08.058010+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-06-12T04:19:40.947404+00:00"
 proposal_signals: ["S2"]
