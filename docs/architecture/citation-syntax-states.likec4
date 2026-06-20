@@ -1,0 +1,38 @@
+// Issue #9507 — the load-bearing citation-syntax distinction that decides
+// whether an ADR `src/...py` reference drifts. Driven by
+// adr_index._SOURCE_FILE_CITATION_RE:
+//   `(src/[^`:\s]+\.py)(?::([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*))?`
+//
+// The colon+symbol MUST live INSIDE the same backtick span to be parsed as
+// symbol-qualified. A symbol in a SEPARATE backtick span is ignored → bare.
+
+specification {
+  element state
+  relationship becomes
+}
+
+model {
+  deadFlat = state 'BARE dead-flat cite  `src/dashboard_routes.py`' {
+    description 'File deleted (now a package). Never in a diff → no drift, but a dead doc ref (rot) + ADR invisible to drift for its real code.'
+  }
+  bareLive = state 'BARE live cite  `src/dashboard.py`' {
+    description 'cited_symbols == empty set → _citation_drifts returns True on ANY file touch (and dashboard.py is NOT shared-infra). This is the FALSE POSITIVE (rollup #9414).'
+  }
+  splitSym = state 'SPLIT spans  `src/epic.py` — `EpicManager.release_epic`' {
+    description 'TRAP: the symbol is in a SEPARATE backtick span, so the regex still parses src/epic.py as BARE → still drifts on any touch.'
+  }
+  qualified = state 'QUALIFIED cite  `src/dashboard.py:HydraFlowDashboard`' {
+    description 'cited_symbols non-empty; production diffs are file-level (no symbol evidence) → never drifts. The FIX.'
+  }
+
+  deadFlat -> qualified 'repoint to live package path + colon-symbol (FIX dead ref)'
+  bareLive -> qualified 'attach :Symbol inside same backticks (FIX false positive)'
+  splitSym -> qualified 'collapse split spans into one `path:Symbol` span'
+}
+
+views {
+  view index {
+    title 'ADR citation syntax states → the qualified target'
+    include *
+  }
+}
