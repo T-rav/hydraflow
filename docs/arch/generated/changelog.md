@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W25
 
+- `3b8a3a1` — feat(test-adequacy): add deterministic coverage-delta cross-check (#9567) (#9567) *(2026-06-20)*
 - `7c5d918` — Fixes #9567: Add a deterministic coverage-delta cross-check to the test-adequacy verifier *(2026-06-15)*
 - `67da8db` — Fixes #9567: Add a deterministic coverage-delta cross-check to the test-adequacy verifier *(2026-06-15)*
 
