@@ -836,3 +836,94 @@ async def test_refresh_real_conflict_aborts_no_push(
         check=True,
     ).stdout.strip()
     assert before == after
+
+
+# ---------------------------------------------------------------------------
+# generate_and_open_pr_async — generate-in-worktree (#9539)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_and_open_pr_leaves_repo_root_clean(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#9539: the generate callback writes INTO the worktree; repo_root is never
+    mutated, so the factory's checkout stays clean after the PR opens."""
+    from auto_pr import generate_and_open_pr_async
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        return "https://github.com/x/y/pull/7\n" if cmd[2] == "create" else ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler),
+    )
+
+    seen: list[Path] = []
+
+    async def generate(worktree: Path) -> None:
+        seen.append(worktree)
+        gen_dir = worktree / "docs" / "arch" / "generated"
+        gen_dir.mkdir(parents=True, exist_ok=True)
+        (gen_dir / "loops.md").write_text("# loops\n")
+
+    result = await generate_and_open_pr_async(
+        repo_root=local_repo,
+        branch="arch-regen-auto",
+        generate=generate,
+        path_specs=["docs/arch/generated"],
+        pr_title="chore(arch): regen",
+        pr_body="b",
+        auto_merge=False,
+    )
+
+    assert result.status == "opened"
+    assert result.pr_url == "https://github.com/x/y/pull/7"
+    # The generate callback ran in a worktree OUTSIDE the host checkout.
+    assert seen and seen[0].resolve() != local_repo.resolve()
+    # KEY PROPERTY: repo_root's working tree is CLEAN — the generated file is
+    # NOT in the host checkout, and `git status` reports nothing.
+    assert not (local_repo / "docs" / "arch" / "generated" / "loops.md").exists()
+    porcelain = subprocess.run(
+        ["git", "-C", str(local_repo), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert porcelain == ""
+
+
+@pytest.mark.asyncio
+async def test_generate_and_open_pr_no_diff_when_generate_writes_nothing(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A generate callback that produces no change short-circuits to no-diff —
+    no commit, no PR (so a quiescent loop tick is a cheap no-op)."""
+    from auto_pr import generate_and_open_pr_async
+
+    gh_calls: list[tuple[str, ...]] = []
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        gh_calls.append(cmd)
+        return "https://github.com/x/y/pull/8\n" if cmd[2] == "create" else ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler),
+    )
+
+    async def generate(_worktree: Path) -> None:
+        return  # writes nothing
+
+    result = await generate_and_open_pr_async(
+        repo_root=local_repo,
+        branch="noop-regen",
+        generate=generate,
+        path_specs=["docs/arch/generated"],
+        pr_title="t",
+        pr_body="b",
+        auto_merge=False,
+    )
+
+    assert result.status == "no-diff"
+    assert not any(c[:3] == ("gh", "pr", "create") for c in gh_calls)
