@@ -23,13 +23,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import subprocess
-from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from models import WorkCycleResult
+
+if TYPE_CHECKING:
+    from auto_pr import AutoPrResult
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +39,6 @@ _KILL_SWITCH_ENV = "HYDRAFLOW_DISABLE_DIAGRAM_LOOP"
 _REGEN_BRANCH = "arch-regen-auto"
 _PR_TITLE_PREFIX = "chore(arch): regenerate architecture knowledge"
 _COVERAGE_ISSUE_TITLE = "chore(arch): unassigned functional area"
-
-
-@dataclass
-class _DriftResult:
-    has_drift: bool
-    changed_files: list[str]
 
 
 class DiagramLoop(BaseBackgroundLoop):
@@ -84,104 +80,68 @@ class DiagramLoop(BaseBackgroundLoop):
         if os.environ.get(_KILL_SWITCH_ENV) == "1":
             return {"skipped": "kill_switch"}
 
-        drift = await asyncio.to_thread(self._regen_and_detect_drift)
-        if not drift.has_drift:
+        result = await self._regen_pr()
+        if result is None:
+            return {"drift": None}
+        if result.status == "no-diff":
             return {"drift": False}
-
-        pr_url = await self._open_or_update_regen_pr(drift.changed_files)
+        # A PR opened → the committed arch drifted from source. Also run the
+        # functional-area coverage check (separate issue, not the regen PR).
         await self._ensure_coverage_issue()
+        return {"drift": True, "pr_url": result.pr_url}
 
-        return {
-            "drift": True,
-            "changed_files": len(drift.changed_files),
-            "pr_url": pr_url,
-        }
-
-    def _regen_and_detect_drift(self) -> _DriftResult:
-        # Lazy import — avoids loading arch.* at module import time.
-        from arch.runner import emit  # noqa: PLC0415
-
-        out_dir = self._repo_root / "docs/arch/generated"
-        emit(repo_root=self._repo_root, out_dir=out_dir)
-        res = subprocess.run(
-            [
-                "git",
-                "status",
-                "--porcelain",
-                "docs/arch/generated",
-                "docs/arch/.meta.json",
-            ],
-            cwd=self._repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-            # Hard cap to prevent thread-pool exhaustion on a hung git
-            # process. Same deadlock class as PR #8454 — even though the
-            # caller wraps this in ``asyncio.to_thread`` (line 82), an
-            # unbounded subprocess can leak the worker thread forever.
-            timeout=30,
-        )
-        if res.returncode != 0:
-            return _DriftResult(has_drift=False, changed_files=[])
-        lines = [line for line in res.stdout.splitlines() if line.strip()]
-        return _DriftResult(has_drift=bool(lines), changed_files=lines)
-
-    async def _open_or_update_regen_pr(self, changed_files: list[str]) -> str | None:
-        """Open a regen PR via auto_pr.open_automated_pr_async.
-
-        Branch is fixed (`arch-regen-auto`); auto_pr handles the
-        idempotent open-or-update behavior at the branch level.
+    async def _regen_pr(self) -> AutoPrResult | None:
+        """Regenerate the arch artifacts INSIDE an ephemeral worktree (branched
+        off the base) and open/update the regen PR — ``repo_root`` is never
+        mutated (#9539). Branch is fixed (``arch-regen-auto``); gh handles
+        open-or-update idempotence at the branch level. Returns the
+        ``AutoPrResult`` (``opened``/``no-diff``), or ``None`` on failure.
         """
-        # Lazy import to avoid a top-level dependency cycle.
         from datetime import UTC, datetime  # noqa: PLC0415
 
-        from auto_pr import open_automated_pr_async  # noqa: PLC0415
+        from auto_pr import generate_and_open_pr_async  # noqa: PLC0415
 
         today = datetime.now(UTC).strftime("%Y-%m-%d")
-        pr_title = f"{_PR_TITLE_PREFIX} — {today}"
-        pr_body = self._build_pr_body(changed_files)
 
-        files_to_commit = [
-            self._repo_root / "docs" / "arch" / "generated",
-            self._repo_root / "docs" / "arch" / ".meta.json",
-        ]
+        async def _generate(worktree: Path) -> None:
+            # Re-extract arch artifacts from the worktree's (base) source into
+            # the worktree's out_dir — never the host checkout. Wrapped in a
+            # thread: emit() is sync CPU/IO work.
+            from arch.runner import emit  # noqa: PLC0415
 
-        result = await open_automated_pr_async(
+            await asyncio.to_thread(
+                emit, repo_root=worktree, out_dir=worktree / "docs/arch/generated"
+            )
+
+        result = await generate_and_open_pr_async(
             repo_root=self._repo_root,
             branch=_REGEN_BRANCH,
-            files=files_to_commit,
-            pr_title=pr_title,
-            pr_body=pr_body,
+            generate=_generate,
+            path_specs=["docs/arch/generated", "docs/arch/.meta.json"],
+            pr_title=f"{_PR_TITLE_PREFIX} — {today}",
+            pr_body=self._build_pr_body(),
             base=self._config.base_branch(),
             auto_merge=True,
             labels=["hydraflow-ready", "arch-regen"],
             raise_on_failure=False,
         )
-        if result.status in {"opened", "no-diff"}:
-            return result.pr_url
-        logger.warning("DiagramLoop PR creation failed: %s", result.error)
-        return None
+        if result.status == "failed":
+            logger.warning("DiagramLoop regen PR failed: %s", result.error)
+            return None
+        return result
 
-    def _build_pr_body(self, changed_files: list[str]) -> str:
-        lines = [
-            "Auto-generated by `DiagramLoop` (L24). The architecture knowledge",
-            "artifacts in `docs/arch/generated/` were re-extracted from source",
-            "and the diff is included in this PR.",
-            "",
-            f"**Changed files** ({len(changed_files)}):",
-            "",
-        ]
-        lines.extend(f"- `{path}`" for path in changed_files[:30])
-        if len(changed_files) > 30:
-            lines.append(f"- _(...and {len(changed_files) - 30} more)_")
-        lines.extend(
+    def _build_pr_body(self) -> str:
+        return "\n".join(
             [
+                "Auto-generated by `DiagramLoop` (L24). The architecture knowledge",
+                "artifacts in `docs/arch/generated/` were re-extracted from source",
+                "inside an ephemeral worktree off the base branch — the factory's",
+                "checkout is never touched (#9539) — and the diff is in this PR.",
                 "",
                 "Per ADR-0029 caretaker pattern. Auto-merges once CI passes",
                 "(arch-regen guard, quality, scenario tests).",
             ]
         )
-        return "\n".join(lines)
 
     async def _unassigned_items(self) -> dict[str, list[str]]:
         """Return {'loops': [...], 'ports': [...]} of items in code but not in YAML."""
