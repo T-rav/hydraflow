@@ -41,6 +41,7 @@ graph LR
     AgentPort["AgentPort<br/><i>port</i>"]
     BaseBackgroundLoop["BaseBackgroundLoop<br/><i>loop</i>"]
     BotPRPort["BotPRPort<br/><i>port</i>"]
+    Credentials["Credentials<br/><i>value_object</i>"]
     EventBus["EventBus<br/><i>service</i>"]
     HydraFlowConfig["HydraFlowConfig<br/><i>aggregate</i>"]
     IssueFetcherPort["IssueFetcherPort<br/><i>port</i>"]
@@ -55,6 +56,7 @@ graph LR
   end
   ADRCouncilReviewer -->|depends_on| EventBus
   ADRCouncilReviewer -->|depends_on| HydraFlowConfig
+  ADRCouncilReviewer -->|depends_on| Credentials
   ADRReviewerLoop -->|depends_on| HydraFlowConfig
   ADRReviewerLoop -->|depends_on| BaseBackgroundLoop
   ADRReviewerLoop -->|implements| BaseBackgroundLoop
@@ -71,6 +73,7 @@ graph LR
   AgentRunner -->|depends_on| RepoWikiStore
   AgentRunner -->|depends_on| Task
   AgentRunner -->|depends_on| EventBus
+  AgentRunner -->|depends_on| Credentials
   BaseBackgroundLoop -->|depends_on| EventBus
   BaseBackgroundLoop -->|depends_on| HydraFlowConfig
   BotPRPort -->|depends_on| HydraFlowConfig
@@ -148,12 +151,14 @@ graph LR
   ReportIssueLoop -->|depends_on| HydraFlowConfig
   ReportIssueLoop -->|depends_on| StateTracker
   ReportIssueLoop -->|implements| BaseBackgroundLoop
+  ReportIssueLoop -->|depends_on| Credentials
   ReviewInsightStorePort -->|depends_on| Task
   RouteBackCounterPort -->|depends_on| PRPort
   SentryLoop -->|depends_on| BaseBackgroundLoop
   SentryLoop -->|depends_on| HydraFlowConfig
   SentryLoop -->|depends_on| StateTracker
   SentryLoop -->|implements| BaseBackgroundLoop
+  SentryLoop -->|depends_on| Credentials
   SkillPromptEvalLoop -->|depends_on| BaseBackgroundLoop
   SkillPromptEvalLoop -->|depends_on| HydraFlowConfig
   SkillPromptEvalLoop -->|depends_on| StateTracker
@@ -177,5 +182,6 @@ graph LR
   WorkspaceGCLoop -->|depends_on| WorkspacePort
   WorkspaceGCLoop -->|depends_on| PRPort
   WorkspaceGCLoop -->|implements| BaseBackgroundLoop
+  WorkspaceGCLoop -->|depends_on| Credentials
   WorkspacePort -->|depends_on| Task
 ```
