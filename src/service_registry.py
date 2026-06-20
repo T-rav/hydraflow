@@ -1294,10 +1294,11 @@ def build_services(
     # Term-Proposer (ADR-0054). Production adapters wire the loop to:
     # - ClaudeCLIClient: shells out to `claude -p` via SubprocessRunner,
     #   mirroring `wiki_compiler.WikiCompiler._call_model`.
-    # - OpenAutoPRBotPRPort: writes term files and delegates to
-    #   `auto_pr.open_automated_pr_async` for the worktree → commit →
-    #   push → `gh pr create` flow. `auto_merge=False` — DependabotMergeLoop
-    #   handles auto-merge once the PR carries `hydraflow-ul-proposed`.
+    # - OpenAutoPRBotPRPort: writes term files INTO an ephemeral worktree and
+    #   delegates to `auto_pr.generate_and_open_pr_async` for the commit →
+    #   push → `gh pr create` flow — repo_root is never mutated (#9539).
+    #   `auto_merge=False` — DependabotMergeLoop handles auto-merge once the
+    #   PR carries `hydraflow-ul-proposed`.
     from term_proposer_llm import TermProposerLLM  # noqa: PLC0415
     from term_proposer_loop import TermProposerLoop  # noqa: PLC0415
     from term_proposer_runtime import (  # noqa: PLC0415
