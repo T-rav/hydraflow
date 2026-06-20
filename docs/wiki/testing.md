@@ -390,3 +390,20 @@ Every load-bearing feature ships through unit + MockWorld scenario + sandbox e2e
 ```json:entry
 {"id":"01KQTESTPYRAMID2026B0PHASE3","title":"Test pyramid — three layers, all required for load-bearing features","topic":null,"source_type":"compiled","source_issue":null,"source_repo":null,"created_at":"2026-05-07T05:30:00.000000+00:00","updated_at":"2026-05-07T05:30:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
+
+## Deterministic coverage-delta cross-check — execution ≠ assertion
+
+The `test-adequacy` skill in the implementer loop runs a deterministic cross-check after the LLM verdict: `make coverage 0` collects a Cobertura XML report and any changed production line that appears in no test's execution trace forces the skill result to RETRY, overriding an LLM PASS. The check runs **once per skill invocation**, after the LLM attempt loop, not on each retry.
+
+The asymmetry is load-bearing: coverage proves *execution*, not *assertion*. A line executed at import time with zero assertions shows as covered. Therefore a deterministic GAPS signal → hard RETRY, but a deterministic CLEAN signal does **not** suppress an LLM RETRY — the model may still flag weak or missing assertions that execution traces cannot detect.
+
+The check is fail-open: when `make coverage 0` fails, times out, or produces no `coverage.xml`, the LLM verdict is preserved unchanged. New files absent from the coverage report are skipped (no data = no assertion). Set `HYDRAFLOW_TEST_ADEQUACY_COVERAGE_TIMEOUT_SECS=0` to disable the timeout bound; set `max_test_adequacy_attempts=0` to disable the skill entirely.
+
+The interactive `hf.test-adequacy` slash command remains read-only and LLM-only — the coverage subprocess runs only inside the implementer loop.
+
+**Why:** LLM-only test-adequacy verdicts can self-rubber-stamp: the same model that generated the implementation judges whether it is adequately tested. The deterministic check adds a signal that cannot be influenced by the model's confidence in its own output.
+
+
+```json:entry
+{"id":"01KRCOVDELTA2026TESTADEQUACY","title":"Deterministic coverage-delta cross-check — execution != assertion","topic":null,"source_type":"compiled","source_issue":null,"source_repo":null,"created_at":"2026-06-20T00:00:00.000000+00:00","updated_at":"2026-06-20T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```
