@@ -23,10 +23,10 @@
     "claude-opus-4-7": {
       "provider": "anthropic",
       "aliases": ["opus", "claude-opus-4-7", "claude-4-7-opus", "claude-opus-4-7[1m]"],
-      "input_cost_per_million": 15.00,
-      "output_cost_per_million": 75.00,
-      "cache_write_cost_per_million": 18.75,
-      "cache_read_cost_per_million": 1.50
+      "input_cost_per_million": 5.00,
+      "output_cost_per_million": 25.00,
+      "cache_write_cost_per_million": 6.25,
+      "cache_read_cost_per_million": 0.50
     },
     "claude-3-5-haiku-20241022": {
       "provider": "anthropic",

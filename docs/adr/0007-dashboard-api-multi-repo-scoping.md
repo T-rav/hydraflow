@@ -75,7 +75,7 @@ Extend the dashboard API to support multi-repo scoping through two mechanisms:
 
 - Source memory: #1617
 - Implementation: #1468
-- `src/dashboard_routes.py`, `src/dashboard.py`
+- `src/dashboard_routes/_routes.py:create_router`, `src/dashboard.py`
 - `src/hf_cli/supervisor_service.py`, `src/hf_cli/supervisor_client.py`
 - `src/ui/src/context/HydraFlowContext.jsx`
 - ADR-0006 (RepoRuntime Isolation Architecture)

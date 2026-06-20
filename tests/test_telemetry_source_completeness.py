@@ -14,7 +14,8 @@ routes around the wrappers via those signals; it cannot prove a module records
 telemetry, only that it does not bypass the recording seam. ``_GRANDFATHERED``
 must shrink toward empty and must never grow.
 
-Ref: ADR-0086, ``docs/wiki/dark-factory.md`` §6.
+Ref: ADR-0055 (telemetry/credit contract for spawn paths),
+``docs/wiki/dark-factory.md`` §6.
 """
 
 from __future__ import annotations

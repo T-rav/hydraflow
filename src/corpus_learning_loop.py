@@ -51,6 +51,7 @@ Kill-switch: :meth:`LoopDeps.enabled_cb` with ``worker_name="corpus_learning"``
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import difflib
 import json
 import logging
@@ -100,6 +101,30 @@ DEFAULT_LOOKBACK_DAYS = 30
 #: Spec §4.1 v2 step 5: 3 consecutive self-validation failures on the
 #: same escape issue trigger a `corpus-learning-stuck` escalation.
 _CORPUS_STUCK_ATTEMPTS = 3
+
+#: Hard cap on the ``gh`` reconcile read. A wedged ``gh`` child must not hang
+#: the loop cycle forever and freeze its heartbeat — the #9410 silent-stall
+#: failure class (#9454 / #9508).
+_GH_TIMEOUT_SECONDS = 120
+
+
+async def _communicate_bounded(
+    proc: asyncio.subprocess.Process,
+) -> tuple[bytes, bytes]:
+    """``proc.communicate()`` bounded by ``_GH_TIMEOUT_SECONDS``.
+
+    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
+    the caller can treat it as a failed read (rather than hanging the loop
+    cycle indefinitely).
+    """
+    try:
+        return await asyncio.wait_for(proc.communicate(), timeout=_GH_TIMEOUT_SECONDS)
+    except TimeoutError:
+        proc.kill()
+        with contextlib.suppress(ProcessLookupError):
+            await proc.wait()
+        raise
+
 
 #: Parses ``Corpus learning stuck on escape #1234: …`` titles for
 #: reconcile-on-close (spec §3.2 lifecycle).
@@ -754,7 +779,7 @@ class CorpusLearningLoop(BaseBackgroundLoop):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            out, _ = await proc.communicate()
+            out, _ = await _communicate_bounded(proc)
             if proc.returncode != 0:
                 return
             issues = json.loads(out or b"[]")
