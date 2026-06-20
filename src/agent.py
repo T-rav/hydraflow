@@ -1115,18 +1115,21 @@ SUMMARY: <one-line summary>
         if commits == 0:
             return LoopResult(passed=True, summary="No commits to check")
 
-        diff = await self._get_branch_diff(worktree_path, branch)
-        if not diff.strip():
+        full_diff = await self._get_branch_diff(worktree_path, branch)
+        if not full_diff.strip():
             return LoopResult(passed=True, summary="Empty diff")
 
         max_diff = self._config.max_review_diff_chars
-        if len(diff) > max_diff:
-            diff = diff[:max_diff] + f"\n[Diff truncated at {max_diff:,} chars]"
+        prompt_diff = (
+            full_diff[:max_diff] + f"\n[Diff truncated at {max_diff:,} chars]"
+            if len(full_diff) > max_diff
+            else full_diff
+        )
 
         prompt = skill.prompt_builder(
             issue_number=issue.id,
             issue_title=issue.title,
-            diff=diff,
+            diff=prompt_diff,
             plan_text=plan_text,
         )
         if not prompt.strip():
@@ -1165,7 +1168,7 @@ SUMMARY: <one-line summary>
         # the worktree code doesn't change between LLM attempts.
         if result.passed and skill.coverage_check:
             uncovered = await self._run_coverage_delta_check(
-                worktree_path, diff, issue.id
+                worktree_path, full_diff, issue.id
             )
             if uncovered:
                 cov_summary = (
