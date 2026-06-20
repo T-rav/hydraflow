@@ -41,6 +41,7 @@ graph LR
     AgentPort["AgentPort<br/><i>port</i>"]
     BaseBackgroundLoop["BaseBackgroundLoop<br/><i>loop</i>"]
     BotPRPort["BotPRPort<br/><i>port</i>"]
+    Credentials["Credentials<br/><i>value_object</i>"]
     EventBus["EventBus<br/><i>service</i>"]
     HydraFlowConfig["HydraFlowConfig<br/><i>aggregate</i>"]
     IssueFetcherPort["IssueFetcherPort<br/><i>port</i>"]
