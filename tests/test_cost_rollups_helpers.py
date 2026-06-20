@@ -808,3 +808,73 @@ def test_per_loop_cost_excludes_non_loop_sources(config) -> None:
     assert "estimated" not in loops
     assert "claude" not in loops
     assert "" not in loops
+
+
+def test_per_loop_cost_populates_prev_period_avg_for_spike_highlight(config) -> None:
+    """tick_cost_avg_usd_prev_period reflects the prior window's avg $/tick.
+
+    A worker that ticks (via BACKGROUND_WORKER_STATUS events) and spends in
+    BOTH the current and the immediately-prior window gets a non-zero
+    prev-period average, so the client-side >2x spike highlight can fire.
+    """
+    now = datetime(2026, 4, 22, 12, tzinfo=UTC)
+    since = now - timedelta(hours=1)
+    prev_since = since - timedelta(hours=1)
+    cur_ts = (since + timedelta(minutes=10)).isoformat()
+    prev_ts = (prev_since + timedelta(minutes=10)).isoformat()
+
+    # source "wiki_compilation" folds to worker "repo_wiki".
+    _write_inference(
+        config,
+        timestamp=cur_ts,
+        source="wiki_compilation",
+        model="claude-sonnet-4-6",
+        input_tokens=0,
+        output_tokens=0,
+        estimated_cost_usd=0.10,
+    )
+    _write_inference(
+        config,
+        timestamp=prev_ts,
+        source="wiki_compilation",
+        model="claude-sonnet-4-6",
+        input_tokens=0,
+        output_tokens=0,
+        estimated_cost_usd=0.02,
+    )
+
+    def _evt(ts: str):
+        ev = MagicMock()
+        ev.type = "background_worker_status"
+        ev.timestamp = ts
+        ev.data = {"worker": "repo_wiki", "status": "success", "last_run": ts}
+        return ev
+
+    cur_ev, prev_ev = _evt(cur_ts), _evt(prev_ts)
+    bus = MagicMock()
+
+    async def _load(s):
+        # Mirror the real EventBus contract: return events at-or-after `s`.
+        out = []
+        for ev, ts in ((cur_ev, cur_ts), (prev_ev, prev_ts)):
+            if datetime.fromisoformat(ts) >= s:
+                out.append(ev)
+        return out
+
+    bus.load_events_since = _load
+
+    # token_source=estimated path: priced 0 from tokens → falls back to
+    # estimated_cost_usd, so cost is deterministic regardless of the table.
+    pricing = MagicMock()
+    pricing.estimate_cost.return_value = 0.0
+
+    rows = build_per_loop_cost(
+        config, since=since, until=now, pricing=pricing, event_bus=bus
+    )
+    row = next(r for r in rows if r["loop"] == "repo_wiki")
+
+    assert row["cost_usd"] == pytest.approx(0.10)
+    assert row["ticks"] == 1  # one current-window event
+    assert row["tick_cost_avg_usd"] == pytest.approx(0.10)
+    # Prior window: $0.02 over 1 tick.
+    assert row["tick_cost_avg_usd_prev_period"] == pytest.approx(0.02)
