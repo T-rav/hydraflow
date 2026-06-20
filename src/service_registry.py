@@ -1070,11 +1070,24 @@ def build_services(
         queue=retrospective_queue,
         prs=prs,
     )
+    # PrinciplesAuditLoop runs make audit-json once per HydraFlow-self and once
+    # per managed repo in a single cycle; multiple repos can push a cycle past
+    # the 2-hour default watchdog. Give it the LLM bound (4 h) via timeout_cb
+    # instead of setting LONG_LLM_CYCLE=True in the protected loop file (#9639).
+    _principles_audit_deps = LoopDeps(
+        event_bus=loop_deps.event_bus,
+        stop_event=loop_deps.stop_event,
+        status_cb=loop_deps.status_cb,
+        enabled_cb=loop_deps.enabled_cb,
+        sleep_fn=loop_deps.sleep_fn,
+        interval_cb=loop_deps.interval_cb,
+        timeout_cb=lambda _: config.loop_watchdog_llm_seconds,
+    )
     principles_audit_loop = PrinciplesAuditLoop(
         config=config,
         state=state,
         pr_manager=prs,
-        deps=loop_deps,
+        deps=_principles_audit_deps,
     )
     flake_tracker_dedup = DedupStore(
         "flake_tracker",
