@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import contextlib
 import json
 import logging
 import shutil
@@ -58,6 +59,32 @@ if TYPE_CHECKING:
     from state import StateTracker
 
 logger = logging.getLogger("hydraflow.fake_coverage_auditor_loop")
+
+# Hard cap on each ``gh``/``rg`` read. A wedged child must not hang the loop
+# cycle forever and freeze its heartbeat — the #9410 silent-stall failure
+# class (#9454 / #9508).
+_SUBPROCESS_TIMEOUT_SECONDS = 120
+
+
+async def _communicate_bounded(
+    proc: asyncio.subprocess.Process,
+) -> tuple[bytes, bytes]:
+    """``proc.communicate()`` bounded by ``_SUBPROCESS_TIMEOUT_SECONDS``.
+
+    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
+    the caller can treat it as a failed read (rather than hanging the loop
+    cycle indefinitely).
+    """
+    try:
+        return await asyncio.wait_for(
+            proc.communicate(), timeout=_SUBPROCESS_TIMEOUT_SECONDS
+        )
+    except TimeoutError:
+        proc.kill()
+        with contextlib.suppress(ProcessLookupError):
+            await proc.wait()
+        raise
+
 
 _MAX_ATTEMPTS = 3
 _HELPER_PREFIXES = ("script_",)
@@ -321,7 +348,14 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _ = await proc.communicate()
+            try:
+                stdout, _ = await _communicate_bounded(proc)
+            except TimeoutError:
+                logger.warning(
+                    "rg helper-usage scan timed out after %ss; treating as no match",
+                    _SUBPROCESS_TIMEOUT_SECONDS,
+                )
+                return False
             # rg exits 0 on match, 1 on no-match, 2+ on error.
             return proc.returncode == 0 and bool(stdout.strip())
 
@@ -511,7 +545,10 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        try:
+            stdout, _ = await _communicate_bounded(proc)
+        except TimeoutError:
+            return
         if proc.returncode != 0:
             return
         try:
@@ -564,11 +601,11 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _ = await proc.communicate()
+            stdout, _ = await _communicate_bounded(proc)
             if proc.returncode != 0:
                 return set()
             data = json.loads(stdout.decode() or "[]")
-        except (OSError, json.JSONDecodeError):
+        except (OSError, TimeoutError, json.JSONDecodeError):
             return set()
         return {entry.get("title", "") for entry in data}
 

@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W24
 
+- `c3f3206` — chore(arch): regen arch artifacts after contracts sandbox fix (#9080) (#9080) *(2026-06-13)*
 - `f0974e5` — fix(wiki): resolve committed conflict markers in 11 term files (#9482) (#9484) (#9484) *(2026-06-12)*
 - `79662e5` — fix(observability): suppress Sentry noise — bugs-only filter + test init guard (#9481) (#9481) *(2026-06-12)*
 - `cadb008` — Fixes #9354: Shadow-drift: exclude non-deterministic corpus samples... (#9445) (#9445) *(2026-06-12)*
@@ -430,48 +431,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 ## 2026-W13
 
 - `bbf7336` — docs: Add ADRs for report pipeline, caretaker loops, and routes decomposition (#5904) (#5904) *(2026-03-28)*
-
-## 2026-W12
-
-- `1448b26` — Fixes #3205: [ADR Follow-up] ADR-0022: Council requests changes (#3289) (#3289) *(2026-03-19)*
-- `b5f4f8f` — Fixes #3244: [ADR Follow-up] ADR-0023: Council requests changes (#3284) (#3284) *(2026-03-18)*
-- `b9d0cd2` — Fixes #3231: [ADR Follow-up] ADR-0015: Council requests changes (#3309) (#3309) *(2026-03-18)*
-- `b69cd2d` — hitl-fix: Fix ADR-0004 title mismatch in ADR-0023 citation (#3241) (#3278) (#3278) *(2026-03-18)*
-- `e08512e` — Fixes #3189: [Memory] Merge consecutive identical if-conditions ins... (#3221) (#3221) *(2026-03-18)*
-- `839ac7e` — Fixes #3233: [ADR Follow-up] ADR-0022: Council requests changes (#3254) (#3254) *(2026-03-18)*
-- `17bd4e2` — Fixes #3220: [ADR Pre-validation] ADR-0023: structural issues (#3242) (#3242) *(2026-03-18)*
-- `582338b` — Fixes #3222: [ADR Duplicate] ADR-0023 (#3243) (#3243) *(2026-03-18)*
-- `674566d` — Fixes #3213: [ADR Follow-up] ADR-0023: Council recommends rejection (#3234) (#3234) *(2026-03-18)*
-- `687783d` — Fixes #3229: [ADR Follow-up] ADR-0022: Council requests changes (#3248) (#3248) *(2026-03-18)*
-- `ea5cda4` — Fixes #3183: [Memory] Symmetric field assertion checklist for share... (#3192) (#3192) *(2026-03-16)*
-- `9cb0bb0` — Fixes #3097: [Memory] ADR pre-validator lacks source function name ... (#3130) (#3130) *(2026-03-16)*
-- `0001d59` — Fixes #3021: [ADR Follow-up] ADR-0021: Council requests changes (#3113) (#3113) *(2026-03-16)*
-- `b1ec5e3` — Fixes #3017: [ADR Follow-up] ADR-0021: Council requests changes (#3108) (#3108) *(2026-03-16)*
-- `518657f` — Fixes #3086: [Memory] ADR stale-cross-ref: always update the "requi... (#3110) (#3110) *(2026-03-16)*
-- `8246a43` — Fixes #3025: [Memory] ADR function references should omit line numbers (#3087) (#3087) *(2026-03-16)*
-- `5714f06` — Fixes #3016: [Memory] ADR line number citations are volatile (#3080) (#3080) *(2026-03-16)*
-- `3cc7250` — Fixes #3024: [ADR Follow-up] ADR-0021: Council requests changes (#3067) (#3067) *(2026-03-16)*
-- `235dd4c` — Fixes #3019: [ADR Follow-up] ADR-0021: Council requests changes (#3063) (#3063) *(2026-03-16)*
-- `700289c` — Fixes #2871: [Memory] ADR cross-references must name the referenced... (#3058) (#3058) *(2026-03-16)*
-- `751a6df` — Fixes #3013: [ADR Duplicate] ADR-0023 (#3053) (#3053) *(2026-03-16)*
-
-## 2026-W11
-
-- `6e82818` — Fixes #2763: [ADR Duplicate] ADR-0023 (#2977) (#2977) *(2026-03-15)*
-- `5a1803b` — Fixes #2757: [ADR Duplicate] ADR-0023 (#2966) (#2966) *(2026-03-15)*
-- `f8daa39` — Fixes #2701: [ADR Follow-up] ADR-0015: Council requests changes (#2764) (#2764) *(2026-03-15)*
-- `92b9a20` — Fixes #2755: [ADR Duplicate] ADR-0023 (#2956) (#2956) *(2026-03-15)*
-- `d8dbf5b` — Fixes #2753: [ADR Duplicate] ADR-0023 (#2946) (#2946) *(2026-03-15)*
-- `72134a2` — Fixes #2751: [ADR Duplicate] ADR-0023 (#2938) (#2938) *(2026-03-15)*
-- `fdc3519` — Fixes #2747: [ADR Duplicate] ADR-0023 (#2923) (#2923) *(2026-03-15)*
-- `3d95c4b` — Fixes #2744: [ADR Duplicate] ADR-0023 (#2911) (#2911) *(2026-03-15)*
-- `c26441d` — Fixes #2740: [ADR Duplicate] ADR-0023 (#2892) (#2892) *(2026-03-15)*
-- `9847e40` — Fixes #2733: [ADR Follow-up] ADR-0023: Council requests changes (#2873) (#2873) *(2026-03-15)*
-- `7ac6420` — Fixes #2737: [ADR Duplicate] ADR-0023 (#2883) (#2883) *(2026-03-15)*
-- `4bc1099` — Fixes #2732: [ADR Follow-up] ADR-0023: Council requests changes (#2863) (#2863) *(2026-03-15)*
-- `83cc8b3` — Fixes #2726: [ADR Follow-up] ADR-0012: Council requests changes (#2846) (#2846) *(2026-03-15)*
-- `8b7d06f` — Fixes #2720: Renumber ADR-0023 to ADR-0024 and update status to Accepted (#2816) (#2816) *(2026-03-15)*
-- `4eb1c9a` — Accept ADR-0010: worktree and path isolation (#2696) (#2696) *(2026-03-15)*
 
 
 <!-- arch:generated -->
