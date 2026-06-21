@@ -946,14 +946,16 @@ def _build_corpus_learning(ports: dict[str, Any], config: Any, deps: Any) -> Any
         deps=deps,
     )
 
-    # Optional: replace the auto_pr seam on the loop's module with a
-    # seeded async callable so tests can assert the opened PR without
-    # shelling out to ``git``/``gh``.
+    # Optional: replace the auto_pr seam with a seeded async callable so
+    # tests can assert the opened PR without shelling out to ``git``/``gh``.
+    # The loop now generates the case tree inside the worktree (#9539) and
+    # lazily imports :func:`auto_pr.generate_and_open_pr_async`, so the seam
+    # to patch is on the ``auto_pr`` module itself (mirrors DiagramLoop).
     auto_pr_stub = ports.get("corpus_learning_auto_pr")
     if auto_pr_stub is not None:
-        import corpus_learning_loop as _mod  # noqa: PLC0415
+        import auto_pr as _auto_pr  # noqa: PLC0415
 
-        _mod.open_automated_pr_async = auto_pr_stub  # type: ignore[assignment]
+        _auto_pr.generate_and_open_pr_async = auto_pr_stub  # type: ignore[assignment]
 
     return loop
 
