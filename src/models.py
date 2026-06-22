@@ -2348,6 +2348,7 @@ class ControlStatusConfig(BaseModel):
     model: str = ""
     pr_unstick_batch_size: int = 10
     workspace_base: str = ""
+    test_adequacy_coverage_timeout_secs: int = 300
 
 
 class ControlStatusResponse(BaseModel):

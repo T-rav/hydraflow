@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_45 terms across 3 bounded contexts._
+_46 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -28,6 +28,18 @@ Mtime-based runtime cache over the ADR directory that parses docs/adr/*.md on fi
 **Invariants:**
 - Re-scans the ADR directory only when its mtime changes; returns the cached ADR list on a stable directory
 - Status values are normalized to one of Accepted, Proposed, Superseded, Deprecated, or Unknown — no raw status strings escape the parser
+
+## ADRPreValidator
+
+**Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/adr_pre_validator.py:ADRPreValidator` · **Confidence:** `accepted`
+**Aliases:** `adr pre-validator`, `adr structural validator`
+
+A service that validates ADR structure before submission to the ADRCouncilReviewer, catching structural defects early in the review pipeline. Checks include: status field presence and validity, required section presence and non-emptiness (Context, Decision, Consequences), ADR number collisions, supersession integrity, volatile line citations, stale 'requires amending' notes, bare ADR references lacking title annotations, source-symbol references against the live repo, and cross-reference title accuracy. Returns an ADRValidationResult that distinguishes auto-fixable issues from blocking ones, allowing the council to skip reviews for trivially malformed drafts.
+
+**Invariants:**
+- Runs all structural checks in a single `validate()` call and returns an ADRValidationResult — never raises on malformed input.
+- Issues are classified as fixable or non-fixable; `has_fixable_only` lets callers auto-repair before escalating to the council.
+- Cross-ADR checks (number collision, supersession, cross-reference titles) are skipped when `all_adrs` is not supplied, so single-ADR validation is always safe.
 
 ## ADRReviewerLoop
 

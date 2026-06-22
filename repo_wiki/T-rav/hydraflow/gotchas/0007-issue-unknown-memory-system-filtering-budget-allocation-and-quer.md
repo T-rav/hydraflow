@@ -4,7 +4,8 @@ topic: gotchas
 source_issue: unknown
 source_phase: synthesis
 created_at: 2026-04-18T15:40:17.674506+00:00
-status: active
+status: superseded
+superseded_by: 0012
 ---
 
 # Memory System — Filtering, Budget Allocation, and Query Optimization

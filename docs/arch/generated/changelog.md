@@ -4,8 +4,31 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W26
+
+- `88d61bc` — merge staging into 9512 *(2026-06-22)*
+- `efdb1cb` — feat(ul): term-proposer batch — 1 drafts (#9654) (#9654) *(2026-06-22)*
+- `6f1dc99` — feat(ul): entry-evidence — 3 new entry links across 1 terms (#9653) (#9653) *(2026-06-22)*
+- `e4d1ef8` — feat(ul): entry-evidence — 27 new entry links across 12 terms (#9638) (#9638) *(2026-06-22)*
+- `1b9ef5b` — feat(ul): edge-proposer — 5 new edges across 5 terms (#9637) (#9637) *(2026-06-22)*
+- `e81d29d` — feat(ul): entry-evidence — 10 new entry links across 5 terms (#9620) (#9620) *(2026-06-22)*
+
 ## 2026-W25
 
+- `ef30b34` — feat(ul): edge-proposer — 5 new edges across 5 terms (#9619) (#9619) *(2026-06-21)*
+- `2865085` — feat(ul): term-proposer batch — 1 drafts (#9612) (#9612) *(2026-06-21)*
+- `376ea77` — feat(ul): entry-evidence — 3 new entry links across 2 terms (#9611) (#9611) *(2026-06-21)*
+- `dada382` — feat(ul): entry-evidence — 14 new entry links across 5 terms (#9573) (#9573) *(2026-06-21)*
+- `4dc2b15` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9571) (#9571) *(2026-06-21)*
+- `74c6d83` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9560) (#9560) *(2026-06-21)*
+- `79f2109` — feat(ul): entry-evidence — 20 new entry links across 11 terms (#9549) (#9549) *(2026-06-21)*
+- `27a4fe5` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9534) (#9534) *(2026-06-21)*
+- `9f3ae72` — feat(ul): entry-evidence — 7 new entry links across 4 terms (#9533) (#9533) *(2026-06-21)*
+- `5f5fb99` — feat(ul): entry-evidence — 5 new entry links across 4 terms (#9495) (#9495) *(2026-06-21)*
+- `bfc5425` — feat(ul): entry-evidence — 21 new entry links across 11 terms (#9610) (#9610) *(2026-06-21)*
+- `1e288b0` — feat(ul): entry-evidence — 8 new entry links across 5 terms (#9492) (#9492) *(2026-06-21)*
+- `5e24e54` — Accept ADR-0027: duplicate class merge artifact pattern (#9493) (#9493) *(2026-06-21)*
+- `d1d7e11` — Fixes #9507: ADR-0007/0013/0019 carry the same dashboard drift FP +... (#9518) (#9518) *(2026-06-20)*
 - `ead8722` — Merge remote-tracking branch 'origin/staging' into agent/diag-9080 *(2026-06-20)*
 - `69fea6a` — feat(factory): generate-in-worktree foundation + DiagramLoop migration (#9539 pt1) (#9614) (#9614) *(2026-06-19)*
 - `e920762` — feat(loops): per-loop work-cycle watchdog (closes #9556) (#9594) (#9594) *(2026-06-19)*
