@@ -11,6 +11,7 @@ graph LR
   end
   subgraph caretaker
     ADRCouncilReviewer["ADRCouncilReviewer<br/><i>service</i>"]
+    ADRPreValidator["ADRPreValidator<br/><i>service</i>"]
     ADRReviewerLoop["ADRReviewerLoop<br/><i>loop</i>"]
     AdrTouchpointAuditorLoop["AdrTouchpointAuditorLoop<br/><i>loop</i>"]
     CIMonitorLoop["CIMonitorLoop<br/><i>loop</i>"]
