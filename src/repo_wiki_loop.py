@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from auto_pr import open_automated_pr_async
+from auto_pr import generate_and_open_pr_async
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import Credentials, HydraFlowConfig
 from events import EventType, HydraFlowEvent
@@ -190,7 +190,7 @@ class RepoWikiLoop(BaseBackgroundLoop):
             return {"status": "config_disabled"}
 
         drained = self._drain_maintenance_queue()
-        repos, tracked_root = self._resolve_repos()
+        repos, _ = self._resolve_repos()
         if not repos:
             return {
                 "repos": 0,
@@ -199,22 +199,24 @@ class RepoWikiLoop(BaseBackgroundLoop):
             }
 
         closed_issues = self._get_closed_issues()
-        stats = await self._lint_and_compile_repos(repos, tracked_root, closed_issues)
+        stats: dict[str, Any] = {"queue_drained": len(drained)}
 
-        drift_findings, drift_marked = await self._detect_structural_drift(
-            repos, tracked_root
-        )
-        stats["drift_findings"] = drift_findings
-        stats["drift_marked_stale"] = drift_marked
-        stats["semantic_drift_findings"] = await self._run_semantic_drift_scan(
-            repos, tracked_root
-        )
-
-        stats["queue_drained"] = len(drained)
+        # Poll/merge any already-open maintenance PR first.
         await self._poll_and_merge_open_pr(stats)
-        await self._maybe_open_maintenance_pr(stats)
-        await self._run_generalization_pass()
 
+        # Skip a fresh heal while a maintenance PR is still open (coalesce):
+        # the open PR holds the pending healing, and the next tick re-heals
+        # off the merged base. The heal now runs INSIDE an ephemeral worktree
+        # off ``origin/<base>`` (#9539), so re-running it here would only
+        # duplicate the open PR's content rather than append to it.
+        if (
+            self._open_pr_branch is not None
+            and self._config.repo_wiki_maintenance_pr_coalesce
+        ):
+            stats["maintenance_pr"] = self._open_pr_url
+            return stats
+
+        await self._heal_and_open_maintenance_pr(closed_issues, stats)
         return stats
 
     def _drain_maintenance_queue(self) -> list[MaintenanceTask]:
@@ -236,14 +238,13 @@ class RepoWikiLoop(BaseBackgroundLoop):
     def _resolve_repos(self) -> tuple[list[str], Path | None]:
         """Return the repos to maintain plus the tracked-layout root.
 
-        Phase 7: when git-backed is on, lint the tracked per-entry layout
-        under ``config.repo_root / config.repo_wiki_path``. In that mode the
-        store's ``active_lint`` still runs against the legacy gitignored
-        layout — harmless read — but stale-flag writes only land on the
-        tracked layout so they surface as uncommitted diffs for the
-        maintenance PR. Tracked repos are merged in BEFORE the caller's
-        no-repos early-return — a freshly migrated repo may only exist in
-        the tracked location.
+        Used by ``_do_work`` purely as the no-repos early-return guard — the
+        actual heal re-discovers repos inside the worktree off ``origin/<base>``
+        (#9539), so the returned ``tracked_root`` (under ``repo_root``) is no
+        longer healed in place. When git-backed is on, tracked repos under
+        ``config.repo_root / config.repo_wiki_path`` are merged in so a
+        freshly-migrated repo (present only in the tracked location) still
+        clears the early-return.
         """
         repos = self._wiki_store.list_repos()
         tracked_root: Path | None = None
@@ -261,11 +262,15 @@ class RepoWikiLoop(BaseBackgroundLoop):
         repos: list[str],
         tracked_root: Path | None,
         closed_issues: set[int],
+        *,
+        store: RepoWikiStore,
     ) -> dict[str, Any]:
         """Phases 1/2/8: per-repo active lint + LLM topic compilation.
 
-        Returns the base maintenance stats dict (drift keys are added by the
-        caller).
+        ``store`` is the wiki store to heal — a worktree-scoped instance so
+        the lint/compile mutations land inside the ephemeral worktree, never
+        ``repo_root`` (#9539). Returns the base maintenance stats dict (drift
+        keys are added by the caller).
         """
         total_stale = 0
         total_orphans = 0
@@ -277,7 +282,7 @@ class RepoWikiLoop(BaseBackgroundLoop):
 
         for slug in repos:
             # Phase 1: Active lint — self-healing pass
-            result = self._wiki_store.active_lint(slug, closed_issues=closed_issues)
+            result = store.active_lint(slug, closed_issues=closed_issues)
             total_stale += result.stale_entries
             total_orphans += result.orphan_entries
             total_entries += result.total_entries
@@ -304,14 +309,14 @@ class RepoWikiLoop(BaseBackgroundLoop):
             # Phase 2: LLM compilation — synthesize topics with many entries
             if self._wiki_compiler is not None:
                 for topic in DEFAULT_TOPICS:
-                    topic_path = self._wiki_store._repo_dir(slug) / f"{topic}.md"
-                    entries = self._wiki_store._load_topic_entries(topic_path)
+                    topic_path = store._repo_dir(slug) / f"{topic}.md"
+                    entries = store._load_topic_entries(topic_path)
                     # Compile at 5+ entries (not 2) to avoid burning LLM
                     # calls on small topics where synthesis adds little value.
                     if len(entries) >= 5:
                         try:
                             after = await self._wiki_compiler.compile_topic(
-                                self._wiki_store, slug, topic
+                                store, slug, topic
                             )
                             if after < len(entries):
                                 total_compiled += len(entries) - after
@@ -385,7 +390,7 @@ class RepoWikiLoop(BaseBackgroundLoop):
         return stats
 
     async def _detect_structural_drift(
-        self, repos: list[str], tracked_root: Path | None
+        self, repos: list[str], tracked_root: Path | None, *, repo_root: Path
     ) -> tuple[int, int]:
         """Phase 9: deterministic wiki-vs-code citation drift detection.
 
@@ -407,7 +412,7 @@ class RepoWikiLoop(BaseBackgroundLoop):
                 result = await asyncio.to_thread(
                     detect_drift,
                     tracked_root=tracked_root,
-                    repo_root=Path(self._config.repo_root),
+                    repo_root=repo_root,
                     repo_slug=slug,
                 )
             except Exception as exc:  # noqa: BLE001
@@ -431,7 +436,7 @@ class RepoWikiLoop(BaseBackgroundLoop):
         return drift_findings, drift_marked
 
     async def _run_semantic_drift_scan(
-        self, repos: list[str], tracked_root: Path | None
+        self, repos: list[str], tracked_root: Path | None, *, repo_root: Path
     ) -> int:
         """Phase 9b (E2): LLM semantic-drift pass.
 
@@ -459,7 +464,7 @@ class RepoWikiLoop(BaseBackgroundLoop):
             try:
                 findings = await scan_semantic_drift(
                     tracked_root=tracked_root,
-                    repo_root=Path(self._config.repo_root),
+                    repo_root=repo_root,
                     repo_slug=slug,
                     ask_llm=_ask_llm,
                     min_age_days=self._config.semantic_drift_min_age_days,
@@ -482,13 +487,18 @@ class RepoWikiLoop(BaseBackgroundLoop):
                 )
         return semantic_findings
 
-    async def _run_generalization_pass(self) -> None:
-        """Promote recurring per-repo entries into the tribal wiki (best-effort)."""
+    async def _run_generalization_pass(self, *, per_repo: RepoWikiStore) -> None:
+        """Promote recurring per-repo entries into the tribal wiki (best-effort).
+
+        ``per_repo`` is the worktree-scoped store so ``mark_superseded`` writes
+        land inside the ephemeral worktree (#9539). The tribal store is rooted
+        under the gitignored data path, so its writes never touch ``repo_root``.
+        """
         tribal_store = self._tribal_store
         if tribal_store is not None and self._wiki_compiler is not None:
             try:
                 await run_generalization_pass(
-                    per_repo=self._wiki_store,
+                    per_repo=per_repo,
                     tribal=tribal_store,
                     compiler=self._wiki_compiler,
                     event_bus=self._bus,
@@ -497,14 +507,22 @@ class RepoWikiLoop(BaseBackgroundLoop):
                 reraise_on_credit_or_bug(exc)
                 logger.warning("generalization pass failed", exc_info=True)
 
-    async def _maybe_open_maintenance_pr(self, stats: dict[str, Any]) -> None:
-        """Open or coalesce a maintenance PR if the tracked wiki layout
-        has uncommitted changes.
+    async def _heal_and_open_maintenance_pr(
+        self, closed_issues: set[int], stats: dict[str, Any]
+    ) -> None:
+        """Run the wiki heal INSIDE an ephemeral worktree, then PR the diff.
+
+        Phase 4 used to lint/compile/drift directly under ``repo_root`` and
+        roll the resulting uncommitted diff into a maintenance PR — leaving the
+        factory's checkout perpetually dirty (#9539, see
+        ``docs/proposals/factory-tree-self-clean.md``). The heal now runs in a
+        worktree branched off ``origin/<base>`` via
+        :func:`generate_and_open_pr_async`, so ``repo_root`` is never mutated.
 
         Silently no-ops when:
         - credentials are absent (no ``gh_token`` to push with)
-        - ``git status --porcelain {repo_wiki_path}`` is empty (no diffs)
         - the repo root is not a git repo (defensive)
+        - the heal produces no diff (→ ``no-diff`` result, no PR opened)
         """
         if self._credentials is None or not self._credentials.gh_token:
             logger.debug("Wiki maintenance PR skipped: no gh_token available")
@@ -516,43 +534,78 @@ class RepoWikiLoop(BaseBackgroundLoop):
             return
 
         path_prefix = self._config.repo_wiki_path
-        try:
-            diff_files = await asyncio.to_thread(
-                _porcelain_paths, repo_root, path_prefix
-            )
-        except subprocess.CalledProcessError as exc:
-            logger.warning(
-                "Wiki maintenance git status failed (stderr=%s)",
-                exc.stderr,
-            )
-            return
+        heal_stats: dict[str, Any] = {}
+        diff_files: list[str] = []
 
-        if not diff_files:
-            return
-
-        if (
-            self._open_pr_branch is not None
-            and self._config.repo_wiki_maintenance_pr_coalesce
-        ):
-            logger.info(
-                "Wiki maintenance PR %s is already open; Phase 5 will append",
-                self._open_pr_url,
+        async def _generate(worktree: Path) -> None:
+            # Heal the worktree's copy of the tracked layout — every write
+            # (lint stale-flags, compile synthesis, drift markers, tribal
+            # supersede) lands here, never under ``repo_root``.
+            tracked_root = (worktree / path_prefix).resolve()
+            wt_wiki_root = worktree / "docs" / "wiki"
+            if not wt_wiki_root.exists():
+                wt_wiki_root = tracked_root
+            store = RepoWikiStore(
+                wiki_root=wt_wiki_root,
+                tracked_root=tracked_root
+                if self._config.repo_wiki_git_backed
+                else None,
+                self_slug=self._config.repo,
             )
-            stats["maintenance_pr"] = self._open_pr_url
-            return
+
+            repos = store.list_repos()
+            if self._config.repo_wiki_git_backed:
+                for slug in _list_tracked_repos(tracked_root):
+                    if slug not in repos:
+                        repos.append(slug)
+
+            wt_tracked_root = (
+                tracked_root if self._config.repo_wiki_git_backed else None
+            )
+            s = await self._lint_and_compile_repos(
+                repos, wt_tracked_root, closed_issues, store=store
+            )
+            drift_findings, drift_marked = await self._detect_structural_drift(
+                repos, wt_tracked_root, repo_root=worktree
+            )
+            s["drift_findings"] = drift_findings
+            s["drift_marked_stale"] = drift_marked
+            s["semantic_drift_findings"] = await self._run_semantic_drift_scan(
+                repos, wt_tracked_root, repo_root=worktree
+            )
+            await self._run_generalization_pass(per_repo=store)
+            heal_stats.update(s)
+
+            # Capture the changed files for the PR body (lazy-resolved after
+            # this callback returns).
+            try:
+                diff_files.extend(
+                    await asyncio.to_thread(_porcelain_paths, worktree, path_prefix)
+                )
+            except subprocess.CalledProcessError as exc:
+                logger.warning(
+                    "Wiki maintenance git status failed in worktree (stderr=%s)",
+                    exc.stderr,
+                )
+
+        def _body() -> str:
+            return _maintenance_pr_body(
+                {**heal_stats, "queue_drained": stats.get("queue_drained", 0)},
+                diff_files,
+            )
 
         timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
         branch = f"hydraflow/wiki-maint-{timestamp}"
         today = datetime.now(UTC).date().isoformat()
         title = f"chore(wiki): maintenance {today}"
-        body = _maintenance_pr_body(stats, diff_files)
 
-        result = await open_automated_pr_async(
+        result = await generate_and_open_pr_async(
             repo_root=repo_root,
             branch=branch,
-            files=[repo_root / p for p in diff_files],
+            generate=_generate,
+            path_specs=[path_prefix],
             pr_title=title,
-            pr_body=body,
+            pr_body=_body,
             base=self._config.base_branch(),
             # Auto-merge is disabled — the loop polls CI on subsequent
             # ticks and calls ``gh pr review --approve`` + ``gh pr merge``
@@ -565,6 +618,9 @@ class RepoWikiLoop(BaseBackgroundLoop):
             commit_author_name=self._config.git_user_name,
             commit_author_email=self._config.git_user_email,
         )
+
+        # Surface the heal stats regardless of whether a PR was opened.
+        stats.update(heal_stats)
 
         if result.status == "opened":
             self._open_pr_branch = branch
