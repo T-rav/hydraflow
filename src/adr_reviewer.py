@@ -727,19 +727,14 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
             )
             return False
 
-        try:
-            adr_path.write_text(amended, encoding="utf-8")
-        except OSError:
-            logger.exception(
-                "ADR-%04d clerk amend accepted but file write failed", result.adr_number
-            )
-            return False
-
         logger.info(
             "ADR-%04d accepted after clerk amendment re-vote",
             result.adr_number,
         )
-        await self._accept_adr(rerun, adr_path, adr_dir)
+        # Hand the amended content straight to acceptance — it is written into
+        # the PR worktree, never back into repo_root (#9539). The clerk-amend
+        # re-read therefore happens off the worktree path inside ``_accept_adr``.
+        await self._accept_adr(rerun, adr_path, adr_dir, source_content=amended)
         return True
 
     def _build_clerk_amendment(self, content: str, result: ADRCouncilResult) -> str:
@@ -812,54 +807,84 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         result: ADRCouncilResult,
         adr_path: Path,
         adr_dir: Path,
+        *,
+        source_content: str | None = None,
     ) -> None:
-        """Accept an ADR: update status, update README, commit and create PR."""
+        """Accept an ADR: compute the Accepted ADR + README and open a PR.
+
+        The acceptance edits (Status flip, Enforced-by line, README row) are
+        produced as in-memory content and written into the PR *worktree*
+        (#9539) — ``repo_root`` is never mutated. ``source_content`` lets the
+        clerk-amend path hand in its already-amended body so the file is not
+        re-read from disk.
+        """
         logger.info("ADR-%04d accepted by council", result.adr_number)
 
-        try:
-            content = adr_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            logger.exception("Failed to read ADR file: %s", adr_path)
-            return
+        if source_content is not None:
+            content = source_content
+        else:
+            try:
+                content = adr_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                logger.exception("Failed to read ADR file: %s", adr_path)
+                return
 
         # Update status in ADR file and guarantee the Enforced-by line
         # (required by tests/test_adr_enforcement.py on every Accepted ADR).
-        updated = _STATUS_RE.sub("**Status:** Accepted", content, count=1)
-        updated = _ensure_enforced_by_line(updated)
-        adr_path.write_text(updated, encoding="utf-8")
+        updated_adr = _STATUS_RE.sub("**Status:** Accepted", content, count=1)
+        updated_adr = _ensure_enforced_by_line(updated_adr)
 
-        # Update README if present
+        # Compute the updated README content (if present) — content only; the
+        # write happens inside the worktree generate callback.
         readme_path = adr_dir / "README.md"
+        updated_readme: str | None = None
         if readme_path.exists():
-            self._update_readme_status(readme_path, result.adr_number)
+            try:
+                readme_content = readme_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                logger.warning("Failed to read ADR README: %s", readme_path)
+            else:
+                changed = self._readme_with_accepted_status(
+                    readme_content, result.adr_number
+                )
+                if changed != readme_content:
+                    updated_readme = changed
 
-        # Commit and create PR
-        await self._commit_acceptance(adr_path, readme_path, result)
+        # Commit and create PR (writes into the worktree, not repo_root).
+        await self._commit_acceptance(
+            adr_path=adr_path,
+            readme_path=readme_path,
+            adr_content=updated_adr,
+            readme_content=updated_readme,
+            result=result,
+        )
 
-    def _update_readme_status(self, readme_path: Path, adr_number: int) -> None:
-        """Update the ADR status in README.md from Proposed to Accepted."""
-        content = readme_path.read_text(encoding="utf-8")
+    def _readme_with_accepted_status(self, content: str, adr_number: int) -> str:
+        """Return README content with the ADR's row flipped Proposed→Accepted."""
         # Match table rows like "| 0001 | ... | Proposed |"
         pattern = re.compile(
             rf"(\|\s*{adr_number:04d}\s*\|.*?\|)\s*Proposed\s*\|",
             re.IGNORECASE,
         )
-        updated = pattern.sub(r"\1 Accepted |", content)
-        if updated != content:
-            readme_path.write_text(updated, encoding="utf-8")
+        return pattern.sub(r"\1 Accepted |", content)
 
     async def _commit_acceptance(
         self,
+        *,
         adr_path: Path,
         readme_path: Path,
+        adr_content: str,
+        readme_content: str | None,
         result: ADRCouncilResult,
     ) -> None:
-        """Create worktree, commit status update, push, and create PR.
+        """Generate the acceptance files in a worktree, commit, push, open PR.
 
         Delegates the worktree/commit/push/PR lifecycle to
-        :func:`auto_pr.open_automated_pr_async`.
+        :func:`auto_pr.generate_and_open_pr_async`. The ``generate`` callback
+        writes the Accepted ADR (and updated README, if any) INTO the worktree
+        it is handed — ``repo_root`` is never written for the PR (#9539).
         """
-        from auto_pr import open_automated_pr_async  # noqa: PLC0415
+        from auto_pr import generate_and_open_pr_async  # noqa: PLC0415
 
         if self._config.dry_run:
             logger.info(
@@ -867,12 +892,25 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
             )
             return
 
-        repo_root = Path(self._config.repo_root)
+        repo_root = Path(self._config.repo_root).resolve()
         branch = f"adr/accept-{result.adr_number:04d}"
 
-        files = [adr_path]
-        if readme_path.exists():
-            files.append(readme_path)
+        # Repo-relative paths for staging + worktree writes.
+        adr_rel = adr_path.resolve().relative_to(repo_root)
+        path_specs = [str(adr_rel)]
+        readme_rel: Path | None = None
+        if readme_content is not None:
+            readme_rel = readme_path.resolve().relative_to(repo_root)
+            path_specs.append(str(readme_rel))
+
+        async def _generate(worktree: Path) -> None:
+            adr_dst = worktree / adr_rel
+            adr_dst.parent.mkdir(parents=True, exist_ok=True)
+            adr_dst.write_text(adr_content, encoding="utf-8")
+            if readme_rel is not None and readme_content is not None:
+                readme_dst = worktree / readme_rel
+                readme_dst.parent.mkdir(parents=True, exist_ok=True)
+                readme_dst.write_text(readme_content, encoding="utf-8")
 
         minority = (
             f"\n\nMinority note: {result.minority_note}"
@@ -897,10 +935,11 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
             f"Generated by HydraFlow ADR Council"
         )
 
-        await open_automated_pr_async(
+        await generate_and_open_pr_async(
             repo_root=repo_root,
             branch=branch,
-            files=files,
+            generate=_generate,
+            path_specs=path_specs,
             pr_title=pr_title,
             pr_body=pr_body,
             commit_message=commit_message,

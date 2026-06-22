@@ -919,12 +919,60 @@ class TestAcceptADR:
             ],
         )
 
-        with patch("auto_pr.open_automated_pr_async", new_callable=AsyncMock):
+        with patch(
+            "auto_pr.generate_and_open_pr_async", new_callable=AsyncMock
+        ) as mock_pr:
             await reviewer._accept_adr(result, adr_path, adr_dir)
 
-        content = adr_path.read_text(encoding="utf-8")
-        assert "**Status:** Accepted" in content
-        assert "**Status:** Proposed" not in content
+        # #9539: repo_root is NEVER mutated for the PR — the proposed file
+        # on disk stays Proposed; the Accepted edit is written into the
+        # worktree by the generate callback (not invoked when mocked).
+        on_disk = adr_path.read_text(encoding="utf-8")
+        assert "**Status:** Proposed" in on_disk
+        assert "**Status:** Accepted" not in on_disk
+
+        kwargs = mock_pr.await_args.kwargs
+        assert kwargs["branch"] == "adr/accept-0001"
+        assert kwargs["path_specs"] == ["docs/adr/0001-test-adr.md"]
+        assert callable(kwargs["generate"])
+
+    @pytest.mark.asyncio
+    async def test_generate_writes_accepted_adr_into_worktree(
+        self, tmp_path: Path
+    ) -> None:
+        """The generate callback writes the Accepted ADR into the worktree it is
+        handed — never repo_root (#9539)."""
+        reviewer = _make_reviewer(tmp_path)
+        adr_dir = tmp_path / "repo" / "docs" / "adr"
+        adr_path = _write_adr(adr_dir, 1, "Test ADR", "Proposed")
+        result = ADRCouncilResult(
+            adr_number=1,
+            adr_title="Test ADR",
+            final_decision="ACCEPT",
+            summary="Council approves",
+            votes=[
+                CouncilVote(
+                    role="architect", verdict=CouncilVerdict.APPROVE, reasoning="Good"
+                ),
+            ],
+        )
+
+        captured: dict = {}
+
+        async def intercept(**kw):
+            captured.update(kw)
+
+        with patch("auto_pr.generate_and_open_pr_async", intercept):
+            await reviewer._accept_adr(result, adr_path, adr_dir)
+
+        worktree = tmp_path / "wt"
+        worktree.mkdir()
+        await captured["generate"](worktree)
+
+        written = (worktree / "docs/adr/0001-test-adr.md").read_text(encoding="utf-8")
+        assert "**Status:** Accepted" in written
+        # repo_root file still untouched.
+        assert "**Status:** Proposed" in adr_path.read_text(encoding="utf-8")
 
     @pytest.mark.asyncio
     async def test_updates_readme_row(self, tmp_path: Path) -> None:
@@ -949,10 +997,24 @@ class TestAcceptADR:
             ],
         )
 
-        with patch("auto_pr.open_automated_pr_async", new_callable=AsyncMock):
+        captured: dict = {}
+
+        async def intercept(**kw):
+            captured.update(kw)
+
+        with patch("auto_pr.generate_and_open_pr_async", intercept):
             await reviewer._accept_adr(result, adr_path, adr_dir)
 
-        readme_content = readme.read_text(encoding="utf-8")
+        # #9539: repo_root README is untouched; the README is staged + written
+        # into the worktree only.
+        assert "| 0001 | Test ADR | Proposed |" in readme.read_text(encoding="utf-8")
+        assert "docs/adr/README.md" in captured["path_specs"]
+
+        worktree = tmp_path / "wt"
+        worktree.mkdir()
+        await captured["generate"](worktree)
+
+        readme_content = (worktree / "docs/adr/README.md").read_text(encoding="utf-8")
         assert "Accepted" in readme_content.split("\n")[1]
         # Other rows unchanged
         assert "| 0002 | Other | Accepted |" in readme_content
@@ -984,7 +1046,7 @@ class TestAcceptADR:
         )
 
         mock_open_pr = AsyncMock()
-        with patch("auto_pr.open_automated_pr_async", mock_open_pr):
+        with patch("auto_pr.generate_and_open_pr_async", mock_open_pr):
             await reviewer._accept_adr(result, adr_path, adr_dir)
 
         # Helper called once; commit_message kwarg carries the minority note.
@@ -1220,6 +1282,7 @@ class TestClerkAmendment:
             ],
         )
         reviewer._run_council_session = AsyncMock(return_value=rerun_result)
+        original = adr_path.read_text(encoding="utf-8")
 
         with patch.object(
             reviewer, "_accept_adr", new_callable=AsyncMock
@@ -1228,11 +1291,16 @@ class TestClerkAmendment:
                 original_result, adr_path, adr_dir
             )
             assert accepted is True
-            mock_accept.assert_awaited_once_with(rerun_result, adr_path, adr_dir)
 
-        updated = adr_path.read_text(encoding="utf-8")
-        assert "## Council Amendment Notes" in updated
-        assert "Clarify tradeoffs" in updated
+        # The amended content is handed to acceptance via source_content (#9539);
+        # repo_root is never written for the PR — the file stays untouched.
+        mock_accept.assert_awaited_once()
+        call = mock_accept.await_args
+        assert call.args == (rerun_result, adr_path, adr_dir)
+        amended = call.kwargs["source_content"]
+        assert "## Council Amendment Notes" in amended
+        assert "Clarify tradeoffs" in amended
+        assert adr_path.read_text(encoding="utf-8") == original
 
     @pytest.mark.asyncio
     async def test_clerk_revote_non_accept_falls_back(self, tmp_path: Path) -> None:
@@ -1601,7 +1669,7 @@ class TestAcceptADREdgeCases:
 
         # Should not raise
         with patch(
-            "auto_pr.open_automated_pr_async", new_callable=AsyncMock
+            "auto_pr.generate_and_open_pr_async", new_callable=AsyncMock
         ) as mock_open_pr:
             await reviewer._accept_adr(result, adr_path, adr_dir)
             # Should not reach commit since file couldn't be read
@@ -1624,10 +1692,14 @@ class TestCommitAcceptance:
         )
 
         with patch(
-            "auto_pr.open_automated_pr_async", new_callable=AsyncMock
+            "auto_pr.generate_and_open_pr_async", new_callable=AsyncMock
         ) as mock_open_pr:
             await reviewer._commit_acceptance(
-                tmp_path / "adr.md", tmp_path / "README.md", result
+                adr_path=tmp_path / "adr.md",
+                readme_path=tmp_path / "README.md",
+                adr_content="**Status:** Accepted\n",
+                readme_content=None,
+                result=result,
             )
             mock_open_pr.assert_not_awaited()
 
@@ -1646,10 +1718,14 @@ class TestCommitAcceptance:
         adr_path.write_text("**Status:** Accepted")
 
         with patch(
-            "auto_pr.open_automated_pr_async", new_callable=AsyncMock
+            "auto_pr.generate_and_open_pr_async", new_callable=AsyncMock
         ) as mock_open_pr:
             await reviewer._commit_acceptance(
-                adr_path, tmp_path / "repo" / "docs" / "adr" / "README.md", result
+                adr_path=adr_path,
+                readme_path=tmp_path / "repo" / "docs" / "adr" / "README.md",
+                adr_content="**Status:** Accepted\n",
+                readme_content=None,
+                result=result,
             )
         assert mock_open_pr.await_count == 1
         assert mock_open_pr.await_args is not None
@@ -1657,6 +1733,9 @@ class TestCommitAcceptance:
         assert kwargs["raise_on_failure"] is False
         assert kwargs["auto_merge"] is False
         assert kwargs["branch"] == "adr/accept-0001"
+        # Generate-in-worktree: never stages files from repo_root (#9539).
+        assert kwargs["path_specs"] == ["docs/adr/0001-test.md"]
+        assert callable(kwargs["generate"])
         # Commit author threaded through from HydraFlowConfig, not hardcoded.
         assert kwargs["commit_author_name"] == reviewer._config.git_user_name
         assert kwargs["commit_author_email"] == reviewer._config.git_user_email

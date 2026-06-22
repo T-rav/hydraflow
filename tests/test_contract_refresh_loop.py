@@ -29,6 +29,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import auto_pr
 import contract_refresh_loop as crl_module
 from auto_pr import AutoPrResult
 from base_background_loop import LoopDeps
@@ -223,7 +224,15 @@ def _install_async_subprocess_stub(
 
 
 class _FakeAutoPR:
-    """Captures ``open_automated_pr_async`` calls and returns a canned result."""
+    """Captures ``generate_and_open_pr_async`` calls and returns a canned result.
+
+    The generate-in-worktree helper (#9539) is patched on the ``auto_pr``
+    module — the loop imports it lazily at call time, so the seam lives
+    there, not on ``crl_module``. The ``generate`` callback is *not*
+    invoked when the helper is mocked, so tests assert the call kwargs
+    (branch, labels, path_specs, callable generate) rather than the
+    written cassette bytes.
+    """
 
     def __init__(self, status: str = "opened") -> None:
         self.calls: list[dict[str, Any]] = []
@@ -261,7 +270,7 @@ async def test_do_work_no_drift_no_pr(
     """All adapters clean → no PR, no replay gate run, no issue."""
     _stub_recording(monkeypatch)
     fake = _FakeAutoPR()
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", fake)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake)
     calls = _stub_make_trust_contracts_ok(monkeypatch)
 
     # Force detect_fleet_drift to report no drift regardless of input.
@@ -304,7 +313,7 @@ async def test_do_work_drift_opens_refresh_pr_and_records_dedup(
     monkeypatch.setattr(crl_module, "detect_fleet_drift", lambda *_a, **_k: fleet)
 
     fake = _FakeAutoPR()
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", fake)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake)
     _stub_make_trust_contracts_ok(monkeypatch)
 
     loop = _loop(tmp_path)
@@ -317,9 +326,21 @@ async def test_do_work_drift_opens_refresh_pr_and_records_dedup(
     assert "git" in kwargs["pr_body"]
     labels = kwargs.get("labels") or []
     assert "contract-refresh" in labels
-    # At least the drifted cassette is in the file list.
-    staged_names = [Path(p).name for p in kwargs["files"]]
-    assert "commit.yaml" in staged_names
+    # Generate-in-worktree (#9539): the helper gets a callable generate +
+    # the drifted adapter's cassette dir in path_specs. There is no
+    # `files` kwarg — the cassettes are written into the worktree by the
+    # callback (not invoked while the helper is mocked), never repo_root.
+    assert "files" not in kwargs
+    assert callable(kwargs["generate"])
+    assert "tests/trust/contracts/cassettes/git" in kwargs["path_specs"], kwargs[
+        "path_specs"
+    ]
+
+    # repo_root must stay clean — nothing was copied into it.
+    committed = (
+        loop._config.repo_root / "tests/trust/contracts/cassettes/git" / "commit.yaml"
+    )
+    assert not committed.exists(), "refresh must not write cassettes under repo_root"
 
     # Dedup key recorded.
     dedup_path = loop._config.data_root / "dedup" / "contract_refresh.json"
@@ -349,7 +370,7 @@ async def test_do_work_dedup_hit_skips_pr(
     monkeypatch.setattr(crl_module, "detect_fleet_drift", lambda *_a, **_k: fleet)
 
     fake = _FakeAutoPR()
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", fake)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake)
     _stub_make_trust_contracts_ok(monkeypatch)
 
     loop = _loop(tmp_path)
@@ -386,7 +407,7 @@ async def test_do_work_replay_gate_fails_files_companion_issue(
     monkeypatch.setattr(crl_module, "detect_fleet_drift", lambda *_a, **_k: fleet)
 
     fake = _FakeAutoPR()
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", fake)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake)
     calls = _stub_make_trust_contracts_fail(monkeypatch)
 
     prs = AsyncMock()
@@ -427,7 +448,7 @@ async def test_do_work_replay_gate_passes_no_companion_issue(
     monkeypatch.setattr(crl_module, "detect_fleet_drift", lambda *_a, **_k: fleet)
 
     fake = _FakeAutoPR()
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", fake)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake)
     _stub_make_trust_contracts_ok(monkeypatch)
 
     prs = AsyncMock()
@@ -444,7 +465,7 @@ async def test_clean_tick_closes_open_fake_drift_issue(
 ) -> None:
     """#9359: a drift-free tick closes a previously-open fake-drift rollup issue."""
     _stub_recording(monkeypatch)
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", _FakeAutoPR())
     _stub_make_trust_contracts_ok(monkeypatch)
     monkeypatch.setattr(
         crl_module,
@@ -482,7 +503,7 @@ async def test_replay_pass_closes_open_fake_drift_issue(
     )
     fleet = crl_module.FleetDriftReport(reports=[drifted_report], has_drift=True)
     monkeypatch.setattr(crl_module, "detect_fleet_drift", lambda *_a, **_k: fleet)
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", _FakeAutoPR())
     _stub_make_trust_contracts_ok(monkeypatch)
 
     state = _FakeState()
@@ -546,7 +567,7 @@ async def test_do_work_emits_telemetry_for_each_recorder_and_replay(
     monkeypatch.setattr(crl_module, "detect_fleet_drift", lambda *_a, **_k: fleet)
 
     fake = _FakeAutoPR()
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", fake)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake)
     _stub_make_trust_contracts_ok(monkeypatch)
 
     emitted = _patch_emit_trace(monkeypatch)
@@ -603,7 +624,7 @@ async def test_replay_gate_failure_trace_carries_exit_code_and_stderr(
     monkeypatch.setattr(crl_module, "detect_fleet_drift", lambda *_a, **_k: fleet)
 
     fake = _FakeAutoPR()
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", fake)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake)
     _stub_make_trust_contracts_fail(monkeypatch)
 
     emitted = _patch_emit_trace(monkeypatch)
@@ -669,7 +690,7 @@ async def test_drift_detection_increments_per_adapter_attempts(
         "detect_fleet_drift",
         lambda *_a, **_k: _drift_fleet_for("git", rec),
     )
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", _FakeAutoPR())
     _stub_make_trust_contracts_ok(monkeypatch)
 
     state = _FakeState()
@@ -729,7 +750,7 @@ async def test_drift_clears_attempts_for_adapters_not_in_this_tick(
         "detect_fleet_drift",
         lambda *_a, **_k: _drift_fleet_for("docker", rec),
     )
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", _FakeAutoPR())
     _stub_make_trust_contracts_ok(monkeypatch)
 
     state = _FakeState()
@@ -762,7 +783,7 @@ async def test_third_attempt_files_escalation_issue(
         "detect_fleet_drift",
         lambda *_a, **_k: _drift_fleet_for("git", rec),
     )
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", _FakeAutoPR())
     _stub_make_trust_contracts_ok(monkeypatch)
 
     state = _FakeState()
@@ -808,7 +829,7 @@ async def test_escalation_is_deduped_across_ticks(
         "detect_fleet_drift",
         lambda *_a, **_k: _drift_fleet_for("git", rec),
     )
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", _FakeAutoPR())
     _stub_make_trust_contracts_ok(monkeypatch)
 
     state = _FakeState()
@@ -856,7 +877,7 @@ async def test_escalation_zero_sentinel_does_not_dedup(
         "detect_fleet_drift",
         lambda *_a, **_k: _drift_fleet_for("git", rec),
     )
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", _FakeAutoPR())
     _stub_make_trust_contracts_ok(monkeypatch)
 
     state = _FakeState()
@@ -896,7 +917,7 @@ async def test_escalation_resets_after_clean_tick(
     _stub_recording(monkeypatch)
     rec = _seed_recorded_cassette(tmp_path / "rec" / "git", "git", "commit")
     monkeypatch.setattr(crl_module, "record_git", lambda *_a, **_k: [rec])
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", _FakeAutoPR())
     _stub_make_trust_contracts_ok(monkeypatch)
 
     state = _FakeState()

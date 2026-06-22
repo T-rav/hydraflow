@@ -11,18 +11,21 @@ Scope (per the plan's Task 16):
 
 - **Happy path**: a seeded escape issue flows through the full
   ``_do_work`` pipeline (reader → synth → three-gate validation →
-  materialize → PR open → dedup) and surfaces the expected counters
-  plus the expected :func:`auto_pr.open_automated_pr_async` call shape.
+  generate-in-worktree → PR open → dedup) and surfaces the expected
+  counters plus the expected :func:`auto_pr.generate_and_open_pr_async`
+  call shape (callable ``generate`` + case ``path_specs``). Driving the
+  captured ``generate`` callback against a scratch worktree proves the
+  case tree materializes there — never under ``repo_root`` (#9539).
 - **Unparseable signal**: a body that misses the envelope convention is
   dropped at synthesis without crashing the tick or filing a PR.
 - **Validation failure**: synthesis succeeds but gate (b) rejects the
   case (no catcher trip) — no PR is filed and the counter stays at 0.
 - **Dedup hit on re-run**: ticking a second time against the same
   escape signal short-circuits at the dedup set, so no second
-  :func:`auto_pr.open_automated_pr_async` call is made.
+  :func:`auto_pr.generate_and_open_pr_async` call is made.
 
 All seams (``PRManager.list_issues_by_label``,
-``auto_pr.open_automated_pr_async``, and — for the gate-(b) failure
+``auto_pr.generate_and_open_pr_async``, and — for the gate-(b) failure
 scenario — ``CorpusLearningLoop._fixture_transcript_for``) are mocked
 at module boundaries; everything in between runs the real code path.
 The suite stays well under 2 s on a modern laptop because there is
@@ -139,15 +142,18 @@ def _loop(
     *,
     enabled: bool = True,
 ) -> CorpusLearningLoop:
-    """Build a :class:`CorpusLearningLoop` rooted at ``tmp_path``.
+    """Build a :class:`CorpusLearningLoop` rooted at ``tmp_path / "repo"``.
 
-    ``repo_root`` is set to ``tmp_path`` so Task 15's materialization
-    writes under the sandbox and never escapes to the real repo.
+    ``repo_root`` is set to a dedicated ``repo`` subdir so the
+    generate-in-worktree assertions can prove the factory checkout
+    (``repo_root``) is never mutated (#9539).
     """
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(exist_ok=True)
     cfg = HydraFlowConfig(
         data_root=tmp_path,
         repo="hydra/hydraflow",
-        repo_root=tmp_path,
+        repo_root=repo_root,
     )
     deps = LoopDeps(
         event_bus=EventBus(),
@@ -172,10 +178,13 @@ def test_end_to_end_happy_path_files_one_pr(
     """Parseable + validatable escape → one PR, dedup recorded, counters aligned.
 
     Asserts the full contract of a green tick: the issue is seen, the
-    envelope is synthesized, the three-gate validator passes, the case
-    is materialized to disk, and ``auto_pr.open_automated_pr_async`` is
-    invoked with the expected title/body/labels shape. The dedup store
-    is updated so a later tick won't re-file.
+    envelope is synthesized, the three-gate validator passes, and
+    ``auto_pr.generate_and_open_pr_async`` is invoked with the expected
+    title/body/labels shape plus a callable ``generate`` + case
+    ``path_specs``. Driving the captured ``generate`` callback against a
+    scratch worktree proves the case tree lands there — never under
+    ``repo_root`` (#9539). The dedup store is updated so a later tick
+    won't re-file.
     """
     _prs.list_issues_by_label = AsyncMock(
         return_value=[
@@ -197,9 +206,9 @@ def test_end_to_end_happy_path_files_one_pr(
             pr_url="https://github.com/hydra/hydraflow/pull/999",
         )
 
-    import corpus_learning_loop as mod
+    import auto_pr
 
-    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_open)
 
     loop = _loop(tmp_path, _prs, _dedup)
     result = asyncio.run(loop._do_work())
@@ -231,20 +240,27 @@ def test_end_to_end_happy_path_files_one_pr(
     assert isinstance(labels, list)
     assert "hydraflow-agent" in labels
     assert "corpus-learning" in labels
-    # Branch + files carry the slug derived from the issue title.
+    # Branch carries the slug derived from the issue title.
     slug = "diff-sanity-missed-renamed-symbol"
     assert slug in str(kwargs["branch"])
     assert "4242" in str(kwargs["branch"])
-    files = kwargs["files"]
-    assert isinstance(files, list)
-    assert files, "expected materialized files to be passed to auto_pr"
+    # No pre-written files: the loop generates in-worktree (#9539).
+    assert "files" not in kwargs
+    assert callable(kwargs["generate"])
+    assert kwargs["path_specs"] == [f"tests/trust/adversarial/cases/{slug}"]
 
-    # Case directory actually landed on disk.
-    case_dir = tmp_path / "tests" / "trust" / "adversarial" / "cases" / slug
+    # Drive the captured generate callback against a scratch worktree —
+    # the case tree must materialize THERE, not under repo_root.
+    worktree = tmp_path / "scratch-worktree"
+    worktree.mkdir()
+    asyncio.run(kwargs["generate"](worktree))
+    case_dir = worktree / "tests" / "trust" / "adversarial" / "cases" / slug
     assert (case_dir / "README.md").exists()
     assert (case_dir / "expected_catcher.txt").read_text().strip() == "diff-sanity"
     assert (case_dir / "before" / "src" / "foo.py").exists()
     assert (case_dir / "after" / "src" / "foo.py").exists()
+    # repo_root stays clean — the factory checkout is never mutated.
+    assert not (loop._config.repo_root / "tests").exists()
 
     # Dedup entry was persisted, keyed on issue number + slug.
     assert f"corpus_learning:4242:{slug}" in _dedup.get()
@@ -284,9 +300,9 @@ def test_end_to_end_unparseable_signal_is_skipped(
         open_calls.append(kwargs)
         return _AutoPrResultStub(status="opened", pr_url="x/y/pull/1")
 
-    import corpus_learning_loop as mod
+    import auto_pr
 
-    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_open)
 
     loop = _loop(tmp_path, _prs, _dedup)
     result = asyncio.run(loop._do_work())
@@ -333,9 +349,9 @@ def test_end_to_end_validation_failure_skips_pr(
         open_calls.append(kwargs)
         return _AutoPrResultStub(status="opened", pr_url="x/y/pull/1")
 
-    import corpus_learning_loop as mod
+    import auto_pr
 
-    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_open)
 
     loop = _loop(tmp_path, _prs, _dedup)
 
@@ -399,9 +415,9 @@ def test_end_to_end_dedup_prevents_refile_on_second_tick(
             pr_url="https://github.com/hydra/hydraflow/pull/999",
         )
 
-    import corpus_learning_loop as mod
+    import auto_pr
 
-    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_open)
 
     loop = _loop(tmp_path, _prs, _dedup)
 
