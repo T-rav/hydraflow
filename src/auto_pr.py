@@ -703,7 +703,7 @@ async def generate_and_open_pr_async(
     generate: Callable[[Path], Awaitable[None]],
     path_specs: list[str],
     pr_title: str,
-    pr_body: str,
+    pr_body: str | Callable[[], str],
     commit_message: str | None = None,
     base: str = "main",
     auto_merge: bool = True,
@@ -733,6 +733,11 @@ async def generate_and_open_pr_async(
         path_specs: repo-relative paths/dirs to ``git add`` after generation
             (e.g. ``["docs/arch/generated", "docs/arch/.meta.json"]``). An empty
             staged diff short-circuits to ``no-diff``.
+        pr_body: the PR body, or a zero-arg callable returning it. A callable is
+            resolved AFTER ``generate`` + staging, so bodies that summarise what
+            the generator produced (counts, changed files) can read state the
+            callback populated. Resolution happens before the no-diff check, so
+            the callable must not assume a PR will actually be opened.
 
     All other args mirror :func:`open_automated_pr_async`.
     """
@@ -802,11 +807,15 @@ async def generate_and_open_pr_async(
         except RuntimeError as exc:
             return _fail(f"failed to stage generated paths for {branch!r}: {exc}")
 
+        # Resolve a lazy body now — after generate + staging — so summaries can
+        # reflect what the generator produced.
+        resolved_body = pr_body() if callable(pr_body) else pr_body
+
         return await _finalize_pr_from_worktree(
             worktree_path=worktree_path,
             branch=branch,
             pr_title=pr_title,
-            pr_body=pr_body,
+            pr_body=resolved_body,
             commit_message=msg,
             base=base,
             auto_merge=auto_merge,

@@ -74,7 +74,6 @@ graph LR
   AgentRunner -->|depends_on| RepoWikiStore
   AgentRunner -->|depends_on| Task
   AgentRunner -->|depends_on| EventBus
-  AgentRunner -->|depends_on| Credentials
   BaseBackgroundLoop -->|depends_on| EventBus
   BaseBackgroundLoop -->|depends_on| HydraFlowConfig
   BotPRPort -->|depends_on| HydraFlowConfig
