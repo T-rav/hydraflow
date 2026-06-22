@@ -58,6 +58,31 @@ def test_emit_writes_trace_entry_with_required_shape(data_root: Path) -> None:
     assert "started_at" in payload  # ISO 8601
 
 
+def test_emit_started_at_is_work_start_not_emit_time(data_root: Path) -> None:
+    """started_at marks when the work began, not when the trace was emitted.
+
+    The helper is called after the subprocess completes (it receives the
+    already-elapsed duration_ms), so it back-dates started_at by duration_ms.
+    A consumer computing [started_at, started_at + duration_ms] then brackets
+    the real work interval instead of a window one full duration in the future.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    duration_ms = 60_000
+    before = datetime.now(UTC)
+    emit_loop_subprocess_trace(
+        loop="X", command=["x"], exit_code=0, duration_ms=duration_ms
+    )
+    after = datetime.now(UTC)
+
+    files = list((data_root / "traces" / "_loops" / "x").glob("run-*.json"))
+    payload = json.loads(files[0].read_text(encoding="utf-8"))
+    started = datetime.fromisoformat(payload["started_at"])
+
+    # started_at + duration lands at ~emit time (now), not one duration ahead.
+    assert before <= started + timedelta(milliseconds=duration_ms) <= after
+
+
 def test_emit_truncates_stderr_tail_preserving(data_root: Path) -> None:
     big = "A" * 4096 + "TAIL_MARKER"
     emit_loop_subprocess_trace(

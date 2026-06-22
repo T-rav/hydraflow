@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from models import (
@@ -443,8 +443,14 @@ def emit_loop_subprocess_trace(
             return
 
         stderr = stderr_excerpt[-_STDERR_TRUNC_CAP:] if stderr_excerpt else None
-        started_at = datetime.now(UTC).isoformat()
-        slug_ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        # The helper is invoked after the subprocess finishes (duration_ms is
+        # already elapsed), so ``emitted`` is ~the work's END. Back-date to the
+        # true start so a consumer's [started_at, started_at + duration_ms]
+        # window brackets the work instead of landing one full duration in the
+        # future. The filename keeps emit-time for uniqueness/ordering.
+        emitted = datetime.now(UTC)
+        started_at = (emitted - timedelta(milliseconds=int(duration_ms))).isoformat()
+        slug_ts = emitted.strftime("%Y%m%dT%H%M%S%fZ")
 
         payload = {
             "kind": "loop",

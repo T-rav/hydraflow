@@ -9,6 +9,7 @@ subsystems take effect.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -28,6 +29,32 @@ if TYPE_CHECKING:
     from state import StateTracker
 
 logger = logging.getLogger("hydraflow.principles_audit_loop")
+
+# Hard caps on subprocess reads. A wedged child must not hang the loop cycle
+# forever and freeze its heartbeat — the #9410 silent-stall failure class
+# (#9454 / #9508). ``make audit-json`` runs a full audit so it gets a longer
+# bound than a plain ``git`` call.
+_AUDIT_TIMEOUT_SECONDS = 1800
+_GIT_TIMEOUT_SECONDS = 120
+
+
+async def _communicate_bounded(
+    proc: asyncio.subprocess.Process, timeout: float
+) -> tuple[bytes, bytes]:
+    """``proc.communicate()`` bounded by *timeout* seconds.
+
+    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
+    the caller ends its cycle (and is restarted by the supervisor) rather than
+    hanging indefinitely.
+    """
+    try:
+        return await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except TimeoutError:
+        proc.kill()
+        with contextlib.suppress(ProcessLookupError):
+            await proc.wait()
+        raise
+
 
 _HYDRAFLOW_SELF = "hydraflow-self"
 _STRUCTURAL_ATTEMPTS = 3
@@ -195,7 +222,22 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await _communicate_bounded(
+                proc, timeout=_AUDIT_TIMEOUT_SECONDS
+            )
+        except TimeoutError as exc:
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            trace_collector.emit_loop_subprocess_trace(
+                loop="principles_audit",
+                command=cmd,
+                exit_code=124,  # bash convention for timeouts
+                duration_ms=duration_ms,
+                stderr_excerpt=f"timeout after {_AUDIT_TIMEOUT_SECONDS}s",
+            )
+            raise RuntimeError(
+                f"make audit-json timed out after {_AUDIT_TIMEOUT_SECONDS}s for {slug}"
+            ) from exc
         duration_ms = int((time.perf_counter() - t0) * 1000)
         exit_code = proc.returncode or 0
         stderr_text = stderr.decode(errors="replace")
@@ -242,7 +284,20 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        out, _ = await proc.communicate()
+        try:
+            out, _ = await _communicate_bounded(proc, timeout=_GIT_TIMEOUT_SECONDS)
+        except TimeoutError as exc:
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            trace_collector.emit_loop_subprocess_trace(
+                loop="principles_audit",
+                command=cmd,
+                exit_code=124,  # bash convention for timeouts
+                duration_ms=duration_ms,
+                stderr_excerpt=f"timeout after {_GIT_TIMEOUT_SECONDS}s",
+            )
+            raise RuntimeError(
+                f"git timed out after {_GIT_TIMEOUT_SECONDS}s: {' '.join(cmd)}"
+            ) from exc
         duration_ms = int((time.perf_counter() - t0) * 1000)
         exit_code = proc.returncode or 0
         combined = out.decode(errors="replace")

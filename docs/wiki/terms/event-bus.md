@@ -6,12 +6,17 @@ bounded_context: "shared-kernel"
 code_anchor: "src/events.py:EventBus"
 aliases: ["pub/sub bus", "hydraflow event bus"]
 related: []
+evidence: ["01KQP0R43781VJFJ9HZRWQCZPC", "01KQP0V9KK99G77287P414NFQW", "01KQP0XFBGMB32VFGNPV8GZ268", "01KRADV2026B0PHASE0003", "01KRBX2N4QP7VW8FGH3J5YD0M3", "01KV254C264KNTZ962PHQ8SZ2J"]
 evidence: ["01KQP0R43781VJFJ9HZRWQCZPC", "01KQP0V9KK99G77287P414NFQW", "01KQP0XFBGMB32VFGNPV8GZ268", "01KRADV2026B0PHASE0003", "01KRBX2N4QP7VW8FGH3J5YD0M3"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668765+00:00"
 updated_at: "2026-06-14T09:02:32.894574+00:00"
+updated_at: "2026-06-14T04:41:09.432376+00:00"
+updated_at: "2026-06-14T04:08:25.937221+00:00"
+updated_at: "2026-06-13T05:06:24.709864+00:00"
+updated_at: "2026-06-20T02:19:44.961938+00:00"
 ---
 
 ## Definition
