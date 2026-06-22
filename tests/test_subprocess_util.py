@@ -1228,6 +1228,76 @@ class TestIsCreditExhaustion:
             "You reached your usage limits set in the test config."
         )
 
+    def test_matches_claude_code_session_limit(self) -> None:
+        """Claude Code subscription session-cap message (2026-06-13 incident).
+
+        The overnight 2026-06-13 run hit this exact phrasing on every agent;
+        because 'session' sits between 'hit your' and 'limit', none of the
+        legacy substrings matched and the credit-pause never fired.
+        """
+        assert is_credit_exhaustion(
+            "You've hit your session limit · resets 5:50am (America/Denver)"
+        )
+
+    def test_matches_session_limit_reached_phrasing(self) -> None:
+        """The alternate 'Session limit reached' rendering must also match."""
+        assert is_credit_exhaustion("Session limit reached. Try again later.")
+
+    def test_does_not_false_match_configured_session_count(self) -> None:
+        """A config statement about the session count is NOT an exhaustion
+        signal — CreditExhaustedError is non-retryable, so this must stay False.
+        """
+        assert not is_credit_exhaustion(
+            "The session limit is configured to 10 sessions per repo."
+        )
+
+    def test_matches_claude_code_weekly_limit(self) -> None:
+        """Claude Code subscription *weekly*-cap message (2026-06-17 incident).
+
+        'weekly' sits between 'hit your' and 'limit', so it slipped past every
+        substring and the factory burned its whole attempt budget into HITL.
+        """
+        assert is_credit_exhaustion(
+            "You've hit your weekly limit · resets Jun 18 at 5pm"
+        )
+
+    def test_matches_weekly_limit_reached_phrasing(self) -> None:
+        assert is_credit_exhaustion("Weekly limit reached. Try again later.")
+
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "You've hit your limit",
+            "You've hit your usage limit",
+            "You've hit your session limit",
+            "You've hit your weekly limit",
+            "You've hit your daily limit",
+            "You've hit your monthly limit",
+            "you have hit your weekly usage limit",
+        ],
+    )
+    def test_limit_hit_regex_covers_the_whole_period_family(self, msg: str) -> None:
+        """Future-proofing: any 'hit your <period> limit' wording must match so a
+        new cap type can't recur the 2026-06-13/2026-06-17 attempt-burn.
+        """
+        assert is_credit_exhaustion(msg)
+
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "you hit your stride, no limit today",
+            "the rate limit is configured to 100 requests",
+            "we hit your target under the limit",
+            "All tests passed.",
+            "",
+        ],
+    )
+    def test_does_not_false_match_benign_limit_prose(self, msg: str) -> None:
+        """The catch-all regex must not fire on conversational text — a false
+        positive halts all work (non-retryable).
+        """
+        assert not is_credit_exhaustion(msg)
+
 
 class TestParseCreditResumeTime:
     """parse_credit_resume_time must recognize Anthropic's ISO-style resume format."""
@@ -1257,6 +1327,28 @@ class TestParseCreditResumeTime:
         assert resume is not None
         assert resume.hour in {15, 22, 23, 0, 1, 2, 7, 8}  # tz-dependent
 
+    def test_parses_am_pm_with_minutes_and_tz(self) -> None:
+        """Claude Code prints H:MM ('resets 5:50am'); the old regex only took
+        whole hours and returned None. 5:50am MDT (June, America/Denver UTC-6)
+        is 11:50 UTC — independent of 'now' because the roll-forward to the next
+        day preserves the wall-clock time.
+        """
+        resume = parse_credit_resume_time(
+            "You've hit your session limit · resets 5:50am (America/Denver)"
+        )
+        assert resume is not None
+        assert (resume.hour, resume.minute) == (11, 50)
+
+    def test_parses_am_pm_with_minutes_no_tz(self) -> None:
+        """Minutes must be honoured even without a timezone suffix (local fallback)."""
+        resume = parse_credit_resume_time("resets 5:50am")
+        assert resume is not None
+        assert resume.minute == 50
+
+    def test_rejects_out_of_range_minutes(self) -> None:
+        """A bogus minute value must fail-to-parse, not roll over into the hour."""
+        assert parse_credit_resume_time("resets 5:99am") is None
+
     def test_returns_none_for_non_matching_text(self) -> None:
         assert parse_credit_resume_time("no date here") is None
 
@@ -1271,3 +1363,95 @@ class TestParseCreditResumeTime:
         assert (
             parse_credit_resume_time("regain access on 2026-05-01 at 00:00 PST") is None
         )
+
+    # ---- Weekly-cap resume formats (2026-06-17 incident) ----
+
+    def test_parses_weekly_weekday_format(self) -> None:
+        """'resets Wednesday at 5pm' → next Wednesday 17:00 in local time."""
+        from datetime import UTC, datetime, timedelta
+
+        resume = parse_credit_resume_time(
+            "You've hit your weekly limit · resets Wednesday at 5pm"
+        )
+        assert resume is not None
+        now = datetime.now(UTC)
+        assert now < resume <= now + timedelta(days=7)
+        local = datetime.now().astimezone().tzinfo
+        local_reset = resume.astimezone(local)
+        assert local_reset.weekday() == 2  # Wednesday
+        assert (local_reset.hour, local_reset.minute) == (17, 0)
+
+    def test_parses_weekly_weekday_with_minutes(self) -> None:
+        from datetime import datetime
+
+        resume = parse_credit_resume_time("resets Wednesday at 5:30pm")
+        assert resume is not None
+        local = datetime.now().astimezone().tzinfo
+        assert resume.astimezone(local).minute == 30
+
+    def test_parses_weekly_month_day_future(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """'resets Jun 18 at 5pm' with now=Jun 15 → ~3 days out (tz-robust)."""
+        from datetime import UTC, timedelta
+        from datetime import datetime as _dt
+
+        import subprocess_util as su
+
+        frozen = _dt(2026, 6, 15, 12, 0, tzinfo=UTC)
+
+        class _Frozen(_dt):
+            @classmethod
+            def now(cls, tz=None):  # type: ignore[override]
+                return (
+                    frozen.astimezone(tz)
+                    if tz is not None
+                    else frozen.replace(tzinfo=None)
+                )
+
+        monkeypatch.setattr(su, "datetime", _Frozen)
+        resume = su.parse_credit_resume_time(
+            "You've hit your weekly limit · resets Jun 18 at 5pm"
+        )
+        assert resume is not None
+        delta = resume - frozen
+        assert timedelta(days=2) < delta < timedelta(days=4)  # ~3d, any tz
+
+    def test_weekly_month_day_in_past_returns_none_not_next_year(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A clearly-past month/day is a stale message — must return None (short
+        default pause), NOT roll a full year and idle the factory.
+        """
+        from datetime import UTC
+        from datetime import datetime as _dt
+
+        import subprocess_util as su
+
+        frozen = _dt(2026, 6, 20, 12, 0, tzinfo=UTC)
+
+        class _Frozen(_dt):
+            @classmethod
+            def now(cls, tz=None):  # type: ignore[override]
+                return (
+                    frozen.astimezone(tz)
+                    if tz is not None
+                    else frozen.replace(tzinfo=None)
+                )
+
+        monkeypatch.setattr(su, "datetime", _Frozen)
+        assert (
+            su.parse_credit_resume_time(
+                "You've hit your weekly limit · resets Jun 18 at 5pm"
+            )
+            is None
+        )
+
+    def test_weekly_invalid_month_day_returns_none(self) -> None:
+        assert parse_credit_resume_time("resets Feb 30 at 5pm") is None
+
+    def test_weekly_detected_but_no_reset_clause_returns_none(self) -> None:
+        """Detection still fires (tested elsewhere); with no parseable reset the
+        caller falls back to its default pause, so parse returns None.
+        """
+        assert parse_credit_resume_time("You've hit your weekly limit") is None

@@ -6,6 +6,7 @@ source_phase: synthesis
 created_at: 2026-04-18T14:53:08.908950+00:00
 status: superseded
 superseded_by: 0007
+superseded_by: 0183
 ---
 
 # Type System and Data Model Consistency Testing

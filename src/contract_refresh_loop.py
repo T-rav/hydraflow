@@ -10,12 +10,15 @@ Tick body (Tasks 15 + 16 + 20 wired; Tasks 17/18/19 still pending):
 3. If drift is detected, hash the drift report and look the hash up in a
    per-loop :class:`DedupStore`. Hash hit → short-circuit so identical
    drift on back-to-back ticks does not refile the same PR.
-4. Stage the drifted/new cassettes into the worktree (their committed
-   paths under ``tests/trust/contracts/``) and open a refresh PR via
-   :func:`auto_pr.open_automated_pr_async` — title ``contract-refresh:
-   YYYY-MM-DD (<adapters>)``, body summarising per-adapter slugs, labels
-   ``contract-refresh`` + ``auto-merge``, ``auto_merge=True``,
-   ``raise_on_failure=False``.
+4. Open a refresh PR via :func:`auto_pr.generate_and_open_pr_async`
+   (#9539 generate-in-worktree): the loop hands a ``generate(worktree)``
+   callback that copies the drifted/new cassettes into the ephemeral
+   worktree's committed paths under ``tests/trust/contracts/`` — the
+   factory's ``repo_root`` is never mutated. ``path_specs`` cover the
+   cassette dirs so only those generated paths are staged. Title
+   ``contract-refresh: YYYY-MM-DD (<adapters>)``, body summarising
+   per-adapter slugs, labels ``contract-refresh`` + ``auto-merge``,
+   ``auto_merge=True``, ``raise_on_failure=False``.
 5. Post-refresh replay gate (Task 16): invoke ``make trust-contracts``
    via :func:`subprocess.run`. Pass → clean exit. Fail → the fresh
    cassettes have outrun the fakes; file a ``hydraflow-find`` +
@@ -57,7 +60,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import trace_collector
-from auto_pr import open_automated_pr_async
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
 from contract_diff import (
     AdapterDriftReport,
@@ -82,12 +84,6 @@ if TYPE_CHECKING:
     from state import StateTracker
 
 logger = logging.getLogger("hydraflow.contract_refresh_loop")
-
-# The committed sandbox repo the GitHub recorder targets. Centralised here
-# so tests (and the eventual config field in Task 18+) can override in one
-# place. Matches ``docs/superpowers/plans/2026-04-22-fake-contract-tests.md``
-# Task 0.
-_SANDBOX_GITHUB_REPO = "T-rav-Hydra-Ops/hydraflow-contracts-sandbox"
 
 # Hard cap on the replay-gate subprocess — defends the async event loop
 # when a recorder hangs on network I/O or a zombie subprocess.
@@ -230,7 +226,7 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             await self._record_with_trace(
                 "contract_recording.record_github",
                 record_github,
-                _SANDBOX_GITHUB_REPO,
+                self._config.contracts_sandbox_repo,
                 tmp_root / "github",
             )
             if external
@@ -335,25 +331,57 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         blob = json.dumps(payload, sort_keys=True).encode("utf-8")
         return hashlib.sha256(blob).hexdigest()
 
-    def _stage_drifted_cassettes(self, reports: list[AdapterDriftReport]) -> list[Path]:
-        """Copy each drifted/new cassette into its committed path under ``repo_root``.
+    def _stage_drifted_cassettes(
+        self, reports: list[AdapterDriftReport], dest_root: Path
+    ) -> list[Path]:
+        """Copy each drifted/new cassette into its committed path under ``dest_root``.
 
-        ``auto_pr.open_automated_pr_async`` reads the file bytes from the
-        paths we return and stages them into the ephemeral worktree, so
-        we *must* write to paths under ``repo_root``. Returns the list
-        of committed paths that now hold the fresh bytes.
+        ``dest_root`` is the ephemeral worktree handed to the
+        :func:`auto_pr.generate_and_open_pr_async` ``generate`` callback
+        (#9539 generate-in-worktree), *not* the factory's ``repo_root``:
+        the source bytes live in the recorder's tmp dir (outside both),
+        so copying them into the worktree's committed cassette paths
+        produces the PR diff without ever dirtying the host checkout.
+        Returns the list of worktree paths that now hold the fresh bytes.
         """
         written: list[Path] = []
         plans_by_name = {p.name: p for p in ADAPTER_PLANS}
         for report in reports:
             plan = plans_by_name[report.adapter]
-            committed_dir = self._config.repo_root / plan.cassette_dir_relpath
+            committed_dir = dest_root / plan.cassette_dir_relpath
             committed_dir.mkdir(parents=True, exist_ok=True)
             for src in [*report.drifted_cassettes, *report.new_cassettes]:
                 dst = committed_dir / src.name
                 dst.write_bytes(src.read_bytes())
                 written.append(dst)
         return written
+
+    def _cassette_path_specs(self, reports: list[AdapterDriftReport]) -> list[str]:
+        """Repo-relative cassette dirs to ``git add`` after generation.
+
+        One entry per drifted adapter (deduped, order-stable). Mirrors the
+        ``path_specs`` contract of :func:`auto_pr.generate_and_open_pr_async`:
+        only these generated paths are staged, so the host checkout's own
+        untracked files can never leak into the refresh PR.
+        """
+        plans_by_name = {p.name: p for p in ADAPTER_PLANS}
+        specs: list[str] = []
+        for report in reports:
+            relpath = plans_by_name[report.adapter].cassette_dir_relpath
+            if relpath not in specs:
+                specs.append(relpath)
+        return specs
+
+    def _count_staged_cassettes(self, reports: list[AdapterDriftReport]) -> int:
+        """Number of drifted/new cassettes the ``generate`` callback will write.
+
+        Computed from the drift report up front because, under
+        generate-in-worktree, the copy happens inside the PR helper's
+        ephemeral worktree (torn down in ``finally``) — the caller can't
+        count the written paths after the fact, so it derives the
+        ``adapters_refreshed`` stat from the report directly.
+        """
+        return sum(len(r.drifted_cassettes) + len(r.new_cassettes) for r in reports)
 
     def _pr_title_and_body(
         self, fleet: FleetDriftReport, stamp: str
@@ -393,17 +421,35 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         )
         return title, "\n".join(body_lines)
 
-    async def _open_refresh_pr(
-        self, written: list[Path], fleet: FleetDriftReport
-    ) -> str | None:
+    async def _open_refresh_pr(self, fleet: FleetDriftReport) -> str | None:
+        """Open the refresh PR via generate-in-worktree (#9539).
+
+        The ``generate`` callback copies the freshly-recorded cassettes
+        (whose bytes live in the recorder's tmp dir) into the ephemeral
+        worktree's committed cassette paths via
+        :meth:`_stage_drifted_cassettes`. ``repo_root`` is never mutated —
+        the worktree is the only thing written, and it is torn down in the
+        helper's ``finally``. ``path_specs`` cover exactly the drifted
+        adapters' cassette dirs so only the generated bytes are staged.
+        """
+        from auto_pr import generate_and_open_pr_async  # noqa: PLC0415
+
         stamp = datetime.now(UTC).strftime("%Y-%m-%d")
         branch = f"contract-refresh/{stamp}"
         title, body = self._pr_title_and_body(fleet, stamp)
+        reports = fleet.reports
 
-        result = await open_automated_pr_async(
+        async def _generate(worktree: Path) -> None:
+            # Copy the recorder's tmp bytes into the worktree's committed
+            # cassette paths. Sync filesystem work — wrap in a thread so the
+            # event loop keeps ticking while many cassettes are written.
+            await asyncio.to_thread(self._stage_drifted_cassettes, reports, worktree)
+
+        result = await generate_and_open_pr_async(
             repo_root=self._config.repo_root,
             branch=branch,
-            files=written,
+            generate=_generate,
+            path_specs=self._cassette_path_specs(reports),
             pr_title=title,
             pr_body=body,
             commit_message=title,
@@ -694,20 +740,23 @@ class ContractRefreshLoop(BaseBackgroundLoop):
 
     async def _stage_and_open_pr(
         self, fleet: FleetDriftReport, dedup_key: str
-    ) -> tuple[list[Path], str | None]:
-        """Stage drifted cassettes, open the refresh PR, and record the dedup key.
+    ) -> tuple[int, str | None]:
+        """Open the refresh PR (generate-in-worktree) and record the dedup key.
 
-        Returns ``(written_paths, pr_url)``.  The dedup key is recorded only
+        Returns ``(staged_count, pr_url)`` — ``staged_count`` is the number
+        of cassettes the worktree ``generate`` callback writes, derived from
+        the drift report up front because the copy now happens inside the
+        helper's ephemeral worktree (#9539). The dedup key is recorded only
         after a successful PR open so a transient failure (branch conflict,
         ``gh`` auth, push rejection) does not silently block the next tick
-        behind a dedup entry while the primary checkout stays dirty with
-        uncommitted cassette writes.
+        behind a dedup entry. ``repo_root`` is never mutated, so there is no
+        dirty-checkout hazard to clean up on failure.
         """
-        written = self._stage_drifted_cassettes(fleet.reports)
-        pr_url = await self._open_refresh_pr(written, fleet)
+        staged_count = self._count_staged_cassettes(fleet.reports)
+        pr_url = await self._open_refresh_pr(fleet)
         if pr_url is not None:
             self._dedup.add(dedup_key)
-        return written, pr_url
+        return staged_count, pr_url
 
     async def _check_replay_and_maybe_file_issue(
         self, fleet: FleetDriftReport, pr_url: str | None
@@ -789,7 +838,7 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         if dedup_key in self._dedup.get():
             return self._on_dedup_hit(fleet, escalated)
 
-        written, pr_url = await self._stage_and_open_pr(fleet, dedup_key)
+        staged_count, pr_url = await self._stage_and_open_pr(fleet, dedup_key)
 
         # Task 16 — replay gate runs after the PR is opened. A failed gate
         # files a fake-drift companion issue; a passing gate does not.
@@ -799,7 +848,7 @@ class ContractRefreshLoop(BaseBackgroundLoop):
 
         return {
             "status": "refreshed",
-            "adapters_refreshed": len(written),
+            "adapters_refreshed": staged_count,
             "adapters_drifted": len(fleet.reports),
             "pr_url": pr_url,
             "replay_gate_passed": replay_proc.returncode == 0,

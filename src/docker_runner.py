@@ -90,7 +90,7 @@ def build_container_kwargs(config: HydraFlowConfig) -> dict[str, Any]:
     # caches and config even when the root filesystem is read-only.
     # uid/gid=1000 matches the container's hydraflow user.
     kwargs["tmpfs"] = {
-        "/tmp": f"size={config.docker_tmp_size}",  # nosec B108
+        "/tmp": f"size={config.docker_tmp_size}",  # nosec  # in-container tmpfs path
         _CONTAINER_HOME: f"size={config.docker_tmp_size},uid=1000,gid=1000",
     }
 
@@ -463,7 +463,7 @@ class DockerRunner:
         if env.get("CLAUDE_CONFIG_DIR"):
             env["CLAUDE_CONFIG_DIR"] = _CONTAINER_CLAUDE_HOME
         # Ensure temp dirs use the writable tmpfs, not the readonly root fs.
-        env.setdefault("TMPDIR", "/tmp")  # nosec B108  # noqa: S108
+        env.setdefault("TMPDIR", "/tmp")  # nosec  # noqa: S108  # in-container tmpfs path
         # HOME must point to the writable tmpfs so tools (uv, npm, git) can
         # write caches and config without fighting a read-only root fs.
         env.setdefault("HOME", _CONTAINER_HOME)
@@ -662,6 +662,19 @@ class DockerRunner:
                 await loop.run_in_executor(None, container.kill)
             except Exception:
                 logger.warning("Failed to kill container on timeout", exc_info=True)
+            raise
+        except asyncio.CancelledError:
+            # A cancelled await (e.g. a loop watchdog) leaves the executor
+            # thread parked inside the synchronous ``container.wait()``.  Kill
+            # the container so ``wait()`` returns promptly and the thread is
+            # released, mirroring the TimeoutError branch — otherwise blocked
+            # threads accumulate in the default ThreadPoolExecutor.
+            try:
+                await asyncio.shield(loop.run_in_executor(None, container.kill))
+            except Exception:
+                logger.warning(
+                    "Failed to kill container on cancellation", exc_info=True
+                )
             raise
         finally:
             try:

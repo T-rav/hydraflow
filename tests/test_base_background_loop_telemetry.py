@@ -50,6 +50,9 @@ async def test_loop_emits_loop_span(fake):
     loop._worker_name = "miniloop"
     loop._status_cb = lambda *_: None  # type: ignore[method-assign,assignment]
     loop._bus = _FakeBus()  # type: ignore[assignment]
+    # __new__ bypasses __init__, so supply the watchdog bound the cycle now
+    # reads (#9556); a fast bound keeps the span-emission assertion quick.
+    loop._timeout_cb = lambda *_: 60  # type: ignore[assignment]
 
     await loop._execute_cycle()
 

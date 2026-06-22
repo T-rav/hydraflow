@@ -57,20 +57,25 @@ def _split_path_symbol(entry: str) -> tuple[str, str | None]:
     return entry, None
 
 
-# Cross-cutting infrastructure modules — bare-cited (file-granular) as a
-# *dependency* by many Accepted ADRs: the config dataclass, shared Pydantic
-# models, the Port protocols, the post-merge handler, and the GitHub PR/issue
-# port wrapper. Every feature touches these, so a file-level touch is
-# implementation churn, not a semantic change to any one ADR's decision. They
-# are the dominant source of ADR-drift false positives (e.g. src/config.py
-# absorbed ~20 merged PRs in two weeks, and src/pr_manager.py is bare-cited by
-# ADR-0005/0018/0045/0056 while changing on nearly every PR that files an issue
-# or PR). #9176 already suppressed the symbol-cited case; #9397 added the first
-# four modules here for the residual *bare-cited* case; pr_manager.py joins them
-# as the next-highest-churn dependency. An ADR that genuinely owns one of these
-# must cite the specific symbol (``src/config.py:HydraFlowConfig``,
-# ``src/pr_manager.py:PRManager.upload_screenshot_gist``) to drift — a bare
-# citation is read as a dependency mention and does not drift.
+# High-churn modules bare-cited (file-granular) as a *dependency pointer* by
+# their pattern ADRs — "the implementation lives here", not "this exact decision
+# is this file". A file-level touch is implementation churn, not a semantic
+# change to any one ADR's decision, so a bare citation is read as a dependency
+# mention and does NOT drift. They are the dominant source of ADR-drift false
+# positives. An ADR that genuinely *owns* a symbol in one of these must cite it
+# at ``:Symbol`` granularity (``src/config.py:HydraFlowConfig``,
+# ``src/pr_manager.py:PRManager.upload_screenshot_gist``) to drift.
+#
+# Lineage:
+#   * #9176 suppressed the symbol-cited case.
+#   * #9397 added the first four cross-cutting infra modules (config, models,
+#     ports, post_merge_handler) for the residual bare-cited case.
+#   * pr_manager.py joined as the next-highest-churn dependency.
+#   * 2026-06-13: the dashboard/server/repo_runtime startup surface and the
+#     contract-testing subsystem (contract_recording/diff/refresh_loop, bare-
+#     cited as dependency pointers by ADR-0047/0052) were the remaining recurring
+#     "ADR drift unresolved after 3" HITL escalations — added here so normal
+#     in-scope churn stops re-firing them.
 _SHARED_INFRA_MODULES = frozenset(
     {
         "src/config.py",
@@ -78,6 +83,18 @@ _SHARED_INFRA_MODULES = frozenset(
         "src/ports.py",
         "src/post_merge_handler.py",
         "src/pr_manager.py",
+        # Dashboard / server / multi-repo startup surface — cross-cutting,
+        # bare-cited as a dependency by the dashboard + multi-repo ADRs
+        # (0007/0008/0013/0019/0038/0050/0060/0090).
+        "src/dashboard.py",
+        "src/server.py",
+        "src/repo_runtime.py",
+        # Contract-testing subsystem — bare-cited as dependency pointers by
+        # ADR-0047 (the pattern) and ADR-0052; cassettes/recorders evolve on
+        # normal contract churn that does not change either decision.
+        "src/contract_recording.py",
+        "src/contract_diff.py",
+        "src/contract_refresh_loop.py",
     }
 )
 

@@ -38,6 +38,10 @@ _ISSUE_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/issues/(\d+)")
 class SentryLoop(BaseBackgroundLoop):
     """Polls Sentry for unresolved issues and files them via Claude agent."""
 
+    # Files issues via an LLM agent — a cycle can legitimately run minutes, so
+    # take the wider loop_watchdog_llm_seconds bound (#9556).
+    LONG_LLM_CYCLE = True
+
     def __init__(
         self,
         config: HydraFlowConfig,
