@@ -10,7 +10,7 @@ Companion to ``tests/scenarios/test_diagram_loop_scenario.py`` (which calls
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -23,56 +23,59 @@ pytestmark = pytest.mark.scenario_loops
 class TestL24DiagramLoop:
     """L24: DiagramLoop regenerates docs/arch/generated/, opens PR on drift."""
 
-    async def test_no_drift_runs_emit_and_skips_pr(self, tmp_path) -> None:
-        """Clean source → emit() runs, git status empty, no PR opened."""
+    async def test_no_drift_skips_pr(self, tmp_path) -> None:
+        """No arch drift → generate-in-worktree returns no-diff; no PR, no issue.
+
+        The regen now runs inside the ephemeral worktree, so the loop routes
+        through ``generate_and_open_pr_async``; a no-diff result means no PR.
+        """
         world = MockWorld(tmp_path)
 
         _seed_ports(world, github=world.github)
 
-        pr_helper = AsyncMock()
-        with (
-            patch("arch.runner.emit") as mock_emit,
-            patch("diagram_loop.subprocess.run") as mock_run,
-            patch("auto_pr.open_automated_pr_async", pr_helper),
-        ):
-            mock_run.return_value = MagicMock(returncode=0, stdout="")
+        from auto_pr import AutoPrResult
+
+        pr_helper = AsyncMock(
+            return_value=AutoPrResult(
+                status="no-diff", pr_url=None, branch="arch-regen-auto"
+            )
+        )
+        with patch("auto_pr.generate_and_open_pr_async", pr_helper):
             stats = await world.run_with_loops(["diagram_loop"], cycles=1)
 
-        result = stats["diagram_loop"]
-        assert result == {"drift": False}
-        mock_emit.assert_called_once()
-        pr_helper.assert_not_awaited()
+        assert stats["diagram_loop"] == {"drift": False}
+        pr_helper.assert_awaited_once()
         assert world.github._issues == {}
 
     async def test_drift_opens_regen_pr_via_auto_pr(self, tmp_path) -> None:
-        """Source drifted → auto_pr opens PR with arch-regen-auto branch."""
+        """Source drifted → generate_and_open_pr_async opens the regen PR."""
         world = MockWorld(tmp_path)
 
         _seed_ports(world, github=world.github)
 
-        pr_result = MagicMock(status="opened", pr_url="https://github.com/x/y/pull/1")
-        pr_helper = AsyncMock(return_value=pr_result)
+        from auto_pr import AutoPrResult
+
+        pr_helper = AsyncMock(
+            return_value=AutoPrResult(
+                status="opened",
+                pr_url="https://github.com/x/y/pull/1",
+                branch="arch-regen-auto",
+            )
+        )
 
         with (
-            patch("arch.runner.emit"),
-            patch("diagram_loop.subprocess.run") as mock_run,
-            patch("auto_pr.open_automated_pr_async", pr_helper),
+            patch("auto_pr.generate_and_open_pr_async", pr_helper),
             # Stub _unassigned_items to focus on the PR path.
             patch(
                 "diagram_loop.DiagramLoop._unassigned_items",
                 AsyncMock(return_value={"loops": [], "ports": []}),
             ),
         ):
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout=" M docs/arch/generated/loops.md\n M docs/arch/generated/ports.md\n",
-            )
             stats = await world.run_with_loops(["diagram_loop"], cycles=1)
 
         result = stats["diagram_loop"]
         assert result["drift"] is True
         assert result["pr_url"] == "https://github.com/x/y/pull/1"
-        assert result["changed_files"] == 2
 
         pr_helper.assert_awaited_once()
         kwargs = pr_helper.await_args.kwargs
@@ -81,3 +84,4 @@ class TestL24DiagramLoop:
         assert kwargs["pr_title"].startswith(
             "chore(arch): regenerate architecture knowledge"
         )
+        assert kwargs["path_specs"] == ["docs/arch/generated", "docs/arch/.meta.json"]

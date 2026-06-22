@@ -30,7 +30,10 @@ _REPO = Path(__file__).resolve().parent.parent.parent
 # alone is not enough; an unbounded subprocess will leak the worker
 # thread and exhaust the pool.
 _ASYNC_SUBPROCESS_MODULES = [
-    "src/diagram_loop.py",
+    # NOTE: src/diagram_loop.py was removed from this list in #9539 — it no
+    # longer runs subprocess.run directly (arch regen now happens inside an
+    # ephemeral worktree via auto_pr.generate_and_open_pr_async, whose git
+    # calls are timeout-bounded in src/auto_pr.py, audited below).
     "src/repo_wiki.py",
     "src/repo_wiki_loop.py",
     "src/arch/runner.py",
