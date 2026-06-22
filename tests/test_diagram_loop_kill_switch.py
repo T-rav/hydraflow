@@ -42,12 +42,16 @@ async def test_kill_switch_unset_runs_normally(loop_deps, monkeypatch):
     loop = DiagramLoop(config=MagicMock(), pr_manager=pr_manager, deps=loop_deps)
 
     monkeypatch.delenv("HYDRAFLOW_DISABLE_DIAGRAM_LOOP", raising=False)
-    from diagram_loop import _DriftResult
+    from auto_pr import AutoPrResult
 
     monkeypatch.setattr(
         loop,
-        "_regen_and_detect_drift",
-        lambda: _DriftResult(has_drift=False, changed_files=[]),
+        "_regen_pr",
+        AsyncMock(
+            return_value=AutoPrResult(
+                status="no-diff", pr_url=None, branch="arch-regen-auto"
+            )
+        ),
     )
     result = await loop._do_work()
     assert result.get("drift") is False

@@ -35,11 +35,13 @@ Phase 2 Tasks 11–15 are wired in:
   ``cases_validated``.
 
 - **Task 15** (materialize + PR): validated cases are written to
-  ``tests/trust/adversarial/cases/<slug>/`` (via
-  :meth:`CorpusLearningLoop._materialize_case_on_disk`) and filed as
-  PRs (via :meth:`CorpusLearningLoop._open_pr_for_case`, which
-  delegates to :func:`auto_pr.open_automated_pr_async`). A
-  :class:`dedup_store.DedupStore` keyed on
+  ``tests/trust/adversarial/cases/<slug>/`` *inside an ephemeral
+  worktree* (via :meth:`CorpusLearningLoop._materialize_case_on_disk`,
+  passed the worktree path) and filed as PRs (via
+  :meth:`CorpusLearningLoop._open_pr_for_case`, which delegates to
+  :func:`auto_pr.generate_and_open_pr_async`). The loop never mutates
+  ``repo_root`` — the generate callback writes only into the worktree
+  it is handed (#9539). A :class:`dedup_store.DedupStore` keyed on
   ``corpus_learning:<issue_number>:<slug>`` prevents re-filing the
   same case on subsequent ticks. The final status dict gains a
   ``cases_filed`` counter.
@@ -51,6 +53,7 @@ Kill-switch: :meth:`LoopDeps.enabled_cb` with ``worker_name="corpus_learning"``
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import difflib
 import json
 import logging
@@ -61,7 +64,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from auto_pr import open_automated_pr_async
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
 from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult  # noqa: TCH001
@@ -100,6 +102,30 @@ DEFAULT_LOOKBACK_DAYS = 30
 #: Spec §4.1 v2 step 5: 3 consecutive self-validation failures on the
 #: same escape issue trigger a `corpus-learning-stuck` escalation.
 _CORPUS_STUCK_ATTEMPTS = 3
+
+#: Hard cap on the ``gh`` reconcile read. A wedged ``gh`` child must not hang
+#: the loop cycle forever and freeze its heartbeat — the #9410 silent-stall
+#: failure class (#9454 / #9508).
+_GH_TIMEOUT_SECONDS = 120
+
+
+async def _communicate_bounded(
+    proc: asyncio.subprocess.Process,
+) -> tuple[bytes, bytes]:
+    """``proc.communicate()`` bounded by ``_GH_TIMEOUT_SECONDS``.
+
+    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
+    the caller can treat it as a failed read (rather than hanging the loop
+    cycle indefinitely).
+    """
+    try:
+        return await asyncio.wait_for(proc.communicate(), timeout=_GH_TIMEOUT_SECONDS)
+    except TimeoutError:
+        proc.kill()
+        with contextlib.suppress(ProcessLookupError):
+            await proc.wait()
+        raise
+
 
 #: Parses ``Corpus learning stuck on escape #1234: …`` titles for
 #: reconcile-on-close (spec §3.2 lifecycle).
@@ -569,9 +595,14 @@ class CorpusLearningLoop(BaseBackgroundLoop):
     # ------------------------------------------------------------------
 
     def _materialize_case_on_disk(
-        self, case: SynthesizedCase, repo_root: Path
+        self, case: SynthesizedCase, root: Path
     ) -> list[Path]:
         """Write a :class:`SynthesizedCase` out under ``tests/trust/adversarial/cases/<slug>/``.
+
+        ``root`` is the directory the case tree is written *relative to*.
+        Under the generate-in-worktree flow (#9539) this is the ephemeral
+        worktree handed to the ``generate`` callback — never ``repo_root`` —
+        so the factory's checkout is left untouched.
 
         Layout mirrors the existing authored cases: every entry in
         ``case.before_files`` lands under ``before/<rel>`` and every
@@ -583,12 +614,10 @@ class CorpusLearningLoop(BaseBackgroundLoop):
         from README.md — is preserved by prepending a ``Keyword:`` line
         so the harness's ``_read_keyword`` helper finds it there.
 
-        Returns the list of absolute paths actually written so the
-        caller can pass them straight to
-        :func:`auto_pr.open_automated_pr_async` without a second
-        `os.walk`.
+        Returns the list of absolute paths actually written (used by
+        callers/tests that assert the on-disk shape).
         """
-        case_dir = repo_root / _CASES_ROOT / case.slug
+        case_dir = root / _CASES_ROOT / case.slug
         written: list[Path] = []
 
         for rel_path, content in case.before_files.items():
@@ -632,16 +661,19 @@ class CorpusLearningLoop(BaseBackgroundLoop):
     async def _open_pr_for_case(
         self,
         case: SynthesizedCase,
-        paths: list[Path],
         *,
         title: str,
         body: str,
     ) -> int | None:
-        """File a PR for ``case`` via :func:`auto_pr.open_automated_pr_async`.
+        """File a PR for ``case`` via :func:`auto_pr.generate_and_open_pr_async`.
+
+        The case tree is materialized *inside the ephemeral worktree*
+        (#9539) by the ``generate`` callback — ``repo_root`` is never
+        mutated. ``path_specs`` stages only the case directory.
 
         Returns the parsed PR number on success, or ``None`` when the
         case has already been filed (dedup hit) or
-        ``open_automated_pr_async`` reported a non-``opened`` status.
+        ``generate_and_open_pr_async`` reported a non-``opened`` status.
         The dedup key is ``corpus_learning:<issue_number>:<slug>`` —
         encoded with both components so that a retitled issue (new
         slug) and a re-filing of the original escape (same slug) are
@@ -651,6 +683,8 @@ class CorpusLearningLoop(BaseBackgroundLoop):
         ``gh``/``git`` failure leaves the set untouched so the next tick
         retries instead of silently dropping the case.
         """
+        from auto_pr import generate_and_open_pr_async  # noqa: PLC0415
+
         dedup_key = f"corpus_learning:{case.issue_number}:{case.slug}"
         if dedup_key in self._dedup.get():
             logger.info(
@@ -661,15 +695,24 @@ class CorpusLearningLoop(BaseBackgroundLoop):
             return None
 
         branch = f"hydraflow/corpus-learning/issue-{case.issue_number}-{case.slug}"
+        case_spec = str(_CASES_ROOT / case.slug)
+
+        async def _generate(worktree: Path) -> None:
+            # Write the case tree INTO the worktree — never repo_root (#9539).
+            # Materialization is synchronous file IO; run it in a thread so the
+            # event loop keeps ticking other loops' heartbeats.
+            await asyncio.to_thread(self._materialize_case_on_disk, case, worktree)
+
         # T2 (audit pass-5): emit a fleet trace for the PR-open
         # subprocess fan-out (auto_pr shells out gh + git multiple times).
         # Spec §4.11 mandates emit_loop_subprocess_trace on every
         # subprocess invocation across all 10 trust loops.
         t0 = time.perf_counter()
-        result = await open_automated_pr_async(
+        result = await generate_and_open_pr_async(
             repo_root=self._config.repo_root,
             branch=branch,
-            files=paths,
+            generate=_generate,
+            path_specs=[case_spec],
             pr_title=title,
             pr_body=body,
             base=self._config.base_branch(),
@@ -704,7 +747,7 @@ class CorpusLearningLoop(BaseBackgroundLoop):
     def _emit_pr_trace(self, t0: float, branch: str, status: str | None) -> None:
         """Spec §4.11: emit a fleet trace per subprocess invocation.
 
-        ``open_automated_pr_async`` shells out to ``git`` and ``gh``
+        ``generate_and_open_pr_async`` shells out to ``git`` and ``gh``
         multiple times under the hood; we record one synthetic trace
         per logical PR-open call so deploy-time observability surfaces
         slow/broken PR opens without cracking open the loop.
@@ -717,7 +760,7 @@ class CorpusLearningLoop(BaseBackgroundLoop):
             return
         emit_loop_subprocess_trace(
             loop=self._worker_name,
-            command=["auto_pr.open_automated_pr_async", branch],
+            command=["auto_pr.generate_and_open_pr_async", branch],
             exit_code=0 if status == "opened" else 1,
             duration_ms=int((time.perf_counter() - t0) * 1000),
             stderr_excerpt=f"status={status}" if status else None,
@@ -754,7 +797,7 @@ class CorpusLearningLoop(BaseBackgroundLoop):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            out, _ = await proc.communicate()
+            out, _ = await _communicate_bounded(proc)
             if proc.returncode != 0:
                 return
             issues = json.loads(out or b"[]")
@@ -871,7 +914,6 @@ class CorpusLearningLoop(BaseBackgroundLoop):
                     result.reason,
                 )
 
-        repo_root = Path(self._config.repo_root)
         # Per-tick cap. Spec §3.2: a misbehaving loop must not flood
         # the issue queue. The dedup is keyed on (issue_number, slug),
         # so a burst of escape issues with churning slugs (e.g. retitled
@@ -879,18 +921,19 @@ class CorpusLearningLoop(BaseBackgroundLoop):
         # `issues_per_hour` detector is post-hoc — by the time it fires,
         # the burst has already happened. This cap bounds blast radius
         # to a known multiple before any anomaly detector runs.
+        #
+        # Materialization (writing the case tree) now happens inside the
+        # ephemeral worktree the PR helper hands to its ``generate``
+        # callback — repo_root is never mutated (#9539).
         max_per_tick = self._config.corpus_learning_max_prs_per_tick
         truncated = False
         for case in validated_cases:
             if cases_filed >= max_per_tick:
                 truncated = True
                 break
-            paths = self._materialize_case_on_disk(case, repo_root)
             title = f"test(trust): corpus-learning case for escape #{case.issue_number}"
             body = _build_pr_body(case)
-            pr_number = await self._open_pr_for_case(
-                case, paths, title=title, body=body
-            )
+            pr_number = await self._open_pr_for_case(case, title=title, body=body)
             if pr_number is not None:
                 cases_filed += 1
         if truncated:

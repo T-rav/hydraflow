@@ -49,6 +49,8 @@ def _make_stub(
     work_fn: Any = None,
     default_interval: int = 60,
     interval_cb: Any = None,
+    timeout_cb: Any = None,
+    loop_cls: type[_StubLoop] = _StubLoop,
     run_on_startup: bool = False,
 ) -> tuple[_StubLoop, asyncio.Event]:
     """Build a _StubLoop with test-friendly defaults."""
@@ -72,9 +74,10 @@ def _make_stub(
         enabled_cb=lambda _name: enabled,
         sleep_fn=instant_sleep,
         interval_cb=interval_cb,
+        timeout_cb=timeout_cb,
     )
 
-    loop = _StubLoop(
+    loop = loop_cls(
         work_fn=work_fn,
         default_interval=default_interval,
         worker_name="test_worker",
@@ -621,3 +624,73 @@ class TestDerivedSleepFn:
         # Call the stored sleep_fn directly
         await loop._sleep_fn(1)
         assert custom_called
+
+
+# ---------------------------------------------------------------------------
+# Per-loop work-cycle watchdog (#9455 / #9556)
+# ---------------------------------------------------------------------------
+
+
+class _LongLlmStubLoop(_StubLoop):
+    """Stub that opts into the longer LLM cycle bound."""
+
+    LONG_LLM_CYCLE = True
+
+
+class TestLoopCycleWatchdog:
+    def test_cycle_timeout_defaults_to_config_default(self, tmp_path: Path) -> None:
+        loop, _stop = _make_stub(tmp_path)
+
+        assert (
+            loop._cycle_timeout_seconds() == loop._config.loop_watchdog_default_seconds
+        )
+
+    def test_long_llm_cycle_uses_llm_bound(self, tmp_path: Path) -> None:
+        loop, _stop = _make_stub(tmp_path, loop_cls=_LongLlmStubLoop)
+
+        assert loop._cycle_timeout_seconds() == loop._config.loop_watchdog_llm_seconds
+
+    def test_timeout_cb_overrides_config(self, tmp_path: Path) -> None:
+        loop, _stop = _make_stub(tmp_path, timeout_cb=lambda _name: 42)
+
+        assert loop._cycle_timeout_seconds() == 42
+
+    @pytest.mark.asyncio
+    async def test_hung_cycle_is_cancelled_and_reported(self, tmp_path: Path) -> None:
+        """A cycle that overruns its bound is cancelled, reported as error, survives."""
+        cancelled = asyncio.Event()
+
+        async def hangs() -> None:
+            try:
+                await asyncio.Event().wait()  # never set
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        # timeout_cb -> 0 makes the watchdog fire on the first wait.
+        loop, _stop = _make_stub(tmp_path, work_fn=hangs, timeout_cb=lambda _name: 0)
+
+        # Must NOT raise — the loop survives a hung cycle.
+        await loop._execute_cycle()
+
+        assert cancelled.is_set(), "the hung work task was not cancelled"
+        # Reported as an error cycle, not success.
+        status_args = [c.args for c in loop._status_cb.call_args_list]
+        assert any(a[1] == "error" for a in status_args), status_args
+        # A distinct watchdog-timeout ERROR event was published.
+        error_events = [e for e in loop._bus.get_history() if e.type == EventType.ERROR]
+        assert error_events, "no ERROR event published on watchdog fire"
+        assert "watchdog timeout" in error_events[-1].data["message"]
+
+    @pytest.mark.asyncio
+    async def test_fast_cycle_is_not_killed_by_watchdog(self, tmp_path: Path) -> None:
+        """Work that finishes within the bound reports success normally."""
+        loop, _stop = _make_stub(
+            tmp_path, work_fn=lambda: {"ok": 1}, timeout_cb=lambda _name: 30
+        )
+
+        await loop._execute_cycle()
+
+        status_args = [c.args for c in loop._status_cb.call_args_list]
+        assert status_args and status_args[-1][1] == "ok", status_args
+        assert status_args[-1][2] == {"ok": 1}

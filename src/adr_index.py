@@ -21,9 +21,13 @@ Status is normalized to one of: "Accepted", "Proposed", "Superseded",
 
 from __future__ import annotations
 
+import logging
 import re
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _TITLE_RE = re.compile(r"^#\s*ADR-(\d{4}):\s*(.+?)\s*$", re.MULTILINE)
 _STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(.+?)\s*$", re.MULTILINE)
@@ -119,13 +123,35 @@ def parse_adr_file(path: Path) -> ADR:
 
 
 def scan_adr_directory(adr_dir: Path) -> list[ADR]:
-    """Parse every ADR file in the directory, sorted by number."""
+    """Parse every ADR file in the directory, sorted by number.
+
+    Emits a ``logger.warning`` for each ADR number claimed by more than one
+    file. Two ADRs sharing a number silently collapse in every dict-keyed
+    downstream caller (``adrs_touching``, ``compute_drift``, the ``adr_xref``
+    generator), so the colliding citations merge non-deterministically. The
+    #9406 collisions went unnoticed for weeks because nothing on the runtime
+    path signalled the duplicate; this warning surfaces it in logs / Sentry
+    immediately while still returning a usable (collision-included) list.
+    """
     if not adr_dir.exists() or not adr_dir.is_dir():
         return []
     adrs: list[ADR] = []
+    files_by_number: dict[int, list[str]] = defaultdict(list)
     for p in adr_dir.iterdir():
         if p.is_file() and p.suffix == ".md" and _TITLE_RE.search(p.read_text()):
-            adrs.append(parse_adr_file(p))
+            adr = parse_adr_file(p)
+            adrs.append(adr)
+            files_by_number[adr.number].append(p.name)
+    for number, names in files_by_number.items():
+        if len(names) > 1:
+            logger.warning(
+                "Duplicate ADR number %04d claimed by %d files: %s. "
+                "Dict-keyed callers will non-deterministically keep/merge one; "
+                "renumber the later-authored file (issue #9406 / #9457).",
+                number,
+                len(names),
+                ", ".join(sorted(names)),
+            )
     return sorted(adrs, key=lambda a: a.number)
 
 
