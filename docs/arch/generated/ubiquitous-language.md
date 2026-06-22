@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_46 terms across 3 bounded contexts._
+_45 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -17,17 +17,6 @@ ADRCouncilReviewer is the domain service that runs multi-agent council review se
 - CreditExhaustedError and AuthenticationError propagate out of the review batch rather than being swallowed per-item, so BaseBackgroundLoop can pause on a fatal billing signal.
 - Every ADR that reaches Accepted status is guaranteed to carry an **Enforced by:** line (injected as '(none)' if absent) before it is written back.
 - Pre-validation must pass before a council session is started; a failing ADR is routed and counted separately without blocking the rest of the batch.
-
-## ADRIndex
-
-**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/adr_index.py:ADRIndex` · **Confidence:** `accepted`
-**Aliases:** `adr cache`, `adr catalog`, `architecture decision index`
-
-Mtime-based runtime cache over the ADR directory that parses docs/adr/*.md on first access and re-scans only when the directory mtime changes. Exposes parsed ADR records — including normalized status, context summary, cited source files, and symbol-level citations — to caretaker loops and agent prompts. Acts as the authoritative in-process view of architecture decisions, enabling loops such as AdrTouchpointAuditorLoop to check which Accepted ADRs cite a given source file without re-reading the filesystem on every tick. The module docstring frames it explicitly as load-bearing: agents must know what has already been decided before they plan.
-
-**Invariants:**
-- Re-scans the ADR directory only when its mtime changes; returns the cached ADR list on a stable directory
-- Status values are normalized to one of Accepted, Proposed, Superseded, Deprecated, or Unknown — no raw status strings escape the parser
 
 ## ADRPreValidator
 

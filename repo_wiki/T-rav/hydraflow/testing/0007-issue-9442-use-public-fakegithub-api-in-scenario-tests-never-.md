@@ -4,8 +4,9 @@ topic: testing
 source_issue: 9442
 source_phase: review
 created_at: 2026-06-13T07:10:55.323905+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0183
 ---
 
 # Use public FakeGitHub API in scenario tests — never mutate _issues directly
