@@ -92,7 +92,7 @@ class TestPricingRefreshLoop:
                 "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
                 return_value=upstream_payload,
             ),
-            patch("auto_pr.open_automated_pr_async", pr_helper),
+            patch("auto_pr.generate_and_open_pr_async", pr_helper),
         ):
             stats = await world.run_with_loops(["pricing_refresh"], cycles=1)
 
@@ -135,7 +135,7 @@ class TestPricingRefreshLoop:
                 "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
                 return_value=upstream_payload,
             ),
-            patch("auto_pr.open_automated_pr_async", pr_helper),
+            patch("auto_pr.generate_and_open_pr_async", pr_helper),
         ):
             stats = await world.run_with_loops(["pricing_refresh"], cycles=1)
 
@@ -149,3 +149,6 @@ class TestPricingRefreshLoop:
         assert kwargs["branch"] == "pricing-refresh-auto"
         assert kwargs["pr_title"].startswith("chore(pricing): refresh from LiteLLM")
         assert kwargs["auto_merge"] is False
+        # Generate-in-worktree (#9539): targeted path spec + a generate callable.
+        assert kwargs["path_specs"] == ["src/assets/model_pricing.json"]
+        assert callable(kwargs["generate"])
