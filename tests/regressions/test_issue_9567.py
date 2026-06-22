@@ -79,8 +79,10 @@ def test_slash_command_remains_read_only(skill_file: Path) -> None:
     the slash-command performs, because the slash command has no worktree or
     subprocess access in interactive sessions.
     """
-    if not skill_file.exists():
-        pytest.skip(f"{skill_file} does not exist")
+    assert skill_file.exists(), (
+        f"{skill_file} is missing; the hf.test-adequacy skill file is a "
+        "committed contract and must exist to declare read-only behaviour"
+    )
 
     text = skill_file.read_text()
     assert "read-only" in text.lower(), (
