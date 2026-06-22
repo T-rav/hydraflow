@@ -511,11 +511,11 @@ def _build_rc_budget(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_wiki_rot_detector(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build WikiRotDetectorLoop for scenarios (spec §4.9).
 
-    The loop's external surface — ``_gh_closed_escalations`` (``gh issue
-    list`` subprocess) and the ``RepoWikiStore`` / ``StateTracker`` /
-    ``DedupStore`` ports — cannot run live inside a scenario. Tests
-    pre-seed three port keys which this builder reads and wires into the
-    constructor:
+    The loop's external surface — ``PRPort.list_closed_issues_by_label``
+    (reconcile, exercised via FakeGitHub) and the ``RepoWikiStore`` /
+    ``StateTracker`` / ``DedupStore`` ports — cannot run live inside a
+    scenario. Tests pre-seed three port keys which this builder reads and
+    wires into the constructor:
 
     * ``wiki_rot_state`` → ``state``
     * ``wiki_rot_dedup`` → ``dedup``
@@ -946,14 +946,16 @@ def _build_corpus_learning(ports: dict[str, Any], config: Any, deps: Any) -> Any
         deps=deps,
     )
 
-    # Optional: replace the auto_pr seam on the loop's module with a
-    # seeded async callable so tests can assert the opened PR without
-    # shelling out to ``git``/``gh``.
+    # Optional: replace the auto_pr seam with a seeded async callable so
+    # tests can assert the opened PR without shelling out to ``git``/``gh``.
+    # The loop now generates the case tree inside the worktree (#9539) and
+    # lazily imports :func:`auto_pr.generate_and_open_pr_async`, so the seam
+    # to patch is on the ``auto_pr`` module itself (mirrors DiagramLoop).
     auto_pr_stub = ports.get("corpus_learning_auto_pr")
     if auto_pr_stub is not None:
-        import corpus_learning_loop as _mod  # noqa: PLC0415
+        import auto_pr as _auto_pr  # noqa: PLC0415
 
-        _mod.open_automated_pr_async = auto_pr_stub  # type: ignore[assignment]
+        _auto_pr.generate_and_open_pr_async = auto_pr_stub  # type: ignore[assignment]
 
     return loop
 
@@ -1087,7 +1089,9 @@ def _build_contract_refresh(ports: dict[str, Any], config: Any, deps: Any) -> An
     * ``contract_refresh_record_git`` → ``record_git``
     * ``contract_refresh_record_docker`` → ``record_docker``
     * ``contract_refresh_record_claude`` → ``record_claude_stream``
-    * ``contract_refresh_auto_pr`` → ``open_automated_pr_async``
+    * ``contract_refresh_auto_pr`` → ``auto_pr.generate_and_open_pr_async``
+      (generate-in-worktree, #9539 — the loop imports it lazily so the
+      seam lives on the ``auto_pr`` module, not ``crl_module``)
 
     ``state`` defaults to a MagicMock wired with int-returning stubs for
     the Task 18 attempt counters (``get_contract_refresh_attempts`` →
@@ -1124,13 +1128,16 @@ def _build_contract_refresh(ports: dict[str, Any], config: Any, deps: Any) -> An
         "contract_refresh_record_claude", default_empty
     )
 
-    # Optional: replace the auto_pr seam on the loop's module with a
-    # seeded async callable so tests can assert the opened PR shape
-    # without shelling out to ``git`` / ``gh``. Mirrors the F1
-    # corpus-learning pattern.
+    # Optional: replace the generate-in-worktree seam (#9539) with a seeded
+    # async callable so tests can assert the opened PR shape without shelling
+    # out to ``git`` / ``gh`` or creating a real worktree. The loop imports
+    # ``generate_and_open_pr_async`` lazily from ``auto_pr`` at call time, so
+    # the seam must be patched on the ``auto_pr`` module (not ``_module``).
     auto_pr_stub = ports.get("contract_refresh_auto_pr")
     if auto_pr_stub is not None:
-        _module.open_automated_pr_async = auto_pr_stub  # type: ignore[assignment]
+        import auto_pr as _auto_pr_module  # noqa: PLC0415
+
+        _auto_pr_module.generate_and_open_pr_async = auto_pr_stub  # type: ignore[assignment]
 
     loop = ContractRefreshLoop(
         config=config,

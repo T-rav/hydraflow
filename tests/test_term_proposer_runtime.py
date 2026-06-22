@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from term_proposer_runtime import (
+    _UL_CONTEXT_MAP_REL,
+    _UL_GLOSSARY_REL,
     ClaudeCLIClient,
     OpenAutoPRBotPRPort,
     regenerate_ubiquitous_language_artifacts,
@@ -78,14 +80,17 @@ class TestClaudeCLIClient:
 
 class TestOpenAutoPRBotPRPort:
     @pytest.mark.asyncio
-    async def test_writes_files_and_returns_pr_number(
+    async def test_generates_in_worktree_and_returns_pr_number(
         self, tmp_path: Path, monkeypatch
     ) -> None:
+        # The bot PR is opened via generate-in-worktree (#9539); repo_root is
+        # never written to. The generate callback is NOT invoked when
+        # generate_and_open_pr_async is mocked, so we assert the call kwargs.
         from auto_pr import AutoPrResult
 
         captured: dict = {}
 
-        async def fake_open_automated_pr_async(**kwargs):
+        async def fake_generate_and_open_pr_async(**kwargs):
             captured.update(kwargs)
             return AutoPrResult(
                 status="opened",
@@ -94,7 +99,7 @@ class TestOpenAutoPRBotPRPort:
             )
 
         monkeypatch.setattr(
-            "auto_pr.open_automated_pr_async", fake_open_automated_pr_async
+            "auto_pr.generate_and_open_pr_async", fake_generate_and_open_pr_async
         )
 
         port = OpenAutoPRBotPRPort(repo_root=tmp_path, gh_token="ghs_x")
@@ -111,17 +116,23 @@ class TestOpenAutoPRBotPRPort:
         )
 
         assert pr_number == 4242
-        # Files written
-        assert (tmp_path / "docs/wiki/terms/foo-loop.md").read_text().startswith("---")
-        assert (tmp_path / "docs/wiki/terms/bar-runner.md").exists()
+        # repo_root stays clean — nothing is written under it (#9539).
+        assert not (tmp_path / "docs/wiki/terms/foo-loop.md").exists()
+        assert not (tmp_path / "docs/arch/generated").exists()
         # auto_pr called with the right args
         assert captured["branch"] == "ul-proposer/abc123"
         assert captured["pr_title"] == "feat(ul): batch"
         assert captured["labels"] == ["hydraflow-ul-proposed"]
         assert captured["auto_merge"] is False  # DependabotMergeLoop handles merge
         assert captured["base"] == "main"  # default (single-tier / pre-staging)
+        assert callable(captured["generate"])
         # 2 term files + the 2 regenerated ubiquitous-language views ride along.
-        assert len(captured["files"]) == 4
+        assert captured["path_specs"] == [
+            "docs/wiki/terms/foo-loop.md",
+            "docs/wiki/terms/bar-runner.md",
+            _UL_GLOSSARY_REL,
+            _UL_CONTEXT_MAP_REL,
+        ]
 
     @pytest.mark.asyncio
     async def test_targets_configured_base_branch(
@@ -135,7 +146,7 @@ class TestOpenAutoPRBotPRPort:
 
         captured: dict = {}
 
-        async def fake_open_automated_pr_async(**kwargs):
+        async def fake_generate_and_open_pr_async(**kwargs):
             captured.update(kwargs)
             return AutoPrResult(
                 status="opened",
@@ -144,7 +155,7 @@ class TestOpenAutoPRBotPRPort:
             )
 
         monkeypatch.setattr(
-            "auto_pr.open_automated_pr_async", fake_open_automated_pr_async
+            "auto_pr.generate_and_open_pr_async", fake_generate_and_open_pr_async
         )
 
         port = OpenAutoPRBotPRPort(repo_root=tmp_path, gh_token="ghs_x", base="staging")
@@ -162,13 +173,13 @@ class TestOpenAutoPRBotPRPort:
     async def test_raises_on_open_failure(self, tmp_path: Path, monkeypatch) -> None:
         from auto_pr import AutoPrResult
 
-        async def fake_open_automated_pr_async(**kwargs):
+        async def fake_generate_and_open_pr_async(**kwargs):
             return AutoPrResult(
                 status="failed", pr_url=None, branch=kwargs["branch"], error="auth"
             )
 
         monkeypatch.setattr(
-            "auto_pr.open_automated_pr_async", fake_open_automated_pr_async
+            "auto_pr.generate_and_open_pr_async", fake_generate_and_open_pr_async
         )
 
         port = OpenAutoPRBotPRPort(repo_root=tmp_path)
@@ -178,18 +189,19 @@ class TestOpenAutoPRBotPRPort:
             )
 
     @pytest.mark.asyncio
-    async def test_stages_regenerated_ul_artifacts_with_term_change(
+    async def test_generate_callback_regenerates_ul_artifacts_in_worktree(
         self, tmp_path: Path, monkeypatch
     ) -> None:
         # A term-proposer PR mutates docs/wiki/terms/ — the generated
         # ubiquitous-language views derive from those files, so the commit MUST
         # also carry the regenerated views or the pre-push arch-check drift
-        # guard rejects the push.
+        # guard rejects the push. The generate callback writes the term file AND
+        # regenerates the views INTO the worktree (never repo_root, #9539).
         from auto_pr import AutoPrResult
 
         captured: dict = {}
 
-        async def fake_open_automated_pr_async(**kwargs):
+        async def fake_generate_and_open_pr_async(**kwargs):
             captured.update(kwargs)
             return AutoPrResult(
                 status="opened",
@@ -198,10 +210,12 @@ class TestOpenAutoPRBotPRPort:
             )
 
         monkeypatch.setattr(
-            "auto_pr.open_automated_pr_async", fake_open_automated_pr_async
+            "auto_pr.generate_and_open_pr_async", fake_generate_and_open_pr_async
         )
 
-        port = OpenAutoPRBotPRPort(repo_root=tmp_path)
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        port = OpenAutoPRBotPRPort(repo_root=repo_root)
         await port.open_bot_pr(
             branch="ul-proposer/abc123",
             title="feat(ul): batch",
@@ -210,13 +224,25 @@ class TestOpenAutoPRBotPRPort:
             files={"docs/wiki/terms/widget-maker.md": _term_file_str("WidgetMaker")},
         )
 
-        staged = {p.relative_to(tmp_path).as_posix() for p in captured["files"]}
-        assert "docs/wiki/terms/widget-maker.md" in staged
-        assert "docs/arch/generated/ubiquitous-language.md" in staged
-        assert "docs/arch/generated/ubiquitous-language-context-map.md" in staged
-        # The regenerated views are actually written to disk so the worktree
-        # copy step has real content to stage.
-        assert (tmp_path / "docs/arch/generated/ubiquitous-language.md").exists()
+        # The term file + the two UL views are staged.
+        assert captured["path_specs"] == [
+            "docs/wiki/terms/widget-maker.md",
+            _UL_GLOSSARY_REL,
+            _UL_CONTEXT_MAP_REL,
+        ]
+        # Drive the generate callback against a real worktree dir: it must write
+        # the term file and regenerate the views THERE — and leave repo_root
+        # untouched (#9539).
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        await captured["generate"](worktree)
+
+        assert (worktree / "docs/wiki/terms/widget-maker.md").exists()
+        assert (worktree / _UL_GLOSSARY_REL).exists()
+        assert (worktree / _UL_CONTEXT_MAP_REL).exists()
+        # repo_root is never touched.
+        assert not (repo_root / "docs/wiki/terms/widget-maker.md").exists()
+        assert not (repo_root / "docs/arch/generated").exists()
 
     @pytest.mark.asyncio
     async def test_skips_regen_when_no_term_files_change(
@@ -227,7 +253,7 @@ class TestOpenAutoPRBotPRPort:
 
         captured: dict = {}
 
-        async def fake_open_automated_pr_async(**kwargs):
+        async def fake_generate_and_open_pr_async(**kwargs):
             captured.update(kwargs)
             return AutoPrResult(
                 status="opened",
@@ -236,7 +262,7 @@ class TestOpenAutoPRBotPRPort:
             )
 
         monkeypatch.setattr(
-            "auto_pr.open_automated_pr_async", fake_open_automated_pr_async
+            "auto_pr.generate_and_open_pr_async", fake_generate_and_open_pr_async
         )
 
         port = OpenAutoPRBotPRPort(repo_root=tmp_path)
@@ -244,9 +270,14 @@ class TestOpenAutoPRBotPRPort:
             branch="x", title="x", body="x", labels=[], files={"docs/other.md": "x"}
         )
 
-        staged = {p.relative_to(tmp_path).as_posix() for p in captured["files"]}
-        assert staged == {"docs/other.md"}
-        assert not (tmp_path / "docs/arch/generated").exists()
+        # Only the non-term file is staged — no UL views ride along.
+        assert captured["path_specs"] == ["docs/other.md"]
+        # Drive the generate callback: it writes only the non-term file, no regen.
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        await captured["generate"](worktree)
+        assert (worktree / "docs/other.md").exists()
+        assert not (worktree / "docs/arch/generated").exists()
 
 
 class TestRegenerateUbiquitousLanguageArtifacts:

@@ -14,7 +14,8 @@ one layer up still swallows it. Per-loop credit PROPAGATION must be covered by a
 behavioral test at the loop boundary (e.g. assert ``CreditExhaustedError``
 escapes ``_do_work``). ``_GRANDFATHERED`` must stay EMPTY.
 
-Ref: ADR-0086, ``docs/wiki/dark-factory.md`` §6, ``src/exception_classify.py``.
+Ref: ADR-0055 (telemetry/credit contract for spawn paths),
+``docs/wiki/dark-factory.md`` §6, ``src/exception_classify.py``.
 """
 
 from __future__ import annotations

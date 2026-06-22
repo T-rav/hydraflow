@@ -14,7 +14,7 @@ import logging
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
@@ -29,6 +29,26 @@ from subprocess_util import AuthenticationError, CreditExhaustedError
 from telemetry.spans import loop_span  # noqa: E402
 
 logger = logging.getLogger("hydraflow.base_background_loop")
+
+
+class LoopCycleTimeoutError(Exception):
+    """Raised when a loop's ``_do_work()`` cycle exceeds its watchdog bound.
+
+    The per-loop watchdog (#9455 / #9556) bounds every cycle so a hung loop —
+    a wedged subprocess, a deadlocked ``await``, an unbounded network wait —
+    cannot block indefinitely and silently freeze its heartbeat. Carries the
+    worker name and the bound that was exceeded for diagnosis. Surfaced as a
+    cycle error (status ``error`` + ERROR event); the loop survives and retries
+    on the next tick rather than crashing.
+    """
+
+    def __init__(self, worker_name: str, timeout_seconds: float) -> None:
+        self.worker_name = worker_name
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            f"{worker_name} work cycle exceeded its {timeout_seconds:g}s "
+            "watchdog bound and was cancelled"
+        )
 
 
 def _make_sleep_fn(
@@ -58,6 +78,11 @@ class LoopDeps:
     enabled_cb: Callable[[str], bool]
     sleep_fn: Callable[[int | float], Coroutine[Any, Any, None]] | None = None
     interval_cb: Callable[[str], int] | None = None
+    # Resolves the per-loop work-cycle watchdog bound (seconds) by worker name.
+    # Optional + forward-compatible: when None the loop derives its bound from
+    # config (LONG_LLM_CYCLE → loop_watchdog_llm_seconds, else
+    # loop_watchdog_default_seconds). Mirrors ``interval_cb`` (#9556).
+    timeout_cb: Callable[[str], int] | None = None
 
 
 class BaseBackgroundLoop(abc.ABC):
@@ -68,6 +93,12 @@ class BaseBackgroundLoop(abc.ABC):
     The base class handles the run loop, enabled check, error reporting,
     status publishing, and interval management.
     """
+
+    # Loops that call an LLM (run_lightweight_agent et al.) set this True to
+    # earn the longer ``loop_watchdog_llm_seconds`` cycle bound instead of the
+    # short ``loop_watchdog_default_seconds`` one (#9455 / #9556). Default False
+    # keeps every non-LLM loop on the tight bound.
+    LONG_LLM_CYCLE: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -89,6 +120,7 @@ class BaseBackgroundLoop(abc.ABC):
             else _make_sleep_fn(deps.stop_event)
         )
         self._interval_cb = deps.interval_cb
+        self._timeout_cb = deps.timeout_cb
         self._run_on_startup = run_on_startup
         self._trigger_event = asyncio.Event()
 
@@ -123,6 +155,20 @@ class BaseBackgroundLoop(abc.ABC):
             return self._interval_cb(self._worker_name)
         return self._get_default_interval()
 
+    def _cycle_timeout_seconds(self) -> int:
+        """Resolve this loop's per-cycle watchdog bound in seconds (#9556).
+
+        Prefers the injected ``timeout_cb`` (operator-tunable, per-loop); else
+        derives from config: :attr:`LONG_LLM_CYCLE` loops get the longer
+        ``loop_watchdog_llm_seconds`` bound, all others the tight
+        ``loop_watchdog_default_seconds`` one.
+        """
+        if self._timeout_cb is not None:
+            return self._timeout_cb(self._worker_name)
+        if self.LONG_LLM_CYCLE:
+            return self._config.loop_watchdog_llm_seconds
+        return self._config.loop_watchdog_default_seconds
+
     def _build_details(self, stats: dict[str, Any] | None) -> dict[str, Any]:
         """Coerce arbitrary worker stats into a details dict."""
         if stats is None:
@@ -133,9 +179,21 @@ class BaseBackgroundLoop(abc.ABC):
 
     @loop_span()
     async def _execute_cycle(self) -> None:
-        """Execute one work cycle with error handling and status reporting."""
+        """Execute one work cycle with error handling and status reporting.
+
+        The ``_do_work()`` call is bounded by a per-loop watchdog
+        (:meth:`_cycle_timeout_seconds`): if a cycle overruns its timeout the
+        work task is cancelled and :class:`LoopCycleTimeoutError` is raised, so
+        a hung loop surfaces as a cycle error and retries next tick instead of
+        freezing its heartbeat forever (#9455 / #9556).
+        """
+        timeout = self._cycle_timeout_seconds()
+        work_task = asyncio.create_task(self._do_work())
         try:
-            stats = await self._do_work()
+            done, _pending = await asyncio.wait({work_task}, timeout=timeout)
+            if work_task not in done:
+                raise LoopCycleTimeoutError(self._worker_name, timeout)
+            stats = work_task.result()
             details = self._build_details(stats)
             last_run = datetime.now(UTC).isoformat()
             self._status_cb(self._worker_name, "ok", details)
@@ -154,33 +212,56 @@ class BaseBackgroundLoop(abc.ABC):
             raise
         except AuthenticationRetryError:
             raise
+        except LoopCycleTimeoutError as exc:
+            # Watchdog fired: the cycle overran its bound. Surface it as a
+            # distinct WARNING (not a bug traceback) plus an error status, so a
+            # hung loop is visible in the dashboard / Sentry without
+            # masquerading as a code fault (#9556).
+            logger.warning("%s", exc)
+            await self._report_cycle_failure(
+                f"{self._worker_name.replace('_', ' ').capitalize()} loop "
+                "watchdog timeout"
+            )
         except Exception:
             logger.exception(
                 "%s loop iteration failed — will retry next cycle",
                 self._worker_name.replace("_", " ").capitalize(),
             )
-            last_run = datetime.now(UTC).isoformat()
-            self._status_cb(self._worker_name, "error", {})
-            await self._bus.publish(
-                HydraFlowEvent(
-                    type=EventType.BACKGROUND_WORKER_STATUS,
-                    data=BackgroundWorkerStatusPayload(
-                        worker=self._worker_name,
-                        status="error",
-                        last_run=last_run,
-                        details={},
-                    ),
-                )
+            await self._report_cycle_failure(
+                f"{self._worker_name.replace('_', ' ').capitalize()} loop error"
             )
-            await self._bus.publish(
-                HydraFlowEvent(
-                    type=EventType.ERROR,
-                    data=ErrorPayload(
-                        message=f"{self._worker_name.replace('_', ' ').capitalize()} loop error",
-                        source=self._worker_name,
-                    ),
-                )
+        finally:
+            # Never let the work task outlive the cycle. On a watchdog timeout —
+            # or if _execute_cycle itself is cancelled (loop shutdown) while
+            # awaiting — an un-drained task orphans and blocks event-loop
+            # teardown's _cancel_all_tasks gather. Cancel + drain it here so the
+            # cycle owns its task's full lifecycle.
+            if not work_task.done():
+                work_task.cancel()
+                with contextlib.suppress(BaseException):
+                    await work_task
+
+    async def _report_cycle_failure(self, message: str) -> None:
+        """Publish the error status + ERROR event for a failed/timed-out cycle."""
+        last_run = datetime.now(UTC).isoformat()
+        self._status_cb(self._worker_name, "error", {})
+        await self._bus.publish(
+            HydraFlowEvent(
+                type=EventType.BACKGROUND_WORKER_STATUS,
+                data=BackgroundWorkerStatusPayload(
+                    worker=self._worker_name,
+                    status="error",
+                    last_run=last_run,
+                    details={},
+                ),
             )
+        )
+        await self._bus.publish(
+            HydraFlowEvent(
+                type=EventType.ERROR,
+                data=ErrorPayload(message=message, source=self._worker_name),
+            )
+        )
 
     async def _sleep_or_trigger(self, seconds: int | float) -> bool:
         """Call the configured sleep function, but return early on trigger.

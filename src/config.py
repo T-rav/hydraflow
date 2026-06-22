@@ -177,6 +177,12 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_STAGING_BISECT_WATCHDOG_RC_CYCLES",
         2,
     ),
+    (
+        "loop_watchdog_default_seconds",
+        "HYDRAFLOW_LOOP_WATCHDOG_DEFAULT_SECONDS",
+        7200,
+    ),
+    ("loop_watchdog_llm_seconds", "HYDRAFLOW_LOOP_WATCHDOG_LLM_SECONDS", 14400),
     ("collaborator_cache_ttl", "HYDRAFLOW_COLLABORATOR_CACHE_TTL", 600),
     (
         "issue_cache_enrich_ttl_seconds",
@@ -1966,6 +1972,44 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Hard wall-clock cap on a single bisect run (default 45 min). "
             "On timeout the loop files hitl-escalation bisect-harness-failure."
+        ),
+    )
+    # -- per-loop work-cycle watchdog (#9455 / #9556) -------------------------
+    # Bounds every BaseBackgroundLoop._do_work() cycle so a hung loop cannot
+    # block indefinitely and silently freeze its heartbeat. Loops opt into the
+    # longer LLM bound via the LONG_LLM_CYCLE ClassVar.
+    #
+    # v1 intent = catch *true hangs* (a cycle that never returns), NOT enforce a
+    # tight per-loop SLA. Bounds are deliberately generous so no legitimate
+    # cycle is false-killed: the heaviest real cycles are bisect (~45 min),
+    # adversarial eval (~60 min) and `make audit` (~30 min), all well under the
+    # 2 h default. Operators tighten per-loop later via timeout_cb / config once
+    # real per-loop SLAs are established. A killed cycle is recoverable (lost
+    # cycle, retries next tick) and surfaces as a distinct "watchdog timeout"
+    # ERROR, so a too-tight bound is self-evident and reclassifiable.
+    loop_watchdog_default_seconds: int = Field(
+        default=7200,
+        ge=60,
+        le=21600,
+        description=(
+            "Per-cycle watchdog bound (seconds) for normal background loops "
+            "(default 2 h — generous, sized to catch true hangs without "
+            "false-killing the heaviest legit cycle). A cycle exceeding this is "
+            "cancelled and raises LoopCycleTimeoutError, reported as a loop "
+            "error; the loop retries next tick. "
+            "Env: HYDRAFLOW_LOOP_WATCHDOG_DEFAULT_SECONDS."
+        ),
+    )
+    loop_watchdog_llm_seconds: int = Field(
+        default=14400,
+        ge=300,
+        le=43200,
+        description=(
+            "Per-cycle watchdog bound (seconds) for loops that call an LLM or "
+            "run an exceptionally long subprocess (LONG_LLM_CYCLE = True; "
+            "default 4 h). Such cycles legitimately run far longer than poll "
+            "cycles, so they get a wider bound than loop_watchdog_default_seconds. "
+            "Env: HYDRAFLOW_LOOP_WATCHDOG_LLM_SECONDS."
         ),
     )
     staging_bisect_flake_reruns: int = Field(
