@@ -38,18 +38,20 @@ def test_default_interval_is_four_hours(loop_deps):
 
 @pytest.mark.asyncio
 async def test_no_drift_returns_drift_false(loop_deps, tmp_path, monkeypatch):
-    pr_manager = MagicMock()
-    pr_manager.find_existing_issue = AsyncMock(return_value=0)
-    pr_manager.create_issue = AsyncMock(return_value=42)
-    loop = DiagramLoop(config=MagicMock(), pr_manager=pr_manager, deps=loop_deps)
+    loop = DiagramLoop(config=MagicMock(), pr_manager=MagicMock(), deps=loop_deps)
     loop._set_repo_root(tmp_path)
 
-    from diagram_loop import _DriftResult
+    from auto_pr import AutoPrResult
 
+    # _regen_pr returns a no-diff result → no drift, coverage check skipped.
     monkeypatch.setattr(
         loop,
-        "_regen_and_detect_drift",
-        lambda: _DriftResult(has_drift=False, changed_files=[]),
+        "_regen_pr",
+        AsyncMock(
+            return_value=AutoPrResult(
+                status="no-diff", pr_url=None, branch="arch-regen-auto"
+            )
+        ),
     )
     result = await loop._do_work()
     assert result == {"drift": False}
@@ -57,35 +59,31 @@ async def test_no_drift_returns_drift_false(loop_deps, tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_drift_opens_pr_and_runs_coverage(loop_deps, tmp_path, monkeypatch):
-    pr_manager = MagicMock()
-    pr_manager.find_existing_issue = AsyncMock(return_value=0)
-    loop = DiagramLoop(config=MagicMock(), pr_manager=pr_manager, deps=loop_deps)
+    loop = DiagramLoop(config=MagicMock(), pr_manager=MagicMock(), deps=loop_deps)
     loop._set_repo_root(tmp_path)
 
-    from diagram_loop import _DriftResult
+    from auto_pr import AutoPrResult
 
     monkeypatch.setattr(
         loop,
-        "_regen_and_detect_drift",
-        lambda: _DriftResult(
-            has_drift=True, changed_files=["M docs/arch/generated/loops.md"]
+        "_regen_pr",
+        AsyncMock(
+            return_value=AutoPrResult(
+                status="opened", pr_url="https://pr/1", branch="arch-regen-auto"
+            )
         ),
     )
-
-    open_pr_mock = AsyncMock(return_value="https://pr/1")
-    monkeypatch.setattr(loop, "_open_or_update_regen_pr", open_pr_mock)
     coverage_mock = AsyncMock()
     monkeypatch.setattr(loop, "_ensure_coverage_issue", coverage_mock)
 
     result = await loop._do_work()
     assert result["drift"] is True
     assert result["pr_url"] == "https://pr/1"
-    open_pr_mock.assert_awaited_once()
     coverage_mock.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_regen_pr_uses_config_base_branch_staging(
+async def test_regen_pr_uses_config_base_branch_and_worktree_path_specs(
     loop_deps, tmp_path, monkeypatch
 ):
     config = MagicMock()
@@ -97,21 +95,24 @@ async def test_regen_pr_uses_config_base_branch_staging(
     captured = {}
 
     import auto_pr as _auto_pr_mod
+    from auto_pr import AutoPrResult
 
     async def intercept(**kw):
-        captured["base"] = kw["base"]
-        from auto_pr import AutoPrResult
-
+        captured.update(kw)
         return AutoPrResult(
-            status="opened",
-            pr_url="https://pr/2",
-            branch=kw["branch"],
-            error=None,
+            status="opened", pr_url="https://pr/2", branch=kw["branch"], error=None
         )
 
-    monkeypatch.setattr(_auto_pr_mod, "open_automated_pr_async", intercept)
-    await loop._open_or_update_regen_pr(["M docs/arch/generated/loops.md"])
+    # _regen_pr must route through generate_and_open_pr_async (worktree), not
+    # open_automated_pr_async (repo_root copy).
+    monkeypatch.setattr(_auto_pr_mod, "generate_and_open_pr_async", intercept)
+    result = await loop._regen_pr()
+
+    assert result.pr_url == "https://pr/2"
     assert captured["base"] == "staging"
+    assert captured["branch"] == "arch-regen-auto"
+    assert captured["path_specs"] == ["docs/arch/generated", "docs/arch/.meta.json"]
+    assert callable(captured["generate"])
 
 
 @pytest.mark.asyncio

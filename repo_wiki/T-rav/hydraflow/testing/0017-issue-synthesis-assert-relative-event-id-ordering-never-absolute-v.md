@@ -7,6 +7,10 @@ created_at: 2026-06-14T05:17:49.828947+00:00
 status: active
 corroborations: 1
 supersedes: 0001,0002,0003,0004,0005,0006
+status: superseded
+corroborations: 1
+supersedes: 0001,0002,0003,0004,0005,0006
+superseded_by: 0034
 ---
 
 # Assert relative event ID ordering, never absolute values

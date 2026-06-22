@@ -1469,7 +1469,7 @@ class PRManager:
         )
         from contracts.boundary import field_or  # noqa: PLC0415
 
-        results = parse_list_with_shape(output, GhIssueListItem)
+        results = parse_list_with_shape(output or "[]", GhIssueListItem)
         return [
             {
                 "number": field_or(r, "number", 0),
@@ -1509,7 +1509,7 @@ class PRManager:
         )
         from contracts.boundary import field_or  # noqa: PLC0415
 
-        results = parse_list_with_shape(output, GhIssueListItem)
+        results = parse_list_with_shape(output or "[]", GhIssueListItem)
         return [
             {
                 "number": field_or(r, "number", 0),

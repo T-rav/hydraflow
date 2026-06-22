@@ -287,9 +287,13 @@ describe('Header component', () => {
       })
 
       const arrows = screen.getAllByText('\u2192')
-      // 4 arrows in main track (plan, implement, review, merged) +
-      // 1 arrow between product track stages (discover → shape) = 5
-      const mainTrackArrows = PIPELINE_STAGES.filter(s => s.track !== 'product').length - 1
+      // Linear arrows = 3 main (plan, implement, review) + 1 product-internal.
+      // Terminal stages (hitl, merged: role/configKey null) fork off review
+      // with diagonal fork arrows instead of chaining linearly, so they no
+      // longer contribute a linear arrow to the main track (#9224).
+      const terminalStages = PIPELINE_STAGES.filter(s => !s.role && !s.configKey)
+      const mainTrackArrows =
+        PIPELINE_STAGES.filter(s => s.track !== 'product').length - 1 - terminalStages.length
       const productTrackArrows = Math.max(0, PIPELINE_STAGES.filter(s => s.track === 'product').length - 1)
       expect(arrows.length).toBe(mainTrackArrows + productTrackArrows)
     })

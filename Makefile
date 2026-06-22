@@ -36,7 +36,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial
+.PHONY: help run dev factory dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -117,6 +117,10 @@ endif
 	wait
 
 dev: run
+
+factory:
+	@echo "$(BLUE)Starting HydraFlow factory in an isolated workspace (dev checkout stays clean)$(RESET)"
+	@$(HYDRAFLOW_DIR)scripts/run-factory-isolated.sh
 
 dry-run:
 	@echo "$(BLUE)HydraFlow dry run (server mode)$(RESET)"

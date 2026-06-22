@@ -663,6 +663,19 @@ class DockerRunner:
             except Exception:
                 logger.warning("Failed to kill container on timeout", exc_info=True)
             raise
+        except asyncio.CancelledError:
+            # A cancelled await (e.g. a loop watchdog) leaves the executor
+            # thread parked inside the synchronous ``container.wait()``.  Kill
+            # the container so ``wait()`` returns promptly and the thread is
+            # released, mirroring the TimeoutError branch — otherwise blocked
+            # threads accumulate in the default ThreadPoolExecutor.
+            try:
+                await asyncio.shield(loop.run_in_executor(None, container.kill))
+            except Exception:
+                logger.warning(
+                    "Failed to kill container on cancellation", exc_info=True
+                )
+            raise
         finally:
             try:
                 await loop.run_in_executor(None, lambda: container.remove(force=True))

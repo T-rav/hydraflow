@@ -22,7 +22,13 @@ from pathlib import Path
 SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 
 # The auto_pr helpers that branch off / target ``origin/{base}``.
-_PR_HELPERS = {"open_automated_pr_async", "open_automated_pr"}
+# ``generate_and_open_pr_async`` is the generate-in-worktree variant (#9539)
+# used by DiagramLoop + CorpusLearningLoop — same base-branch contract.
+_PR_HELPERS = {
+    "open_automated_pr_async",
+    "open_automated_pr",
+    "generate_and_open_pr_async",
+}
 
 
 def _called_name(func: ast.expr) -> str | None:

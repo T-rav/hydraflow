@@ -23,6 +23,7 @@ import logging
 import re
 import shutil
 import subprocess
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -427,6 +428,108 @@ async def _ensure_labels_async(
     return ensured
 
 
+async def _finalize_pr_from_worktree(
+    *,
+    worktree_path: Path,
+    branch: str,
+    pr_title: str,
+    pr_body: str,
+    commit_message: str,
+    base: str,
+    auto_merge: bool,
+    gh_token: str,
+    labels: list[str] | None,
+    commit_author_name: str,
+    commit_author_email: str,
+    fail: Callable[[str], AutoPrResult],
+) -> AutoPrResult:
+    """Commit already-staged worktree changes, push, open the PR, auto-merge.
+
+    Shared tail for ``open_automated_pr_async`` (which stages by copying files
+    from ``repo_root``) and ``generate_and_open_pr_async`` (which stages content
+    generated directly in the worktree). The caller owns worktree creation,
+    staging (``git add``), and teardown (``finally``); this only runs the
+    commit → push → label → pr-create → auto-merge tail.
+    """
+    from subprocess_util import run_subprocess  # noqa: PLC0415
+
+    # Empty staged diff → nothing to PR.
+    try:
+        await run_subprocess(
+            "git", "diff", "--cached", "--quiet", cwd=worktree_path, gh_token=gh_token
+        )
+        logger.info("auto_pr: empty staged diff for %s", branch)
+        return AutoPrResult(status="no-diff", pr_url=None, branch=branch)
+    except RuntimeError:
+        pass  # non-zero → there IS a diff; proceed.
+
+    commit_args = _build_commit_args(
+        commit_author_name, commit_author_email, commit_message
+    )
+    try:
+        await run_subprocess("git", *commit_args, cwd=worktree_path, gh_token=gh_token)
+    except RuntimeError as exc:
+        return fail(f"git commit failed: {exc}")
+
+    try:
+        await run_subprocess(
+            "git", "push", "-u", "origin", branch, cwd=worktree_path, gh_token=gh_token
+        )
+    except RuntimeError as exc:
+        return fail(f"git push failed for {branch!r}: {exc}")
+
+    ensured_labels = (
+        await _ensure_labels_async(labels or [], cwd=worktree_path, gh_token=gh_token)
+        if labels
+        else []
+    )
+
+    create_args: list[str] = [
+        "gh",
+        "pr",
+        "create",
+        "--title",
+        pr_title,
+        "--body",
+        pr_body,
+        "--base",
+        base,
+        "--head",
+        branch,
+    ]
+    for label in ensured_labels:
+        create_args.extend(["--label", label])
+    try:
+        create_stdout = await run_subprocess(
+            *create_args, cwd=worktree_path, gh_token=gh_token
+        )
+    except RuntimeError as exc:
+        return fail(f"gh pr create failed for {branch!r}: {exc}")
+
+    pr_url = _extract_pr_url(create_stdout)
+    if pr_url is None:
+        logger.warning(
+            "gh pr create succeeded for %s but no URL parsed: %r", branch, create_stdout
+        )
+
+    if auto_merge and pr_url is not None:
+        try:
+            await run_subprocess(
+                "gh",
+                "pr",
+                "merge",
+                pr_url,
+                "--auto",
+                "--squash",
+                cwd=worktree_path,
+                gh_token=gh_token,
+            )
+        except RuntimeError as exc:
+            logger.warning("gh pr merge --auto failed for %s: %s", pr_url, exc)
+
+    return AutoPrResult(status="opened", pr_url=pr_url, branch=branch)
+
+
 async def open_automated_pr_async(  # noqa: PLR0911 — linear step-by-step guards, each with its own fail path
     *,
     repo_root: Path,
@@ -574,108 +677,154 @@ async def open_automated_pr_async(  # noqa: PLR0911 — linear step-by-step guar
         except (RuntimeError, OSError, ValueError) as exc:
             return _fail(f"failed to stage files for {branch!r}: {exc}")
 
-        # Detect empty staged diff.
-        try:
-            await run_subprocess(
-                "git",
-                "diff",
-                "--cached",
-                "--quiet",
-                cwd=worktree_path,
-                gh_token=gh_token,
-            )
-            # exit 0 → no staged diff
-            logger.info("open_automated_pr_async: empty staged diff for %s", branch)
-            return AutoPrResult(status="no-diff", pr_url=None, branch=branch)
-        except RuntimeError:
-            # Non-zero exit means there IS a diff. Proceed.
-            pass
-
-        # Commit with the caller-supplied identity when provided; when either
-        # value is empty, omit the `-c user.*` overrides so git falls back to
-        # ambient config per the `HydraFlowConfig.git_user_name/email`
-        # contract.
-        commit_args = _build_commit_args(commit_author_name, commit_author_email, msg)
-        try:
-            await run_subprocess(
-                "git", *commit_args, cwd=worktree_path, gh_token=gh_token
-            )
-        except RuntimeError as exc:
-            return _fail(f"git commit failed: {exc}")
-
-        try:
-            await run_subprocess(
-                "git",
-                "push",
-                "-u",
-                "origin",
-                branch,
-                cwd=worktree_path,
-                gh_token=gh_token,
-            )
-        except RuntimeError as exc:
-            return _fail(f"git push failed for {branch!r}: {exc}")
-
-        # Ensure each requested label exists on the repo before pr-create —
-        # otherwise a missing label crashes the whole PR (#6643 / EdgeProposer).
-        ensured_labels = (
-            await _ensure_labels_async(
-                labels or [], cwd=worktree_path, gh_token=gh_token
-            )
-            if labels
-            else []
+        return await _finalize_pr_from_worktree(
+            worktree_path=worktree_path,
+            branch=branch,
+            pr_title=pr_title,
+            pr_body=pr_body,
+            commit_message=msg,
+            base=base,
+            auto_merge=auto_merge,
+            gh_token=gh_token,
+            labels=labels,
+            commit_author_name=commit_author_name,
+            commit_author_email=commit_author_email,
+            fail=_fail,
         )
 
-        # Create the PR.
-        create_args: list[str] = [
-            "gh",
-            "pr",
-            "create",
-            "--title",
-            pr_title,
-            "--body",
-            pr_body,
-            "--base",
+    finally:
+        await _remove_worktree_async(repo_root, worktree_path, branch, gh_token)
+
+
+async def generate_and_open_pr_async(
+    *,
+    repo_root: Path,
+    branch: str,
+    generate: Callable[[Path], Awaitable[None]],
+    path_specs: list[str],
+    pr_title: str,
+    pr_body: str | Callable[[], str],
+    commit_message: str | None = None,
+    base: str = "main",
+    auto_merge: bool = True,
+    gh_token: str = "",
+    raise_on_failure: bool = True,
+    worktree_parent: Path | None = None,
+    commit_author_name: str = BOT_NAME,
+    commit_author_email: str = BOT_EMAIL,
+    labels: list[str] | None = None,
+) -> AutoPrResult:
+    """Open a PR for content GENERATED inside the worktree — never touching repo_root.
+
+    The generate-in-worktree counterpart to :func:`open_automated_pr_async`.
+    Instead of the caller pre-writing files under ``repo_root`` (which leaves the
+    factory's checkout perpetually dirty — see #9539 /
+    ``docs/proposals/factory-tree-self-clean.md``), the caller supplies a
+    ``generate`` coroutine that writes into the freshly-created worktree (branched
+    off ``origin/{base}``). The worktree is the only thing mutated, and it is torn
+    down in ``finally`` — so ``repo_root`` stays clean.
+
+    Args:
+        generate: ``async (worktree_path) -> None`` — produce the desired file
+            state inside ``worktree_path`` (e.g. run an arch/diagram regen with
+            ``out_dir`` under the worktree). Credit/auth/bug exceptions propagate
+            via ``reraise_on_credit_or_bug``; other errors become a ``failed``
+            result (or raise when ``raise_on_failure``).
+        path_specs: repo-relative paths/dirs to ``git add`` after generation
+            (e.g. ``["docs/arch/generated", "docs/arch/.meta.json"]``). An empty
+            staged diff short-circuits to ``no-diff``.
+        pr_body: the PR body, or a zero-arg callable returning it. A callable is
+            resolved AFTER ``generate`` + staging, so bodies that summarise what
+            the generator produced (counts, changed files) can read state the
+            callback populated. Resolution happens before the no-diff check, so
+            the callable must not assume a PR will actually be opened.
+
+    All other args mirror :func:`open_automated_pr_async`.
+    """
+    from exception_classify import reraise_on_credit_or_bug  # noqa: PLC0415
+    from subprocess_util import run_subprocess  # noqa: PLC0415
+
+    repo_root = repo_root.resolve()
+    timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    wt_name = f"genpr-{_sanitize_branch_for_path(branch)}-{timestamp}"
+    wt_parent = (worktree_parent or repo_root.parent).resolve()
+    wt_parent.mkdir(parents=True, exist_ok=True)
+    worktree_path = wt_parent / wt_name
+    msg = commit_message if commit_message is not None else pr_title
+
+    def _fail(err: str) -> AutoPrResult:
+        if raise_on_failure:
+            raise AutoPrError(err)
+        logger.warning("generate_and_open_pr_async failed for %s: %s", branch, err)
+        return AutoPrResult(status="failed", pr_url=None, branch=branch, error=err)
+
+    try:
+        await run_subprocess(
+            "git", "fetch", "origin", base, "--quiet", cwd=repo_root, gh_token=gh_token
+        )
+    except RuntimeError as exc:
+        logger.warning(
+            "git fetch origin %s failed for %s; continuing with cached ref: %s",
             base,
-            "--head",
             branch,
-        ]
-        for label in ensured_labels:
-            create_args.extend(["--label", label])
+            exc,
+        )
+
+    try:
         try:
-            create_stdout = await run_subprocess(
-                *create_args,
-                cwd=worktree_path,
+            await run_subprocess(
+                "git",
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                str(worktree_path),
+                f"origin/{base}",
+                cwd=repo_root,
                 gh_token=gh_token,
             )
         except RuntimeError as exc:
-            return _fail(f"gh pr create failed for {branch!r}: {exc}")
+            return _fail(f"git worktree add failed for {branch!r}: {exc}")
 
-        pr_url = _extract_pr_url(create_stdout)
-        if pr_url is None:
-            logger.warning(
-                "gh pr create succeeded for %s but no URL parsed: %r",
-                branch,
-                create_stdout,
-            )
+        # Generate the desired file state INSIDE the worktree (never repo_root).
+        try:
+            await generate(worktree_path)
+        except Exception as exc:  # noqa: BLE001 — classify then convert to a result
+            reraise_on_credit_or_bug(exc)
+            return _fail(f"generate callback failed for {branch!r}: {exc}")
 
-        if auto_merge and pr_url is not None:
-            try:
+        # Stage the generated paths (targeted; mirrors the no-`git add -A` rule).
+        # Skip specs the generator didn't materialise — `git add` errors on a
+        # pathspec that matches nothing, and "the generator produced none of
+        # this path" is a legitimate no-op (→ empty staged diff → no-diff).
+        try:
+            for spec in path_specs:
+                if not (worktree_path / spec).exists():
+                    continue
                 await run_subprocess(
-                    "gh",
-                    "pr",
-                    "merge",
-                    pr_url,
-                    "--auto",
-                    "--squash",
-                    cwd=worktree_path,
-                    gh_token=gh_token,
+                    "git", "add", "--", spec, cwd=worktree_path, gh_token=gh_token
                 )
-            except RuntimeError as exc:
-                logger.warning("gh pr merge --auto failed for %s: %s", pr_url, exc)
+        except RuntimeError as exc:
+            return _fail(f"failed to stage generated paths for {branch!r}: {exc}")
 
-        return AutoPrResult(status="opened", pr_url=pr_url, branch=branch)
+        # Resolve a lazy body now — after generate + staging — so summaries can
+        # reflect what the generator produced.
+        resolved_body = pr_body() if callable(pr_body) else pr_body
 
+        return await _finalize_pr_from_worktree(
+            worktree_path=worktree_path,
+            branch=branch,
+            pr_title=pr_title,
+            pr_body=resolved_body,
+            commit_message=msg,
+            base=base,
+            auto_merge=auto_merge,
+            gh_token=gh_token,
+            labels=labels,
+            commit_author_name=commit_author_name,
+            commit_author_email=commit_author_email,
+            fail=_fail,
+        )
     finally:
         await _remove_worktree_async(repo_root, worktree_path, branch, gh_token)
 
