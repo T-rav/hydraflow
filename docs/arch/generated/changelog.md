@@ -4,8 +4,19 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W25
+
+- `ead8722` — Merge remote-tracking branch 'origin/staging' into agent/diag-9080 *(2026-06-20)*
+- `69fea6a` — feat(factory): generate-in-worktree foundation + DiagramLoop migration (#9539 pt1) (#9614) (#9614) *(2026-06-19)*
+- `e920762` — feat(loops): per-loop work-cycle watchdog (closes #9556) (#9594) (#9594) *(2026-06-19)*
+- `1d8a175` — fix: close regression-test backlog from the 2026-06-13 session (10 issues) (#9592) (#9592) *(2026-06-19)*
+- `9ce3101` — Fixes #9442: wiki_rot_detector _gh_closed_escalations bypasses PRPo... (#9509) (#9509) *(2026-06-15)*
+
 ## 2026-W24
 
+- `e79114c` — chore(wiki): untrack RepoWikiLoop runtime caches to stop perpetual tree-dirt (#9537) (#9537) *(2026-06-14)*
+- `5a715ac` — fix(adr-drift): stop recurring false-positive ADR-drift HITL escalations (#9530) (#9530) *(2026-06-13)*
+- `4e65ff6` — Fixes #9499: PricingRefreshLoop bare-tier alias may lag the newest ... (#9517) (#9517) *(2026-06-13)*
 - `c3f3206` — chore(arch): regen arch artifacts after contracts sandbox fix (#9080) (#9080) *(2026-06-13)*
 - `f0974e5` — fix(wiki): resolve committed conflict markers in 11 term files (#9482) (#9484) (#9484) *(2026-06-12)*
 - `79662e5` — fix(observability): suppress Sentry noise — bugs-only filter + test init guard (#9481) (#9481) *(2026-06-12)*
