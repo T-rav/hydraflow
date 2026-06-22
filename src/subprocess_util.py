@@ -339,6 +339,15 @@ _CREDIT_PATTERNS = (
     # (2026-06-13 incident; see tests/regressions/test_session_limit_credit_pause.py.)
     "hit your session limit",
     "session limit reached",
+    # Claude Code subscription *weekly*-cap message
+    # ("You've hit your weekly limit · resets Jun 18 at 5pm"). Same failure
+    # class as the session cap (2026-06-17 incident): "weekly" sits between
+    # "hit your" and "limit", so it slipped past every substring and the factory
+    # burned its whole attempt budget into HITL. The _LIMIT_HIT_RE regex below
+    # now catches the entire "hit your <period> limit" family so a new cap
+    # wording (daily/monthly/…) cannot recur this.
+    # See tests/regressions/test_weekly_limit_credit_pause.py.
+    "weekly limit reached",
     # Anthropic API spend-cap rejection (HTTP 400 invalid_request_error).
     # Full phrase — narrower patterns would false-match conversational
     # transcript text like "reached your specified goals" and trigger a
@@ -346,6 +355,14 @@ _CREDIT_PATTERNS = (
     "reached your specified api usage limits",
     "reached your specified usage limits",
 )
+
+# Catches the whole "You've hit your <usage|session|weekly|daily|…> limit"
+# family in one shot, so a new subscription-cap wording can't slip past the
+# substring list and burn the attempt budget — the failure mode behind both the
+# 2026-06-13 (session) and 2026-06-17 (weekly) HITL pile-ups. Allows 0–2 words
+# between "your" and "limit"; word-boundary anchored so it does not match prose
+# like "hit your stride, no limit".
+_LIMIT_HIT_RE = re.compile(r"\bhit your(?:\s+\w+){0,2}\s+limit\b", re.IGNORECASE)
 
 # Matches e.g. "reset at 3pm (America/New_York)", "reset at 3am",
 # "resets 5am (America/Denver)", "resets at 5am", "resets 5:50am (America/Denver)".
@@ -356,6 +373,37 @@ _RESET_TIME_RE = re.compile(
     r"(?:\s*\(([^)]+)\))?",
     re.IGNORECASE,
 )
+
+# Weekly-cap resume formats. Claude Code renders the weekly reset as an absolute
+# day, usually WITHOUT a timezone — assume local time (the message is shown in
+# the user's locale). Both forms optionally accept a trailing "(Area/City)".
+#   "resets Jun 18 at 5pm"      → month abbrev + day + time
+#   "resets Wednesday at 5pm"   → weekday name + time (next occurrence)
+_WEEKLY_DATE_RE = re.compile(
+    r"resets?\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})"
+    r"\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)(?:\s*\(([^)]+)\))?",
+    re.IGNORECASE,
+)
+_WEEKLY_DAY_RE = re.compile(
+    r"resets?\s+(mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+at\s+"
+    r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)(?:\s*\(([^)]+)\))?",
+    re.IGNORECASE,
+)
+_MONTH_ABBR = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+_WEEKDAY_ABBR = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
 # Matches Anthropic's ISO-style spend-cap resume format:
 # "regain access on 2026-05-01 at 00:00 UTC"
@@ -402,7 +450,103 @@ _DOCKER_ENV_PASSTHROUGH_KEYS = (
 def is_credit_exhaustion(text: str) -> bool:
     """Check if *text* indicates an API credit exhaustion condition."""
     text_lower = text.lower()
-    return any(p in text_lower for p in _CREDIT_PATTERNS)
+    if any(p in text_lower for p in _CREDIT_PATTERNS):
+        return True
+    # Future-proof catch-all for the "hit your <period> limit" family.
+    return _LIMIT_HIT_RE.search(text) is not None
+
+
+def _to_24h(hour: int, minute: int, ampm: str) -> tuple[int, int] | None:
+    """Convert a validated 12-hour clock reading to (hour24, minute), or None.
+
+    Rejects out-of-range hours (1–12) and minutes (0–59) so a bogus value
+    ("5:99am") fails to parse rather than rolling over.
+    """
+    if hour < 1 or hour > 12 or minute > 59:
+        return None
+    if ampm.lower() == "am":
+        hour_24 = 0 if hour == 12 else hour
+    else:
+        hour_24 = hour if hour == 12 else hour + 12
+    return hour_24, minute
+
+
+def _resolve_tz(tz_name: str | None, *, default_utc: bool):
+    """Resolve a parenthesised tz name to a tzinfo.
+
+    ``default_utc`` picks the fallback when no tz is present: the legacy
+    hour-only format defaults to UTC; the weekly formats (rendered in the user's
+    locale without a tz) default to local time.
+    """
+    if tz_name:
+        try:
+            return ZoneInfo(tz_name.strip())
+        except (KeyError, ValueError):
+            logger.warning(
+                "Could not parse timezone %r — falling back to local time", tz_name
+            )
+            return datetime.now().astimezone().tzinfo or UTC
+    if default_utc:
+        return UTC
+    return datetime.now().astimezone().tzinfo or UTC
+
+
+def _parse_weekly_month_day(text: str) -> datetime | None:
+    """Parse ``"resets Jun 18 at 5pm"`` (month abbrev + day) → UTC datetime."""
+    md = _WEEKLY_DATE_RE.search(text)
+    if md is None:
+        return None
+    hm = _to_24h(int(md.group(3)), int(md.group(4) or 0), md.group(5))
+    if hm is None:
+        return None
+    tz = _resolve_tz(md.group(6), default_utc=False)
+    now = datetime.now(tz=tz)
+    try:
+        reset = now.replace(
+            month=_MONTH_ABBR[md.group(1).lower()[:3]],
+            day=int(md.group(2)),
+            hour=hm[0],
+            minute=hm[1],
+            second=0,
+            microsecond=0,
+        )
+    except ValueError:
+        return None  # e.g. "Feb 30"
+    # A weekly reset is always within ~7 days, so a clearly-past month/day is a
+    # stale message — NOT next year. Return None so the caller falls back to its
+    # short default pause and re-evaluates, rather than idling for a year. (1h
+    # slack absorbs clock skew.)
+    if reset < now - timedelta(hours=1):
+        return None
+    return reset.astimezone(UTC)
+
+
+def _parse_weekly_weekday(text: str) -> datetime | None:
+    """Parse ``"resets Wednesday at 5pm"`` (weekday → next occurrence) → UTC."""
+    wd = _WEEKLY_DAY_RE.search(text)
+    if wd is None:
+        return None
+    hm = _to_24h(int(wd.group(2)), int(wd.group(3) or 0), wd.group(4))
+    if hm is None:
+        return None
+    tz = _resolve_tz(wd.group(5), default_utc=False)
+    now = datetime.now(tz=tz)
+    days_ahead = (_WEEKDAY_ABBR[wd.group(1).lower()[:3]] - now.weekday()) % 7
+    reset = (now + timedelta(days=days_ahead)).replace(
+        hour=hm[0], minute=hm[1], second=0, microsecond=0
+    )
+    if reset <= now:
+        reset += timedelta(days=7)
+    return reset.astimezone(UTC)
+
+
+def _parse_weekly_resume_time(text: str) -> datetime | None:
+    """Parse Claude Code's weekly-cap resume formats to a UTC datetime.
+
+    ``"resets Jun 18 at 5pm"`` (month + day) and ``"resets Wednesday at 5pm"``
+    (weekday → next occurrence). Returns None if neither matches.
+    """
+    return _parse_weekly_month_day(text) or _parse_weekly_weekday(text)
 
 
 async def probe_credit_availability() -> bool:
@@ -476,6 +620,13 @@ def parse_credit_resume_time(text: str) -> datetime | None:
             return datetime(year, month, day, hour, minute, tzinfo=UTC)
         except ValueError:
             return None
+
+    # Weekly-cap formats ("resets Jun 18 at 5pm" / "resets Wednesday at 5pm").
+    # Checked before the bare hour format so the "5pm" tail isn't parsed as a
+    # same-day reset (which would resume days early during a weekly pause).
+    weekly = _parse_weekly_resume_time(text)
+    if weekly is not None:
+        return weekly
 
     match = _RESET_TIME_RE.search(text)
     if not match:

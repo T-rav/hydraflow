@@ -836,3 +836,143 @@ async def test_refresh_real_conflict_aborts_no_push(
         check=True,
     ).stdout.strip()
     assert before == after
+
+
+# ---------------------------------------------------------------------------
+# generate_and_open_pr_async — generate-in-worktree (#9539)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_and_open_pr_leaves_repo_root_clean(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#9539: the generate callback writes INTO the worktree; repo_root is never
+    mutated, so the factory's checkout stays clean after the PR opens."""
+    from auto_pr import generate_and_open_pr_async
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        return "https://github.com/x/y/pull/7\n" if cmd[2] == "create" else ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler),
+    )
+
+    seen: list[Path] = []
+
+    async def generate(worktree: Path) -> None:
+        seen.append(worktree)
+        gen_dir = worktree / "docs" / "arch" / "generated"
+        gen_dir.mkdir(parents=True, exist_ok=True)
+        (gen_dir / "loops.md").write_text("# loops\n")
+
+    result = await generate_and_open_pr_async(
+        repo_root=local_repo,
+        branch="arch-regen-auto",
+        generate=generate,
+        path_specs=["docs/arch/generated"],
+        pr_title="chore(arch): regen",
+        pr_body="b",
+        auto_merge=False,
+    )
+
+    assert result.status == "opened"
+    assert result.pr_url == "https://github.com/x/y/pull/7"
+    # The generate callback ran in a worktree OUTSIDE the host checkout.
+    assert seen and seen[0].resolve() != local_repo.resolve()
+    # KEY PROPERTY: repo_root's working tree is CLEAN — the generated file is
+    # NOT in the host checkout, and `git status` reports nothing.
+    assert not (local_repo / "docs" / "arch" / "generated" / "loops.md").exists()
+    porcelain = subprocess.run(
+        ["git", "-C", str(local_repo), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert porcelain == ""
+
+
+@pytest.mark.asyncio
+async def test_generate_and_open_pr_no_diff_when_generate_writes_nothing(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A generate callback that produces no change short-circuits to no-diff —
+    no commit, no PR (so a quiescent loop tick is a cheap no-op)."""
+    from auto_pr import generate_and_open_pr_async
+
+    gh_calls: list[tuple[str, ...]] = []
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        gh_calls.append(cmd)
+        return "https://github.com/x/y/pull/8\n" if cmd[2] == "create" else ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler),
+    )
+
+    async def generate(_worktree: Path) -> None:
+        return  # writes nothing
+
+    result = await generate_and_open_pr_async(
+        repo_root=local_repo,
+        branch="noop-regen",
+        generate=generate,
+        path_specs=["docs/arch/generated"],
+        pr_title="t",
+        pr_body="b",
+        auto_merge=False,
+    )
+
+    assert result.status == "no-diff"
+    assert not any(c[:3] == ("gh", "pr", "create") for c in gh_calls)
+
+
+@pytest.mark.asyncio
+async def test_generate_and_open_pr_resolves_lazy_body_after_generate(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A callable ``pr_body`` is resolved AFTER ``generate`` runs, so it can
+    summarise what the generator produced (counts, changed files)."""
+    from auto_pr import generate_and_open_pr_async
+
+    create_bodies: list[str] = []
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        if cmd[2] == "create":
+            # Capture the --body argument passed to gh pr create.
+            idx = cmd.index("--body")
+            create_bodies.append(cmd[idx + 1])
+            return "https://github.com/x/y/pull/9\n"
+        return ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler),
+    )
+
+    produced: dict[str, int] = {}
+
+    async def generate(worktree: Path) -> None:
+        gen_dir = worktree / "docs" / "arch" / "generated"
+        gen_dir.mkdir(parents=True, exist_ok=True)
+        (gen_dir / "loops.md").write_text("# loops\n")
+        produced["files"] = 1  # state the body callable will read
+
+    def body() -> str:
+        # If resolved too early (before generate), produced would be empty.
+        return f"generated {produced.get('files', 0)} file(s)"
+
+    result = await generate_and_open_pr_async(
+        repo_root=local_repo,
+        branch="lazy-body-regen",
+        generate=generate,
+        path_specs=["docs/arch/generated"],
+        pr_title="t",
+        pr_body=body,
+        auto_merge=False,
+    )
+
+    assert result.status == "opened"
+    assert create_bodies == ["generated 1 file(s)"]

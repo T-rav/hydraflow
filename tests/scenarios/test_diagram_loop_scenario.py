@@ -48,15 +48,20 @@ def _make_loop(tmp_path: Path) -> tuple[DiagramLoop, MagicMock]:
 @pytest.mark.asyncio
 async def test_no_drift_returns_drift_false_and_skips_pr(tmp_path: Path) -> None:
     loop, pr_manager = _make_loop(tmp_path)
-    # arch.runner.emit is a no-op; git status returns nothing.
-    with (
-        patch("arch.runner.emit") as mock_emit,
-        patch("diagram_loop.subprocess.run") as mock_run,
-    ):
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
+    from auto_pr import AutoPrResult
+
+    # Generation-in-worktree finds no drift → no-diff result; coverage skipped.
+    with patch(
+        "auto_pr.generate_and_open_pr_async",
+        AsyncMock(
+            return_value=AutoPrResult(
+                status="no-diff", pr_url=None, branch="arch-regen-auto"
+            )
+        ),
+    ) as mock_pr:
         result = await loop._do_work()
     assert result == {"drift": False}
-    mock_emit.assert_called_once()
+    mock_pr.assert_awaited_once()
     pr_manager.find_existing_issue.assert_not_awaited()
     pr_manager.create_issue.assert_not_awaited()
 
@@ -69,25 +74,23 @@ async def test_drift_opens_pr_with_correct_labels(tmp_path: Path, monkeypatch) -
         loop, "_unassigned_items", AsyncMock(return_value={"loops": [], "ports": []})
     )
 
-    pr_result = MagicMock(status="opened", pr_url="https://github.com/x/y/pull/1")
-    with (
-        patch("arch.runner.emit") as mock_emit,
-        patch("diagram_loop.subprocess.run") as mock_run,
-        patch(
-            "auto_pr.open_automated_pr_async", AsyncMock(return_value=pr_result)
-        ) as mock_pr,
-    ):
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout=" M docs/arch/generated/loops.md\n"
-        )
+    from auto_pr import AutoPrResult
+
+    pr_result = AutoPrResult(
+        status="opened",
+        pr_url="https://github.com/x/y/pull/1",
+        branch="arch-regen-auto",
+    )
+    with patch(
+        "auto_pr.generate_and_open_pr_async", AsyncMock(return_value=pr_result)
+    ) as mock_pr:
         result = await loop._do_work()
 
     assert result["drift"] is True
     assert result["pr_url"] == "https://github.com/x/y/pull/1"
-    assert result["changed_files"] == 1
 
-    # PR opened with the regen branch and expected labels
-    mock_emit.assert_called_once()
+    # PR opened with the regen branch, expected labels, and worktree-generated
+    # path specs (the loop never stages files from repo_root).
     call_kwargs = mock_pr.await_args.kwargs
     assert call_kwargs["branch"] == "arch-regen-auto"
     assert call_kwargs["pr_title"].startswith(
@@ -95,6 +98,8 @@ async def test_drift_opens_pr_with_correct_labels(tmp_path: Path, monkeypatch) -
     )
     assert "hydraflow-ready" in call_kwargs["labels"]
     assert "arch-regen" in call_kwargs["labels"]
+    assert call_kwargs["path_specs"] == ["docs/arch/generated", "docs/arch/.meta.json"]
+    assert callable(call_kwargs["generate"])
 
 
 @pytest.mark.asyncio
