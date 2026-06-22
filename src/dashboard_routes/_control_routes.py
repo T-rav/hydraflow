@@ -395,6 +395,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         "staging_branch",
         "main_branch",
         "rc_cadence_hours",
+        "test_adequacy_coverage_timeout_secs",
     }
 
     def _build_system_worker_inference_stats(
@@ -587,6 +588,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             model=cfg.model,
             pr_unstick_batch_size=cfg.pr_unstick_batch_size,
             workspace_base=str(cfg.workspace_base),
+            test_adequacy_coverage_timeout_secs=cfg.test_adequacy_coverage_timeout_secs,
         )
 
     def _runtime_status(orch: object | None) -> tuple[ControlStatus, str | None, bool]:
