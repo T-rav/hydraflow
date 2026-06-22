@@ -25,6 +25,14 @@ const NO_ROLE_DOT_COLORS = {
   hitl: theme.red,
 }
 
+// Terminal end-states = pipeline stages with no processing role and no config
+// knob (hitl, merged). After REVIEW an issue forks to a human OR gets merged —
+// never both — so these render as parallel arms of a fork, not a linear chain.
+// Derived from PIPELINE_STAGES so adding/removing a terminal needs no edit here.
+const TERMINAL_STAGE_KEYS = new Set(
+  PIPELINE_STAGES.filter(s => !s.role && !s.configKey).map(s => s.key)
+)
+
 function PendingIntentCard({ intent }) {
   return (
     <div style={styles.pendingCard}>
@@ -79,7 +87,12 @@ function PipelineFlow({ stageGroups }) {
   const mainGroups = stageGroups.filter(g => !PRODUCT_TRACK_KEYS.has(g.stage.key))
   const productGroups = stageGroups.filter(g => PRODUCT_TRACK_KEYS.has(g.stage.key))
   const triageGroup = mainGroups.find(g => g.stage.key === 'triage')
-  const postTriageGroups = mainGroups.filter(g => g.stage.key !== 'triage')
+  // Post-triage main-track stages, minus the terminal end-states (hitl, merged):
+  // those fork off REVIEW rather than chaining linearly after it.
+  const postTriageGroups = mainGroups.filter(
+    g => g.stage.key !== 'triage' && !TERMINAL_STAGE_KEYS.has(g.stage.key)
+  )
+  const terminalGroups = mainGroups.filter(g => TERMINAL_STAGE_KEYS.has(g.stage.key))
 
   return (
     <div style={styles.flowContainer} data-testid="pipeline-flow">
@@ -111,6 +124,16 @@ function PipelineFlow({ stageGroups }) {
           {renderFlowStage(group)}
         </React.Fragment>
       ))}
+      {terminalGroups.length > 0 && (
+        <div style={styles.flowFork} data-testid="flow-terminal-fork">
+          {terminalGroups.map((group, idx) => (
+            <div style={styles.flowForkTop} key={group.stage.key}>
+              <span style={styles.flowForkArrow}>{idx === 0 ? '↗' : '↘'}</span>
+              {renderFlowStage(group)}
+            </div>
+          ))}
+        </div>
+      )}
       {(mergedCount > 0 || failedCount > 0) && (
         <span style={styles.flowSummary} data-testid="flow-summary">
           {mergedCount > 0 && <span style={flowSummaryMergedStyle}>{mergedCount} merged</span>}

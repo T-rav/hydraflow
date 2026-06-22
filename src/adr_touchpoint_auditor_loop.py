@@ -23,6 +23,7 @@ keys are ``adr_touchpoint_auditor:ADR-NNNN`` (no PR component).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -44,6 +45,29 @@ logger = logging.getLogger("hydraflow.adr_touchpoint_auditor_loop")
 
 _MAX_ATTEMPTS = 3
 _DEFAULT_PR_LIMIT = 50  # gh pr list page size per tick
+
+# Hard cap on each ``gh`` read. A wedged ``gh`` child (auth prompt, network
+# black-hole) must not hang the loop cycle forever and freeze its heartbeat —
+# the #9410 silent-stall failure class (#9454 / #9508).
+_GH_TIMEOUT_SECONDS = 120
+
+
+async def _communicate_bounded(
+    proc: asyncio.subprocess.Process,
+) -> tuple[bytes, bytes]:
+    """``proc.communicate()`` bounded by ``_GH_TIMEOUT_SECONDS``.
+
+    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
+    the caller can treat it as a failed read (rather than hanging the loop
+    cycle indefinitely).
+    """
+    try:
+        return await asyncio.wait_for(proc.communicate(), timeout=_GH_TIMEOUT_SECONDS)
+    except TimeoutError:
+        proc.kill()
+        with contextlib.suppress(ProcessLookupError):
+            await proc.wait()
+        raise
 
 
 def _rollup_key(adr_number: int) -> str:
@@ -110,7 +134,14 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await _communicate_bounded(proc)
+        except TimeoutError:
+            logger.warning(
+                "gh pr list timed out after %ss; skipping tick",
+                _GH_TIMEOUT_SECONDS,
+            )
+            return []
         if proc.returncode != 0:
             logger.warning(
                 "gh pr list failed (rc=%s): %s",
@@ -251,7 +282,10 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        try:
+            stdout, _ = await _communicate_bounded(proc)
+        except TimeoutError:
+            return
         if proc.returncode != 0:
             return
         try:

@@ -14,7 +14,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0004 | `src.agent_cli`, `src.base_runner` |
 | ADR-0005 | `src.implement_phase`, `src.pr_manager` |
 | ADR-0006 | `src.events`, `src.hf_cli.supervisor_service`, `src.issue_store`, `src.orchestrator`, `src.state` |
-| ADR-0007 | `src.dashboard`, `src.dashboard_routes`, `src.hf_cli.supervisor_client`, `src.hf_cli.supervisor_service` |
+| ADR-0007 | `src.dashboard`, `src.dashboard_routes._routes`, `src.hf_cli.supervisor_client`, `src.hf_cli.supervisor_service` |
 | ADR-0008 | `src.dashboard`, `src.dashboard_routes`, `src.hf_cli.supervisor_service` |
 | ADR-0009 | `src.config`, `src.orchestrator`, `src.repo_runtime`, `src.workspace` |
 | ADR-0010 | `src.config`, `src.docker_runner`, `src.metrics_manager`, `src.worktree` |
@@ -131,11 +131,11 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.contracts.shadow` | ADR-0086 |
 | `src.corpus_learning_loop` | ADR-0045 |
 | `src.dashboard` | ADR-0007, ADR-0008, ADR-0038 |
-| `src.dashboard_routes` | ADR-0007, ADR-0008, ADR-0013, ADR-0019, ADR-0038 |
+| `src.dashboard_routes` | ADR-0008, ADR-0013, ADR-0019, ADR-0038 |
 | `src.dashboard_routes._atlas_routes` | ADR-0060, ADR-0090 |
 | `src.dashboard_routes._cost_rollups` | ADR-0045 |
 | `src.dashboard_routes._diagnostics_routes` | ADR-0050 |
-| `src.dashboard_routes._routes` | ADR-0030 |
+| `src.dashboard_routes._routes` | ADR-0007, ADR-0030 |
 | `src.data_migration` | ADR-0021 |
 | `src.discover_phase` | ADR-0031, ADR-0045 |
 | `src.discover_runner` | ADR-0031, ADR-0045, ADR-0063 |

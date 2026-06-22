@@ -14,6 +14,7 @@ dedup key clears when the escalation issue is closed (spec §3.2).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import tempfile
@@ -35,6 +36,29 @@ logger = logging.getLogger("hydraflow.flake_tracker_loop")
 
 _MAX_ATTEMPTS = 3
 _RUN_WINDOW = 20
+
+# Hard cap on each ``gh`` read/download. A wedged child must not hang the loop
+# cycle forever and freeze its heartbeat — the #9410 silent-stall failure
+# class (#9454 / #9508).
+_GH_TIMEOUT_SECONDS = 120
+
+
+async def _communicate_bounded(
+    proc: asyncio.subprocess.Process,
+) -> tuple[bytes, bytes]:
+    """``proc.communicate()`` bounded by ``_GH_TIMEOUT_SECONDS``.
+
+    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
+    the caller can treat it as a failed read (rather than hanging the loop
+    cycle indefinitely).
+    """
+    try:
+        return await asyncio.wait_for(proc.communicate(), timeout=_GH_TIMEOUT_SECONDS)
+    except TimeoutError:
+        proc.kill()
+        with contextlib.suppress(ProcessLookupError):
+            await proc.wait()
+        raise
 
 
 def parse_junit_xml(xml_bytes: bytes) -> dict[str, str]:
@@ -100,7 +124,14 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await _communicate_bounded(proc)
+        except TimeoutError:
+            logger.warning(
+                "gh run list timed out after %ss; returning empty",
+                _GH_TIMEOUT_SECONDS,
+            )
+            return []
         if proc.returncode != 0:
             logger.warning(
                 "gh run list exit=%d: %s",
@@ -137,7 +168,15 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await proc.communicate()
+            try:
+                _, stderr = await _communicate_bounded(proc)
+            except TimeoutError:
+                logger.info(
+                    "gh run download timed out after %ss for run %s",
+                    _GH_TIMEOUT_SECONDS,
+                    run_id,
+                )
+                return {}
             if proc.returncode != 0:
                 logger.info(
                     "no junit-scenario artifact for run %s: %s",
@@ -266,7 +305,10 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        try:
+            stdout, _ = await _communicate_bounded(proc)
+        except TimeoutError:
+            return
         if proc.returncode != 0:
             return
         try:
