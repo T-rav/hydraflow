@@ -53,7 +53,7 @@ async def test_refresh_pr_uses_config_base_branch_staging(
             error=None,
         )
 
-    monkeypatch.setattr(_auto_pr_mod, "open_automated_pr_async", intercept)
+    monkeypatch.setattr(_auto_pr_mod, "generate_and_open_pr_async", intercept)
 
     diff = PricingDiff(updated={"claude-opus": {"input_cost_per_token": 1.0}})
     await loop._open_or_update_refresh_pr(diff)

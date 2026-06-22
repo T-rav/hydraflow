@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from exception_classify import reraise_on_credit_or_bug
@@ -157,7 +157,11 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         try:
             emit_loop_subprocess_trace(
                 loop=self._worker_name,
-                command=["gh", "issue", "list", "--label", "wiki-rot-stuck"],
+                command=[
+                    "PRPort.list_closed_issues_by_label",
+                    "wiki-rot-stuck",
+                    "limit=50",
+                ],
                 exit_code=0,
                 duration_ms=duration_ms,
                 stderr_excerpt=(
@@ -369,7 +373,9 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         interval (spec §3.2).
         """
         try:
-            closed = await self._gh_closed_escalations()
+            closed = await self._pr.list_closed_issues_by_label(
+                "wiki-rot-stuck", limit=50
+            )
         except Exception as exc:  # noqa: BLE001
             reraise_on_credit_or_bug(exc)
             logger.debug("reconcile: gh list failed", exc_info=True)
@@ -395,52 +401,6 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         if to_clear:
             remaining = current - to_clear
             self._dedup.set_all(remaining)
-
-    async def _gh_closed_escalations(self) -> list[dict[str, Any]]:
-        """Return the list of closed ``hitl-escalation`` +
-        ``wiki-rot-stuck`` issues authored by this bot.
-
-        Shells out to ``gh issue list`` to avoid a PRManager dependency
-        on a rarely-used endpoint.  JSON parse / non-zero exit → empty
-        list (tolerant — reconciliation is best-effort).
-        """
-        import asyncio  # noqa: PLC0415
-        import json  # noqa: PLC0415
-        import subprocess  # noqa: PLC0415
-
-        cmd = [
-            "gh",
-            "issue",
-            "list",
-            "--state",
-            "closed",
-            "--label",
-            "hitl-escalation",
-            "--label",
-            "wiki-rot-stuck",
-            "--author",
-            "@me",
-            "--json",
-            "number,title,body",
-            "--limit",
-            "50",
-        ]
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            stdout, _ = await proc.communicate()
-        except (OSError, FileNotFoundError):
-            return []
-        if proc.returncode != 0:
-            return []
-        try:
-            data = json.loads(stdout or b"[]")
-        except json.JSONDecodeError:
-            return []
-        return data if isinstance(data, list) else []
 
 
 # -- module helpers --------------------------------------------------------

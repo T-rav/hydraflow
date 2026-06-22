@@ -7,6 +7,7 @@ escalations, detects recurring patterns, and generates improvement suggestions.
 from __future__ import annotations
 
 import logging
+import re
 from collections import Counter
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -52,18 +53,28 @@ CATEGORY_DESCRIPTIONS: dict[str, str] = {
     FailureCategory.VISUAL_WARN: "Visual validation warning — minor screenshot differences detected",
 }
 
-# Keyword mapping for subcategory extraction from failure details
+# Keyword mapping for subcategory extraction from failure details.
+#
+# Keywords are matched on whole-word / phrase boundaries (see
+# ``extract_subcategories``), NOT as bare substrings. Bare broad single words
+# such as "type"/"format"/"style"/"test"/"coverage"/"convention"/"exception"
+# used to match as substrings inside larger words ("type" in "prototype" /
+# "typescript", "format" in "information", "test" in "latest"), mis-bucketing
+# unrelated failure detail into the wrong subcategory (#9566 — same class of
+# bug fixed in ``review_insights.CATEGORY_KEYWORDS`` for #9545 / #9426). They
+# are now qualified as phrases or replaced by deficiency-specific tokens that
+# cannot accidentally appear inside a larger identifier.
 SUBCATEGORY_KEYWORDS: dict[str, list[str]] = {
-    "lint_error": ["ruff", "lint", "format", "style"],
-    "type_error": ["pyright", "type", "mypy", "annotation"],
-    "test_failure": ["test", "pytest", "assert", "coverage"],
-    "import_error": ["import", "module not found", "no module"],
+    "lint_error": ["ruff", "lint error", "lint failure", "code style"],
+    "type_error": ["pyright", "type error", "mypy", "type annotation"],
+    "test_failure": ["pytest", "test failure", "test failed", "tests failed"],
+    "import_error": ["import error", "module not found", "no module"],
     "syntax_error": ["syntax", "parse error", "unexpected token"],
     "merge_conflict": ["merge conflict", "conflict", "CONFLICT"],
-    "timeout": ["timeout", "timed out", "exceeded"],
+    "timeout": ["timeout", "timed out", "time limit exceeded"],
     "missing_tests": ["missing test", "no test", "untested"],
-    "naming": ["naming", "convention", "rename"],
-    "error_handling": ["error handling", "exception", "try/except"],
+    "naming": ["naming convention", "rename to", "should be renamed"],
+    "error_handling": ["error handling", "unhandled exception", "try/except"],
     "visual_diff": ["screenshot", "visual diff", "pixel diff", "diff image"],
     "visual_regression": [
         "visual regression",
@@ -120,15 +131,33 @@ class ImprovementSuggestion(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _keyword_matches(keyword: str, lowered_details: str) -> bool:
+    """Whole-word / phrase match of *keyword* against *lowered_details*.
+
+    Uses ``\\b`` boundaries around the keyword so a short token like "test"
+    matches "test"/"tests" but never inside a larger word like "latest", and so
+    broad terms ("type", "format") can never match inside a larger identifier
+    ("prototype", "typescript", "information"). Non-word characters inside a
+    keyword ("try/except") are matched literally (#9566).
+    """
+    pattern = r"\b" + re.escape(keyword) + r"\b"
+    return re.search(pattern, lowered_details) is not None
+
+
 def extract_subcategories(details: str) -> list[str]:
-    """Extract subcategories from failure details using keyword matching."""
+    """Extract subcategories from failure details using keyword matching.
+
+    Scans *details* (case-insensitive) against :data:`SUBCATEGORY_KEYWORDS`
+    using whole-word / phrase boundaries (not bare substring) so unrelated text
+    is not mis-bucketed into the wrong subcategory (#9566).
+    """
     if not details:
         return []
     lower = details.lower()
     return [
         sub
         for sub, keywords in SUBCATEGORY_KEYWORDS.items()
-        if any(kw.lower() in lower for kw in keywords)
+        if any(_keyword_matches(kw.lower(), lower) for kw in keywords)
     ]
 
 

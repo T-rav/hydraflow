@@ -73,7 +73,7 @@ async def test_no_drift_returns_drift_false(repo_root: Path) -> None:
             "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
             return_value=upstream_payload,
         ),
-        patch("auto_pr.open_automated_pr_async", pr_helper),
+        patch("auto_pr.generate_and_open_pr_async", pr_helper),
     ):
         result = await loop._do_work()
 
@@ -105,7 +105,7 @@ async def test_drift_opens_pr_via_auto_pr(repo_root: Path) -> None:
             "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
             return_value=upstream_payload,
         ),
-        patch("auto_pr.open_automated_pr_async", pr_helper),
+        patch("auto_pr.generate_and_open_pr_async", pr_helper),
     ):
         result = await loop._do_work()
 
@@ -118,10 +118,22 @@ async def test_drift_opens_pr_via_auto_pr(repo_root: Path) -> None:
     assert kwargs["pr_title"].startswith("chore(pricing): refresh from LiteLLM")
     assert kwargs["auto_merge"] is False
     assert "hydraflow-ready" in kwargs["labels"]
+    # Generate-in-worktree (#9539): targeted path spec + a generate callable,
+    # no repo_root file copy.
+    assert kwargs["path_specs"] == ["src/assets/model_pricing.json"]
+    assert callable(kwargs["generate"])
 
 
-async def test_drift_writes_updated_pricing_file(repo_root: Path) -> None:
-    """The on-disk file is rewritten with the new value before the PR opens."""
+async def test_drift_leaves_repo_root_clean_and_generates_into_worktree(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    """#9539: repo_root is NEVER written; the proposed file is generated INTO
+    the worktree by the supplied ``generate`` callback.
+
+    The PR primitive is mocked, so the loop never touches ``repo_root``. We
+    then run the captured ``generate`` callback against a separate worktree
+    seeded with the same baseline and assert the new value lands there.
+    """
     upstream_payload = {
         "claude-haiku-4-5-20251001": {
             "litellm_provider": "anthropic",
@@ -132,6 +144,7 @@ async def test_drift_writes_updated_pricing_file(repo_root: Path) -> None:
         },
     }
     loop, _ = _build_loop(repo_root)
+    before = (repo_root / "src" / "assets" / "model_pricing.json").read_text()
 
     pr_result = MagicMock(status="opened", pr_url="x", error=None)
     pr_helper = AsyncMock(return_value=pr_result)
@@ -140,21 +153,34 @@ async def test_drift_writes_updated_pricing_file(repo_root: Path) -> None:
             "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
             return_value=upstream_payload,
         ),
-        patch("auto_pr.open_automated_pr_async", pr_helper),
+        patch("auto_pr.generate_and_open_pr_async", pr_helper),
     ):
         await loop._do_work()
 
-    on_disk = json.loads(
-        (repo_root / "src" / "assets" / "model_pricing.json").read_text()
-    )
+    # repo_root stays byte-identical — nothing under it was written.
+    after = (repo_root / "src" / "assets" / "model_pricing.json").read_text()
+    assert after == before
+
+    # Run the captured generate callback against a fresh worktree seeded with
+    # the baseline and confirm the proposed value lands there.
+    generate = pr_helper.await_args.kwargs["generate"]
+    worktree = tmp_path / "wt"
+    wt_pricing = worktree / "src" / "assets" / "model_pricing.json"
+    wt_pricing.parent.mkdir(parents=True)
+    wt_pricing.write_text(before)
+    await generate(worktree)
+
+    on_disk = json.loads(wt_pricing.read_text())
     assert (
         on_disk["models"]["claude-haiku-4-5-20251001"]["input_cost_per_million"] == 1.5
     )
     assert on_disk["updated_at"] != "2026-04-01"  # bumped
 
 
-async def test_added_model_lands_in_pricing_file(repo_root: Path) -> None:
-    """An upstream-only model is added to the JSON with provider+aliases scaffold."""
+async def test_added_model_generates_into_worktree(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    """An upstream-only model is added to the worktree JSON with provider+aliases."""
     upstream_payload = {
         "claude-haiku-4-5-20251001": {
             "litellm_provider": "anthropic",
@@ -170,6 +196,8 @@ async def test_added_model_lands_in_pricing_file(repo_root: Path) -> None:
         },
     }
     loop, _ = _build_loop(repo_root)
+    before = (repo_root / "src" / "assets" / "model_pricing.json").read_text()
+
     pr_result = MagicMock(status="opened", pr_url="x", error=None)
     pr_helper = AsyncMock(return_value=pr_result)
     with (
@@ -177,13 +205,21 @@ async def test_added_model_lands_in_pricing_file(repo_root: Path) -> None:
             "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
             return_value=upstream_payload,
         ),
-        patch("auto_pr.open_automated_pr_async", pr_helper),
+        patch("auto_pr.generate_and_open_pr_async", pr_helper),
     ):
         result = await loop._do_work()
 
-    on_disk = json.loads(
-        (repo_root / "src" / "assets" / "model_pricing.json").read_text()
-    )
+    # repo_root untouched (#9539).
+    assert (repo_root / "src" / "assets" / "model_pricing.json").read_text() == before
+
+    generate = pr_helper.await_args.kwargs["generate"]
+    worktree = tmp_path / "wt"
+    wt_pricing = worktree / "src" / "assets" / "model_pricing.json"
+    wt_pricing.parent.mkdir(parents=True)
+    wt_pricing.write_text(before)
+    await generate(worktree)
+
+    on_disk = json.loads(wt_pricing.read_text())
     assert "claude-future-99" in on_disk["models"]
     new_entry = on_disk["models"]["claude-future-99"]
     assert new_entry["provider"] == "anthropic"
@@ -202,7 +238,7 @@ async def test_network_error_returns_no_drift_no_issue(repo_root: Path) -> None:
             "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
             side_effect=urllib.error.URLError("connection refused"),
         ),
-        patch("auto_pr.open_automated_pr_async", pr_helper),
+        patch("auto_pr.generate_and_open_pr_async", pr_helper),
     ):
         result = await loop._do_work()
 
@@ -230,7 +266,7 @@ async def test_bounds_violation_opens_issue_no_pr(repo_root: Path) -> None:
             "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
             return_value=upstream_payload,
         ),
-        patch("auto_pr.open_automated_pr_async", pr_helper),
+        patch("auto_pr.generate_and_open_pr_async", pr_helper),
     ):
         result = await loop._do_work()
 
@@ -266,7 +302,7 @@ async def test_bounds_violation_does_not_overwrite_pricing_file(
             "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
             return_value=upstream_payload,
         ),
-        patch("auto_pr.open_automated_pr_async", AsyncMock()),
+        patch("auto_pr.generate_and_open_pr_async", AsyncMock()),
     ):
         await loop._do_work()
 
@@ -293,7 +329,7 @@ async def test_bounds_issue_dedups_by_title_prefix(repo_root: Path) -> None:
             "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
             return_value=upstream_payload,
         ),
-        patch("auto_pr.open_automated_pr_async", AsyncMock()),
+        patch("auto_pr.generate_and_open_pr_async", AsyncMock()),
     ):
         await loop._do_work()
 
@@ -314,7 +350,7 @@ async def test_kill_switch_short_circuits(
             "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
             fetch,
         ),
-        patch("auto_pr.open_automated_pr_async", pr_helper),
+        patch("auto_pr.generate_and_open_pr_async", pr_helper),
     ):
         result = await loop._do_work()
 
@@ -336,7 +372,7 @@ async def test_parse_error_opens_deduped_issue(repo_root: Path) -> None:
             "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
             side_effect=json.JSONDecodeError("Expecting value", "", 0),
         ),
-        patch("auto_pr.open_automated_pr_async", pr_helper),
+        patch("auto_pr.generate_and_open_pr_async", pr_helper),
     ):
         result = await loop._do_work()
 
@@ -359,20 +395,21 @@ async def test_parse_error_dedups_when_issue_already_open(repo_root: Path) -> No
             "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
             side_effect=json.JSONDecodeError("bad", "", 0),
         ),
-        patch("auto_pr.open_automated_pr_async", AsyncMock()),
+        patch("auto_pr.generate_and_open_pr_async", AsyncMock()),
     ):
         await loop._do_work()
 
     pr_manager.create_issue.assert_not_awaited()
 
 
-async def test_pr_failure_reverts_pricing_file(repo_root: Path) -> None:
-    """If auto_pr returns failure, the on-disk pricing file is restored.
+async def test_pr_failure_returns_pr_failed_and_leaves_repo_root_clean(
+    repo_root: Path,
+) -> None:
+    """#9539: a failed PR-open returns ``pr_failed`` and never mutates repo_root.
 
-    Locks the atomic-write contract: a successful file write followed by
-    a failed PR-open must NOT leave the worktree mutated. Otherwise the
-    next tick reads the mutation as "local", sees no diff, and the
-    refresh is silently lost.
+    There is no revert path anymore — the proposed file was only ever written
+    into the (now-torn-down) worktree, so ``repo_root`` is untouched whether
+    the PR opened or failed.
     """
     upstream_payload = {
         "claude-haiku-4-5-20251001": {
@@ -395,43 +432,13 @@ async def test_pr_failure_reverts_pricing_file(repo_root: Path) -> None:
             "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
             return_value=upstream_payload,
         ),
-        patch("auto_pr.open_automated_pr_async", pr_helper),
+        patch("auto_pr.generate_and_open_pr_async", pr_helper),
     ):
         result = await loop._do_work()
 
     assert result["error"] == "pr_failed"
     assert result["pr_url"] is None
-    # File must be byte-identical to its pre-tick state.
-    assert pricing_path.read_text() == before
-
-
-async def test_pr_helper_exception_reverts_pricing_file(repo_root: Path) -> None:
-    """If auto_pr raises (e.g., transient gh failure), revert the file."""
-    upstream_payload = {
-        "claude-haiku-4-5-20251001": {
-            "litellm_provider": "anthropic",
-            "input_cost_per_token": 1.5e-6,
-            "output_cost_per_token": 5e-6,
-            "cache_creation_input_token_cost": 1.25e-6,
-            "cache_read_input_token_cost": 1e-7,
-        },
-    }
-    loop, _ = _build_loop(repo_root)
-    pricing_path = repo_root / "src" / "assets" / "model_pricing.json"
-    before = pricing_path.read_text()
-
-    pr_helper = AsyncMock(side_effect=RuntimeError("gh CLI missing"))
-
-    with (
-        patch(
-            "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
-            return_value=upstream_payload,
-        ),
-        patch("auto_pr.open_automated_pr_async", pr_helper),
-        pytest.raises(RuntimeError),
-    ):
-        await loop._do_work()
-
+    # repo_root is byte-identical — the proposal lived only in the worktree.
     assert pricing_path.read_text() == before
 
 
@@ -456,7 +463,7 @@ async def test_clean_tick_closes_open_pricing_issues(repo_root: Path) -> None:
             "pricing_refresh_loop.PricingRefreshLoop._fetch_upstream",
             return_value=upstream_payload,
         ),
-        patch("auto_pr.open_automated_pr_async", pr_helper),
+        patch("auto_pr.generate_and_open_pr_async", pr_helper),
     ):
         result = await loop._do_work()
 

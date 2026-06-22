@@ -14,6 +14,7 @@ gate.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from typing import TYPE_CHECKING
@@ -42,6 +43,31 @@ logger = logging.getLogger("hydraflow.memory_backlog_loop")
 _MAX_ATTEMPTS = 3
 _MIRROR_SUBPATH = ("docs", "wiki", "memory-feedback")
 _DEDUP_PREFIX = "memory_backlog:"
+
+# Hard cap on each ``git``/``gh`` child. A wedged subprocess must not hang the
+# loop cycle forever and freeze its heartbeat — the #9410 silent-stall failure
+# class (#9454 / #9508).
+_SUBPROCESS_TIMEOUT_SECONDS = 120
+
+
+async def _communicate_bounded(
+    proc: asyncio.subprocess.Process,
+) -> tuple[bytes, bytes]:
+    """``proc.communicate()`` bounded by ``_SUBPROCESS_TIMEOUT_SECONDS``.
+
+    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
+    the caller can treat it as a failed read (rather than hanging the loop
+    cycle indefinitely).
+    """
+    try:
+        return await asyncio.wait_for(
+            proc.communicate(), timeout=_SUBPROCESS_TIMEOUT_SECONDS
+        )
+    except TimeoutError:
+        proc.kill()
+        with contextlib.suppress(ProcessLookupError):
+            await proc.wait()
+        raise
 
 
 class MemoryBacklogLoop(BaseBackgroundLoop):
@@ -165,7 +191,14 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, add_err = await add_proc.communicate()
+        try:
+            _, add_err = await _communicate_bounded(add_proc)
+        except TimeoutError:
+            logger.warning(
+                "memory_backlog: git add timed out after %ss",
+                _SUBPROCESS_TIMEOUT_SECONDS,
+            )
+            return
         if add_proc.returncode != 0:
             logger.warning(
                 "memory_backlog: git add failed (rc=%s): %s",
@@ -193,7 +226,14 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, commit_err = await commit_proc.communicate()
+        try:
+            _, commit_err = await _communicate_bounded(commit_proc)
+        except TimeoutError:
+            logger.warning(
+                "memory_backlog: git commit timed out after %ss",
+                _SUBPROCESS_TIMEOUT_SECONDS,
+            )
+            return
         if commit_proc.returncode != 0:
             logger.warning(
                 "memory_backlog: git commit failed (rc=%s): %s",
@@ -251,7 +291,10 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        try:
+            stdout, _ = await _communicate_bounded(proc)
+        except TimeoutError:
+            return
         if proc.returncode != 0:
             return
         try:
