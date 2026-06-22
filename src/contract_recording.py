@@ -307,7 +307,7 @@ def _record_close_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
 
 
 def _record_create_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
-    """Create a sandbox issue; write create_issue cassette."""
+    """Create a sandbox issue; write create_issue cassette; close the issue."""
     create = _run(
         [
             "gh",
@@ -323,6 +323,9 @@ def _record_create_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
     )
     if not _require_success(create, label="gh issue create (create_issue)"):
         return None
+    assert create is not None
+
+    issue_number = _parse_trailing_int(create.stdout)
 
     payload = _build_cassette_payload(
         adapter="github",
@@ -341,6 +344,26 @@ def _record_create_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
     payload["baseline_only"] = False
     path = tmp_dir / "create_issue.yaml"
     _write_yaml_cassette(path, payload)
+
+    # Clean up: close the scratch issue so no durable open issues accumulate
+    # in the sandbox repo across ContractRefreshLoop ticks.
+    if issue_number is not None:
+        close = _run(
+            ["gh", "issue", "close", str(issue_number), "--repo", sandbox_repo]
+        )
+        if not _require_success(close, label="gh issue close (create_issue cleanup)"):
+            logger.warning(
+                "contract_recording: cleanup close of issue #%s failed — cassette "
+                "was written successfully but the sandbox issue remains open",
+                issue_number,
+            )
+    else:
+        logger.warning(
+            "contract_recording: could not parse issue number from %r — "
+            "sandbox issue was not closed",
+            create.stdout,
+        )
+
     return path
 
 
