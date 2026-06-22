@@ -927,3 +927,52 @@ async def test_generate_and_open_pr_no_diff_when_generate_writes_nothing(
 
     assert result.status == "no-diff"
     assert not any(c[:3] == ("gh", "pr", "create") for c in gh_calls)
+
+
+@pytest.mark.asyncio
+async def test_generate_and_open_pr_resolves_lazy_body_after_generate(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A callable ``pr_body`` is resolved AFTER ``generate`` runs, so it can
+    summarise what the generator produced (counts, changed files)."""
+    from auto_pr import generate_and_open_pr_async
+
+    create_bodies: list[str] = []
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        if cmd[2] == "create":
+            # Capture the --body argument passed to gh pr create.
+            idx = cmd.index("--body")
+            create_bodies.append(cmd[idx + 1])
+            return "https://github.com/x/y/pull/9\n"
+        return ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler),
+    )
+
+    produced: dict[str, int] = {}
+
+    async def generate(worktree: Path) -> None:
+        gen_dir = worktree / "docs" / "arch" / "generated"
+        gen_dir.mkdir(parents=True, exist_ok=True)
+        (gen_dir / "loops.md").write_text("# loops\n")
+        produced["files"] = 1  # state the body callable will read
+
+    def body() -> str:
+        # If resolved too early (before generate), produced would be empty.
+        return f"generated {produced.get('files', 0)} file(s)"
+
+    result = await generate_and_open_pr_async(
+        repo_root=local_repo,
+        branch="lazy-body-regen",
+        generate=generate,
+        path_specs=["docs/arch/generated"],
+        pr_title="t",
+        pr_body=body,
+        auto_merge=False,
+    )
+
+    assert result.status == "opened"
+    assert create_bodies == ["generated 1 file(s)"]
