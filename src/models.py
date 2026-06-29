@@ -15,6 +15,7 @@ from typing import (
     NamedTuple,
     NotRequired,
     Protocol,
+    cast,
 )
 from uuid import uuid4
 
@@ -1766,10 +1767,13 @@ class RcBudgetDurationEntry(BaseModel):
     conclusion: str
 
 
+VerdictStr = Literal["ADVANCE", "LOOP_BACK", "ESCALATE", "UNVISITED"]
+
+
 class StageRecord(BaseModel):
     """Per-stage convergence record inside a ConvergenceLedger."""
 
-    last_verdict: Literal["ADVANCE", "LOOP_BACK", "ESCALATE", "UNVISITED"] = "UNVISITED"
+    last_verdict: VerdictStr = "UNVISITED"
     attempts: int = 0
     last_finding_signatures: list[str] = Field(default_factory=list)
 
@@ -1809,8 +1813,12 @@ class ConvergenceLedger(BaseModel):
     def record_gate_result(
         self, stage: str, decision: str, signatures: list[str]
     ) -> None:
+        # Records verdict + signatures ONLY. Does NOT touch attempts —
+        # increment_attempts is the sole counter bumper.
+        if decision not in ("ADVANCE", "LOOP_BACK", "ESCALATE", "UNVISITED"):
+            raise ValueError(f"invalid gate verdict: {decision!r}")
         rec = self._stage(stage)
-        rec.last_verdict = decision  # type: ignore[assignment]
+        rec.last_verdict = cast(VerdictStr, decision)
         rec.last_finding_signatures = list(signatures)
 
     def mark_lap(self) -> None:
@@ -1826,6 +1834,8 @@ class ConvergenceLedger(BaseModel):
         self.laps += 1
 
     def all_gated_advanced(self, gated_stages: list[str]) -> bool:
+        if not gated_stages:
+            return False
         return all(
             self.stage_state.get(s, StageRecord()).last_verdict == "ADVANCE"
             for s in gated_stages

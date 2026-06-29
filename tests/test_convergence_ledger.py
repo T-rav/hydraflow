@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from models import ConvergenceLedger
+import pytest
+
+from models import ConvergenceLedger, StageRecord
 
 
 class TestConvergenceLedgerModel:
@@ -51,3 +53,16 @@ class TestConvergenceLedgerModel:
         ledger.record_gate_result("review", "LOOP_BACK", ["sig-b"])
         ledger.mark_lap()
         assert ledger.detect_outer_oscillation(window=2) is False
+
+    def test_stage_record_round_trips(self) -> None:
+        sr = StageRecord(last_verdict="ADVANCE", attempts=2, last_finding_signatures=["x"])
+        assert StageRecord.model_validate_json(sr.model_dump_json()) == sr
+
+    def test_record_gate_result_rejects_invalid_verdict(self) -> None:
+        ledger = ConvergenceLedger(issue_number=7)
+        with pytest.raises(ValueError):
+            ledger.record_gate_result("review", "BOGUS", [])
+
+    def test_recompute_converged_false_when_no_gates(self) -> None:
+        ledger = ConvergenceLedger(issue_number=7)
+        assert ledger.recompute_converged([]) is False
