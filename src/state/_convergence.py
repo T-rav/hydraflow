@@ -15,7 +15,7 @@ class ConvergenceStateMixin:
 
     _data: StateData
 
-    def save(self) -> None: ...  # provided by StateTracker
+    def save(self) -> None: ...  # provided by CoreMixin
 
     @staticmethod
     def _key(issue_id: int | str) -> str: ...  # provided by StateTracker
@@ -33,7 +33,7 @@ class ConvergenceStateMixin:
         cl = self._data.convergence_ledgers.get(key)
         if cl is None:
             cl = ConvergenceLedger(issue_number=issue_number, blast_radius=blast_radius)
-            self._data.convergence_ledgers[key] = cl
+            self._data.convergence_ledgers[key] = cl.model_copy(deep=True)
             self.save()
         return cl.model_copy(deep=True)
 
@@ -46,5 +46,8 @@ class ConvergenceStateMixin:
         self.save()
 
     def clear_convergence_ledger(self, issue_number: int) -> None:
-        self._data.convergence_ledgers.pop(self._key(issue_number), None)
-        self.save()
+        if (
+            self._data.convergence_ledgers.pop(self._key(issue_number), None)
+            is not None
+        ):
+            self.save()

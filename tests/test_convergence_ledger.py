@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from models import ConvergenceLedger, StageRecord
+from models import ConvergenceLedger, StageRecord, StateData
 from tests.helpers import make_tracker
 
 
@@ -69,6 +69,14 @@ class TestConvergenceLedgerModel:
     def test_recompute_converged_false_when_no_gates(self) -> None:
         ledger = ConvergenceLedger(issue_number=7)
         assert ledger.recompute_converged([]) is False
+
+    def test_state_data_with_ledger_round_trips(self) -> None:
+        ledger = ConvergenceLedger(issue_number=7, blast_radius="high")
+        ledger.increment_attempts("review")
+        data = StateData(convergence_ledgers={"7": ledger})
+        restored = StateData.model_validate_json(data.model_dump_json())
+        assert restored.convergence_ledgers["7"].blast_radius == "high"
+        assert restored.convergence_ledgers["7"].get_attempts("review") == 1
 
 
 class TestConvergenceLedgerPersistence:
