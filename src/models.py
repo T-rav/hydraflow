@@ -1913,6 +1913,7 @@ class StateData(BaseModel):
     pending_reports: list[PendingReport] = Field(default_factory=list)
     tracked_reports: list[TrackedReport] = Field(default_factory=list)
     issue_outcomes: dict[str, IssueOutcome] = Field(default_factory=dict)
+    convergence_ledgers: dict[str, ConvergenceLedger] = Field(default_factory=dict)
     hook_failures: dict[str, list[HookFailureRecord]] = Field(default_factory=dict)
     epic_states: dict[str, EpicState] = Field(default_factory=dict)
     releases: dict[str, Release] = Field(default_factory=dict)

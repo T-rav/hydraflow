@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from models import ConvergenceLedger, StageRecord
+from tests.helpers import make_tracker
 
 
 class TestConvergenceLedgerModel:
@@ -55,7 +56,9 @@ class TestConvergenceLedgerModel:
         assert ledger.detect_outer_oscillation(window=2) is False
 
     def test_stage_record_round_trips(self) -> None:
-        sr = StageRecord(last_verdict="ADVANCE", attempts=2, last_finding_signatures=["x"])
+        sr = StageRecord(
+            last_verdict="ADVANCE", attempts=2, last_finding_signatures=["x"]
+        )
         assert StageRecord.model_validate_json(sr.model_dump_json()) == sr
 
     def test_record_gate_result_rejects_invalid_verdict(self) -> None:
@@ -66,3 +69,24 @@ class TestConvergenceLedgerModel:
     def test_recompute_converged_false_when_no_gates(self) -> None:
         ledger = ConvergenceLedger(issue_number=7)
         assert ledger.recompute_converged([]) is False
+
+
+class TestConvergenceLedgerPersistence:
+    def test_ensure_creates_and_persists(self, tmp_path) -> None:
+        tracker = make_tracker(tmp_path)
+        ledger = tracker.ensure_convergence_ledger(7, blast_radius="medium")
+        ledger.increment_attempts("review")
+        tracker.save_convergence_ledger(7, ledger)
+
+        reloaded = make_tracker(tmp_path)
+        reloaded.load()
+        got = reloaded.get_convergence_ledger(7)
+        assert got is not None
+        assert got.blast_radius == "medium"
+        assert got.get_attempts("review") == 1
+
+    def test_clear_removes_ledger(self, tmp_path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.save_convergence_ledger(7, tracker.ensure_convergence_ledger(7))
+        tracker.clear_convergence_ledger(7)
+        assert tracker.get_convergence_ledger(7) is None
