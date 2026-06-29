@@ -31,7 +31,7 @@ from pydantic.alias_generators import (
 )
 from typing_extensions import TypedDict
 
-from src.pending_concerns import AdversarialState
+from src.pending_concerns import AdversarialState, Concern
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -1764,6 +1764,86 @@ class RcBudgetDurationEntry(BaseModel):
     created_at: str
     duration_s: int
     conclusion: str
+
+
+class StageRecord(BaseModel):
+    """Per-stage convergence record inside a ConvergenceLedger."""
+
+    last_verdict: Literal["ADVANCE", "LOOP_BACK", "ESCALATE", "UNVISITED"] = "UNVISITED"
+    attempts: int = 0
+    last_finding_signatures: list[str] = Field(default_factory=list)
+
+
+class ConvergenceLedger(BaseModel):
+    """Single source of truth for one issue's two-level convergence state.
+
+    Replaces the scattered per-issue attempt counters (no dual-write). The
+    ledger is always-on storage; the Gate decision that writes to it is the
+    only flag-gated part (see ADR for the storage/decision split).
+    """
+
+    issue_number: int
+    laps: int = 0
+    blast_radius: Literal["low", "medium", "high"] = "low"
+    stage_state: dict[str, StageRecord] = Field(default_factory=dict)
+    open_concerns: list[Concern] = Field(default_factory=list)
+    lap_signatures: list[list[str]] = Field(default_factory=list)
+    converged: bool = False
+
+    def _stage(self, stage: str) -> StageRecord:
+        rec = self.stage_state.get(stage)
+        if rec is None:
+            rec = StageRecord()
+            self.stage_state[stage] = rec
+        return rec
+
+    def get_attempts(self, stage: str) -> int:
+        rec = self.stage_state.get(stage)
+        return rec.attempts if rec else 0
+
+    def increment_attempts(self, stage: str) -> int:
+        rec = self._stage(stage)
+        rec.attempts += 1
+        return rec.attempts
+
+    def record_gate_result(
+        self, stage: str, decision: str, signatures: list[str]
+    ) -> None:
+        rec = self._stage(stage)
+        rec.attempts += 1
+        rec.last_verdict = decision  # type: ignore[assignment]
+        rec.last_finding_signatures = list(signatures)
+
+    def mark_lap(self) -> None:
+        """Close the current lap: snapshot the union of stage signatures."""
+        sig: list[str] = sorted(
+            {
+                s
+                for rec in self.stage_state.values()
+                for s in rec.last_finding_signatures
+            }
+        )
+        self.lap_signatures.append(sig)
+        self.laps += 1
+
+    def all_gated_advanced(self, gated_stages: list[str]) -> bool:
+        return all(
+            self.stage_state.get(s, StageRecord()).last_verdict == "ADVANCE"
+            for s in gated_stages
+        )
+
+    def recompute_converged(self, gated_stages: list[str]) -> bool:
+        self.converged = (
+            self.all_gated_advanced(gated_stages) and not self.open_concerns
+        )
+        return self.converged
+
+    def detect_outer_oscillation(self, window: int = 2) -> bool:
+        if len(self.lap_signatures) < window:
+            return False
+        tail = self.lap_signatures[-window:]
+        first = tail[0]
+        return bool(first) and all(s == first for s in tail)
 
 
 class StateData(BaseModel):

@@ -304,6 +304,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 3600),
     ("contract_refresh_interval", "HYDRAFLOW_CONTRACT_REFRESH_INTERVAL", 604800),
     ("max_fake_repair_attempts", "HYDRAFLOW_MAX_FAKE_REPAIR_ATTEMPTS", 3),
+    ("max_convergence_laps", "HYDRAFLOW_MAX_CONVERGENCE_LAPS", 3),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -2594,6 +2595,15 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Max per-adapter consecutive drift ticks before ContractRefreshLoop "
             "escalates a fake-drift issue to hitl-escalation (spec §4.2 Task 18)."
+        ),
+    )
+    max_convergence_laps: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Maximum outer-convergence laps allowed before a ConvergenceLedger "
+            "escalates an issue (ADR for convergence ledger feature)."
         ),
     )
     contracts_sandbox_repo: str = Field(
