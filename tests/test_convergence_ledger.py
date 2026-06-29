@@ -7,12 +7,14 @@ class TestConvergenceLedgerModel:
     def test_round_trip_serialization(self) -> None:
         # Arrange
         ledger = ConvergenceLedger(issue_number=7, blast_radius="high")
+        ledger.increment_attempts("review")
         ledger.record_gate_result("review", "LOOP_BACK", ["sig-a"])
         # Act
         restored = ConvergenceLedger.model_validate_json(ledger.model_dump_json())
         # Assert
         assert restored == ledger
         assert restored.stage_state["review"].attempts == 1
+        assert restored.stage_state["review"].last_verdict == "LOOP_BACK"
 
     def test_increment_attempts_is_per_stage(self) -> None:
         ledger = ConvergenceLedger(issue_number=7)

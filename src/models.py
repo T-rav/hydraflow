@@ -1810,7 +1810,6 @@ class ConvergenceLedger(BaseModel):
         self, stage: str, decision: str, signatures: list[str]
     ) -> None:
         rec = self._stage(stage)
-        rec.attempts += 1
         rec.last_verdict = decision  # type: ignore[assignment]
         rec.last_finding_signatures = list(signatures)
 
