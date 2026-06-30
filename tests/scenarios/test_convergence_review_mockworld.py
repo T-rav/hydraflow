@@ -3,13 +3,15 @@
 Verifies two behaviours introduced by the convergence gate
 (``convergence_gate_enabled=True``):
 
-1. ``test_loop_back_then_converge`` — a PR that fails review on pass 1
+1. ``test_loop_back_records_lap`` — a PR that fails review on pass 1
    (REQUEST_CHANGES) loops back to the ready queue; the ledger records the
    lap.  The test confirms the ledger is populated by the real gate logic
-   running inside MockWorld.
+   running inside MockWorld.  Full converge-after-loopback (two pipeline
+   passes) is deferred: ``run_pipeline`` is single-shot by design, and the
+   ``run_with_loops`` catalog does not expose implement/review pipeline phases.
 
-2. ``test_oscillation_escalates`` — repeated REQUEST_CHANGES results push the
-   issue over the outer lap budget (``max_convergence_laps``), causing
+2. ``test_oscillation_escalates`` — a single REQUEST_CHANGES result pushes the
+   issue over the outer lap budget (``max_convergence_laps=1``), causing
    escalation to HITL and the ledger's lap count to hit the budget.
 
 These are **integration-level** scenarios: the real ``ReviewPhase._handle_rejected_review_gated``
@@ -63,29 +65,35 @@ def _make_world_with_gate(tmp_path, *, max_convergence_laps: int = 3) -> MockWor
 # ---------------------------------------------------------------------------
 # Probe / verification (inline — not a standalone test class)
 # ---------------------------------------------------------------------------
-# The probe is embedded in test_loop_back_then_converge:  if the ledger is
+# The probe is embedded in test_loop_back_records_lap:  if the ledger is
 # None after a scripted REQUEST_CHANGES with the gate ON, the test will fail
 # with a clear assertion message rather than a vacuous pass.
 
 
 # ---------------------------------------------------------------------------
-# Scenario 1 — loop-back, then advance on next pass
+# Scenario 1 — loop-back records one lap; issue stays un-merged
 # ---------------------------------------------------------------------------
 
 
-class TestLoopBackThenConverge:
-    """Gate ON: reject → loop-back, then approve → advance.
+class TestLoopBackRecordsLap:
+    """Gate ON: one REQUEST_CHANGES → loop-back, ledger records the lap.
 
     The single ``run_pipeline`` call delivers the scripted REQUEST_CHANGES
     verdict.  ``_handle_rejected_review_gated`` runs, records one lap in the
     ledger, and re-queues the issue back to ``ready``.  The test confirms:
 
     - The ledger is created and ``laps == 1`` (one reject lap closed).
+    - ``ledger.converged`` is False (LOOP_BACK, not APPROVE).
     - The issue is NOT merged in this pipeline pass (it was re-queued).
     - ``final_stage`` is ``"review"`` (the reject result is the last record).
+
+    Note: converge-after-loopback (two passes ending in APPROVE) is deferred.
+    ``run_pipeline`` is single-shot by design; a two-pass scenario requires
+    running a second fresh ``MockWorld`` with the re-queued issue, which falls
+    outside the scope of this unit-level scenario.
     """
 
-    async def test_loop_back_then_converge(self, tmp_path) -> None:
+    async def test_loop_back_records_lap(self, tmp_path) -> None:
         world = _make_world_with_gate(tmp_path)
 
         IssueBuilder().numbered(1).titled("Fix bug").bodied("A bug to fix").at(world)
@@ -120,6 +128,8 @@ class TestLoopBackThenConverge:
         assert outcome.merged is False
         assert outcome.review_result is not None
         assert outcome.review_result.verdict == ReviewVerdict.REQUEST_CHANGES
+        # Pipeline routing: the reject result was the last record in this pass.
+        assert outcome.final_stage == "review"
 
 
 # ---------------------------------------------------------------------------
@@ -130,18 +140,19 @@ class TestLoopBackThenConverge:
 class TestOscillationEscalates:
     """Gate ON, lap budget exhausted → issue escalates to HITL.
 
-    We lower ``max_convergence_laps`` to 1 so that even a single REQUEST_CHANGES
-    lap triggers the budget check inside ``_convergence_decision``:
+    We lower ``max_convergence_laps`` to 1 so that a single REQUEST_CHANGES
+    lap immediately triggers the budget check inside ``_convergence_decision``:
 
         if LOOP_BACK and ledger.laps >= max_convergence_laps:
             result = escalate(...)
 
     After escalation ``_handle_rejected_review_gated`` calls
-    ``_escalate_to_hitl``, which transitions the issue to the HITL label.
+    ``_escalate_to_hitl``, which transitions the issue to the diagnose label
+    (``hydraflow-diagnose``), not directly to ``hydraflow-hitl``.
     The test asserts:
 
-    - The ledger has at least 1 lap (the budget-exhausting lap).
-    - The issue carries the HITL label (escalation completed).
+    - The ledger records exactly 1 lap (the budget-exhausting lap).
+    - The issue carries the diagnose label (escalation completed).
     - The issue is NOT merged.
     """
 
@@ -169,9 +180,9 @@ class TestOscillationEscalates:
             "the real gate did not run. BLOCKED."
         )
 
-        # The lap budget was exhausted: laps >= max_convergence_laps (1).
-        assert ledger.laps >= 1, (
-            f"Expected laps >= 1 after budget-exhausting reject; got {ledger.laps}"
+        # The lap budget was exhausted: exactly 1 lap (max_convergence_laps=1).
+        assert ledger.laps == 1, (
+            f"Expected laps==1 after budget-exhausting reject at max_convergence_laps=1; got {ledger.laps}"
         )
 
         # Issue must be escalated to HITL and NOT merged.
