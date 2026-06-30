@@ -309,6 +309,9 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 3600),
     ("contract_refresh_interval", "HYDRAFLOW_CONTRACT_REFRESH_INTERVAL", 604800),
     ("max_fake_repair_attempts", "HYDRAFLOW_MAX_FAKE_REPAIR_ATTEMPTS", 3),
+    ("fitness_scorecard_interval", "HYDRAFLOW_FITNESS_SCORECARD_INTERVAL", 86400),
+    ("fitness_window_days", "HYDRAFLOW_FITNESS_WINDOW_DAYS", 30),
+    ("fitness_min_samples", "HYDRAFLOW_FITNESS_MIN_SAMPLES", 20),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -2352,6 +2355,26 @@ class HydraFlowConfig(BaseModel):
         ge=60,
         le=86400,
         description="Poll interval in seconds for retrospective analysis loop",
+    )
+
+    # Trust fleet — LoopFitnessScorecard (spec §5)
+    fitness_scorecard_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description="Seconds between loop-fitness scorecard cycles",
+    )
+    fitness_window_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="Rolling window (days) over which loop fitness is computed",
+    )
+    fitness_min_samples: int = Field(
+        default=20,
+        ge=1,
+        le=10000,
+        description="Min samples before a SCORED loop reports OK confidence",
     )
 
     # Trust fleet — FlakeTrackerLoop (spec §4.5)
