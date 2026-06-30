@@ -4,6 +4,11 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W27
+
+- `cd4ffcc` — fix(fitness): satisfy completeness invariants for new loop + event *(2026-06-30)*
+- `963718c` — docs(fitness): ADR-0093 + UL terms + wiki + regenerated arch *(2026-06-30)*
+
 ## 2026-W26
 
 - `5e72016` — Fixes #9080: Provision isolated GitHub contracts sandbox (sandbox session + teardown) (#9512) (#9512) *(2026-06-22)*
