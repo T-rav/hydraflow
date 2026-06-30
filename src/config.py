@@ -1604,7 +1604,10 @@ class HydraFlowConfig(BaseModel):
             "Route the review retry/escalate decision through the "
             "convergence HybridGate + ConvergenceLedger (ADR: two-level "
             "convergence). Off by default so rollout is opt-in; the "
-            "ledger storage is always-on, only the gate decision is gated."
+            "ledger storage is always-on, only the gate decision is gated. "
+            "When enabled, escalation at the review reject boundary is "
+            "governed by max_convergence_laps (plus oscillation detection), "
+            "NOT max_review_fix_attempts."
         ),
     )
 
