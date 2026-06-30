@@ -124,6 +124,7 @@ ADR and that named test files actually exist.
 | [0090](0090-atlas-knowledge-graph-dashboard.md) | Atlas — Knowledge Graph Dashboard Surface | Accepted |
 | [0091](0091-epic-monitor-completion-sweep.md) | Fold Epic Completion Sweep into Epic Monitor | Accepted |
 | [0092](0092-untrusted-text-trust-boundary.md) | Untrusted-text trust boundary for agent prompts | Accepted |
+| [0093](0093-two-level-convergence-gate-and-ledger.md) | Two-level convergence: Gate + ConvergenceLedger | Accepted |
 
 ## Adding a new ADR
 
