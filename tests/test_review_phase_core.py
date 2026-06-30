@@ -3014,6 +3014,282 @@ class TestRunPostReviewActions:
 
 
 # ---------------------------------------------------------------------------
+# Convergence gate wiring (Phase 2a: review APPROVE decision → converged live)
+# ---------------------------------------------------------------------------
+
+
+def _setup_approve_gate_post_review_mocks(phase: ReviewPhase) -> None:
+    """Mocks for the APPROVE path through ``_run_post_review_actions``.
+
+    Stubs the side-effect helpers around the gate (visual validation,
+    outcome recording, merge, re-queue transition) so the test exercises the
+    gate decision + control-flow wiring, not the merge/transition internals.
+    """
+    phase._run_visual_validation = AsyncMock(return_value=None)
+    phase._handle_visual_failure = AsyncMock()
+    phase._record_review_outcome = AsyncMock()
+    phase._handle_approved_merge = AsyncMock()
+    phase._cleanup_worktree = AsyncMock()
+    phase._is_product_track_pr = MagicMock(return_value=False)
+    # Re-queue + escalate side effects.
+    phase._store.enqueue_transition = MagicMock()
+    phase._transitioner.transition = AsyncMock()
+    phase._transitioner.post_comment = AsyncMock()
+    _setup_escalate_to_hitl_mocks(phase)
+
+
+class TestApproveConvergenceGate:
+    """Phase 2a: the APPROVE verdict routes through ``_convergence_decision``.
+
+    When ``convergence_gate_enabled`` is on, a clean deterministic check plus
+    all-lens APPROVE makes the ledger record ``last_verdict == "ADVANCE"``,
+    which flips ``converged`` to True — the headline of the phase.
+    """
+
+    @pytest.mark.asyncio
+    async def test_convergence_decision_advance_sets_converged_true(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """The headline: clean det + all-lens APPROVE → ADVANCE, converged True."""
+        from convergence_gate import GateDecision, JudgeVerdict
+
+        config.convergence_gate_enabled = True
+        phase = make_review_phase(config, default_mocks=True)
+
+        async def _approve_judge(_ctx, _i):
+            return JudgeVerdict(approve=True, signatures=["correctness"])
+
+        decision = await phase._convergence_decision(
+            issue_number=7,
+            review_approved=True,
+            code_scanning_alerts=None,
+            post_verify_judge=_approve_judge,
+        )
+
+        assert decision.decision is GateDecision.ADVANCE
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        assert ledger.stage_state["review"].last_verdict == "ADVANCE"
+        assert ledger.converged is True
+
+    @pytest.mark.asyncio
+    async def test_convergence_decision_veto_loops_back_converged_false(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """One lens VETO under lap budget → LOOP_BACK; converged stays False."""
+        from convergence_gate import GateDecision, JudgeVerdict
+
+        config.convergence_gate_enabled = True
+        phase = make_review_phase(config, default_mocks=True)
+
+        async def _veto_judge(_ctx, _i):
+            return JudgeVerdict(
+                approve=False, feedback="fix the loop", signatures=["correctness"]
+            )
+
+        decision = await phase._convergence_decision(
+            issue_number=7,
+            review_approved=True,
+            code_scanning_alerts=None,
+            post_verify_judge=_veto_judge,
+        )
+
+        assert decision.decision is GateDecision.LOOP_BACK
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        assert ledger.stage_state["review"].last_verdict == "LOOP_BACK"
+        assert ledger.converged is False
+
+    @pytest.mark.asyncio
+    async def test_convergence_decision_alerts_loop_back_without_judging(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Code-scanning alerts → det RED → LOOP_BACK; the judge never runs."""
+        from convergence_gate import GateDecision
+
+        config.convergence_gate_enabled = True
+        phase = make_review_phase(config, default_mocks=True)
+
+        judge_calls = {"n": 0}
+
+        async def _judge(_ctx, _i):
+            judge_calls["n"] += 1
+            from convergence_gate import JudgeVerdict
+
+            return JudgeVerdict(approve=True)
+
+        alert = CodeScanningAlert(number=1, severity="high", rule="sql-injection")
+        decision = await phase._convergence_decision(
+            issue_number=7,
+            review_approved=True,
+            code_scanning_alerts=[alert],
+            post_verify_judge=_judge,
+        )
+
+        assert decision.decision is GateDecision.LOOP_BACK
+        assert judge_calls["n"] == 0  # det RED short-circuits before the judge
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        assert ledger.stage_state["review"].last_verdict == "LOOP_BACK"
+        assert ledger.converged is False
+
+    @pytest.mark.asyncio
+    async def test_post_review_actions_gate_on_approve_advances_and_merges(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Flag on + clean det + lens APPROVE → ADVANCE → _handle_approved_merge,
+        ledger converged True, _run_post_verify_advisor NOT called."""
+        from review_advisor import PostVerifyResult
+
+        config.convergence_gate_enabled = True
+        phase = make_review_phase(config, default_mocks=True)
+        issue = TaskFactory.create()
+        pr = PRInfoFactory.create(issue_number=issue.id)
+        wt_path = config.workspace_path_for_issue(issue.id)
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        _setup_approve_gate_post_review_mocks(phase)
+        phase._run_post_verify_advisor = AsyncMock()  # must NOT be called
+        phase._run_post_verify_for_surface = AsyncMock(
+            return_value=PostVerifyResult(
+                verdict="APPROVE",
+                reasoning="clean",
+                suggested_fix_direction="none",
+            )
+        )
+
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
+        context = PreReviewContext(
+            diff="diff text", visual_decision=None, code_scanning_alerts=None
+        )
+
+        returned = await phase._run_post_review_actions(
+            pr, issue, wt_path, result, context, worker_id=0
+        )
+
+        assert returned == result
+        phase._handle_approved_merge.assert_awaited_once()
+        phase._run_post_verify_advisor.assert_not_awaited()
+        phase._cleanup_worktree.assert_awaited_once_with(pr, result, False)
+        ledger = phase._state.get_convergence_ledger(pr.issue_number)
+        assert ledger is not None
+        assert ledger.stage_state["review"].last_verdict == "ADVANCE"
+        assert ledger.converged is True
+
+    @pytest.mark.asyncio
+    async def test_post_review_actions_gate_on_approve_veto_requeues(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Flag on + lens VETO under budget → LOOP_BACK: re-queue to ready,
+        worktree preserved (skip_worktree_cleanup True), no merge."""
+        from review_advisor import PostVerifyResult
+
+        config.convergence_gate_enabled = True
+        phase = make_review_phase(config, default_mocks=True)
+        issue = TaskFactory.create()
+        pr = PRInfoFactory.create(issue_number=issue.id)
+        wt_path = config.workspace_path_for_issue(issue.id)
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        _setup_approve_gate_post_review_mocks(phase)
+        phase._run_post_verify_for_surface = AsyncMock(
+            return_value=PostVerifyResult(
+                verdict="VETO",
+                reasoning="bug",
+                suggested_fix_direction="fix it",
+            )
+        )
+
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
+        context = PreReviewContext(
+            diff="diff text", visual_decision=None, code_scanning_alerts=None
+        )
+
+        await phase._run_post_review_actions(
+            pr, issue, wt_path, result, context, worker_id=0
+        )
+
+        phase._handle_approved_merge.assert_not_awaited()
+        phase._transitioner.transition.assert_awaited_once_with(
+            pr.issue_number, "ready", pr_number=pr.number
+        )
+        # Worktree preserved on loop-back.
+        phase._cleanup_worktree.assert_awaited_once_with(pr, result, True)
+        ledger = phase._state.get_convergence_ledger(pr.issue_number)
+        assert ledger is not None
+        assert ledger.stage_state["review"].last_verdict == "LOOP_BACK"
+        assert ledger.converged is False
+
+    @pytest.mark.asyncio
+    async def test_post_review_actions_gate_on_alerts_requeue_without_judge(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Flag on + code-scanning alerts → det RED → LOOP_BACK, judge never runs."""
+        config.convergence_gate_enabled = True
+        phase = make_review_phase(config, default_mocks=True)
+        issue = TaskFactory.create()
+        pr = PRInfoFactory.create(issue_number=issue.id)
+        wt_path = config.workspace_path_for_issue(issue.id)
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        _setup_approve_gate_post_review_mocks(phase)
+        phase._run_post_verify_for_surface = AsyncMock()  # must NOT be called
+
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
+        context = PreReviewContext(
+            diff="diff text",
+            visual_decision=None,
+            code_scanning_alerts=[
+                CodeScanningAlert(number=1, severity="high", rule="xss")
+            ],
+        )
+
+        await phase._run_post_review_actions(
+            pr, issue, wt_path, result, context, worker_id=0
+        )
+
+        phase._handle_approved_merge.assert_not_awaited()
+        phase._run_post_verify_for_surface.assert_not_awaited()
+        phase._transitioner.transition.assert_awaited_once_with(
+            pr.issue_number, "ready", pr_number=pr.number
+        )
+        ledger = phase._state.get_convergence_ledger(pr.issue_number)
+        assert ledger is not None
+        assert ledger.stage_state["review"].last_verdict == "LOOP_BACK"
+
+    @pytest.mark.asyncio
+    async def test_post_review_actions_flag_off_uses_legacy_advisor(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Flag off → legacy _run_post_verify_advisor + _handle_approved_merge path,
+        and no convergence ledger decision is recorded for the approve verdict."""
+        config.convergence_gate_enabled = False
+        phase = make_review_phase(config, default_mocks=True)
+        issue = TaskFactory.create()
+        pr = PRInfoFactory.create(issue_number=issue.id)
+        wt_path = config.workspace_path_for_issue(issue.id)
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        _setup_approve_gate_post_review_mocks(phase)
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
+        phase._run_post_verify_advisor = AsyncMock(return_value=(result, "diff text"))
+
+        context = PreReviewContext(
+            diff="diff text", visual_decision=None, code_scanning_alerts=None
+        )
+
+        await phase._run_post_review_actions(
+            pr, issue, wt_path, result, context, worker_id=0
+        )
+
+        phase._run_post_verify_advisor.assert_awaited_once()
+        phase._handle_approved_merge.assert_awaited_once()
+        # No gate decision recorded for the review stage on the legacy path.
+        ledger = phase._state.get_convergence_ledger(pr.issue_number)
+        assert ledger is None or ledger.stage_state.get("review") is None
+
+
+# ---------------------------------------------------------------------------
 # Baseline policy integration in _review_one_inner
 # ---------------------------------------------------------------------------
 

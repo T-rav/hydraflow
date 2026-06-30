@@ -1317,10 +1317,40 @@ class ReviewPhase:
                     }
                 )
 
-        # PostVerifyAdvisor — second-opinion gate on APPROVE verdicts.
-        # On VETO, the advisor hands the disagreement back to the executor
-        # for up to a blast-radius-stratified retry budget (R-2). After the
-        # retry budget is exhausted, the disagreement is escalated to HITL.
+        # APPROVE-path second opinion.
+        #
+        # Gate-on (convergence_gate_enabled): the approve decision routes
+        # through the convergence HybridGate. The lens judge + outer lap
+        # budget own the retry loop, so PostVerifyAdvisor's internal retry
+        # budget is bypassed (we do NOT call _run_post_verify_advisor here).
+        # ADVANCE → merge (recording last_verdict=="ADVANCE", which flips
+        # ledger.converged to True). LOOP_BACK → re-queue to ``ready``
+        # (worktree preserved). ESCALATE → HITL (worktree destroyed).
+        #
+        # Gate-off (legacy): PostVerifyAdvisor is the second-opinion gate; on
+        # VETO it hands the disagreement back to the executor for up to a
+        # blast-radius-stratified retry budget (R-2), escalating to HITL when
+        # the budget is exhausted.
+        skip_worktree_cleanup = False
+        if (
+            self._uses_convergence_gate()
+            and result.verdict == ReviewVerdict.APPROVE
+            and pr.number > 0
+        ):
+            skip_worktree_cleanup = await self._handle_approved_review_gated(
+                pr,
+                task,
+                wt_path,
+                result,
+                diff,
+                worker_id,
+                surface=surface,
+                code_scanning_alerts=code_scanning_alerts,
+                visual_decision=pre_review.visual_decision,
+            )
+            await self._cleanup_worktree(pr, result, skip_worktree_cleanup)
+            return result
+
         if result.verdict == ReviewVerdict.APPROVE and pr.number > 0:
             result, diff = await self._run_post_verify_advisor(
                 pr=pr,
@@ -1333,7 +1363,6 @@ class ReviewPhase:
                 surface=surface,
             )
 
-        skip_worktree_cleanup = False
         if result.verdict == ReviewVerdict.APPROVE and pr.number > 0:
             await self._handle_approved_merge(
                 pr,
@@ -3652,13 +3681,26 @@ class ReviewPhase:
         *,
         issue_number: int,
         review_approved: bool,
+        code_scanning_alerts: list[Any] | None = None,
+        post_verify_judge: Callable[..., Any] | None = None,
     ) -> GateResult:
-        """Run the convergence HybridGate for the review reject boundary.
+        """Run the convergence HybridGate for a review boundary.
 
         Reads blast radius from the ledger, evaluates the gate, records the
         decision (verdict + signatures + lap) back into the ledger, enforces
         the outer lap budget, and persists. Returns the (possibly lap-budget
         converted) :class:`GateResult`.
+
+        Two boundaries route through here:
+
+        * **reject** (``review_approved=False``): the deterministic check is
+          RED (the verdict itself), so the gate loops back without judging —
+          the Phase-1 behavior, preserved byte-for-byte.
+        * **approve** (``review_approved=True``): the deterministic check is
+          :meth:`_approve_deterministic_check` (RED when open code-scanning
+          alerts exist → LOOP_BACK without judging; GREEN → the injected
+          *post_verify_judge* lens passes run). All-lens APPROVE records
+          ``last_verdict == "ADVANCE"``, which flips ``converged`` to True.
         """
         from convergence_gate import (  # noqa: PLC0415
             DetResult,
@@ -3677,16 +3719,34 @@ class ReviewPhase:
         attempts = ledger.get_attempts("review")
         max_attempts = self._config.max_review_fix_attempts
 
-        async def _det(_ctx: GateContext) -> DetResult:
-            # Phase 1 deterministic signal: the review verdict itself.
-            # At the reject boundary review_approved is False, so the gate
-            # never reaches the judge below.
-            return DetResult(ok=review_approved)
+        if review_approved:
+            approve_det = self._approve_deterministic_check(code_scanning_alerts)
 
-        async def _judge(_ctx: GateContext, _i: int) -> JudgeVerdict:
-            # Unreached in Phase 1 (det is RED at the reject boundary). A later
-            # phase layers hybrid judge passes into the approve path.
-            return JudgeVerdict(approve=True)
+            async def _det(_ctx: GateContext) -> DetResult:
+                # Approve boundary: deterministic signal is the code-scanning
+                # check. GREEN (no alerts) → the lens judge runs; RED → the
+                # gate loops back without judging.
+                return approve_det
+
+            # The real lens judge is injected by the approve call site. Fall
+            # back to a fail-open stub if a caller omits it.
+            if post_verify_judge is not None:
+                _judge = post_verify_judge
+            else:
+
+                async def _judge(_ctx: GateContext, _i: int) -> JudgeVerdict:
+                    return JudgeVerdict(approve=True)
+        else:
+
+            async def _det(_ctx: GateContext) -> DetResult:
+                # Reject boundary: the review verdict itself is the
+                # deterministic signal. review_approved is False, so the gate
+                # never reaches the judge below.
+                return DetResult(ok=review_approved)
+
+            async def _judge(_ctx: GateContext, _i: int) -> JudgeVerdict:
+                # Unreached at the reject boundary (det is RED).
+                return JudgeVerdict(approve=True)
 
         gate = build_review_gate(deterministic_check=_det, post_verify_judge=_judge)
         ctx = GateContext(
@@ -3916,6 +3976,128 @@ class ReviewPhase:
                 "review_convergence_escalation",
                 f"PR #{pr.number}",
             )
+        return False  # Destroy worktree
+
+    async def _handle_approved_review_gated(
+        self,
+        pr: PRInfo,
+        task: Task,
+        wt_path: Path,
+        result: ReviewResult,
+        diff: str,
+        worker_id: int,
+        *,
+        surface: str,
+        code_scanning_alerts: list[CodeScanningAlert] | None,
+        visual_decision: VisualValidationDecision | None,
+    ) -> bool:
+        """Convergence-gate variant of the APPROVE decision (Phase 2a).
+
+        Runs when ``convergence_gate_enabled`` is True and the review verdict
+        is APPROVE. Builds the real lens judge and routes through
+        :meth:`_convergence_decision` with ``review_approved=True``:
+
+        * **ADVANCE** → ``_handle_approved_merge`` (the recorded
+          ``last_verdict == "ADVANCE"`` makes ``recompute_converged`` flip
+          ``ledger.converged`` to True). Worktree destroyed.
+        * **LOOP_BACK** → re-queue to ``ready`` with the gate feedback,
+          mirroring the reject loop-back contract. Worktree preserved.
+        * **ESCALATE** → HITL. Worktree destroyed.
+
+        Returns the ``skip_worktree_cleanup`` flag: True to preserve the
+        worktree (loop-back), False to destroy it (advance/escalate).
+        """
+        from convergence_gate import GateDecision  # noqa: PLC0415
+
+        judge = self._post_verify_lens_judge(
+            pr=pr,
+            task=task,
+            wt_path=wt_path,
+            result=result,
+            diff=diff,
+            worker_id=worker_id,
+            surface=surface,
+        )
+        decision = await self._convergence_decision(
+            issue_number=pr.issue_number,
+            review_approved=True,
+            code_scanning_alerts=code_scanning_alerts,
+            post_verify_judge=judge,
+        )
+
+        if decision.decision is GateDecision.ADVANCE:
+            await self._handle_approved_merge(
+                pr,
+                task,
+                result,
+                diff,
+                worker_id,
+                code_scanning_alerts=code_scanning_alerts,
+                visual_decision=visual_decision,
+            )
+            return False  # Destroy worktree
+
+        if decision.decision is GateDecision.LOOP_BACK:
+            self._state.set_review_feedback(
+                pr.issue_number, decision.feedback or result.summary
+            )
+            self._store.enqueue_transition(task, "ready")
+            await self._transitioner.transition(
+                pr.issue_number, "ready", pr_number=pr.number
+            )
+            await self._transitioner.post_comment(
+                pr.issue_number,
+                "**Convergence gate requested changes** — "
+                "re-queuing for implementation.",
+            )
+            logger.info(
+                "PR #%d: approve-gate loop-back — re-queuing issue #%d",
+                pr.number,
+                pr.issue_number,
+            )
+            return True  # Preserve worktree
+
+        # ESCALATE
+        cause = decision.reason or "approve-gate escalation"
+        logger.warning(
+            "PR #%d: approve-gate escalation (%s) — escalating issue #%d to HITL",
+            pr.number,
+            cause,
+            pr.issue_number,
+        )
+        review_phase.record_harness_failure(
+            self._harness_insights,
+            pr.issue_number,
+            FailureCategory.HITL_ESCALATION,
+            cause,
+            stage=PipelineStage.REVIEW,
+            pr_number=pr.number,
+        )
+        await self._publish_review_status(pr, worker_id, "escalating")
+        from models import EscalationContext  # noqa: PLC0415
+
+        esc_context = EscalationContext(
+            cause=cause,
+            origin_phase="review",
+            pr_number=pr.number,
+            agent_transcript=result.transcript if result.transcript else None,
+        )
+        self._state.set_escalation_context(pr.issue_number, esc_context)
+        await self._escalate_to_hitl(
+            HitlEscalation(
+                issue_number=pr.issue_number,
+                pr_number=pr.number,
+                cause=cause,
+                origin_label=self._config.review_label[0],
+                comment=(
+                    f"**Convergence gate escalation** — {cause}. "
+                    f"Escalating to human review."
+                ),
+                post_on_pr=False,
+                event_cause="review_convergence_escalation",
+                task=task,
+            )
+        )
         return False  # Destroy worktree
 
     # Delegate properties for backward compatibility in tests
