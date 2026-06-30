@@ -3,6 +3,7 @@
 The fetcher is extracted and tested in isolation by monkeypatching the
 _run_gh seam on a stub PRManager-like object.
 """
+
 from __future__ import annotations
 
 import asyncio

@@ -39,9 +39,7 @@ class FitnessScorecardLoop(BaseBackgroundLoop):
         issue_fetcher: Callable[[], Awaitable[list[IssueRecord]]],
         repo_root: Path | None = None,
     ) -> None:
-        super().__init__(
-            worker_name="fitness_scorecard", config=config, deps=deps
-        )
+        super().__init__(worker_name="fitness_scorecard", config=config, deps=deps)
         self._issue_fetcher = issue_fetcher
         self._repo_root = repo_root or Path.cwd()
         self._loops: dict[str, BaseBackgroundLoop] = {}

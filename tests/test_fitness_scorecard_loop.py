@@ -30,9 +30,13 @@ class _ScoredLoop(BaseBackgroundLoop):
 
     def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
         return LoopFitness(
-            worker_name=self._worker_name, kind=FitnessKind.SCORED,
-            score=0.75, components={"filed": 4.0}, sample_count=4,
-            confidence=Confidence.OK, timestamp=ctx.window_end,
+            worker_name=self._worker_name,
+            kind=FitnessKind.SCORED,
+            score=0.75,
+            components={"filed": 4.0},
+            sample_count=4,
+            confidence=Confidence.OK,
+            timestamp=ctx.window_end,
         )
 
 
@@ -56,7 +60,10 @@ async def test_producer_scores_loops_and_emits(tmp_path) -> None:
     async def fetch() -> list[IssueRecord]:
         return [
             IssueRecord(
-                number=1, labels=["x"], is_pr=True, merged=True,
+                number=1,
+                labels=["x"],
+                is_pr=True,
+                merged=True,
                 created_at=datetime(2026, 6, 15, tzinfo=UTC),
             )
         ]
@@ -82,8 +89,11 @@ async def test_kill_switch_short_circuits(tmp_path) -> None:
     config = ConfigFactory.create(repo_root=tmp_path / "repo")
     bus = MagicMock()
     deps = LoopDeps(
-        event_bus=bus, stop_event=asyncio.Event(), status_cb=MagicMock(),
-        enabled_cb=MagicMock(return_value=False), sleep_fn=AsyncMock(),
+        event_bus=bus,
+        stop_event=asyncio.Event(),
+        status_cb=MagicMock(),
+        enabled_cb=MagicMock(return_value=False),
+        sleep_fn=AsyncMock(),
     )
 
     async def fetch() -> list[IssueRecord]:

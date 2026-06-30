@@ -63,9 +63,7 @@ async def test_scorecard_scenario(tmp_path) -> None:
     producer = FitnessScorecardLoop(
         config=d.config, deps=d.loop_deps, issue_fetcher=fetch, repo_root=tmp_path
     )
-    proposer = _Proposer(
-        worker_name="x_proposer", config=d.config, deps=d.loop_deps
-    )
+    proposer = _Proposer(worker_name="x_proposer", config=d.config, deps=d.loop_deps)
     producer.set_loops({"x_proposer": proposer, "fitness_scorecard": producer})
 
     payload = await producer._do_work()

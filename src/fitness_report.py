@@ -34,9 +34,7 @@ def render_fitness_markdown(results: list[LoopFitness]) -> str:
     return "\n".join(lines)
 
 
-def save_fitness_snapshots(
-    config: HydraFlowConfig, results: list[LoopFitness]
-) -> Path:
+def save_fitness_snapshots(config: HydraFlowConfig, results: list[LoopFitness]) -> Path:
     """Append each fitness row to ``<metrics_cache_dir>/fitness.jsonl``."""
     from file_util import append_jsonl, file_lock  # noqa: PLC0415
 

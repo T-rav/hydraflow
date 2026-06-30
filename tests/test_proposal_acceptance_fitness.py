@@ -56,16 +56,24 @@ def test_insufficient_data_below_min_samples() -> None:
 
 def test_ignores_other_labels_and_out_of_window() -> None:
     other_label = IssueRecord(
-        number=99, labels=["unrelated"], is_pr=True, merged=True,
+        number=99,
+        labels=["unrelated"],
+        is_pr=True,
+        merged=True,
         created_at=datetime(2026, 6, 10, tzinfo=UTC),
     )
     out_of_window = IssueRecord(
-        number=98, labels=["term-proposal"], is_pr=True, merged=True,
+        number=98,
+        labels=["term-proposal"],
+        is_pr=True,
+        merged=True,
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
     fit = proposal_acceptance_fitness(
         _ctx([other_label, out_of_window]),
-        worker_name="term_proposer", label="term-proposal", min_samples=1,
+        worker_name="term_proposer",
+        label="term-proposal",
+        min_samples=1,
     )
     assert fit.sample_count == 0
     assert fit.score is None  # no filed items in window

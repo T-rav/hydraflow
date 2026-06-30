@@ -100,12 +100,16 @@ async def test_fitness_scorecard_e2e(tmp_path) -> None:
     artifact = tmp_path / "docs" / "arch" / "generated" / "loop-fitness.md"
     assert artifact.exists(), f"loop-fitness.md not found at {artifact}"
     content = artifact.read_text()
-    assert "x_proposer" in content, f"scored loop name missing from artifact:\n{content}"
+    assert "x_proposer" in content, (
+        f"scored loop name missing from artifact:\n{content}"
+    )
 
     # ── 2. fitness.jsonl has one row per registered loop ─────────────────────
     jsonl_path = get_metrics_cache_dir(d.config) / "fitness.jsonl"
     assert jsonl_path.exists(), f"fitness.jsonl not found at {jsonl_path}"
-    rows = [json.loads(line) for line in jsonl_path.read_text().splitlines() if line.strip()]
+    rows = [
+        json.loads(line) for line in jsonl_path.read_text().splitlines() if line.strip()
+    ]
     assert len(rows) == 2, f"expected 2 rows (one per loop), got {len(rows)}: {rows}"
     worker_names = {r["worker_name"] for r in rows}
     assert "x_proposer" in worker_names

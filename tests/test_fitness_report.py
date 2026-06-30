@@ -12,15 +12,21 @@ _TS = datetime(2026, 6, 30, tzinfo=UTC)
 
 def _scored(name: str, score: float) -> LoopFitness:
     return LoopFitness(
-        worker_name=name, kind=FitnessKind.SCORED, score=score,
+        worker_name=name,
+        kind=FitnessKind.SCORED,
+        score=score,
         components={"filed": 10.0, "accepted": score * 10},
-        sample_count=10, confidence=Confidence.OK, timestamp=_TS,
+        sample_count=10,
+        confidence=Confidence.OK,
+        timestamp=_TS,
     )
 
 
 def _housekeeping(name: str) -> LoopFitness:
     return LoopFitness(
-        worker_name=name, kind=FitnessKind.HOUSEKEEPING, timestamp=_TS,
+        worker_name=name,
+        kind=FitnessKind.HOUSEKEEPING,
+        timestamp=_TS,
     )
 
 
