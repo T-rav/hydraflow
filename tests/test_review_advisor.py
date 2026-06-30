@@ -2002,3 +2002,39 @@ class TestReviewBlastRadiusState:
 
     def test_min_review_passes_high(self):
         assert min_review_passes_for_blast_radius("high") == 3
+
+
+class TestPostVerifyInputLens:
+    def test_post_verify_input_accepts_lens(self):
+        inp = PostVerifyInput(
+            surface="pr_review", diff="d", executor_verdict_summary="s", lens="security"
+        )
+        assert inp.lens == "security"
+
+    def test_post_verify_input_round_trips(self):
+        inp = PostVerifyInput(
+            surface="pr_review", diff="d", executor_verdict_summary="s", lens="spec"
+        )
+        assert PostVerifyInput.model_validate_json(inp.model_dump_json()).lens == "spec"
+
+    def test_build_prompt_varies_by_lens(self):
+        runner = _StubAdvisorRunner(
+            '{"verdict":"APPROVE","reasoning":"ok","disagreements":[]}'
+        )
+        adv = PostVerifyAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        base = adv._build_prompt(
+            PostVerifyInput(surface="pr_review", diff="d", executor_verdict_summary="s")
+        )
+        sec = adv._build_prompt(
+            PostVerifyInput(
+                surface="pr_review",
+                diff="d",
+                executor_verdict_summary="s",
+                lens="security",
+            )
+        )
+        assert sec != base
+        assert "security" in sec.lower()
