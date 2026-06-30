@@ -4176,3 +4176,130 @@ class TestWikiIngestAdvisor:
             summary="Diff",
         )
         assert "diff --git a/src/review_advisor.py" in descriptor
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Approve-path deterministic check + multi-lens PostVerify judge
+# ---------------------------------------------------------------------------
+
+
+class TestApproveGateHelpers:
+    """Tests for ReviewPhase helpers wired into the approve-path HybridGate."""
+
+    def test_lenses_for_maps_n_to_distinct_lenses(self, config) -> None:
+        phase = make_review_phase(config, default_mocks=True)
+        assert phase._lenses_for(1) == ["correctness"]
+        assert phase._lenses_for(2) == ["correctness", "security"]
+        assert phase._lenses_for(3) == ["correctness", "security", "spec"]
+
+    def test_approve_det_ok_when_no_alerts_none(self, config) -> None:
+        phase = make_review_phase(config, default_mocks=True)
+        result = phase._approve_deterministic_check(None)
+        assert result.ok is True
+
+    def test_approve_det_ok_when_no_alerts_empty(self, config) -> None:
+        phase = make_review_phase(config, default_mocks=True)
+        result = phase._approve_deterministic_check([])
+        assert result.ok is True
+
+    def test_approve_det_red_when_alerts_present(self, config) -> None:
+        from models import CodeScanningAlert
+
+        phase = make_review_phase(config, default_mocks=True)
+        alert = CodeScanningAlert(number=1, severity="high", rule="sql-injection")
+        result = phase._approve_deterministic_check([alert])
+        assert result.ok is False
+        assert len(result.failures) == 1
+        assert "1" in result.failures[0]  # alert count in the failure message
+
+    @pytest.mark.asyncio
+    async def test_lens_judge_calls_runner_with_correct_lens_and_maps_approve(
+        self, config
+    ) -> None:
+        from unittest.mock import AsyncMock, MagicMock
+
+        from convergence_gate import GateContext
+        from review_advisor import PostVerifyResult
+
+        phase = make_review_phase(config, default_mocks=True)
+
+        pv_result = PostVerifyResult(
+            verdict="APPROVE",
+            reasoning="looks good",
+            suggested_fix_direction="no changes",
+        )
+
+        # Patch _run_post_verify_for_surface on the phase instance
+        phase._run_post_verify_for_surface = AsyncMock(return_value=pv_result)
+
+        pr = MagicMock()
+        pr.number = 42
+        task = MagicMock()
+        task.id = 42
+
+        judge_fn = phase._post_verify_lens_judge(
+            pr=pr,
+            task=task,
+            wt_path="/tmp/wt",
+            result=MagicMock(),
+            diff="diff text",
+            worker_id=0,
+            surface="pr_review",
+        )
+
+        ctx = GateContext(
+            issue_number=42,
+            stage="review",
+            blast_radius="low",
+            attempts=0,
+            max_attempts=3,
+        )
+        verdict = await judge_fn(ctx, 0)
+
+        assert verdict.approve is True
+        # Verify the runner was called with lens="correctness" (low blast_radius -> 1 pass -> index 0)
+        call_kwargs = phase._run_post_verify_for_surface.call_args.kwargs
+        assert call_kwargs.get("lens") == "correctness"
+
+    @pytest.mark.asyncio
+    async def test_lens_judge_maps_veto_to_approve_false(self, config) -> None:
+        from unittest.mock import AsyncMock, MagicMock
+
+        from convergence_gate import GateContext
+        from review_advisor import PostVerifyResult
+
+        phase = make_review_phase(config, default_mocks=True)
+
+        pv_result = PostVerifyResult(
+            verdict="VETO",
+            reasoning="has bugs",
+            suggested_fix_direction="fix the loop",
+        )
+        phase._run_post_verify_for_surface = AsyncMock(return_value=pv_result)
+
+        pr = MagicMock()
+        pr.number = 7
+        task = MagicMock()
+        task.id = 7
+
+        judge_fn = phase._post_verify_lens_judge(
+            pr=pr,
+            task=task,
+            wt_path="/tmp/wt",
+            result=MagicMock(),
+            diff="diff text",
+            worker_id=0,
+            surface="pr_review",
+        )
+
+        ctx = GateContext(
+            issue_number=7,
+            stage="review",
+            blast_radius="low",
+            attempts=0,
+            max_attempts=3,
+        )
+        verdict = await judge_fn(ctx, 0)
+
+        assert verdict.approve is False
+        assert verdict.feedback == "fix the loop"

@@ -1489,6 +1489,7 @@ class ReviewPhase:
         attempt_number: int = 0,
         issue_number: int,
         log_pr_number: int | None = None,
+        lens: str | None = None,
     ) -> PostVerifyResult | None:
         """Run a single post-verify advisor invocation for ``surface``.
 
@@ -1567,6 +1568,7 @@ class ReviewPhase:
                     pre_flight_plan=pre_flight_plan,
                     attempt_number=attempt_number,
                     issue_number=issue_number,
+                    lens=lens,  # type: ignore[arg-type]
                 )
             )
         except Exception as exc:
@@ -3542,6 +3544,95 @@ class ReviewPhase:
             await self._prs.push_branch(wt_path, pr.branch)
 
         return re_result
+
+    # ------------------------------------------------------------------
+    # Approve-path gate helpers (Task 2 — convergence phase 2)
+    # ------------------------------------------------------------------
+
+    _APPROVE_GATE_LENSES: list[str] = ["correctness", "security", "spec"]
+
+    def _lenses_for(self, n: int) -> list[str]:
+        """Return the first *n* PostVerify lens identifiers.
+
+        Maps blast-radius pass count (1 / 2 / 3) to the ordered lens
+        sequence used by the approve-path :class:`HybridGate` judge.
+        """
+        return self._APPROVE_GATE_LENSES[:n]
+
+    def _approve_deterministic_check(
+        self,
+        code_scanning_alerts: list[Any] | None,
+    ) -> Any:
+        """Deterministic gate signal: block when open code-scanning alerts exist.
+
+        Returns a :class:`~convergence_gate.DetResult` with ``ok=True`` when
+        *code_scanning_alerts* is ``None`` or empty; ``ok=False`` with a
+        human-readable failure message when at least one alert is present.
+        """
+        from convergence_gate import DetResult  # noqa: PLC0415
+
+        if not code_scanning_alerts:
+            return DetResult(ok=True)
+        n = len(code_scanning_alerts)
+        return DetResult(ok=False, failures=[f"open code-scanning alerts: {n}"])
+
+    def _post_verify_lens_judge(
+        self,
+        *,
+        pr: Any,
+        task: Any,
+        wt_path: Any,
+        result: Any,
+        diff: str,
+        worker_id: int,
+        surface: str,
+    ) -> Callable[..., Any]:
+        """Return an async ``judge(ctx, i) -> JudgeVerdict`` for the approve gate.
+
+        The returned callable is the *judge* slot of a
+        :class:`~convergence_gate.HybridGate`.  On each invocation it:
+
+        1. Resolves the lens from ``_lenses_for(min_passes)[i]``.
+        2. Calls :meth:`_run_post_verify_for_surface` with that lens.
+        3. Maps ``PostVerifyResult.verdict == "APPROVE"`` →
+           ``JudgeVerdict(approve=True)``; VETO → ``approve=False``.
+        4. On any non-credit/non-bug exception: calls
+           ``reraise_on_credit_or_bug`` first, then returns a degraded
+           ``JudgeVerdict(approve=True, feedback="judge-degraded")``
+           (fail-open, matching the ``HybridGate`` default).
+        """
+        from convergence_gate import JudgeVerdict  # noqa: PLC0415
+        from exception_classify import reraise_on_credit_or_bug  # noqa: PLC0415
+        from review_advisor import min_review_passes_for_blast_radius  # noqa: PLC0415
+
+        async def _judge(ctx: Any, i: int) -> Any:
+            n = min_review_passes_for_blast_radius(ctx.blast_radius)
+            lens = self._lenses_for(n)[i]
+            try:
+                pv = await self._run_post_verify_for_surface(
+                    surface=surface,
+                    diff=diff,
+                    spec=task.body or None,
+                    executor_verdict_summary=(result.summary or result.verdict.value),
+                    pre_flight_plan=self._advisor_pre_flight_plan.get(
+                        (surface, pr.number)
+                    ),
+                    issue_number=task.id,
+                    log_pr_number=pr.number,
+                    lens=lens,
+                )
+            except Exception as exc:  # noqa: BLE001
+                reraise_on_credit_or_bug(exc)
+                return JudgeVerdict(approve=True, feedback="judge-degraded")
+            if pv is None:
+                # Advisor degraded (kill-switch off or runner crash) — fail open.
+                return JudgeVerdict(approve=True, feedback="judge-degraded")
+            return JudgeVerdict(
+                approve=pv.verdict == "APPROVE",
+                feedback=pv.suggested_fix_direction,
+            )
+
+        return _judge
 
     def _uses_convergence_gate(self) -> bool:
         """Whether the review reject/escalate decision routes through the gate.
