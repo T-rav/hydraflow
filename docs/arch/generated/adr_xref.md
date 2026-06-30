@@ -99,6 +99,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0090 | `src.dashboard_routes._atlas_routes`, `src.ubiquitous_language` |
 | ADR-0091 | — |
 | ADR-0092 | `src.agent`, `src.preflight.runner`, `src.untrusted_text` |
+| ADR-0093 | `src.base_background_loop`, `src.fitness_scorecard_loop`, `src.loop_fitness` |
 
 ## Module → ADRs
 
@@ -115,7 +116,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.agent_cli` | ADR-0004 |
 | `src.assumption_surfacer` | ADR-0064 |
 | `src.auto_agent_preflight_loop` | ADR-0050, ADR-0063, ADR-0084 |
-| `src.base_background_loop` | ADR-0049, ADR-0055, ADR-0084 |
+| `src.base_background_loop` | ADR-0049, ADR-0055, ADR-0084, ADR-0093 |
 | `src.base_runner` | ADR-0004, ADR-0032, ADR-0055, ADR-0066 |
 | `src.bg_worker_manager` | ADR-0049 |
 | `src.branch_protection_audit` | ADR-0082 |
@@ -152,6 +153,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.exception_classify` | ADR-0055 |
 | `src.fake_coverage_auditor_loop` | ADR-0045 |
 | `src.file_util` | ADR-0021 |
+| `src.fitness_scorecard_loop` | ADR-0093 |
 | `src.flake_tracker_loop` | ADR-0045 |
 | `src.gate_activation_check` | ADR-0082 |
 | `src.gate_activator_loop` | ADR-0082 |
@@ -166,6 +168,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.issue_store` | ADR-0006, ADR-0022, ADR-0041, ADR-0084 |
 | `src.label_drift_watcher_loop` | ADR-0088 |
 | `src.live_corpus_replay_loop` | ADR-0086 |
+| `src.loop_fitness` | ADR-0093 |
 | `src.memory_backlog_loop` | ADR-0089 |
 | `src.memory_backlog_mirror` | ADR-0089 |
 | `src.merge_state_watcher` | ADR-0075 |

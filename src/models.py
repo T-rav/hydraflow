@@ -2511,6 +2511,15 @@ class BackgroundWorkerStatusPayload(TypedDict):
     details: dict[str, object]
 
 
+class LoopFitnessUpdatePayload(TypedDict):
+    """Payload for ``EventType.LOOP_FITNESS_UPDATE``."""
+
+    generated_at: str
+    window_days: int
+    loop_count: int
+    scored_count: int
+
+
 class OrchestratorStatusPayload(TypedDict, total=False):
     """Payload for ``EventType.ORCHESTRATOR_STATUS``."""
 

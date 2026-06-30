@@ -115,6 +115,7 @@ class TestEventTypeEnum:
             "CONCERN_FORWARDED",
             "CONCERN_ADDRESSED",
             "SHIPPED_WITH_KNOWN_GAP",
+            "LOOP_FITNESS_UPDATE",
         }
         actual = {member.name for member in EventType}
         assert expected == actual

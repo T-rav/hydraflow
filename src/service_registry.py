@@ -43,6 +43,7 @@ from epic_sweeper_loop import EpicSweeperLoop
 from events import EventBus
 from execution import SubprocessRunner
 from fake_coverage_auditor_loop import FakeCoverageAuditorLoop
+from fitness_scorecard_loop import FitnessScorecardLoop
 from flake_tracker_loop import FlakeTrackerLoop
 from gate_activation_check import check_gate_activation
 from gate_activator_loop import GateActivatorLoop  # noqa: TCH001
@@ -60,6 +61,7 @@ from live_corpus_replay_loop import (
     LiveCorpusReplayLoop,  # noqa: TCH001 — dataclass annotation
 )
 from log_ingest_loop import LogIngestLoop  # noqa: TCH001 — used in dataclass field
+from loop_fitness import IssueRecord as _IssueRecord
 from memory_backlog_loop import MemoryBacklogLoop
 from merge_conflict_resolver import MergeConflictResolver
 from merge_state_watcher_loop import MergeStateWatcherLoop
@@ -128,6 +130,100 @@ if TYPE_CHECKING:
     from metrics_manager import MetricsManager
 
 logger = logging.getLogger("hydraflow.service_registry")
+
+_ISSUE_LIMIT = 1000
+_PR_LIMIT = 1000
+
+
+def _make_fitness_issue_fetcher(prs: PRManager):
+    """Return an async closure that fetches issues + PRs and maps them to IssueRecord.
+
+    Uses two ``gh`` CLI calls via ``prs._run_gh`` (the same low-level seam
+    used by StaleIssueLoop). If either call returns exactly the --limit count,
+    a warning is logged so the caller knows results may be capped.
+    """
+    import json as _json
+    from datetime import datetime as _datetime
+
+    def _parse_dt(s: str | None) -> _datetime | None:
+        if not s:
+            return None
+        return _datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+    async def _fetcher() -> list[_IssueRecord]:
+        records: list[_IssueRecord] = []
+
+        # -- issues --
+        raw_issues = await prs._run_gh(
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            prs._repo,
+            "--state",
+            "all",
+            "--limit",
+            str(_ISSUE_LIMIT),
+            "--json",
+            "number,state,labels,createdAt,closedAt",
+        )
+        issues: list[dict] = _json.loads(raw_issues) if raw_issues else []
+        if len(issues) == _ISSUE_LIMIT:
+            logger.warning(
+                "fitness_issue_fetcher: issue results capped at %d; "
+                "some issues may be missing from the fitness window",
+                _ISSUE_LIMIT,
+            )
+        for item in issues:
+            records.append(
+                _IssueRecord(
+                    number=item["number"],
+                    labels=[lbl["name"] for lbl in item.get("labels", [])],
+                    is_pr=False,
+                    state=item["state"].lower(),
+                    merged=False,
+                    created_at=_parse_dt(item.get("createdAt")),  # type: ignore[arg-type]
+                    closed_at=_parse_dt(item.get("closedAt")),
+                )
+            )
+
+        # -- pull requests --
+        raw_prs = await prs._run_gh(
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            prs._repo,
+            "--state",
+            "all",
+            "--limit",
+            str(_PR_LIMIT),
+            "--json",
+            "number,state,labels,createdAt,closedAt,mergedAt",
+        )
+        pull_requests: list[dict] = _json.loads(raw_prs) if raw_prs else []
+        if len(pull_requests) == _PR_LIMIT:
+            logger.warning(
+                "fitness_issue_fetcher: PR results capped at %d; "
+                "some PRs may be missing from the fitness window",
+                _PR_LIMIT,
+            )
+        for item in pull_requests:
+            records.append(
+                _IssueRecord(
+                    number=item["number"],
+                    labels=[lbl["name"] for lbl in item.get("labels", [])],
+                    is_pr=True,
+                    state=item["state"].lower(),
+                    merged=item.get("mergedAt") is not None,
+                    created_at=_parse_dt(item.get("createdAt")),  # type: ignore[arg-type]
+                    closed_at=_parse_dt(item.get("closedAt")),
+                )
+            )
+
+        return records
+
+    return _fetcher
 
 
 @dataclass
@@ -230,6 +326,7 @@ class ServiceRegistry:
     entry_evidence_loop: EntryEvidenceLoop
     live_corpus_replay_loop: LiveCorpusReplayLoop
     triage_retry_loop: TriageRetryLoop
+    fitness_scorecard_loop: FitnessScorecardLoop
 
     # Optional integrations
 
@@ -1381,6 +1478,14 @@ def build_services(
         dedup_path=config.data_root / "dedup" / "entry_evidence.json",
     )
 
+    _fitness_issue_fetcher = _make_fitness_issue_fetcher(prs)
+    fitness_scorecard_loop = FitnessScorecardLoop(
+        config=config,
+        deps=loop_deps,
+        issue_fetcher=_fitness_issue_fetcher,
+        repo_root=config.repo_root,
+    )
+
     return ServiceRegistry(
         observability=observability,
         workspaces=workspaces,
@@ -1462,4 +1567,5 @@ def build_services(
         entry_evidence_loop=entry_evidence_loop,
         live_corpus_replay_loop=_live_corpus_replay_loop,
         triage_retry_loop=triage_retry_loop,
+        fitness_scorecard_loop=fitness_scorecard_loop,
     )

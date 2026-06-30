@@ -1425,6 +1425,33 @@ def _build_triage_retry(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
+def _build_fitness_scorecard(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build FitnessScorecardLoop for scenarios (ADR-0093).
+
+    Read-only caretaker loop. Scenarios that need to assert on emitted
+    LOOP_FITNESS_UPDATE events can seed ``ports['fitness_issue_fetcher']``
+    with an async callable returning a list of IssueRecord-like objects.
+    The default is a no-op async function returning an empty list, which
+    is sufficient for smoke/wiring tests.
+    """
+    from fitness_scorecard_loop import FitnessScorecardLoop  # noqa: PLC0415
+
+    issue_fetcher = ports.get("fitness_issue_fetcher")
+    if issue_fetcher is None:
+
+        async def _no_issues() -> list:
+            return []
+
+        issue_fetcher = _no_issues
+        ports["fitness_issue_fetcher"] = issue_fetcher
+
+    return FitnessScorecardLoop(
+        config=config,
+        deps=deps,
+        issue_fetcher=issue_fetcher,
+    )
+
+
 _BUILDERS: dict[str, Any] = {
     # phase 1
     "ci_monitor": _build_ci_monitor,
@@ -1488,6 +1515,8 @@ _BUILDERS: dict[str, Any] = {
     "staging_promotion": _build_staging_promotion,
     # factory-phase drift mitigation (ADR-0063 W2)
     "triage_retry": _build_triage_retry,
+    # loop fitness scorecard (ADR-0093)
+    "fitness_scorecard": _build_fitness_scorecard,
 }
 
 

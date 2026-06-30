@@ -72,6 +72,10 @@ SKIP_LIST: set[str] = {
     "concern_forwarded",
     "concern_addressed",
     "shipped_with_known_gap",
+    # Loop fitness events are consumed server-side (fitness.jsonl + artifact
+    # regeneration); the dashboard reads fitness via /api/loop-fitness REST,
+    # not via a reducer case.
+    "loop_fitness_update",
 }
 
 

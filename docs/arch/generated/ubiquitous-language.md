@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_46 terms across 3 bounded contexts._
+_49 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -247,6 +247,30 @@ Trust-fleet loop that detects uncovered methods on fake adapters under `src/mock
 - Maximum 3 repair attempts before HITL escalation.
 - Kill-switch is via `enabled_cb("fake_coverage_auditor")` (ADR-0049).
 
+## FitnessContext
+
+**Kind:** `value_object` · **Context:** `caretaker` · **Anchor:** `src/loop_fitness.py:FitnessContext` · **Confidence:** `accepted`
+**Aliases:** `fitness context`, `loop fitness context`
+
+Frozen, data-only Pydantic model that is the **sole input** to any `loop_fitness()` call. Carries the evaluation window (`window_start`, `window_end`), this loop's `BACKGROUND_WORKER_STATUS` events pre-filtered to the window, a snapshot list of `IssueRecord`s relevant to the loop, and optional per-loop cost. Contains no live GitHub client. The purity constraint (ADR-0093 §2) requires that `loop_fitness()` reads only from `ctx` — no network, no clock, no mutable self state — which lets the same function score live history now and replayed history in the future optimizer.
+
+**Invariants:**
+- Carries no live client or callable; the model is frozen (`model_config = {"frozen": True}`).
+- `issues` is a snapshot list of `IssueRecord` rows; each loop attributes its own artifacts by querying this list for its label.
+- The same `FitnessContext` instance that powers the live scorecard can power an offline optimizer replay — that equivalence is the design invariant this type enforces.
+
+## FitnessScorecardLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/fitness_scorecard_loop.py:FitnessScorecardLoop` · **Confidence:** `accepted`
+**Aliases:** `fitness scorecard`, `fitness scorecard loop`, `loop fitness scorecard`
+
+Read-only caretaker loop (ADR-0029) that produces the per-loop fitness scorecard on a configurable cadence (default 86400 s). Each tick it builds one `FitnessContext` per registered loop, calls every loop's `loop_fitness(ctx)`, persists results to `fitness.jsonl`, regenerates `docs/arch/generated/loop-fitness.md`, and emits a `LOOP_FITNESS_UPDATE` event. Mutates no loop state, so it sits off the ADR-0046 recursion ladder. Kill-switch via `enabled_cb("fitness_scorecard")` per ADR-0049. (ADR-0093)
+
+**Invariants:**
+- Kill-switch is via `enabled_cb("fitness_scorecard")` at the top of `_do_work()` (ADR-0049).
+- The loop is read-only: it calls `loop_fitness()` on peer loops but changes no loop config or state.
+- Declares its own fitness as `HOUSEKEEPING` — it produces no GitHub proposals or artifacts that have an acceptance lifecycle.
+
 ## FlakeTrackerLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/flake_tracker_loop.py:FlakeTrackerLoop` · **Confidence:** `accepted`
@@ -334,6 +358,18 @@ configured drift retry budget is exhausted.
 - Empty shadow corpus is an idle tick, not an error.
 - Drift issues are auto-agent routed before any human escalation.
 - Dispatcher registration is keyed by `(adapter, command)` so cassette
+
+## LoopFitness
+
+**Kind:** `value_object` · **Context:** `caretaker` · **Anchor:** `src/loop_fitness.py:LoopFitness` · **Confidence:** `accepted`
+**Aliases:** `loop fitness`, `loop fitness score`, `fitness result`
+
+The result of calling a background loop's `loop_fitness(ctx)` method for one evaluation window. Carries `kind` (`SCORED` or `HOUSEKEEPING`), an optional normalized `score` in [0, 1] valid only for intra-loop trend comparison, raw `components` for diagnosis, `sample_count`, and a `Confidence` signal (`OK` or `INSUFFICIENT_DATA`) keyed off `sample_count` vs a per-loop threshold. Produced by every `BaseBackgroundLoop` subclass; consumed by `FitnessScorecardLoop` and persisted to `fitness.jsonl`. (ADR-0093)
+
+**Invariants:**
+- `score` is normalized 0–1 and valid **only for intra-loop use** (trend over time, or intra-loop config ranking). Cross-loop comparison of `score` is architecturally invalid.
+- When `kind` is `HOUSEKEEPING`, `score` is always `None`; `components` carries raw counters.
+- `confidence` is `INSUFFICIENT_DATA` when `sample_count` is below the loop's `min_samples` threshold; `score` is `None` in that case regardless of `kind`.
 
 ## MergeStateWatcherLoop
 

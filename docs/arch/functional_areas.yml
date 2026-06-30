@@ -22,6 +22,7 @@ areas:
       - EdgeProposerLoop
       - EntryEvidenceLoop
       - EpicMonitorLoop
+      - FitnessScorecardLoop
       - EpicSweeperLoop
       - GitHubCacheLoop
       - HealthMonitorLoop
