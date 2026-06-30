@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Literal, Protocol, runtime_checkable
 
 from exception_classify import reraise_on_credit_or_bug
 from review_advisor import min_review_passes_for_blast_radius
 
 
-class GateDecision(str, Enum):
+class GateDecision(StrEnum):
     ADVANCE = "ADVANCE"
     LOOP_BACK = "LOOP_BACK"
     ESCALATE = "ESCALATE"
