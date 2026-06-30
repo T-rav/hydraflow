@@ -1,17 +1,21 @@
-"""s50 — convergence gate: REQUEST_CHANGES loops back, APPROVE merges; ledger converged.
+"""s50 — convergence gate: REQUEST_CHANGES loops back, APPROVE merges.
 
 Exercises the end-to-end convergence gate path (``convergence_gate_enabled=True``,
 enabled via ``HYDRAFLOW_CONVERGENCE_GATE_ENABLED=true`` in the hydraflow service
 environment — see docker-compose.sandbox.yml):
 
-1. Gate ON — the convergence ``HybridGate`` routes the review reject/advance decision.
-2. First review returns REQUEST_CHANGES → gate records LOOP_BACK, ledger lap 1 closed,
+1. Gate ON — the convergence ``HybridGate`` is wired only into the REJECT path
+   (``_handle_rejected_review`` → ``_convergence_decision``).
+2. First review returns REQUEST_CHANGES → gate's deterministic check is RED (review
+   not approved) → gate records LOOP_BACK; ledger lap 1 is closed via ``mark_lap()``;
    issue transitions back to hydraflow-ready.
-3. Second review returns APPROVE → gate's deterministic check is GREEN, gate records
-   ADVANCE, ``recompute_converged`` sets ``converged=True`` on the ledger.
-4. PR is merged; ``/api/issues/history`` shows ``outcome=="merged"`` for issue #1.
+3. Second review returns APPROVE → the APPROVE path is UNGATED in Phase 1; the gate
+   and ``recompute_converged`` are NOT called. ``ledger.converged`` remains False.
+4. PR is merged via the normal approve path; ``/api/issues/history`` shows
+   ``outcome=="merged"`` for issue #1.
 5. ``/api/state`` shows the ``convergence_ledgers`` entry with ``laps >= 1`` and
-   ``converged: true`` after the approve pass.
+   ``stage_state["review"]["last_verdict"] == "LOOP_BACK"`` — confirming the gate
+   recorded the reject lap. ``converged`` is NOT asserted (ungated in Phase 1).
 """
 
 from __future__ import annotations
@@ -83,8 +87,11 @@ async def assert_outcome(api, page) -> None:
         timeout=240.0,
     )
 
-    # --- 2. /api/state shows convergence_ledgers with laps >= 1 and converged=True ---
-    def _ledger_converged(payload: object) -> bool:
+    # --- 2. /api/state shows convergence_ledgers with the reject lap recorded ---
+    # Phase 1 gates only the REJECT path. On REQUEST_CHANGES the gate records
+    # LOOP_BACK and closes lap 1 via mark_lap(). The APPROVE path is ungated, so
+    # ledger.converged is never set to True in Phase 1 — do not assert converged.
+    def _ledger_recorded_loopback(payload: object) -> bool:
         if not isinstance(payload, dict):
             return False
         ledgers = payload.get("convergence_ledgers")
@@ -98,12 +105,17 @@ async def assert_outcome(api, page) -> None:
                 continue
             if entry.get("issue_number") != 1:
                 continue
-            if entry.get("converged") is True and entry.get("laps", 0) >= 1:
+            # The reject closed lap 1 — laps >= 1.
+            if entry.get("laps", 0) < 1:
+                continue
+            # The gate recorded LOOP_BACK on the reject pass.
+            review_stage = entry.get("stage_state", {}).get("review", {})
+            if review_stage.get("last_verdict") == "LOOP_BACK":
                 return True
         return False
 
     await api.wait_until(
         "/api/state",
-        _ledger_converged,
+        _ledger_recorded_loopback,
         timeout=30.0,
     )
