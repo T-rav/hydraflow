@@ -3733,6 +3733,12 @@ class ReviewPhase:
             if post_verify_judge is not None:
                 _judge = post_verify_judge
             else:
+                logger.warning(
+                    "convergence_decision: approve gate for issue #%d is using a "
+                    "fail-open stub judge (post_verify_judge=None). No live caller "
+                    "should reach this path; check call sites if seen in production.",
+                    issue_number,
+                )
 
                 async def _judge(_ctx: GateContext, _i: int) -> JudgeVerdict:
                     return JudgeVerdict(approve=True)
@@ -3999,7 +4005,9 @@ class ReviewPhase:
 
         * **ADVANCE** → ``_handle_approved_merge`` (the recorded
           ``last_verdict == "ADVANCE"`` makes ``recompute_converged`` flip
-          ``ledger.converged`` to True). Worktree destroyed.
+          ``ledger.converged`` to True inside ``_convergence_decision`` via
+          ``recompute_converged``, BEFORE control returns here). Worktree
+          destroyed.
         * **LOOP_BACK** → re-queue to ``ready`` with the gate feedback,
           mirroring the reject loop-back contract. Worktree preserved.
         * **ESCALATE** → HITL. Worktree destroyed.
@@ -4090,7 +4098,7 @@ class ReviewPhase:
                 cause=cause,
                 origin_label=self._config.review_label[0],
                 comment=(
-                    f"**Convergence gate escalation** — {cause}. "
+                    f"**Convergence gate escalation.** {cause}. "
                     f"Escalating to human review."
                 ),
                 post_on_pr=False,
@@ -4098,6 +4106,12 @@ class ReviewPhase:
                 task=task,
             )
         )
+        if result.transcript:
+            await self._suggest_memory(
+                result.transcript,
+                "review_convergence_escalation",
+                f"PR #{pr.number}",
+            )
         return False  # Destroy worktree
 
     # Delegate properties for backward compatibility in tests

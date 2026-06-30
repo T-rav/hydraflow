@@ -3288,6 +3288,74 @@ class TestApproveConvergenceGate:
         ledger = phase._state.get_convergence_ledger(pr.issue_number)
         assert ledger is None or ledger.stage_state.get("review") is None
 
+    @pytest.mark.asyncio
+    async def test_lens_judge_exercises_all_3_lenses_for_high_blast_no_index_error(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """High-blast (N=3) judge: all 3 lenses exercised, no IndexError.
+
+        Constructs the lens judge via ``_post_verify_lens_judge``, stubs
+        ``_run_post_verify_for_surface`` to record the ``lens`` kwarg on each
+        call, then drives it for i=0,1,2 with a high-blast GateContext.
+        Asserts captured lenses == ['correctness','security','spec'] and that
+        no IndexError (or any exception) is raised.
+        """
+        from convergence_gate import GateContext, JudgeVerdict
+        from review_advisor import PostVerifyResult
+
+        config.convergence_gate_enabled = True
+        phase = make_review_phase(config, default_mocks=True)
+
+        issue = TaskFactory.create()
+        pr = PRInfoFactory.create(issue_number=issue.id)
+        wt_path = config.workspace_path_for_issue(issue.id)
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        # Set the blast radius on the state so _post_verify_lens_judge resolves N=3.
+        phase._state.set_review_blast_radius(issue.id, "high")
+
+        captured_lenses: list[str] = []
+
+        async def _fake_post_verify(*, lens=None, **_kwargs):
+            captured_lenses.append(lens)
+            return PostVerifyResult(
+                verdict="APPROVE",
+                reasoning="ok",
+                suggested_fix_direction="none",
+            )
+
+        phase._run_post_verify_for_surface = _fake_post_verify  # type: ignore[method-assign]
+
+        result_stub = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
+        judge = phase._post_verify_lens_judge(
+            pr=pr,
+            task=issue,
+            wt_path=wt_path,
+            result=result_stub,
+            diff="diff text",
+            worker_id=0,
+            surface="pr_review",
+        )
+
+        # Build a high-blast GateContext (blast_radius="high" → N=3 lenses).
+        ctx = GateContext(
+            issue_number=issue.id,
+            stage="review",
+            blast_radius="high",
+            attempts=0,
+            max_attempts=5,
+        )
+
+        # Drive i=0,1,2 — must not raise IndexError.
+        verdicts = []
+        for i in range(3):
+            verdict = await judge(ctx, i)
+            verdicts.append(verdict)
+
+        assert captured_lenses == ["correctness", "security", "spec"]
+        assert all(isinstance(v, JudgeVerdict) for v in verdicts)
+        assert all(v.approve is True for v in verdicts)
+
 
 # ---------------------------------------------------------------------------
 # Baseline policy integration in _review_one_inner
