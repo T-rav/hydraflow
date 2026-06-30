@@ -154,6 +154,15 @@ class PostVerifyInput(BaseModel):
 # contains those words coincidentally (T24.5 closed I5).
 _MIN_SIGNAL_MATCH_LEN = 10
 
+# Per-lens focus preambles prepended to the PostVerifyAdvisor prompt when a
+# lens is set. Promoted to module-level so tests can import the mapping and
+# verify prompt content without instantiating the full advisor.
+_POST_VERIFY_LENS_GUIDANCE: dict[str, str] = {
+    "correctness": "Focus this review pass on CORRECTNESS: logic errors, broken edge cases, race conditions, wrong behavior.",
+    "security": "Focus this review pass on SECURITY and RISK: injection, authz/authn, secrets, unsafe deserialization, blast radius.",
+    "spec": "Focus this review pass on SPEC ADHERENCE: does the diff do what the issue/spec requires, nothing more, nothing less.",
+}
+
 
 def _validate_disagreements_against_plan(
     disagreements: list[Disagreement],
@@ -845,13 +854,8 @@ class PostVerifyAdvisor:
             '"suggested_fix_direction":str|null}'
         )
         prompt = "\n".join(sections)
-        _LENS_GUIDANCE = {
-            "correctness": "Focus this review pass on CORRECTNESS: logic errors, broken edge cases, race conditions, wrong behavior.",
-            "security": "Focus this review pass on SECURITY and RISK: injection, authz/authn, secrets, unsafe deserialization, blast radius.",
-            "spec": "Focus this review pass on SPEC ADHERENCE: does the diff do what the issue/spec requires, nothing more, nothing less.",
-        }
         if inp.lens:
-            prompt = f"{_LENS_GUIDANCE[inp.lens]}\n\n{prompt}"
+            prompt = f"{_POST_VERIFY_LENS_GUIDANCE[inp.lens]}\n\n{prompt}"
         return prompt
 
 
