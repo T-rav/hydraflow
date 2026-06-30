@@ -8,6 +8,7 @@ loop state -- read-only, so off the ADR-0046 recursion ladder.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,6 +24,8 @@ from loop_fitness import (
     IssueRecord,
     LoopFitness,
 )
+
+logger = logging.getLogger("hydraflow.fitness_scorecard")
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -85,7 +88,23 @@ class FitnessScorecardLoop(BaseBackgroundLoop):
                 worker_status=status_by_worker.get(name, []),
                 issues=issues,
             )
-            results.append(loop.loop_fitness(ctx))
+            try:
+                results.append(loop.loop_fitness(ctx))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "loop_fitness raised for %r; using fallback HOUSEKEEPING row",
+                    name,
+                    exc_info=True,
+                )
+                results.append(
+                    LoopFitness(
+                        worker_name=name,
+                        kind=FitnessKind.HOUSEKEEPING,
+                        confidence=Confidence.INSUFFICIENT_DATA,
+                        notes=f"loop_fitness raised: {type(exc).__name__}: {exc}",
+                        timestamp=window_end,
+                    )
+                )
 
         save_fitness_snapshots(self._config, results)
 

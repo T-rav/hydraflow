@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from exception_classify import reraise_on_credit_or_bug
-from loop_fitness import FitnessContext, LoopFitness
+from loop_fitness import Confidence, FitnessContext, FitnessKind, LoopFitness
 
 if TYPE_CHECKING:
     from scripts.gates.activation import ActivationProposal
@@ -110,13 +110,16 @@ class GateActivatorLoop(BaseBackgroundLoop):
         return self._config.gate_activator_interval
 
     def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
-        from loop_fitness import proposal_acceptance_fitness  # noqa: PLC0415
-
-        return proposal_acceptance_fitness(
-            ctx,
+        # GateActivatorLoop files ONE stable-titled, deduped issue and CLOSES IT
+        # ITSELF (_resolve_activation_issue) when no proposals remain. "Closed"
+        # therefore reflects the loop's own housekeeping, not human acceptance --
+        # there is no clean per-proposal acceptance signal here. Return HOUSEKEEPING
+        # so the scorecard is honest rather than counting self-closures as accepted.
+        return LoopFitness(
             worker_name=self._worker_name,
-            label="hydraflow-gate-activation",
-            min_samples=self._config.fitness_min_samples,
+            kind=FitnessKind.HOUSEKEEPING,
+            confidence=Confidence.INSUFFICIENT_DATA,
+            timestamp=ctx.window_end,
         )
 
     async def _do_work(self) -> dict[str, Any] | None:  # noqa: PLR0911

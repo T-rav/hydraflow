@@ -1,11 +1,17 @@
-"""Tests: TermProposerLoop, EdgeProposerLoop, and GateActivatorLoop each report
-SCORED fitness via ``proposal_acceptance_fitness``.
+"""Tests: TermProposerLoop and EdgeProposerLoop report SCORED fitness via
+``proposal_acceptance_fitness``; GateActivatorLoop reports HOUSEKEEPING.
 
-For each loop:
-- Build with its real constructor (config from ConfigFactory, MagicMock/AsyncMock
+For TermProposerLoop and EdgeProposerLoop:
+- Build with the real constructor (config from ConfigFactory, MagicMock/AsyncMock
   for collaborators that only call loop_fitness via self._config / self._worker_name).
 - Craft a FitnessContext with 3 records carrying the loop's label, 2 accepted.
 - Assert kind==SCORED, confidence==OK, score==approx(2/3), components correct.
+
+For GateActivatorLoop:
+- GateActivatorLoop files ONE stable-titled, deduped issue and closes it itself
+  (_resolve_activation_issue) when no proposals remain. Closed issues reflect the
+  loop's own housekeeping, not human acceptance -- no honest per-proposal signal
+  exists. Assert kind==HOUSEKEEPING, score is None.
 """
 
 from __future__ import annotations
@@ -120,7 +126,13 @@ def test_edge_proposer_reports_scored_fitness(tmp_path: Path) -> None:
     assert fit.worker_name == "edge_proposer"
 
 
-def test_gate_activator_reports_scored_fitness(tmp_path: Path) -> None:
+def test_gate_activator_reports_housekeeping_fitness(tmp_path: Path) -> None:
+    """GateActivatorLoop must return HOUSEKEEPING -- not SCORED.
+
+    The loop closes its own issue via _resolve_activation_issue when no
+    proposals remain, so "closed" reflects housekeeping, not human acceptance.
+    There is no honest per-proposal acceptance signal for this loop.
+    """
     from dedup_store import DedupStore
     from gate_activator_loop import GateActivatorLoop
 
@@ -137,11 +149,10 @@ def test_gate_activator_reports_scored_fitness(tmp_path: Path) -> None:
         detector=AsyncMock(return_value=[]),
     )
 
+    # Context doesn't matter for HOUSEKEEPING; use an issue ctx for completeness.
     label = "hydraflow-gate-activation"
     fit = loop.loop_fitness(_issue_ctx(label))
 
-    assert fit.kind is FitnessKind.SCORED
-    assert fit.confidence is Confidence.OK
-    assert fit.score == pytest.approx(2 / 3)
-    assert fit.components == {"filed": 3.0, "accepted": 2.0}
+    assert fit.kind is FitnessKind.HOUSEKEEPING
+    assert fit.score is None
     assert fit.worker_name == "gate_activator"

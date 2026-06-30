@@ -120,3 +120,65 @@ def test_producer_declares_housekeeping_fitness(tmp_path) -> None:
         window_end=datetime(2026, 6, 30, tzinfo=UTC),
     )
     assert loop.loop_fitness(ctx).kind is FitnessKind.HOUSEKEEPING
+
+
+class _RaisingLoop(BaseBackgroundLoop):
+    """Stub loop whose loop_fitness always raises a RuntimeError."""
+
+    def _get_default_interval(self) -> int:
+        return 60
+
+    async def _do_work(self):
+        return {}
+
+    def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
+        raise RuntimeError("boom from loop_fitness")
+
+
+@pytest.mark.asyncio
+async def test_per_loop_isolation_on_loop_fitness_error(tmp_path) -> None:
+    """If one loop's loop_fitness raises, the tick must still complete.
+
+    The healthy loop keeps its real row; the raising loop gets a HOUSEKEEPING
+    fallback whose notes mention the exception.  The jsonl artifact is written
+    and the LOOP_FITNESS_UPDATE event is published.
+    """
+    config = ConfigFactory.create(repo_root=tmp_path / "repo")
+    bus = MagicMock()
+    bus.publish = AsyncMock()
+    bus.load_events_since = AsyncMock(return_value=[])
+
+    async def fetch() -> list[IssueRecord]:
+        return []
+
+    scorecard = FitnessScorecardLoop(
+        config=config, deps=_deps(bus), issue_fetcher=fetch, repo_root=tmp_path
+    )
+    healthy = _ScoredLoop(worker_name="healthy", config=config, deps=_deps(bus))
+    raiser = _RaisingLoop(worker_name="raiser", config=config, deps=_deps(bus))
+    scorecard.set_loops({"healthy": healthy, "raiser": raiser})
+
+    # (a) _do_work completes without raising
+    result = await scorecard._do_work()
+    assert result is not None
+
+    # (b) fitness.jsonl and artifact written
+    fitness_jsonl = config.repo_data_root / "metrics" / "fitness.jsonl"
+    assert fitness_jsonl.exists()
+    assert (tmp_path / "docs/arch/generated/loop-fitness.md").exists()
+
+    # (c) LOOP_FITNESS_UPDATE event published
+    bus.publish.assert_awaited_once()
+
+    # (d) healthy loop has its real SCORED row; raising loop has HOUSEKEEPING fallback
+    import json
+
+    rows = [json.loads(line) for line in fitness_jsonl.read_text().splitlines()]
+    by_worker = {r["worker_name"]: r for r in rows}
+
+    assert by_worker["healthy"]["kind"] == FitnessKind.SCORED.value
+    raiser_row = by_worker["raiser"]
+    assert raiser_row["kind"] == FitnessKind.HOUSEKEEPING.value
+    assert raiser_row["score"] is None
+    assert "RuntimeError" in (raiser_row.get("notes") or "")
+    assert "boom from loop_fitness" in (raiser_row.get("notes") or "")
