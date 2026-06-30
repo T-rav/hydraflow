@@ -124,9 +124,7 @@ class HybridGate:
             return advance(signatures)
         if ctx.attempts < ctx.max_attempts:
             return loop_back(self._loop_back_target, " | ".join(feedback), signatures)
-        return escalate(
-            f"judge veto after {ctx.max_attempts} attempts", signatures
-        )
+        return escalate(f"judge veto after {ctx.max_attempts} attempts", signatures)
 
 
 def build_review_gate(
