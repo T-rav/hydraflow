@@ -64,3 +64,49 @@ class LoopFitness(BaseModel):
     confidence: Confidence = Confidence.INSUFFICIENT_DATA
     notes: str | None = None
     timestamp: datetime
+
+
+def proposal_acceptance_fitness(
+    ctx: FitnessContext,
+    *,
+    worker_name: str,
+    label: str,
+    min_samples: int = 20,
+) -> LoopFitness:
+    """Fitness for proposer-archetype loops: merged-or-closed / filed.
+
+    Pure over ``ctx``. ``accepted`` = merged PRs or closed issues carrying
+    ``label`` and created inside the window. Returns INSUFFICIENT_DATA (no
+    score) until ``filed`` reaches ``min_samples``.
+    """
+    filed = [
+        r
+        for r in ctx.issues
+        if label in r.labels and ctx.window_start <= r.created_at <= ctx.window_end
+    ]
+    accepted = [
+        r
+        for r in filed
+        if (r.is_pr and r.merged) or (not r.is_pr and r.state == "closed")
+    ]
+    n = len(filed)
+    components = {"filed": float(n), "accepted": float(len(accepted))}
+    if n < min_samples:
+        return LoopFitness(
+            worker_name=worker_name,
+            kind=FitnessKind.SCORED,
+            score=None,
+            components=components,
+            sample_count=n,
+            confidence=Confidence.INSUFFICIENT_DATA,
+            timestamp=ctx.window_end,
+        )
+    return LoopFitness(
+        worker_name=worker_name,
+        kind=FitnessKind.SCORED,
+        score=len(accepted) / n,
+        components=components,
+        sample_count=n,
+        confidence=Confidence.OK,
+        timestamp=ctx.window_end,
+    )
