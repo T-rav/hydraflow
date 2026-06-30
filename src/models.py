@@ -1788,6 +1788,48 @@ class StageRecord(BaseModel):
     last_finding_signatures: list[str] = Field(default_factory=list)
 
 
+DriverState = Literal[
+    "TRIAGE",
+    "DISCOVER",
+    "SHAPE",
+    "PLAN",
+    "READY",
+    "REVIEW",
+    "HITL_WAIT",
+    "HITL_APPLY",
+    "DIAGNOSE",
+    "PARKED",
+    "MERGED",
+    "CLOSED",
+    "ESCALATED",
+]
+
+
+class SuspendRecord(BaseModel):
+    """Why and where a suspended IssueDriver should resume.
+
+    ``reason`` is an open string (documented values: ``shape_human_select``,
+    ``hitl_correction``, ``ci_wait``, ``epic_gap_barrier``) so new suspend
+    causes do not require a schema change.
+    """
+
+    reason: str
+    suspended_at: str
+    wake_signal: Literal["comment", "correction", "label"]
+    resume_state: DriverState
+
+
+class PolicyEvent(BaseModel):
+    """One issue-level orchestration decision, recorded for audit/replay."""
+
+    at: str
+    from_state: DriverState
+    to_state: DriverState
+    decision: str
+    reason: str
+    counters: dict[str, int] = Field(default_factory=dict)
+
+
 class ConvergenceLedger(BaseModel):
     """Single source of truth for one issue's two-level convergence state.
 
