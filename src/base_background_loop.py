@@ -18,13 +18,13 @@ from typing import Any, ClassVar
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
+from loop_fitness import Confidence, FitnessContext, FitnessKind, LoopFitness
 from models import (
     BackgroundWorkerStatusPayload,
     ErrorPayload,
     StatusCallback,
     WorkCycleResult,  # noqa: TCH002
 )
-from loop_fitness import Confidence, FitnessContext, FitnessKind, LoopFitness
 from runner_utils import AuthenticationRetryError
 from subprocess_util import AuthenticationError, CreditExhaustedError
 from telemetry.spans import loop_span  # noqa: E402

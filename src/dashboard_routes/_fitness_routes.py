@@ -60,5 +60,5 @@ def register(router: APIRouter, ctx: object) -> None:
         """Return the latest fitness row per worker as JSON."""
         from dashboard_routes._routes import RouteContext  # noqa: PLC0415
 
-        config = ctx.config if isinstance(ctx, RouteContext) else getattr(ctx, "config")
+        config = ctx.config if isinstance(ctx, RouteContext) else ctx.config
         return JSONResponse(latest_fitness_by_worker(config))

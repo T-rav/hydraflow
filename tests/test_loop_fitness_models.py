@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+from pydantic import ValidationError
+
 from loop_fitness import (
     Confidence,
     FitnessContext,
@@ -41,8 +44,7 @@ def test_fitness_context_is_frozen_and_pure_data() -> None:
         ],
     )
     # Frozen: cannot mutate.
-    import pytest
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ctx.window_start = datetime(2026, 1, 1, tzinfo=UTC)  # type: ignore[misc]
     # Round-trips as pure data.
     assert FitnessContext.model_validate_json(ctx.model_dump_json()) == ctx
