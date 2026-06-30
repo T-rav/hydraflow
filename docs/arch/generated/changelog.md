@@ -4,6 +4,10 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W27
+
+- `4c9e6dc` — docs(adr): ADR-0093 two-level convergence (Gate + ConvergenceLedger) *(2026-06-30)*
+
 ## 2026-W25
 
 - `d1d7e11` — Fixes #9507: ADR-0007/0013/0019 carry the same dashboard drift FP +... (#9518) (#9518) *(2026-06-20)*
