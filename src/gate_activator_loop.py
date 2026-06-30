@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from exception_classify import reraise_on_credit_or_bug
+from loop_fitness import FitnessContext, LoopFitness
 
 if TYPE_CHECKING:
     from scripts.gates.activation import ActivationProposal
@@ -107,6 +108,16 @@ class GateActivatorLoop(BaseBackgroundLoop):
 
     def _get_default_interval(self) -> int:
         return self._config.gate_activator_interval
+
+    def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
+        from loop_fitness import proposal_acceptance_fitness  # noqa: PLC0415
+
+        return proposal_acceptance_fitness(
+            ctx,
+            worker_name=self._worker_name,
+            label="hydraflow-gate-activation",
+            min_samples=self._config.fitness_min_samples,
+        )
 
     async def _do_work(self) -> dict[str, Any] | None:  # noqa: PLR0911
         if not self._enabled_cb(self._worker_name):

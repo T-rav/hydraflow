@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
+from loop_fitness import FitnessContext, LoopFitness
 from term_proposer_loop import BotPRPort, _render_term_file_str
 from ubiquitous_language import (
     Term,
@@ -55,6 +56,16 @@ class EdgeProposerLoop(BaseBackgroundLoop):
 
     def _get_default_interval(self) -> int:
         return self._config.edge_proposer_interval
+
+    def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
+        from loop_fitness import proposal_acceptance_fitness  # noqa: PLC0415
+
+        return proposal_acceptance_fitness(
+            ctx,
+            worker_name=self._worker_name,
+            label=EDGE_PROPOSER_PR_LABEL,
+            min_samples=self._config.fitness_min_samples,
+        )
 
     async def _do_work(self) -> dict[str, Any] | None:
         # Canonical operator UI kill-switch (ADR-0049).

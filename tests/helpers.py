@@ -409,6 +409,7 @@ class ConfigFactory:
         implement_two_stage_review_enabled: bool = True,
         fitness_scorecard_interval: int = 86400,
         fitness_window_days: int = 30,
+        fitness_min_samples: int = 20,
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -651,6 +652,7 @@ class ConfigFactory:
                 implement_two_stage_review_enabled=implement_two_stage_review_enabled,
                 fitness_scorecard_interval=fitness_scorecard_interval,
                 fitness_window_days=fitness_window_days,
+                fitness_min_samples=fitness_min_samples,
             )
 
 
