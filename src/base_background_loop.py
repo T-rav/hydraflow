@@ -24,6 +24,7 @@ from models import (
     StatusCallback,
     WorkCycleResult,  # noqa: TCH002
 )
+from loop_fitness import Confidence, FitnessContext, FitnessKind, LoopFitness
 from runner_utils import AuthenticationRetryError
 from subprocess_util import AuthenticationError, CreditExhaustedError
 from telemetry.spans import loop_span  # noqa: E402
@@ -140,6 +141,25 @@ class BaseBackgroundLoop(abc.ABC):
     @abc.abstractmethod
     def _get_default_interval(self) -> int:
         """Return the config-driven default interval in seconds."""
+
+    def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
+        """Return this loop's fitness for the window in ``ctx``.
+
+        Default is HOUSEKEEPING (no normalized score). Loops with a meaningful
+        objective override this to return SCORED fitness. Must be PURE over
+        ``ctx`` — no network, no clock, no mutable ``self`` state — so the same
+        function can score replayed history for the deferred optimizer.
+        ``tests/test_loop_fitness_completeness.py`` forces every new loop to
+        override this.
+        """
+        return LoopFitness(
+            worker_name=self._worker_name,
+            kind=FitnessKind.HOUSEKEEPING,
+            components={},
+            sample_count=0,
+            confidence=Confidence.INSUFFICIENT_DATA,
+            timestamp=ctx.window_end,
+        )
 
     def trigger(self) -> None:
         """Request an immediate execution of the next work cycle.
