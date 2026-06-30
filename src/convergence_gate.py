@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal, Protocol, runtime_checkable
+
+from exception_classify import reraise_on_credit_or_bug
+from review_advisor import min_review_passes_for_blast_radius
 
 
 class GateDecision(str, Enum):
@@ -71,3 +75,55 @@ class Gate(Protocol):
     name: str
 
     async def evaluate(self, ctx: GateContext) -> GateResult: ...
+
+
+class HybridGate:
+    """Deterministic-first, blast-radius-scaled judge referee (spec §4.2)."""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        deterministic: Callable[[GateContext], Awaitable[DetResult]],
+        judge: Callable[[GateContext, int], Awaitable[JudgeVerdict]],
+        loop_back_target: str = "ready",
+        fail_default_approve: bool = True,
+    ) -> None:
+        self.name = name
+        self._deterministic = deterministic
+        self._judge = judge
+        self._loop_back_target = loop_back_target
+        self._fail_default_approve = fail_default_approve
+
+    async def evaluate(self, ctx: GateContext) -> GateResult:
+        det = await self._deterministic(ctx)
+        if not det.ok:
+            return loop_back(
+                self._loop_back_target, "; ".join(det.failures), det.signatures
+            )
+
+        n = min_review_passes_for_blast_radius(ctx.blast_radius)
+        signatures = list(det.signatures)
+        vetoed = False
+        feedback: list[str] = []
+        for i in range(n):
+            try:
+                verdict = await self._judge(ctx, i)
+            except Exception as exc:  # noqa: BLE001
+                reraise_on_credit_or_bug(exc)
+                verdict = JudgeVerdict(
+                    approve=self._fail_default_approve, feedback="judge-degraded"
+                )
+            signatures.extend(verdict.signatures)
+            if not verdict.approve:
+                vetoed = True
+                if verdict.feedback:
+                    feedback.append(verdict.feedback)
+
+        if not vetoed:
+            return advance(signatures)
+        if ctx.attempts < ctx.max_attempts:
+            return loop_back(self._loop_back_target, " | ".join(feedback), signatures)
+        return escalate(
+            f"judge veto after {ctx.max_attempts} attempts", signatures
+        )
