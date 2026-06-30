@@ -1602,8 +1602,8 @@ class HydraFlowConfig(BaseModel):
         default=False,
         description=(
             "Route the review retry/escalate decision through the "
-            "convergence HybridGate + ConvergenceLedger (ADR: two-level "
-            "convergence). Off by default so rollout is opt-in; the "
+            "convergence HybridGate + ConvergenceLedger (ADR-0093). "
+            "Off by default so rollout is opt-in; the "
             "ledger storage is always-on, only the gate decision is gated. "
             "When enabled, escalation at the review reject boundary is "
             "governed by max_convergence_laps (plus oscillation detection), "
@@ -2620,7 +2620,7 @@ class HydraFlowConfig(BaseModel):
         le=20,
         description=(
             "Maximum outer-convergence laps allowed before a ConvergenceLedger "
-            "escalates an issue (ADR for convergence ledger feature)."
+            "escalates an issue (ADR-0093)."
         ),
     )
     contracts_sandbox_repo: str = Field(
