@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from config import HydraFlowConfig
+from dashboard_routes._routes import RouteContext
 from metrics_manager import get_metrics_cache_dir
 
 logger = logging.getLogger("hydraflow.dashboard")
@@ -52,13 +53,10 @@ def latest_fitness_by_worker(config: HydraFlowConfig) -> dict[str, dict]:
     return latest
 
 
-def register(router: APIRouter, ctx: object) -> None:
+def register(router: APIRouter, ctx: RouteContext) -> None:
     """Register fitness-related routes on *router*."""
 
     @router.get("/api/loop-fitness")
     async def get_loop_fitness() -> JSONResponse:
         """Return the latest fitness row per worker as JSON."""
-        from dashboard_routes._routes import RouteContext  # noqa: PLC0415
-
-        config = ctx.config if isinstance(ctx, RouteContext) else ctx.config
-        return JSONResponse(latest_fitness_by_worker(config))
+        return JSONResponse(latest_fitness_by_worker(ctx.config))
