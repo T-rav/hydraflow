@@ -18,10 +18,10 @@ import time
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    from convergence_gate import GateResult
+    from convergence_gate import DetResult, GateResult
     from issue_cache import IssueCache
     from ports import IssueStorePort, PRPort, ReviewInsightStorePort, WorkspacePort
     from precondition_gate import PreconditionGate
@@ -1489,7 +1489,7 @@ class ReviewPhase:
         attempt_number: int = 0,
         issue_number: int,
         log_pr_number: int | None = None,
-        lens: str | None = None,
+        lens: Literal["correctness", "security", "spec"] | None = None,
     ) -> PostVerifyResult | None:
         """Run a single post-verify advisor invocation for ``surface``.
 
@@ -1568,7 +1568,7 @@ class ReviewPhase:
                     pre_flight_plan=pre_flight_plan,
                     attempt_number=attempt_number,
                     issue_number=issue_number,
-                    lens=lens,  # type: ignore[arg-type]
+                    lens=lens,
                 )
             )
         except Exception as exc:
@@ -3549,9 +3549,13 @@ class ReviewPhase:
     # Approve-path gate helpers (Task 2 — convergence phase 2)
     # ------------------------------------------------------------------
 
-    _APPROVE_GATE_LENSES: list[str] = ["correctness", "security", "spec"]
+    _APPROVE_GATE_LENSES: list[Literal["correctness", "security", "spec"]] = [
+        "correctness",
+        "security",
+        "spec",
+    ]
 
-    def _lenses_for(self, n: int) -> list[str]:
+    def _lenses_for(self, n: int) -> list[Literal["correctness", "security", "spec"]]:
         """Return the first *n* PostVerify lens identifiers.
 
         Maps blast-radius pass count (1 / 2 / 3) to the ordered lens
@@ -3562,7 +3566,7 @@ class ReviewPhase:
     def _approve_deterministic_check(
         self,
         code_scanning_alerts: list[Any] | None,
-    ) -> Any:
+    ) -> DetResult:
         """Deterministic gate signal: block when open code-scanning alerts exist.
 
         Returns a :class:`~convergence_gate.DetResult` with ``ok=True`` when
@@ -3630,6 +3634,7 @@ class ReviewPhase:
             return JudgeVerdict(
                 approve=pv.verdict == "APPROVE",
                 feedback=pv.suggested_fix_direction,
+                signatures=[lens],
             )
 
         return _judge

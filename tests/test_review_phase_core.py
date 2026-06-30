@@ -4303,3 +4303,180 @@ class TestApproveGateHelpers:
 
         assert verdict.approve is False
         assert verdict.feedback == "fix the loop"
+
+    @pytest.mark.asyncio
+    async def test_lens_judge_signatures_populated_on_approve(self, config) -> None:
+        """Returned JudgeVerdict.signatures contains the lens on APPROVE (FIX 2)."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from convergence_gate import GateContext
+        from review_advisor import PostVerifyResult
+
+        phase = make_review_phase(config, default_mocks=True)
+
+        pv_result = PostVerifyResult(
+            verdict="APPROVE",
+            reasoning="looks good",
+            suggested_fix_direction="no changes",
+        )
+        phase._run_post_verify_for_surface = AsyncMock(return_value=pv_result)
+
+        pr = MagicMock()
+        pr.number = 55
+        task = MagicMock()
+        task.id = 55
+
+        judge_fn = phase._post_verify_lens_judge(
+            pr=pr,
+            task=task,
+            wt_path="/tmp/wt",
+            result=MagicMock(),
+            diff="diff text",
+            worker_id=0,
+            surface="pr_review",
+        )
+
+        ctx = GateContext(
+            issue_number=55,
+            stage="review",
+            blast_radius="low",
+            attempts=0,
+            max_attempts=3,
+        )
+        verdict = await judge_fn(ctx, 0)
+
+        # lens for blast_radius=low, index=0 is "correctness"
+        assert verdict.signatures == ["correctness"]
+
+    @pytest.mark.asyncio
+    async def test_lens_judge_signatures_populated_on_veto(self, config) -> None:
+        """Returned JudgeVerdict.signatures contains the lens on VETO (FIX 2)."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from convergence_gate import GateContext
+        from review_advisor import PostVerifyResult
+
+        phase = make_review_phase(config, default_mocks=True)
+
+        pv_result = PostVerifyResult(
+            verdict="VETO",
+            reasoning="security issue",
+            suggested_fix_direction="fix it",
+        )
+        phase._run_post_verify_for_surface = AsyncMock(return_value=pv_result)
+
+        pr = MagicMock()
+        pr.number = 56
+        task = MagicMock()
+        task.id = 56
+
+        judge_fn = phase._post_verify_lens_judge(
+            pr=pr,
+            task=task,
+            wt_path="/tmp/wt",
+            result=MagicMock(),
+            diff="diff text",
+            worker_id=0,
+            surface="pr_review",
+        )
+
+        ctx = GateContext(
+            issue_number=56,
+            stage="review",
+            blast_radius="low",
+            attempts=0,
+            max_attempts=3,
+        )
+        verdict = await judge_fn(ctx, 0)
+
+        assert verdict.approve is False
+        assert verdict.signatures == ["correctness"]
+
+    @pytest.mark.asyncio
+    async def test_judge_credit_exhausted_propagates(self, config) -> None:
+        """CreditExhaustedError from post-verify must propagate, not be swallowed (FIX 1).
+
+        reraise_on_credit_or_bug re-raises CreditExhaustedError, so the
+        broad except in _judge must not hide it (dark-factory §2.2).
+        """
+        from unittest.mock import AsyncMock, MagicMock
+
+        from convergence_gate import GateContext
+        from subprocess_util import CreditExhaustedError
+
+        phase = make_review_phase(config, default_mocks=True)
+
+        phase._run_post_verify_for_surface = AsyncMock(
+            side_effect=CreditExhaustedError("no credits")
+        )
+
+        pr = MagicMock()
+        pr.number = 99
+        task = MagicMock()
+        task.id = 99
+
+        judge_fn = phase._post_verify_lens_judge(
+            pr=pr,
+            task=task,
+            wt_path="/tmp/wt",
+            result=MagicMock(),
+            diff="diff text",
+            worker_id=0,
+            surface="pr_review",
+        )
+
+        ctx = GateContext(
+            issue_number=99,
+            stage="review",
+            blast_radius="low",
+            attempts=0,
+            max_attempts=3,
+        )
+
+        with pytest.raises(CreditExhaustedError, match="no credits"):
+            await judge_fn(ctx, 0)
+
+    @pytest.mark.asyncio
+    async def test_judge_degraded_on_runner_failure(self, config) -> None:
+        """Generic Exception from post-verify returns degraded verdict, does not raise (FIX 1).
+
+        A transient runner failure fails open (approve=True) to match
+        the HybridGate fail-open default.
+        """
+        from unittest.mock import AsyncMock, MagicMock
+
+        from convergence_gate import GateContext
+
+        phase = make_review_phase(config, default_mocks=True)
+
+        phase._run_post_verify_for_surface = AsyncMock(
+            side_effect=RuntimeError("runner temporarily unavailable")
+        )
+
+        pr = MagicMock()
+        pr.number = 100
+        task = MagicMock()
+        task.id = 100
+
+        judge_fn = phase._post_verify_lens_judge(
+            pr=pr,
+            task=task,
+            wt_path="/tmp/wt",
+            result=MagicMock(),
+            diff="diff text",
+            worker_id=0,
+            surface="pr_review",
+        )
+
+        ctx = GateContext(
+            issue_number=100,
+            stage="review",
+            blast_radius="low",
+            attempts=0,
+            max_attempts=3,
+        )
+
+        verdict = await judge_fn(ctx, 0)
+
+        assert verdict.approve is True
+        assert verdict.feedback == "judge-degraded"
