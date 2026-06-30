@@ -1661,6 +1661,175 @@ class TestHandleRejectedReview:
 
 
 # ---------------------------------------------------------------------------
+# Convergence gate wiring (Phase 1: review reject/escalate decision)
+# ---------------------------------------------------------------------------
+
+
+class TestReviewConvergenceGate:
+    """Phase 1 convergence gate wiring at the review reject boundary.
+
+    The ledger storage is always-on; only the *decision* that drives
+    retry-vs-escalate is gated behind ``convergence_gate_enabled``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_gate_disabled_uses_legacy_decision(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Flag off → seam reports legacy; no convergence ledger decision used."""
+        config.convergence_gate_enabled = False
+        phase = make_review_phase(config, default_mocks=True)
+        assert phase._uses_convergence_gate() is False
+
+    @pytest.mark.asyncio
+    async def test_gate_enabled_seam_is_on(self, config: HydraFlowConfig) -> None:
+        config.convergence_gate_enabled = True
+        phase = make_review_phase(config, default_mocks=True)
+        assert phase._uses_convergence_gate() is True
+
+    @pytest.mark.asyncio
+    async def test_under_cap_returns_loop_back_and_records_ledger(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Under the fix cap, a rejected review loops back and records one lap."""
+        from convergence_gate import GateDecision
+
+        config.convergence_gate_enabled = True
+        phase = make_review_phase(config, default_mocks=True)
+
+        decision = await phase._convergence_decision(
+            issue_number=7, review_approved=False
+        )
+
+        assert decision.decision is GateDecision.LOOP_BACK
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        assert ledger.stage_state["review"].last_verdict == "LOOP_BACK"
+        assert ledger.stage_state["review"].attempts == 1
+        assert ledger.laps == 1
+
+    @pytest.mark.asyncio
+    async def test_red_deterministic_always_loops_back_regardless_of_attempts(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """At the reject boundary the deterministic check is RED, so the gate
+        loops back even when the per-stage attempt counter is high — escalation
+        at this boundary comes from the outer lap budget, not the attempt cap
+        (see HybridGate.evaluate: a RED det skips the judge + cap entirely).
+        """
+        from convergence_gate import GateDecision
+
+        config.convergence_gate_enabled = True
+        # Headroom on the lap budget so only the attempt count is in play.
+        config.max_convergence_laps = 20
+        phase = make_review_phase(config, default_mocks=True)
+
+        # Pre-seed attempts well past the fix cap on the ledger.
+        for _ in range(config.max_review_fix_attempts + 3):
+            phase._state.increment_review_attempts(7)
+
+        decision = await phase._convergence_decision(
+            issue_number=7, review_approved=False
+        )
+
+        assert decision.decision is GateDecision.LOOP_BACK
+
+    @pytest.mark.asyncio
+    async def test_lap_budget_exhaustion_converts_loop_back_to_escalate(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """After ``max_convergence_laps`` loop-backs the outer budget escalates."""
+        from convergence_gate import GateDecision
+
+        config.convergence_gate_enabled = True
+        # Give attempt headroom so the cap never trips before the lap budget.
+        config.max_review_fix_attempts = 100
+        config.max_convergence_laps = 3
+        phase = make_review_phase(config, default_mocks=True)
+
+        decisions = []
+        for _ in range(config.max_convergence_laps):
+            decisions.append(
+                await phase._convergence_decision(
+                    issue_number=7, review_approved=False
+                )
+            )
+
+        # First laps loop back; the lap that hits the budget escalates.
+        assert decisions[0].decision is GateDecision.LOOP_BACK
+        assert decisions[-1].decision is GateDecision.ESCALATE
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        assert ledger.laps == config.max_convergence_laps
+        assert ledger.stage_state["review"].last_verdict == "ESCALATE"
+
+    @pytest.mark.asyncio
+    async def test_decision_is_persisted_across_reload(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """The ledger is saved to StateTracker, not just held in memory."""
+        from state import StateTracker
+
+        config.convergence_gate_enabled = True
+        phase = make_review_phase(config, default_mocks=True)
+
+        await phase._convergence_decision(issue_number=7, review_approved=False)
+
+        reloaded = StateTracker(config.state_file)
+        ledger = reloaded.get_convergence_ledger(7)
+        assert ledger is not None
+        assert ledger.stage_state["review"].last_verdict == "LOOP_BACK"
+        assert ledger.laps == 1
+
+    @pytest.mark.asyncio
+    async def test_handle_rejected_review_gate_on_loops_back(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Flag on + under cap: rejected review re-queues to ``ready`` (True)."""
+        config.convergence_gate_enabled = True
+        phase = make_review_phase(config, default_mocks=True)
+        pr = PRInfoFactory.create()
+        task = TaskFactory.create(id=pr.issue_number)
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
+
+        _setup_rejected_review_mocks(phase)
+
+        returned = await phase._handle_rejected_review(pr, task, result, 0)
+
+        assert returned is True
+        phase._prs.transition.assert_awaited_once_with(
+            pr.issue_number, "ready", pr_number=pr.number
+        )
+        ledger = phase._state.get_convergence_ledger(pr.issue_number)
+        assert ledger is not None
+        assert ledger.stage_state["review"].last_verdict == "LOOP_BACK"
+
+    @pytest.mark.asyncio
+    async def test_handle_rejected_review_gate_on_escalates_on_lap_budget(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Flag on + outer lap budget exhausted: rejected review escalates (False)."""
+        config.convergence_gate_enabled = True
+        config.max_review_fix_attempts = 100  # keep attempt cap out of the way
+        config.max_convergence_laps = 1  # escalate on the very first lap
+        phase = make_review_phase(config, default_mocks=True)
+        pr = PRInfoFactory.create()
+        task = TaskFactory.create(id=pr.issue_number)
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
+
+        _setup_rejected_review_mocks(phase)
+        phase._prs.post_pr_comment = AsyncMock()
+
+        returned = await phase._handle_rejected_review(pr, task, result, 0)
+
+        assert returned is False
+        assert phase._state.get_hitl_origin(pr.issue_number) == "hydraflow-review"
+        ledger = phase._state.get_convergence_ledger(pr.issue_number)
+        assert ledger is not None
+        assert ledger.stage_state["review"].last_verdict == "ESCALATE"
+
+
+# ---------------------------------------------------------------------------
 # _attempt_review_fix
 # ---------------------------------------------------------------------------
 

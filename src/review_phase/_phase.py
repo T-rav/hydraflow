@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from convergence_gate import GateResult
     from issue_cache import IssueCache
     from ports import IssueStorePort, PRPort, ReviewInsightStorePort, WorkspacePort
     from precondition_gate import PreconditionGate
@@ -3542,6 +3543,91 @@ class ReviewPhase:
 
         return re_result
 
+    def _uses_convergence_gate(self) -> bool:
+        """Whether the review reject/escalate decision routes through the gate.
+
+        Flag-gated (``convergence_gate_enabled``, default off). The ledger
+        storage is always-on; only the gate *decision* is opt-in.
+        """
+        return bool(self._config.convergence_gate_enabled)
+
+    async def _convergence_decision(
+        self,
+        *,
+        issue_number: int,
+        review_approved: bool,
+    ) -> GateResult:
+        """Run the convergence HybridGate for the review reject boundary.
+
+        Reads blast radius from the ledger, evaluates the gate, records the
+        decision (verdict + signatures + lap) back into the ledger, enforces
+        the outer lap budget, and persists. Returns the (possibly lap-budget
+        converted) :class:`GateResult`.
+        """
+        from convergence_gate import (  # noqa: PLC0415
+            DetResult,
+            GateContext,
+            GateDecision,
+            JudgeVerdict,
+            build_review_gate,
+            escalate,
+        )
+
+        radius = self._state.get_review_blast_radius(issue_number) or "low"
+        ledger = self._state.ensure_convergence_ledger(
+            issue_number, blast_radius=radius  # type: ignore[arg-type]
+        )
+        attempts = ledger.get_attempts("review")
+        max_attempts = self._config.max_review_fix_attempts
+
+        async def _det(_ctx: GateContext) -> DetResult:
+            # Phase 1 deterministic signal: the review verdict itself.
+            # At the reject boundary review_approved is False, so the gate
+            # never reaches the judge below.
+            return DetResult(ok=review_approved)
+
+        async def _judge(_ctx: GateContext, _i: int) -> JudgeVerdict:
+            # Unreached in Phase 1 (det is RED at the reject boundary). A later
+            # phase layers hybrid judge passes into the approve path.
+            return JudgeVerdict(approve=True)
+
+        gate = build_review_gate(deterministic_check=_det, post_verify_judge=_judge)
+        ctx = GateContext(
+            issue_number=issue_number,
+            stage="review",
+            blast_radius=radius,  # type: ignore[arg-type]
+            attempts=attempts,
+            max_attempts=max_attempts,
+        )
+        result = await gate.evaluate(ctx)
+
+        # Persist the decision into the ledger (single source of truth).
+        if result.decision is GateDecision.LOOP_BACK:
+            ledger.increment_attempts("review")
+        ledger.record_gate_result(
+            "review", result.decision.value, result.finding_signatures
+        )
+        ledger.mark_lap()
+
+        # Outer lap budget: a LOOP_BACK that exhausts the lap cap becomes an
+        # ESCALATE so the outer loop can never spin past max_convergence_laps.
+        if (
+            result.decision is GateDecision.LOOP_BACK
+            and ledger.laps >= self._config.max_convergence_laps
+        ):
+            result = escalate(
+                f"outer lap budget exhausted "
+                f"({ledger.laps}/{self._config.max_convergence_laps})",
+                result.finding_signatures,
+            )
+            ledger.record_gate_result(
+                "review", result.decision.value, result.finding_signatures
+            )
+
+        ledger.recompute_converged(["review"])
+        self._state.save_convergence_ledger(issue_number, ledger)
+        return result
+
     async def _handle_rejected_review(
         self,
         pr: PRInfo,
@@ -3554,6 +3640,11 @@ class ReviewPhase:
         Returns *True* if the worktree should be preserved (retry case),
         *False* if the worktree should be destroyed (HITL escalation).
         """
+        if self._uses_convergence_gate():
+            return await self._handle_rejected_review_gated(
+                pr, task, result, worker_id
+            )
+
         max_attempts = self._config.max_review_fix_attempts
         attempts = self._state.get_review_attempts(pr.issue_number)
 
@@ -3634,6 +3725,103 @@ class ReviewPhase:
                     f"PR #{pr.number}",
                 )
             return False  # Destroy worktree
+
+    async def _handle_rejected_review_gated(
+        self,
+        pr: PRInfo,
+        task: Task,
+        result: ReviewResult,
+        worker_id: int,
+    ) -> bool:
+        """Convergence-gate variant of the reject/escalate decision.
+
+        Runs when ``convergence_gate_enabled`` is True. The review verdict is
+        REQUEST_CHANGES/COMMENT here (``review_approved=False``), so the gate's
+        deterministic check is RED: it loops back (re-queue to ``ready``) until
+        the outer lap budget is exhausted, at which point it escalates to HITL.
+        """
+        from convergence_gate import GateDecision  # noqa: PLC0415
+
+        decision = await self._convergence_decision(
+            issue_number=pr.issue_number, review_approved=False
+        )
+
+        if decision.decision is GateDecision.LOOP_BACK:
+            # Under cap: re-queue for implementation with feedback.
+            self._state.set_review_feedback(
+                pr.issue_number, decision.feedback or result.summary
+            )
+            self._store.enqueue_transition(task, "ready")
+            await self._transitioner.transition(
+                pr.issue_number, "ready", pr_number=pr.number
+            )
+            await self._transitioner.post_comment(
+                pr.issue_number,
+                "**Review requested changes** — re-queuing for "
+                "implementation with feedback.",
+            )
+            logger.info(
+                "PR #%d: %s verdict — convergence loop-back, re-queuing issue #%d",
+                pr.number,
+                result.verdict.value,
+                pr.issue_number,
+            )
+            return True  # Preserve worktree
+
+        # ESCALATE
+        ledger = self._state.get_convergence_ledger(pr.issue_number)
+        oscillating = bool(ledger and ledger.detect_outer_oscillation())
+        cause = (
+            "review convergence oscillation — same findings recurred across laps"
+            if oscillating
+            else (decision.reason or "review convergence cap exceeded")
+        )
+        logger.warning(
+            "PR #%d: review convergence escalation (%s) — escalating issue #%d to HITL",
+            pr.number,
+            cause,
+            pr.issue_number,
+        )
+        review_phase.record_harness_failure(
+            self._harness_insights,
+            pr.issue_number,
+            FailureCategory.HITL_ESCALATION,
+            cause,
+            stage=PipelineStage.REVIEW,
+            pr_number=pr.number,
+        )
+        await self._publish_review_status(pr, worker_id, "escalating")
+        from models import EscalationContext  # noqa: PLC0415
+
+        esc_context = EscalationContext(
+            cause=cause,
+            origin_phase="review",
+            pr_number=pr.number,
+            agent_transcript=result.transcript if result.transcript else None,
+        )
+        self._state.set_escalation_context(pr.issue_number, esc_context)
+        await self._escalate_to_hitl(
+            HitlEscalation(
+                issue_number=pr.issue_number,
+                pr_number=pr.number,
+                cause=cause,
+                origin_label=self._config.review_label[0],
+                comment=(
+                    f"**Review convergence escalation** — {cause}. "
+                    f"Escalating to human review."
+                ),
+                post_on_pr=False,
+                event_cause="review_convergence_escalation",
+                task=task,
+            )
+        )
+        if result.transcript:
+            await self._suggest_memory(
+                result.transcript,
+                "review_convergence_escalation",
+                f"PR #{pr.number}",
+            )
+        return False  # Destroy worktree
 
     # Delegate properties for backward compatibility in tests
     @property

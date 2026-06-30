@@ -127,3 +127,23 @@ class HybridGate:
         return escalate(
             f"judge veto after {ctx.max_attempts} attempts", signatures
         )
+
+
+def build_review_gate(
+    *,
+    deterministic_check: Callable[[GateContext], Awaitable[DetResult]],
+    post_verify_judge: Callable[[GateContext, int], Awaitable[JudgeVerdict]],
+    fail_default_approve: bool = True,
+) -> HybridGate:
+    """Build the review-stage HybridGate (deterministic check + PostVerify judge).
+
+    Binds the review deterministic signal and the post-verify judge into a
+    gate that loops back to the ``ready`` stage on a recoverable veto.
+    """
+    return HybridGate(
+        "review",
+        deterministic=deterministic_check,
+        judge=post_verify_judge,
+        loop_back_target="ready",
+        fail_default_approve=fail_default_approve,
+    )

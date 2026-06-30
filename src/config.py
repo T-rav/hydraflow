@@ -395,6 +395,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_PRECONDITION_GATE_ENABLED",
         False,
     ),
+    (
+        "convergence_gate_enabled",
+        "HYDRAFLOW_CONVERGENCE_GATE_ENABLED",
+        False,
+    ),
     ("docker_read_only_root", "HYDRAFLOW_DOCKER_READ_ONLY_ROOT", True),
     ("docker_no_new_privileges", "HYDRAFLOW_DOCKER_NO_NEW_PRIVILEGES", True),
     (
@@ -1591,6 +1596,15 @@ class HydraFlowConfig(BaseModel):
             "Enforce stage preconditions on the implement and review "
             "phases. Requires issue_cache_enabled to be True. Defaults "
             "to False to give operators a separate opt-in switch."
+        ),
+    )
+    convergence_gate_enabled: bool = Field(
+        default=False,
+        description=(
+            "Route the review retry/escalate decision through the "
+            "convergence HybridGate + ConvergenceLedger (ADR: two-level "
+            "convergence). Off by default so rollout is opt-in; the "
+            "ledger storage is always-on, only the gate decision is gated."
         ),
     )
 
