@@ -49,4 +49,3 @@ class ReviewStateMixin:
         """Clear the last-reviewed commit SHA for *issue_number*."""
         self._data.last_reviewed_shas.pop(self._key(issue_number), None)
         self.save()
-
