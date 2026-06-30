@@ -22,10 +22,11 @@ environment — see docker-compose.sandbox.yml):
    ``stage_state["review"]["last_verdict"] == "ADVANCE"``, and
    ``converged == True`` — confirming the full Phase 2a gate path completed.
 
-Advisor scripting note: the gated approve calls ``PostVerifyAdvisor`` (role
-``"post_verify"``, lens ``"correctness"`` for low blast radius). The seed scripts
-this via ``advisor_scripts={1: {"post_verify": [<APPROVE payload>]}}`` so the
-``FakeLLM`` returns APPROVE and the gate cleanly records ``ADVANCE`` rather than
+Advisor scripting note: the gated approve calls ``PostVerifyAdvisor`` with the
+lens-tagged role ``"post_verify:correctness"`` (correctness lens for low blast
+radius). The seed scripts this via
+``advisor_scripts={1: {"post_verify:correctness": [<APPROVE payload>]}}`` (FakeLLM
+keys on the exact role string) so the gate cleanly records ``ADVANCE`` rather than
 relying on the degraded fail-open path.
 """
 
@@ -93,11 +94,14 @@ def seed() -> MockWorldSeed:
         },
         advisor_scripts={
             # Script the post_verify advisor for issue 1 to APPROVE.
-            # The gated approve path invokes PostVerifyAdvisor with role
-            # "post_verify" (lens "correctness" for low blast radius). FakeLLM
-            # pops this result via pop_advisor_result(1, "post_verify") so the
-            # gate records ADVANCE and recompute_converged flips converged=True.
-            1: {"post_verify": [_ADVISOR_POST_VERIFY_APPROVE]},
+            # The gated approve path invokes PostVerifyAdvisor with the
+            # lens-tagged role "post_verify:correctness" (correctness lens for
+            # low blast radius). FakeLLM pops the result keyed by the EXACT role
+            # string, so the key must be "post_verify:correctness" (not the base
+            # "post_verify") for the script to be load-bearing rather than
+            # fail-open. The gate then records ADVANCE and recompute_converged
+            # flips converged=True.
+            1: {"post_verify:correctness": [_ADVISOR_POST_VERIFY_APPROVE]},
         },
         # Allow enough cycles for: triage → plan → implement → review (reject) →
         # loop-back → ready → implement (again) → review (approve) → merge.

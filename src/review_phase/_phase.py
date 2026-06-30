@@ -251,7 +251,8 @@ class ReviewPhase:
         ``.parent`` is the FakeLLM. We extract the issue number from the
         prompt (emitted by ``PostVerifyAdvisor._build_prompt`` when
         ``PostVerifyInput.issue_number`` is set) and pop the scripted advisor
-        result keyed by ``(issue_number, "post_verify")``.
+        result keyed by ``(issue_number, f"post_verify:{lens}")`` (the
+        lens-tagged role, e.g. ``"post_verify:correctness"``).
 
         Dispatch is duck-typed on ``hasattr(self._reviewers, "_execute")``:
         production ``ReviewRunner`` provides it via ``BaseRunner``; the
