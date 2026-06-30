@@ -3575,7 +3575,8 @@ class ReviewPhase:
 
         radius = self._state.get_review_blast_radius(issue_number) or "low"
         ledger = self._state.ensure_convergence_ledger(
-            issue_number, blast_radius=radius  # type: ignore[arg-type]
+            issue_number,
+            blast_radius=radius,  # type: ignore[arg-type]
         )
         attempts = ledger.get_attempts("review")
         max_attempts = self._config.max_review_fix_attempts
@@ -3641,9 +3642,7 @@ class ReviewPhase:
         *False* if the worktree should be destroyed (HITL escalation).
         """
         if self._uses_convergence_gate():
-            return await self._handle_rejected_review_gated(
-                pr, task, result, worker_id
-            )
+            return await self._handle_rejected_review_gated(pr, task, result, worker_id)
 
         max_attempts = self._config.max_review_fix_attempts
         attempts = self._state.get_review_attempts(pr.issue_number)

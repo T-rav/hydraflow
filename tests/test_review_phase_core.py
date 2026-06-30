@@ -1750,9 +1750,7 @@ class TestReviewConvergenceGate:
         decisions = []
         for _ in range(config.max_convergence_laps):
             decisions.append(
-                await phase._convergence_decision(
-                    issue_number=7, review_approved=False
-                )
+                await phase._convergence_decision(issue_number=7, review_approved=False)
             )
 
         # First laps loop back; the lap that hits the budget escalates.

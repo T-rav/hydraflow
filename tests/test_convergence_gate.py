@@ -1,4 +1,5 @@
 """Unit tests for convergence_gate module."""
+
 from __future__ import annotations
 
 import pytest
