@@ -7,19 +7,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime
+import sys
+from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
-import sys
 
 # Ensure src is on the path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from loop_fitness import IssueRecord
 from service_registry import _make_fitness_issue_fetcher
-
 
 ISSUE_OPEN = {
     "number": 1,

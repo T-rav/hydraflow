@@ -45,7 +45,6 @@ from execution import SubprocessRunner
 from fake_coverage_auditor_loop import FakeCoverageAuditorLoop
 from fitness_scorecard_loop import FitnessScorecardLoop
 from flake_tracker_loop import FlakeTrackerLoop
-from loop_fitness import IssueRecord as _IssueRecord
 from gate_activation_check import check_gate_activation
 from gate_activator_loop import GateActivatorLoop  # noqa: TCH001
 from github_cache_loop import GitHubCacheLoop, GitHubDataCache
@@ -62,6 +61,7 @@ from live_corpus_replay_loop import (
     LiveCorpusReplayLoop,  # noqa: TCH001 — dataclass annotation
 )
 from log_ingest_loop import LogIngestLoop  # noqa: TCH001 — used in dataclass field
+from loop_fitness import IssueRecord as _IssueRecord
 from memory_backlog_loop import MemoryBacklogLoop
 from merge_conflict_resolver import MergeConflictResolver
 from merge_state_watcher_loop import MergeStateWatcherLoop
