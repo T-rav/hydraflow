@@ -6,7 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W26
 
-- `88d61bc` — merge staging into 9512 *(2026-06-22)*
+- `5e72016` — Fixes #9080: Provision isolated GitHub contracts sandbox (sandbox session + teardown) (#9512) (#9512) *(2026-06-22)*
+- `0117ea0` — feat(test-adequacy): add deterministic coverage-delta cross-check (#9567) (#9646) (#9646) *(2026-06-22)*
+- `8e3a40d` — feat(ul): term-proposer batch — 1 drafts (#9655) (#9655) *(2026-06-22)*
 - `efdb1cb` — feat(ul): term-proposer batch — 1 drafts (#9654) (#9654) *(2026-06-22)*
 - `6f1dc99` — feat(ul): entry-evidence — 3 new entry links across 1 terms (#9653) (#9653) *(2026-06-22)*
 - `e4d1ef8` — feat(ul): entry-evidence — 27 new entry links across 12 terms (#9638) (#9638) *(2026-06-22)*
@@ -29,7 +31,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `1e288b0` — feat(ul): entry-evidence — 8 new entry links across 5 terms (#9492) (#9492) *(2026-06-21)*
 - `5e24e54` — Accept ADR-0027: duplicate class merge artifact pattern (#9493) (#9493) *(2026-06-21)*
 - `d1d7e11` — Fixes #9507: ADR-0007/0013/0019 carry the same dashboard drift FP +... (#9518) (#9518) *(2026-06-20)*
-- `ead8722` — Merge remote-tracking branch 'origin/staging' into agent/diag-9080 *(2026-06-20)*
 - `69fea6a` — feat(factory): generate-in-worktree foundation + DiagramLoop migration (#9539 pt1) (#9614) (#9614) *(2026-06-19)*
 - `e920762` — feat(loops): per-loop work-cycle watchdog (closes #9556) (#9594) (#9594) *(2026-06-19)*
 - `1d8a175` — fix: close regression-test backlog from the 2026-06-13 session (10 issues) (#9592) (#9592) *(2026-06-19)*
@@ -40,7 +41,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `e79114c` — chore(wiki): untrack RepoWikiLoop runtime caches to stop perpetual tree-dirt (#9537) (#9537) *(2026-06-14)*
 - `5a715ac` — fix(adr-drift): stop recurring false-positive ADR-drift HITL escalations (#9530) (#9530) *(2026-06-13)*
 - `4e65ff6` — Fixes #9499: PricingRefreshLoop bare-tier alias may lag the newest ... (#9517) (#9517) *(2026-06-13)*
-- `c3f3206` — chore(arch): regen arch artifacts after contracts sandbox fix (#9080) (#9080) *(2026-06-13)*
 - `f0974e5` — fix(wiki): resolve committed conflict markers in 11 term files (#9482) (#9484) (#9484) *(2026-06-12)*
 - `79662e5` — fix(observability): suppress Sentry noise — bugs-only filter + test init guard (#9481) (#9481) *(2026-06-12)*
 - `cadb008` — Fixes #9354: Shadow-drift: exclude non-deterministic corpus samples... (#9445) (#9445) *(2026-06-12)*
@@ -461,10 +461,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `494f736` — docs: ADR-0032 Per-Repo Wiki Knowledge Base (Karpathy pattern) (#6096) (#6096) *(2026-04-05)*
 - `f65f00b` — docs: accept ADR-0023 pair + add diagnostic and HITL plans (#6093) (#6093) *(2026-04-05)*
 - `2977a62` — docs: ADR-0031 Product Track Architecture (Discover/Shape phases) (#6010) (#6010) *(2026-04-05)*
-
-## 2026-W13
-
-- `bbf7336` — docs: Add ADRs for report pipeline, caretaker loops, and routes decomposition (#5904) (#5904) *(2026-03-28)*
 
 
 <!-- arch:generated -->
