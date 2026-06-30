@@ -56,7 +56,8 @@ def seed() -> MockWorldSeed:
                         "verdict": "request-changes",
                         "comments": ["needs better error handling"],
                     },
-                    # Pass 2: APPROVE → gate records ADVANCE, converged=True, merge
+                    # Pass 2: APPROVE → merges via the ungated approve path (the
+                    # gate is not involved on approve in Phase 1; converged stays False)
                     {"verdict": "approve"},
                 ]
             },
