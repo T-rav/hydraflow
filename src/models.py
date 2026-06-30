@@ -1846,6 +1846,16 @@ class ConvergenceLedger(BaseModel):
     converged: bool = False
     oscillation_escalated: bool = False
 
+    # --- IssueDriver orchestration state (HydraFlow v2, additive) ---
+    driver_state: DriverState = "TRIAGE"
+    suspend: SuspendRecord | None = None
+    pending_correction: str | None = None
+    hitl_origin: str | None = None
+    hitl_cause: str | None = None
+    route_backs: dict[str, int] = Field(default_factory=dict)
+    issue_attempts: int = 0
+    policy_log: list[PolicyEvent] = Field(default_factory=list)
+
     def _stage(self, stage: str) -> StageRecord:
         rec = self.stage_state.get(stage)
         if rec is None:
@@ -1936,6 +1946,20 @@ class ConvergenceLedger(BaseModel):
             if self.stage_state.get(stage, StageRecord()).last_verdict == "LOOP_BACK"
         )
         return loopback_count >= min_loopback_stages
+
+    def get_route_backs(self, edge: str) -> int:
+        return self.route_backs.get(edge, 0)
+
+    def increment_route_backs(self, edge: str) -> int:
+        self.route_backs[edge] = self.route_backs.get(edge, 0) + 1
+        return self.route_backs[edge]
+
+    def increment_issue_attempts(self) -> int:
+        self.issue_attempts += 1
+        return self.issue_attempts
+
+    def append_policy_event(self, event: PolicyEvent) -> None:
+        self.policy_log.append(event)
 
 
 class StateData(BaseModel):

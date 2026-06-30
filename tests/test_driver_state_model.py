@@ -30,3 +30,51 @@ class TestPolicyEvent:
         restored = PolicyEvent.model_validate_json(ev.model_dump_json())
         assert restored == ev
         assert restored.counters == {}
+
+
+from models import ConvergenceLedger, PolicyEvent  # noqa: E402
+
+
+class TestConvergenceLedgerDriverFields:
+    def test_driver_field_defaults(self) -> None:
+        cl = ConvergenceLedger(issue_number=7)
+        assert cl.driver_state == "TRIAGE"
+        assert cl.suspend is None
+        assert cl.pending_correction is None
+        assert cl.hitl_origin is None
+        assert cl.hitl_cause is None
+        assert cl.route_backs == {}
+        assert cl.issue_attempts == 0
+        assert cl.policy_log == []
+
+    def test_route_back_and_attempt_helpers(self) -> None:
+        cl = ConvergenceLedger(issue_number=7)
+        assert cl.get_route_backs("ready->plan") == 0
+        assert cl.increment_route_backs("ready->plan") == 1
+        assert cl.increment_route_backs("ready->plan") == 2
+        assert cl.get_route_backs("ready->plan") == 2
+        assert cl.get_route_backs("review->ready") == 0
+        assert cl.increment_issue_attempts() == 1
+        assert cl.increment_issue_attempts() == 2
+
+    def test_append_policy_event(self) -> None:
+        cl = ConvergenceLedger(issue_number=7)
+        ev = PolicyEvent(
+            at="2026-06-30T12:00:00+00:00",
+            from_state="PLAN",
+            to_state="READY",
+            decision="ADVANCE",
+            reason="plan approved",
+        )
+        cl.append_policy_event(ev)
+        assert cl.policy_log == [ev]
+
+    def test_driver_fields_round_trip(self) -> None:
+        cl = ConvergenceLedger(issue_number=7, driver_state="REVIEW")
+        cl.increment_route_backs("review->ready")
+        cl.increment_issue_attempts()
+        restored = ConvergenceLedger.model_validate_json(cl.model_dump_json())
+        assert restored == cl
+        assert restored.driver_state == "REVIEW"
+        assert restored.route_backs == {"review->ready": 1}
+        assert restored.issue_attempts == 1
