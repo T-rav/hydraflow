@@ -12,6 +12,7 @@ from adr_utils import (
     is_adr_issue_title,
 )
 from config import HydraFlowConfig
+from convergence_recording import record_stage_verdict
 from events import EventBus, EventType, HydraFlowEvent
 from models import Task, TriageResult
 from phase_utils import (
@@ -35,6 +36,20 @@ logger = logging.getLogger("hydraflow.triage_phase")
 
 _SENTRY_MARKER = "<!-- [sentry:"
 _AUDITOR_MARKER = "<!-- [hydraflow-auditor:"
+
+# Verdict map for ConvergenceLedger boundary recording (ADR-0045 / convergence gate).
+# "ADVANCE" = issue moves forward in the pipeline.
+# "LOOP_BACK" = issue is requeued or parked and must re-enter triage.
+# Outcomes not in this map (e.g. "unknown") are not recorded.
+_TRIAGE_VERDICT_MAP: dict[str, str] = {
+    "plan": "ADVANCE",
+    "sentry_noise_closed": "ADVANCE",
+    "already_addressed": "ADVANCE",
+    "epic_decomposed": "ADVANCE",
+    "bug_not_present": "ADVANCE",
+    "discover": "LOOP_BACK",
+    "parked": "LOOP_BACK",
+}
 
 
 def _is_sentry_issue(issue: Task) -> bool:
@@ -466,6 +481,16 @@ class TriagePhase:
                         issue.id,
                         evidence,
                     )
+                    _verdict = _TRIAGE_VERDICT_MAP.get(routing_outcome)
+                    if _verdict is not None:
+                        record_stage_verdict(
+                            self._state,
+                            enabled=self._config.convergence_gate_enabled,
+                            issue_number=issue.id,
+                            stage="triage",
+                            decision=_verdict,
+                            signatures=[],
+                        )
                     return 1
                 if str(repro.outcome) == "unable":
                     logger.warning(
@@ -492,6 +517,17 @@ class TriagePhase:
             self._store.enqueue_transition(issue, "plan")
             await self._transitioner.transition(issue.id, "plan")
             self._state.increment_session_counter("triaged")
+
+        _verdict = _TRIAGE_VERDICT_MAP.get(routing_outcome)
+        if _verdict is not None:
+            record_stage_verdict(
+                self._state,
+                enabled=self._config.convergence_gate_enabled,
+                issue_number=issue.id,
+                stage="triage",
+                decision=_verdict,
+                signatures=[],
+            )
 
         return 1
 
