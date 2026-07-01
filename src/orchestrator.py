@@ -203,6 +203,7 @@ class HydraFlowOrchestrator:
             "edge_proposer": svc.edge_proposer_loop,
             "live_corpus_replay": svc.live_corpus_replay_loop,
             "triage_retry": svc.triage_retry_loop,
+            "convergence_oscillation": svc.convergence_oscillation_loop,
             "entry_evidence": svc.entry_evidence_loop,
             "fitness_scorecard": svc.fitness_scorecard_loop,
         }
@@ -1064,6 +1065,7 @@ class HydraFlowOrchestrator:
             ("edge_proposer", self._svc.edge_proposer_loop.run),
             ("live_corpus_replay", self._svc.live_corpus_replay_loop.run),
             ("triage_retry", self._svc.triage_retry_loop.run),
+            ("convergence_oscillation", self._svc.convergence_oscillation_loop.run),
             ("entry_evidence", self._svc.entry_evidence_loop.run),
             ("fitness_scorecard", self._svc.fitness_scorecard_loop.run),
         ]

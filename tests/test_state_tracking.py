@@ -139,10 +139,10 @@ class TestInitialization:
             "live_corpus_drift_rollup",
             "live_corpus_escalation_issue",
             # Auto-Agent — AutoAgentPreflightLoop (spec §3.6)
-            "auto_agent_attempts",
+            # auto_agent_attempts migrated to convergence_ledgers (Task 1)
             "auto_agent_daily_spend",
             # SandboxFailureFixerLoop (sandbox-tier scenario testing track)
-            "sandbox_failure_fixer_attempts",
+            # sandbox_failure_fixer_attempts migrated to convergence_ledgers (Task 2)
             # AdrTouchpointAuditorLoop (ADR-0056)
             "adr_audit_cursor",
             "adr_audit_attempts",

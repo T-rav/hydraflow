@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `f2fa87d` — fix(adr-conformance): renumber feature ADR 0098 -> 0100 (0098 taken by convergence-oscillation on staging) *(2026-07-01)*
 - `3760503` — feat(adr-conformance): implement _detect_rename for high-confidence pytest-node renames (bead advisor-fqk2) *(2026-07-01)*
 - `2ff13df` — chore(adr-conformance): arch-regen after escalation-reconcile fix (bead advisor-daj2) *(2026-07-01)*
 - `c6e5962` — feat(adr-conformance): reconcile closed remediation issues so the loop re-files (bead advisor-daj2) *(2026-07-01)*

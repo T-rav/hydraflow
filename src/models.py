@@ -1793,6 +1793,7 @@ class ConvergenceLedger(BaseModel):
     open_concerns: list[Concern] = Field(default_factory=list)
     lap_signatures: list[list[str]] = Field(default_factory=list)
     converged: bool = False
+    oscillation_escalated: bool = False
 
     def _stage(self, stage: str) -> StageRecord:
         rec = self.stage_state.get(stage)
@@ -1853,6 +1854,30 @@ class ConvergenceLedger(BaseModel):
         tail = self.lap_signatures[-window:]
         first = tail[0]
         return bool(first) and all(s == first for s in tail)
+
+    def detect_cross_boundary_oscillation(
+        self, *, window: int = 2, min_loopback_stages: int = 2
+    ) -> bool:
+        """Return True if the ledger shows cross-boundary oscillation.
+
+        Two conditions (either is sufficient):
+        (a) Temporal: ``detect_outer_oscillation(window)`` is True — recurring
+            identical findings across review laps.
+        (b) Snapshot: at least ``min_loopback_stages`` DISTINCT stages among
+            ``{"triage", "shape", "plan"}`` currently have
+            ``last_verdict == "LOOP_BACK"`` — pre-review cross-boundary churn.
+
+        Pure function of ledger state; no mutation.
+        """
+        if self.detect_outer_oscillation(window):
+            return True
+        boundary_stages = {"triage", "shape", "plan"}
+        loopback_count = sum(
+            1
+            for stage in boundary_stages
+            if self.stage_state.get(stage, StageRecord()).last_verdict == "LOOP_BACK"
+        )
+        return loopback_count >= min_loopback_stages
 
 
 class StateData(BaseModel):
@@ -1947,7 +1972,7 @@ class StateData(BaseModel):
     # Trust fleet — ContractRefreshLoop (spec §4.2 Task 18)
     contract_refresh_attempts: dict[str, int] = Field(default_factory=dict)
     # Auto-Agent — AutoAgentPreflightLoop (spec §3.6)
-    auto_agent_attempts: dict[str, int] = Field(default_factory=dict)
+    # NOTE: auto_agent_attempts migrated to convergence_ledgers["N"].stage_state["auto_agent"].attempts
     auto_agent_daily_spend: dict[str, float] = Field(default_factory=dict)
     # Trust fleet — TrustFleetSanityLoop (spec §12.1)
     trust_fleet_sanity_attempts: dict[str, int] = Field(default_factory=dict)
@@ -1957,8 +1982,8 @@ class StateData(BaseModel):
     )
     # Trust fleet — caretaker loops (Plan 5)
     flake_counts: dict[str, int] = Field(default_factory=dict)
+    # NOTE: sandbox_failure_fixer_attempts migrated to convergence_ledgers[str(pr_number)].stage_state["sandbox_fix"].attempts
     # SandboxFailureFixerLoop state
-    sandbox_failure_fixer_attempts: dict[str, int] = Field(default_factory=dict)
     flake_attempts: dict[str, int] = Field(default_factory=dict)
     skill_prompt_last_green: dict[str, str] = Field(default_factory=dict)
     skill_prompt_attempts: dict[str, int] = Field(default_factory=dict)
@@ -2932,9 +2957,14 @@ class LabelCounts(TypedDict):
 
 
 class WorkerResultMeta(TypedDict, total=False):
-    """Metadata stored by ``StateTracker.set_worker_result_meta``."""
+    """Metadata stored by ``StateTracker.set_worker_result_meta``.
 
-    quality_fix_attempts: int
+    Note: ``quality_fix_attempts`` has been migrated to the convergence ledger
+    (``ConvergenceLedger.stage_state["quality_fix"].attempts``). Use
+    ``StateTracker.set_quality_fix_attempts`` / ``get_convergence_ledger`` to
+    read or write that count.
+    """
+
     pre_quality_review_attempts: int
     duration_seconds: float
     error: str | None

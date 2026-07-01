@@ -291,11 +291,12 @@ class TestRecord:
         state.set_worker_result_meta(
             42,
             {
-                "quality_fix_attempts": 1,
                 "duration_seconds": 120.5,
                 "error": None,
             },
         )
+        # quality_fix count lives in the ledger now
+        state.set_quality_fix_attempts(42, 1)
 
         review = ReviewResultFactory.create(
             merged=True, fixes_made=False, ci_fix_attempts=0
@@ -367,6 +368,23 @@ class TestRecord:
         data = json.loads(lines[0])
         assert data["quality_fix_rounds"] == 0
         assert data["duration_seconds"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_retrospective_reads_quality_fix_from_ledger(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """quality_fix_rounds in retrospective entry comes from the convergence ledger."""
+        collector, _, state = _make_collector(config, diff_names=["src/foo.py"])
+        # Seed the ledger with 2 quality_fix attempts (new source of truth)
+        state.set_quality_fix_attempts(42, 2)
+
+        review = ReviewResultFactory.create(merged=True)
+        await collector.record(42, 101, review)
+
+        retro_path = config.retrospectives_path
+        lines = retro_path.read_text().strip().splitlines()
+        data = json.loads(lines[0])
+        assert data["quality_fix_rounds"] == 2
 
     @pytest.mark.asyncio
     async def test_record_failure_is_non_blocking(

@@ -17,6 +17,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `BranchProtectionAuditorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_branch_protection_auditor_loop.py` | ✅ in catalog | ✅ `s41_branch_protection_auditor_no_drift.py` |
 | `CIMonitorLoop` | ✅ [0029, 0065] | ✅ [ci-monitor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_ci_monitor_loop.py` | ✅ in catalog | ✅ `s15_ci_monitor_main_branch_red.py` |
 | `ContractRefreshLoop` | ✅ [0045, 0047] | ✅ [contract-refresh-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_contract_refresh_loop.py` | ✅ in catalog | ✅ `s30_contract_refresh_clean.py` |
+| `ConvergenceOscillationLoop` | ✅ [0096, 0097, 0098] | ❌ | ✅ loops.md | ❌ | ✅ `test_convergence_oscillation_loop.py` | ✅ in catalog | ✅ `s51_convergence_oscillation.py` |
 | `CorpusLearningLoop` | ✅ [0045] | ✅ [corpus-learning-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_corpus_learning_loop.py` | ✅ in catalog | ✅ `s22_corpus_learning_no_escape_issues.py` |
 | `CostBudgetWatcherLoop` | ✅ [0054] | ✅ [architecture.md] | ✅ loops.md | ✅ README.md | ✅ `test_cost_budget_watcher_loop.py` | ✅ in catalog | ✅ `s26_cost_budget_watcher_unlimited.py` |
 | `DependabotMergeLoop` | ✅ [0054, 0057, 0058] | ✅ [dependabot-merge-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_dependabot_merge_loop.py` | ✅ in catalog | ✅ `s09_dependabot_auto_merge.py` |
@@ -45,7 +46,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `ReportIssueLoop` | ✅ [0013, 0018, 0028, 0045] | ✅ [report-issue-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_report_issue_loop.py` | ✅ in catalog | ✅ `s19_report_issue_empty_queue.py` |
 | `RetrospectiveLoop` | ✅ [0074, 0093] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_retrospective_loop.py` | ✅ in catalog | ✅ `s18_retrospective_empty_queue.py` |
 | `RunsGCLoop` | ✅ [0073] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_runs_gc_loop.py` | ✅ in catalog | ✅ `s47_runs_gc_idle_poll.py` |
-| `SandboxFailureFixerLoop` | ✅ [0052, 0063] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_sandbox_failure_fixer_loop.py` | ✅ in catalog | ✅ `s38_sandbox_fixer_richer_context.py` |
+| `SandboxFailureFixerLoop` | ✅ [0052, 0063, 0097] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_sandbox_failure_fixer_loop.py` | ✅ in catalog | ✅ `s38_sandbox_fixer_richer_context.py` |
 | `SecurityPatchLoop` | ✅ [0029, 0065] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_security_patch_loop.py` | ✅ in catalog | ✅ `s21_security_patch_no_alerts.py` |
 | `SentryLoop` | ✅ [0055] | ✅ [sentry-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_sentry_loop.py` | ✅ in catalog | ✅ `s42_sentry_ingest_no_credentials.py` |
 | `SkillPromptEvalLoop` | ✅ [0045] | ✅ [skill-prompt-eval-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_skill_prompt_eval_loop.py` | ✅ in catalog | ✅ `s17_skill_prompt_eval_clean_corpus.py` |
