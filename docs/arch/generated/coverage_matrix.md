@@ -67,6 +67,7 @@ per-adapter, not per-port).
 |---|---|---|---|---|---|---|---|
 | `AgentPort` | ✅ [0066] | ✅ [agent-port.md, architecture-layers.md] | ✅ ports.md | ✅ README.md | ✅ `FakeAgent` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `BotPRPort` | ✅ [0068] | ✅ [bot-pr-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeBotPR` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `ConformanceRunnerPort` | ❌ | ❌ | ✅ ports.md | ❌ | ✅ `FakeConformanceRunner` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `IssueFetcherPort` | ✅ [0067, 0081] | ✅ [architecture-async-control.md, issue-fetcher-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeIssueFetcher` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `IssueStorePort` | ✅ [0041] | ✅ [architecture-layers.md, issue-store-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeIssueStore` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `ObservabilityPort` | ✅ [0072] | ✅ [observability-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeSentry` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
