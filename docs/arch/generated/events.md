@@ -6,6 +6,7 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 
 | Event | Publishers | Subscribers |
 |---|---|---|
+| **ADR_CONFORMANCE_UPDATE** ⚠️ | `src.adr_conformance_loop:AdrConformanceLoop._emit_event` | — |
 | **ADR_DRAFT_OPENED** ⚠️ | `src.base_runner:BaseRunner._process_transcript_for_adr_draft` | — |
 | **ADVERSARIAL_STAGE_CONVERGED** ⚠️ | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_stage_converged` | — |
 | **ADVERSARIAL_STAGE_EXHAUSTED** ⚠️ | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_stage_exhausted` | — |

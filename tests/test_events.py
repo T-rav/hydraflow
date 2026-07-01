@@ -53,6 +53,7 @@ _EVENT_STRING_CASES: list[tuple[EventType, str]] = [
     (EventType.WIKI_SUPERSEDES, "wiki_supersedes"),
     (EventType.TRIBAL_PROMOTION, "tribal_promotion"),
     (EventType.ADR_DRAFT_OPENED, "adr_draft_opened"),
+    (EventType.ADR_CONFORMANCE_UPDATE, "adr_conformance_update"),
     (EventType.ADVERSARIAL_STAGE_STARTED, "adversarial_stage_started"),
     (EventType.ADVERSARIAL_STAGE_CONVERGED, "adversarial_stage_converged"),
     (EventType.ADVERSARIAL_STAGE_EXHAUSTED, "adversarial_stage_exhausted"),
@@ -109,6 +110,7 @@ class TestEventTypeEnum:
             "WIKI_SUPERSEDES",
             "TRIBAL_PROMOTION",
             "ADR_DRAFT_OPENED",
+            "ADR_CONFORMANCE_UPDATE",
             "ADVERSARIAL_STAGE_STARTED",
             "ADVERSARIAL_STAGE_CONVERGED",
             "ADVERSARIAL_STAGE_EXHAUSTED",
@@ -136,6 +138,9 @@ class TestEventTypeEnum:
     def test_enum_comparison_with_string(self) -> None:
         assert EventType.ERROR == "error"
         assert EventType.ERROR == "error"
+
+    def test_adr_conformance_update_is_known_event(self) -> None:
+        assert EventType.ADR_CONFORMANCE_UPDATE.value == "adr_conformance_update"
 
 
 # ---------------------------------------------------------------------------

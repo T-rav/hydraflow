@@ -6,10 +6,25 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
-- `969eb8f` — docs(adr): ADR-0098 convergence oscillation caretaker (Phase 2d) *(2026-07-01)*
-- `eb802af` — feat(convergence): wire ConvergenceOscillationLoop into orchestrator + registries *(2026-07-01)*
-- `036e91c` — feat(convergence): ConvergenceOscillationLoop caretaker (detect + escalate) *(2026-07-01)*
-- `7503e7e` — Two-level convergence Phase 2c: migrate attempt counters into the ledger (#9681) (#9681) *(2026-07-01)*
+- `f2fa87d` — fix(adr-conformance): renumber feature ADR 0098 -> 0100 (0098 taken by convergence-oscillation on staging) *(2026-07-01)*
+- `3760503` — feat(adr-conformance): implement _detect_rename for high-confidence pytest-node renames (bead advisor-fqk2) *(2026-07-01)*
+- `2ff13df` — chore(adr-conformance): arch-regen after escalation-reconcile fix (bead advisor-daj2) *(2026-07-01)*
+- `c6e5962` — feat(adr-conformance): reconcile closed remediation issues so the loop re-files (bead advisor-daj2) *(2026-07-01)*
+- `3a45ff1` — chore(adr-conformance): declare markdown test dep, broaden atlas ADR-title regex, correct DedupStore narrative (beads advisor-geca/df9b/daj2) *(2026-07-01)*
+- `49cddd4` — fix(adr-conformance): supersede P3 Enforced-by convention + green make quality (reducer skip, planner bound, README row, arch) *(2026-07-01)*
+- `4d5d1e3` — docs(adr): correct ADR-0098 remediation prose to issue-only (loop opens no PRs) *(2026-07-01)*
+- `483f4d0` — docs(adr): ADR-0098 ADR conformance as a measured contract (self-enforcing) *(2026-07-01)*
+- `2770430` — fix(adr-conformance): parse ## Status (H2) ADRs + status-completeness ratchet (0053 now enforced) *(2026-07-01)*
+- `6d09c05` — feat(adr-conformance): enforce ADR-0049 (kill-switch ratchet) + ADR-0053 (read-only UL-drift check) *(2026-07-01)*
+- `6b7e6eb` — fix(adr-conformance): parse all ADR title formats + parse-completeness ratchet + non-greedy Enforced-by *(2026-07-01)*
+- `35f6176` — feat(adr-conformance): backfill conformance annotations (0002/03/42/56/93) + subset grandfather guard *(2026-07-01)*
+- `86b274d` — fix(adr-conformance): renumber ADR-0094 -> ADR-0098 (0094 taken by two-level-convergence) *(2026-07-01)*
+- `a243526` — feat(adr-conformance): register AdrConformanceLoop + satisfy completeness invariants *(2026-07-01)*
+- `1fbeeed` — feat(adr-conformance): AdrConformanceLoop (evaluate + issue-only split-class remediation) *(2026-07-01)*
+- `0a3b14a` — fix(adr-conformance): satisfy Port/fake completeness invariants (area, mkdocs nav, count, fake test) *(2026-06-30)*
+- `2fc0b0e` — feat(adr-conformance): Enforced-by column + adr-conformance.md generator *(2026-06-30)*
+- `93d9fb0` — fix(adr-conformance): export FakeConformanceRunner + add ConformanceRunnerPort signature test *(2026-06-30)*
+- `e8e7046` — feat(adr-conformance): ConformanceRunnerPort + subprocess adapter + fake *(2026-06-30)*
 - `62cd012` — Two-level convergence Phase 2b: boundary verdict recording (Triage/Shape/Plan) (#9677) (#9677) *(2026-06-30)*
 - `e396bad` — Merge origin/staging into Phase1+2a; resolve ADR-0093 collision (convergence ADRs -> 0094/0095), union config + README *(2026-06-30)*
 - `1877391` — feat: loop-fitness scorecard (read-only measurement substrate) (#9672) (#9672) *(2026-06-30)*

@@ -98,6 +98,7 @@ class EventType(StrEnum):
     WIKI_SUPERSEDES = "wiki_supersedes"
     TRIBAL_PROMOTION = "tribal_promotion"
     ADR_DRAFT_OPENED = "adr_draft_opened"
+    ADR_CONFORMANCE_UPDATE = "adr_conformance_update"
     # Adversarial pipeline (ADR draft — earlier-adversarial-pipeline)
     ADVERSARIAL_STAGE_STARTED = "adversarial_stage_started"
     ADVERSARIAL_STAGE_CONVERGED = "adversarial_stage_converged"
