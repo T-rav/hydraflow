@@ -110,6 +110,11 @@ async def test_oscillating_ledger_escalates(tmp_path: Path) -> None:
 
     assert result == {"status": "ok", "scanned": 1, "escalated": 1}
     assert pr.create_issue.await_count == 1
+    # The escalation issue must carry the HITL escalation label + the
+    # convergence marker; a wrong-label regression would otherwise pass silently.
+    _title, _body, labels = pr.create_issue.call_args.args
+    assert loop._config.hitl_escalation_label[0] in labels
+    assert "convergence-oscillation" in labels
     # The flag must be persisted in the live state tracker.
     updated = state.get_convergence_ledger(42)
     assert updated is not None
