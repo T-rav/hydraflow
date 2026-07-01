@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from adr_conformance import MUTATING_MAKE_TARGETS, is_mutating, resolve_check
 from adr_index import Check
