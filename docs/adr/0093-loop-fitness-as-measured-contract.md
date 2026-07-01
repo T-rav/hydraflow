@@ -2,7 +2,8 @@
 
 **Status:** Accepted
 **Date:** 2026-06-30
-**Enforced by:** tests/test_loop_fitness_completeness.py, tests/test_base_loop_fitness_default.py, tests/test_fitness_scorecard_loop.py
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_loop_fitness_completeness.py
 
 ## Context
 

@@ -181,6 +181,11 @@ _bg_worker_defs = [
         "Scans recently-merged PRs for ADR drift — cited src/ modules changed without the ADR being updated. Replaces the synchronous touchpoint gate. See ADR-0056.",
     ),
     (
+        "adr_conformance",
+        "ADR Conformance",
+        "Evaluates every Accepted ADR's `Enforced by:` checks and files/updates remediation issues on drift. See ADR-0100.",
+    ),
+    (
         "auto_agent_preflight",
         "Auto-Agent Pre-Flight",
         "Intercepts hitl-escalation issues; runs an emulated-engineer subprocess to attempt autonomous resolution before the issue surfaces to a human (spec §1–§11; ADR-0050).",
