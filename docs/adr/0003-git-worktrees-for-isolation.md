@@ -1,8 +1,12 @@
 # ADR-0003: Git Worktrees for Issue Isolation
 
 **Status:** Accepted
-**Enforced by:** tests/test_integration_worktree.py
 **Date:** 2026-02-26
+**Enforcement:** decision-of-record
+
+Worktree isolation mechanics are exercised incidentally by
+`tests/test_integration_worktree.py`; that coverage is not treated as a
+conformance contract for this ADR (see ADR-0098).
 
 ## Context
 

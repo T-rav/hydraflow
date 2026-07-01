@@ -9,8 +9,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR | Modules cited | Enforced by |
 |---|---|---|
 | ADR-0001 | — | `tests/test_orchestrator_loops.py, tests/architecture/test_loop_count_matches_adr0001.py` |
-| ADR-0002 | `src.config`, `src.pr_manager` | `tests/test_state_machine.py` |
-| ADR-0003 | `src.ports`, `src.worktree` | `tests/test_integration_worktree.py` |
+| ADR-0002 | `src.config`, `src.pr_manager` | `pytest:tests/test_state_machine.py` |
+| ADR-0003 | `src.ports`, `src.worktree` | — |
 | ADR-0004 | `src.agent_cli`, `src.base_runner` | `tests/test_agent_cli.py, tests/test_base_runner.py` |
 | ADR-0005 | `src.implement_phase`, `src.pr_manager` | `tests/test_implement_phase.py` |
 | ADR-0006 | `src.events`, `src.hf_cli.supervisor_service`, `src.issue_store`, `src.orchestrator`, `src.state` | — |
@@ -48,7 +48,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0039 | `src.adr_reviewer`, `src.triage_phase` | — |
 | ADR-0040 | `src.adr_reviewer` | — |
 | ADR-0041 | `src.caching_issue_store`, `src.issue_cache`, `src.issue_store`, `src.precondition_gate`, `src.route_back` | `tests/test_issue_cache.py, tests/test_precondition_gate.py` |
-| ADR-0042 | — | — |
+| ADR-0042 | — | `branch-protection ruleset review per docs/standards/branch_protection` |
 | ADR-0043 | `src.docker_runner`, `src.preflight` | — |
 | ADR-0044 | `src.orchestrator`, `src.ports` | `scripts/hydraflow_audit/* (structural/behavioural checks), tests/test_planner.py::test_build_prompt_includes_principles_checklist, tests/test_reviewer.py::test_build_review_prompt_includes_hydraflow_principles_checks (prompt-level enforcement in plan + review phases)` |
 | ADR-0045 | `src.config`, `src.contract_refresh_loop`, `src.corpus_learning_loop`, `src.dashboard_routes._cost_rollups`, `src.discover_phase`, `src.discover_runner`, `src.fake_coverage_auditor_loop`, `src.flake_tracker_loop`, `src.health_monitor_loop`, `src.models`, `src.orchestrator`, `src.pr_manager`, `src.principles_audit_loop`, `src.rc_budget_loop`, `src.report_issue_loop`, `src.service_registry`, `src.shape_phase`, `src.shape_runner`, `src.skill_prompt_eval_loop`, `src.staging_bisect_loop`, `src.trust_fleet_sanity_loop`, `src.wiki_rot_detector_loop` | `tests/test_trust_fleet_sanity_loop.py, tests/test_loop_wiring_completeness.py, tests/test_trust_fleet_anomaly_detectors.py`, `- **Spec:** docs/superpowers/specs/2026-04-22-trust-architecture-hardening-design.md (../superpowers/specs/2026-04-22-trust-architecture-hardening-design.md)`, `- **Implementation plans:** 11 plans under docs/superpowers/plans/2026-04-22-*.md (../superpowers/plans/) — one per trust loop and subsystem.` |
@@ -62,7 +62,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0053 | `src.repo_wiki`, `src.repo_wiki_loop` | — |
 | ADR-0054 | `src.term_proposer_loop`, `src.ubiquitous_language` | — |
 | ADR-0055 | `src.base_background_loop`, `src.base_runner`, `src.config`, `src.events`, `src.exception_classify`, `src.mockworld.fakes.fake_honeycomb`, `src.pr_manager`, `src.server`, `src.telemetry.__init__`, `src.telemetry.otel`, `src.telemetry.slugs`, `src.telemetry.spans`, `src.telemetry.subprocess_bridge`, `src.trace_collector`, `src.workspace` | — |
-| ADR-0056 | `src.adr_drift`, `src.adr_touchpoint_auditor_loop`, `src.state._adr_audit` | `'tests/test_adr_touchpoint_auditor_loop.py', 'tests/test_adr_drift.py', 'tests/test_loop_wiring_completeness.py' (auto-discovery confirms the loop is wired in all 5 checkpoints).` |
+| ADR-0056 | `src.adr_drift`, `src.adr_touchpoint_auditor_loop`, `src.state._adr_audit` | `pytest:tests/test_adr_touchpoint_auditor_loop.py` |
 | ADR-0057 | `src.term_pruner_loop`, `src.ubiquitous_language` | — |
 | ADR-0058 | `src.edge_proposer_loop`, `src.ubiquitous_language` | — |
 | ADR-0059 | `src.mockworld.fakes.fake_llm`, `src.review_advisor`, `src.review_phase`, `src.reviewer` | `'tests/test_review_advisor.py' (~100+ unit tests covering all 5 surfaces); 'tests/scenarios/test_pr_review_advisor_*.py' (11 Tier-1 MockWorld scenarios); 'tests/test_review_phase_core.py::TestSelfModificationGuard' (T29 self-modification guard); 'make quality' CI gate.` |

@@ -14,9 +14,12 @@ from adr_index import scan_adr_directory
 REPO = Path(__file__).resolve().parent.parent
 ADR_DIR = REPO / "docs" / "adr"
 
-# Every Accepted ADR number NOT yet annotated. Populate once (see Step 1b),
-# then SHRINK as backfill tasks annotate. NEVER grows.
-_GRANDFATHERED: frozenset[int] = frozenset(
+# Fixed snapshot of every Accepted ADR number that was NOT annotated as of
+# Task 4 (the ratchet's introduction). NEVER edit this literal — it is the
+# baseline the subset guard below checks against. Backfill tasks shrink the
+# *live* grandfathered set by adding numbers to `_ANNOTATED`, not by editing
+# this frozenset.
+_GRANDFATHER_BASELINE: frozenset[int] = frozenset(
     {
         1,
         2,
@@ -66,7 +69,16 @@ _GRANDFATHERED: frozenset[int] = frozenset(
         96,
     }
 )
-_GRANDFATHER_BASELINE = 46
+
+# ADRs annotated with **Enforcement:** by backfill tasks, removed from the
+# live grandfathered set. Task 13 annotates 0002/0003/0042/0056/0093; later
+# backfill tasks (14, 15, 16) grow this set as they annotate more ADRs.
+_ANNOTATED: frozenset[int] = frozenset({2, 3, 42, 56, 93})
+
+# Live grandfathered set: baseline minus everything annotated so far. A true
+# subset of the baseline, so it can only shrink — never grow, and never swap
+# one exemption for another same-size one.
+_GRANDFATHERED: frozenset[int] = _GRANDFATHER_BASELINE - _ANNOTATED
 
 
 def _accepted():
@@ -117,7 +129,13 @@ def test_manual_adrs_have_a_process_pointer():
 
 
 def test_grandfather_only_shrinks():
-    assert len(_GRANDFATHERED) <= _GRANDFATHER_BASELINE, (
-        "_GRANDFATHERED grew — exempting an ADR from the conformance ratchet is "
-        "meta-level rubber-stamping. Annotate the ADR instead."
+    assert _GRANDFATHERED <= _GRANDFATHER_BASELINE, (
+        "_GRANDFATHERED is not a subset of _GRANDFATHER_BASELINE — exempting an "
+        "ADR from the conformance ratchet is meta-level rubber-stamping. "
+        "Annotate the ADR instead of swapping one exemption for another."
+    )
+    assert len(_GRANDFATHER_BASELINE) == 46, (
+        "_GRANDFATHER_BASELINE changed size — it is a fixed snapshot from Task 4 "
+        "and must never be edited. Shrink the live grandfathered set by adding "
+        "annotated ADR numbers to _ANNOTATED instead."
     )
