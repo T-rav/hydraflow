@@ -22,11 +22,14 @@ guardrail test in ``tests/test_adr_conformance_loop.py``.
 There is no reducer/aggregation step for ``ADR_CONFORMANCE_UPDATE`` (Task 9
 scope): per-ADR outcomes are packed directly into the event payload.
 
-``_detect_rename`` is currently a conservative stub that always returns
-``None`` — high-confidence rename detection (mapping an UNRESOLVED check to
-a plausible new identity) is a follow-up. Returning ``None`` unconditionally
-just routes every UNRESOLVED check to FILE_ISSUE, which is the safe default
-per ``classify_remediation``.
+``_detect_rename`` detects high-confidence pytest-node renames (via
+``adr_conformance.find_renamed_pytest_node``): an UNRESOLVED pytest check
+whose cited node is now defined in exactly one other file under ``tests/``
+is treated as renamed and routed to REPOINT. Any other case — make-target
+checks (out of scope), zero matches, or ambiguous (>1) matches — returns
+``None``, which routes the outcome to FILE_ISSUE per ``classify_remediation``.
+That's the conservative default: a REPOINT is only ever proposed (via an
+issue; see ``_file_repoint_issue``) when the new identity is unambiguous.
 """
 
 from __future__ import annotations
@@ -102,13 +105,29 @@ class AdrConformanceLoop(BaseBackgroundLoop):
     def _detect_rename(self, conf: AdrConformance) -> str | None:
         """Detect a high-confidence renamed identity for an UNRESOLVED check.
 
-        Stub (ADR-0098 follow-up): always returns ``None``. This routes
-        every UNRESOLVED outcome to FILE_ISSUE via
-        ``adr_conformance_remediation.classify_remediation`` rather than
-        REPOINT, which is the conservative/safe default until confirmed-
-        rename detection (e.g. git-log-following a moved pytest node or
-        make target) is implemented.
+        Only pytest-node checks are handled (make-target renames are out of
+        scope — see ``adr_conformance.find_renamed_pytest_node``). Returns
+        the first high-confidence new identity found among *conf*'s
+        UNRESOLVED pytest checks, or ``None`` if none resolve unambiguously
+        — which routes the outcome to FILE_ISSUE via
+        ``adr_conformance_remediation.classify_remediation`` instead of the
+        (potentially wrong) REPOINT path. That's the conservative default:
+        ambiguity must never produce a guessed repoint.
         """
+        from adr_conformance import (  # noqa: PLC0415
+            CheckOutcome,
+            find_renamed_pytest_node,
+        )
+
+        for check in conf.checks:
+            if check.outcome != CheckOutcome.UNRESOLVED:
+                continue
+            if not check.check.startswith("pytest:"):
+                continue
+            node_target = check.check[len("pytest:") :]
+            match = find_renamed_pytest_node(node_target, self._repo_root)
+            if match is not None:
+                return match
         return None
 
     def _metrics_path(self):  # noqa: ANN202

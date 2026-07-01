@@ -266,11 +266,77 @@ async def test_decision_of_record_never_remediated(loop_fixture) -> None:
 
 
 async def test_unresolved_without_rename_match_files_issue(loop_fixture) -> None:
-    """_detect_rename is a conservative stub returning None; UNRESOLVED routes
-    to FILE_ISSUE (not REPOINT) until rename detection is implemented."""
+    """No file anywhere under tests/ defines test_ghost (the fixture's ghost
+    node), so _detect_rename finds zero matches and UNRESOLVED routes to
+    FILE_ISSUE (not REPOINT)."""
     loop, fakes = loop_fixture
     await run_tick(loop)
     assert any("ADR-0051" in title for title, _body, _labels in fakes.pr.created_issues)
+
+
+async def test_unresolved_with_unambiguous_rename_files_repoint_issue(
+    loop_fixture,
+) -> None:
+    """ADR-0051 cites tests/test_ghost_module.py::test_ghost, which does not
+    exist. If exactly one other file under tests/ defines test_ghost, that's
+    a high-confidence rename: the loop must take the REPOINT path (a
+    "may have been renamed" issue naming the new identity), not a plain
+    FILE_ISSUE."""
+    loop, fakes = loop_fixture
+    (fakes.repo_root / "tests" / "test_ghost_module_v2.py").write_text(
+        "def test_ghost():\n    assert True\n"
+    )
+
+    result = await run_tick(loop)
+
+    assert result["repointed"] >= 1
+    repoint_titles = [
+        title
+        for title, _body, _labels in fakes.pr.created_issues
+        if "ADR-0051" in title and "renamed" in title
+    ]
+    assert repoint_titles, (
+        f"expected a repoint issue for ADR-0051, got: {fakes.pr.created_issues}"
+    )
+    repoint_body = next(
+        body
+        for title, body, _labels in fakes.pr.created_issues
+        if title in repoint_titles
+    )
+    assert "pytest:tests/test_ghost_module_v2.py::test_ghost" in repoint_body
+    # Must not have also filed the plain FILE_ISSUE title shape for ADR-0051.
+    assert not any(
+        title == "ADR conformance: ADR-0051 is unresolved"
+        for title, _body, _labels in fakes.pr.created_issues
+    )
+
+
+async def test_unresolved_with_ambiguous_rename_still_files_plain_issue(
+    loop_fixture,
+) -> None:
+    """If TWO files under tests/ define test_ghost, that's ambiguous (not
+    high-confidence) -> _detect_rename must return None -> the loop routes
+    to the plain FILE_ISSUE path, not a guessed REPOINT."""
+    loop, fakes = loop_fixture
+    (fakes.repo_root / "tests" / "test_ghost_module_v2.py").write_text(
+        "def test_ghost():\n    assert True\n"
+    )
+    (fakes.repo_root / "tests" / "test_ghost_module_v3.py").write_text(
+        "def test_ghost():\n    assert True\n"
+    )
+
+    result = await run_tick(loop)
+
+    assert result["repointed"] == 0
+    assert any(
+        title == "ADR conformance: ADR-0051 is unresolved"
+        for title, _body, _labels in fakes.pr.created_issues
+    )
+    assert not any(
+        "renamed" in title
+        for title, _body, _labels in fakes.pr.created_issues
+        if "ADR-0051" in title
+    )
 
 
 async def test_pass_clears_attempt_counter(loop_fixture) -> None:

@@ -1,45 +1,45 @@
 {
-  "regenerated_at": "2026-07-01T21:23:22.182204+00:00",
-  "commit_sha": "19c62181d163e401280dee4c72a2587cc376437d",
+  "regenerated_at": "2026-07-01T21:30:03.645686+00:00",
+  "commit_sha": "2ff13df3533c1b9aa8d4070e02214e4185934db3",
   "artifacts": {
     "loops.md": {
-      "source_sha": "19c62181d163e401280dee4c72a2587cc376437d"
+      "source_sha": "2ff13df3533c1b9aa8d4070e02214e4185934db3"
     },
     "ports.md": {
-      "source_sha": "19c62181d163e401280dee4c72a2587cc376437d"
+      "source_sha": "2ff13df3533c1b9aa8d4070e02214e4185934db3"
     },
     "labels.md": {
-      "source_sha": "19c62181d163e401280dee4c72a2587cc376437d"
+      "source_sha": "2ff13df3533c1b9aa8d4070e02214e4185934db3"
     },
     "modules.md": {
-      "source_sha": "19c62181d163e401280dee4c72a2587cc376437d"
+      "source_sha": "2ff13df3533c1b9aa8d4070e02214e4185934db3"
     },
     "events.md": {
-      "source_sha": "19c62181d163e401280dee4c72a2587cc376437d"
+      "source_sha": "2ff13df3533c1b9aa8d4070e02214e4185934db3"
     },
     "adr_xref.md": {
-      "source_sha": "19c62181d163e401280dee4c72a2587cc376437d"
+      "source_sha": "2ff13df3533c1b9aa8d4070e02214e4185934db3"
     },
     "mockworld.md": {
-      "source_sha": "19c62181d163e401280dee4c72a2587cc376437d"
+      "source_sha": "2ff13df3533c1b9aa8d4070e02214e4185934db3"
     },
     "changelog.md": {
-      "source_sha": "19c62181d163e401280dee4c72a2587cc376437d"
+      "source_sha": "2ff13df3533c1b9aa8d4070e02214e4185934db3"
     },
     "coverage_matrix.md": {
-      "source_sha": "19c62181d163e401280dee4c72a2587cc376437d"
+      "source_sha": "2ff13df3533c1b9aa8d4070e02214e4185934db3"
     },
     "adr-conformance.md": {
-      "source_sha": "19c62181d163e401280dee4c72a2587cc376437d"
+      "source_sha": "2ff13df3533c1b9aa8d4070e02214e4185934db3"
     },
     "functional_areas.md": {
-      "source_sha": "19c62181d163e401280dee4c72a2587cc376437d"
+      "source_sha": "2ff13df3533c1b9aa8d4070e02214e4185934db3"
     },
     "ubiquitous-language.md": {
-      "source_sha": "19c62181d163e401280dee4c72a2587cc376437d"
+      "source_sha": "2ff13df3533c1b9aa8d4070e02214e4185934db3"
     },
     "ubiquitous-language-context-map.md": {
-      "source_sha": "19c62181d163e401280dee4c72a2587cc376437d"
+      "source_sha": "2ff13df3533c1b9aa8d4070e02214e4185934db3"
     }
   }
 }

@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `2ff13df` — chore(adr-conformance): arch-regen after escalation-reconcile fix (bead advisor-daj2) *(2026-07-01)*
 - `c6e5962` — feat(adr-conformance): reconcile closed remediation issues so the loop re-files (bead advisor-daj2) *(2026-07-01)*
 - `3a45ff1` — chore(adr-conformance): declare markdown test dep, broaden atlas ADR-title regex, correct DedupStore narrative (beads advisor-geca/df9b/daj2) *(2026-07-01)*
 - `49cddd4` — fix(adr-conformance): supersede P3 Enforced-by convention + green make quality (reducer skip, planner bound, README row, arch) *(2026-07-01)*
