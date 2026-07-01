@@ -30,6 +30,7 @@ from ._contract_refresh import ContractRefreshStateMixin
 from ._corpus_learning import CorpusLearningStateMixin
 from ._dependabot_merge import DependabotMergeStateMixin
 from ._diagnostic import DiagnosticStateMixin
+from ._disturbance import DisturbanceStateMixin
 from ._epic import EpicStateMixin
 from ._fake_coverage import FakeCoverageStateMixin
 from ._flake_tracker import FlakeTrackerStateMixin
@@ -107,6 +108,7 @@ class StateTracker(
     AdrAuditStateMixin,
     AdversarialStateMixin,
     TriageRetryStateMixin,
+    DisturbanceStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 
