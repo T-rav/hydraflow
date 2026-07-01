@@ -12,6 +12,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **BranchProtectionAuditorLoop** | `src.branch_protection_auditor_loop` | 604800 | — | — | ADR-0029, ADR-0049, ADR-0082 |
 | **CIMonitorLoop** | `src.ci_monitor_loop` | 300 | — | — | — |
 | **ContractRefreshLoop** | `src.contract_refresh_loop` | 604800 | — | — | — |
+| **ConvergenceOscillationLoop** | `src.convergence_oscillation_loop` | 3600 | — | — | ADR-0029, ADR-0049 |
 | **CorpusLearningLoop** | `src.corpus_learning_loop` | 3600 | — | — | — |
 | **CostBudgetWatcherLoop** | `src.cost_budget_watcher_loop` | 300 | `HYDRAFLOW_DISABLE_COST_BUDGET_WATCHER` | — | — |
 | **DependabotMergeLoop** | `src.dependabot_merge_loop` | 3600 | — | — | — |
