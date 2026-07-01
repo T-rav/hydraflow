@@ -30,6 +30,9 @@ EXPECTED_NAMES = {
     "WorkspacePort",
     "IssueStorePort",
     "AgentRunner",
+    "DisturbanceDampenerLoop",
+    "ViolationDetector",
+    "DimensionBaseline",
 }
 
 
