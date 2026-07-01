@@ -61,7 +61,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.plan_phase")
 
-# Verdict map for ConvergenceLedger boundary recording (ADR-0045 / convergence gate).
+# Verdict map for ConvergenceLedger boundary recording (ADR-0096 / convergence gate).
 # "ADVANCE" = issue moves forward in the pipeline.
 # "LOOP_BACK" = issue failed planning and must re-enter the plan stage.
 # "ESCALATE" = issue is handed off to HITL.

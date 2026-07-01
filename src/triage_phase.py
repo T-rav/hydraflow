@@ -37,7 +37,7 @@ logger = logging.getLogger("hydraflow.triage_phase")
 _SENTRY_MARKER = "<!-- [sentry:"
 _AUDITOR_MARKER = "<!-- [hydraflow-auditor:"
 
-# Verdict map for ConvergenceLedger boundary recording (ADR-0045 / convergence gate).
+# Verdict map for ConvergenceLedger boundary recording (ADR-0096 / convergence gate).
 # "ADVANCE" = issue moves forward in the pipeline.
 # "LOOP_BACK" = issue is requeued or parked and must re-enter triage.
 # Outcomes not in this map (e.g. "unknown") are not recorded.
