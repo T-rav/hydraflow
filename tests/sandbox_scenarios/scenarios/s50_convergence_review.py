@@ -1,26 +1,54 @@
-"""s50 — convergence gate: REQUEST_CHANGES loops back, APPROVE merges.
+"""s50 — convergence gate: REQUEST_CHANGES loops back, APPROVE converges and merges.
 
 Exercises the end-to-end convergence gate path (``convergence_gate_enabled=True``,
 enabled via ``HYDRAFLOW_CONVERGENCE_GATE_ENABLED=true`` in the hydraflow service
 environment — see docker-compose.sandbox.yml):
 
-1. Gate ON — the convergence ``HybridGate`` is wired only into the REJECT path
-   (``_handle_rejected_review`` → ``_convergence_decision``).
+1. Gate ON — the convergence ``HybridGate`` is wired into BOTH the REJECT path
+   (``_handle_rejected_review`` → ``_convergence_decision``) AND the APPROVE path
+   (``_handle_approved_review_gated`` → ``_convergence_decision``) in Phase 2a.
 2. First review returns REQUEST_CHANGES → gate's deterministic check is RED (review
    not approved) → gate records LOOP_BACK; ledger lap 1 is closed via ``mark_lap()``;
    issue transitions back to hydraflow-ready.
-3. Second review returns APPROVE → the APPROVE path is UNGATED in Phase 1; the gate
-   and ``recompute_converged`` are NOT called. ``ledger.converged`` remains False.
-4. PR is merged via the normal approve path; ``/api/issues/history`` shows
+3. Re-implementation runs on the re-queued issue, producing a new branch/PR.
+4. Second review returns APPROVE → routed through the convergence gate
+   (``_handle_approved_review_gated``): the deterministic check passes, the
+   ``PostVerifyAdvisor`` lens judge (``post_verify`` role, ``correctness`` lens for
+   low blast radius) returns APPROVE → gate records ``ADVANCE`` →
+   ``recompute_converged(["review"])`` flips ``ledger.converged`` to ``True``.
+5. PR is merged via ``_handle_approved_merge``; ``/api/issues/history`` shows
    ``outcome=="merged"`` for issue #1.
-5. ``/api/state`` shows the ``convergence_ledgers`` entry with ``laps >= 1`` and
-   ``stage_state["review"]["last_verdict"] == "LOOP_BACK"`` — confirming the gate
-   recorded the reject lap. ``converged`` is NOT asserted (ungated in Phase 1).
+6. ``/api/state`` shows the ``convergence_ledgers`` entry with ``laps >= 1``,
+   ``stage_state["review"]["last_verdict"] == "ADVANCE"``, and
+   ``converged == True`` — confirming the full Phase 2a gate path completed.
+
+Advisor scripting note: the gated approve calls ``PostVerifyAdvisor`` with the
+lens-tagged role ``"post_verify:correctness"`` (correctness lens for low blast
+radius). The seed scripts this via
+``advisor_scripts={1: {"post_verify:correctness": [<APPROVE payload>]}}`` (FakeLLM
+keys on the exact role string) so the gate cleanly records ``ADVANCE`` rather than
+relying on the degraded fail-open path.
 """
 
 from __future__ import annotations
 
+import json
+
 from mockworld.seed import MockWorldSeed
+
+# Scripted advisor verdict for the gated approve path (Phase 2a).
+# The convergence gate calls PostVerifyAdvisor (role="post_verify",
+# lens="correctness" for low blast radius). Scripting APPROVE here ensures
+# the FakeLLM returns a clean verdict so the gate records ADVANCE and
+# recompute_converged flips ledger.converged to True.
+_ADVISOR_POST_VERIFY_APPROVE: str = json.dumps(
+    {
+        "verdict": "APPROVE",
+        "reasoning": "Re-implementation satisfies the original spec.",
+        "disagreements": [],
+        "suggested_fix_direction": None,
+    }
+)
 
 NAME = "s50_convergence_review"
 DESCRIPTION = (
@@ -56,11 +84,24 @@ def seed() -> MockWorldSeed:
                         "verdict": "request-changes",
                         "comments": ["needs better error handling"],
                     },
-                    # Pass 2: APPROVE → merges via the ungated approve path (the
-                    # gate is not involved on approve in Phase 1; converged stays False)
+                    # Pass 2: APPROVE → routed through the convergence gate
+                    # (_handle_approved_review_gated) → ADVANCE → converged=True
+                    # → merge. The post_verify advisor is scripted to APPROVE via
+                    # advisor_scripts below so the gate cleanly records ADVANCE.
                     {"verdict": "approve"},
                 ]
             },
+        },
+        advisor_scripts={
+            # Script the post_verify advisor for issue 1 to APPROVE.
+            # The gated approve path invokes PostVerifyAdvisor with the
+            # lens-tagged role "post_verify:correctness" (correctness lens for
+            # low blast radius). FakeLLM pops the result keyed by the EXACT role
+            # string, so the key must be "post_verify:correctness" (not the base
+            # "post_verify") for the script to be load-bearing rather than
+            # fail-open. The gate then records ADVANCE and recompute_converged
+            # flips converged=True.
+            1: {"post_verify:correctness": [_ADVISOR_POST_VERIFY_APPROVE]},
         },
         # Allow enough cycles for: triage → plan → implement → review (reject) →
         # loop-back → ready → implement (again) → review (approve) → merge.
@@ -88,11 +129,13 @@ async def assert_outcome(api, page) -> None:
         timeout=240.0,
     )
 
-    # --- 2. /api/state shows convergence_ledgers with the reject lap recorded ---
-    # Phase 1 gates only the REJECT path. On REQUEST_CHANGES the gate records
-    # LOOP_BACK and closes lap 1 via mark_lap(). The APPROVE path is ungated, so
-    # ledger.converged is never set to True in Phase 1 — do not assert converged.
-    def _ledger_recorded_loopback(payload: object) -> bool:
+    # --- 2. /api/state shows convergence_ledgers with full Phase 2a gate path ---
+    # Phase 2a gates BOTH the REJECT and APPROVE paths. On REQUEST_CHANGES the gate
+    # records LOOP_BACK and closes lap 1 via mark_lap(). On APPROVE the gate runs
+    # the post_verify lens judge → records ADVANCE → recompute_converged flips
+    # ledger.converged to True. Assert all three: laps >= 1, last_verdict == "ADVANCE",
+    # and converged is True.
+    def _ledger_converged(payload: object) -> bool:
         if not isinstance(payload, dict):
             return False
         ledgers = payload.get("convergence_ledgers")
@@ -109,14 +152,18 @@ async def assert_outcome(api, page) -> None:
             # The reject closed lap 1 — laps >= 1.
             if entry.get("laps", 0) < 1:
                 continue
-            # The gate recorded LOOP_BACK on the reject pass.
+            # The gate recorded ADVANCE on the approve pass.
             review_stage = entry.get("stage_state", {}).get("review", {})
-            if review_stage.get("last_verdict") == "LOOP_BACK":
-                return True
+            if review_stage.get("last_verdict") != "ADVANCE":
+                continue
+            # recompute_converged flipped converged to True after ADVANCE.
+            if entry.get("converged") is not True:
+                continue
+            return True
         return False
 
     await api.wait_until(
         "/api/state",
-        _ledger_recorded_loopback,
+        _ledger_converged,
         timeout=30.0,
     )

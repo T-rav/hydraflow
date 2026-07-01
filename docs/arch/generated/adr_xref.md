@@ -100,6 +100,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0091 | — |
 | ADR-0092 | `src.agent`, `src.preflight.runner`, `src.untrusted_text` |
 | ADR-0093 | `src.config`, `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase`, `src.state._convergence` |
+| ADR-0094 | `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase` |
 
 ## Module → ADRs
 
@@ -130,7 +131,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.contract_recording` | ADR-0047, ADR-0052 |
 | `src.contract_refresh_loop` | ADR-0045, ADR-0047 |
 | `src.contracts.shadow` | ADR-0086 |
-| `src.convergence_gate` | ADR-0093 |
+| `src.convergence_gate` | ADR-0093, ADR-0094 |
 | `src.corpus_learning_loop` | ADR-0045 |
 | `src.dashboard` | ADR-0007, ADR-0008, ADR-0038 |
 | `src.dashboard_routes` | ADR-0008, ADR-0013, ADR-0019, ADR-0038 |
@@ -176,7 +177,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.mockworld.fakes.fake_honeycomb` | ADR-0055 |
 | `src.mockworld.fakes.fake_llm` | ADR-0059 |
 | `src.mockworld.sandbox_main` | ADR-0052 |
-| `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0064, ADR-0084, ADR-0088, ADR-0093 |
+| `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0064, ADR-0084, ADR-0088, ADR-0093, ADR-0094 |
 | `src.orchestrator` | ADR-0006, ADR-0009, ADR-0014, ADR-0044, ADR-0045 |
 | `src.pending_concerns` | ADR-0064 |
 | `src.plan_council` | ADR-0064 |
@@ -208,10 +209,10 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.retrospective` | ADR-0074 |
 | `src.retrospective_loop` | ADR-0074 |
 | `src.retrospective_queue` | ADR-0074 |
-| `src.review_advisor` | ADR-0059, ADR-0093 |
+| `src.review_advisor` | ADR-0059, ADR-0093, ADR-0094 |
 | `src.review_insights` | ADR-0070 |
 | `src.review_phase` | ADR-0012, ADR-0014, ADR-0015, ADR-0031, ADR-0059 |
-| `src.review_phase._phase` | ADR-0063, ADR-0093 |
+| `src.review_phase._phase` | ADR-0063, ADR-0093, ADR-0094 |
 | `src.reviewer` | ADR-0025, ADR-0027, ADR-0059 |
 | `src.route_back` | ADR-0041, ADR-0071 |
 | `src.run_recorder` | ADR-0073 |

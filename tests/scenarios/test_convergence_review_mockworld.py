@@ -1,6 +1,6 @@
 """MockWorld scenarios — convergence gate at the review boundary.
 
-Verifies two behaviours introduced by the convergence gate
+Verifies three behaviours introduced by the convergence gate
 (``convergence_gate_enabled=True``):
 
 1. ``test_loop_back_records_lap`` — a PR that fails review on pass 1
@@ -14,11 +14,20 @@ Verifies two behaviours introduced by the convergence gate
    issue over the outer lap budget (``max_convergence_laps=1``), causing
    escalation to HITL and the ledger's lap count to hit the budget.
 
-These are **integration-level** scenarios: the real ``ReviewPhase._handle_rejected_review_gated``
-and ``ConvergenceLedger`` run; nothing is hand-populated in the ledger.
+3. ``test_approve_converges`` — a PR with an APPROVE review verdict and a
+   scripted post-verify advisor APPROVE passes the gated path end-to-end:
+   ``_convergence_decision(review_approved=True)`` runs the lens judge once
+   (low blast radius = 1 pass), records ``last_verdict=="ADVANCE"``, flips
+   ``ledger.converged`` to True, and merges the PR.
+
+These are **integration-level** scenarios: the real ``ReviewPhase._handle_approved_review_gated``
+/ ``_handle_rejected_review_gated`` and ``ConvergenceLedger`` run; nothing is
+hand-populated in the ledger.
 """
 
 from __future__ import annotations
+
+import json
 
 import pytest
 
@@ -197,4 +206,123 @@ class TestOscillationEscalates:
         assert diagnose_label in issue_labels, (
             f"Expected diagnose label {diagnose_label!r} in issue labels after "
             f"convergence escalation; got {issue_labels}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Scenario 3 — gated APPROVE path makes ledger.converged go True
+# ---------------------------------------------------------------------------
+
+
+class TestApproveConverges:
+    """Gate ON: APPROVE review + scripted post-verify APPROVE → converged=True.
+
+    This is the critical Phase-2 proof: the gated approve path runs
+    ``_handle_approved_review_gated`` → ``_convergence_decision(review_approved=True)``
+    → the HybridGate lens judge (one pass for low blast radius) → the scripted
+    ``post_verify`` advisor → ADVANCE → ``ledger.converged = True``.
+
+    Phase 1 could only exercise the reject path (REQUEST_CHANGES → LOOP_BACK).
+    This scenario proves the ADVANCE branch is plumbed end-to-end in MockWorld:
+    the real gate logic records ``last_verdict=="ADVANCE"``, calls
+    ``recompute_converged``, and flips ``converged`` to True — all without
+    hand-touching the ledger.
+
+    Post-verify advisor is scriptable in MockWorld via
+    ``world._llm.script_advisor(issue, "post_verify", [payload])``.
+    The ``_PostVerifyRunner`` inside ``ReviewPhase._build_post_verify_runner``
+    detects the ``_mockworld_fake_llm`` sentinel on ``self._reviewers`` and
+    pops the scripted result instead of dispatching a real Claude subprocess.
+    For low blast radius, ``min_review_passes_for_blast_radius`` returns 1,
+    so exactly one advisor pop is needed.
+
+    Kill-switch env vars are set explicitly to guard against test-suite-wide
+    overrides silently disabling the advisor and causing a vacuous pass.
+    """
+
+    async def test_approve_converges(self, tmp_path, monkeypatch) -> None:
+        # Enable the advisor master + pr_review surface + post_verify role
+        # kill-switches so _run_post_verify_for_surface does not short-circuit.
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_PR_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_POSTVERIFY_ENABLED", "true")
+
+        world = _make_world_with_gate(tmp_path)
+
+        IssueBuilder().numbered(1).titled("Add feature X").bodied(
+            "Implement feature X as described in the spec."
+        ).at(world)
+
+        # Script the review executor to return APPROVE (the gate fires only on
+        # APPROVE verdicts; REQUEST_CHANGES goes through the reject branch).
+        approve_review = ReviewResultFactory.create(
+            issue_number=1,
+            verdict=ReviewVerdict.APPROVE,
+            merged=False,  # MockWorld does not auto-merge; we assert outcome below.
+        )
+        world.set_phase_results("review", 1, [approve_review])
+
+        # Script the post-verify advisor.  For blast_radius="low", the
+        # HybridGate runs exactly one lens pass (min_review_passes_for_blast_radius
+        # returns 1 for "low").  The lens for pass 0 is "correctness"
+        # (_APPROVE_GATE_LENSES[0]), so PostVerifyAdvisor.run receives
+        # lens="correctness" and passes role="post_verify:correctness" to the
+        # runner.  The MockWorld _PostVerifyRunner routes by that compound role,
+        # so we must script under "post_verify:correctness" — not "post_verify".
+        advisor_payload = json.dumps(
+            {
+                "verdict": "APPROVE",
+                "reasoning": "Diff matches intent; no concerns.",
+                "disagreements": [],
+                "suggested_fix_direction": None,
+            }
+        )
+        world._llm.script_advisor(1, "post_verify:correctness", [advisor_payload])
+
+        result = await world.run_pipeline()
+
+        # --- probe: confirm the gate ran and created the ledger ---
+        ledger = world.harness.state.get_convergence_ledger(1)
+        assert ledger is not None, (
+            "ConvergenceLedger is None after a gated APPROVE — "
+            "_handle_approved_review_gated did not run through MockWorld. "
+            "BLOCKED: the approve-gate path is not exercised at this injection level."
+        )
+
+        # The gate recorded ADVANCE for the review stage, which flips converged.
+        review_record = ledger.stage_state.get("review")
+        assert review_record is not None, (
+            "No 'review' stage record in the ledger after APPROVE path ran."
+        )
+        assert review_record.last_verdict == "ADVANCE", (
+            f"Expected last_verdict=='ADVANCE' after gated APPROVE; "
+            f"got {review_record.last_verdict!r}"
+        )
+
+        # converged must be True: recompute_converged(["review"]) was called
+        # inside _convergence_decision after recording ADVANCE.
+        assert ledger.converged is True, (
+            f"Expected ledger.converged==True after ADVANCE decision; "
+            f"got converged={ledger.converged!r}, laps={ledger.laps}"
+        )
+
+        # One lap was closed (mark_lap() is called in _convergence_decision).
+        assert ledger.laps >= 1, (
+            f"Expected ledger.laps >= 1 after gated approve path; got {ledger.laps}"
+        )
+
+        # The PR was merged: _handle_approved_review_gated calls
+        # _handle_approved_merge when the gate returns ADVANCE.
+        outcome = result.issue(1)
+        assert outcome.merged is True, (
+            "Expected issue #1 to be merged after gated ADVANCE; "
+            f"got merged={outcome.merged!r}"
+        )
+
+        # The advisor was invoked exactly once (one lens pass, low blast radius).
+        # Role is "post_verify:correctness" because lens="correctness" is the
+        # first (and only) lens for blast_radius="low".
+        assert world._llm.advisor_call_count_for("post_verify:correctness") == 1, (
+            f"Expected exactly one post_verify:correctness advisor call; "
+            f"got {world._llm.advisor_call_count_for('post_verify:correctness')}"
         )
