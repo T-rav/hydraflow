@@ -45,14 +45,12 @@ pytestmark = pytest.mark.scenario
 
 
 def _make_world_with_gate(tmp_path, *, max_convergence_laps: int = 3) -> MockWorld:
-    """Return a fresh MockWorld with the convergence gate enabled.
+    """Return a fresh MockWorld for convergence-gate scenarios.
 
+    The gate is always-on (unconditional since the legacy fork was removed).
     We pass a config built before constructing MockWorld so that
-    ``ReviewPhase`` (wired in ``PipelineHarness.__init__``) picks up the flag
-    at construction time.  Mutating ``world.harness.config`` after the fact
-    would also work because ``ReviewPhase._uses_convergence_gate()`` reads
-    ``self._config.convergence_gate_enabled`` at call time, but passing it in
-    is the cleaner contract.
+    ``ReviewPhase`` (wired in ``PipelineHarness.__init__``) picks up
+    ``max_convergence_laps`` at construction time.
     """
     from tests.helpers import ConfigFactory
 

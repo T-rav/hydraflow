@@ -198,47 +198,6 @@ class TestHITLEscalationEvents:
         ]
         assert len(escalation_events) == 0
 
-    @pytest.mark.asyncio
-    async def test_review_fix_cap_exceeded_emits_hitl_event(
-        self, config: HydraFlowConfig, event_bus
-    ) -> None:
-        """Review fix cap exceeded should emit HITL_ESCALATION with cause review_fix_cap_exceeded."""
-        phase = make_review_phase(config, event_bus=event_bus)
-        issue = TaskFactory.create()
-        pr = PRInfoFactory.create()
-
-        # Set attempts to max so cap is exceeded
-        phase._state.increment_review_attempts(42)
-        phase._state.increment_review_attempts(42)
-
-        phase._reviewers.review = AsyncMock(
-            return_value=ReviewResultFactory.create(
-                verdict=ReviewVerdict.REQUEST_CHANGES
-            )
-        )
-        phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
-        phase._prs.push_branch = AsyncMock(return_value=True)
-        _setup_escalate_to_hitl_mocks(phase)
-        phase._prs.post_comment = AsyncMock()
-        phase._prs.submit_review = AsyncMock()
-        phase._workspaces.merge_main = AsyncMock(return_value=True)
-
-        wt = config.workspace_path_for_issue(42)
-        wt.mkdir(parents=True, exist_ok=True)
-
-        await phase.review_prs([pr], [issue])
-
-        escalation_events = [
-            e for e in event_bus.get_history() if e.type == EventType.HITL_ESCALATION
-        ]
-        assert len(escalation_events) == 1
-        data = escalation_events[0].data
-        assert data["issue"] == 42
-        assert data["pr"] == 101
-        assert data["status"] == "diagnostic"
-        assert data["role"] == "reviewer"
-        assert data["cause"] == "review_fix_cap_exceeded"
-
 
 # ---------------------------------------------------------------------------
 # REQUEST_CHANGES retry logic
@@ -320,35 +279,6 @@ class TestRequestChangesRetry:
         await phase.review_prs([pr], [issue])
 
         assert phase._state.get_review_attempts(42) == 1
-
-    @pytest.mark.asyncio
-    async def test_request_changes_at_cap_escalates_to_hitl(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """REQUEST_CHANGES at cap should escalate to diagnostic loop."""
-        phase, pr, issue = self._setup_phase_for_retry(config)
-        # Set attempts to max
-        phase._state.increment_review_attempts(42)
-        phase._state.increment_review_attempts(42)
-
-        await phase.review_prs([pr], [issue])
-
-        phase._prs.transition.assert_any_await(42, "diagnose", pr_number=101)
-
-    @pytest.mark.asyncio
-    async def test_request_changes_at_cap_posts_escalation_comment(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """REQUEST_CHANGES at cap should post an escalation comment."""
-        phase, pr, issue = self._setup_phase_for_retry(config)
-        phase._state.increment_review_attempts(42)
-        phase._state.increment_review_attempts(42)
-
-        await phase.review_prs([pr], [issue])
-
-        phase._prs.post_comment.assert_awaited()
-        comment_arg = phase._prs.post_comment.call_args[0][1]
-        assert "cap exceeded" in comment_arg.lower()
 
     @pytest.mark.asyncio
     async def test_comment_verdict_treated_as_soft_rejection(

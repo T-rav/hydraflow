@@ -211,9 +211,8 @@ class ReviewPhase:
 
             self._visual_validator = VisualValidator(config)
 
-        # Per-PR advisor retry counter — incremented on VETO. Bounded by the
-        # blast-radius-stratified post-verify retry budget (R-2; see
-        # review_advisor.post_verify_retry_budget).
+        # Per-PR advisor retry counter — incremented on VETO. Used by
+        # PRContext to pass prior_fix_attempts to the composite trigger.
         self._advisor_attempt: dict[int, int] = {}
         # Per-PR list of advisor PostVerifyResults collected this run. The
         # transcript hand-back to the executor (on VETO) is rendered from

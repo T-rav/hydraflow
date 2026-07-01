@@ -37,9 +37,8 @@ def _make_world_with_gate(tmp_path, *, max_convergence_laps: int = 3) -> MockWor
     We pass a config built before constructing MockWorld so that
     ``ReviewPhase`` (wired in ``PipelineHarness.__init__``) picks up the flag
     at construction time.  Mutating ``world.harness.config`` after the fact
-    would also work because ``ReviewPhase._uses_convergence_gate()`` reads
-    ``self._config.convergence_gate_enabled`` at call time, but passing it in
-    is the cleaner contract.
+    would also work because ``ReviewPhase`` reads ``convergence_gate_enabled``
+    from config, but passing it in at construction is the cleaner contract.
     """
     from tests.helpers import ConfigFactory
 
