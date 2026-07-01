@@ -101,6 +101,28 @@ describe('LoopFitnessPanel', () => {
     expect(scoreEl.textContent).not.toBe('0.000')
   })
 
+  it('renders score of 0 as "0.000", not "n/a"', () => {
+    mockUseHydraFlow.mockReturnValue(defaultContext({
+      loopFitness: {
+        ZeroScoredLoop: {
+          worker_name: 'ZeroScoredLoop',
+          kind: 'scored',
+          score: 0,
+          components: {},
+          sample_count: 8,
+          confidence: 'ok',
+          notes: null,
+          timestamp: '2026-06-30T00:00:00Z',
+        },
+      },
+    }))
+    render(<LoopFitnessPanel />)
+    const scoreEl = screen.getByTestId('loop-fitness-score-ZeroScoredLoop')
+    expect(scoreEl.textContent).toBe('0.000')
+    // Must not render as "n/a"
+    expect(scoreEl.textContent).not.toBe('n/a')
+  })
+
   it('renders insufficient_data confidence visually distinct from ok', () => {
     mockUseHydraFlow.mockReturnValue(defaultContext({
       loopFitness: {
