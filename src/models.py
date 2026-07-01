@@ -2927,9 +2927,14 @@ class LabelCounts(TypedDict):
 
 
 class WorkerResultMeta(TypedDict, total=False):
-    """Metadata stored by ``StateTracker.set_worker_result_meta``."""
+    """Metadata stored by ``StateTracker.set_worker_result_meta``.
 
-    quality_fix_attempts: int
+    Note: ``quality_fix_attempts`` has been migrated to the convergence ledger
+    (``ConvergenceLedger.stage_state["quality_fix"].attempts``). Use
+    ``StateTracker.set_quality_fix_attempts`` / ``get_convergence_ledger`` to
+    read or write that count.
+    """
+
     pre_quality_review_attempts: int
     duration_seconds: float
     error: str | None
