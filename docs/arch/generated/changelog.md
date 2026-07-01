@@ -4,9 +4,25 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W27
+
+- `7674bb5` — docs(adr): add ADR-0094 orchestration as a control system (Proposed) *(2026-06-30)*
+- `5476b45` — fix(ul): tighten Governor/Set-point term definitions to match anchors (review) *(2026-06-30)*
+- `8ef7487` — feat(ul): seed seven control-theory role terms (ADR-0094) *(2026-06-30)*
+
+## 2026-W25
+
+- `d1d7e11` — Fixes #9507: ADR-0007/0013/0019 carry the same dashboard drift FP +... (#9518) (#9518) *(2026-06-20)*
+- `69fea6a` — feat(factory): generate-in-worktree foundation + DiagramLoop migration (#9539 pt1) (#9614) (#9614) *(2026-06-19)*
+- `e920762` — feat(loops): per-loop work-cycle watchdog (closes #9556) (#9594) (#9594) *(2026-06-19)*
+- `1d8a175` — fix: close regression-test backlog from the 2026-06-13 session (10 issues) (#9592) (#9592) *(2026-06-19)*
+- `9ce3101` — Fixes #9442: wiki_rot_detector _gh_closed_escalations bypasses PRPo... (#9509) (#9509) *(2026-06-15)*
+
 ## 2026-W24
 
-- `0773c6d` — chore: salvage uncommitted changes for issue #9507 *(2026-06-13)*
+- `e79114c` — chore(wiki): untrack RepoWikiLoop runtime caches to stop perpetual tree-dirt (#9537) (#9537) *(2026-06-14)*
+- `5a715ac` — fix(adr-drift): stop recurring false-positive ADR-drift HITL escalations (#9530) (#9530) *(2026-06-13)*
+- `4e65ff6` — Fixes #9499: PricingRefreshLoop bare-tier alias may lag the newest ... (#9517) (#9517) *(2026-06-13)*
 - `f0974e5` — fix(wiki): resolve committed conflict markers in 11 term files (#9482) (#9484) (#9484) *(2026-06-12)*
 - `79662e5` — fix(observability): suppress Sentry noise — bugs-only filter + test init guard (#9481) (#9481) *(2026-06-12)*
 - `cadb008` — Fixes #9354: Shadow-drift: exclude non-deterministic corpus samples... (#9445) (#9445) *(2026-06-12)*
@@ -427,10 +443,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `494f736` — docs: ADR-0032 Per-Repo Wiki Knowledge Base (Karpathy pattern) (#6096) (#6096) *(2026-04-05)*
 - `f65f00b` — docs: accept ADR-0023 pair + add diagnostic and HITL plans (#6093) (#6093) *(2026-04-05)*
 - `2977a62` — docs: ADR-0031 Product Track Architecture (Discover/Shape phases) (#6010) (#6010) *(2026-04-05)*
-
-## 2026-W13
-
-- `bbf7336` — docs: Add ADRs for report pipeline, caretaker loops, and routes decomposition (#5904) (#5904) *(2026-03-28)*
 
 
 <!-- arch:generated -->

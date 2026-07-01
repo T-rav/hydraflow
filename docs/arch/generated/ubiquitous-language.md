@@ -2,9 +2,18 @@
 
 # Ubiquitous Language
 
-_43 terms across 3 bounded contexts._
+_50 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
+
+## Actuator
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/base_runner.py:BaseRunner` · **Confidence:** `accepted`
+
+The component that applies a Controller's action to the Plant: dispatches an agent runner, opens a PR, swaps a pipeline label. BaseRunner is the canonical actuator; PRManager realizes the PR-creation and label-swap actions.
+
+**Invariants:**
+- Every Actuator action is subject to the Governor's saturation and safety limits.
 
 ## ADRCouncilReviewer
 
@@ -115,6 +124,15 @@ Trust-fleet loop that refreshes cassettes for fake contract tests on a weekly ca
 - The replay gate failure opens a companion issue but does not block the auto-merge PR.
 - Kill-switch is via `enabled_cb("contract_refresh")` (ADR-0049); no config field.
 
+## Controller
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/issue_store.py:IssueStore` · **Confidence:** `accepted`
+
+The component that converts Error into a control action — which unit to act on next and how hard. HydraFlow has a supervisory controller (which issue to admit/route, today FIFO in IssueStore) and an inner controller (the per-issue gate decision, e.g. the review_advisor PostVerifyResult APPROVE/VETO).
+
+**Invariants:**
+- A Controller decides; it does not itself touch the Plant (that is the Actuator).
+
 ## CorpusLearningLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/corpus_learning_loop.py:CorpusLearningLoop` · **Confidence:** `accepted`
@@ -188,6 +206,15 @@ Caretaker loop that backfills `Term.evidence` links by matching wiki entries to 
 - Kill-switch is via `enabled_cb("entry_evidence")` (ADR-0049); no config field.
 - `entry_evidence_max_entries_per_tick` bounds the LLM spend per cycle.
 
+## Error
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/harness_insights.py:FailureRecord` · **Confidence:** `accepted`
+
+The gap between Set-point and measured state that a Controller acts to reduce: unresolved review concerns, a REQUEST_CHANGES verdict, route-backs, or a recorded FailureRecord. On main the signal is largely binary; a continuous per-issue error is a known-open surface.
+
+**Invariants:**
+- Error is derived (Set-point minus measured state), never authored directly.
+
 ## EventBus
 
 **Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/events.py:EventBus` · **Confidence:** `accepted`
@@ -249,6 +276,15 @@ Centralized GitHub data poller that replaces the pattern where every dashboard e
 - Only one instance per repo runtime; all read consumers share the same cache snapshot.
 - Write operations bypass the cache and call `gh` directly.
 - Cache staleness is observable: each `CacheSnapshot` carries a `fetched_at` timestamp; `age_seconds` is infinite until the first poll completes.
+
+## Governor
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/base_background_loop.py:LoopDeps` · **Confidence:** `accepted`
+
+The saturation limiter and safety interlock that bounds every Actuator regardless of Controller intent. LoopDeps carries a loop's per-cycle safety controls — the kill switch (enabled_cb) and the watchdog timeout bound (timeout_cb); the wider Governor role (concurrency caps, credit holds) is realized elsewhere, by the max_workers/max_planners semaphores and the credit-exhaustion signal. The v2 Governor generalizes these into an explicit capacity-and-safety authority.
+
+**Invariants:**
+- The Governor can veto or throttle any actuation; a Controller cannot override it.
 
 ## HydraFlowConfig
 
@@ -324,6 +360,15 @@ Hexagonal port for the observability boundary (ADR-0044 P7.7). Exposes five meth
 - Pure Protocol — no implementation, no state.
 - The adapter is a no-op when `sentry_sdk` is absent; every method returns silently so callers never need a try/except around port calls.
 - Domain code never imports `sentry_sdk` directly; all observability routes through the injected `ObservabilityPort` so a future OTLP, structured-log, or sidecar adapter can replace Sentry without touching call sites.
+
+## Plant
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/models.py:StateData` · **Confidence:** `accepted`
+
+The process an orchestration loop drives and observes: the repository plus an issue's lifecycle. Its durable, observable state is captured in StateData (and, in v2, the ConvergenceLedger). Controllers act on the Plant through Actuators; Sensors read it.
+
+**Invariants:**
+- The Plant is only mutated through an Actuator, never by a Controller directly.
 
 ## PricingRefreshLoop
 
@@ -419,6 +464,15 @@ Hexagonal port for the per-issue route-back counter. Lives in `src/route_back.py
 - Three methods: `get_route_back_count` reads the current count; `increment_route_back_count` returns the new count after incrementing; `decrement_route_back_count` rolls back an increment when a subsequent label swap fails, preventing transient network blips from burning route-back budget without any actual route-back occurring.
 - `decrement_route_back_count` must be a no-op (returning 0) when the counter is already at zero.
 
+## Sensor
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/models.py:MetricsSnapshot` · **Confidence:** `accepted`
+
+Any component that measures the current state of the Plant and emits a signal a Controller can read — deterministic (drift detectors, lint) or LLM-based (spec/review judges). MetricsSnapshot is the canonical aggregate reading.
+
+**Invariants:**
+- A Sensor observes; it does not mutate the Plant.
+
 ## SentryLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/sentry_loop.py:SentryLoop` · **Confidence:** `accepted`
@@ -430,6 +484,15 @@ Background loop that polls the Sentry API for unresolved issues across configure
 - Issues are deduplicated before filing; re-ingestion of the same Sentry event does not produce duplicate GitHub issues.
 - Kill-switch is via `enabled_cb("sentry")` (ADR-0049).
 - Sentry errors in the `ERROR+` level range trigger the issue-filing path; `WARNING` and below are skipped.
+
+## Set-point
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/issue_store.py:IssueStoreStage` · **Confidence:** `accepted`
+
+The desired state an orchestration loop drives toward — an issue reaching its terminal pipeline stage (the MERGED value of the IssueStoreStage state space), or a regulator holding a quantity at zero. A first-class converged flag arrives with the v2 ConvergenceLedger.
+
+**Invariants:**
+- The Set-point is the loop's target, not its current state (that is the Sensor reading).
 
 ## SkillPromptEvalLoop
 
