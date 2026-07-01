@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `affa3dc` — chore(disturbance): move DisturbanceDampenerLoop to auto_agent functional area (review) *(2026-07-01)*
 - `3d11bc1` — feat(disturbance): wire DisturbanceDampenerLoop into orchestrator + arch *(2026-07-01)*
 - `473ffe2` — feat(disturbance): DisturbanceDampenerLoop burn-down actuator (Pattern A) *(2026-07-01)*
 - `9bf9123` — chore(disturbance): update refs to retired mock-spec test after migration *(2026-07-01)*
