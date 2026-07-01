@@ -177,6 +177,9 @@ class AdrConformanceLoop(BaseBackgroundLoop):
             )
             return
         self._state.set_adr_conformance_rollup(conf.adr_id, issue_number=issue_number)
+        # The state rollup above is the operative per-ADR double-file cap
+        # (gates create-vs-update via get_adr_conformance_rollup); this
+        # dedup write is a secondary marker, mirroring AdrTouchpointAuditorLoop.
         dedup = self._dedup.get()
         dedup.add(_dedup_key(conf.adr_id))
         self._dedup.set_all(dedup)
@@ -208,6 +211,9 @@ class AdrConformanceLoop(BaseBackgroundLoop):
             )
             return
         self._state.set_adr_conformance_rollup(conf.adr_id, issue_number=issue_number)
+        # The state rollup above is the operative per-ADR double-file cap
+        # (gates create-vs-update via get_adr_conformance_rollup); this
+        # dedup write is a secondary marker, mirroring AdrTouchpointAuditorLoop.
         dedup = self._dedup.get()
         dedup.add(_dedup_key(conf.adr_id))
         self._dedup.set_all(dedup)

@@ -434,6 +434,12 @@ class TestAtlasAdrsList:
             "## Date\n\n2026-02-20\n\n"
             "## Context\n\nAnother thing.\n"
         )
+        (root / "0093-em-dash.md").write_text(
+            "# ADR-0093 — Loop fitness as a measured contract\n\n"
+            "## Status\n\nAccepted\n\n"
+            "## Date\n\n2026-05-01\n\n"
+            "## Context\n\nEm-dash-titled ADR.\n"
+        )
         (root / "README.md").write_text("# ADR Index\n\nIgnored.\n")
         return root
 
@@ -447,7 +453,7 @@ class TestAtlasAdrsList:
 
         result = endpoint()
 
-        assert len(result) == 2
+        assert len(result) == 3
         first = next(r for r in result if r["number"] == 1)
         assert first["title"] == "First decision"
         assert first["status"] == "Accepted"
@@ -455,6 +461,19 @@ class TestAtlasAdrsList:
 
         second = next(r for r in result if r["number"] == 2)
         assert second["status"] == "Proposed"
+
+    def test_parses_em_dash_titled_adr(self, tmp_path: Path, adr_root: Path) -> None:
+        """Colon and em-dash title separators must both parse (mirrors the
+        broadened _TITLE_RE in adr_index.py)."""
+        config = HydraFlowConfig(repo_root=tmp_path)
+        router = _make_router(tmp_path, config)
+        endpoint = find_endpoint(router, "/api/atlas/adrs", method="GET")
+        assert endpoint is not None
+
+        result = endpoint()
+
+        em_dash = next(r for r in result if r["number"] == 93)
+        assert em_dash["title"] == "Loop fitness as a measured contract"
 
     def test_empty_when_adr_dir_missing(self, tmp_path: Path) -> None:
         config = HydraFlowConfig(repo_root=tmp_path)
