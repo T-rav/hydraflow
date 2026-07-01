@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `2770430` — fix(adr-conformance): parse ## Status (H2) ADRs + status-completeness ratchet (0053 now enforced) *(2026-07-01)*
 - `6d09c05` — feat(adr-conformance): enforce ADR-0049 (kill-switch ratchet) + ADR-0053 (read-only UL-drift check) *(2026-07-01)*
 - `6b7e6eb` — fix(adr-conformance): parse all ADR title formats + parse-completeness ratchet + non-greedy Enforced-by *(2026-07-01)*
 - `35f6176` — feat(adr-conformance): backfill conformance annotations (0002/03/42/56/93) + subset grandfather guard *(2026-07-01)*

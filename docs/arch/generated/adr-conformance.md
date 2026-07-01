@@ -72,6 +72,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0094 | unknown | — |
 | ADR-0095 | unknown | — |
 | ADR-0096 | unknown | — |
+| ADR-0098 | enforced | `pytest:tests/test_adr_conformance_coverage.py` |
 
 ## Check → ADRs it protects
 
@@ -88,6 +89,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `(process)` | ADR-0009, ADR-0023, ADR-0025, ADR-0035, ADR-0036, ADR-0065 |
 | `branch-protection ruleset review per docs/standards/branch_protection` | ADR-0042 |
 | `pytest:tests/regressions/test_canonical_killswitch.py` | ADR-0049 |
+| `pytest:tests/test_adr_conformance_coverage.py` | ADR-0098 |
 | `pytest:tests/test_adr_touchpoint_auditor_loop.py` | ADR-0056 |
 | `pytest:tests/test_loop_fitness_completeness.py` | ADR-0093 |
 | `pytest:tests/test_loop_kill_switch_completeness.py` | ADR-0049 |
