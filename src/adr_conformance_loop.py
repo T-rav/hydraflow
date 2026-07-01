@@ -221,7 +221,9 @@ class AdrConformanceLoop(BaseBackgroundLoop):
         ``==`` (not ``>=``) guard, so a still-open remediation doesn't file a
         fresh escalation every subsequent tick.
         """
-        title = f"HITL: {conf.adr_id} conformance unresolved after {attempts} attempts"
+        title = (
+            f"HITL: {conf.adr_id} conformance unresolved after {_MAX_ATTEMPTS} attempts"
+        )
         body = (
             f"`adr_conformance` has re-evaluated `{conf.adr_id}` as "
             f"`{conf.outcome.value}` {attempts} times without resolution. "
@@ -308,8 +310,14 @@ class AdrConformanceLoop(BaseBackgroundLoop):
                 await self._file_or_update_issue(conf)
                 filed += 1
             elif decision.action is RemediationAction.ESCALATE:
-                await self._escalate_to_adr_reviewer(conf, attempts)
-                escalated += 1
+                # Fire exactly once at the threshold. classify_remediation
+                # returns ESCALATE for every attempts >= max_attempts, so
+                # without this guard a still-unresolved ADR would re-file a
+                # HITL issue every subsequent tick (attempts=4, 5, 6, ...).
+                if attempts == _MAX_ATTEMPTS:
+                    await self._escalate_to_adr_reviewer(conf, attempts)
+                    escalated += 1
+                # attempts > _MAX_ATTEMPTS: already escalated once; no-op.
             else:
                 self._state.clear_adr_conformance_attempts(conf.adr_id)
 

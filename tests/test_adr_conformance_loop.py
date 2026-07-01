@@ -305,6 +305,32 @@ async def test_escalates_after_max_attempts(loop_fixture) -> None:
     )
 
 
+async def test_escalation_fires_once_across_multiple_ticks(loop_fixture) -> None:
+    """A persistently-failing ADR must escalate exactly ONCE, at the attempts
+    threshold — not on every subsequent tick past it (unbounded HITL spam).
+
+    Runs the tick 5 times in a row: attempts goes 1, 2, 3 (threshold — first
+    and only escalation), 4, 5 (both past-threshold, must no-op on escalate).
+    The fixture has two persistently-unresolved ADRs (ADR-0049 FAIL,
+    ADR-0051 UNRESOLVED); each is entitled to exactly one escalation, so we
+    scope the assertion to ADR-0049 specifically.
+    """
+    loop, fakes = loop_fixture
+
+    for _ in range(5):
+        await run_tick(loop)
+
+    hitl_titles = [
+        title
+        for title, _body, _labels in fakes.pr.created_issues
+        if "HITL" in title and "ADR-0049" in title
+    ]
+    assert len(hitl_titles) == 1, (
+        f"expected exactly one HITL escalation issue for ADR-0049, got "
+        f"{len(hitl_titles)}: {hitl_titles}"
+    )
+
+
 async def test_kill_switch_short_circuits(loop_fixture) -> None:
     loop, fakes = loop_fixture
     loop._enabled_cb = lambda _name: False
