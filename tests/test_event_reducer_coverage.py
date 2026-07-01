@@ -76,6 +76,10 @@ SKIP_LIST: set[str] = {
     # regeneration); the dashboard reads fitness via /api/loop-fitness REST,
     # not via a reducer case.
     "loop_fitness_update",
+    # ADR conformance events are consumed server-side (adr_conformance.jsonl +
+    # artifact regeneration), the same passive-dashboard shape as
+    # loop_fitness_update/metrics_update; no direct reducer case.
+    "adr_conformance_update",
 }
 
 

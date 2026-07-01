@@ -11,6 +11,8 @@ HydraFlow has a **dependency** link between an ADR and the code it governs: `adr
 
 This matters because agents read Accepted ADRs as ground truth. `adr_index.render_full` injects ADR prose directly into plan-phase prompts. An ADR whose invariant has silently drifted is worse than no ADR at all: it is a confidently wrong instruction. The fitness-function pattern is already proven three times over in this repo (wiki `json:entry` blocks, ADR source-citations, the `loop_fitness` ratchet from ADR-0093). The one architectural layer without a conformance contract is the ADRs themselves, the decisions everything else defers to.
 
+This ADR **supersedes** the pre-existing "P3" `**Enforced by:**` convention introduced by PR #8398: a bare `**Enforced by:**` line (values like `(none)`, `(process)`, `(historical)`) validated only by `tests/test_adr_enforcement.py`, with no typed grammar and no resolution check. That test is deleted; `tests/test_adr_conformance_coverage.py` is the single validator going forward, and the `**Enforced by:**` line is now paired with a required `**Enforcement:**` kind (`enforced` / `manual` / `decision-of-record`) instead of standing alone.
+
 ## Decision
 
 ### The contract surface
@@ -53,6 +55,7 @@ A red conformance check has exactly two legitimate ways to go green: the code is
 - The dependency tripwire (ADR-0056, `adr_drift.py`) and the conformance contract (this ADR) are complementary, not redundant: one flags that governed code changed, the other proves the governing decision still holds.
 - `AdrConformanceLoop` is a mutator on the ADR-0046 ladder, so any future audit of "which loops need dedup + attempt-budget + kill-switch bounding" must include it alongside the other producer loops, not alongside the read-only observers.
 - This ADR is itself Exhibit A: it is `enforced`, cites `tests/test_adr_conformance_coverage.py`, and its own coverage entry is proved the same way as every other ADR the ratchet checks — no ADR earns a manual exemption from the mechanism it defines.
+- The P3 `**Enforced by:**`-only convention (PR #8398) and its validator `tests/test_adr_enforcement.py` are retired. `docs/adr/README.md`'s Enforcement section and every future Accepted ADR use the `**Enforcement:**` + `**Enforced by:**` pairing this ADR defines.
 
 ## References
 

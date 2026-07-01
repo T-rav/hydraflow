@@ -61,23 +61,36 @@ def _write_adr_decision(
 
 # Valid statuses are single words: Proposed, Accepted, Superseded, Deprecated, Rejected.
 _STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(\w+)", re.IGNORECASE)
-_ENFORCED_BY_RE = re.compile(r"^\*\*Enforced by:\*\*", re.MULTILINE)
+_ENFORCEMENT_LINE_RE = re.compile(r"^\*\*Enforcement:\*\*", re.MULTILINE)
 _STATUS_LINE_RE = re.compile(r"^(\*\*Status:\*\*[^\n]*)$", re.MULTILINE)
 
 
-def _ensure_enforced_by_line(content: str) -> str:
-    """Guarantee an ``**Enforced by:**`` line directly under the Status line.
+def _ensure_enforcement_line(content: str) -> str:
+    """Guarantee an ``**Enforcement:**`` line directly under the Status line.
 
-    When the ADR already carries an ``Enforced by:`` line (author-
-    provided or backfill), leave it untouched — respect the author.
-    Otherwise inject ``**Enforced by:** (none)`` so
-    ``tests/test_adr_enforcement.py`` does not fail the first time this
-    ADR ships as Accepted. Operators replace the ``(none)`` placeholder
-    with real test references as enforcement matures.
+    ADR-0098's coverage ratchet (``tests/test_adr_conformance_coverage.py``)
+    requires every non-grandfathered Accepted ADR to declare a recognized
+    ``**Enforcement:**`` kind (``enforced`` / ``manual`` /
+    ``decision-of-record``); an absent or unrecognized value normalizes to
+    ``unknown`` and fails CI. This supersedes the pre-ADR-0098 "P3"
+    convention (PR #8398) which only guaranteed a bare
+    ``**Enforced by:** (none)`` line validated by the now-deleted
+    ``tests/test_adr_enforcement.py``.
+
+    When the ADR already carries an ``Enforcement:`` line (author-provided
+    or backfill), leave it untouched — respect the author. Otherwise inject
+    ``**Enforcement:** decision-of-record``: the ratchet's "no runnable
+    check" kind, which is honest about a bot-authored ADR that hasn't had
+    an enforcement mechanism designed yet, requires no ``Enforced by:``
+    checks, and passes the ratchet immediately. Operators upgrade it to
+    ``enforced``/``manual`` with real ``Enforced by:`` references as
+    enforcement matures.
     """
-    if _ENFORCED_BY_RE.search(content):
+    if _ENFORCEMENT_LINE_RE.search(content):
         return content
-    return _STATUS_LINE_RE.sub(r"\1\n**Enforced by:** (none)", content, count=1)
+    return _STATUS_LINE_RE.sub(
+        r"\1\n**Enforcement:** decision-of-record", content, count=1
+    )
 
 
 _DUPLICATE_THRESHOLD = 0.7
@@ -829,10 +842,12 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
                 logger.exception("Failed to read ADR file: %s", adr_path)
                 return
 
-        # Update status in ADR file and guarantee the Enforced-by line
-        # (required by tests/test_adr_enforcement.py on every Accepted ADR).
+        # Update status in ADR file and guarantee the Enforcement line
+        # (required by the ADR-0098 coverage ratchet,
+        # tests/test_adr_conformance_coverage.py, on every non-grandfathered
+        # Accepted ADR).
         updated_adr = _STATUS_RE.sub("**Status:** Accepted", content, count=1)
-        updated_adr = _ensure_enforced_by_line(updated_adr)
+        updated_adr = _ensure_enforcement_line(updated_adr)
 
         # Compute the updated README content (if present) — content only; the
         # write happens inside the worktree generate callback.

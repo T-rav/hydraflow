@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `4d5d1e3` — docs(adr): correct ADR-0098 remediation prose to issue-only (loop opens no PRs) *(2026-07-01)*
+- `483f4d0` — docs(adr): ADR-0098 ADR conformance as a measured contract (self-enforcing) *(2026-07-01)*
 - `2770430` — fix(adr-conformance): parse ## Status (H2) ADRs + status-completeness ratchet (0053 now enforced) *(2026-07-01)*
 - `6d09c05` — feat(adr-conformance): enforce ADR-0049 (kill-switch ratchet) + ADR-0053 (read-only UL-drift check) *(2026-07-01)*
 - `6b7e6eb` — fix(adr-conformance): parse all ADR title formats + parse-completeness ratchet + non-greedy Enforced-by *(2026-07-01)*
