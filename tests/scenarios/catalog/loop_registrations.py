@@ -1425,6 +1425,36 @@ def _build_triage_retry(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
+def _build_convergence_oscillation(
+    ports: dict[str, Any], config: Any, deps: Any
+) -> Any:
+    """Build ConvergenceOscillationLoop for scenarios (ADR-0098).
+
+    Caretaker loop that scans ConvergenceLedger entries held in StateTracker
+    and escalates cross-boundary oscillation to HITL once per issue.  Tests
+    seed a FakeGitHub via ``ports['github']``; the optional
+    ``convergence_oscillation_state`` port lets a scenario inject a pre-built
+    StateTracker mock when it needs to assert on ledger scanning or escalation.
+    """
+    from convergence_oscillation_loop import ConvergenceOscillationLoop  # noqa: PLC0415
+
+    state = ports.get("convergence_oscillation_state")
+    if state is None:
+        state = MagicMock()
+        state.iter_convergence_ledgers.return_value = []
+        state.mark_oscillation_escalated.return_value = None
+        ports["convergence_oscillation_state"] = state
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return ConvergenceOscillationLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        deps=deps,
+    )
+
+
 def _build_fitness_scorecard(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build FitnessScorecardLoop for scenarios (ADR-0093).
 
@@ -1515,6 +1545,8 @@ _BUILDERS: dict[str, Any] = {
     "staging_promotion": _build_staging_promotion,
     # factory-phase drift mitigation (ADR-0063 W2)
     "triage_retry": _build_triage_retry,
+    # convergence oscillation escalation (ADR-0098)
+    "convergence_oscillation": _build_convergence_oscillation,
     # loop fitness scorecard (ADR-0093)
     "fitness_scorecard": _build_fitness_scorecard,
 }

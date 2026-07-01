@@ -80,6 +80,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "github_cache": (10, 3600),  # 10s min, 1h max (single-poller cache)
     "triage_retry": (3600, 604800),  # 1h min, 7d max (default 24h, ADR-0063 W2)
     "fitness_scorecard": (3600, 604800),  # 1h min, 7d max (default 24h)
+    "convergence_oscillation": (300, 86400),  # 5m min, 1d max (default 1h, ADR-0098)
 }
 
 # Internal pipeline labels that must not be treated as epic names in the history panel.

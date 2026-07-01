@@ -25,6 +25,7 @@ from caching_issue_store import CachingIssueStore
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
 from config import Credentials, HydraFlowConfig
 from contract_refresh_loop import ContractRefreshLoop
+from convergence_oscillation_loop import ConvergenceOscillationLoop
 from corpus_learning_loop import CorpusLearningLoop
 from cost_budget_watcher_loop import CostBudgetWatcherLoop  # noqa: TCH001
 from crate_manager import CrateManager
@@ -326,6 +327,7 @@ class ServiceRegistry:
     entry_evidence_loop: EntryEvidenceLoop
     live_corpus_replay_loop: LiveCorpusReplayLoop
     triage_retry_loop: TriageRetryLoop
+    convergence_oscillation_loop: ConvergenceOscillationLoop
     fitness_scorecard_loop: FitnessScorecardLoop
 
     # Optional integrations
@@ -1081,6 +1083,12 @@ def build_services(
         pr_manager=prs,
         deps=loop_deps,
     )
+    convergence_oscillation_loop = ConvergenceOscillationLoop(
+        config=config,
+        state=state,
+        pr_manager=prs,
+        deps=loop_deps,
+    )
     gh_cache_loop = GitHubCacheLoop(config, gh_cache, deps=loop_deps)  # noqa: F841
     from dedup_store import DedupStore  # noqa: PLC0415
 
@@ -1567,5 +1575,6 @@ def build_services(
         entry_evidence_loop=entry_evidence_loop,
         live_corpus_replay_loop=_live_corpus_replay_loop,
         triage_retry_loop=triage_retry_loop,
+        convergence_oscillation_loop=convergence_oscillation_loop,
         fitness_scorecard_loop=fitness_scorecard_loop,
     )

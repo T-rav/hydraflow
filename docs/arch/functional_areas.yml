@@ -163,11 +163,13 @@ areas:
       - AutoAgentPreflightLoop
       - SandboxFailureFixerLoop
       - TriageRetryLoop
+      - ConvergenceOscillationLoop
     modules:
       - src/auto_agent_preflight_loop.py
       - src/preflight/**
       - src/triage_retry_loop.py
-    related_adrs: ['0050', '0063']
+      - src/convergence_oscillation_loop.py
+    related_adrs: ['0050', '0063', '0098']
 
   goal_driven_dev:
     label: Goal-Driven Development

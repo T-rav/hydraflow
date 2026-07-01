@@ -326,6 +326,11 @@ _bg_worker_defs = [
         "Re-runs parked-issue triage every 24h with the original parking reason as context. Caps at 3 retries before escalating to HITL with the triage-retry-exhausted sub-label. Closes the only factory phase with no autonomous re-entry path. See ADR-0063 W2.",
     ),
     (
+        "convergence_oscillation",
+        "Convergence Oscillation",
+        "Scans issue convergence ledgers for cross-boundary oscillation (repeated LOOP_BACK across triage/shape/plan or recurring review-lap findings) and escalates stuck issues to HITL, once each. See ADR-0098.",
+    ),
+    (
         "fitness_scorecard",
         "Fitness Scorecard",
         "Computes per-loop fitness scores each tick by combining event history and issue attribution. Persists to fitness.jsonl and regenerates docs/arch/generated/loop-fitness.md. Read-only caretaker per ADR-0029.",

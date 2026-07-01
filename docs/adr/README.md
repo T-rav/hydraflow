@@ -129,6 +129,7 @@ ADR and that named test files actually exist.
 | [0095](0095-approve-path-gating-and-converged.md) | Approve-path gating and live convergence (Phase 2a) | Accepted |
 | [0096](0096-boundary-verdict-recording.md) | Boundary verdict recording (Phase 2b) | Accepted |
 | [0097](0097-attempt-counter-migration-to-ledger.md) | Attempt counter migration into the ledger (Phase 2c) | Accepted |
+| [0098](0098-convergence-oscillation-caretaker.md) | Convergence oscillation caretaker (Phase 2d) | Accepted |
 
 ## Adding a new ADR
 
