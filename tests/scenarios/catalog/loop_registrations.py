@@ -683,6 +683,53 @@ def _build_adr_touchpoint_auditor(ports: dict[str, Any], config: Any, deps: Any)
     return loop
 
 
+def _build_adr_conformance(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build AdrConformanceLoop for scenarios (ADR-0094).
+
+    Mirrors ``_build_adr_touchpoint_auditor``. Tests pre-seed:
+    * ``adr_conformance_runner`` → a ``ConformanceRunnerPort`` (defaults to
+      ``FakeConformanceRunner``, which maps ``check.raw`` -> preset outcome
+      without shelling out).
+    * ``adr_conformance_index`` → an ``ADRIndex`` (or duck-typed substitute).
+
+    State + dedup default to MagicMocks behaving like a clean slate (no
+    rollup recorded, zero attempts, empty dedup set). Tests override via
+    ``adr_conformance_state`` / ``adr_conformance_dedup``.
+    """
+    from adr_conformance_loop import AdrConformanceLoop  # noqa: PLC0415
+    from mockworld.fakes import FakeConformanceRunner  # noqa: PLC0415
+
+    state = ports.get("adr_conformance_state")
+    if state is None:
+        state = MagicMock()
+        state.get_adr_conformance_rollup.return_value = None
+        state.inc_adr_conformance_attempts.return_value = 1
+        ports["adr_conformance_state"] = state
+
+    dedup = ports.get("adr_conformance_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["adr_conformance_dedup"] = dedup
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+    adr_index = ports.get("adr_conformance_index") or MagicMock(adrs=lambda: [])
+    runner = ports.get("adr_conformance_runner")
+    if runner is None:
+        runner = FakeConformanceRunner()
+        ports["adr_conformance_runner"] = runner
+
+    return AdrConformanceLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        adr_index=adr_index,
+        runner=runner,
+        deps=deps,
+    )
+
+
 def _build_branch_protection_auditor(
     ports: dict[str, Any], config: Any, deps: Any
 ) -> Any:
@@ -1483,6 +1530,7 @@ _BUILDERS: dict[str, Any] = {
     "skill_prompt_eval": _build_skill_prompt_eval,
     "fake_coverage_auditor": _build_fake_coverage_auditor,
     "adr_touchpoint_auditor": _build_adr_touchpoint_auditor,
+    "adr_conformance": _build_adr_conformance,
     "memory_backlog": _build_memory_backlog,
     "rc_budget": _build_rc_budget,
     "wiki_rot_detector": _build_wiki_rot_detector,

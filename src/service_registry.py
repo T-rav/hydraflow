@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from acceptance_criteria import AcceptanceCriteriaGenerator
+from adr_conformance_loop import AdrConformanceLoop
+from adr_conformance_runner import SubprocessConformanceRunner
 from adr_index import ADRIndex
 from adr_reviewer import ADRCouncilReviewer
 from adr_reviewer_loop import ADRReviewerLoop
@@ -308,6 +310,7 @@ class ServiceRegistry:
     skill_prompt_eval_loop: SkillPromptEvalLoop
     fake_coverage_auditor_loop: FakeCoverageAuditorLoop
     adr_touchpoint_auditor_loop: AdrTouchpointAuditorLoop
+    adr_conformance_loop: AdrConformanceLoop
     memory_backlog_loop: MemoryBacklogLoop
     rc_budget_loop: RCBudgetLoop
     wiki_rot_detector_loop: WikiRotDetectorLoop
@@ -1233,6 +1236,20 @@ def build_services(
         deps=loop_deps,
     )
 
+    adr_conformance_dedup = DedupStore(
+        "adr_conformance",
+        config.data_root / "dedup" / "adr_conformance.json",
+    )
+    adr_conformance_loop = AdrConformanceLoop(  # noqa: F841
+        config=config,
+        state=state,
+        pr_manager=prs,
+        dedup=adr_conformance_dedup,
+        adr_index=ADRIndex(config.repo_root / "docs" / "adr"),
+        runner=SubprocessConformanceRunner(),
+        deps=loop_deps,
+    )
+
     branch_protection_auditor_dedup = DedupStore(
         "branch_protection_auditor",
         config.data_root / "dedup" / "branch_protection_auditor.json",
@@ -1549,6 +1566,7 @@ def build_services(
         skill_prompt_eval_loop=skill_prompt_eval_loop,
         fake_coverage_auditor_loop=fake_coverage_auditor_loop,
         adr_touchpoint_auditor_loop=adr_touchpoint_auditor_loop,
+        adr_conformance_loop=adr_conformance_loop,
         memory_backlog_loop=memory_backlog_loop,
         rc_budget_loop=rc_budget_loop,
         wiki_rot_detector_loop=wiki_rot_detector_loop,

@@ -262,7 +262,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -289,6 +289,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   skill_prompt_eval: 604800,
   fake_coverage_auditor: 604800,
   adr_touchpoint_auditor: 14400,
+  adr_conformance: 86400,
   memory_backlog: 86400,
   rc_budget: 14400,
   wiki_rot_detector: 604800,
@@ -353,6 +354,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'skill_prompt_eval', label: 'Skill Prompt Eval', description: 'Runs the full adversarial skill corpus weekly and files drift + weak-case issues.', color: theme.blue, group: 'learning', tags: ['quality'] },
   { key: 'fake_coverage_auditor', label: 'Fake Coverage Auditor', description: 'Flags un-cassetted fake adapter methods and un-exercised test helpers.', color: theme.accent, group: 'learning', tags: ['quality'] },
   { key: 'adr_touchpoint_auditor', label: 'ADR Touchpoint Auditor', description: 'Scans recently-merged PRs for ADR drift — cited src/ modules changed without the ADR being updated. Replaces the synchronous touchpoint gate. See ADR-0056.', color: theme.purple, group: 'governance', tags: ['audit', 'drift'] },
+  { key: 'adr_conformance', label: 'ADR Conformance', description: 'Evaluates every Accepted ADR\'s `Enforced by:` checks and files/updates remediation issues on drift. See ADR-0094.', color: theme.purple, group: 'governance', tags: ['audit', 'compliance'] },
   { key: 'memory_backlog', label: 'Memory Backlog', description: 'Files hydraflow-find issues for pending entries in docs/wiki/memory-feedback/.', color: theme.purple, group: 'learning', tags: ['knowledge'] },
   { key: 'rc_budget', label: 'RC Budget', description: 'Detects RC CI wall-clock bloat via rolling-median + spike-vs-recent-max signals; files hydraflow-find issues.', color: theme.orange, group: 'repo_health', tags: ['quality'] },
   { key: 'term_proposer', label: 'Term Proposer', description: 'Caretaker that grows the ubiquitous-language glossary by detecting load-bearing classes without terms (S1+S2+S5 signals), drafting them via LLM, and opening auto-merging bot PRs as `confidence: proposed`. See ADR-0054.', color: theme.cyan, group: 'learning', tags: ['knowledge'] },

@@ -69,6 +69,7 @@ areas:
       audit, flake tracker, corpus learning, fake coverage auditor,
       RC budget, meta-observability sanity.
     loops:
+      - AdrConformanceLoop
       - AdrTouchpointAuditorLoop
       - ContractRefreshLoop
       - CorpusLearningLoop
