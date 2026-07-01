@@ -74,7 +74,7 @@ The caretaker complements, and does not replace, the review phase's lap-cap esca
 
 This ADR covers:
 
-- The `detect_cross_boundary_oscillation` detection method on `ConvergenceLedger` and the `oscillation_escalated` dedup flag on `StageRecord` (`src/models.py`).
+- The `detect_cross_boundary_oscillation` detection method and the `oscillation_escalated` dedup flag, both on `ConvergenceLedger` (`src/models.py`).
 - The `iter_convergence_ledgers` public accessor and `mark_oscillation_escalated` helper on `StateTracker` (`src/state/_convergence.py`).
 - `ConvergenceOscillationLoop` and its full orchestrator and registry wiring (`src/convergence_oscillation_loop.py`).
 - The full test pyramid: unit tests for detection and the loop, a MockWorld scenario, and a sandbox e2e scenario.
@@ -95,7 +95,7 @@ Supersede when: the detection algorithm changes (for example, adding a frequency
 
 ## Source-file citations
 
-- `src/models.py`: `ConvergenceLedger.detect_cross_boundary_oscillation`, `StageRecord.oscillation_escalated`.
+- `src/models.py`: `ConvergenceLedger.detect_cross_boundary_oscillation`, `ConvergenceLedger.oscillation_escalated`.
 - `src/state/_convergence.py`: `StateTracker.iter_convergence_ledgers`, `StateTracker.mark_oscillation_escalated`.
 - `src/convergence_oscillation_loop.py`: `ConvergenceOscillationLoop`, worker `convergence_oscillation`.
 - `tests/scenarios/test_convergence_oscillation_mockworld.py`: MockWorld scenario exercising the full caretaker flow.

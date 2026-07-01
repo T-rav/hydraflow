@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `969eb8f` — docs(adr): ADR-0098 convergence oscillation caretaker (Phase 2d) *(2026-07-01)*
 - `eb802af` — feat(convergence): wire ConvergenceOscillationLoop into orchestrator + registries *(2026-07-01)*
 - `036e91c` — feat(convergence): ConvergenceOscillationLoop caretaker (detect + escalate) *(2026-07-01)*
 - `7503e7e` — Two-level convergence Phase 2c: migrate attempt counters into the ledger (#9681) (#9681) *(2026-07-01)*
