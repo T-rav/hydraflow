@@ -50,3 +50,9 @@ def test_ignores_suppression_inside_string_literal(tmp_path: Path) -> None:
     findings = SuppressionsDetector().detect(tmp_path)
     # Only the real trailing comment counts; the string literal is ignored.
     assert [f.signature for f in findings] == ["src/a.py::noqa:E501"]
+
+
+def test_multi_code_noqa_keeps_all_codes(tmp_path: Path) -> None:
+    _write(tmp_path, "src/a.py", "x = call()  # noqa: S603, S607\n")
+    findings = SuppressionsDetector().detect(tmp_path)
+    assert [f.signature for f in findings] == ["src/a.py::noqa:S603,S607"]

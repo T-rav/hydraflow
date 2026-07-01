@@ -9,13 +9,13 @@ from pathlib import Path
 from disturbance.models import Finding
 
 _SUPPRESSION_RE = re.compile(
-    r"#\s*(?P<kind>type:\s*ignore|noqa)(?P<detail>\[[^\]]*\]|:\s*[^\s#]+)?"
+    r"#\s*(?P<kind>type:\s*ignore|noqa)(?P<detail>\[[^\]]*\]|:\s*[^#]+)?"
 )
 
 
 def _normalize(kind: str, detail: str | None) -> str:
     base = "type-ignore" if kind.replace(" ", "").startswith("type") else "noqa"
-    tail = (detail or "").replace(" ", "")
+    tail = (detail or "").replace(" ", "").rstrip(",")
     return f"{base}{tail}"
 
 

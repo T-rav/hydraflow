@@ -12,21 +12,22 @@ entries:
   src/adversarial_retry_loop.py::noqa:S101: 4
   src/agent.py::noqa:BLE001: 2
   src/agent.py::noqa:F401: 1
-  src/agent.py::noqa:F841: 1
+  "src/agent.py::noqa:F841\u2014usedinf-stringprompt": 1
   src/agent.py::noqa:PLC0415: 6
   src/agent.py::type-ignore[no-any-return]: 1
   src/arch/generators/coverage_matrix.py::noqa:BLE001: 1
   src/arch/generators/coverage_matrix.py::type-ignore[import-untyped]: 1
   src/arch/runner.py::noqa:PLC0415: 1
-  src/auto_pr.py::noqa:BLE001: 1
+  "src/auto_pr.py::noqa:BLE001\u2014classifythenconverttoaresult": 1
   src/auto_pr.py::noqa:PLC0415: 3
-  src/auto_pr.py::noqa:PLR0911: 2
+  "src/auto_pr.py::noqa:PLR0911\u2014linearstep-by-stepguards,eachwithitsownfail/outcomepath": 1
+  "src/auto_pr.py::noqa:PLR0911\u2014linearstep-by-stepguards,eachwithitsownfailpath": 1
   src/base_background_loop.py::noqa:BLE001: 2
   src/base_background_loop.py::noqa:E402: 1
   src/base_background_loop.py::noqa:TCH002: 1
   src/base_runner.py::noqa:BLE001: 1
   src/base_runner.py::noqa:E402: 1
-  src/base_runner.py::noqa:F401: 1
+  "src/base_runner.py::noqa:F401\u2014usedin_inject_adr_index": 1
   src/base_runner.py::noqa:PLC0415: 3
   src/base_runner.py::noqa:TCH004: 1
   src/baseline_policy.py::noqa:BLE001: 3
@@ -36,7 +37,7 @@ entries:
   src/caching_issue_store.py::noqa:PLC0415: 1
   src/changelog.py::noqa:BLE001: 2
   src/ci_monitor_loop.py::noqa:PLR0911: 1
-  src/ci_scaffold.py::noqa:F401: 1
+  src/ci_scaffold.py::noqa:F401-re-exportforcompatibilitytests: 1
   src/config.py::noqa:PLC0415: 2
   src/contract_refresh_loop.py::noqa:TCH001: 2
   src/contracts/shape_dispatchers.py::noqa:PLR0911: 1
@@ -44,11 +45,12 @@ entries:
   src/corpus_learning_loop.py::noqa:PLC0415: 1
   src/corpus_learning_loop.py::noqa:TCH001: 2
   src/cost_budget_alerts.py::noqa:PLC0415: 2
-  src/cost_budget_watcher_loop.py::noqa:BLE001: 3
+  src/cost_budget_watcher_loop.py::noqa:BLE001: 2
+  "src/cost_budget_watcher_loop.py::noqa:BLE001\u2014telemetryshouldn'tkillthegate": 1
   src/cost_budget_watcher_loop.py::noqa:PLC0415: 1
   src/cost_budget_watcher_loop.py::noqa:PLR0911: 1
-  src/dashboard_routes/_atlas_routes.py::noqa:BLE001: 1
-  src/dashboard_routes/_common.py::noqa:F401: 1
+  "src/dashboard_routes/_atlas_routes.py::noqa:BLE001\u2014diagnosticsendpoint,neverfail": 1
+  src/dashboard_routes/_common.py::noqa:F401(re-exportedforhandlers): 1
   src/dashboard_routes/_control_routes.py::noqa:BLE001: 2
   src/dashboard_routes/_control_routes.py::noqa:PLC0415: 5
   src/dashboard_routes/_control_routes.py::noqa:PLR0914: 1
@@ -57,7 +59,9 @@ entries:
   src/dashboard_routes/_diagnostics_routes.py::noqa:PLC0415: 4
   src/dashboard_routes/_hitl_routes.py::noqa:BLE001: 1
   src/dashboard_routes/_metrics_routes.py::noqa:PLR0915: 1
-  src/dashboard_routes/_routes.py::noqa:BLE001: 6
+  src/dashboard_routes/_routes.py::noqa:BLE001: 4
+  "src/dashboard_routes/_routes.py::noqa:BLE001\u2014adownrepomustnotsinkthemerge": 1
+  "src/dashboard_routes/_routes.py::noqa:BLE001\u2014skipadownrepo,keepthesocket": 1
   src/dashboard_routes/_routes.py::noqa:PLC0415: 3
   src/dashboard_routes/_state_routes.py::noqa:BLE001: 7
   src/dashboard_routes/_state_routes.py::noqa:PLC0415: 3
@@ -65,17 +69,17 @@ entries:
   src/dashboard_routes/_state_routes.py::noqa:PLR0915: 1
   src/dashboard_routes/_trust_routes.py::noqa:BLE001: 5
   src/dashboard_routes/_trust_routes.py::noqa:PLC0415: 1
-  src/dashboard_routes/_trust_routes.py::noqa:S404: 1
-  src/dashboard_routes/_trust_routes.py::noqa:S603: 2
+  "src/dashboard_routes/_trust_routes.py::noqa:S404\u2014wrappedcallsaretrusted`gh`invocations": 1
+  "src/dashboard_routes/_trust_routes.py::noqa:S603\u2014trusted``gh``invocation": 2
   src/dashboard_routes/_waterfall_builder.py::noqa:PLC0415: 1
   src/dashboard_routes/_wiki_routes.py::noqa:BLE001: 2
   src/dashboard_routes/_wiki_routes.py::noqa:PLC0415: 2
-  src/dashboard_routes/_wiki_routes.py::noqa:SLF001: 1
+  "src/dashboard_routes/_wiki_routes.py::noqa:SLF001\u2014read-onlydiagnostics": 1
   src/diagnostic_loop.py::noqa:PLC0415: 1
   src/diagnostic_loop.py::noqa:PLR0911: 1
   src/diagnostic_loop.py::noqa:UP007: 1
   src/diagram_loop.py::noqa:PLC0415: 6
-  src/discover_expander.py::noqa:BLE001: 1
+  "src/discover_expander.py::noqa:BLE001\u2014logandfallthrough": 1
   src/discover_phase.py::type-ignore[arg-type]: 1
   src/discover_runner.py::type-ignore[attr-defined]: 1
   src/discover_runner.py::type-ignore[override]: 1
@@ -96,7 +100,8 @@ entries:
   src/expert_council.py::noqa:PLC0415: 1
   src/expert_council.py::type-ignore[attr-defined]: 1
   src/expert_council.py::type-ignore[override]: 1
-  src/fake_coverage_auditor_loop.py::noqa:BLE001: 2
+  "src/fake_coverage_auditor_loop.py::noqa:BLE001\u2014auditmustnotcrashtheloop": 1
+  "src/fake_coverage_auditor_loop.py::noqa:BLE001\u2014issuefilingfailure\u2260loopfailure": 1
   src/fake_coverage_auditor_loop.py::noqa:PLC0415: 2
   src/fake_coverage_auditor_loop.py::noqa:TCH001: 2
   src/flake_tracker_loop.py::noqa:PLC0415: 1
@@ -113,15 +118,16 @@ entries:
   src/implement_phase.py::noqa:BLE001: 1
   src/implement_phase.py::noqa:PLC0415: 14
   src/implement_phase.py::type-ignore[arg-type]: 2
-  src/implement_spec_reviewer.py::noqa:ANN001: 3
+  "src/implement_spec_reviewer.py::noqa:ANN001\u2014duck-typed": 1
+  "src/implement_spec_reviewer.py::noqa:ANN001\u2014duck-typedrun_simplecallable": 2
   src/implement_spec_reviewer.py::noqa:PLC0415: 2
   src/issue_store.py::type-ignore[assignment]: 1
   src/issue_store.py::type-ignore[typeddict-item]: 2
   src/label_drift_watcher_loop.py::noqa:TCH001: 2
-  src/live_corpus_replay_loop.py::noqa:BLE001: 1
+  "src/live_corpus_replay_loop.py::noqa:BLE001\u2014replaymustcontinueondispatchererror": 1
   src/live_corpus_replay_loop.py::noqa:TCH001: 3
   src/log_ingest_loop.py::noqa:BLE001: 2
-  src/log_ingest_loop.py::noqa:TCH004: 1
+  "src/log_ingest_loop.py::noqa:TCH004\u2014usedin__init__signature": 1
   src/log_ingestion.py::noqa:BLE001: 2
   src/log_ingestion.py::noqa:TCH002: 1
   src/makefile_contract.py::noqa:PLC0415: 4
@@ -143,8 +149,8 @@ entries:
   src/mockworld/sandbox_main.py::noqa:PLC0415: 1
   src/mockworld/sandbox_main.py::type-ignore[attr-defined]: 6
   src/mockworld/sandbox_main.py::type-ignore[misc]: 3
-  src/models.py::noqa:F401: 1
-  src/models.py::noqa:UP035: 1
+  "src/models.py::noqa:F401\u2014usedinField(validation_alias=...)": 1
+  "src/models.py::noqa:UP035\u2014neededatruntimeforPydantictoexcludefromfields": 1
   src/models.py::type-ignore[assignment]: 2
   src/models.py::type-ignore[return-value]: 2
   src/observability/sentry_adapter.py::noqa:BLE001: 5
@@ -154,7 +160,8 @@ entries:
   src/orchestrator.py::noqa:PLC0415: 2
   src/phase_utils.py::noqa:BLE001: 2
   src/phase_utils.py::noqa:F401: 1
-  src/phase_utils.py::noqa:PLC0415: 8
+  src/phase_utils.py::noqa:PLC0415: 7
+  "src/phase_utils.py::noqa:PLC0415\u2014deferredtoavoidcircularimport": 1
   src/plan_phase.py::noqa:BLE001: 9
   src/plan_phase.py::noqa:PLC0415: 6
   src/plan_phase.py::noqa:TCH004: 1
@@ -166,7 +173,8 @@ entries:
   src/planner.py::noqa:PLC0415: 1
   src/polyglot_prep.py::noqa:PLC0415: 8
   src/ports.py::noqa:TCH004: 1
-  src/post_merge_handler.py::noqa:BLE001: 3
+  src/post_merge_handler.py::noqa:BLE001: 2
+  "src/post_merge_handler.py::noqa:BLE001\u2014neverblockmergepathonwikiI/O": 1
   src/post_merge_handler.py::noqa:PLC0415: 5
   src/pr_manager.py::noqa:BLE001: 1
   src/pr_manager.py::noqa:E402: 1
@@ -176,22 +184,23 @@ entries:
   src/precheck.py::noqa:BLE001: 1
   src/precondition_gate.py::noqa:BLE001: 1
   src/preflight/__init__.py::noqa:PLC0415: 3
-  src/preflight/__init__.py::noqa:PLR0911: 1
+  "src/preflight/__init__.py::noqa:PLR0911\u2014lineargatechecks,eachwithitsownreturnpath": 1
   src/preflight/__init__.py::noqa:S603: 1
-  src/preflight/__init__.py::noqa:S603,: 1
+  src/preflight/__init__.py::noqa:S603,S607: 1
   src/prep.py::type-ignore[arg-type]: 1
   src/pricing_refresh_loop.py::noqa:PLC0415: 1
-  src/pricing_refresh_loop.py::noqa:PLR0911: 1
+  "src/pricing_refresh_loop.py::noqa:PLR0911\u2014lineargatechecks,eachwithitsownreturnpath": 1
   src/pricing_refresh_loop.py::noqa:S101: 1
   src/principles_audit_loop.py::noqa:BLE001: 4
   src/rc_budget_loop.py::noqa:PLC0415: 1
   src/rc_budget_loop.py::noqa:TCH001: 2
   src/repo_wiki.py::noqa:BLE001: 3
-  src/repo_wiki.py::noqa:PLC0415: 6
+  src/repo_wiki.py::noqa:PLC0415: 5
+  "src/repo_wiki.py::noqa:PLC0415\u2014isolatedhere,notamodule-leveldep": 1
   src/repo_wiki.py::type-ignore[return-value]: 1
   src/repo_wiki_ingest.py::noqa:BLE001: 1
   src/repo_wiki_loop.py::noqa:BLE001: 6
-  src/repo_wiki_loop.py::noqa:PLR0911: 1
+  "src/repo_wiki_loop.py::noqa:PLR0911\u2014linearstate-machineguards": 1
   src/repo_wiki_loop.py::type-ignore[arg-type]: 1
   src/report_issue_loop.py::noqa:PLC0415: 3
   src/report_issue_loop.py::noqa:PLR0911: 1
@@ -199,7 +208,7 @@ entries:
   src/retrospective.py::noqa:PLC0415: 4
   src/retrospective_loop.py::noqa:BLE001: 1
   src/retrospective_loop.py::noqa:PLC0415: 3
-  src/review_advisor.py::noqa:BLE001: 3
+  "src/review_advisor.py::noqa:BLE001\u2014telemetryneverbreaksbusinesslogic": 3
   src/review_advisor.py::noqa:PLC0415: 2
   src/review_advisor.py::type-ignore[override]: 1
   src/review_insights.py::noqa:BLE001: 2
@@ -210,9 +219,10 @@ entries:
   src/review_phase/_phase.py::noqa: 1
   src/review_phase/_phase.py::noqa:ARG002: 2
   src/review_phase/_phase.py::noqa:BLE001: 3
-  src/review_phase/_phase.py::noqa:E402,: 1
+  "src/review_phase/_phase.py::noqa:E402,F401\u2014usedbycallsitesbelow": 1
   src/review_phase/_phase.py::noqa:PLC0415: 36
-  src/review_phase/_phase.py::noqa:TCH004: 2
+  "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__+sig": 1
+  "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__signature": 1
   src/reviewer.py::noqa:PLC0415: 3
   src/route_back.py::noqa:BLE001: 6
   src/runner_utils.py::noqa:PLC0415: 4
@@ -224,14 +234,16 @@ entries:
   src/sentry/reverse_lookup.py::noqa:BLE001: 1
   src/sentry_loop.py::noqa:BLE001: 5
   src/sentry_loop.py::noqa:PLC0415: 3
-  src/sentry_loop.py::noqa:PLR0911: 1
-  src/sentry_loop.py::noqa:TCH004: 2
+  "src/sentry_loop.py::noqa:PLR0911\u2014lineargatechecks,eachwithitsownreturnpath": 1
+  "src/sentry_loop.py::noqa:TCH004\u2014usedin__init__signature": 2
   src/server.py::noqa:PLC0415: 18
   src/server.py::type-ignore[arg-type]: 2
   src/server.py::type-ignore[no-untyped-def]: 1
   src/service_registry.py::noqa:F841: 31
   src/service_registry.py::noqa:PLC0415: 14
-  src/service_registry.py::noqa:TCH001: 17
+  src/service_registry.py::noqa:TCH001: 14
+  "src/service_registry.py::noqa:TCH001\u2014dataclassannotation": 1
+  "src/service_registry.py::noqa:TCH001\u2014usedindataclassfield": 2
   src/service_registry.py::type-ignore[assignment]: 1
   src/service_registry.py::type-ignore[attr-defined]: 4
   src/shape_challenger.py::noqa:BLE001: 1
@@ -251,7 +263,7 @@ entries:
   src/state/_review.py::noqa:PLC0415: 1
   src/state/_review.py::type-ignore[arg-type]: 1
   src/stream_parser.py::noqa:PLR0911: 1
-  src/subprocess_util.py::noqa:BLE001: 1
+  "src/subprocess_util.py::noqa:BLE001\u2014observabilitymustneverbreakthecallpath": 1
   src/subprocess_util.py::noqa:PLC0415: 1
   src/subprocess_util.py::noqa:PLW0603: 9
   src/subprocess_util.py::noqa:PLW2901: 2
@@ -261,10 +273,11 @@ entries:
   src/telemetry/spans.py::type-ignore[return-value]: 3
   src/term_proposer_runtime.py::noqa:PLC0415: 4
   src/test_scaffold.py::noqa:BLE001: 1
-  src/trace_collector.py::noqa:E402: 3
+  src/trace_collector.py::noqa:E402: 2
+  "src/trace_collector.py::noqa:E402\u2014intentionallynearhelperstosurviveruffunused-importsweeps": 1
   src/trace_collector.py::noqa:PLC0415: 3
   src/trace_rollup.py::noqa:PLC0415: 2
-  src/trace_rollup.py::noqa:PLR0911: 1
+  "src/trace_rollup.py::noqa:PLR0911\u2014early-returnguardsformissing/malformedtracefiles": 1
   src/transcript_summarizer.py::noqa:PLC0415: 1
   src/triage_phase.py::noqa:BLE001: 1
   src/triage_phase.py::noqa:PLC0415: 3
@@ -276,7 +289,7 @@ entries:
   src/trust_fleet_anomaly_detectors.py::noqa:BLE001: 1
   src/trust_fleet_sanity_loop.py::noqa:BLE001: 3
   src/trust_fleet_sanity_loop.py::noqa:PLC0415: 3
-  src/ubiquitous_language.py::noqa:PLR0911: 1
+  "src/ubiquitous_language.py::noqa:PLR0911\u2014linearF1guards,eachwithitsownfailpath": 1
   src/verification_judge.py::noqa:PLC0415: 1
   src/whatsapp_bridge.py::noqa:PLC0415: 1
   src/wiki_compiler.py::noqa:BLE001: 3
