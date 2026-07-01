@@ -337,6 +337,72 @@ async def test_closed_remediation_issue_is_reconciled_and_refiles(
     assert rollup_after["issue_number"] != rollup_before["issue_number"]
 
 
+async def test_closing_escalation_issue_does_not_reset_remediation_state(
+    loop_fixture,
+) -> None:
+    """Closing the HITL escalation issue (the documented human action once an
+    ADR has been escalated) must NOT clear the ADR's FILE_ISSUE dedup key,
+    rollup, or attempt counter — only closing the actual remediation issue
+    should do that. The escalation title contains the bare ADR id (e.g.
+    "HITL: ADR-0049 conformance unresolved after 3 attempts"), which is a
+    substring match against the tracked dedup key's ADR id — this must not
+    be conflated with the remediation issue's title shape."""
+    loop, fakes = loop_fixture
+
+    # classify_remediation is FILE_ISSUE-or-ESCALATE (never both in the same
+    # tick — attempts >= max_attempts routes straight to ESCALATE). So the
+    # realistic sequence is: tick 1 files the remediation issue (attempts=1),
+    # left open by the human; further ticks bump attempts until tick 3 hits
+    # the threshold and fires the one-shot HITL escalation, with the
+    # original remediation issue still open and its rollup/dedup intact.
+    result1 = await run_tick(loop)
+    assert result1["filed"] >= 1
+
+    rollup_before = fakes.state.get_adr_conformance_rollup("ADR-0049")
+    assert rollup_before is not None
+    dedup_key = "adr_conformance:ADR-0049"
+    assert dedup_key in fakes.dedup.get()
+
+    # Advance attempts to just below threshold, then run the tick that hits
+    # attempts==_MAX_ATTEMPTS and escalates.
+    fakes.state.inc_adr_conformance_attempts("ADR-0049")
+    result2 = await run_tick(loop)
+    assert result2["escalated"] >= 1
+
+    attempts_before = fakes.state._data.adr_conformance_attempts.get("ADR-0049")
+    assert attempts_before == 3
+
+    # Simulate a human closing ONLY the escalation issue (the documented
+    # HITL action), leaving the still-open remediation issue untouched.
+    escalation_title = next(
+        title
+        for title, _body, labels in fakes.pr.created_issues
+        if "hitl" in "".join(labels).lower() and "ADR-0049" in title
+    )
+    remediation_title = next(
+        title
+        for title, _body, labels in fakes.pr.created_issues
+        if "hitl" not in "".join(labels).lower() and "ADR-0049" in title
+    )
+    fakes.pr.closed_issue_titles = [escalation_title]
+
+    await run_tick(loop)
+
+    # The escalation issue being closed must NOT have reconciled/cleared the
+    # remediation dedup key, rollup, or attempt counter.
+    assert dedup_key in fakes.dedup.get()
+    rollup_after = fakes.state.get_adr_conformance_rollup("ADR-0049")
+    assert rollup_after is not None
+    assert rollup_after["issue_number"] == rollup_before["issue_number"]
+    attempts_after = fakes.state._data.adr_conformance_attempts.get("ADR-0049")
+    assert attempts_after is not None
+    assert attempts_after >= attempts_before
+
+    # Sanity: the still-open remediation issue is untouched/not orphaned by
+    # the reconcile (no spurious re-file of a *different* issue number).
+    assert remediation_title  # still tracked; not asserted closed/refiled here
+
+
 async def test_escalates_after_max_attempts(loop_fixture) -> None:
     loop, fakes = loop_fixture
     # Pre-load the attempt counter so this tick's increment lands exactly at

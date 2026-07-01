@@ -242,7 +242,10 @@ class AdrConformanceLoop(BaseBackgroundLoop):
             "The decision may be stale — consider a supersession proposal, "
             "or fix the underlying drift.\n\n"
             "Human review needed.\n\n"
-            "_Closing this issue clears the dedup key (ADR-0098)._"
+            "_Closing this issue does NOT clear the remediation dedup key "
+            "or reset the attempt counter (ADR-0098) — the underlying "
+            "FILE_ISSUE/REPOINT remediation issue must be closed (or the "
+            "drift fixed) to do that._"
         )
         await self._pr.create_issue(
             title,
@@ -260,9 +263,27 @@ class AdrConformanceLoop(BaseBackgroundLoop):
         keep calling ``update_issue_body`` on the closed issue number
         forever instead of re-filing. Listing closed issues carrying our
         ``find_label`` and matching each tracked dedup key's ADR id against
-        the issue title (``_issue_title`` embeds ``conf.adr_id`` verbatim,
-        e.g. ``"ADR conformance: ADR-0049 is fail"``) lets us detect this and
-        clear state so the next evaluation re-files fresh.
+        the issue title lets us detect this and clear state so the next
+        evaluation re-files fresh.
+
+        IMPORTANT — remediation-only match, not "any title containing the
+        ADR id": the HITL escalation issue filed by
+        ``_escalate_to_adr_reviewer`` ALSO carries ``find_label`` (it's
+        ``[*find_label, *hitl_escalation_label]``) and its title
+        (``f"HITL: {adr_id} conformance unresolved after {_MAX_ATTEMPTS}
+        attempts"``) also contains the bare ``adr_id`` as a substring. A
+        naive ``adr_id in title`` match would treat closing the escalation
+        issue (the documented human action once escalated) as if the
+        FILE_ISSUE/REPOINT remediation issue had been closed, wrongly
+        clearing the attempt counter and rollup and resetting the 3-strikes
+        escalation threshold while orphaning the still-open remediation
+        issue. Both remediation title shapes
+        (``_issue_title`` -> ``"ADR conformance: {adr_id} is {outcome}"``
+        and ``_file_repoint_issue`` -> ``"ADR conformance: {adr_id} check
+        may have been renamed"``) share the ``"ADR conformance: {adr_id} "``
+        prefix, which the ``"HITL: ..."`` escalation title never matches —
+        so anchor the match on that prefix instead of a bare substring
+        check.
         """
         closed_titles: list[str] = []
         for label in self._config.find_label:
@@ -290,10 +311,16 @@ class AdrConformanceLoop(BaseBackgroundLoop):
                 if not key.startswith("adr_conformance:"):
                     continue
                 adr_id = key.split(":", 1)[1]
-                if adr_id in title:
-                    keep.discard(key)
-                    self._state.clear_adr_conformance_attempts(adr_id)
-                    self._state.clear_adr_conformance_rollup(adr_id)
+                if not title.startswith(f"ADR conformance: {adr_id} "):
+                    # Excludes the HITL escalation title
+                    # ("HITL: {adr_id} conformance unresolved after N
+                    # attempts") even though it also contains adr_id —
+                    # closing an escalation issue must never clear
+                    # FILE_ISSUE/REPOINT dedup/rollup/attempt state.
+                    continue
+                keep.discard(key)
+                self._state.clear_adr_conformance_attempts(adr_id)
+                self._state.clear_adr_conformance_rollup(adr_id)
         if keep != current:
             self._dedup.set_all(keep)
 
