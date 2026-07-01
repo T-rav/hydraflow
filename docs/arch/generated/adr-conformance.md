@@ -31,6 +31,9 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0024 | unknown | `tests/test_implement_phase.py, tests/scenarios/fakes/test_prior_failure_propagation.py` |
 | ADR-0025 | unknown | `(process)` |
 | ADR-0027 | unknown | `(none)` |
+| ADR-0028 | unknown | — |
+| ADR-0029 | unknown | — |
+| ADR-0030 | unknown | — |
 | ADR-0031 | unknown | `tests/test_discover_phase.py, tests/test_shape_phase.py, tests/test_discover_runner.py, tests/test_shape_runner.py, tests/architecture/test_functional_area_coverage.py` |
 | ADR-0032 | unknown | `tests/test_repo_wiki.py, tests/test_repo_wiki_store_git.py, tests/test_repo_wiki_ingest.py, tests/test_wiki_drift_detector.py, tests/test_wiki_drift_symbols.py, tests/test_wiki_semantic_drift.py, tests/test_repo_wiki_temporal.py, tests/test_wiki_corroboration.py` |
 | ADR-0034 | unknown | `tests/test_state_machine.py` |
@@ -46,7 +49,15 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0050 | unknown | `'tests/test_auto_agent_preflight_loop.py'; 'tests/scenarios/test_auto_agent_preflight_scenario.py'; 'tests/test_loop_wiring_completeness.py'.` |
 | ADR-0051 | unknown | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer).` |
 | ADR-0052 | unknown | `'tests/test_mockworld_fakes_conformance.py' (Port↔Fake signature parity), 'tests/test_sandbox_scenario_contract.py' (scenario catalog contract), '.github/workflows/ci.yml' 'sandbox' job (CI gate).` |
+| ADR-0053 | enforced | `pytest:tests/test_ubiquitous_language_drift.py`, `pytest:tests/test_seed_terms.py` |
+| ADR-0054 | unknown | — |
+| ADR-0055 | unknown | — |
 | ADR-0056 | enforced | `pytest:tests/test_adr_touchpoint_auditor_loop.py` |
+| ADR-0057 | unknown | — |
+| ADR-0058 | unknown | — |
+| ADR-0060 | unknown | — |
+| ADR-0061 | unknown | — |
+| ADR-0062 | unknown | — |
 | ADR-0064 | unknown | `'src/adversarial_retry_loop.py:AdversarialRetryLoop' (shared retry primitive), 'src/complexity_gate.py:ComplexityGate' (routing), 'src/plan_phase.py:PlanPhase' / 'src/shape_phase.py:ShapePhase' / 'src/discovery_council.py:DiscoveryCouncil' (call sites), 'src/wiki_carryover.py:build_wiki_entry' (carryover→knowledge), 'tests/scenarios/test_adversarial_pipeline.py' + 'tests/regressions/test_adversarial_pipeline_regressions.py' (behaviour pinning).` |
 | ADR-0065 | unknown | `(process)` |
 | ADR-0071 | unknown | `tests/test_route_back.py` |
@@ -54,6 +65,8 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0085 | unknown | `tests/test_secret_scrub.py` |
 | ADR-0088 | unknown | — |
 | ADR-0089 | unknown | `'tests/test_memory_backlog_loop.py', 'tests/test_loop_wiring_completeness.py' (auto-discovery confirms 5-checkpoint wire), 'tests/architecture/test_functional_area_coverage.py' (loop assigned in 'functional_areas.yml').` |
+| ADR-0090 | unknown | — |
+| ADR-0091 | unknown | — |
 | ADR-0092 | unknown | `tests/test_untrusted_text.py, tests/test_preflight_untrusted_fencing.py, tests/test_agent_cli.py, tests/test_agent_advanced.py` |
 | ADR-0093 | enforced | `pytest:tests/test_loop_fitness_completeness.py` |
 | ADR-0094 | unknown | — |
@@ -78,7 +91,9 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_adr_touchpoint_auditor_loop.py` | ADR-0056 |
 | `pytest:tests/test_loop_fitness_completeness.py` | ADR-0093 |
 | `pytest:tests/test_loop_kill_switch_completeness.py` | ADR-0049 |
+| `pytest:tests/test_seed_terms.py` | ADR-0053 |
 | `pytest:tests/test_state_machine.py` | ADR-0002 |
+| `pytest:tests/test_ubiquitous_language_drift.py` | ADR-0053 |
 | `tests/test_adr_pre_validator.py` | ADR-0037 |
 | `tests/test_agent_cli.py, tests/test_base_runner.py` | ADR-0004 |
 | `tests/test_dashboard_routes_repo.py` | ADR-0007, ADR-0008 |

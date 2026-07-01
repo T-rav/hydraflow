@@ -21,6 +21,17 @@ hyphen, or bare whitespace are all accepted (e.g.
 ``# ADR-NNNN...`` heading in docs/adr/*.md MUST parse — see
 ``tests/test_adr_conformance_coverage.py::test_every_adr_file_parses``.
 
+Status also accepts an H2-heading form used by ~13 ADRs (e.g. ADR-0053):
+
+    ## Status
+
+    Accepted
+
+Every ADR file that declares a status via either the bold-inline
+``**Status:**`` form or the ``## Status`` heading form MUST parse to a
+non-"Unknown" status — see
+``tests/test_adr_conformance_coverage.py::test_every_adr_with_a_status_section_parses_known_status``.
+
 Status is normalized to one of: "Accepted", "Proposed", "Superseded",
 "Deprecated". "Superseded by ADR-NNNN" populates ``superseded_by``.
 """
@@ -38,6 +49,17 @@ logger = logging.getLogger(__name__)
 
 _TITLE_RE = re.compile(r"^#\s*ADR-(\d{4})\s*[:–—-]?\s*(.+?)\s*$", re.MULTILINE)
 _STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(.+?)\s*$", re.MULTILINE)
+# H2 heading form used by ~13 ADRs (e.g. ADR-0053):
+#
+#     ## Status
+#
+#     Accepted
+#
+# Value is the first non-empty line after the heading. Matched independently
+# of _STATUS_RE (rather than folded into one alternation) so each regex stays
+# readable and the "first non-empty line" semantics are explicit here rather
+# than smuggled into a shared capture group.
+_STATUS_H2_RE = re.compile(r"^##\s+Status\s*\n+([^\n]+)", re.MULTILINE)
 _CONTEXT_RE = re.compile(r"##\s+Context\s*\n\s*\n(.+?)(?=\n\s*\n|\n##\s|\Z)", re.DOTALL)
 _SUPERSEDED_RE = re.compile(r"Superseded\s+by\s+(ADR-\d{4})", re.IGNORECASE)
 _ENFORCEMENT_RE = re.compile(r"\*\*Enforcement:\*\*\s*(.+?)\s*$", re.MULTILINE)
@@ -167,6 +189,10 @@ def parse_adr_file(path: Path) -> ADR:
     status_match = _STATUS_RE.search(text)
     if status_match:
         status_raw = status_match.group(1).strip()
+    else:
+        status_h2_match = _STATUS_H2_RE.search(text)
+        if status_h2_match:
+            status_raw = status_h2_match.group(1).strip()
 
     superseded_by = None
     sup_match = _SUPERSEDED_RE.search(status_raw)

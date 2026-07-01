@@ -23,14 +23,37 @@ ADR_DIR = REPO / "docs" / "adr"
 # closes), so it must not share the production regex.
 _ADR_HEADING_RE = re.compile(r"^#\s*ADR-(\d{4})\b")
 
-# Fixed snapshot of every Accepted ADR number that was NOT annotated as of
-# Task 13 (the parse-completeness fix: _TITLE_RE was broadened to accept
-# em-dash/en-dash/hyphen/whitespace separators, not just colons, so ~24
-# previously-invisible ADRs — including 0093 — now parse and enter this
-# ratchet for the first time). NEVER edit this literal — it is the baseline
-# the subset guard below checks against. Backfill tasks shrink the *live*
-# grandfathered set by adding numbers to `_ANNOTATED`, not by editing this
-# frozenset.
+# Extracts the raw status value from either of the two forms ADRs actually
+# use: bold-inline (`**Status:** Accepted`) or H2 heading
+# (`## Status\n\nAccepted`). Intentionally independent of
+# adr_index._STATUS_RE / _STATUS_H2_RE — this test exists to catch those
+# regexes silently regressing to a narrower format again (the same class of
+# bug as _ADR_HEADING_RE above, this time for status instead of title: the
+# H2 form was invisible to _STATUS_RE for 13 ADRs, including ADR-0053, until
+# this fix), so it must not share the production regex.
+_STATUS_SECTION_RE = re.compile(
+    r"\*\*Status:\*\*\s*(.+?)\s*$|^##\s+Status\s*\n+([^\n]+)", re.MULTILINE
+)
+# Words that MUST normalize to a known bucket (Accepted/Proposed/Superseded/
+# Deprecated) via adr_index._normalize_status. A status value containing one
+# of these words but still coming back "Unknown" from scan_adr_directory is
+# unambiguously a parser regression, not a legitimately-unmodeled status
+# word (e.g. "Rejected", which _normalize_status intentionally buckets as
+# "Unknown" since it isn't one of the four load-bearing statuses).
+_RECOGNIZED_STATUS_WORDS_RE = re.compile(
+    r"accepted|proposed|draft|superseded|deprecated", re.IGNORECASE
+)
+
+# Fixed snapshot of every Accepted ADR number that was NOT annotated, as of
+# the status-completeness fix (this task): adr_index._STATUS_RE was broadened
+# to also match the `## Status` H2 heading form (not just bold-inline
+# `**Status:**`), so 13 previously-invisible ADRs — including 0053 — now
+# parse with a real status and enter this ratchet for the first time.
+# Re-derived from (Task 13's baseline of 46) + (13 newly-visible H2-status
+# Accepted ADRs) - (0053, which moves from invisible straight to annotated).
+# NEVER edit this literal — it is the baseline the subset guard below checks
+# against. Backfill tasks shrink the *live* grandfathered set by adding
+# numbers to `_ANNOTATED`, not by editing this frozenset.
 _GRANDFATHER_BASELINE: frozenset[int] = frozenset(
     {
         1,
@@ -54,6 +77,9 @@ _GRANDFATHER_BASELINE: frozenset[int] = frozenset(
         24,
         25,
         27,
+        28,
+        29,
+        30,
         31,
         32,
         34,
@@ -64,10 +90,16 @@ _GRANDFATHER_BASELINE: frozenset[int] = frozenset(
         43,
         45,
         47,
-        49,
         50,
         51,
         52,
+        54,
+        55,
+        57,
+        58,
+        60,
+        61,
+        62,
         64,
         65,
         71,
@@ -75,6 +107,8 @@ _GRANDFATHER_BASELINE: frozenset[int] = frozenset(
         85,
         88,
         89,
+        90,
+        91,
         92,
         94,
         95,
@@ -86,12 +120,13 @@ _GRANDFATHER_BASELINE: frozenset[int] = frozenset(
 # live grandfathered set. Task 13 annotates 0002/0003/0042/0056/0093; later
 # backfill tasks (14, 15, 16) grow this set as they annotate more ADRs.
 # Task 14/15 add 49 (kill-switch convention) and 53 (ubiquitous language).
-# Note: 53 is not actually present in _GRANDFATHER_BASELINE (its ## Status
-# H2 heading doesn't match _STATUS_RE's **Status:** bold-inline pattern, so
-# it parses as status="Unknown" and _accepted() excludes it — a pre-existing
-# parser gap shared by 13 other ADRs, out of scope for this task). Adding 53
-# here is a harmless no-op until that gap is fixed; 49 IS in the baseline
-# and its inclusion here is what actually shrinks the live grandfathered set.
+# As of the status-completeness fix (this task), 53's `## Status` H2 heading
+# is now recognized by adr_index._STATUS_H2_RE, so it parses as
+# status="Accepted" and enters _accepted() for the first time — its
+# **Enforcement:** enforced annotation is genuinely exercised now, not a
+# no-op. 49 and 53 are both in _ANNOTATED and both NOT in
+# _GRANDFATHER_BASELINE (49 was already excluded pre-fix; 53 is newly
+# excluded here since it skips grandfathering entirely).
 _ANNOTATED: frozenset[int] = frozenset({2, 3, 42, 49, 53, 56, 93})
 
 # Live grandfathered set: baseline minus everything annotated so far. A true
@@ -127,6 +162,51 @@ def test_every_adr_file_parses():
         f"scan_adr_directory silently skipped ADR file(s) for number(s) "
         f"{sorted(missing)} — every file with an '# ADR-NNNN' heading must "
         f"parse. Check _TITLE_RE against the file's actual title separator."
+    )
+
+
+def test_every_adr_with_a_status_section_parses_known_status():
+    """No silent status-parse failures: every ADR file whose status section
+    (`**Status:**` bold-inline OR `## Status` H2 heading) contains one of
+    the four load-bearing status words (Accepted/Proposed/Superseded/
+    Deprecated) must parse to that bucket, not "Unknown".
+
+    This is the regression test for the sibling bug to
+    ``test_every_adr_file_parses``: adr_index._STATUS_RE only matched the
+    bold-inline form, so 13 ADRs using the `## Status` H2 heading (including
+    ADR-0053) parsed as ``status="Unknown"`` and were silently excluded from
+    ``_accepted()`` — and therefore from this entire ratchet. ADR-0053's
+    ``**Enforcement:** enforced`` annotation was a no-op as a result.
+
+    Scoped to status values containing a recognized word so it doesn't flag
+    ADRs with a genuinely different, unmodeled status word (e.g. ADR-0039/
+    0040's ``**Status:** Rejected`` — "Rejected" isn't one of the four
+    normalized buckets by design, and correctly parses to "Unknown"; that is
+    not a parser bug).
+    """
+    on_disk: set[int] = set()
+    for p in ADR_DIR.glob("*.md"):
+        text = p.read_text()
+        first_line = text.splitlines()[0] if text else ""
+        heading_match = _ADR_HEADING_RE.match(first_line)
+        if not heading_match:
+            continue
+        status_match = _STATUS_SECTION_RE.search(text)
+        if not status_match:
+            continue
+        raw_value = status_match.group(1) or status_match.group(2) or ""
+        if _RECOGNIZED_STATUS_WORDS_RE.search(raw_value):
+            on_disk.add(int(heading_match.group(1)))
+
+    by_number = {a.number: a for a in scan_adr_directory(ADR_DIR)}
+    still_unknown = sorted(n for n in on_disk if by_number[n].status == "Unknown")
+    assert not still_unknown, (
+        f"ADR(s) {still_unknown} have a status section containing a "
+        "recognized status word (Accepted/Proposed/Superseded/Deprecated) "
+        "but parsed to status='Unknown' — check adr_index._STATUS_RE / "
+        "_STATUS_H2_RE against the file's actual status format. A silent "
+        "status-parse failure hides the ADR from every check in this "
+        "ratchet (see ADR-0053's grandfathering note)."
     )
 
 
@@ -179,9 +259,10 @@ def test_grandfather_only_shrinks():
         "ADR from the conformance ratchet is meta-level rubber-stamping. "
         "Annotate the ADR instead of swapping one exemption for another."
     )
-    assert len(_GRANDFATHER_BASELINE) == 46, (
-        "_GRANDFATHER_BASELINE changed size — it is a fixed snapshot re-derived "
-        "in Task 13 (parse-completeness fix widened _TITLE_RE, so ~24 "
+    assert len(_GRANDFATHER_BASELINE) == 57, (
+        "_GRANDFATHER_BASELINE changed size — it is a fixed snapshot, most "
+        "recently re-derived by the status-completeness fix (adr_index._STATUS_RE "
+        "widened to also match the '## Status' H2 heading form, so 13 "
         "previously-invisible ADRs now enter this ratchet) and must never be "
         "edited again. Shrink the live grandfathered set by adding annotated "
         "ADR numbers to _ANNOTATED instead."
