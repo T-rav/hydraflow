@@ -395,3 +395,45 @@ async def test_dispatch_falls_back_to_repo_root_without_workspace_port(
     kwargs = runner.run.call_args.kwargs
     assert kwargs["worktree_path"] == str(loop._config.repo_root)
     assert kwargs["worktree_path"] != "rc/2026-04-26"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2c convergence-ledger migration tests
+# ---------------------------------------------------------------------------
+
+
+def test_sandbox_attempts_stored_in_ledger(tmp_path: Path) -> None:
+    """After bump, the counter lives in the convergence ledger, not a bespoke field."""
+    from state import StateTracker
+
+    tracker = StateTracker(state_file=tmp_path / "state.json")
+    tracker.bump_sandbox_failure_fixer_attempts(30)
+    ledger = tracker.get_convergence_ledger(30)
+    assert ledger is not None
+    assert ledger.stage_state["sandbox_fix"].attempts == 1
+
+
+def test_old_state_json_with_sandbox_key_loads_clean(tmp_path: Path) -> None:
+    """A state.json with the old 'sandbox_failure_fixer_attempts' key loads without error.
+
+    StateData has extra='ignore', so the stale key is silently dropped. The
+    accessor must then return 0 (not 1) — the old field is not read.
+    """
+    import json
+
+    from models import StateData
+    from state import StateTracker
+
+    old_state: dict = {
+        "sandbox_failure_fixer_attempts": {"30": 1},
+        "convergence_ledgers": {},
+    }
+    # model_validate must not raise
+    data = StateData.model_validate(old_state)
+    assert not hasattr(data, "sandbox_failure_fixer_attempts")
+
+    # Wire it into a tracker via disk so the full load path is exercised.
+    state_file = tmp_path / "state.json"
+    state_file.write_text(json.dumps(old_state))
+    tracker = StateTracker(state_file=state_file)
+    assert tracker.get_sandbox_failure_fixer_attempts(30) == 0

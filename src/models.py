@@ -1957,8 +1957,8 @@ class StateData(BaseModel):
     )
     # Trust fleet — caretaker loops (Plan 5)
     flake_counts: dict[str, int] = Field(default_factory=dict)
+    # NOTE: sandbox_failure_fixer_attempts migrated to convergence_ledgers[str(pr_number)].stage_state["sandbox_fix"].attempts
     # SandboxFailureFixerLoop state
-    sandbox_failure_fixer_attempts: dict[str, int] = Field(default_factory=dict)
     flake_attempts: dict[str, int] = Field(default_factory=dict)
     skill_prompt_last_green: dict[str, str] = Field(default_factory=dict)
     skill_prompt_attempts: dict[str, int] = Field(default_factory=dict)
