@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from config import HydraFlowConfig
+from convergence_recording import record_stage_verdict, signatures_from_concerns
 from dedup_store import DedupStore
 from events import EventBus, EventType, HydraFlowEvent
 from expert_council import CouncilResult, ExpertCouncil  # noqa: TCH001
@@ -294,9 +295,25 @@ class ShapePhase:
                         self._store.enqueue_transition(issue, "plan")
                         await self._prs.transition(issue.id, "plan")
                         self._state.increment_session_counter("shaped")
+                        record_stage_verdict(
+                            self._state,
+                            enabled=self._config.convergence_gate_enabled,
+                            issue_number=issue.id,
+                            stage="shape",
+                            decision="ADVANCE",
+                            signatures=[],
+                        )
                         return 1
                     # No selection yet — re-enqueue and wait
                     self._store.enqueue_transition(issue, "shape")
+                    record_stage_verdict(
+                        self._state,
+                        enabled=self._config.convergence_gate_enabled,
+                        issue_number=issue.id,
+                        stage="shape",
+                        decision="LOOP_BACK",
+                        signatures=[],
+                    )
                     return 0
 
                 # --- No options marker: generate options ---
@@ -363,6 +380,7 @@ class ShapePhase:
         # Both run only when an AgentLike adversarial agent is attached
         # (legacy paths skip these entirely). Per dark-factory contract:
         # never deadlock — concerns persist + forward, even on exhaustion.
+        adv: AdversarialState | None = None
         if self._has_any_adversarial_agent():
             adv = self._state.get_adversarial_state(issue.id) or AdversarialState(
                 phase="shape"
@@ -392,17 +410,47 @@ class ShapePhase:
             await self._process_finalization(issue, conv, result.content)
             conv.status = "done"
             self._state.set_shape_conversation(issue.id, conv)
+            record_stage_verdict(
+                self._state,
+                enabled=self._config.convergence_gate_enabled,
+                issue_number=issue.id,
+                stage="shape",
+                decision="ADVANCE",
+                signatures=signatures_from_concerns(adv.pending_concerns)
+                if adv is not None
+                else [],
+            )
             return 1
 
         # After first agent turn with directions, run expert council vote
         if len(conv.turns) == 1 and self._council:
             council_result = await self._run_council_vote(issue, conv, result.content)
             if council_result:
+                record_stage_verdict(
+                    self._state,
+                    enabled=self._config.convergence_gate_enabled,
+                    issue_number=issue.id,
+                    stage="shape",
+                    decision="ADVANCE",
+                    signatures=signatures_from_concerns(adv.pending_concerns)
+                    if adv is not None
+                    else [],
+                )
                 return council_result
 
         # No consensus or no council — post turn and wait for human
         await self._post_conversation_turn(issue, result.content, len(conv.turns), conv)
         self._store.enqueue_transition(issue, "shape")
+        record_stage_verdict(
+            self._state,
+            enabled=self._config.convergence_gate_enabled,
+            issue_number=issue.id,
+            stage="shape",
+            decision="LOOP_BACK",
+            signatures=signatures_from_concerns(adv.pending_concerns)
+            if adv is not None
+            else [],
+        )
 
         await self._bus.publish(
             HydraFlowEvent(

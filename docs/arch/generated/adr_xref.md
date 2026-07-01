@@ -102,6 +102,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0093 | `src.base_background_loop`, `src.fitness_scorecard_loop`, `src.loop_fitness` |
 | ADR-0094 | `src.config`, `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase`, `src.state._convergence` |
 | ADR-0095 | `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase` |
+| ADR-0096 | `src.convergence_recording`, `src.plan_phase`, `src.shape_phase`, `src.triage_phase` |
 
 ## Module → ADRs
 
@@ -133,6 +134,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.contract_refresh_loop` | ADR-0045, ADR-0047 |
 | `src.contracts.shadow` | ADR-0086 |
 | `src.convergence_gate` | ADR-0094, ADR-0095 |
+| `src.convergence_recording` | ADR-0096 |
 | `src.corpus_learning_loop` | ADR-0045 |
 | `src.dashboard` | ADR-0007, ADR-0008, ADR-0038 |
 | `src.dashboard_routes` | ADR-0008, ADR-0013, ADR-0019, ADR-0038 |
@@ -185,7 +187,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.pending_concerns` | ADR-0064 |
 | `src.plan_council` | ADR-0064 |
 | `src.plan_council_prompts` | ADR-0064 |
-| `src.plan_phase` | ADR-0014, ADR-0031, ADR-0063, ADR-0064 |
+| `src.plan_phase` | ADR-0014, ADR-0031, ADR-0063, ADR-0064, ADR-0096 |
 | `src.ports` | ADR-0003, ADR-0044, ADR-0066, ADR-0067, ADR-0068, ADR-0069, ADR-0070 |
 | `src.post_merge_handler` | ADR-0012, ADR-0014, ADR-0015, ADR-0016, ADR-0019, ADR-0064 |
 | `src.pr_manager` | ADR-0002, ADR-0005, ADR-0011, ADR-0013, ADR-0018, ADR-0045, ADR-0055, ADR-0084, ADR-0088 |
@@ -227,7 +229,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.service_registry` | ADR-0045 |
 | `src.shape_challenger` | ADR-0064 |
 | `src.shape_expert_council` | ADR-0064 |
-| `src.shape_phase` | ADR-0031, ADR-0045, ADR-0063, ADR-0064 |
+| `src.shape_phase` | ADR-0031, ADR-0045, ADR-0063, ADR-0064, ADR-0096 |
 | `src.shape_runner` | ADR-0031, ADR-0045 |
 | `src.skill_prompt_eval_loop` | ADR-0045 |
 | `src.skill_registry` | ADR-0065 |
@@ -250,7 +252,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.term_proposer_loop` | ADR-0054, ADR-0068 |
 | `src.term_pruner_loop` | ADR-0057, ADR-0068 |
 | `src.trace_collector` | ADR-0055 |
-| `src.triage_phase` | ADR-0014, ADR-0017, ADR-0031, ADR-0039, ADR-0063 |
+| `src.triage_phase` | ADR-0014, ADR-0017, ADR-0031, ADR-0039, ADR-0063, ADR-0096 |
 | `src.trust_fleet_sanity_loop` | ADR-0045, ADR-0046 |
 | `src.ubiquitous_language` | ADR-0054, ADR-0057, ADR-0058, ADR-0090 |
 | `src.untrusted_text` | ADR-0092 |
