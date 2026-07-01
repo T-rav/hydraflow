@@ -763,6 +763,7 @@ class TestPostMergeConflictFix:
         phase._prs.merge_pr = fake_merge
         phase._prs.remove_label = AsyncMock()
         phase._prs.add_labels = AsyncMock()
+        phase._prs.fetch_code_scanning_alerts = AsyncMock(return_value=None)
 
         wt = config.workspace_path_for_issue(42)
         wt.mkdir(parents=True, exist_ok=True)
@@ -1468,224 +1469,15 @@ class TestReviewOneInner:
 
 
 # ---------------------------------------------------------------------------
-# _handle_rejected_review unit tests
-# ---------------------------------------------------------------------------
-
-
-class TestHandleRejectedReview:
-    """Unit tests for the _handle_rejected_review helper."""
-
-    @pytest.mark.asyncio
-    async def test_under_cap_returns_true(self, config: HydraFlowConfig) -> None:
-        """When under the review fix cap, should return True (preserve worktree)."""
-        phase = make_review_phase(config)
-        pr = PRInfoFactory.create()
-        task = TaskFactory.create(id=pr.issue_number)
-        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
-
-        _setup_rejected_review_mocks(phase)
-
-        # 0 attempts < max_review_fix_attempts (2 default)
-        returned = await phase._handle_rejected_review(pr, task, result, 0)
-
-        assert returned is True
-
-    @pytest.mark.asyncio
-    async def test_under_cap_stores_review_feedback(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """When under cap, review summary should be saved as feedback for re-implementation."""
-        phase = make_review_phase(config)
-        pr = PRInfoFactory.create()
-        result = ReviewResultFactory.create(
-            verdict=ReviewVerdict.REQUEST_CHANGES,
-            summary="Fix the error handling logic",
-        )
-        task = TaskFactory.create(id=pr.issue_number)
-
-        _setup_rejected_review_mocks(phase)
-
-        await phase._handle_rejected_review(pr, task, result, 0)
-
-        assert phase._state.get_review_feedback(42) == "Fix the error handling logic"
-
-    @pytest.mark.asyncio
-    async def test_under_cap_swaps_labels_on_issue_and_pr(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """When under cap, should swap labels from review→ready on both issue and PR."""
-        phase = make_review_phase(config)
-        pr = PRInfoFactory.create()
-        task = TaskFactory.create(id=pr.issue_number)
-        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
-
-        _setup_rejected_review_mocks(phase)
-
-        await phase._handle_rejected_review(pr, task, result, 0)
-
-        phase._prs.transition.assert_awaited_once_with(42, "ready", pr_number=101)
-
-    @pytest.mark.asyncio
-    async def test_under_cap_increments_review_attempts(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """When under cap, should increment the review attempt counter."""
-        phase = make_review_phase(config)
-        pr = PRInfoFactory.create()
-        task = TaskFactory.create(id=pr.issue_number)
-        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
-
-        _setup_rejected_review_mocks(phase)
-
-        await phase._handle_rejected_review(pr, task, result, 0)
-
-        assert phase._state.get_review_attempts(42) == 1
-
-    @pytest.mark.asyncio
-    async def test_under_cap_enqueues_ready_transition(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """When under cap, should enqueue ready transition for immediate implement wakeup."""
-        phase = make_review_phase(config)
-        pr = PRInfoFactory.create()
-        task = TaskFactory.create(id=pr.issue_number)
-        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
-
-        _setup_rejected_review_mocks(phase)
-
-        await phase._handle_rejected_review(pr, task, result, 0)
-
-        phase._store.enqueue_transition.assert_called_once_with(task, "ready")
-
-    @pytest.mark.asyncio
-    async def test_cap_exceeded_returns_false(self, tmp_path: Path) -> None:
-        """When review fix cap is exhausted, should return False (destroy worktree)."""
-        from tests.helpers import ConfigFactory
-
-        config = ConfigFactory.create(
-            max_review_fix_attempts=2,
-            repo_root=tmp_path / "repo",
-            workspace_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
-        )
-        phase = make_review_phase(config)
-        pr = PRInfoFactory.create()
-        task = TaskFactory.create(id=pr.issue_number)
-        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
-
-        _setup_rejected_review_mocks(phase)
-        phase._prs.post_pr_comment = AsyncMock()
-
-        # Exhaust cap: 2 attempts already recorded
-        phase._state.increment_review_attempts(42)
-        phase._state.increment_review_attempts(42)
-
-        returned = await phase._handle_rejected_review(pr, task, result, 0)
-
-        assert returned is False
-
-    @pytest.mark.asyncio
-    async def test_cap_exceeded_escalates_to_hitl(
-        self, tmp_path: Path, event_bus
-    ) -> None:
-        """When cap is exceeded, should escalate issue to HITL and set state."""
-        from tests.helpers import ConfigFactory
-
-        config = ConfigFactory.create(
-            max_review_fix_attempts=2,
-            repo_root=tmp_path / "repo",
-            workspace_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
-        )
-        phase = make_review_phase(config, event_bus=event_bus)
-        pr = PRInfoFactory.create()
-        task = TaskFactory.create(id=pr.issue_number)
-        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
-
-        _setup_rejected_review_mocks(phase)
-        phase._prs.post_pr_comment = AsyncMock()
-
-        phase._state.increment_review_attempts(42)
-        phase._state.increment_review_attempts(42)
-
-        await phase._handle_rejected_review(pr, task, result, 0)
-
-        assert phase._state.get_hitl_origin(42) == "hydraflow-review"
-        phase._prs.transition.assert_any_await(42, "diagnose", pr_number=101)
-
-    @pytest.mark.asyncio
-    async def test_cap_exceeded_posts_comment_on_issue(self, tmp_path: Path) -> None:
-        """When cap exceeded, HITL escalation comment should be posted on the issue."""
-        from tests.helpers import ConfigFactory
-
-        config = ConfigFactory.create(
-            max_review_fix_attempts=1,
-            repo_root=tmp_path / "repo",
-            workspace_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
-        )
-        phase = make_review_phase(config)
-        pr = PRInfoFactory.create()
-        task = TaskFactory.create(id=pr.issue_number)
-        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
-
-        _setup_rejected_review_mocks(phase)
-        phase._prs.post_pr_comment = AsyncMock()
-
-        # Exhaust cap
-        phase._state.increment_review_attempts(42)
-
-        await phase._handle_rejected_review(pr, task, result, 0)
-
-        # post_on_pr=False, so comment goes to the issue
-        comment_calls = [c.args for c in phase._prs.post_comment.call_args_list]
-        assert any("cap exceeded" in c[1].lower() for c in comment_calls)
-        phase._prs.post_pr_comment.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_under_cap_posts_requeue_comment(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """When under cap, should post a re-queue notification on the issue."""
-        phase = make_review_phase(config)
-        pr = PRInfoFactory.create()
-        task = TaskFactory.create(id=pr.issue_number)
-        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
-
-        _setup_rejected_review_mocks(phase)
-
-        await phase._handle_rejected_review(pr, task, result, 0)
-
-        comment_calls = [c.args for c in phase._prs.post_comment.call_args_list]
-        assert any("Re-queuing for implementation" in c[1] for c in comment_calls)
-
-
-# ---------------------------------------------------------------------------
 # Convergence gate wiring (Phase 1: review reject/escalate decision)
 # ---------------------------------------------------------------------------
 
 
 class TestReviewConvergenceGate:
-    """Phase 1 convergence gate wiring at the review reject boundary.
+    """Convergence gate wiring at the review reject boundary.
 
-    The ledger storage is always-on; only the *decision* that drives
-    retry-vs-escalate is gated behind ``convergence_gate_enabled``.
+    The convergence HybridGate is the sole reject/escalate decision path.
     """
-
-    @pytest.mark.asyncio
-    async def test_gate_disabled_uses_legacy_decision(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """Flag off → seam reports legacy; no convergence ledger decision used."""
-        config.convergence_gate_enabled = False
-        phase = make_review_phase(config, default_mocks=True)
-        assert phase._uses_convergence_gate() is False
-
-    @pytest.mark.asyncio
-    async def test_gate_enabled_seam_is_on(self, config: HydraFlowConfig) -> None:
-        config.convergence_gate_enabled = True
-        phase = make_review_phase(config, default_mocks=True)
-        assert phase._uses_convergence_gate() is True
 
     @pytest.mark.asyncio
     async def test_under_cap_returns_loop_back_and_records_ledger(
@@ -1694,7 +1486,6 @@ class TestReviewConvergenceGate:
         """Under the fix cap, a rejected review loops back and records one lap."""
         from convergence_gate import GateDecision
 
-        config.convergence_gate_enabled = True
         phase = make_review_phase(config, default_mocks=True)
 
         decision = await phase._convergence_decision(
@@ -1719,7 +1510,6 @@ class TestReviewConvergenceGate:
         """
         from convergence_gate import GateDecision
 
-        config.convergence_gate_enabled = True
         # Headroom on the lap budget so only the attempt count is in play.
         config.max_convergence_laps = 20
         phase = make_review_phase(config, default_mocks=True)
@@ -1741,7 +1531,6 @@ class TestReviewConvergenceGate:
         """After ``max_convergence_laps`` loop-backs the outer budget escalates."""
         from convergence_gate import GateDecision
 
-        config.convergence_gate_enabled = True
         # Give attempt headroom so the cap never trips before the lap budget.
         config.max_review_fix_attempts = 100
         config.max_convergence_laps = 3
@@ -1768,7 +1557,6 @@ class TestReviewConvergenceGate:
         """The ledger is saved to StateTracker, not just held in memory."""
         from state import StateTracker
 
-        config.convergence_gate_enabled = True
         phase = make_review_phase(config, default_mocks=True)
 
         await phase._convergence_decision(issue_number=7, review_approved=False)
@@ -1783,8 +1571,7 @@ class TestReviewConvergenceGate:
     async def test_handle_rejected_review_gate_on_loops_back(
         self, config: HydraFlowConfig
     ) -> None:
-        """Flag on + under cap: rejected review re-queues to ``ready`` (True)."""
-        config.convergence_gate_enabled = True
+        """Under cap: rejected review re-queues to ``ready`` (True)."""
         phase = make_review_phase(config, default_mocks=True)
         pr = PRInfoFactory.create()
         task = TaskFactory.create(id=pr.issue_number)
@@ -1806,8 +1593,7 @@ class TestReviewConvergenceGate:
     async def test_handle_rejected_review_gate_on_escalates_on_lap_budget(
         self, config: HydraFlowConfig
     ) -> None:
-        """Flag on + outer lap budget exhausted: rejected review escalates (False)."""
-        config.convergence_gate_enabled = True
+        """Outer lap budget exhausted: rejected review escalates (False)."""
         config.max_review_fix_attempts = 100  # keep attempt cap out of the way
         config.max_convergence_laps = 1  # escalate on the very first lap
         phase = make_review_phase(config, default_mocks=True)
@@ -2943,6 +2729,11 @@ class TestRunPostReviewActions:
         phase._run_visual_validation = AsyncMock(return_value=None)
         phase._handle_visual_failure = AsyncMock()
         phase._record_review_outcome = AsyncMock()
+        # Mock the gated handler (now the sole APPROVE path) to return False
+        # (worktree destroy) so cleanup is called with skip=False. The test
+        # verifies the control-flow from _run_post_review_actions: self-fix
+        # re-review upgrades to APPROVE, which routes through the gate handler.
+        phase._handle_approved_review_gated = AsyncMock(return_value=False)
         phase._handle_approved_merge = AsyncMock()
         phase._handle_rejected_review = AsyncMock(return_value=False)
         phase._cleanup_worktree = AsyncMock()
@@ -2964,7 +2755,7 @@ class TestRunPostReviewActions:
 
         assert result == upgraded
         phase._handle_self_fix_re_review.assert_awaited_once()
-        phase._handle_approved_merge.assert_awaited_once()
+        phase._handle_approved_review_gated.assert_awaited_once()
         phase._cleanup_worktree.assert_awaited_once_with(pr, upgraded, False)
 
     @pytest.mark.asyncio
@@ -3039,11 +2830,10 @@ def _setup_approve_gate_post_review_mocks(phase: ReviewPhase) -> None:
 
 
 class TestApproveConvergenceGate:
-    """Phase 2a: the APPROVE verdict routes through ``_convergence_decision``.
+    """APPROVE verdict routes through ``_convergence_decision`` (unconditional).
 
-    When ``convergence_gate_enabled`` is on, a clean deterministic check plus
-    all-lens APPROVE makes the ledger record ``last_verdict == "ADVANCE"``,
-    which flips ``converged`` to True — the headline of the phase.
+    A clean deterministic check plus all-lens APPROVE makes the ledger record
+    ``last_verdict == "ADVANCE"``, which flips ``converged`` to True.
     """
 
     @pytest.mark.asyncio
@@ -3053,7 +2843,6 @@ class TestApproveConvergenceGate:
         """The headline: clean det + all-lens APPROVE → ADVANCE, converged True."""
         from convergence_gate import GateDecision, JudgeVerdict
 
-        config.convergence_gate_enabled = True
         phase = make_review_phase(config, default_mocks=True)
 
         async def _approve_judge(_ctx, _i):
@@ -3079,7 +2868,6 @@ class TestApproveConvergenceGate:
         """One lens VETO under lap budget → LOOP_BACK; converged stays False."""
         from convergence_gate import GateDecision, JudgeVerdict
 
-        config.convergence_gate_enabled = True
         phase = make_review_phase(config, default_mocks=True)
 
         async def _veto_judge(_ctx, _i):
@@ -3107,7 +2895,6 @@ class TestApproveConvergenceGate:
         """Code-scanning alerts → det RED → LOOP_BACK; the judge never runs."""
         from convergence_gate import GateDecision
 
-        config.convergence_gate_enabled = True
         phase = make_review_phase(config, default_mocks=True)
 
         judge_calls = {"n": 0}
@@ -3137,11 +2924,10 @@ class TestApproveConvergenceGate:
     async def test_post_review_actions_gate_on_approve_advances_and_merges(
         self, config: HydraFlowConfig
     ) -> None:
-        """Flag on + clean det + lens APPROVE → ADVANCE → _handle_approved_merge,
-        ledger converged True, _run_post_verify_advisor NOT called."""
+        """Clean det + lens APPROVE → ADVANCE → _handle_approved_merge,
+        ledger converged True."""
         from review_advisor import PostVerifyResult
 
-        config.convergence_gate_enabled = True
         phase = make_review_phase(config, default_mocks=True)
         issue = TaskFactory.create()
         pr = PRInfoFactory.create(issue_number=issue.id)
@@ -3149,7 +2935,6 @@ class TestApproveConvergenceGate:
         wt_path.mkdir(parents=True, exist_ok=True)
 
         _setup_approve_gate_post_review_mocks(phase)
-        phase._run_post_verify_advisor = AsyncMock()  # must NOT be called
         phase._run_post_verify_for_surface = AsyncMock(
             return_value=PostVerifyResult(
                 verdict="APPROVE",
@@ -3169,7 +2954,6 @@ class TestApproveConvergenceGate:
 
         assert returned == result
         phase._handle_approved_merge.assert_awaited_once()
-        phase._run_post_verify_advisor.assert_not_awaited()
         phase._cleanup_worktree.assert_awaited_once_with(pr, result, False)
         ledger = phase._state.get_convergence_ledger(pr.issue_number)
         assert ledger is not None
@@ -3180,11 +2964,10 @@ class TestApproveConvergenceGate:
     async def test_post_review_actions_gate_on_approve_veto_requeues(
         self, config: HydraFlowConfig
     ) -> None:
-        """Flag on + lens VETO under budget → LOOP_BACK: re-queue to ready,
+        """Lens VETO under budget → LOOP_BACK: re-queue to ready,
         worktree preserved (skip_worktree_cleanup True), no merge."""
         from review_advisor import PostVerifyResult
 
-        config.convergence_gate_enabled = True
         phase = make_review_phase(config, default_mocks=True)
         issue = TaskFactory.create()
         pr = PRInfoFactory.create(issue_number=issue.id)
@@ -3224,8 +3007,7 @@ class TestApproveConvergenceGate:
     async def test_post_review_actions_gate_on_alerts_requeue_without_judge(
         self, config: HydraFlowConfig
     ) -> None:
-        """Flag on + code-scanning alerts → det RED → LOOP_BACK, judge never runs."""
-        config.convergence_gate_enabled = True
+        """Code-scanning alerts → det RED → LOOP_BACK, judge never runs."""
         phase = make_review_phase(config, default_mocks=True)
         issue = TaskFactory.create()
         pr = PRInfoFactory.create(issue_number=issue.id)
@@ -3258,37 +3040,6 @@ class TestApproveConvergenceGate:
         assert ledger.stage_state["review"].last_verdict == "LOOP_BACK"
 
     @pytest.mark.asyncio
-    async def test_post_review_actions_flag_off_uses_legacy_advisor(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """Flag off → legacy _run_post_verify_advisor + _handle_approved_merge path,
-        and no convergence ledger decision is recorded for the approve verdict."""
-        config.convergence_gate_enabled = False
-        phase = make_review_phase(config, default_mocks=True)
-        issue = TaskFactory.create()
-        pr = PRInfoFactory.create(issue_number=issue.id)
-        wt_path = config.workspace_path_for_issue(issue.id)
-        wt_path.mkdir(parents=True, exist_ok=True)
-
-        _setup_approve_gate_post_review_mocks(phase)
-        result = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
-        phase._run_post_verify_advisor = AsyncMock(return_value=(result, "diff text"))
-
-        context = PreReviewContext(
-            diff="diff text", visual_decision=None, code_scanning_alerts=None
-        )
-
-        await phase._run_post_review_actions(
-            pr, issue, wt_path, result, context, worker_id=0
-        )
-
-        phase._run_post_verify_advisor.assert_awaited_once()
-        phase._handle_approved_merge.assert_awaited_once()
-        # No gate decision recorded for the review stage on the legacy path.
-        ledger = phase._state.get_convergence_ledger(pr.issue_number)
-        assert ledger is None or ledger.stage_state.get("review") is None
-
-    @pytest.mark.asyncio
     async def test_lens_judge_exercises_all_3_lenses_for_high_blast_no_index_error(
         self, config: HydraFlowConfig
     ) -> None:
@@ -3303,7 +3054,6 @@ class TestApproveConvergenceGate:
         from convergence_gate import GateContext, JudgeVerdict
         from review_advisor import PostVerifyResult
 
-        config.convergence_gate_enabled = True
         phase = make_review_phase(config, default_mocks=True)
 
         issue = TaskFactory.create()
@@ -4528,8 +4278,6 @@ class TestWikiIngestAdvisor:
 
 
 class TestApproveGateHelpers:
-    """Tests for ReviewPhase helpers wired into the approve-path HybridGate."""
-
     def test_lenses_for_maps_n_to_distinct_lenses(self, config) -> None:
         phase = make_review_phase(config, default_mocks=True)
         assert phase._lenses_for(1) == ["correctness"]

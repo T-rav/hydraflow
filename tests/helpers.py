@@ -1739,6 +1739,10 @@ def make_review_phase(
         phase._prs.add_labels = AsyncMock()
         phase._prs.post_pr_comment = AsyncMock()
         phase._prs.submit_review = AsyncMock(return_value=True)
+        # The convergence gate runs on every APPROVE; the deterministic check
+        # blocks on truthy code-scanning alert objects from an unset AsyncMock.
+        # Explicitly return None (no alerts) so the gate's approve-det is GREEN.
+        phase._prs.fetch_code_scanning_alerts = AsyncMock(return_value=None)
 
         wt = config.workspace_base / f"issue-{issue_number}"
         wt.mkdir(parents=True, exist_ok=True)
