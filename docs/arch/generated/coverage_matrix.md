@@ -11,7 +11,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | Loop | ADR | Wiki | Generated | Standard | Unit | Scenario | Sandbox |
 |---|---|---|---|---|---|---|---|
 | `ADRReviewerLoop` | ✅ [0079] | ✅ [adr-council-reviewer.md, adr-reviewer-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_reviewer_loop.py` | ✅ in catalog | ✅ `s25_adr_reviewer_no_proposed_adrs.py` |
-| `AdrTouchpointAuditorLoop` | ✅ [0056, 0089, 0094] | ✅ [adr-touchpoint-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_touchpoint_auditor_loop.py` | ✅ in catalog | ✅ `s33_adr_touchpoint_auditor_no_drift.py` |
+| `AdrTouchpointAuditorLoop` | ✅ [0056, 0089, 0099] | ✅ [adr-touchpoint-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_touchpoint_auditor_loop.py` | ✅ in catalog | ✅ `s33_adr_touchpoint_auditor_no_drift.py` |
 | `AutoAgentPreflightLoop` | ✅ [0050, 0063, 0084] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_auto_agent_preflight_loop.py` | ✅ in catalog | ✅ `s31_auto_agent_preflight_no_escalations.py` |
 | `BranchProtectionAuditorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_branch_protection_auditor_loop.py` | ✅ in catalog | ✅ `s41_branch_protection_auditor_no_drift.py` |
 | `CIMonitorLoop` | ✅ [0029, 0065] | ✅ [ci-monitor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_ci_monitor_loop.py` | ✅ in catalog | ✅ `s15_ci_monitor_main_branch_red.py` |
@@ -26,7 +26,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `EpicMonitorLoop` | ✅ [0080, 0081, 0091] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_monitor_loop.py` | ✅ in catalog | ✅ `s27_epic_monitor_no_epics.py` |
 | `EpicSweeperLoop` | ✅ [0080, 0081] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_sweeper_loop.py` | ✅ in catalog | ✅ `s23_epic_sweeper_no_epics.py` |
 | `FakeCoverageAuditorLoop` | ✅ [0045, 0047, 0056, 0089] | ✅ [fake-coverage-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_fake_coverage_auditor_loop.py` | ✅ in catalog | ✅ `s29_fake_coverage_auditor_clean.py` |
-| `FlakeTrackerLoop` | ✅ [0045, 0056, 0065, 0089, 0094] | ✅ [flake-tracker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_flake_tracker_loop.py` | ✅ in catalog | ❌ |
+| `FlakeTrackerLoop` | ✅ [0045, 0056, 0065, 0089, 0099] | ✅ [flake-tracker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_flake_tracker_loop.py` | ✅ in catalog | ❌ |
 | `GateActivatorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_gate_activator_loop.py` | ✅ in catalog | ✅ `s45_gate_activator_no_proposals.py` |
 | `GitHubCacheLoop` | ✅ [0076] | ✅ [git-hub-cache-loop.md, github-cache-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_github_cache_loop.py` | ✅ in catalog | ✅ `s44_github_cache_idle_poll.py` |
 | `HealthMonitorLoop` | ✅ [0045, 0046] | ✅ [testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_health_monitor_loop_primary_cycle.py` | ✅ in catalog | ✅ `s48_health_monitor_idle_poll.py` |
@@ -55,7 +55,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `TermPrunerLoop` | ✅ [0057, 0060, 0062, 0068] | ✅ [term-pruner-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_term_pruner_loop.py` | ✅ in catalog | ❌ |
 | `TriageRetryLoop` | ✅ [0063] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_triage_retry_loop.py` | ✅ in catalog | ❌ |
 | `TrustFleetSanityLoop` | ✅ [0045, 0046] | ✅ [testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_trust_fleet_sanity_loop.py` | ✅ in catalog | ❌ |
-| `WikiRotDetectorLoop` | ✅ [0045, 0056, 0089, 0094] | ✅ [wiki-rot-detector-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_wiki_rot_detector_loop.py` | ✅ in catalog | ❌ |
+| `WikiRotDetectorLoop` | ✅ [0045, 0056, 0089, 0099] | ✅ [wiki-rot-detector-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_wiki_rot_detector_loop.py` | ✅ in catalog | ❌ |
 | `WorkspaceGCLoop` | ✅ [0069] | ✅ [workspace-gc-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_workspace_gc_loop.py` | ✅ in catalog | ✅ `s46_workspace_gc_idle_poll.py` |
 ## Section 2: Ports
 

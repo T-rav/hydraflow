@@ -1,4 +1,4 @@
-# ADR-0094: HydraFlow Orchestration as a Control System
+# ADR-0099: HydraFlow Orchestration as a Control System
 
 **Status:** Proposed
 **Date:** 2026-06-30
@@ -29,7 +29,7 @@ Model HydraFlow's entire autonomous-loop layer as a **hierarchy of control loops
 ### Hierarchy of loops
 
 - **Regulators — the caretaker fleet (ADR-0029).** Each caretaker loop is a single-input regulator holding one measured quantity at a fixed set-point and rejecting disturbances (`WikiRotDetectorLoop`/`AdrTouchpointAuditorLoop`: drift→0; `FlakeTrackerLoop`: flakes→0; `StaleIssueGcLoop`: stale issues→0).
-- **Servo — the IssueDriver (v2).** Drives one issue from its current `driver_state` to the MERGED set-point along a trajectory. The `HybridGate` (ADR-0093) is its inner controller; the `ConvergenceLedger` is its error/state register.
+- **Servo — the IssueDriver (v2).** Drives one issue from its current `driver_state` to the MERGED set-point along a trajectory. The `HybridGate` (ADR-0094) is its inner controller; the `ConvergenceLedger` is its error/state register.
 - **Supervisory controller — the scheduler (v2 P2).** `DriverManager` + `SchedulingPolicy` allocate finite capacity across many servos: a pure control law (`select`) over a frozen sensor view (`SchedulingView`).
 - **Governor (v2 P3).** The saturation limiter and emergency brake beneath the supervisory controller.
 - **System identification (v2 P4).** `PolicyScorecard` + `ReplayDriverManager` score control laws offline; the autonomous auto-tuner is a deliberately-deferred adaptive loop.
@@ -98,7 +98,7 @@ flowchart LR
 - **Seed role terms phase-by-phase as v2 symbols land.** Rejected: the full mental model is more useful now; anchoring to current `main` classes (re-anchored at P5) delivers the vocabulary immediately without tripping the anchor-drift gate.
 - **Reuse existing `TermKind`s (`policy`/`service`).** Rejected: control roles are architectural roles, not DDD tactical patterns; mis-filing them would confuse the glossary. A dedicated `control_role` kind is honest.
 - **A separate, non-ADR-0053 control glossary.** Rejected: duplicates the living-glossary machinery and loses the drift enforcement and generated rendering.
-- **Supersede ADR-0001 now.** Rejected: the loop-architecture supersession belongs to the v2 P5 ADR set; ADR-0094 is the conceptual anchor that set will cite, and stays Proposed until then.
+- **Supersede ADR-0001 now.** Rejected: the loop-architecture supersession belongs to the v2 P5 ADR set; ADR-0099 is the conceptual anchor that set will cite, and stays Proposed until then.
 
 ## Related
 
@@ -108,5 +108,5 @@ flowchart LR
 - ADR-0042 (two-tier branch/release promotion)
 - ADR-0049 (kill-switch convention — the governor's interlock)
 - ADR-0053 (ubiquitous language as a living artifact — the vocabulary discipline this extends)
-- ADR-0093 (`ConvergenceLedger` + `HybridGate` — the servo's error register + inner controller)
+- ADR-0094 (`ConvergenceLedger` + `HybridGate` — the servo's error register + inner controller)
 - `src/ubiquitous_language.py:TermKind`, `src/issue_store.py:IssueStore`, `src/base_runner.py:BaseRunner`, `src/base_background_loop.py:LoopDeps`

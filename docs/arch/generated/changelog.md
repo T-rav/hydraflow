@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `684e516` — chore(arch): regenerate generated docs for ADR-0094 + control-role terms *(2026-06-30)*
 - `7674bb5` — docs(adr): add ADR-0094 orchestration as a control system (Proposed) *(2026-06-30)*
 - `5476b45` — fix(ul): tighten Governor/Set-point term definitions to match anchors (review) *(2026-06-30)*
 - `8ef7487` — feat(ul): seed seven control-theory role terms (ADR-0094) *(2026-06-30)*
