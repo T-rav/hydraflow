@@ -7,7 +7,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | Loop | Module | Tick (s) | Kill Switch | Events | ADRs |
 |---|---|---|---|---|---|
 | **ADRReviewerLoop** | `src.adr_reviewer_loop` | 86400 | — | — | — |
-| **AdrConformanceLoop** | `src.adr_conformance_loop` | 86400 | — | ADR_CONFORMANCE_UPDATE | ADR-0094 |
+| **AdrConformanceLoop** | `src.adr_conformance_loop` | 86400 | — | ADR_CONFORMANCE_UPDATE | ADR-0098 |
 | **AdrTouchpointAuditorLoop** | `src.adr_touchpoint_auditor_loop` | 14400 | — | — | ADR-0056 |
 | **AutoAgentPreflightLoop** | `src.auto_agent_preflight_loop` | 120 | — | — | — |
 | **BranchProtectionAuditorLoop** | `src.branch_protection_auditor_loop` | 604800 | — | — | ADR-0029, ADR-0049, ADR-0082 |

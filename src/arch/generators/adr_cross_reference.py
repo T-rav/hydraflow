@@ -23,7 +23,7 @@ def render_adr_cross_reference(idx: ADRRefIndex, adrs: list[ADR] | None = None) 
         for m in r.cited_modules:
             reverse[m].append(r.adr_id)
 
-    # ADR-0094: surface which checks enforce each ADR alongside the module
+    # ADR-0098: surface which checks enforce each ADR alongside the module
     # citations. Keyed by ADR number so lookups work regardless of adrs'
     # ordering; missing/omitted `adrs` renders "—" for every row.
     enforced_by_raw: dict[str, str] = {}

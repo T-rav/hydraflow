@@ -1,4 +1,4 @@
-"""Config defaults + state accessors for AdrConformanceLoop (ADR-0094).
+"""Config defaults + state accessors for AdrConformanceLoop (ADR-0098).
 
 Mirrors the sibling ADR-0056 touchpoint-auditor config flags and
 adr_audit_*/adr_rollup_* state methods, renamed to the adr_conformance_*

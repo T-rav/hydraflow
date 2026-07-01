@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `a243526` — feat(adr-conformance): register AdrConformanceLoop + satisfy completeness invariants *(2026-07-01)*
 - `1fbeeed` — feat(adr-conformance): AdrConformanceLoop (evaluate + issue-only split-class remediation) *(2026-07-01)*
 - `0a3b14a` — fix(adr-conformance): satisfy Port/fake completeness invariants (area, mkdocs nav, count, fake test) *(2026-06-30)*
 - `2fc0b0e` — feat(adr-conformance): Enforced-by column + adr-conformance.md generator *(2026-06-30)*

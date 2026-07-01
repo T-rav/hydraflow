@@ -2463,7 +2463,7 @@ class HydraFlowConfig(BaseModel):
         description="Labels for stuck ADR drift escalations (paired with hitl_escalation_label)",
     )
 
-    # Trust fleet — AdrConformanceLoop (ADR-0094)
+    # Trust fleet — AdrConformanceLoop (ADR-0098)
     adr_conformance_interval: int = Field(
         default=86400,
         ge=3600,
@@ -2672,7 +2672,7 @@ class HydraFlowConfig(BaseModel):
         le=20,
         description=(
             "Maximum outer-convergence laps allowed before a ConvergenceLedger "
-            "escalates an issue (ADR-0094)."
+            "escalates an issue (ADR-0098)."
         ),
     )
     contracts_sandbox_repo: str = Field(
@@ -2970,7 +2970,7 @@ class HydraFlowConfig(BaseModel):
     )
     adr_conformance_loop_enabled: bool = Field(
         default=False,
-        description="Deploy-time kill-switch for AdrConformanceLoop (ADR-0094).",
+        description="Deploy-time kill-switch for AdrConformanceLoop (ADR-0098).",
     )
     ci_monitor_loop_enabled: bool = Field(
         default=True,

@@ -1,5 +1,5 @@
 # tests/test_adr_conformance_coverage.py
-"""Coverage ratchet (ADR-0094): every Accepted ADR declares Enforcement,
+"""Coverage ratchet (ADR-0098): every Accepted ADR declares Enforcement,
 and every `enforced` check resolves and is side-effect-free. Mirrors
 tests/test_loop_fitness_completeness.py. _GRANDFATHERED SHRINKS only.
 """

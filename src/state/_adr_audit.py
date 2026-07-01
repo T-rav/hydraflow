@@ -1,5 +1,5 @@
 """State accessors for AdrTouchpointAuditorLoop (ADR-0056) and
-AdrConformanceLoop (ADR-0094)."""
+AdrConformanceLoop (ADR-0098)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 class AdrAuditStateMixin:
     """Cursor (last-scanned merged-PR ISO timestamp) + per-finding repair attempts.
 
-    Also carries the sibling AdrConformanceLoop (ADR-0094) attempt/rollup
+    Also carries the sibling AdrConformanceLoop (ADR-0098) attempt/rollup
     state under the `adr_conformance_*` namespace.
     """
 
@@ -73,7 +73,7 @@ class AdrAuditStateMixin:
         self._data.adr_rollup_issues = rollups
         self.save()
 
-    # AdrConformanceLoop (ADR-0094) — per-ADR remediation attempt counters +
+    # AdrConformanceLoop (ADR-0098) — per-ADR remediation attempt counters +
     # rollup tracking. Mirrors the adr_audit_*/adr_rollup_* methods above
     # under a distinct storage namespace so conformance counters never
     # collide with touchpoint-audit counters.

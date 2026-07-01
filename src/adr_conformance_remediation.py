@@ -1,4 +1,4 @@
-"""Pure remediation classification (ADR-0094). No I/O; the loop performs the
+"""Pure remediation classification (ADR-0098). No I/O; the loop performs the
 side effects. Ambiguity ('the decision moved') is reached by recurrence, not
 guessed: FAIL files an issue until attempts hit the budget, then escalates.
 """

@@ -149,7 +149,7 @@ class TestInitialization:
             # Per-ADR rollup tracking (#8987) — see ADR-0056 amendment.
             "adr_rollup_issues",
             "rollup_issues",
-            # AdrConformanceLoop (ADR-0094) — mirrors adr_audit_attempts/
+            # AdrConformanceLoop (ADR-0098) — mirrors adr_audit_attempts/
             # adr_rollup_issues above under a distinct namespace.
             "adr_conformance_attempts",
             "adr_conformance_rollup_issues",

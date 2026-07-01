@@ -166,7 +166,7 @@ The trust-architecture hardening fleet (ADR-0045) — RC promotion gate, staging
 
 - `ConformanceRunnerPort` — `src.ports`
 
-**Related ADRs:** `ADR-0042`, `ADR-0045`, `ADR-0048`, `ADR-0056`, `ADR-0094`
+**Related ADRs:** `ADR-0042`, `ADR-0045`, `ADR-0048`, `ADR-0056`, `ADR-0098`
 
 
 ## Hexagonal Boundaries
