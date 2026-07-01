@@ -41,6 +41,8 @@ graph LR
     AgentPort["AgentPort<br/><i>port</i>"]
     BaseBackgroundLoop["BaseBackgroundLoop<br/><i>loop</i>"]
     BotPRPort["BotPRPort<br/><i>port</i>"]
+    DimensionBaseline["DimensionBaseline<br/><i>policy</i>"]
+    DisturbanceDampenerLoop["DisturbanceDampenerLoop<br/><i>loop</i>"]
     EventBus["EventBus<br/><i>service</i>"]
     HydraFlowConfig["HydraFlowConfig<br/><i>aggregate</i>"]
     IssueFetcherPort["IssueFetcherPort<br/><i>port</i>"]
@@ -51,6 +53,7 @@ graph LR
     ReviewInsightStorePort["ReviewInsightStorePort<br/><i>port</i>"]
     RouteBackCounterPort["RouteBackCounterPort<br/><i>port</i>"]
     StateTracker["StateTracker<br/><i>service</i>"]
+    ViolationDetector["ViolationDetector<br/><i>port</i>"]
     WorkspacePort["WorkspacePort<br/><i>port</i>"]
   end
   ADRCouncilReviewer -->|depends_on| EventBus
