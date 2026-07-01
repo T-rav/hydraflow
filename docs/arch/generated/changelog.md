@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `6dbf0e9` — Merge remote-tracking branch 'origin/staging' into worktree-control-theory-adr *(2026-07-01)*
+- `9914531` — ADR conformance as a measured contract (ADR-0098) (#9684) (#9684) *(2026-07-01)*
 - `ff073fb` — Merge remote-tracking branch 'origin/staging' into worktree-control-theory-adr *(2026-07-01)*
 - `cd3404d` — chore(adr): renumber control-theory ADR 0094->0099 (staging claimed 0094 for convergence) *(2026-07-01)*
 - `7eb71e4` — Two-level convergence Phase 2d: oscillation caretaker loop (#9683) (#9683) *(2026-07-01)*

@@ -103,8 +103,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0094 | `src.config`, `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase`, `src.state._convergence` | — |
 | ADR-0095 | `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase` | — |
 | ADR-0096 | `src.convergence_recording`, `src.plan_phase`, `src.shape_phase`, `src.triage_phase` | — |
-| ADR-0097 | `src.implement_phase`, `src.retrospective`, `src.state._auto_agent`, `src.state._convergence`, `src.state._sandbox_failure_fixer` | — |
-| ADR-0098 | `src.convergence_oscillation_loop`, `src.models`, `src.state._convergence` | — |
+| ADR-0097 | `src.implement_phase`, `src.retrospective`, `src.state._auto_agent`, `src.state._convergence`, `src.state._sandbox_failure_fixer` | `pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py` |
+| ADR-0098 | `src.convergence_oscillation_loop`, `src.models`, `src.state._convergence` | `pytest:tests/scenarios/test_convergence_oscillation_mockworld.py` |
 | ADR-0099 | `src.base_background_loop`, `src.base_runner`, `src.harness_insights`, `src.issue_store`, `src.models`, `src.review_advisor`, `src.ubiquitous_language` | `'tests/test_seed_terms.py' (the seven 'control_role' glossary terms load, resolve to 'main' classes, and ship 'accepted'), '(process)' (every orchestration component declares its control role)` |
 | ADR-0100 | `src.adr_conformance`, `src.adr_conformance_loop`, `src.adr_index` | `pytest:tests/test_adr_conformance_coverage.py` |
 
