@@ -19,7 +19,6 @@ areas:
       - CostBudgetWatcherLoop
       - DependabotMergeLoop
       - DiagnosticLoop
-      - DisturbanceDampenerLoop
       - EdgeProposerLoop
       - EntryEvidenceLoop
       - EpicMonitorLoop
@@ -161,6 +160,7 @@ areas:
       before escalating to the same HITL queue Auto-Agent consumes.
     loops:
       - AutoAgentPreflightLoop
+      - DisturbanceDampenerLoop
       - SandboxFailureFixerLoop
       - TriageRetryLoop
     modules:

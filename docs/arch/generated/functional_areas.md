@@ -11,7 +11,6 @@ flowchart LR
         caretaking_CostBudgetWatcherLoop([CostBudgetWatcherLoop])
         caretaking_DependabotMergeLoop([DependabotMergeLoop])
         caretaking_DiagnosticLoop([DiagnosticLoop])
-        caretaking_DisturbanceDampenerLoop([DisturbanceDampenerLoop])
         caretaking_EdgeProposerLoop([EdgeProposerLoop])
         caretaking_EntryEvidenceLoop([EntryEvidenceLoop])
         caretaking_EpicMonitorLoop([EpicMonitorLoop])
@@ -78,6 +77,7 @@ flowchart LR
     end
     subgraph auto_agent["Auto-Agent (HITL Pre-Flight)"]
         auto_agent_AutoAgentPreflightLoop([AutoAgentPreflightLoop])
+        auto_agent_DisturbanceDampenerLoop([DisturbanceDampenerLoop])
         auto_agent_SandboxFailureFixerLoop([SandboxFailureFixerLoop])
         auto_agent_TriageRetryLoop([TriageRetryLoop])
     end
@@ -98,7 +98,6 @@ Autonomous background loops that maintain the system without human input — wik
 - `CostBudgetWatcherLoop` — `src.cost_budget_watcher_loop`
 - `DependabotMergeLoop` — `src.dependabot_merge_loop`
 - `DiagnosticLoop` — `src.diagnostic_loop`
-- `DisturbanceDampenerLoop` — `src.disturbance_dampener_loop`
 - `EdgeProposerLoop` — `src.edge_proposer_loop`
 - `EntryEvidenceLoop` — `src.entry_evidence_loop`
 - `EpicMonitorLoop` — `src.epic_monitor_loop`
@@ -242,6 +241,7 @@ The Auto-Agent HITL pre-flight loop intercepts every `hitl-escalation` issue bef
 **Loops**
 
 - `AutoAgentPreflightLoop` — `src.auto_agent_preflight_loop`
+- `DisturbanceDampenerLoop` — `src.disturbance_dampener_loop`
 - `SandboxFailureFixerLoop` — `src.sandbox_failure_fixer_loop`
 - `TriageRetryLoop` — `src.triage_retry_loop`
 
