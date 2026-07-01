@@ -107,6 +107,20 @@ class TestAtomicSave:
 
 
 class TestReviewAttemptTracking:
+    def test_increment_review_attempts_uses_ledger(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        assert tracker.get_review_attempts(7) == 0
+        assert tracker.increment_review_attempts(7) == 1
+        # the count lives ONLY in the ledger — no legacy field
+        assert tracker.get_convergence_ledger(7).get_attempts("review") == 1
+        assert not hasattr(tracker._data, "review_attempts")
+
+    def test_min_review_passes_reads_ledger_blast_radius(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        ledger = tracker.ensure_convergence_ledger(7, blast_radius="high")
+        tracker.save_convergence_ledger(7, ledger)
+        assert tracker.min_review_passes_required(7) == 3  # high -> 3
+
     def test_get_review_attempts_defaults_to_zero(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
         assert tracker.get_review_attempts(42) == 0
@@ -216,7 +230,6 @@ class TestStateDataModel:
         assert data.reviewed_prs == {}
         assert data.hitl_origins == {}
         assert data.hitl_causes == {}
-        assert data.review_attempts == {}
         assert data.review_feedback == {}
         assert data.worker_result_meta == {}
         assert data.issue_attempts == {}

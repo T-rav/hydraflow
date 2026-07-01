@@ -309,6 +309,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 3600),
     ("contract_refresh_interval", "HYDRAFLOW_CONTRACT_REFRESH_INTERVAL", 604800),
     ("max_fake_repair_attempts", "HYDRAFLOW_MAX_FAKE_REPAIR_ATTEMPTS", 3),
+    ("max_convergence_laps", "HYDRAFLOW_MAX_CONVERGENCE_LAPS", 3),
     ("fitness_scorecard_interval", "HYDRAFLOW_FITNESS_SCORECARD_INTERVAL", 86400),
     ("fitness_window_days", "HYDRAFLOW_FITNESS_WINDOW_DAYS", 30),
     ("fitness_min_samples", "HYDRAFLOW_FITNESS_MIN_SAMPLES", 20),
@@ -400,6 +401,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "precondition_gate_enabled",
         "HYDRAFLOW_PRECONDITION_GATE_ENABLED",
+        False,
+    ),
+    (
+        "convergence_gate_enabled",
+        "HYDRAFLOW_CONVERGENCE_GATE_ENABLED",
         False,
     ),
     ("docker_read_only_root", "HYDRAFLOW_DOCKER_READ_ONLY_ROOT", True),
@@ -1606,6 +1612,18 @@ class HydraFlowConfig(BaseModel):
             "to False to give operators a separate opt-in switch."
         ),
     )
+    convergence_gate_enabled: bool = Field(
+        default=False,
+        description=(
+            "Route the review retry/escalate decision through the "
+            "convergence HybridGate + ConvergenceLedger (ADR-0094). "
+            "Off by default so rollout is opt-in; the "
+            "ledger storage is always-on, only the gate decision is gated. "
+            "When enabled, escalation at the review reject boundary is "
+            "governed by max_convergence_laps (plus oscillation detection), "
+            "NOT max_review_fix_attempts."
+        ),
+    )
 
     # Shadow corpus (#8786) — opt-in live sampling of production
     # subprocess calls. When enabled, every gh/git/docker/claude call
@@ -2628,6 +2646,15 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Max per-adapter consecutive drift ticks before ContractRefreshLoop "
             "escalates a fake-drift issue to hitl-escalation (spec §4.2 Task 18)."
+        ),
+    )
+    max_convergence_laps: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Maximum outer-convergence laps allowed before a ConvergenceLedger "
+            "escalates an issue (ADR-0094)."
         ),
     )
     contracts_sandbox_repo: str = Field(

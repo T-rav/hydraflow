@@ -15,6 +15,7 @@ from typing import (
     NamedTuple,
     NotRequired,
     Protocol,
+    cast,
 )
 from uuid import uuid4
 
@@ -31,7 +32,7 @@ from pydantic.alias_generators import (
 )
 from typing_extensions import TypedDict
 
-from src.pending_concerns import AdversarialState
+from src.pending_concerns import AdversarialState, Concern
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -1766,6 +1767,94 @@ class RcBudgetDurationEntry(BaseModel):
     conclusion: str
 
 
+VerdictStr = Literal["ADVANCE", "LOOP_BACK", "ESCALATE", "UNVISITED"]
+
+
+class StageRecord(BaseModel):
+    """Per-stage convergence record inside a ConvergenceLedger."""
+
+    last_verdict: VerdictStr = "UNVISITED"
+    attempts: int = 0
+    last_finding_signatures: list[str] = Field(default_factory=list)
+
+
+class ConvergenceLedger(BaseModel):
+    """Single source of truth for one issue's two-level convergence state.
+
+    Replaces the scattered per-issue attempt counters (no dual-write). The
+    ledger is always-on storage; the Gate decision that writes to it is the
+    only flag-gated part (see ADR for the storage/decision split).
+    """
+
+    issue_number: int
+    laps: int = 0
+    blast_radius: Literal["low", "medium", "high"] = "low"
+    stage_state: dict[str, StageRecord] = Field(default_factory=dict)
+    open_concerns: list[Concern] = Field(default_factory=list)
+    lap_signatures: list[list[str]] = Field(default_factory=list)
+    converged: bool = False
+
+    def _stage(self, stage: str) -> StageRecord:
+        rec = self.stage_state.get(stage)
+        if rec is None:
+            rec = StageRecord()
+            self.stage_state[stage] = rec
+        return rec
+
+    def get_attempts(self, stage: str) -> int:
+        rec = self.stage_state.get(stage)
+        return rec.attempts if rec else 0
+
+    def increment_attempts(self, stage: str) -> int:
+        rec = self._stage(stage)
+        rec.attempts += 1
+        return rec.attempts
+
+    def record_gate_result(
+        self, stage: str, decision: str, signatures: list[str]
+    ) -> None:
+        # Records verdict + signatures ONLY. Does NOT touch attempts —
+        # increment_attempts is the sole counter bumper.
+        if decision not in ("ADVANCE", "LOOP_BACK", "ESCALATE", "UNVISITED"):
+            raise ValueError(f"invalid gate verdict: {decision!r}")
+        rec = self._stage(stage)
+        rec.last_verdict = cast(VerdictStr, decision)
+        rec.last_finding_signatures = list(signatures)
+
+    def mark_lap(self) -> None:
+        """Close the current lap: snapshot the union of stage signatures."""
+        sig: list[str] = sorted(
+            {
+                s
+                for rec in self.stage_state.values()
+                for s in rec.last_finding_signatures
+            }
+        )
+        self.lap_signatures.append(sig)
+        self.laps += 1
+
+    def all_gated_advanced(self, gated_stages: list[str]) -> bool:
+        if not gated_stages:
+            return False
+        return all(
+            self.stage_state.get(s, StageRecord()).last_verdict == "ADVANCE"
+            for s in gated_stages
+        )
+
+    def recompute_converged(self, gated_stages: list[str]) -> bool:
+        self.converged = (
+            self.all_gated_advanced(gated_stages) and not self.open_concerns
+        )
+        return self.converged
+
+    def detect_outer_oscillation(self, window: int = 2) -> bool:
+        if len(self.lap_signatures) < window:
+            return False
+        tail = self.lap_signatures[-window:]
+        first = tail[0]
+        return bool(first) and all(s == first for s in tail)
+
+
 class StateData(BaseModel):
     """Typed schema for the JSON-backed crash-recovery state."""
 
@@ -1786,7 +1875,6 @@ class StateData(BaseModel):
         default_factory=dict
     )
     hitl_visual_evidence: dict[str, VisualEvidence] = Field(default_factory=dict)
-    review_attempts: dict[str, int] = Field(default_factory=dict)
     review_feedback: dict[str, str] = Field(default_factory=dict)
     worker_result_meta: dict[str, WorkerResultMeta] = Field(default_factory=dict)
     bg_worker_states: dict[str, BackgroundWorkerState] = Field(default_factory=dict)
@@ -1814,16 +1902,10 @@ class StateData(BaseModel):
     )
     interrupted_issues: dict[str, str] = Field(default_factory=dict)
     last_reviewed_shas: dict[str, str] = Field(default_factory=dict)
-    review_blast_radii: dict[str, str] = Field(
-        default_factory=dict,
-        description=(
-            "Per-issue blast-radius tier ('low'|'medium'|'high') computed at "
-            "pre-flight time. Used by the dashboard and ADR-0051 iteration planning."
-        ),
-    )
     pending_reports: list[PendingReport] = Field(default_factory=list)
     tracked_reports: list[TrackedReport] = Field(default_factory=list)
     issue_outcomes: dict[str, IssueOutcome] = Field(default_factory=dict)
+    convergence_ledgers: dict[str, ConvergenceLedger] = Field(default_factory=dict)
     hook_failures: dict[str, list[HookFailureRecord]] = Field(default_factory=dict)
     epic_states: dict[str, EpicState] = Field(default_factory=dict)
     releases: dict[str, Release] = Field(default_factory=dict)
