@@ -16,7 +16,7 @@ updated_at: "2026-07-01T02:34:42.393502+00:00"
 
 ## Definition
 
-The saturation limiter and safety interlock that bounds every Actuator regardless of Controller intent: concurrency caps, credit holds, and the per-loop kill switch bundled in LoopDeps. The v2 Governor generalizes this into an explicit capacity-and-safety authority.
+The saturation limiter and safety interlock that bounds every Actuator regardless of Controller intent. LoopDeps carries a loop's per-cycle safety controls — the kill switch (enabled_cb) and the watchdog timeout bound (timeout_cb); the wider Governor role (concurrency caps, credit holds) is realized elsewhere, by the max_workers/max_planners semaphores and the credit-exhaustion signal. The v2 Governor generalizes these into an explicit capacity-and-safety authority.
 
 ## Invariants
 

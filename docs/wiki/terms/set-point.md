@@ -16,7 +16,7 @@ updated_at: "2026-07-01T02:34:42.393467+00:00"
 
 ## Definition
 
-The desired state an orchestration loop drives toward — an issue reaching its terminal pipeline stage, or a regulator holding a quantity at zero. Encoded on main as the terminal value of the IssueStoreStage state space; a first-class converged flag arrives with the v2 ConvergenceLedger.
+The desired state an orchestration loop drives toward — an issue reaching its terminal pipeline stage (the MERGED value of the IssueStoreStage state space), or a regulator holding a quantity at zero. A first-class converged flag arrives with the v2 ConvergenceLedger.
 
 ## Invariants
 
