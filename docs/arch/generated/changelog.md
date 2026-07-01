@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `93d9fb0` — fix(adr-conformance): export FakeConformanceRunner + add ConformanceRunnerPort signature test *(2026-06-30)*
 - `e8e7046` — feat(adr-conformance): ConformanceRunnerPort + subprocess adapter + fake *(2026-06-30)*
 - `62cd012` — Two-level convergence Phase 2b: boundary verdict recording (Triage/Shape/Plan) (#9677) (#9677) *(2026-06-30)*
 - `e396bad` — Merge origin/staging into Phase1+2a; resolve ADR-0093 collision (convergence ADRs -> 0094/0095), union config + README *(2026-06-30)*

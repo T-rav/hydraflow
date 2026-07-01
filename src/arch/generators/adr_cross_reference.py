@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from adr_index import ADR
 from arch._models import ADRRefIndex
 
 _HEADER = "# ADR Cross-Reference\n\n"
@@ -15,16 +16,25 @@ _PREAMBLE = (
 _FOOTER = "\n\n{{ARCH_FOOTER}}\n"
 
 
-def render_adr_cross_reference(idx: ADRRefIndex) -> str:
+def render_adr_cross_reference(idx: ADRRefIndex, adrs: list[ADR] | None = None) -> str:
     forward = sorted(idx.adr_to_modules, key=lambda r: r.adr_id)
     reverse: dict[str, list[str]] = defaultdict(list)
     for r in forward:
         for m in r.cited_modules:
             reverse[m].append(r.adr_id)
 
-    fwd = "## ADR → Modules\n\n| ADR | Modules cited |\n|---|---|\n"
+    # ADR-0094: surface which checks enforce each ADR alongside the module
+    # citations. Keyed by ADR number so lookups work regardless of adrs'
+    # ordering; missing/omitted `adrs` renders "—" for every row.
+    enforced_by_raw: dict[str, str] = {}
+    for a in adrs or []:
+        adr_id = f"ADR-{a.number:04d}"
+        enforced_by_raw[adr_id] = ", ".join(f"`{c.raw}`" for c in a.enforced_by) or "—"
+
+    fwd = "## ADR → Modules\n\n| ADR | Modules cited | Enforced by |\n|---|---|---|\n"
     fwd += "\n".join(
-        f"| {r.adr_id} | {', '.join(f'`{m}`' for m in r.cited_modules) or '—'} |"
+        f"| {r.adr_id} | {', '.join(f'`{m}`' for m in r.cited_modules) or '—'} | "
+        f"{enforced_by_raw.get(r.adr_id, '—')} |"
         for r in forward
     )
 
