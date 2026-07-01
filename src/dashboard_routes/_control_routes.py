@@ -281,6 +281,11 @@ _bg_worker_defs = [
         "Auto-fixes promotion PRs failing sandbox CI by dispatching the auto-agent",
     ),
     (
+        "disturbance_dampener",
+        "Disturbance Dampener",
+        "Burns down disturbance backlog by selecting units per dimension+file, dispatching an auto-agent fix, and opening one PR per file (ADR-0095).",
+    ),
+    (
         "security_patch",
         "Security Patch",
         "Polls Dependabot alerts and files issues for fixable vulnerabilities.",

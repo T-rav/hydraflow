@@ -19,6 +19,7 @@ areas:
       - CostBudgetWatcherLoop
       - DependabotMergeLoop
       - DiagnosticLoop
+      - DisturbanceDampenerLoop
       - EdgeProposerLoop
       - EntryEvidenceLoop
       - EpicMonitorLoop

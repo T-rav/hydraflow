@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `473ffe2` — feat(disturbance): DisturbanceDampenerLoop burn-down actuator (Pattern A) *(2026-07-01)*
 - `9bf9123` — chore(disturbance): update refs to retired mock-spec test after migration *(2026-07-01)*
 - `185875f` — feat(disturbance): mock-spec detector adapter over existing AST detector *(2026-07-01)*
 - `a63f101` — feat(disturbance): suppression-count detector (type:ignore / noqa) *(2026-07-01)*

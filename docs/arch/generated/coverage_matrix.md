@@ -21,7 +21,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `DependabotMergeLoop` | ✅ [0054, 0057, 0058] | ✅ [dependabot-merge-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_dependabot_merge_loop.py` | ✅ in catalog | ✅ `s09_dependabot_auto_merge.py` |
 | `DiagnosticLoop` | ✅ [0050] | ✅ [diagnostic-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_diagnostic_loop.py` | ✅ in catalog | ✅ `s05_hitl_after_review_exhaustion.py` |
 | `DiagramLoop` | ✅ [0001] | ✅ [diagram-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_diagram_loop.py` | ✅ in catalog | ✅ `s34_diagram_loop_no_changes.py` |
-| `DisturbanceDampenerLoop` | ❌ | ❌ | ❌ | ❌ | ✅ `test_disturbance_dampener_loop.py` | ❌ | ❌ |
+| `DisturbanceDampenerLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_disturbance_dampener_loop.py` | ⚠️ in catalog (no scenario file) | ❌ |
 | `EdgeProposerLoop` | ✅ [0058, 0060, 0062] | ✅ [edge-proposer-loop.md, entry-evidence-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_edge_proposer_loop.py` | ✅ in catalog | ✅ `s28_edge_proposer_no_proposals.py` |
 | `EntryEvidenceLoop` | ✅ [0062, 0078] | ✅ [edge-proposer-loop.md, entry-evidence-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_entry_evidence_loop.py` | ✅ in catalog | ✅ `s24_entry_evidence_no_terms.py` |
 | `EpicMonitorLoop` | ✅ [0080, 0081, 0091] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_monitor_loop.py` | ✅ in catalog | ✅ `s27_epic_monitor_no_epics.py` |

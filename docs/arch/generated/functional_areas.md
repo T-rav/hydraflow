@@ -11,6 +11,7 @@ flowchart LR
         caretaking_CostBudgetWatcherLoop([CostBudgetWatcherLoop])
         caretaking_DependabotMergeLoop([DependabotMergeLoop])
         caretaking_DiagnosticLoop([DiagnosticLoop])
+        caretaking_DisturbanceDampenerLoop([DisturbanceDampenerLoop])
         caretaking_EdgeProposerLoop([EdgeProposerLoop])
         caretaking_EntryEvidenceLoop([EntryEvidenceLoop])
         caretaking_EpicMonitorLoop([EpicMonitorLoop])
@@ -97,6 +98,7 @@ Autonomous background loops that maintain the system without human input — wik
 - `CostBudgetWatcherLoop` — `src.cost_budget_watcher_loop`
 - `DependabotMergeLoop` — `src.dependabot_merge_loop`
 - `DiagnosticLoop` — `src.diagnostic_loop`
+- `DisturbanceDampenerLoop` — `src.disturbance_dampener_loop`
 - `EdgeProposerLoop` — `src.edge_proposer_loop`
 - `EntryEvidenceLoop` — `src.entry_evidence_loop`
 - `EpicMonitorLoop` — `src.epic_monitor_loop`

@@ -867,6 +867,42 @@ def _build_sandbox_failure_fixer(ports: dict[str, Any], config: Any, deps: Any) 
     )
 
 
+def _build_disturbance_dampener(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build DisturbanceDampenerLoop for scenarios (ADR-0095, Pattern A).
+
+    Scenarios that exercise the burn-down path must seed ``ports['github']``
+    (FakeGitHub satisfies the PRPort contract) and ``ports['auto_agent_runner']``
+    (an AsyncMock-style object whose ``run`` returns a ``PreflightSpawn``-like
+    namespace). Scenarios that only need scaffold-wiring smoke can omit both;
+    the loop falls back to a no-op tick. ``state`` and ``dedup`` default to
+    MagicMocks that behave like a clean slate (no prior attempts, no prior
+    dedup keys), mirroring FlakeTrackerLoop's builder.
+    """
+    from disturbance_dampener_loop import DisturbanceDampenerLoop  # noqa: PLC0415
+
+    state = ports.get("disturbance_dampener_state")
+    if state is None:
+        state = MagicMock()
+        state.get_disturbance_dampener_attempts.return_value = 0
+        state.bump_disturbance_dampener_attempts.return_value = 1
+        ports["disturbance_dampener_state"] = state
+
+    dedup = ports.get("disturbance_dampener_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["disturbance_dampener_dedup"] = dedup
+
+    return DisturbanceDampenerLoop(
+        config=config,
+        state=state,
+        prs=ports.get("github"),
+        dedup=dedup,
+        deps=deps,
+        runner=ports.get("auto_agent_runner"),
+    )
+
+
 def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build AutoAgentPreflightLoop for scenarios (spec §1–§11).
 
@@ -1470,6 +1506,8 @@ _BUILDERS: dict[str, Any] = {
     # auto-agent (spec §1–§11; ADR-0050)
     "auto_agent_preflight": _build_auto_agent_preflight,
     "sandbox_failure_fixer": _build_sandbox_failure_fixer,
+    # disturbance dampener burn-down actuator (ADR-0095, Pattern A)
+    "disturbance_dampener": _build_disturbance_dampener,
     # ubiquitous-language (ADR-0054 + ADR-0057 + ADR-0058 + ADR-0062)
     "edge_proposer": _build_edge_proposer,
     "entry_evidence": _build_entry_evidence,

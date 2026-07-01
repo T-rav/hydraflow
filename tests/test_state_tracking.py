@@ -144,6 +144,8 @@ class TestInitialization:
             "auto_agent_daily_spend",
             # SandboxFailureFixerLoop (sandbox-tier scenario testing track)
             "sandbox_failure_fixer_attempts",
+            # DisturbanceDampenerLoop (ADR-0095, Pattern A)
+            "disturbance_dampener_attempts",
             # AdrTouchpointAuditorLoop (ADR-0056)
             "adr_audit_cursor",
             "adr_audit_attempts",
