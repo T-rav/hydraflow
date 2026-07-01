@@ -28,6 +28,7 @@ graph LR
     src -- "4" --> src_arch
     src -- "26" --> src_contracts
     src -- "4" --> src_dashboard_routes
+    src -- "4" --> src_disturbance
     src -- "1" --> src_observability
     src -- "12" --> src_preflight
     src -- "1" --> src_review_phase

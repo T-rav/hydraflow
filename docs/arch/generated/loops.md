@@ -17,6 +17,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **DependabotMergeLoop** | `src.dependabot_merge_loop` | 3600 | — | — | — |
 | **DiagnosticLoop** | `src.diagnostic_loop` | 30 | — | DIAGNOSTIC_UPDATE | — |
 | **DiagramLoop** | `src.diagram_loop` | 14400 | `HYDRAFLOW_DISABLE_DIAGRAM_LOOP` | — | ADR-0029, ADR-0049 |
+| **DisturbanceDampenerLoop** | `src.disturbance_dampener_loop` | — | — | — | ADR-0095 |
 | **EdgeProposerLoop** | `src.edge_proposer_loop` | 86400 | — | — | — |
 | **EntryEvidenceLoop** | `src.entry_evidence_loop` | 86400 | — | — | ADR-0062 |
 | **EpicMonitorLoop** | `src.epic_monitor_loop` | 1800 | — | — | — |
