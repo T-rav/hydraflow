@@ -13,10 +13,14 @@ import re
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from adr_index import Check
+from adr_index import ADR, Check
+
+if TYPE_CHECKING:
+    from ports import ConformanceRunnerPort
 
 
 class ConformanceKind(StrEnum):
@@ -140,3 +144,79 @@ def resolve_check(check: Check, repo_root: Path) -> bool:
     if check.kind == "make":
         return _make_target_defined(repo_root, check.target)
     return False  # prose is unresolvable by design
+
+
+_WORST = {
+    CheckOutcome.PASS: 0,
+    CheckOutcome.SKIPPED: 0,
+    CheckOutcome.MANUAL: 0,
+    CheckOutcome.UNRESOLVED: 1,
+    CheckOutcome.FAIL: 2,
+}
+
+
+def evaluate_adrs(
+    adrs: list[ADR],
+    runner: ConformanceRunnerPort,
+    *,
+    repo_root: Path,
+    timestamp: datetime,
+) -> list[AdrConformance]:
+    out: list[AdrConformance] = []
+    for a in adrs:
+        if a.status != "Accepted":
+            continue
+        kind = classify_enforcement(a.enforcement)
+        if kind is None:
+            continue  # unknown — the ratchet blocks these at CI; runner ignores
+        adr_id = f"ADR-{a.number:04d}"
+        if kind is ConformanceKind.DECISION_OF_RECORD:
+            out.append(
+                AdrConformance(
+                    adr_id=adr_id,
+                    kind=kind,
+                    outcome=CheckOutcome.SKIPPED,
+                    checks=[],
+                    timestamp=timestamp,
+                )
+            )
+            continue
+        if kind is ConformanceKind.MANUAL:
+            checks = [
+                CheckResult(check=c.raw, outcome=CheckOutcome.MANUAL)
+                for c in a.enforced_by
+            ]
+            out.append(
+                AdrConformance(
+                    adr_id=adr_id,
+                    kind=kind,
+                    outcome=CheckOutcome.MANUAL,
+                    checks=checks,
+                    timestamp=timestamp,
+                )
+            )
+            continue
+        # enforced
+        results: list[CheckResult] = []
+        for c in a.enforced_by:
+            if c.kind != "prose" and not resolve_check(c, repo_root):
+                results.append(
+                    CheckResult(check=c.raw, outcome=CheckOutcome.UNRESOLVED)
+                )
+                continue
+            results.append(runner.run(c, repo_root=repo_root))
+        worst = max(
+            (r.outcome for r in results),
+            key=lambda o: _WORST[o],
+            default=CheckOutcome.PASS,
+        )
+        out.append(
+            AdrConformance(
+                adr_id=adr_id,
+                kind=kind,
+                outcome=worst,
+                checks=results,
+                timestamp=timestamp,
+            )
+        )
+    return out
