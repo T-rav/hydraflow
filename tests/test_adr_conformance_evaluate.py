@@ -53,3 +53,43 @@ def test_decision_of_record_is_skipped_and_manual_is_manual(tmp_path):
     assert results[0].outcome is CheckOutcome.SKIPPED
     assert results[0].kind is ConformanceKind.DECISION_OF_RECORD
     assert results[1].outcome is CheckOutcome.MANUAL
+
+
+def test_enforced_outcome_is_worst_pass_plus_fail_is_fail(tmp_path):
+    # Two resolvable checks, one PASS one FAIL → ADR outcome is FAIL.
+    # Guards the max(_WORST) aggregation against a min/ranking regression.
+    (tmp_path / "Makefile").write_text("a:\n\techo\nb:\n\techo\n")
+    ca = Check("make", "a", "make:a")
+    cb = Check("make", "b", "make:b")
+    runner = FakeConformanceRunner(
+        {"make:a": CheckOutcome.PASS, "make:b": CheckOutcome.FAIL}
+    )
+    [res] = evaluate_adrs(
+        [_adr(1, "enforced", (ca, cb))], runner, repo_root=tmp_path, timestamp=TS
+    )
+    assert res.outcome is CheckOutcome.FAIL
+
+
+def test_enforced_outcome_pass_plus_unresolved_is_unresolved(tmp_path):
+    # PASS (resolvable) + UNRESOLVED (no target) → UNRESOLVED, locking the
+    # FAIL > UNRESOLVED > PASS ordering (not just FAIL-vs-rest).
+    (tmp_path / "Makefile").write_text("a:\n\techo\n")  # only 'a' resolves
+    ca = Check("make", "a", "make:a")
+    cghost = Check("make", "ghost", "make:ghost")
+    runner = FakeConformanceRunner({"make:a": CheckOutcome.PASS})
+    [res] = evaluate_adrs(
+        [_adr(1, "enforced", (ca, cghost))], runner, repo_root=tmp_path, timestamp=TS
+    )
+    assert res.outcome is CheckOutcome.UNRESOLVED
+
+
+def test_enforced_with_empty_enforced_by_defaults_to_pass(tmp_path):
+    # Vacuously-enforced ADR (no checks) → outcome PASS, empty checks list.
+    [res] = evaluate_adrs(
+        [_adr(1, "enforced", ())],
+        FakeConformanceRunner({}),
+        repo_root=tmp_path,
+        timestamp=TS,
+    )
+    assert res.outcome is CheckOutcome.PASS
+    assert res.checks == []
