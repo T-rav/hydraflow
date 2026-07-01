@@ -1,5 +1,43 @@
+import markdown
+
 from adr_index import ADR, Check
 from arch.generators.adr_conformance import render_adr_conformance
+
+
+def test_raw_check_text_with_markdown_link_and_backticks_does_not_render_as_link():
+    """Regression: a `raw` check citation that embeds a markdown link AND a
+    literal backtick used to break out of the single-backtick code-span
+    wrapper, letting the link render as a real `<a href>` — which then
+    fails `mkdocs build --strict` because the linked path (docs/superpowers/)
+    is excluded from the site. See ADR-0050's Enforced-by field for a real
+    example of this shape.
+    """
+    adrs = [
+        ADR(
+            number=50,
+            title="Auto-Agent HITL pre-flight",
+            status="Accepted",
+            summary="",
+            enforcement="manual",
+            enforced_by=(
+                Check(
+                    "prose",
+                    "tests/test_x.py`.",
+                    "`tests/test_x.py`.",
+                ),
+                Check(
+                    "prose",
+                    "spec link",
+                    "- **Spec:** [docs/superpowers/specs/x.md](../superpowers/specs/x.md)",
+                ),
+            ),
+        ),
+    ]
+    md = render_adr_conformance(adrs)
+    html = markdown.markdown(md, extensions=["tables"])
+    assert "<a href" not in html, (
+        f"raw check text leaked a real markdown link into rendered HTML:\n{html}"
+    )
 
 
 def test_render_has_static_map_reverse_index_and_manual_section():

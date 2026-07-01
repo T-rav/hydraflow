@@ -29,7 +29,9 @@ def render_adr_cross_reference(idx: ADRRefIndex, adrs: list[ADR] | None = None) 
     enforced_by_raw: dict[str, str] = {}
     for a in adrs or []:
         adr_id = f"ADR-{a.number:04d}"
-        enforced_by_raw[adr_id] = ", ".join(f"`{c.raw}`" for c in a.enforced_by) or "—"
+        enforced_by_raw[adr_id] = (
+            ", ".join(c.as_code_span() for c in a.enforced_by) or "—"
+        )
 
     fwd = "## ADR → Modules\n\n| ADR | Modules cited | Enforced by |\n|---|---|---|\n"
     fwd += "\n".join(

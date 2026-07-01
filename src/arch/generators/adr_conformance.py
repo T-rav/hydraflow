@@ -48,7 +48,7 @@ def render_adr_conformance(adrs: list[ADR]) -> str:
     reverse: dict[str, list[str]] = defaultdict(list)
     for a in accepted:
         for check in a.enforced_by:
-            reverse[check.raw].append(_adr_id(a))
+            reverse[check.as_code_span()].append(_adr_id(a))
 
     fwd = (
         "## Static Enforcement Map\n\n"
@@ -56,14 +56,14 @@ def render_adr_conformance(adrs: list[ADR]) -> str:
     )
     fwd += "\n".join(
         f"| {_adr_id(a)} | {a.enforcement} | "
-        f"{', '.join(f'`{c.raw}`' for c in a.enforced_by) or '—'} |"
+        f"{', '.join(c.as_code_span() for c in a.enforced_by) or '—'} |"
         for a in accepted
     )
 
     rev = "\n\n## Check → ADRs it protects\n\n| Check | Protects |\n|---|---|\n"
     rev += "\n".join(
-        f"| `{check}` | {', '.join(sorted(set(protects)))} |"
-        for check, protects in sorted(reverse.items())
+        f"| {check_span} | {', '.join(sorted(set(protects)))} |"
+        for check_span, protects in sorted(reverse.items())
     )
 
     manual = [a for a in accepted if a.enforcement == "manual"]
@@ -72,7 +72,7 @@ def render_adr_conformance(adrs: list[ADR]) -> str:
         man_section += "| ADR | Prose pointer |\n|---|---|\n"
         man_section += "\n".join(
             f"| {_adr_id(a)} | "
-            f"{', '.join(f'`{c.raw}`' for c in a.enforced_by) or '—'} |"
+            f"{', '.join(c.as_code_span() for c in a.enforced_by) or '—'} |"
             for a in manual
         )
     else:

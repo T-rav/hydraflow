@@ -55,6 +55,7 @@ flowchart LR
         trust_fleet_RCBudgetLoop([RCBudgetLoop])
         trust_fleet_StagingBisectLoop([StagingBisectLoop])
         trust_fleet_TrustFleetSanityLoop([TrustFleetSanityLoop])
+        trust_fleet_ConformanceRunnerPort[/ConformanceRunnerPort/]
     end
     subgraph hexagonal_boundaries["Hexagonal Boundaries"]
         hexagonal_boundaries_AgentPort[/AgentPort/]
@@ -159,7 +160,11 @@ The trust-architecture hardening fleet (ADR-0045) — RC promotion gate, staging
 - `StagingBisectLoop` — `src.staging_bisect_loop`
 - `TrustFleetSanityLoop` — `src.trust_fleet_sanity_loop`
 
-**Related ADRs:** `ADR-0042`, `ADR-0045`, `ADR-0048`, `ADR-0056`
+**Ports**
+
+- `ConformanceRunnerPort` — `src.ports`
+
+**Related ADRs:** `ADR-0042`, `ADR-0045`, `ADR-0048`, `ADR-0056`, `ADR-0094`
 
 
 ## Hexagonal Boundaries

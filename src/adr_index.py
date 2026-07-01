@@ -53,6 +53,10 @@ _KNOWN_ENFORCEMENT = frozenset({"enforced", "manual", "decision-of-record"})
 _SOURCE_FILE_CITATION_RE = re.compile(
     r"`(src/[^`:\s]+\.py)(?::([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*))?`"
 )
+# Matches a Markdown inline link `[text](url)`, used by Check.as_code_span
+# to defuse links embedded in raw Enforced-by prose before they're wrapped
+# in a code span for display in generated docs tables.
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
 
 
 @dataclass(frozen=True)
@@ -62,6 +66,26 @@ class Check:
     kind: Literal["pytest", "make", "prose"]
     target: str
     raw: str
+
+    def as_code_span(self) -> str:
+        """Render ``raw`` as a Markdown inline code span, safe for embedding
+        in generated docs tables.
+
+        Manual/prose Enforced-by fields sometimes carry ADR-body Markdown
+        verbatim (bullet lists, bold, and relative links into the
+        gitignored ``docs/superpowers/`` tree). Naively wrapping ``raw`` in
+        a single pair of backticks is unsafe on two counts: (1) if ``raw``
+        itself contains a backtick, the code span closes early and any
+        ``[text](url)`` after it renders as a *real* link; (2) even without
+        an early close, some Markdown link syntax can still leak through.
+        Stripping link syntax and backticks first makes the code span
+        closure unconditionally safe, which keeps `mkdocs build --strict`
+        from flagging a broken/excluded target for links that were only
+        ever meant to be inert prose.
+        """
+        text = _MARKDOWN_LINK_RE.sub(r"\1 (\2)", self.raw)
+        text = text.replace("`", "'")
+        return f"`{text}`"
 
 
 def parse_enforced_by(block: str) -> tuple[Check, ...]:
