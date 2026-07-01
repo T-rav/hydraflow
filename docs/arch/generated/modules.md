@@ -38,7 +38,7 @@ graph LR
     src_dashboard_routes -- "3" --> src_onboarding
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "2" --> src_state
-    src_disturbance_detectors -- "1" --> src_disturbance
+    src_disturbance_detectors -- "2" --> src_disturbance
     src_mockworld_fakes -- "30" --> src_mockworld
     src_mockworld_fakes -- "1" --> src_telemetry
     src_preflight -- "1" --> src_runners
