@@ -426,6 +426,16 @@ class ShapePhase:
         if len(conv.turns) == 1 and self._council:
             council_result = await self._run_council_vote(issue, conv, result.content)
             if council_result:
+                record_stage_verdict(
+                    self._state,
+                    enabled=self._config.convergence_gate_enabled,
+                    issue_number=issue.id,
+                    stage="shape",
+                    decision="ADVANCE",
+                    signatures=signatures_from_concerns(adv.pending_concerns)
+                    if adv is not None
+                    else [],
+                )
                 return council_result
 
         # No consensus or no council — post turn and wait for human

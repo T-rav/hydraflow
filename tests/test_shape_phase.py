@@ -598,3 +598,68 @@ class TestShapeConvergenceLedger:
             "Security risk in API design"
             in ledger.stage_state["shape"].last_finding_signatures
         )
+
+    @pytest.mark.asyncio
+    async def test_council_consensus_records_advance_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        """Gate ON + council reaches consensus (len(turns)==1 + _council set) ->
+        ledger records 'ADVANCE'.
+
+        Uses a stubbed _run_council_vote returning 1 (consensus) so the
+        council-consensus exit in _shape_with_runner is exercised without
+        driving the full multi-round council logic.
+        """
+        runner = MagicMock()
+        runner.bind_escalation_deps = MagicMock()
+        runner.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="Direction proposal", is_final=False)
+        )
+        phase, state = _make_shape_phase_with_real_state(
+            tmp_path, convergence_gate_enabled=True, shape_runner=runner
+        )
+        task = Task(id=60, title="Build dashboard", body="", labels=[])
+        phase._store.enrich_with_comments = AsyncMock(
+            return_value=task.model_copy(update={"comments": []})
+        )
+        phase._state.get_shape_conversation = MagicMock(return_value=None)
+        phase._state.set_shape_conversation = MagicMock()
+        phase._state.increment_session_counter = MagicMock()
+        phase._prs.transition = AsyncMock()
+        phase._prs.post_comment = AsyncMock()
+
+        # Stub _run_council_vote to return 1 (consensus reached)
+        phase._council = MagicMock()  # truthy so the if-branch is taken
+        phase._run_council_vote = AsyncMock(return_value=1)
+
+        await phase._shape_with_runner(task)
+
+        ledger = state.get_convergence_ledger(60)
+        assert ledger is not None, "Ledger must be created when gate is on"
+        assert ledger.stage_state["shape"].last_verdict == "ADVANCE"
+
+    @pytest.mark.asyncio
+    async def test_gate_off_runner_path_records_no_ledger(self, tmp_path: Path) -> None:
+        """Gate OFF + runner exit -> no ledger created even when runner loops back."""
+        runner = MagicMock()
+        runner.bind_escalation_deps = MagicMock()
+        runner.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="Turn content", is_final=False)
+        )
+        phase, state = _make_shape_phase_with_real_state(
+            tmp_path, convergence_gate_enabled=False, shape_runner=runner
+        )
+        task = Task(id=61, title="Improve reporting", body="", labels=[])
+        phase._store.enrich_with_comments = AsyncMock(
+            return_value=task.model_copy(update={"comments": []})
+        )
+        phase._state.get_shape_conversation = MagicMock(return_value=None)
+        phase._state.set_shape_conversation = MagicMock()
+        phase._state.increment_session_counter = MagicMock()
+        phase._prs.transition = AsyncMock()
+        phase._prs.post_comment = AsyncMock()
+
+        await phase._shape_with_runner(task)
+
+        ledger = state.get_convergence_ledger(61)
+        assert ledger is None, "No ledger should be created when gate is off"
