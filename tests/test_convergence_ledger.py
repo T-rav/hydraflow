@@ -8,13 +8,10 @@ from tests.helpers import make_tracker
 
 class TestConvergenceLedgerModel:
     def test_round_trip_serialization(self) -> None:
-        # Arrange
         ledger = ConvergenceLedger(issue_number=7, blast_radius="high")
         ledger.increment_attempts("review")
         ledger.record_gate_result("review", "LOOP_BACK", ["sig-a"])
-        # Act
         restored = ConvergenceLedger.model_validate_json(ledger.model_dump_json())
-        # Assert
         assert restored == ledger
         assert restored.stage_state["review"].attempts == 1
         assert restored.stage_state["review"].last_verdict == "LOOP_BACK"
@@ -98,3 +95,105 @@ class TestConvergenceLedgerPersistence:
         tracker.save_convergence_ledger(7, tracker.ensure_convergence_ledger(7))
         tracker.clear_convergence_ledger(7)
         assert tracker.get_convergence_ledger(7) is None
+
+
+class TestDetectCrossBoundaryOscillation:
+    def test_temporal_oscillation_triggers_true(self) -> None:
+        # Arrange: two identical lap signatures => outer oscillation detected
+        ledger = ConvergenceLedger(issue_number=7)
+        ledger.record_gate_result("review", "LOOP_BACK", ["x"])
+        ledger.mark_lap()
+        ledger.record_gate_result("review", "LOOP_BACK", ["x"])
+        ledger.mark_lap()
+        # lap_signatures is [["x"], ["x"]]
+        # Act + Assert
+        assert ledger.detect_cross_boundary_oscillation(window=2) is True
+
+    def test_snapshot_oscillation_triggers_true(self) -> None:
+        # Arrange: two distinct boundary stages with LOOP_BACK (no laps needed)
+        ledger = ConvergenceLedger(issue_number=7)
+        ledger.record_gate_result("triage", "LOOP_BACK", [])
+        ledger.record_gate_result("plan", "LOOP_BACK", [])
+        # No marks => laps=0 => outer oscillation False, but snapshot True
+        # Act + Assert
+        assert ledger.detect_cross_boundary_oscillation(min_loopback_stages=2) is True
+
+    def test_converged_advancing_ledger_returns_false(self) -> None:
+        # Arrange: all stages ADVANCE, no repeated signatures
+        ledger = ConvergenceLedger(issue_number=7)
+        ledger.record_gate_result("triage", "ADVANCE", ["sig-a"])
+        ledger.mark_lap()
+        ledger.record_gate_result("triage", "ADVANCE", ["sig-b"])
+        ledger.mark_lap()
+        # Act + Assert
+        assert ledger.detect_cross_boundary_oscillation() is False
+
+    def test_only_one_boundary_loopback_returns_false(self) -> None:
+        # Arrange: only one boundary stage at LOOP_BACK, no outer oscillation
+        ledger = ConvergenceLedger(issue_number=7)
+        ledger.record_gate_result("triage", "LOOP_BACK", [])
+        ledger.record_gate_result("shape", "ADVANCE", [])
+        # Act + Assert: min_loopback_stages=2 not met
+        assert ledger.detect_cross_boundary_oscillation(min_loopback_stages=2) is False
+
+    def test_oscillation_escalated_field_defaults_false(self) -> None:
+        ledger = ConvergenceLedger(issue_number=7)
+        assert ledger.oscillation_escalated is False
+
+    def test_oscillation_escalated_round_trips(self) -> None:
+        ledger = ConvergenceLedger(issue_number=7)
+        ledger.oscillation_escalated = True
+        restored = ConvergenceLedger.model_validate_json(ledger.model_dump_json())
+        assert restored.oscillation_escalated is True
+
+
+class TestIterConvergenceLedgers:
+    def test_iter_returns_all_ledgers_as_int_tuples(self, tmp_path) -> None:
+        # Arrange: create two ledgers for different issues
+        tracker = make_tracker(tmp_path)
+        tracker.ensure_convergence_ledger(3)
+        tracker.ensure_convergence_ledger(17)
+        result = tracker.iter_convergence_ledgers()
+        # Assert: both issues present as (int, ConvergenceLedger)
+        issue_nums = {n for n, _ in result}
+        assert issue_nums == {3, 17}
+        for n, ledger in result:
+            assert isinstance(n, int)
+            assert isinstance(ledger, ConvergenceLedger)
+
+    def test_iter_returns_deep_copies(self, tmp_path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.ensure_convergence_ledger(5)
+        result = tracker.iter_convergence_ledgers()
+        _, ledger = result[0]
+        # Mutating returned copy must not affect stored state
+        ledger.oscillation_escalated = True
+        stored = tracker.get_convergence_ledger(5)
+        assert stored is not None
+        assert stored.oscillation_escalated is False
+
+    def test_mark_oscillation_escalated_sets_flag_and_persists(self, tmp_path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.ensure_convergence_ledger(7)
+        tracker.mark_oscillation_escalated(7)
+        # Assert: flag set in memory
+        ledger = tracker.get_convergence_ledger(7)
+        assert ledger is not None
+        assert ledger.oscillation_escalated is True
+        # Assert: persists across reload
+        reloaded = make_tracker(tmp_path)
+        reloaded.load()
+        restored = reloaded.get_convergence_ledger(7)
+        assert restored is not None
+        assert restored.oscillation_escalated is True
+
+    def test_mark_oscillation_escalated_creates_ledger_if_absent(
+        self, tmp_path
+    ) -> None:
+        tracker = make_tracker(tmp_path)
+        # Issue 99 has no ledger yet
+        assert tracker.get_convergence_ledger(99) is None
+        tracker.mark_oscillation_escalated(99)
+        ledger = tracker.get_convergence_ledger(99)
+        assert ledger is not None
+        assert ledger.oscillation_escalated is True

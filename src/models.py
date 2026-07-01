@@ -1793,6 +1793,7 @@ class ConvergenceLedger(BaseModel):
     open_concerns: list[Concern] = Field(default_factory=list)
     lap_signatures: list[list[str]] = Field(default_factory=list)
     converged: bool = False
+    oscillation_escalated: bool = False
 
     def _stage(self, stage: str) -> StageRecord:
         rec = self.stage_state.get(stage)
@@ -1853,6 +1854,30 @@ class ConvergenceLedger(BaseModel):
         tail = self.lap_signatures[-window:]
         first = tail[0]
         return bool(first) and all(s == first for s in tail)
+
+    def detect_cross_boundary_oscillation(
+        self, *, window: int = 2, min_loopback_stages: int = 2
+    ) -> bool:
+        """Return True if the ledger shows cross-boundary oscillation.
+
+        Two conditions (either is sufficient):
+        (a) Temporal: ``detect_outer_oscillation(window)`` is True — recurring
+            identical findings across review laps.
+        (b) Snapshot: at least ``min_loopback_stages`` DISTINCT stages among
+            ``{"triage", "shape", "plan"}`` currently have
+            ``last_verdict == "LOOP_BACK"`` — pre-review cross-boundary churn.
+
+        Pure function of ledger state; no mutation.
+        """
+        if self.detect_outer_oscillation(window):
+            return True
+        boundary_stages = {"triage", "shape", "plan"}
+        loopback_count = sum(
+            1
+            for stage in boundary_stages
+            if self.stage_state.get(stage, StageRecord()).last_verdict == "LOOP_BACK"
+        )
+        return loopback_count >= min_loopback_stages
 
 
 class StateData(BaseModel):

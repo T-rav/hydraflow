@@ -108,6 +108,23 @@ class ConvergenceStateMixin:
         cl = self._data.convergence_ledgers.get(self._key(issue_number))
         return cl.blast_radius if cl else None
 
+    def iter_convergence_ledgers(self) -> list[tuple[int, ConvergenceLedger]]:
+        """Return all ledgers as ``(issue_number, ledger)`` pairs (deep-copied)."""
+        return [
+            (int(k), v.model_copy(deep=True))
+            for k, v in self._data.convergence_ledgers.items()
+        ]
+
+    def mark_oscillation_escalated(self, issue_number: int) -> None:
+        """Set ``oscillation_escalated = True`` on *issue_number*'s ledger and save."""
+        key = self._key(issue_number)
+        cl = self._data.convergence_ledgers.get(key)
+        if cl is None:
+            cl = ConvergenceLedger(issue_number=issue_number)
+            self._data.convergence_ledgers[key] = cl
+        cl.oscillation_escalated = True
+        self.save()
+
     def min_review_passes_required(self, issue_number: int) -> int:
         """Return the minimum fresh-eyes review passes for *issue_number*.
 

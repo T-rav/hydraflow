@@ -310,6 +310,21 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("contract_refresh_interval", "HYDRAFLOW_CONTRACT_REFRESH_INTERVAL", 604800),
     ("max_fake_repair_attempts", "HYDRAFLOW_MAX_FAKE_REPAIR_ATTEMPTS", 3),
     ("max_convergence_laps", "HYDRAFLOW_MAX_CONVERGENCE_LAPS", 3),
+    (
+        "convergence_oscillation_interval",
+        "HYDRAFLOW_CONVERGENCE_OSCILLATION_INTERVAL",
+        3600,
+    ),
+    (
+        "convergence_oscillation_window",
+        "HYDRAFLOW_CONVERGENCE_OSCILLATION_WINDOW",
+        2,
+    ),
+    (
+        "convergence_oscillation_min_loopback_stages",
+        "HYDRAFLOW_CONVERGENCE_OSCILLATION_MIN_LOOPBACK_STAGES",
+        2,
+    ),
     ("fitness_scorecard_interval", "HYDRAFLOW_FITNESS_SCORECARD_INTERVAL", 86400),
     ("fitness_window_days", "HYDRAFLOW_FITNESS_WINDOW_DAYS", 30),
     ("fitness_min_samples", "HYDRAFLOW_FITNESS_MIN_SAMPLES", 20),
@@ -527,6 +542,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("stale_issue_gc_loop_enabled", "HYDRAFLOW_STALE_ISSUE_GC_LOOP_ENABLED", True),
     ("stale_issue_loop_enabled", "HYDRAFLOW_STALE_ISSUE_LOOP_ENABLED", True),
     ("triage_retry_loop_enabled", "HYDRAFLOW_TRIAGE_RETRY_LOOP_ENABLED", True),
+    (
+        "convergence_oscillation_loop_enabled",
+        "HYDRAFLOW_CONVERGENCE_OSCILLATION_LOOP_ENABLED",
+        True,
+    ),
     (
         "trust_fleet_sanity_loop_enabled",
         "HYDRAFLOW_TRUST_FLEET_SANITY_LOOP_ENABLED",
@@ -2655,6 +2675,42 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Maximum outer-convergence laps allowed before a ConvergenceLedger "
             "escalates an issue (ADR-0094)."
+        ),
+    )
+    convergence_oscillation_interval: int = Field(
+        default=3600,
+        ge=300,
+        le=86400,
+        description=(
+            "Seconds between ConvergenceOscillationLoop ticks (default 1h). "
+            "Must be between 5 minutes and 24 hours."
+        ),
+    )
+    convergence_oscillation_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable the ConvergenceOscillationLoop caretaker that scans "
+            "ConvergenceLedgers for cross-boundary oscillation and escalates "
+            "stuck issues to HITL."
+        ),
+    )
+    convergence_oscillation_window: int = Field(
+        default=2,
+        ge=2,
+        le=10,
+        description=(
+            "Number of recent lap signatures to compare when detecting temporal "
+            "outer oscillation (detect_outer_oscillation window parameter)."
+        ),
+    )
+    convergence_oscillation_min_loopback_stages: int = Field(
+        default=2,
+        ge=1,
+        le=3,
+        description=(
+            "Minimum number of distinct boundary stages (triage/shape/plan) "
+            "that must have last_verdict==LOOP_BACK to trigger snapshot "
+            "oscillation escalation."
         ),
     )
     contracts_sandbox_repo: str = Field(
