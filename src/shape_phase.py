@@ -297,7 +297,6 @@ class ShapePhase:
                         self._state.increment_session_counter("shaped")
                         record_stage_verdict(
                             self._state,
-                            enabled=self._config.convergence_gate_enabled,
                             issue_number=issue.id,
                             stage="shape",
                             decision="ADVANCE",
@@ -308,7 +307,6 @@ class ShapePhase:
                     self._store.enqueue_transition(issue, "shape")
                     record_stage_verdict(
                         self._state,
-                        enabled=self._config.convergence_gate_enabled,
                         issue_number=issue.id,
                         stage="shape",
                         decision="LOOP_BACK",
@@ -412,7 +410,6 @@ class ShapePhase:
             self._state.set_shape_conversation(issue.id, conv)
             record_stage_verdict(
                 self._state,
-                enabled=self._config.convergence_gate_enabled,
                 issue_number=issue.id,
                 stage="shape",
                 decision="ADVANCE",
@@ -428,7 +425,6 @@ class ShapePhase:
             if council_result:
                 record_stage_verdict(
                     self._state,
-                    enabled=self._config.convergence_gate_enabled,
                     issue_number=issue.id,
                     stage="shape",
                     decision="ADVANCE",
@@ -443,7 +439,6 @@ class ShapePhase:
         self._store.enqueue_transition(issue, "shape")
         record_stage_verdict(
             self._state,
-            enabled=self._config.convergence_gate_enabled,
             issue_number=issue.id,
             stage="shape",
             decision="LOOP_BACK",

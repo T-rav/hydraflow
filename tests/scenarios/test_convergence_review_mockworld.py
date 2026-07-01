@@ -1,7 +1,6 @@
 """MockWorld scenarios — convergence gate at the review boundary.
 
-Verifies three behaviours introduced by the convergence gate
-(``convergence_gate_enabled=True``):
+Verifies three behaviours of the unconditional convergence gate:
 
 1. ``test_loop_back_records_lap`` — a PR that fails review on pass 1
    (REQUEST_CHANGES) loops back to the ready queue; the ledger records the
@@ -64,7 +63,6 @@ def _make_world_with_gate(tmp_path, *, max_convergence_laps: int = 3) -> MockWor
         visual_validation_enabled=False,
         max_ci_fix_attempts=0,
     )
-    cfg.convergence_gate_enabled = True
     cfg.max_convergence_laps = max_convergence_laps
     return MockWorld(tmp_path, config=cfg)
 

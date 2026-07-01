@@ -11,7 +11,6 @@ if TYPE_CHECKING:
 def record_stage_verdict(
     state: Any,
     *,
-    enabled: bool,
     issue_number: int,
     stage: str,
     decision: str,
@@ -19,11 +18,9 @@ def record_stage_verdict(
 ) -> None:
     """Record a boundary verdict into the per-issue ConvergenceLedger.
 
-    No-op when not enabled. Records verdict + signatures ONLY (does NOT
-    mark_lap or recompute_converged — those stay review-owned).
+    Records verdict + signatures ONLY (does NOT mark_lap or
+    recompute_converged — those stay review-owned).
     """
-    if not enabled:
-        return
     ledger = state.ensure_convergence_ledger(issue_number)
     ledger.record_gate_result(stage, decision, signatures)
     state.save_convergence_ledger(issue_number, ledger)
