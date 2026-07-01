@@ -4528,8 +4528,6 @@ class TestWikiIngestAdvisor:
 
 
 class TestApproveGateHelpers:
-    """Tests for ReviewPhase helpers wired into the approve-path HybridGate."""
-
     def test_lenses_for_maps_n_to_distinct_lenses(self, config) -> None:
         phase = make_review_phase(config, default_mocks=True)
         assert phase._lenses_for(1) == ["correctness"]

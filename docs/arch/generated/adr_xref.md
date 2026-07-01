@@ -103,8 +103,9 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0094 | `src.config`, `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase`, `src.state._convergence` | — |
 | ADR-0095 | `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase` | — |
 | ADR-0096 | `src.convergence_recording`, `src.plan_phase`, `src.shape_phase`, `src.triage_phase` | — |
-| ADR-0097 | `src.implement_phase`, `src.retrospective`, `src.state._auto_agent`, `src.state._convergence`, `src.state._sandbox_failure_fixer` | — |
-| ADR-0098 | `src.convergence_oscillation_loop`, `src.models`, `src.state._convergence` | — |
+| ADR-0097 | `src.implement_phase`, `src.retrospective`, `src.state._auto_agent`, `src.state._convergence`, `src.state._sandbox_failure_fixer` | `pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py` |
+| ADR-0098 | `src.convergence_oscillation_loop`, `src.models`, `src.state._convergence` | `pytest:tests/scenarios/test_convergence_oscillation_mockworld.py` |
+| ADR-0099 | `src.base_background_loop`, `src.base_runner`, `src.harness_insights`, `src.issue_store`, `src.models`, `src.review_advisor`, `src.ubiquitous_language` | `'tests/test_seed_terms.py' (the seven 'control_role' glossary terms load, resolve to 'main' classes, and ship 'accepted'), '(process)' (every orchestration component declares its control role)` |
 | ADR-0100 | `src.adr_conformance`, `src.adr_conformance_loop`, `src.adr_index` | `pytest:tests/test_adr_conformance_coverage.py` |
 
 ## Module → ADRs
@@ -125,8 +126,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.agent_cli` | ADR-0004 |
 | `src.assumption_surfacer` | ADR-0064 |
 | `src.auto_agent_preflight_loop` | ADR-0050, ADR-0063, ADR-0084 |
-| `src.base_background_loop` | ADR-0049, ADR-0055, ADR-0084, ADR-0093 |
-| `src.base_runner` | ADR-0004, ADR-0032, ADR-0055, ADR-0066 |
+| `src.base_background_loop` | ADR-0049, ADR-0055, ADR-0084, ADR-0093, ADR-0099 |
+| `src.base_runner` | ADR-0004, ADR-0032, ADR-0055, ADR-0066, ADR-0099 |
 | `src.bg_worker_manager` | ADR-0049 |
 | `src.branch_protection_audit` | ADR-0082 |
 | `src.branch_protection_auditor_loop` | ADR-0082 |
@@ -170,6 +171,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.gate_activation_check` | ADR-0082 |
 | `src.gate_activator_loop` | ADR-0082 |
 | `src.github_cache_loop` | ADR-0076 |
+| `src.harness_insights` | ADR-0099 |
 | `src.health_monitor_loop` | ADR-0045, ADR-0046 |
 | `src.hf_cli.__main__` | ADR-0036 |
 | `src.hf_cli.supervisor_client` | ADR-0007 |
@@ -177,7 +179,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.implement_phase` | ADR-0005, ADR-0014, ADR-0024, ADR-0063, ADR-0097 |
 | `src.issue_cache` | ADR-0041 |
 | `src.issue_fetcher` | ADR-0019, ADR-0067 |
-| `src.issue_store` | ADR-0006, ADR-0022, ADR-0041, ADR-0084 |
+| `src.issue_store` | ADR-0006, ADR-0022, ADR-0041, ADR-0084, ADR-0099 |
 | `src.label_drift_watcher_loop` | ADR-0088 |
 | `src.live_corpus_replay_loop` | ADR-0086 |
 | `src.loop_fitness` | ADR-0093 |
@@ -189,7 +191,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.mockworld.fakes.fake_honeycomb` | ADR-0055 |
 | `src.mockworld.fakes.fake_llm` | ADR-0059 |
 | `src.mockworld.sandbox_main` | ADR-0052 |
-| `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0064, ADR-0084, ADR-0088, ADR-0094, ADR-0095, ADR-0098 |
+| `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0064, ADR-0084, ADR-0088, ADR-0094, ADR-0095, ADR-0098, ADR-0099 |
 | `src.orchestrator` | ADR-0006, ADR-0009, ADR-0014, ADR-0044, ADR-0045 |
 | `src.pending_concerns` | ADR-0064 |
 | `src.plan_council` | ADR-0064 |
@@ -221,7 +223,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.retrospective` | ADR-0074, ADR-0097 |
 | `src.retrospective_loop` | ADR-0074 |
 | `src.retrospective_queue` | ADR-0074 |
-| `src.review_advisor` | ADR-0059, ADR-0094, ADR-0095 |
+| `src.review_advisor` | ADR-0059, ADR-0094, ADR-0095, ADR-0099 |
 | `src.review_insights` | ADR-0070 |
 | `src.review_phase` | ADR-0012, ADR-0014, ADR-0015, ADR-0031, ADR-0059 |
 | `src.review_phase._phase` | ADR-0063, ADR-0094, ADR-0095 |
@@ -262,7 +264,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.trace_collector` | ADR-0055 |
 | `src.triage_phase` | ADR-0014, ADR-0017, ADR-0031, ADR-0039, ADR-0063, ADR-0096 |
 | `src.trust_fleet_sanity_loop` | ADR-0045, ADR-0046 |
-| `src.ubiquitous_language` | ADR-0054, ADR-0057, ADR-0058, ADR-0090 |
+| `src.ubiquitous_language` | ADR-0054, ADR-0057, ADR-0058, ADR-0090, ADR-0099 |
 | `src.untrusted_text` | ADR-0092 |
 | `src.visual_validation` | ADR-0015 |
 | `src.wiki_carryover` | ADR-0064 |

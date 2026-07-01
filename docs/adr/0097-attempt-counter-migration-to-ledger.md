@@ -4,6 +4,8 @@
 - **Date:** 2026-07-01
 - **Refines:** ADR-0094 (two-level convergence: Gate + ConvergenceLedger)
 - **Extends:** ADR-0096 (boundary verdict recording)
+- **Enforcement:** enforced
+- **Enforced by:** pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py
 
 ## Context
 
