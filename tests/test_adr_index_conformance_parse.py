@@ -54,6 +54,36 @@ def test_missing_enforcement_normalizes_to_unknown(tmp_path):
     assert adr.enforcement == "unknown"
 
 
+def test_enforced_by_stops_at_next_bullet_not_just_blank_line(tmp_path):
+    """Regression: **Enforced by:** followed immediately (no blank line) by
+    a sibling frontmatter bullet like `- **Spec:**` must NOT swallow that
+    bullet into the Enforced-by capture. Real ADR frontmatter is often a
+    single bullet list with no blank lines between fields:
+
+        - **Enforced by:** pytest:tests/x.py::t
+        - **Spec:** foo
+
+    Before the fix, the greedy capture ran until the next blank line or
+    `**Field:**`/`##` heading — but `- **Spec:**` is a bullet, not a
+    top-level `**Field:**` line, so it wasn't recognized as a stop point
+    and got absorbed into the Enforced-by block.
+    """
+    adr = parse_adr_file(
+        _write(
+            tmp_path,
+            (
+                "# ADR-0099: X\n\n**Status:** Accepted\n"
+                "**Enforcement:** enforced\n"
+                "- **Enforced by:** pytest:tests/x.py::t\n"
+                "- **Spec:** foo\n\n## Context\n\nc\n"
+            ),
+        )
+    )
+    assert adr.enforced_by == (
+        Check(kind="pytest", target="tests/x.py::t", raw="pytest:tests/x.py::t"),
+    )
+
+
 def test_manual_prose_is_one_check_per_line_not_comma_split():
     # commas inside manual prose must NOT fragment
     checks = parse_enforced_by("branch protection review, per PR checklist\n")

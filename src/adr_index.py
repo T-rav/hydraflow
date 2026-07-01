@@ -15,6 +15,12 @@ File format (from docs/adr/0001-five-concurrent-async-loops.md):
 
     HydraFlow must process GitHub issues through five distinct stages...
 
+The separator after the ADR number is flexible: colon, em-dash, en-dash,
+hyphen, or bare whitespace are all accepted (e.g.
+``# ADR-0093 — Loop fitness as a measured contract``). Every
+``# ADR-NNNN...`` heading in docs/adr/*.md MUST parse — see
+``tests/test_adr_conformance_coverage.py::test_every_adr_file_parses``.
+
 Status is normalized to one of: "Accepted", "Proposed", "Superseded",
 "Deprecated". "Superseded by ADR-NNNN" populates ``superseded_by``.
 """
@@ -30,15 +36,18 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 
-_TITLE_RE = re.compile(r"^#\s*ADR-(\d{4}):\s*(.+?)\s*$", re.MULTILINE)
+_TITLE_RE = re.compile(r"^#\s*ADR-(\d{4})\s*[:–—-]?\s*(.+?)\s*$", re.MULTILINE)
 _STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(.+?)\s*$", re.MULTILINE)
 _CONTEXT_RE = re.compile(r"##\s+Context\s*\n\s*\n(.+?)(?=\n\s*\n|\n##\s|\Z)", re.DOTALL)
 _SUPERSEDED_RE = re.compile(r"Superseded\s+by\s+(ADR-\d{4})", re.IGNORECASE)
 _ENFORCEMENT_RE = re.compile(r"\*\*Enforcement:\*\*\s*(.+?)\s*$", re.MULTILINE)
 # Capture the Enforced-by block: the field line plus any indented/continued
-# lines until the next blank line or the next **Field:** / ## heading.
+# lines until the next blank line, the next **Field:** / ## heading, or the
+# next Markdown bullet (`- **Spec:**`, `- **Plan:**`, etc.). Without the
+# bullet stop, a trailing sibling bullet on the *same* frontmatter list (no
+# blank line between them) gets swallowed into the Enforced-by capture.
 _ENFORCED_BY_RE = re.compile(
-    r"\*\*Enforced by:\*\*[ \t]*(.*?)(?=\n\s*\n|\n\*\*[A-Z]|\n##\s|\Z)",
+    r"\*\*Enforced by:\*\*[ \t]*(.*?)(?=\n\s*\n|\n\*\*[A-Z]|\n##\s|\n\s*[-*]\s|\Z)",
     re.DOTALL,
 )
 _KNOWN_ENFORCEMENT = frozenset({"enforced", "manual", "decision-of-record"})

@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `35f6176` — feat(adr-conformance): backfill conformance annotations (0002/03/42/56/93) + subset grandfather guard *(2026-07-01)*
 - `86b274d` — fix(adr-conformance): renumber ADR-0094 -> ADR-0098 (0094 taken by two-level-convergence) *(2026-07-01)*
 - `a243526` — feat(adr-conformance): register AdrConformanceLoop + satisfy completeness invariants *(2026-07-01)*
 - `1fbeeed` — feat(adr-conformance): AdrConformanceLoop (evaluate + issue-only split-class remediation) *(2026-07-01)*

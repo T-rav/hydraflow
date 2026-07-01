@@ -6,6 +6,7 @@ tests/test_loop_fitness_completeness.py. _GRANDFATHERED SHRINKS only.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from adr_conformance import classify_enforcement, is_mutating, resolve_check
@@ -14,16 +15,25 @@ from adr_index import scan_adr_directory
 REPO = Path(__file__).resolve().parent.parent
 ADR_DIR = REPO / "docs" / "adr"
 
+# Any file whose FIRST line is an ADR heading, regardless of the separator
+# used after the number (colon, em-dash, en-dash, hyphen, bare whitespace).
+# Mirrors adr_index._TITLE_RE's number-capture but is intentionally a
+# simpler/independent check: this test exists to catch _TITLE_RE silently
+# regressing to a narrower format again (the ADR-0098 bug this ratchet
+# closes), so it must not share the production regex.
+_ADR_HEADING_RE = re.compile(r"^#\s*ADR-(\d{4})\b")
+
 # Fixed snapshot of every Accepted ADR number that was NOT annotated as of
-# Task 4 (the ratchet's introduction). NEVER edit this literal — it is the
-# baseline the subset guard below checks against. Backfill tasks shrink the
-# *live* grandfathered set by adding numbers to `_ANNOTATED`, not by editing
-# this frozenset.
+# Task 13 (the parse-completeness fix: _TITLE_RE was broadened to accept
+# em-dash/en-dash/hyphen/whitespace separators, not just colons, so ~24
+# previously-invisible ADRs — including 0093 — now parse and enter this
+# ratchet for the first time). NEVER edit this literal — it is the baseline
+# the subset guard below checks against. Backfill tasks shrink the *live*
+# grandfathered set by adding numbers to `_ANNOTATED`, not by editing this
+# frozenset.
 _GRANDFATHER_BASELINE: frozenset[int] = frozenset(
     {
         1,
-        2,
-        3,
         4,
         5,
         7,
@@ -51,7 +61,6 @@ _GRANDFATHER_BASELINE: frozenset[int] = frozenset(
         36,
         37,
         41,
-        42,
         43,
         45,
         47,
@@ -59,11 +68,14 @@ _GRANDFATHER_BASELINE: frozenset[int] = frozenset(
         50,
         51,
         52,
-        56,
         64,
+        65,
+        71,
         83,
+        85,
         88,
         89,
+        92,
         94,
         95,
         96,
@@ -83,6 +95,32 @@ _GRANDFATHERED: frozenset[int] = _GRANDFATHER_BASELINE - _ANNOTATED
 
 def _accepted():
     return [a for a in scan_adr_directory(ADR_DIR) if a.status == "Accepted"]
+
+
+def test_every_adr_file_parses():
+    """No silent skips: every docs/adr/*.md file with an ADR heading must
+    come back from scan_adr_directory. This is the regression test for the
+    bug this ratchet exists to close — _TITLE_RE required a colon after the
+    ADR number, so em-dash-titled ADRs (e.g. ADR-0093) were invisible to
+    scan_adr_directory and therefore invisible to every check in this file.
+    A parser that silently drops files defeats the whole coverage premise.
+    """
+    on_disk: set[int] = set()
+    for p in ADR_DIR.glob("*.md"):
+        text = p.read_text()
+        first_line = text.splitlines()[0] if text else ""
+        m = _ADR_HEADING_RE.match(first_line)
+        if m:
+            on_disk.add(int(m.group(1)))
+
+    parsed = {a.number for a in scan_adr_directory(ADR_DIR)}
+
+    missing = on_disk - parsed
+    assert not missing, (
+        f"scan_adr_directory silently skipped ADR file(s) for number(s) "
+        f"{sorted(missing)} — every file with an '# ADR-NNNN' heading must "
+        f"parse. Check _TITLE_RE against the file's actual title separator."
+    )
 
 
 def test_every_accepted_adr_declares_enforcement():
@@ -135,7 +173,9 @@ def test_grandfather_only_shrinks():
         "Annotate the ADR instead of swapping one exemption for another."
     )
     assert len(_GRANDFATHER_BASELINE) == 46, (
-        "_GRANDFATHER_BASELINE changed size — it is a fixed snapshot from Task 4 "
-        "and must never be edited. Shrink the live grandfathered set by adding "
-        "annotated ADR numbers to _ANNOTATED instead."
+        "_GRANDFATHER_BASELINE changed size — it is a fixed snapshot re-derived "
+        "in Task 13 (parse-completeness fix widened _TITLE_RE, so ~24 "
+        "previously-invisible ADRs now enter this ratchet) and must never be "
+        "edited again. Shrink the live grandfathered set by adding annotated "
+        "ADR numbers to _ANNOTATED instead."
     )
