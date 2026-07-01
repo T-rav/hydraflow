@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `a63f101` — feat(disturbance): suppression-count detector (type:ignore / noqa) *(2026-07-01)*
 - `7634e20` — feat(disturbance): add Finding/RatchetResult models + ViolationDetector protocol *(2026-07-01)*
 
 ## 2026-W25
