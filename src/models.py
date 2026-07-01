@@ -1947,7 +1947,7 @@ class StateData(BaseModel):
     # Trust fleet — ContractRefreshLoop (spec §4.2 Task 18)
     contract_refresh_attempts: dict[str, int] = Field(default_factory=dict)
     # Auto-Agent — AutoAgentPreflightLoop (spec §3.6)
-    auto_agent_attempts: dict[str, int] = Field(default_factory=dict)
+    # NOTE: auto_agent_attempts migrated to convergence_ledgers["N"].stage_state["auto_agent"].attempts
     auto_agent_daily_spend: dict[str, float] = Field(default_factory=dict)
     # Trust fleet — TrustFleetSanityLoop (spec §12.1)
     trust_fleet_sanity_attempts: dict[str, int] = Field(default_factory=dict)
