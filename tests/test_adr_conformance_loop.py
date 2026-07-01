@@ -133,11 +133,18 @@ class _AsyncPRManagerStub:
         self.closed_issues: list[int] = []
         self._next_issue_number = 100
         self._by_title: dict[str, int] = {}
+        # Titles to report back as CLOSED via list_closed_issues_by_label,
+        # set by tests simulating a human closing a remediation issue.
+        self.closed_issue_titles: list[str] = []
 
     async def create_issue(
         self, title: str, body: str, labels: list[str] | None = None
     ) -> int:
-        if title in self._by_title:
+        # Mirrors real PRManager.create_issue's find_existing_issue(title)
+        # dedup: it only matches OPEN issues, so a title whose prior issue
+        # has since been closed must create a genuinely new issue number
+        # rather than resurrecting the closed one.
+        if title in self._by_title and title not in self.closed_issue_titles:
             return self._by_title[title]
         number = self._next_issue_number
         self._next_issue_number += 1
@@ -150,6 +157,12 @@ class _AsyncPRManagerStub:
 
     async def close_issue(self, issue_number: int) -> None:
         self.closed_issues.append(issue_number)
+
+    async def list_closed_issues_by_label(
+        self, label: str, limit: int = 100
+    ) -> list[dict]:
+        del label, limit
+        return [{"title": t} for t in self.closed_issue_titles]
 
 
 @pytest.fixture
@@ -282,6 +295,46 @@ async def test_second_tick_dedups_and_does_not_refile(loop_fixture) -> None:
     # find_existing_issue-style dedup: same title short-circuits to the same
     # issue number via our stub's _by_title cache, so no *new* issue rows.
     assert len(fakes.pr.created_issues) == first_count
+
+
+async def test_closed_remediation_issue_is_reconciled_and_refiles(
+    loop_fixture,
+) -> None:
+    """A human closing a remediation issue without fixing the ADR must not
+    freeze the loop onto the dead issue. Tick 1 files + records rollup/dedup.
+    Once the issue is externally closed, tick 2 must reconcile (clearing the
+    rollup/dedup/attempts) and re-file a fresh issue rather than silently
+    updating the closed one."""
+    loop, fakes = loop_fixture
+
+    result1 = await run_tick(loop)
+    assert result1["filed"] >= 1
+    first_count = len(fakes.pr.created_issues)
+    assert any("ADR-0049" in title for title, _b, _l in fakes.pr.created_issues)
+
+    rollup_before = fakes.state.get_adr_conformance_rollup("ADR-0049")
+    assert rollup_before is not None
+    dedup_key = "adr_conformance:ADR-0049"
+    assert dedup_key in fakes.dedup.get()
+
+    # Simulate a human closing the filed issue without fixing the ADR.
+    filed_title = next(
+        title for title, _b, _l in fakes.pr.created_issues if "ADR-0049" in title
+    )
+    fakes.pr.closed_issue_titles = [filed_title]
+
+    result2 = await run_tick(loop)
+
+    # Reconciled: rollup + dedup key cleared before evaluation, so the still
+    # failing ADR-0049 is re-filed as a brand-new issue this tick.
+    assert result2["filed"] >= 1
+    assert len(fakes.pr.created_issues) == first_count + 1
+    new_titles = [title for title, _b, _l in fakes.pr.created_issues[first_count:]]
+    assert any("ADR-0049" in title for title in new_titles)
+
+    rollup_after = fakes.state.get_adr_conformance_rollup("ADR-0049")
+    assert rollup_after is not None
+    assert rollup_after["issue_number"] != rollup_before["issue_number"]
 
 
 async def test_escalates_after_max_attempts(loop_fixture) -> None:

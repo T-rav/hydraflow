@@ -178,8 +178,11 @@ class AdrConformanceLoop(BaseBackgroundLoop):
             return
         self._state.set_adr_conformance_rollup(conf.adr_id, issue_number=issue_number)
         # The state rollup above is the operative per-ADR double-file cap
-        # (gates create-vs-update via get_adr_conformance_rollup); this
-        # dedup write is a secondary marker, mirroring AdrTouchpointAuditorLoop.
+        # (gates create-vs-update via get_adr_conformance_rollup); this dedup
+        # write is the tracked-key set that _reconcile_closed_conformance_issues
+        # reads on the next tick to detect externally-closed remediation
+        # issues and clear stale state so the loop re-files instead of
+        # updating a dead issue.
         dedup = self._dedup.get()
         dedup.add(_dedup_key(conf.adr_id))
         self._dedup.set_all(dedup)
@@ -212,8 +215,11 @@ class AdrConformanceLoop(BaseBackgroundLoop):
             return
         self._state.set_adr_conformance_rollup(conf.adr_id, issue_number=issue_number)
         # The state rollup above is the operative per-ADR double-file cap
-        # (gates create-vs-update via get_adr_conformance_rollup); this
-        # dedup write is a secondary marker, mirroring AdrTouchpointAuditorLoop.
+        # (gates create-vs-update via get_adr_conformance_rollup); this dedup
+        # write is the tracked-key set that _reconcile_closed_conformance_issues
+        # reads on the next tick to detect externally-closed remediation
+        # issues and clear stale state so the loop re-files instead of
+        # updating a dead issue.
         dedup = self._dedup.get()
         dedup.add(_dedup_key(conf.adr_id))
         self._dedup.set_all(dedup)
@@ -243,6 +249,53 @@ class AdrConformanceLoop(BaseBackgroundLoop):
             body,
             [*self._config.find_label, *self._config.hitl_escalation_label],
         )
+
+    async def _reconcile_closed_conformance_issues(self) -> None:
+        """Clear dedup keys + attempt/rollup state for closed remediation issues.
+
+        Mirrors ``AdrTouchpointAuditorLoop._reconcile_closed_escalations``
+        (ADR-0056). Without this, a human closing a remediation issue
+        without fixing the underlying drift leaves the loop's rollup state
+        pointed at a dead (closed) issue: ``_file_or_update_issue`` would
+        keep calling ``update_issue_body`` on the closed issue number
+        forever instead of re-filing. Listing closed issues carrying our
+        ``find_label`` and matching each tracked dedup key's ADR id against
+        the issue title (``_issue_title`` embeds ``conf.adr_id`` verbatim,
+        e.g. ``"ADR conformance: ADR-0049 is fail"``) lets us detect this and
+        clear state so the next evaluation re-files fresh.
+        """
+        closed_titles: list[str] = []
+        for label in self._config.find_label:
+            try:
+                closed = await self._pr.list_closed_issues_by_label(label)
+            except (
+                RuntimeError,
+                AttributeError,
+            ) as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "adr_conformance: could not list closed issues for label %s: %s",
+                    label,
+                    exc,
+                )
+                continue
+            closed_titles.extend(str(item.get("title", "")) for item in closed)
+
+        if not closed_titles:
+            return
+
+        current = self._dedup.get()
+        keep = set(current)
+        for title in closed_titles:
+            for key in list(keep):
+                if not key.startswith("adr_conformance:"):
+                    continue
+                adr_id = key.split(":", 1)[1]
+                if adr_id in title:
+                    keep.discard(key)
+                    self._state.clear_adr_conformance_attempts(adr_id)
+                    self._state.clear_adr_conformance_rollup(adr_id)
+        if keep != current:
+            self._dedup.set_all(keep)
 
     async def _emit_event(self, results: list[AdrConformance]) -> None:
         """Publish ADR_CONFORMANCE_UPDATE with per-ADR outcomes packed into
@@ -283,6 +336,9 @@ class AdrConformanceLoop(BaseBackgroundLoop):
         )
 
         t0 = time.perf_counter()
+
+        await self._reconcile_closed_conformance_issues()
+
         now = datetime.now(UTC)
         adrs = self._adr_index.adrs()
         results = evaluate_adrs(
