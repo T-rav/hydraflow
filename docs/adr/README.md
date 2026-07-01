@@ -128,6 +128,7 @@ ADR and that named test files actually exist.
 | [0094](0094-two-level-convergence-gate-and-ledger.md) | Two-level convergence: Gate + ConvergenceLedger | Accepted |
 | [0095](0095-approve-path-gating-and-converged.md) | Approve-path gating and live convergence (Phase 2a) | Accepted |
 | [0096](0096-boundary-verdict-recording.md) | Boundary verdict recording (Phase 2b) | Accepted |
+| [0097](0097-attempt-counter-migration-to-ledger.md) | Attempt counter migration into the ledger (Phase 2c) | Accepted |
 
 ## Adding a new ADR
 

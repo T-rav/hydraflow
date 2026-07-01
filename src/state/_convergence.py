@@ -70,6 +70,22 @@ class ConvergenceStateMixin:
         self.save()
         return n
 
+    def set_quality_fix_attempts(self, issue_number: int, count: int) -> None:
+        """Record the per-run quality-fix attempt count for *issue_number* into the ledger."""
+        from models import StageRecord  # noqa: PLC0415
+
+        key = self._key(issue_number)
+        cl = self._data.convergence_ledgers.get(key)
+        if cl is None:
+            cl = ConvergenceLedger(issue_number=issue_number)
+            self._data.convergence_ledgers[key] = cl
+        rec = cl.stage_state.get("quality_fix")
+        if rec is None:
+            cl.stage_state["quality_fix"] = StageRecord(attempts=count)
+        else:
+            rec.attempts = count
+        self.save()
+
     def reset_review_attempts(self, issue_number: int) -> None:
         """Clear the review attempt counter for *issue_number*."""
         cl = self._data.convergence_ledgers.get(self._key(issue_number))

@@ -586,8 +586,8 @@ class ImplementPhase:
                 f"Error: {result.error or 'none'}",
                 stage=PipelineStage.IMPLEMENT,
             )
+        self._state.set_quality_fix_attempts(issue.id, result.quality_fix_attempts)
         meta: WorkerResultMeta = {
-            "quality_fix_attempts": result.quality_fix_attempts,
             "pre_quality_review_attempts": result.pre_quality_review_attempts,
             "duration_seconds": result.duration_seconds,
             "error": result.error,
