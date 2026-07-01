@@ -283,6 +283,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_INTERVAL",
         14400,
     ),
+    (
+        "adr_conformance_interval",
+        "HYDRAFLOW_ADR_CONFORMANCE_INTERVAL",
+        86400,
+    ),
     ("term_proposer_interval", "HYDRAFLOW_TERM_PROPOSER_INTERVAL", 14400),
     ("term_proposer_max_per_tick", "HYDRAFLOW_TERM_PROPOSER_MAX_PER_TICK", 10),
     (
@@ -462,6 +467,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "adr_touchpoint_auditor_loop_enabled",
         "HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_LOOP_ENABLED",
         True,
+    ),
+    (
+        "adr_conformance_loop_enabled",
+        "HYDRAFLOW_ADR_CONFORMANCE_LOOP_ENABLED",
+        False,
     ),
     ("ci_monitor_loop_enabled", "HYDRAFLOW_CI_MONITOR_LOOP_ENABLED", True),
     (
@@ -2453,6 +2463,14 @@ class HydraFlowConfig(BaseModel):
         description="Labels for stuck ADR drift escalations (paired with hitl_escalation_label)",
     )
 
+    # Trust fleet — AdrConformanceLoop (ADR-0094)
+    adr_conformance_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description="Seconds between AdrConformanceLoop ticks (default 24h)",
+    )
+
     # Trust fleet — MemoryBacklogLoop (ADR-0089)
     memory_backlog_interval_seconds: int = Field(
         default=86_400,
@@ -2949,6 +2967,10 @@ class HydraFlowConfig(BaseModel):
     adr_touchpoint_auditor_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for AdrTouchpointAuditorLoop.",
+    )
+    adr_conformance_loop_enabled: bool = Field(
+        default=False,
+        description="Deploy-time kill-switch for AdrConformanceLoop (ADR-0094).",
     )
     ci_monitor_loop_enabled: bool = Field(
         default=True,
