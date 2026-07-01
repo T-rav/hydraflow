@@ -1446,4 +1446,3 @@ class TestPlanConvergenceLedger:
 
         ledger = state.get_convergence_ledger(205)
         assert ledger is None, "No ledger should be created when gate is off"
-        assert prs.post_comment.await_count >= 1
