@@ -1,5 +1,5 @@
 # tests/test_adr_conformance_coverage.py
-"""Coverage ratchet (ADR-0098): every Accepted ADR declares Enforcement,
+"""Coverage ratchet (ADR-0100): every Accepted ADR declares Enforcement,
 and every `enforced` check resolves and is side-effect-free. Mirrors
 tests/test_loop_fitness_completeness.py. _GRANDFATHERED SHRINKS only.
 """
@@ -19,7 +19,7 @@ ADR_DIR = REPO / "docs" / "adr"
 # used after the number (colon, em-dash, en-dash, hyphen, bare whitespace).
 # Mirrors adr_index._TITLE_RE's number-capture but is intentionally a
 # simpler/independent check: this test exists to catch _TITLE_RE silently
-# regressing to a narrower format again (the ADR-0098 bug this ratchet
+# regressing to a narrower format again (the ADR-0100 bug this ratchet
 # closes), so it must not share the production regex.
 _ADR_HEADING_RE = re.compile(r"^#\s*ADR-(\d{4})\b")
 

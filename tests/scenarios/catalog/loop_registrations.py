@@ -684,7 +684,7 @@ def _build_adr_touchpoint_auditor(ports: dict[str, Any], config: Any, deps: Any)
 
 
 def _build_adr_conformance(ports: dict[str, Any], config: Any, deps: Any) -> Any:
-    """Build AdrConformanceLoop for scenarios (ADR-0098).
+    """Build AdrConformanceLoop for scenarios (ADR-0100).
 
     Mirrors ``_build_adr_touchpoint_auditor``. Tests pre-seed:
     * ``adr_conformance_runner`` → a ``ConformanceRunnerPort`` (defaults to

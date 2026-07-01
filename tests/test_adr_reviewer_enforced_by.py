@@ -1,9 +1,9 @@
 """Tests for the Enforcement injector in the ADR council writer.
 
 Closes the gap where bot-authored ADRs flipped to Accepted without an
-``**Enforcement:**`` line, which would then fail the ADR-0098 coverage
+``**Enforcement:**`` line, which would then fail the ADR-0100 coverage
 ratchet (``tests/test_adr_conformance_coverage.py``). Supersedes the
-pre-ADR-0098 "P3" convention (PR #8398), which only guaranteed a bare
+pre-ADR-0100 "P3" convention (PR #8398), which only guaranteed a bare
 ``**Enforced by:** (none)`` line validated by the now-deleted
 ``tests/test_adr_enforcement.py``.
 """

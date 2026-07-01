@@ -1976,7 +1976,7 @@ class StateData(BaseModel):
     # rollup issue number + the set of PR numbers currently listed in the body.
     # Used so subsequent ticks update the body in-place rather than re-filing.
     adr_rollup_issues: dict[str, dict] = Field(default_factory=dict)
-    # AdrConformanceLoop (ADR-0098) — remediation attempt counters + rollup
+    # AdrConformanceLoop (ADR-0100) — remediation attempt counters + rollup
     # tracking. Mirrors adr_audit_attempts/adr_rollup_issues above under a
     # distinct namespace so the two auditors' counters never collide.
     adr_conformance_attempts: dict[str, int] = Field(default_factory=dict)

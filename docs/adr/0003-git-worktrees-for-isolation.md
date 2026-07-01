@@ -6,7 +6,7 @@
 
 Worktree isolation mechanics are exercised incidentally by
 `tests/test_integration_worktree.py`; that coverage is not treated as a
-conformance contract for this ADR (see ADR-0098).
+conformance contract for this ADR (see ADR-0100).
 
 ## Context
 

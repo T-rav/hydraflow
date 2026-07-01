@@ -1,4 +1,4 @@
-"""End-to-end test for AdrConformanceLoop (ADR-0098).
+"""End-to-end test for AdrConformanceLoop (ADR-0100).
 
 Exercises the full producer path with real I/O (no mocks-of-mocks):
   producer tick → adr_conformance.jsonl persisted → jsonl read back off disk

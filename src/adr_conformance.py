@@ -1,4 +1,4 @@
-"""Pure conformance model + check resolution/evaluation (ADR-0098).
+"""Pure conformance model + check resolution/evaluation (ADR-0100).
 
 Mirrors src/loop_fitness.py: pure functions over data, no I/O in the model
 layer, replay-safe. Execution is injected via ConformanceRunnerPort so this

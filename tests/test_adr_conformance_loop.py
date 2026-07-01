@@ -1,4 +1,4 @@
-"""Unit tests for AdrConformanceLoop (ADR-0098).
+"""Unit tests for AdrConformanceLoop (ADR-0100).
 
 Mirrors tests/test_adr_touchpoint_auditor_loop.py's shape. Fixtures build a
 small ADRIndex over tmp docs/adr fixtures (one enforced-FAIL ADR, one
@@ -7,7 +7,7 @@ decision-of-record ADR, one enforced-UNRESOLVED ADR), a FakeConformanceRunner
 create_issue calls, an in-memory-backed DedupStore on tmp, and a real
 StateTracker on tmp.
 
-The GUARDRAIL test (load-bearing, ADR-0098): the loop's ONLY repo-write
+The GUARDRAIL test (load-bearing, ADR-0100): the loop's ONLY repo-write
 surface is filing/updating GitHub issues + appending to the gitignored
 metrics jsonl. It must never mutate any file under src/, tests/, or
 docs/adr/.

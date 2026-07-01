@@ -167,7 +167,7 @@ class ADR:
     A non-empty frozenset means *only* changes to those symbols fire the
     gate."""
     enforcement: str = "unknown"
-    """enforced | manual | decision-of-record | unknown (ADR-0098)."""
+    """enforced | manual | decision-of-record | unknown (ADR-0100)."""
     enforced_by: tuple[Check, ...] = ()
     """Typed checks parsed from **Enforced by:**; () for decision-of-record."""
 

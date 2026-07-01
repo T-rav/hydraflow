@@ -2463,7 +2463,7 @@ class HydraFlowConfig(BaseModel):
         description="Labels for stuck ADR drift escalations (paired with hitl_escalation_label)",
     )
 
-    # Trust fleet — AdrConformanceLoop (ADR-0098)
+    # Trust fleet — AdrConformanceLoop (ADR-0100)
     adr_conformance_interval: int = Field(
         default=86400,
         ge=3600,
@@ -2970,7 +2970,7 @@ class HydraFlowConfig(BaseModel):
     )
     adr_conformance_loop_enabled: bool = Field(
         default=False,
-        description="Deploy-time kill-switch for AdrConformanceLoop (ADR-0098).",
+        description="Deploy-time kill-switch for AdrConformanceLoop (ADR-0100).",
     )
     ci_monitor_loop_enabled: bool = Field(
         default=True,

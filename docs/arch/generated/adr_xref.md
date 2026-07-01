@@ -103,16 +103,16 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0094 | `src.config`, `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase`, `src.state._convergence` | — |
 | ADR-0095 | `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase` | — |
 | ADR-0096 | `src.convergence_recording`, `src.plan_phase`, `src.shape_phase`, `src.triage_phase` | — |
-| ADR-0098 | `src.adr_conformance`, `src.adr_conformance_loop`, `src.adr_index` | `pytest:tests/test_adr_conformance_coverage.py` |
+| ADR-0100 | `src.adr_conformance`, `src.adr_conformance_loop`, `src.adr_index` | `pytest:tests/test_adr_conformance_coverage.py` |
 
 ## Module → ADRs
 
 | Module | Cited by |
 |---|---|
-| `src.adr_conformance` | ADR-0098 |
-| `src.adr_conformance_loop` | ADR-0098 |
+| `src.adr_conformance` | ADR-0100 |
+| `src.adr_conformance_loop` | ADR-0100 |
 | `src.adr_drift` | ADR-0056 |
-| `src.adr_index` | ADR-0098 |
+| `src.adr_index` | ADR-0100 |
 | `src.adr_pre_validator` | ADR-0037 |
 | `src.adr_reviewer` | ADR-0033, ADR-0034, ADR-0037, ADR-0039, ADR-0040, ADR-0079 |
 | `src.adr_reviewer_loop` | ADR-0079 |

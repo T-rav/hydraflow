@@ -1,4 +1,4 @@
-"""Subprocess adapter for executing ADR conformance checks (ADR-0098).
+"""Subprocess adapter for executing ADR conformance checks (ADR-0100).
 
 Read-only by contract: only check-mode targets are ever cited (the coverage
 ratchet rejects mutating ones), so execution here does not mutate the repo.

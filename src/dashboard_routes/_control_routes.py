@@ -183,7 +183,7 @@ _bg_worker_defs = [
     (
         "adr_conformance",
         "ADR Conformance",
-        "Evaluates every Accepted ADR's `Enforced by:` checks and files/updates remediation issues on drift. See ADR-0098.",
+        "Evaluates every Accepted ADR's `Enforced by:` checks and files/updates remediation issues on drift. See ADR-0100.",
     ),
     (
         "auto_agent_preflight",

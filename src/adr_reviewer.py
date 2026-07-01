@@ -68,11 +68,11 @@ _STATUS_LINE_RE = re.compile(r"^(\*\*Status:\*\*[^\n]*)$", re.MULTILINE)
 def _ensure_enforcement_line(content: str) -> str:
     """Guarantee an ``**Enforcement:**`` line directly under the Status line.
 
-    ADR-0098's coverage ratchet (``tests/test_adr_conformance_coverage.py``)
+    ADR-0100's coverage ratchet (``tests/test_adr_conformance_coverage.py``)
     requires every non-grandfathered Accepted ADR to declare a recognized
     ``**Enforcement:**`` kind (``enforced`` / ``manual`` /
     ``decision-of-record``); an absent or unrecognized value normalizes to
-    ``unknown`` and fails CI. This supersedes the pre-ADR-0098 "P3"
+    ``unknown`` and fails CI. This supersedes the pre-ADR-0100 "P3"
     convention (PR #8398) which only guaranteed a bare
     ``**Enforced by:** (none)`` line validated by the now-deleted
     ``tests/test_adr_enforcement.py``.
@@ -843,7 +843,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
                 return
 
         # Update status in ADR file and guarantee the Enforcement line
-        # (required by the ADR-0098 coverage ratchet,
+        # (required by the ADR-0100 coverage ratchet,
         # tests/test_adr_conformance_coverage.py, on every non-grandfathered
         # Accepted ADR).
         updated_adr = _STATUS_RE.sub("**Status:** Accepted", content, count=1)

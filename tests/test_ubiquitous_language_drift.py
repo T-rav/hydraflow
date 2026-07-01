@@ -1,8 +1,8 @@
-"""Read-only UL glossary drift check (ADR-0053, ADR-0098 Task 15).
+"""Read-only UL glossary drift check (ADR-0053, ADR-0100 Task 15).
 
 `make lint-ul` is the source-generating command, but it MUTATES the repo (it
 writes `docs/arch/generated/ubiquitous-language.md`), which disqualifies it
-from being an `enforced` ADR-0098 check — mutating checks aren't allowed to
+from being an `enforced` ADR-0100 check — mutating checks aren't allowed to
 gate the coverage ratchet (`adr_conformance.is_mutating`).
 
 This test performs the same render `scripts/lint_ubiquitous_language.py`

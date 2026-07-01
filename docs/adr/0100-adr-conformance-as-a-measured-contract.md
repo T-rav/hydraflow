@@ -1,4 +1,4 @@
-# ADR-0098: ADR conformance as a measured contract
+# ADR-0100: ADR conformance as a measured contract
 
 **Status:** Accepted
 **Date:** 2026-06-30

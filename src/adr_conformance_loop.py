@@ -1,4 +1,4 @@
-"""AdrConformanceLoop — keystone caretaker loop of ADR-0098.
+"""AdrConformanceLoop — keystone caretaker loop of ADR-0100.
 
 Periodically evaluates every Accepted ADR's ``**Enforced by:**`` checks
 (via ``adr_conformance.evaluate_adrs`` + an injected ``ConformanceRunnerPort``)
@@ -7,7 +7,7 @@ and remediates drift by filing/updating GitHub issues. Mirrors the shape of
 counter, escalation to HITL once at the attempt threshold, kill-switch +
 config-disabled short circuits, dedup keyed one issue per ADR.
 
-Issue-only write surface (load-bearing, ADR-0098): this loop's ONLY
+Issue-only write surface (load-bearing, ADR-0100): this loop's ONLY
 repo-write side effect is filing/updating GitHub issues through
 ``PRManager`` plus appending to the **gitignored**
 ``.hydraflow/metrics/{repo_slug}/adr_conformance.jsonl`` log. It never
@@ -61,7 +61,7 @@ def _dedup_key(adr_id: str) -> str:
 
 
 class AdrConformanceLoop(BaseBackgroundLoop):
-    """ADR conformance auditor (ADR-0098): evaluate + split-class remediation.
+    """ADR conformance auditor (ADR-0100): evaluate + split-class remediation.
 
     Filed remediation is issue-only. See module docstring for the guardrail.
     """
@@ -165,7 +165,7 @@ class AdrConformanceLoop(BaseBackgroundLoop):
                 "`**Enforced by:**` line to point at the new target, OR",
                 "3. If the decision itself is stale, consider superseding the ADR.",
                 "",
-                "_Filed by `adr_conformance` per ADR-0098._",
+                "_Filed by `adr_conformance` per ADR-0100._",
                 "",
                 "<!-- [hydraflow-auditor: source=AdrConformanceLoop] -->",
             ]
@@ -219,7 +219,7 @@ class AdrConformanceLoop(BaseBackgroundLoop):
             "If this is correct, update the ADR's `**Enforced by:**` line to "
             "point at the new target. This issue does not modify the ADR — "
             "human/pipeline review is required before repointing.\n\n"
-            "_Filed by `adr_conformance` per ADR-0098._\n\n"
+            "_Filed by `adr_conformance` per ADR-0100._\n\n"
             "<!-- [hydraflow-auditor: source=AdrConformanceLoop] -->"
         )
         issue_number = await self._pr.create_issue(
@@ -262,7 +262,7 @@ class AdrConformanceLoop(BaseBackgroundLoop):
             "or fix the underlying drift.\n\n"
             "Human review needed.\n\n"
             "_Closing this issue does NOT clear the remediation dedup key "
-            "or reset the attempt counter (ADR-0098) — the underlying "
+            "or reset the attempt counter (ADR-0100) — the underlying "
             "FILE_ISSUE/REPOINT remediation issue must be closed (or the "
             "drift fixed) to do that._"
         )

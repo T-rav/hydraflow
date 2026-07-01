@@ -1,4 +1,4 @@
-"""MockWorld scenario for AdrConformanceLoop (ADR-0098).
+"""MockWorld scenario for AdrConformanceLoop (ADR-0100).
 
 Drives the loop end-to-end through the ``_build_adr_conformance`` catalog
 builder (Task 11) against a seeded ADR fixture directory, a real
@@ -155,7 +155,7 @@ def _build_loop(world: MockWorld, repo_root: Path):
 
 
 class TestAdrConformanceScenario:
-    """ADR-0098 — AdrConformanceLoop end-to-end MockWorld scenarios."""
+    """ADR-0100 — AdrConformanceLoop end-to-end MockWorld scenarios."""
 
     async def test_tick_persists_evaluates_emits_and_files(self, tmp_path) -> None:
         """One tick over FAIL/UNRESOLVED/SKIPPED ADRs.

@@ -11,8 +11,8 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | Loop | ADR | Wiki | Generated | Standard | Unit | Scenario | Sandbox |
 |---|---|---|---|---|---|---|---|
 | `ADRReviewerLoop` | ✅ [0079] | ✅ [adr-council-reviewer.md, adr-reviewer-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_reviewer_loop.py` | ✅ in catalog | ✅ `s25_adr_reviewer_no_proposed_adrs.py` |
-| `AdrConformanceLoop` | ✅ [0098] | ❌ | ✅ loops.md | ❌ | ✅ `test_adr_conformance_loop.py` | ✅ in catalog | ❌ |
-| `AdrTouchpointAuditorLoop` | ✅ [0056, 0089, 0098] | ✅ [adr-index.md, adr-touchpoint-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_touchpoint_auditor_loop.py` | ✅ in catalog | ✅ `s33_adr_touchpoint_auditor_no_drift.py` |
+| `AdrConformanceLoop` | ✅ [0100] | ❌ | ✅ loops.md | ❌ | ✅ `test_adr_conformance_loop.py` | ✅ in catalog | ❌ |
+| `AdrTouchpointAuditorLoop` | ✅ [0056, 0089, 0100] | ✅ [adr-index.md, adr-touchpoint-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_touchpoint_auditor_loop.py` | ✅ in catalog | ✅ `s33_adr_touchpoint_auditor_no_drift.py` |
 | `AutoAgentPreflightLoop` | ✅ [0050, 0063, 0084] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_auto_agent_preflight_loop.py` | ✅ in catalog | ✅ `s31_auto_agent_preflight_no_escalations.py` |
 | `BranchProtectionAuditorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_branch_protection_auditor_loop.py` | ✅ in catalog | ✅ `s41_branch_protection_auditor_no_drift.py` |
 | `CIMonitorLoop` | ✅ [0029, 0065] | ✅ [ci-monitor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_ci_monitor_loop.py` | ✅ in catalog | ✅ `s15_ci_monitor_main_branch_red.py` |
@@ -27,7 +27,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `EpicMonitorLoop` | ✅ [0080, 0081, 0091] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_monitor_loop.py` | ✅ in catalog | ✅ `s27_epic_monitor_no_epics.py` |
 | `EpicSweeperLoop` | ✅ [0080, 0081] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_sweeper_loop.py` | ✅ in catalog | ✅ `s23_epic_sweeper_no_epics.py` |
 | `FakeCoverageAuditorLoop` | ✅ [0045, 0047, 0056, 0089] | ✅ [fake-coverage-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_fake_coverage_auditor_loop.py` | ✅ in catalog | ✅ `s29_fake_coverage_auditor_clean.py` |
-| `FitnessScorecardLoop` | ✅ [0093, 0098] | ✅ [fitness-scorecard.md, loop-fitness.md] | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_fitness_scorecard_loop.py` | ✅ in catalog | ❌ |
+| `FitnessScorecardLoop` | ✅ [0093, 0100] | ✅ [fitness-scorecard.md, loop-fitness.md] | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_fitness_scorecard_loop.py` | ✅ in catalog | ❌ |
 | `FlakeTrackerLoop` | ✅ [0045, 0056, 0065, 0089] | ✅ [flake-tracker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_flake_tracker_loop.py` | ✅ in catalog | ❌ |
 | `GateActivatorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_gate_activator_loop.py` | ✅ in catalog | ✅ `s45_gate_activator_no_proposals.py` |
 | `GitHubCacheLoop` | ✅ [0076] | ✅ [git-hub-cache-loop.md, github-cache-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_github_cache_loop.py` | ✅ in catalog | ✅ `s44_github_cache_idle_poll.py` |

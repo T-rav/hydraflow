@@ -15,7 +15,7 @@ Consequences), use `module:function_or_class` format (e.g. `src/config.py:HydraF
 ### Enforcement
 
 Every ADR with **Status: Accepted** (outside a shrinking grandfather list)
-MUST declare an `**Enforcement:**` kind — see [ADR-0098](0098-adr-conformance-as-a-measured-contract.md).
+MUST declare an `**Enforcement:**` kind — see [ADR-0100](0100-adr-conformance-as-a-measured-contract.md).
 Value is one of:
 
 - `enforced` — asserts a runnable invariant. Requires an `**Enforced by:**`
@@ -134,7 +134,7 @@ cadence and files remediation issues on drift.
 | [0094](0094-two-level-convergence-gate-and-ledger.md) | Two-level convergence: Gate + ConvergenceLedger | Accepted |
 | [0095](0095-approve-path-gating-and-converged.md) | Approve-path gating and live convergence (Phase 2a) | Accepted |
 | [0096](0096-boundary-verdict-recording.md) | Boundary verdict recording (Phase 2b) | Accepted |
-| [0098](0098-adr-conformance-as-a-measured-contract.md) | ADR conformance as a measured contract | Accepted |
+| [0100](0100-adr-conformance-as-a-measured-contract.md) | ADR conformance as a measured contract | Accepted |
 
 ## Adding a new ADR
 
