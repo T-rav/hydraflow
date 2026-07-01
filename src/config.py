@@ -2672,7 +2672,7 @@ class HydraFlowConfig(BaseModel):
         le=20,
         description=(
             "Maximum outer-convergence laps allowed before a ConvergenceLedger "
-            "escalates an issue (ADR-0098)."
+            "escalates an issue (ADR-0094)."
         ),
     )
     contracts_sandbox_repo: str = Field(
