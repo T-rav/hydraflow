@@ -42,7 +42,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0043 | unknown | — |
 | ADR-0045 | unknown | `tests/test_trust_fleet_sanity_loop.py, tests/test_loop_wiring_completeness.py, tests/test_trust_fleet_anomaly_detectors.py` |
 | ADR-0047 | unknown | `'make trust-contracts'; 'tests/trust/contracts/test_fake_*_contract.py'; 'src/contract_refresh_loop.py' (the weekly refresh loop that keeps cassettes in sync with reality).` |
-| ADR-0049 | unknown | `tests/test_loop_kill_switch_completeness.py, tests/regressions/test_canonical_killswitch.py` |
+| ADR-0049 | enforced | `pytest:tests/test_loop_kill_switch_completeness.py`, `pytest:tests/regressions/test_canonical_killswitch.py` |
 | ADR-0050 | unknown | `'tests/test_auto_agent_preflight_loop.py'; 'tests/scenarios/test_auto_agent_preflight_scenario.py'; 'tests/test_loop_wiring_completeness.py'.` |
 | ADR-0051 | unknown | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer).` |
 | ADR-0052 | unknown | `'tests/test_mockworld_fakes_conformance.py' (Port↔Fake signature parity), 'tests/test_sandbox_scenario_contract.py' (scenario catalog contract), '.github/workflows/ci.yml' 'sandbox' job (CI gate).` |
@@ -74,8 +74,10 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `(none)` | ADR-0027 |
 | `(process)` | ADR-0009, ADR-0023, ADR-0025, ADR-0035, ADR-0036, ADR-0065 |
 | `branch-protection ruleset review per docs/standards/branch_protection` | ADR-0042 |
+| `pytest:tests/regressions/test_canonical_killswitch.py` | ADR-0049 |
 | `pytest:tests/test_adr_touchpoint_auditor_loop.py` | ADR-0056 |
 | `pytest:tests/test_loop_fitness_completeness.py` | ADR-0093 |
+| `pytest:tests/test_loop_kill_switch_completeness.py` | ADR-0049 |
 | `pytest:tests/test_state_machine.py` | ADR-0002 |
 | `tests/test_adr_pre_validator.py` | ADR-0037 |
 | `tests/test_agent_cli.py, tests/test_base_runner.py` | ADR-0004 |
@@ -89,7 +91,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `tests/test_integration_pipeline.py` | ADR-0022 |
 | `tests/test_integration_worktree.py` | ADR-0010 |
 | `tests/test_issue_cache.py, tests/test_precondition_gate.py` | ADR-0041 |
-| `tests/test_loop_kill_switch_completeness.py, tests/regressions/test_canonical_killswitch.py` | ADR-0049 |
 | `tests/test_orchestrator_loops.py, tests/architecture/test_loop_count_matches_adr0001.py` | ADR-0001 |
 | `tests/test_repo_wiki.py, tests/test_repo_wiki_store_git.py, tests/test_repo_wiki_ingest.py, tests/test_wiki_drift_detector.py, tests/test_wiki_drift_symbols.py, tests/test_wiki_semantic_drift.py, tests/test_repo_wiki_temporal.py, tests/test_wiki_corroboration.py` | ADR-0032 |
 | `tests/test_review_phase_hooks.py` | ADR-0015 |

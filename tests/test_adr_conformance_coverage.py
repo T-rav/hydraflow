@@ -85,7 +85,14 @@ _GRANDFATHER_BASELINE: frozenset[int] = frozenset(
 # ADRs annotated with **Enforcement:** by backfill tasks, removed from the
 # live grandfathered set. Task 13 annotates 0002/0003/0042/0056/0093; later
 # backfill tasks (14, 15, 16) grow this set as they annotate more ADRs.
-_ANNOTATED: frozenset[int] = frozenset({2, 3, 42, 56, 93})
+# Task 14/15 add 49 (kill-switch convention) and 53 (ubiquitous language).
+# Note: 53 is not actually present in _GRANDFATHER_BASELINE (its ## Status
+# H2 heading doesn't match _STATUS_RE's **Status:** bold-inline pattern, so
+# it parses as status="Unknown" and _accepted() excludes it — a pre-existing
+# parser gap shared by 13 other ADRs, out of scope for this task). Adding 53
+# here is a harmless no-op until that gap is fixed; 49 IS in the baseline
+# and its inclusion here is what actually shrinks the live grandfathered set.
+_ANNOTATED: frozenset[int] = frozenset({2, 3, 42, 49, 53, 56, 93})
 
 # Live grandfathered set: baseline minus everything annotated so far. A true
 # subset of the baseline, so it can only shrink — never grow, and never swap
