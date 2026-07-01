@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from config import HydraFlowConfig
 from expert_council import CouncilResult, CouncilVote
-from models import ShapeConversation, Task
+from models import ShapeConversation, ShapeTurnResult, Task
 from shape_phase import _SHAPE_OPTIONS_MARKER, ShapePhase
+from state import StateTracker
 
 
 @pytest.fixture
@@ -401,3 +404,197 @@ class TestCouncilVoteRoundThree:
             for call in deps["event_bus"].publish.await_args_list
         ]
         assert "council_diversified_round" in published_actions
+
+
+# ---------------------------------------------------------------------------
+# Convergence ledger recording (Task 3)
+# ---------------------------------------------------------------------------
+
+
+def _make_shape_phase_with_real_state(
+    tmp_path: Path,
+    *,
+    convergence_gate_enabled: bool,
+    shape_runner: MagicMock | None = None,
+) -> tuple[ShapePhase, StateTracker]:
+    """Build a ShapePhase backed by a real StateTracker for ledger assertions."""
+    from events import EventBus
+
+    cfg = HydraFlowConfig(
+        repo="test/repo",
+        state_file=tmp_path / "state.json",
+        convergence_gate_enabled=convergence_gate_enabled,
+    )
+    state = StateTracker(cfg.state_file)
+    bus = EventBus()
+    store = MagicMock()
+    prs = AsyncMock()
+    stop_event = asyncio.Event()
+    phase = ShapePhase(
+        cfg,
+        state,
+        store,
+        prs,
+        bus,
+        stop_event,
+        shape_runner=shape_runner,
+    )
+    return phase, state
+
+
+class TestShapeConvergenceLedger:
+    """Shape phase records boundary verdicts into the ConvergenceLedger (Task 3)."""
+
+    @pytest.mark.asyncio
+    async def test_selection_made_records_advance_verdict(self, tmp_path: Path) -> None:
+        """Gate ON + selection found in comments -> ledger records 'ADVANCE'."""
+        phase, state = _make_shape_phase_with_real_state(
+            tmp_path, convergence_gate_enabled=True
+        )
+        task = Task(id=55, title="Build notifications", body="", labels=[])
+        comments = [
+            f"{_SHAPE_OPTIONS_MARKER} for #55\n\n### Direction A: ...",
+            "Direction A — let's go with this",
+        ]
+        phase._store.enrich_with_comments = AsyncMock(
+            return_value=task.model_copy(update={"comments": comments})
+        )
+
+        await phase._shape_single(task)
+
+        ledger = state.get_convergence_ledger(55)
+        assert ledger is not None, "Ledger must be created when gate is on"
+        assert ledger.stage_state["shape"].last_verdict == "ADVANCE"
+
+    @pytest.mark.asyncio
+    async def test_waiting_records_loop_back_verdict(self, tmp_path: Path) -> None:
+        """Gate ON + no selection found (still waiting) -> ledger records 'LOOP_BACK'."""
+        phase, state = _make_shape_phase_with_real_state(
+            tmp_path, convergence_gate_enabled=True
+        )
+        task = Task(id=56, title="Build search", body="", labels=[])
+        comments = [
+            f"{_SHAPE_OPTIONS_MARKER} for #56\n\n### Direction A: ...",
+            "Hmm, not sure yet...",
+        ]
+        phase._store.enrich_with_comments = AsyncMock(
+            return_value=task.model_copy(update={"comments": comments})
+        )
+
+        await phase._shape_single(task)
+
+        ledger = state.get_convergence_ledger(56)
+        assert ledger is not None, "Ledger must be created when gate is on"
+        assert ledger.stage_state["shape"].last_verdict == "LOOP_BACK"
+
+    @pytest.mark.asyncio
+    async def test_runner_finalized_records_advance_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        """Gate ON + runner returns is_final=True -> ledger records 'ADVANCE'."""
+        runner = MagicMock()
+        runner.bind_escalation_deps = MagicMock()
+        runner.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="Final direction", is_final=True)
+        )
+        phase, state = _make_shape_phase_with_real_state(
+            tmp_path, convergence_gate_enabled=True, shape_runner=runner
+        )
+        task = Task(id=57, title="Build analytics", body="", labels=[])
+        # No options marker → goes into _shape_with_runner path
+        phase._store.enrich_with_comments = AsyncMock(
+            return_value=task.model_copy(update={"comments": []})
+        )
+        # conv has no turns, so _handle_waiting_state returns proceed=True immediately
+        phase._state.get_shape_conversation = MagicMock(return_value=None)
+        phase._state.set_shape_conversation = MagicMock()
+        phase._state.increment_session_counter = MagicMock()
+        # _handle_waiting_state: conv has no turns, so proceed=True immediately
+        phase._prs.transition = AsyncMock()
+        phase._prs.post_comment = AsyncMock()
+
+        # _process_finalization calls post_comment + transition + increment
+        await phase._shape_with_runner(task)
+
+        ledger = state.get_convergence_ledger(57)
+        assert ledger is not None, "Ledger must be created when gate is on"
+        assert ledger.stage_state["shape"].last_verdict == "ADVANCE"
+
+    @pytest.mark.asyncio
+    async def test_gate_off_records_no_ledger_on_selection(
+        self, tmp_path: Path
+    ) -> None:
+        """Gate OFF -> no ledger created even when selection is found."""
+        phase, state = _make_shape_phase_with_real_state(
+            tmp_path, convergence_gate_enabled=False
+        )
+        task = Task(id=58, title="Improve onboarding", body="", labels=[])
+        comments = [
+            f"{_SHAPE_OPTIONS_MARKER} for #58\n\n### Direction A: ...",
+            "Direction B please",
+        ]
+        phase._store.enrich_with_comments = AsyncMock(
+            return_value=task.model_copy(update={"comments": comments})
+        )
+
+        await phase._shape_single(task)
+
+        ledger = state.get_convergence_ledger(58)
+        assert ledger is None, "No ledger should be created when gate is off"
+
+    @pytest.mark.asyncio
+    async def test_runner_finalized_with_concerns_records_signatures(
+        self, tmp_path: Path
+    ) -> None:
+        """Gate ON + adversarial agents with HIGH concerns -> signatures recorded."""
+        from datetime import datetime
+
+        from pending_concerns import AdversarialState, Concern
+
+        runner = MagicMock()
+        runner.bind_escalation_deps = MagicMock()
+        runner.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="Final content", is_final=True)
+        )
+        phase, state = _make_shape_phase_with_real_state(
+            tmp_path, convergence_gate_enabled=True, shape_runner=runner
+        )
+        task = Task(id=59, title="Build API gateway", body="", labels=[])
+        phase._store.enrich_with_comments = AsyncMock(
+            return_value=task.model_copy(update={"comments": []})
+        )
+        phase._state.get_shape_conversation = MagicMock(return_value=None)
+        phase._state.set_shape_conversation = MagicMock()
+        phase._state.increment_session_counter = MagicMock()
+        phase._prs.transition = AsyncMock()
+        phase._prs.post_comment = AsyncMock()
+
+        # Plant an adversarial state with a HIGH concern via state
+        concern = Concern(
+            id="c1",
+            raised_in_phase="shape",
+            raised_in_stage="shape_challenger",
+            severity="HIGH",
+            concern="Security risk in API design",
+            raised_at=datetime.now(),
+            must_address_by="plan",
+        )
+        adv = AdversarialState(phase="shape", pending_concerns=[concern])
+        # Wire adversarial agents so the block runs, then override get_adversarial_state
+        mock_challenger = MagicMock()
+        phase._challenger_agent = mock_challenger
+        phase._state.get_adversarial_state = MagicMock(return_value=adv)
+        phase._state.set_adversarial_state = MagicMock()
+
+        # Override _run_shape_challenger to do nothing (concern already in adv)
+        phase._run_shape_challenger = AsyncMock()
+
+        await phase._shape_with_runner(task)
+
+        ledger = state.get_convergence_ledger(59)
+        assert ledger is not None
+        assert ledger.stage_state["shape"].last_verdict == "ADVANCE"
+        assert (
+            "Security risk in API design"
+            in ledger.stage_state["shape"].last_finding_signatures
+        )
