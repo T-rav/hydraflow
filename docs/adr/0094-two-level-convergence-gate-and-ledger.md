@@ -1,4 +1,4 @@
-# ADR-0093: Two-level convergence: Gate + ConvergenceLedger
+# ADR-0094: Two-level convergence: Gate + ConvergenceLedger
 
 - **Status:** Accepted
 - **Date:** 2026-06-30

@@ -1,13 +1,13 @@
-# ADR-0094: Approve-path gating and live convergence (Phase 2a)
+# ADR-0095: Approve-path gating and live convergence (Phase 2a)
 
 - **Status:** Accepted
 - **Date:** 2026-06-30
-- **Refines:** ADR-0093 (two-level convergence: Gate + ConvergenceLedger)
+- **Refines:** ADR-0094 (two-level convergence: Gate + ConvergenceLedger)
 - **Related:** ADR-0051 (blast-radius review passes), ADR-0059 (advisor-pattern self-repairing review / PostVerifyAdvisor), ADR-0049 (kill-switch convention)
 
 ## Context
 
-ADR-0093 shipped the convergence `Gate` + `ConvergenceLedger` wired only into the Review **reject** boundary. It explicitly left two things for a later phase and named the supersession trigger: "supersede when the APPROVE path is gated (making `converged` live)." Under Phase 1, `ledger.converged` was structurally unreachable, because the reject path only ever records `LOOP_BACK`/`ESCALATE`, never `ADVANCE`.
+ADR-0094 shipped the convergence `Gate` + `ConvergenceLedger` wired only into the Review **reject** boundary. It explicitly left two things for a later phase and named the supersession trigger: "supersede when the APPROVE path is gated (making `converged` live)." Under Phase 1, `ledger.converged` was structurally unreachable, because the reject path only ever records `LOOP_BACK`/`ESCALATE`, never `ADVANCE`.
 
 Phase 2a closes that gap: it routes the Review APPROVE decision through the same gate, so a clean approve records `ADVANCE` and `converged` becomes a real, reachable signal. It remains behind `convergence_gate_enabled` (default off).
 
@@ -17,7 +17,7 @@ Phase 2a closes that gap: it routes the Review APPROVE decision through the same
 
 The APPROVE path now flows through the same `_convergence_decision` seam the reject path uses, with `review_approved=True`. That method is the single place the Review boundary decides ADVANCE / LOOP_BACK / ESCALATE for both verdicts:
 
-- **Reject** (`review_approved=False`): deterministic signal is red, the gate loops back (unchanged from ADR-0093).
+- **Reject** (`review_approved=False`): deterministic signal is red, the gate loops back (unchanged from ADR-0094).
 - **Approve** (`review_approved=True`): deterministic check runs, then the judge runs, then the gate combines.
 
 ### PostVerifyAdvisor becomes the gate's multi-lens judge (Fork 1)

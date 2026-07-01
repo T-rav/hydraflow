@@ -28,6 +28,7 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **HITL_ESCALATION** ⚠️ | `src.dashboard_routes._routes:create_router.request_changes`<br>`src.review_phase._phase:ReviewPhase._escalate_to_hitl` | — |
 | **HITL_UPDATE** ⚠️ | `src.dashboard_routes._hitl_routes:register._resolve_hitl_item`<br>`src.dashboard_routes._hitl_routes:register.hitl_correct`<br>`src.hitl_phase:HITLPhase._process_one_hitl`<br>`src.hitl_runner:HITLRunner.run`<br>`src.pr_unsticker:PRUnsticker.unstick` | — |
 | **ISSUE_CREATED** ⚠️ | `src.pr_manager:PRManager.create_issue` | — |
+| **LOOP_FITNESS_UPDATE** ⚠️ | `src.fitness_scorecard_loop:FitnessScorecardLoop._do_work` | — |
 | **MERGE_UPDATE** ⚠️ | `src.pr_manager:PRManager.merge_pr`<br>`src.pr_manager:PRManager.merge_promotion_pr` | — |
 | **METRICS_UPDATE** ⚠️ | `src.metrics_manager:MetricsManager.sync` | — |
 | **ORCHESTRATOR_STATUS** ⚠️ | `src.dashboard_routes._control_routes:register.start_orchestrator`<br>`src.orchestrator:HydraFlowOrchestrator._publish_status` | — |

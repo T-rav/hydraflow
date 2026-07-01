@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_43 terms across 3 bounded contexts._
+_49 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -17,6 +17,29 @@ ADRCouncilReviewer is the domain service that runs multi-agent council review se
 - CreditExhaustedError and AuthenticationError propagate out of the review batch rather than being swallowed per-item, so BaseBackgroundLoop can pause on a fatal billing signal.
 - Every ADR that reaches Accepted status is guaranteed to carry an **Enforced by:** line (injected as '(none)' if absent) before it is written back.
 - Pre-validation must pass before a council session is started; a failing ADR is routed and counted separately without blocking the rest of the batch.
+
+## ADRIndex
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/adr_index.py:ADRIndex` · **Confidence:** `accepted`
+**Aliases:** `adr cache`, `adr catalog`, `architecture decision index`
+
+Mtime-based runtime cache over the ADR directory that parses docs/adr/*.md on first access and re-scans only when the directory mtime changes. Exposes parsed ADR records — including normalized status, context summary, cited source files, and symbol-level citations — to caretaker loops and agent prompts. Acts as the authoritative in-process view of architecture decisions, enabling loops such as AdrTouchpointAuditorLoop to check which Accepted ADRs cite a given source file without re-reading the filesystem on every tick. The module docstring frames it explicitly as load-bearing: agents must know what has already been decided before they plan.
+
+**Invariants:**
+- Re-scans the ADR directory only when its mtime changes; returns the cached ADR list on a stable directory
+- Status values are normalized to one of Accepted, Proposed, Superseded, Deprecated, or Unknown — no raw status strings escape the parser
+
+## ADRPreValidator
+
+**Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/adr_pre_validator.py:ADRPreValidator` · **Confidence:** `accepted`
+**Aliases:** `adr pre-validator`, `adr structural validator`
+
+A service that validates ADR structure before submission to the ADRCouncilReviewer, catching structural defects early in the review pipeline. Checks include: status field presence and validity, required section presence and non-emptiness (Context, Decision, Consequences), ADR number collisions, supersession integrity, volatile line citations, stale 'requires amending' notes, bare ADR references lacking title annotations, source-symbol references against the live repo, and cross-reference title accuracy. Returns an ADRValidationResult that distinguishes auto-fixable issues from blocking ones, allowing the council to skip reviews for trivially malformed drafts.
+
+**Invariants:**
+- Runs all structural checks in a single `validate()` call and returns an ADRValidationResult — never raises on malformed input.
+- Issues are classified as fixable or non-fixable; `has_fixable_only` lets callers auto-repair before escalating to the council.
+- Cross-ADR checks (number collision, supersession, cross-reference titles) are skipped when `all_adrs` is not supplied, so single-ADR validation is always safe.
 
 ## ADRReviewerLoop
 
@@ -127,6 +150,17 @@ Trust-fleet loop that autonomously grows the adversarial test corpus from escape
 - Cases that trip more than one catcher are rejected as ambiguous before they can corrupt the corpus.
 - No `corpus_learning_enabled` config field exists — kill-switch is purely via `enabled_cb("corpus_learning")` (spec §12.2, ADR-0049).
 
+## Credentials
+
+**Kind:** `value_object` · **Context:** `shared-kernel` · **Anchor:** `src/config.py:Credentials` · **Confidence:** `accepted`
+**Aliases:** `infrastructure credentials`, `secrets bundle`
+
+A frozen value object that bundles raw infrastructure secrets — GitHub token, Sentry auth token, and WhatsApp API credentials — needed by runners and loops to authenticate with external services. Explicitly separated from HydraFlowConfig to ensure secrets never appear in domain-model serialization. Built from environment variables at startup via build_credentials() and injected as a constructor parameter into every loop or runner that calls an authenticated external API.
+
+**Invariants:**
+- Immutable once constructed (frozen=True); no field may be mutated after build.
+- Never serialized as part of domain state — kept separate from HydraFlowConfig by design.
+
 ## DependabotMergeLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/dependabot_merge_loop.py:DependabotMergeLoop` · **Confidence:** `accepted`
@@ -212,6 +246,30 @@ Trust-fleet loop that detects uncovered methods on fake adapters under `src/mock
 - Issue bodies are updated in-place on repeat ticks, not replaced.
 - Maximum 3 repair attempts before HITL escalation.
 - Kill-switch is via `enabled_cb("fake_coverage_auditor")` (ADR-0049).
+
+## FitnessContext
+
+**Kind:** `value_object` · **Context:** `caretaker` · **Anchor:** `src/loop_fitness.py:FitnessContext` · **Confidence:** `accepted`
+**Aliases:** `fitness context`, `loop fitness context`
+
+Frozen, data-only Pydantic model that is the **sole input** to any `loop_fitness()` call. Carries the evaluation window (`window_start`, `window_end`), this loop's `BACKGROUND_WORKER_STATUS` events pre-filtered to the window, a snapshot list of `IssueRecord`s relevant to the loop, and optional per-loop cost. Contains no live GitHub client. The purity constraint (ADR-0093 §2) requires that `loop_fitness()` reads only from `ctx` — no network, no clock, no mutable self state — which lets the same function score live history now and replayed history in the future optimizer.
+
+**Invariants:**
+- Carries no live client or callable; the model is frozen (`model_config = {"frozen": True}`).
+- `issues` is a snapshot list of `IssueRecord` rows; each loop attributes its own artifacts by querying this list for its label.
+- The same `FitnessContext` instance that powers the live scorecard can power an offline optimizer replay — that equivalence is the design invariant this type enforces.
+
+## FitnessScorecardLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/fitness_scorecard_loop.py:FitnessScorecardLoop` · **Confidence:** `accepted`
+**Aliases:** `fitness scorecard`, `fitness scorecard loop`, `loop fitness scorecard`
+
+Read-only caretaker loop (ADR-0029) that produces the per-loop fitness scorecard on a configurable cadence (default 86400 s). Each tick it builds one `FitnessContext` per registered loop, calls every loop's `loop_fitness(ctx)`, persists results to `fitness.jsonl`, regenerates `docs/arch/generated/loop-fitness.md`, and emits a `LOOP_FITNESS_UPDATE` event. Mutates no loop state, so it sits off the ADR-0046 recursion ladder. Kill-switch via `enabled_cb("fitness_scorecard")` per ADR-0049. (ADR-0093)
+
+**Invariants:**
+- Kill-switch is via `enabled_cb("fitness_scorecard")` at the top of `_do_work()` (ADR-0049).
+- The loop is read-only: it calls `loop_fitness()` on peer loops but changes no loop config or state.
+- Declares its own fitness as `HOUSEKEEPING` — it produces no GitHub proposals or artifacts that have an acceptance lifecycle.
 
 ## FlakeTrackerLoop
 
@@ -300,6 +358,18 @@ configured drift retry budget is exhausted.
 - Empty shadow corpus is an idle tick, not an error.
 - Drift issues are auto-agent routed before any human escalation.
 - Dispatcher registration is keyed by `(adapter, command)` so cassette
+
+## LoopFitness
+
+**Kind:** `value_object` · **Context:** `caretaker` · **Anchor:** `src/loop_fitness.py:LoopFitness` · **Confidence:** `accepted`
+**Aliases:** `loop fitness`, `loop fitness score`, `fitness result`
+
+The result of calling a background loop's `loop_fitness(ctx)` method for one evaluation window. Carries `kind` (`SCORED` or `HOUSEKEEPING`), an optional normalized `score` in [0, 1] valid only for intra-loop trend comparison, raw `components` for diagnosis, `sample_count`, and a `Confidence` signal (`OK` or `INSUFFICIENT_DATA`) keyed off `sample_count` vs a per-loop threshold. Produced by every `BaseBackgroundLoop` subclass; consumed by `FitnessScorecardLoop` and persisted to `fitness.jsonl`. (ADR-0093)
+
+**Invariants:**
+- `score` is normalized 0–1 and valid **only for intra-loop use** (trend over time, or intra-loop config ranking). Cross-loop comparison of `score` is architecturally invalid.
+- When `kind` is `HOUSEKEEPING`, `score` is always `None`; `components` carries raw counters.
+- `confidence` is `INSUFFICIENT_DATA` when `sample_count` is below the loop's `min_samples` threshold; `score` is `None` in that case regardless of `kind`.
 
 ## MergeStateWatcherLoop
 

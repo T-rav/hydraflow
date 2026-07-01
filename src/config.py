@@ -115,6 +115,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_diff_sanity_attempts", "HYDRAFLOW_MAX_DIFF_SANITY_ATTEMPTS", 1),
     ("max_scope_check_attempts", "HYDRAFLOW_MAX_SCOPE_CHECK_ATTEMPTS", 1),
     ("max_test_adequacy_attempts", "HYDRAFLOW_MAX_TEST_ADEQUACY_ATTEMPTS", 1),
+    (
+        "test_adequacy_coverage_timeout_secs",
+        "HYDRAFLOW_TEST_ADEQUACY_COVERAGE_TIMEOUT_SECS",
+        300,
+    ),
     ("max_plan_compliance_attempts", "HYDRAFLOW_MAX_PLAN_COMPLIANCE_ATTEMPTS", 1),
     ("max_discover_attempts", "HYDRAFLOW_MAX_DISCOVER_ATTEMPTS", 3),
     ("max_discover_expansions", "HYDRAFLOW_MAX_DISCOVER_EXPANSIONS", 1),
@@ -305,6 +310,9 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("contract_refresh_interval", "HYDRAFLOW_CONTRACT_REFRESH_INTERVAL", 604800),
     ("max_fake_repair_attempts", "HYDRAFLOW_MAX_FAKE_REPAIR_ATTEMPTS", 3),
     ("max_convergence_laps", "HYDRAFLOW_MAX_CONVERGENCE_LAPS", 3),
+    ("fitness_scorecard_interval", "HYDRAFLOW_FITNESS_SCORECARD_INTERVAL", 86400),
+    ("fitness_window_days", "HYDRAFLOW_FITNESS_WINDOW_DAYS", 30),
+    ("fitness_min_samples", "HYDRAFLOW_FITNESS_MIN_SAMPLES", 20),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -795,6 +803,12 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         le=3,
         description="Max test adequacy check passes (0 = disabled)",
+    )
+    test_adequacy_coverage_timeout_secs: int = Field(
+        default=300,
+        ge=60,
+        le=1800,
+        description="Timeout in seconds for the coverage-delta make coverage run",
     )
     max_plan_compliance_attempts: int = Field(
         default=1,
@@ -1602,7 +1616,7 @@ class HydraFlowConfig(BaseModel):
         default=False,
         description=(
             "Route the review retry/escalate decision through the "
-            "convergence HybridGate + ConvergenceLedger (ADR-0093). "
+            "convergence HybridGate + ConvergenceLedger (ADR-0094). "
             "Off by default so rollout is opt-in; the "
             "ledger storage is always-on, only the gate decision is gated. "
             "When enabled, escalation at the review reject boundary is "
@@ -2361,6 +2375,26 @@ class HydraFlowConfig(BaseModel):
         description="Poll interval in seconds for retrospective analysis loop",
     )
 
+    # Trust fleet — LoopFitnessScorecard (spec §5)
+    fitness_scorecard_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description="Seconds between loop-fitness scorecard cycles",
+    )
+    fitness_window_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="Rolling window (days) over which loop fitness is computed",
+    )
+    fitness_min_samples: int = Field(
+        default=20,
+        ge=1,
+        le=10000,
+        description="Min samples before a SCORED loop reports OK confidence",
+    )
+
     # Trust fleet — FlakeTrackerLoop (spec §4.5)
     flake_tracker_interval: int = Field(
         default=14400,
@@ -2620,7 +2654,7 @@ class HydraFlowConfig(BaseModel):
         le=20,
         description=(
             "Maximum outer-convergence laps allowed before a ConvergenceLedger "
-            "escalates an issue (ADR-0093)."
+            "escalates an issue (ADR-0094)."
         ),
     )
     contracts_sandbox_repo: str = Field(

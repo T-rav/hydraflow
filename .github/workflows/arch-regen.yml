@@ -5,6 +5,15 @@ on:
       - 'src/**'
       - 'docs/adr/**'
       - 'docs/arch/**'
+      # coverage_matrix.py rglobs docs/wiki/** (wiki column) and
+      # docs/standards/** (standards column); ubiquitous-language views render
+      # from docs/wiki/terms/**. Without these paths a wiki/standards edit that
+      # adds or removes a loop-referencing file changes the generated matrix
+      # without ever running the drift check, so drift accumulates silently on
+      # staging until an unrelated docs/arch/** PR trips it. See arch.generators
+      # .coverage_matrix._wiki_check / _standards_check.
+      - 'docs/wiki/**'
+      - 'docs/standards/**'
       - 'tests/scenarios/fakes/**'
       - 'tests/architecture/**'
 

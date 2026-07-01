@@ -326,6 +326,11 @@ _bg_worker_defs = [
         "Re-runs parked-issue triage every 24h with the original parking reason as context. Caps at 3 retries before escalating to HITL with the triage-retry-exhausted sub-label. Closes the only factory phase with no autonomous re-entry path. See ADR-0063 W2.",
     ),
     (
+        "fitness_scorecard",
+        "Fitness Scorecard",
+        "Computes per-loop fitness scores each tick by combining event history and issue attribution. Persists to fitness.jsonl and regenerates docs/arch/generated/loop-fitness.md. Read-only caretaker per ADR-0029.",
+    ),
+    (
         "workspace_gc",
         "Workspace GC",
         "Garbage-collects stale workspaces and orphaned branches.",
@@ -395,6 +400,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         "staging_branch",
         "main_branch",
         "rc_cadence_hours",
+        "test_adequacy_coverage_timeout_secs",
     }
 
     def _build_system_worker_inference_stats(
@@ -587,6 +593,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             model=cfg.model,
             pr_unstick_batch_size=cfg.pr_unstick_batch_size,
             workspace_base=str(cfg.workspace_base),
+            test_adequacy_coverage_timeout_secs=cfg.test_adequacy_coverage_timeout_secs,
         )
 
     def _runtime_status(orch: object | None) -> tuple[ControlStatus, str | None, bool]:

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from dedup_store import DedupStore
+from loop_fitness import FitnessContext, LoopFitness
 from subprocess_util import AuthenticationError, CreditExhaustedError
 from ubiquitous_language import (
     Candidate,
@@ -158,6 +159,16 @@ class TermProposerLoop(BaseBackgroundLoop):
 
     def _get_default_interval(self) -> int:
         return self._config.term_proposer_interval
+
+    def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
+        from loop_fitness import proposal_acceptance_fitness  # noqa: PLC0415
+
+        return proposal_acceptance_fitness(
+            ctx,
+            worker_name=self._worker_name,
+            label=TERM_PROPOSER_PR_LABEL,
+            min_samples=self._config.fitness_min_samples,
+        )
 
     async def _do_work(self) -> dict[str, Any] | None:
         # Canonical operator UI kill-switch (ADR-0049).

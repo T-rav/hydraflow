@@ -2430,6 +2430,7 @@ class ControlStatusConfig(BaseModel):
     model: str = ""
     pr_unstick_batch_size: int = 10
     workspace_base: str = ""
+    test_adequacy_coverage_timeout_secs: int = 300
 
 
 class ControlStatusResponse(BaseModel):
@@ -2590,6 +2591,15 @@ class BackgroundWorkerStatusPayload(TypedDict):
     status: str
     last_run: str
     details: dict[str, object]
+
+
+class LoopFitnessUpdatePayload(TypedDict):
+    """Payload for ``EventType.LOOP_FITNESS_UPDATE``."""
+
+    generated_at: str
+    window_days: int
+    loop_count: int
+    scored_count: int
 
 
 class OrchestratorStatusPayload(TypedDict, total=False):

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -218,35 +218,26 @@ class TestL18RepoWikiLoop:
         assert result["repos"] == 0
         assert result["total_entries"] == 0
 
-    async def test_one_repo_lint_runs(self, tmp_path):
-        """With one repo, active_lint is called and stats reflect its results."""
+    async def test_one_repo_routes_to_heal_and_pr(self, tmp_path):
+        """With repos present, the loop routes to the generate-in-worktree
+        heal+PR path (#9539). The heal mutations + clean-checkout invariant are
+        covered by the unit + real-git tests in ``test_repo_wiki_loop*``; here
+        we assert the orchestration reaches the heal when a repo exists."""
         world = MockWorld(tmp_path)
-
-        from repo_wiki import LintResult  # noqa: PLC0415
-
-        lint_result = LintResult(
-            stale_entries=1,
-            orphan_entries=0,
-            total_entries=5,
-            entries_marked_stale=1,
-            orphans_pruned=0,
-            empty_topics=[],
-        )
 
         wiki_store = MagicMock()
         wiki_store.list_repos.return_value = ["my-org/my-repo"]
-        wiki_store.active_lint.return_value = lint_result
         _seed_ports(world, wiki_store=wiki_store)
 
-        stats = await world.run_with_loops(["repo_wiki"], cycles=1)
+        heal = AsyncMock()
+        with patch("repo_wiki_loop.RepoWikiLoop._heal_and_open_maintenance_pr", heal):
+            stats = await world.run_with_loops(["repo_wiki"], cycles=1)
 
         result = stats["repo_wiki"]
-        assert result["repos"] == 1
-        assert result["total_entries"] == 5
-        assert result["stale_entries"] == 1
-        wiki_store.active_lint.assert_called_once_with(
-            "my-org/my-repo", closed_issues=set()
-        )
+        assert result is not None
+        heal.assert_awaited_once()
+        # Signature: (closed_issues, stats) — closed_issues is a set.
+        assert isinstance(heal.await_args.args[0], set)
 
 
 # ---------------------------------------------------------------------------

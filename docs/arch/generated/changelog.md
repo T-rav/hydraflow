@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `a642ac1` — docs(adr-0094): soften escalate-parity wording (reject adds oscillation cause) *(2026-06-30)*
+- `5a5a105` — docs(adr): ADR-0094 approve-path gating + live convergence (Phase 2a) *(2026-06-30)*
 - `4c9e6dc` — docs(adr): ADR-0093 two-level convergence (Gate + ConvergenceLedger) *(2026-06-30)*
 
 ## 2026-W25
