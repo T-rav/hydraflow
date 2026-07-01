@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `1054635` — docs(adr): ADR-0097 attempt counter migration into the ledger (Phase 2c) *(2026-06-30)*
 - `62cd012` — Two-level convergence Phase 2b: boundary verdict recording (Triage/Shape/Plan) (#9677) (#9677) *(2026-06-30)*
 - `e396bad` — Merge origin/staging into Phase1+2a; resolve ADR-0093 collision (convergence ADRs -> 0094/0095), union config + README *(2026-06-30)*
 - `1877391` — feat: loop-fitness scorecard (read-only measurement substrate) (#9672) (#9672) *(2026-06-30)*

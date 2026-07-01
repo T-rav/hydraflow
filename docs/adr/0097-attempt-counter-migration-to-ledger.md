@@ -11,7 +11,7 @@ ADR-0094 introduced the `ConvergenceLedger` as the single source of truth for pe
 
 Three per-issue attempt counters remained in bespoke storage after Phase 1:
 
-- `StateData.auto_agent_attempts` (an integer field, incremented each time the AutoAgent runner is invoked for an issue)
+- `StateData.auto_agent_attempts` (a dict keyed by issue number, incremented each time the AutoAgent runner is invoked for an issue)
 - `StateData.sandbox_failure_fixer_attempts` (a dict keyed by PR number, tracking sandbox-fix tries per PR)
 - A per-issue quality-fix count written into `WorkerResultMeta` and read by `retrospective.py`
 
@@ -71,7 +71,7 @@ The Gate decision path is behind `convergence_gate_enabled`. Ledger storage is a
 
 ## Scope (Phase 2c)
 
-This ADR covers the direct migration of three attempt counters into the ledger without helper abstractions, and the MockWorld integration scenario that exercises all three counter paths. Out of scope: Phase 2d's `ConvergenceOscillationLoop` caretaker, which consumes verdict history rather than attempt counts.
+This ADR covers the direct migration of three attempt counters into the ledger without helper abstractions, and an integration scenario that exercises the `sandbox_fix` counter path through the real `SandboxFailureFixerLoop` (representative of the shared accessor-delegation pattern all three migrations use). Out of scope: Phase 2d's `ConvergenceOscillationLoop` caretaker, which consumes verdict history rather than attempt counts.
 
 ## Alternatives considered
 
@@ -89,4 +89,4 @@ Supersede when: a new phase changes attempt counter semantics (for example, intr
 - `src/state/_convergence.py`: `set_quality_fix_attempts` and related read accessor, delegating to stage `"quality_fix"`.
 - `src/implement_phase.py`: writes quality-fix count via `set_quality_fix_attempts` at the end of a worker run.
 - `src/retrospective.py`: reads quality-fix count from the ledger for post-run analysis.
-- `tests/scenarios/test_convergence_counter_migration_mockworld.py`: MockWorld integration scenario exercising all three counter migration paths.
+- `tests/scenarios/test_convergence_counter_migration_mockworld.py`: integration scenario driving the real `SandboxFailureFixerLoop` to prove the `sandbox_fix` counter lands in the ledger through production code (representative of all three migrations' shared delegation pattern).
