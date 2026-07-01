@@ -15,6 +15,7 @@ flowchart LR
         caretaking_EntryEvidenceLoop([EntryEvidenceLoop])
         caretaking_EpicMonitorLoop([EpicMonitorLoop])
         caretaking_EpicSweeperLoop([EpicSweeperLoop])
+        caretaking_FitnessScorecardLoop([FitnessScorecardLoop])
         caretaking_GitHubCacheLoop([GitHubCacheLoop])
         caretaking_HealthMonitorLoop([HealthMonitorLoop])
         caretaking_LabelDriftWatcherLoop([LabelDriftWatcherLoop])
@@ -77,6 +78,7 @@ flowchart LR
     end
     subgraph auto_agent["Auto-Agent (HITL Pre-Flight)"]
         auto_agent_AutoAgentPreflightLoop([AutoAgentPreflightLoop])
+        auto_agent_ConvergenceOscillationLoop([ConvergenceOscillationLoop])
         auto_agent_SandboxFailureFixerLoop([SandboxFailureFixerLoop])
         auto_agent_TriageRetryLoop([TriageRetryLoop])
     end
@@ -101,6 +103,7 @@ Autonomous background loops that maintain the system without human input — wik
 - `EntryEvidenceLoop` — `src.entry_evidence_loop`
 - `EpicMonitorLoop` — `src.epic_monitor_loop`
 - `EpicSweeperLoop` — `src.epic_sweeper_loop`
+- `FitnessScorecardLoop` — `src.fitness_scorecard_loop`
 - `GitHubCacheLoop` — `src.github_cache_loop`
 - `HealthMonitorLoop` — `src.health_monitor_loop`
 - `LabelDriftWatcherLoop` — `src.label_drift_watcher_loop`
@@ -240,6 +243,7 @@ The Auto-Agent HITL pre-flight loop intercepts every `hitl-escalation` issue bef
 **Loops**
 
 - `AutoAgentPreflightLoop` — `src.auto_agent_preflight_loop`
+- `ConvergenceOscillationLoop` — `src.convergence_oscillation_loop`
 - `SandboxFailureFixerLoop` — `src.sandbox_failure_fixer_loop`
 - `TriageRetryLoop` — `src.triage_retry_loop`
 
@@ -248,8 +252,9 @@ The Auto-Agent HITL pre-flight loop intercepts every `hitl-escalation` issue bef
 - `src/auto_agent_preflight_loop.py`
 - `src/preflight/**`
 - `src/triage_retry_loop.py`
+- `src/convergence_oscillation_loop.py`
 
-**Related ADRs:** `ADR-0050`, `ADR-0063`
+**Related ADRs:** `ADR-0050`, `ADR-0063`, `ADR-0098`
 
 
 ## Goal-Driven Development

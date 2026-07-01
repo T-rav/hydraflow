@@ -1,0 +1,139 @@
+// Issue #9567 — Deterministic coverage-delta cross-check for the test-adequacy verifier
+// C4 model of the change area: the test-adequacy skill loop gains a deterministic
+// coverage-delta signal that anchors/overrides the LLM verdict.
+
+specification {
+  element system
+  element container
+  element component
+  element module
+  element externalSystem
+
+  tag new        // introduced by this issue
+  tag modified   // touched by this issue
+  tag existing   // unchanged context
+}
+
+model {
+  hydraflow = system 'HydraFlow' {
+    description 'Multi-agent GitHub issue lifecycle automation'
+
+    agentRunner = container 'AgentRunner (implement phase)' {
+      description 'Runs post-implementation skills against the branch diff (src/agent.py)'
+      technology 'Python / asyncio'
+
+      runSkill = component '_run_skill()' {
+        #modified
+        description 'Generic skill loop: builds prompt, runs LLM, parses verdict. Gains a deterministic coverage reconciliation step for skills flagged deterministic_coverage_check.'
+      }
+      runCoverageDelta = component '_run_coverage_delta_check()' {
+        #new
+        description 'Runs `make coverage 0` via the subprocess port, reads coverage.xml, delegates to pure coverage_delta functions. Returns CoverageDeltaResult (available=False on disable / no-prod-change / test-failure / timeout).'
+      }
+      runnerPort = component 'self._runner (SubprocessRunner port)' {
+        #existing
+        description 'HostRunner / DockerRunner — run_simple([...]). Hexagonal subprocess boundary.'
+      }
+    }
+
+    skillRegistry = container 'skill_registry.py' {
+      #modified
+      description 'Declarative AgentSkill registry. Gains optional deterministic_coverage_check flag (default False); set True on the test-adequacy skill.'
+      technology 'Python dataclass'
+    }
+
+    coverageDelta = container 'coverage_delta.py' {
+      #new
+      description 'Pure, I/O-free coverage-delta engine'
+      technology 'Python (re + xml.etree)'
+
+      parseDiff = component 'parse_diff_changed_lines()' {
+        #new
+        description 'Unified-diff -> {production .py path: set(new-file line numbers)}; excludes test/non-prod files.'
+      }
+      parseCobertura = component 'parse_cobertura_covered_lines()' {
+        #new
+        description 'Cobertura XML -> {path: set(covered line numbers)}; normalizes <source> basename + filename to repo-relative paths.'
+      }
+      computeDelta = component 'compute_coverage_delta()' {
+        #new
+        description 'For each changed prod line, is it covered? -> CoverageDeltaResult(available, changed, covered, uncovered[]).'
+      }
+      reconcile = component 'reconcile_coverage_with_llm()' {
+        #new
+        description 'Deterministic gaps override LLM OK -> RETRY; clean coverage anchors but does not override an LLM RETRY; unavailable -> LLM verdict unchanged.'
+      }
+    }
+
+    testAdequacy = container 'test_adequacy.py' {
+      #existing
+      description 'LLM prompt builder + result parser (unchanged by this issue).'
+      technology 'Python prompt'
+    }
+
+    config = container 'config.py (HydraFlowConfig)' {
+      #modified
+      description 'Adds test_adequacy_coverage_enabled (bool, default True) + test_adequacy_coverage_timeout (int, default 1800), env-overridable.'
+      technology 'Pydantic'
+    }
+  }
+
+  makefile = externalSystem 'Makefile target `make coverage [MIN]`' {
+    #existing
+    description 'PYTHONPATH=src uv run pytest tests/ --cov=src --cov-fail-under=MIN --cov-report=xml:coverage.xml -p no:xdist'
+  }
+  pytest = externalSystem 'pytest-cov / coverage.py' {
+    #existing
+    description 'Writes Cobertura coverage.xml (gitignored) into the worktree root.'
+  }
+
+  // Relationships
+  runSkill -> testAdequacy 'builds prompt / parses LLM verdict'
+  runSkill -> runCoverageDelta 'when skill.deterministic_coverage_check'
+  runSkill -> reconcile 'merge LLM verdict + coverage result'
+  runSkill -> skillRegistry 'reads deterministic_coverage_check flag'
+  runCoverageDelta -> config 'reads enabled / timeout'
+  runCoverageDelta -> parseDiff 'extract changed prod lines'
+  runCoverageDelta -> runnerPort 'run_simple(["make","coverage","0"])'
+  runnerPort -> makefile 'spawn'
+  makefile -> pytest 'invoke with --cov-report=xml'
+  pytest -> runCoverageDelta 'coverage.xml on disk (bind-mounted)'
+  runCoverageDelta -> parseCobertura 'parse covered lines'
+  runCoverageDelta -> computeDelta 'changed vs covered'
+}
+
+views {
+  view context {
+    title 'Issue #9567 — Context: coverage-delta cross-check in the skill loop'
+    include *
+    include hydraflow.*
+    autoLayout TopBottom
+  }
+
+  view components {
+    title 'Issue #9567 — Components: AgentRunner + coverage_delta engine'
+    include
+      hydraflow.agentRunner.*,
+      hydraflow.coverageDelta.*,
+      hydraflow.skillRegistry,
+      hydraflow.testAdequacy,
+      hydraflow.config,
+      makefile,
+      pytest
+    autoLayout LeftRight
+  }
+
+  dynamic view coverageFlow {
+    title 'Issue #9567 — Dynamic: one test-adequacy run with deterministic reconciliation'
+    hydraflow.agentRunner.runSkill -> hydraflow.testAdequacy 'run LLM assessment -> (llm_passed, summary, gaps)'
+    hydraflow.agentRunner.runSkill -> hydraflow.agentRunner.runCoverageDelta 'deterministic_coverage_check is True'
+    hydraflow.agentRunner.runCoverageDelta -> hydraflow.coverageDelta.parseDiff 'changed prod lines (empty -> skip pytest)'
+    hydraflow.agentRunner.runCoverageDelta -> hydraflow.agentRunner.runnerPort 'make coverage 0'
+    hydraflow.agentRunner.runnerPort -> makefile 'spawn full suite under coverage'
+    makefile -> pytest 'emit coverage.xml'
+    hydraflow.agentRunner.runCoverageDelta -> hydraflow.coverageDelta.parseCobertura 'read + parse coverage.xml'
+    hydraflow.agentRunner.runCoverageDelta -> hydraflow.coverageDelta.computeDelta 'changed vs covered -> CoverageDeltaResult'
+    hydraflow.agentRunner.runSkill -> hydraflow.coverageDelta.reconcile 'gaps override LLM OK -> RETRY'
+    autoLayout TopBottom
+  }
+}

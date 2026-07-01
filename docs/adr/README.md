@@ -124,6 +124,12 @@ ADR and that named test files actually exist.
 | [0090](0090-atlas-knowledge-graph-dashboard.md) | Atlas — Knowledge Graph Dashboard Surface | Accepted |
 | [0091](0091-epic-monitor-completion-sweep.md) | Fold Epic Completion Sweep into Epic Monitor | Accepted |
 | [0092](0092-untrusted-text-trust-boundary.md) | Untrusted-text trust boundary for agent prompts | Accepted |
+| [0093](0093-loop-fitness-as-measured-contract.md) | Loop fitness as a measured contract | Accepted |
+| [0094](0094-two-level-convergence-gate-and-ledger.md) | Two-level convergence: Gate + ConvergenceLedger | Accepted |
+| [0095](0095-approve-path-gating-and-converged.md) | Approve-path gating and live convergence (Phase 2a) | Accepted |
+| [0096](0096-boundary-verdict-recording.md) | Boundary verdict recording (Phase 2b) | Accepted |
+| [0097](0097-attempt-counter-migration-to-ledger.md) | Attempt counter migration into the ledger (Phase 2c) | Accepted |
+| [0098](0098-convergence-oscillation-caretaker.md) | Convergence oscillation caretaker (Phase 2d) | Accepted |
 | [0099](0099-orchestration-as-a-control-system.md) | Orchestration as a Control System | Proposed |
 
 ## Adding a new ADR

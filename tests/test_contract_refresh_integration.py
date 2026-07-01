@@ -3,7 +3,7 @@
 This file is intentionally separate from
 ``tests/test_contract_refresh_loop.py`` — that module mocks
 :func:`contract_diff.detect_fleet_drift` and
-:func:`auto_pr.open_automated_pr_async` as independent pinholes,
+:func:`auto_pr.generate_and_open_pr_async` as independent pinholes,
 never exercising the recorder→diff→stage→PR ladder as one unit. The
 integration tests below stitch those stages together against the
 *real* ``detect_fleet_drift`` implementation + the real
@@ -13,22 +13,28 @@ mocking only the two genuine external surfaces:
 * the per-adapter recorders (``record_github`` / ``record_git`` /
   ``record_docker`` / ``record_claude_stream``) — these spawn real
   binaries and must not run in a unit-test harness.
-* :func:`auto_pr.open_automated_pr_async` — this shells out to
-  ``git`` + ``gh``; stubbing it keeps the test hermetic without
-  coupling to the real worktree / gh auth machinery.
+* :func:`auto_pr.generate_and_open_pr_async` — this shells out to
+  ``git`` + ``gh`` and creates an ephemeral worktree; stubbing it keeps
+  the test hermetic without coupling to the real worktree / gh auth
+  machinery. Under generate-in-worktree (#9539) the loop's ``generate``
+  callback writes cassettes into the worktree the helper hands it, so
+  with the helper mocked the callback never runs — these tests assert
+  the call kwargs (branch, labels, path_specs, callable generate) and
+  that ``repo_root`` stays clean.
 
 The replay gate (``make trust-contracts``) is mocked at the
-``subprocess.run`` seam the loop reads — the same seam the Task 16
-unit tests drive — so both gate-pass and gate-fail paths flow through
-the real issue-filing code.
+``asyncio.create_subprocess_exec`` seam the loop reads — the same seam
+the Task 16 unit tests drive — so both gate-pass and gate-fail paths
+flow through the real issue-filing code.
 
 Scope (per Task 21 of the plan):
 
 * **Happy-path drift** — seeded mismatched cassettes flow through the
-  real ``detect_fleet_drift`` → ``_stage_drifted_cassettes`` →
-  ``_open_refresh_pr`` → ``_run_replay_gate`` ladder. Assertions:
-  PR opened with the expected title/labels/files, dedup entry
-  persisted to JSON, replay gate invoked, no companion issue filed.
+  real ``detect_fleet_drift`` → ``_open_refresh_pr`` (generate-in-worktree)
+  → ``_run_replay_gate`` ladder. Assertions: PR opened with the expected
+  title/labels/path_specs + callable generate, ``repo_root`` untouched,
+  dedup entry persisted to JSON, replay gate invoked, no companion issue
+  filed.
 * **Replay-gate fail → companion issue** — same drift, but the
   replay gate exits non-zero. Assertions: refresh PR still opens,
   ``PRManager.create_issue`` fires with ``hydraflow-find`` +
@@ -49,6 +55,7 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
+import auto_pr
 import contract_refresh_loop as crl_module
 from auto_pr import AutoPrResult
 from base_background_loop import LoopDeps
@@ -123,9 +130,11 @@ class _FakeState:
 def _loop(tmp_path: Path, *, prs: Any | None = None) -> ContractRefreshLoop:
     """Build a :class:`ContractRefreshLoop` rooted at ``tmp_path``.
 
-    The loop's ``config.repo_root`` is set to ``tmp_path / "repo"`` so
-    cassette writes from :meth:`_stage_drifted_cassettes` land under
-    the sandbox and never escape to the real HydraFlow tree.
+    The loop's ``config.repo_root`` is set to ``tmp_path / "repo"``. Under
+    generate-in-worktree (#9539) the loop never writes cassettes under
+    ``repo_root`` at all — :meth:`_stage_drifted_cassettes` copies into the
+    ephemeral worktree the PR helper hands its ``generate`` callback — so
+    these tests additionally assert ``repo_root`` stays clean.
     """
     cfg = HydraFlowConfig(
         data_root=tmp_path / "data",
@@ -214,7 +223,13 @@ def _write_recorded_git_cassette(tmp_dir: Path, *, stdout: str) -> Path:
 
 
 class _FakeAutoPR:
-    """Captures ``open_automated_pr_async`` calls and returns a canned result."""
+    """Captures ``generate_and_open_pr_async`` calls and returns a canned result.
+
+    The generate-in-worktree helper (#9539) is patched on ``auto_pr`` — the
+    loop imports it lazily — and its ``generate`` callback is not invoked
+    while the helper is mocked, so the captured kwargs carry ``generate`` +
+    ``path_specs`` (no ``files``).
+    """
 
     def __init__(self, status: str = "opened") -> None:
         self.calls: list[dict[str, Any]] = []
@@ -315,7 +330,7 @@ async def test_end_to_end_drift_opens_pr_and_records_dedup(
     _stub_recorders_only_git(monkeypatch, recorded)
 
     fake_pr = _FakeAutoPR()
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", fake_pr)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_pr)
 
     replay_calls = _patch_subprocess_run(monkeypatch, returncode=0)
 
@@ -344,26 +359,35 @@ async def test_end_to_end_drift_opens_pr_and_records_dedup(
     assert "git" in kwargs["pr_title"]
     assert "contract-refresh" in kwargs["labels"]
     assert "auto-merge" in kwargs["labels"]
-    # The staged file is the committed cassette path under repo_root.
-    staged = [Path(p) for p in kwargs["files"]]
-    assert len(staged) == 1
-    assert staged[0].name == "commit.yaml"
-    assert staged[0].is_relative_to(repo_root)
+    # Generate-in-worktree (#9539): no `files` kwarg — the helper gets a
+    # callable `generate` and the drifted adapter's cassette dir in
+    # `path_specs`. The bytes are written INTO the worktree by the callback,
+    # never into repo_root.
+    assert "files" not in kwargs
+    assert callable(kwargs["generate"])
+    assert kwargs["path_specs"] == ["tests/trust/contracts/cassettes/git"]
 
-    # The staged cassette now carries the recorder bytes — not the
-    # original committed bytes — so the PR actually ships the fresh
-    # recording. This is the load-bearing invariant: a refresh PR that
-    # didn't overwrite the committed file would merge into a no-op.
-    # We key off the distinct stdout tokens (``renamed`` in recorder,
-    # ``initial`` in committed's output) because the commit-message
-    # args happen to match between the two; it's the stdout the fake
-    # replays, not the input args.
-    staged_bytes = staged[0].read_bytes()
-    assert b"renamed" in staged_bytes, staged_bytes
-    # The fresh recorder_sha marker pins this down — committed side
-    # had ``deadbeef``, recorder emitted ``cafef00d``.
-    assert b"cafef00d" in staged_bytes, staged_bytes
-    assert b"deadbeef" not in staged_bytes, staged_bytes
+    # repo_root must stay clean: the committed cassette retains its ORIGINAL
+    # bytes — the loop never overwrote it (that's the whole point of #9539).
+    committed = repo_root / "tests/trust/contracts/cassettes/git/commit.yaml"
+    committed_bytes = committed.read_bytes()
+    assert b"initial" in committed_bytes, committed_bytes
+    assert b"deadbeef" in committed_bytes, committed_bytes
+    assert b"renamed" not in committed_bytes, committed_bytes
+
+    # Driving the captured `generate` callback against a throwaway worktree
+    # proves the PR ships the FRESH recording: it copies the recorder bytes
+    # (``renamed`` / ``cafef00d``) into the worktree's committed cassette
+    # path — the load-bearing invariant a no-op refresh would violate.
+    fake_worktree = tmp_path / "fake_worktree"
+    fake_worktree.mkdir()
+    await kwargs["generate"](fake_worktree)
+    generated = fake_worktree / "tests/trust/contracts/cassettes/git/commit.yaml"
+    assert generated.exists(), "generate callback must write into the worktree"
+    generated_bytes = generated.read_bytes()
+    assert b"renamed" in generated_bytes, generated_bytes
+    assert b"cafef00d" in generated_bytes, generated_bytes
+    assert b"deadbeef" not in generated_bytes, generated_bytes
 
     # Replay gate ran exactly once.
     assert replay_calls == [["make", "trust-contracts"]]
@@ -403,7 +427,7 @@ async def test_end_to_end_replay_gate_fail_files_fake_drift_issue(
     _stub_recorders_only_git(monkeypatch, recorded)
 
     fake_pr = _FakeAutoPR()
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", fake_pr)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_pr)
 
     _patch_subprocess_run(
         monkeypatch,
@@ -439,29 +463,25 @@ async def test_end_to_end_replay_gate_fail_files_fake_drift_issue(
 
 
 # ---------------------------------------------------------------------------
-# Scenario 3 — post-refresh quiescence: second tick reads clean
+# Scenario 3 — post-refresh quiescence: second identical tick dedups
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_second_tick_after_refresh_is_clean(
+async def test_second_tick_after_refresh_dedups(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """After a successful refresh, the next tick sees no drift.
+    """After a successful refresh, an identical next tick short-circuits on dedup.
 
-    ``_stage_drifted_cassettes`` overwrites the committed file with
-    the recorder bytes. On the next tick the recorder emits those
-    same bytes again, so the real ``detect_fleet_drift`` canonicalizes
-    both sides identically and reports no drift — the loop returns
-    ``status="clean"`` without touching ``auto_pr`` or the replay
-    gate a second time. This is the load-bearing "weekly loop
-    quiesces after a successful refresh" guarantee.
-
-    Note: the dedup short-circuit (``status="dedup_hit"``) is
-    exercised by the unit test ``test_do_work_dedup_hit_skips_pr``
-    against a mocked ``detect_fleet_drift`` — in integration, real
-    diff sees matching bytes and returns no reports, which is the
-    happy-path the dedup guard exists to defend.
+    Under generate-in-worktree (#9539) the loop NO LONGER overwrites the
+    committed cassette under ``repo_root`` — the refresh bytes are written
+    only into the ephemeral worktree the PR helper tears down. So the real
+    ``detect_fleet_drift`` on the next tick still sees the same drift; the
+    quiescence guarantee is now provided by the per-loop ``DedupStore``: the
+    drift hash recorded on tick #1 short-circuits tick #2 to
+    ``status="dedup_hit"`` — no second PR, no second replay gate. This is the
+    load-bearing "weekly loop does not re-file an identical refresh PR every
+    tick" guarantee, and it proves ``repo_root`` is never mutated.
     """
     loop = _loop(tmp_path)
     repo_root = loop._config.repo_root
@@ -473,22 +493,30 @@ async def test_second_tick_after_refresh_is_clean(
     _stub_recorders_only_git(monkeypatch, recorded)
 
     fake_pr = _FakeAutoPR()
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", fake_pr)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_pr)
     replay_calls = _patch_subprocess_run(monkeypatch, returncode=0)
 
     prs = AsyncMock()
     prs.create_issue = AsyncMock(return_value=0)
     loop = _loop(tmp_path, prs=prs)
+    repo_root = loop._config.repo_root
+    _write_committed_git_cassette(repo_root, stdout="[main abc1234] initial\n")
 
-    # Tick #1: PR filed, staged cassette overwrites committed.
+    # Tick #1: drift → PR filed → dedup key recorded.
     first = await loop._do_work()
     assert first["status"] == "refreshed"
     assert len(fake_pr.calls) == 1
     assert len(replay_calls) == 1
 
-    # Tick #2: committed matches recorder → no drift, no extra work.
+    # repo_root was NOT mutated — the committed cassette still holds the
+    # original bytes (the refresh diff lives only in the torn-down worktree).
+    committed = repo_root / "tests/trust/contracts/cassettes/git/commit.yaml"
+    assert b"initial" in committed.read_bytes()
+    assert b"renamed" not in committed.read_bytes()
+
+    # Tick #2: same drift, but the dedup hash short-circuits before any PR.
     second = await loop._do_work()
-    assert second["status"] == "clean", second
-    assert second["adapters_drifted"] == 0
-    assert len(fake_pr.calls) == 1, "clean tick must not fire a second PR"
-    assert len(replay_calls) == 1, "clean tick must not fire a second replay gate"
+    assert second["status"] == "dedup_hit", second
+    assert second["adapters_drifted"] == 1
+    assert len(fake_pr.calls) == 1, "dedup tick must not fire a second PR"
+    assert len(replay_calls) == 1, "dedup tick must not fire a second replay gate"

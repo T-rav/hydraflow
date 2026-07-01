@@ -280,10 +280,11 @@ class TestStateRoundtrip:
         raw = json.loads((tmp_path / "state.json").read_text())
         # JSON keys must be strings
         assert "42" in raw["active_workspaces"]
-        assert "99" in raw["review_attempts"]
+        # review attempts now live in the convergence_ledgers dict (keyed by string)
+        assert "99" in raw["convergence_ledgers"]
         # int keys should NOT appear
         assert 42 not in raw["active_workspaces"]
-        assert 99 not in raw["review_attempts"]
+        assert 99 not in raw["convergence_ledgers"]
 
     def test_multiple_entries_roundtrip(self, tmp_path: Path) -> None:
         """Multiple entries in the same dict field survive roundtrip."""

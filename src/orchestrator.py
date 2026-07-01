@@ -202,9 +202,12 @@ class HydraFlowOrchestrator:
             "edge_proposer": svc.edge_proposer_loop,
             "live_corpus_replay": svc.live_corpus_replay_loop,
             "triage_retry": svc.triage_retry_loop,
+            "convergence_oscillation": svc.convergence_oscillation_loop,
             "entry_evidence": svc.entry_evidence_loop,
+            "fitness_scorecard": svc.fitness_scorecard_loop,
         }
         self._bg_workers = BGWorkerManager(config, self._state, bg_loop_registry)
+        svc.fitness_scorecard_loop.set_loops(bg_loop_registry)
         # Loops that need a reference to BGWorkerManager cannot take one
         # at construction time (chicken-and-egg: BGWorkerManager takes the
         # loop registry). Inject it now, post-construction.
@@ -1060,7 +1063,9 @@ class HydraFlowOrchestrator:
             ("edge_proposer", self._svc.edge_proposer_loop.run),
             ("live_corpus_replay", self._svc.live_corpus_replay_loop.run),
             ("triage_retry", self._svc.triage_retry_loop.run),
+            ("convergence_oscillation", self._svc.convergence_oscillation_loop.run),
             ("entry_evidence", self._svc.entry_evidence_loop.run),
+            ("fitness_scorecard", self._svc.fitness_scorecard_loop.run),
         ]
 
         # Hindsight WAL replay loop removed in Phase 3 cutover — the wiki

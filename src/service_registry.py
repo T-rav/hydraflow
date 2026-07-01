@@ -25,6 +25,7 @@ from caching_issue_store import CachingIssueStore
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
 from config import Credentials, HydraFlowConfig
 from contract_refresh_loop import ContractRefreshLoop
+from convergence_oscillation_loop import ConvergenceOscillationLoop
 from corpus_learning_loop import CorpusLearningLoop
 from cost_budget_watcher_loop import CostBudgetWatcherLoop  # noqa: TCH001
 from crate_manager import CrateManager
@@ -43,6 +44,7 @@ from epic_sweeper_loop import EpicSweeperLoop
 from events import EventBus
 from execution import SubprocessRunner
 from fake_coverage_auditor_loop import FakeCoverageAuditorLoop
+from fitness_scorecard_loop import FitnessScorecardLoop
 from flake_tracker_loop import FlakeTrackerLoop
 from gate_activation_check import check_gate_activation
 from gate_activator_loop import GateActivatorLoop  # noqa: TCH001
@@ -60,6 +62,7 @@ from live_corpus_replay_loop import (
     LiveCorpusReplayLoop,  # noqa: TCH001 — dataclass annotation
 )
 from log_ingest_loop import LogIngestLoop  # noqa: TCH001 — used in dataclass field
+from loop_fitness import IssueRecord as _IssueRecord
 from memory_backlog_loop import MemoryBacklogLoop
 from merge_conflict_resolver import MergeConflictResolver
 from merge_state_watcher_loop import MergeStateWatcherLoop
@@ -128,6 +131,100 @@ if TYPE_CHECKING:
     from metrics_manager import MetricsManager
 
 logger = logging.getLogger("hydraflow.service_registry")
+
+_ISSUE_LIMIT = 1000
+_PR_LIMIT = 1000
+
+
+def _make_fitness_issue_fetcher(prs: PRManager):
+    """Return an async closure that fetches issues + PRs and maps them to IssueRecord.
+
+    Uses two ``gh`` CLI calls via ``prs._run_gh`` (the same low-level seam
+    used by StaleIssueLoop). If either call returns exactly the --limit count,
+    a warning is logged so the caller knows results may be capped.
+    """
+    import json as _json
+    from datetime import datetime as _datetime
+
+    def _parse_dt(s: str | None) -> _datetime | None:
+        if not s:
+            return None
+        return _datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+    async def _fetcher() -> list[_IssueRecord]:
+        records: list[_IssueRecord] = []
+
+        # -- issues --
+        raw_issues = await prs._run_gh(
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            prs._repo,
+            "--state",
+            "all",
+            "--limit",
+            str(_ISSUE_LIMIT),
+            "--json",
+            "number,state,labels,createdAt,closedAt",
+        )
+        issues: list[dict] = _json.loads(raw_issues) if raw_issues else []
+        if len(issues) == _ISSUE_LIMIT:
+            logger.warning(
+                "fitness_issue_fetcher: issue results capped at %d; "
+                "some issues may be missing from the fitness window",
+                _ISSUE_LIMIT,
+            )
+        for item in issues:
+            records.append(
+                _IssueRecord(
+                    number=item["number"],
+                    labels=[lbl["name"] for lbl in item.get("labels", [])],
+                    is_pr=False,
+                    state=item["state"].lower(),
+                    merged=False,
+                    created_at=_parse_dt(item.get("createdAt")),  # type: ignore[arg-type]
+                    closed_at=_parse_dt(item.get("closedAt")),
+                )
+            )
+
+        # -- pull requests --
+        raw_prs = await prs._run_gh(
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            prs._repo,
+            "--state",
+            "all",
+            "--limit",
+            str(_PR_LIMIT),
+            "--json",
+            "number,state,labels,createdAt,closedAt,mergedAt",
+        )
+        pull_requests: list[dict] = _json.loads(raw_prs) if raw_prs else []
+        if len(pull_requests) == _PR_LIMIT:
+            logger.warning(
+                "fitness_issue_fetcher: PR results capped at %d; "
+                "some PRs may be missing from the fitness window",
+                _PR_LIMIT,
+            )
+        for item in pull_requests:
+            records.append(
+                _IssueRecord(
+                    number=item["number"],
+                    labels=[lbl["name"] for lbl in item.get("labels", [])],
+                    is_pr=True,
+                    state=item["state"].lower(),
+                    merged=item.get("mergedAt") is not None,
+                    created_at=_parse_dt(item.get("createdAt")),  # type: ignore[arg-type]
+                    closed_at=_parse_dt(item.get("closedAt")),
+                )
+            )
+
+        return records
+
+    return _fetcher
 
 
 @dataclass
@@ -230,6 +327,8 @@ class ServiceRegistry:
     entry_evidence_loop: EntryEvidenceLoop
     live_corpus_replay_loop: LiveCorpusReplayLoop
     triage_retry_loop: TriageRetryLoop
+    convergence_oscillation_loop: ConvergenceOscillationLoop
+    fitness_scorecard_loop: FitnessScorecardLoop
 
     # Optional integrations
 
@@ -984,6 +1083,12 @@ def build_services(
         pr_manager=prs,
         deps=loop_deps,
     )
+    convergence_oscillation_loop = ConvergenceOscillationLoop(
+        config=config,
+        state=state,
+        pr_manager=prs,
+        deps=loop_deps,
+    )
     gh_cache_loop = GitHubCacheLoop(config, gh_cache, deps=loop_deps)  # noqa: F841
     from dedup_store import DedupStore  # noqa: PLC0415
 
@@ -1307,10 +1412,11 @@ def build_services(
     # Term-Proposer (ADR-0054). Production adapters wire the loop to:
     # - ClaudeCLIClient: shells out to `claude -p` via SubprocessRunner,
     #   mirroring `wiki_compiler.WikiCompiler._call_model`.
-    # - OpenAutoPRBotPRPort: writes term files and delegates to
-    #   `auto_pr.open_automated_pr_async` for the worktree → commit →
-    #   push → `gh pr create` flow. `auto_merge=False` — DependabotMergeLoop
-    #   handles auto-merge once the PR carries `hydraflow-ul-proposed`.
+    # - OpenAutoPRBotPRPort: writes term files INTO an ephemeral worktree and
+    #   delegates to `auto_pr.generate_and_open_pr_async` for the commit →
+    #   push → `gh pr create` flow — repo_root is never mutated (#9539).
+    #   `auto_merge=False` — DependabotMergeLoop handles auto-merge once the
+    #   PR carries `hydraflow-ul-proposed`.
     from term_proposer_llm import TermProposerLLM  # noqa: PLC0415
     from term_proposer_loop import TermProposerLoop  # noqa: PLC0415
     from term_proposer_runtime import (  # noqa: PLC0415
@@ -1378,6 +1484,14 @@ def build_services(
         pr_port=term_proposer_pr_port,
         repo_root=config.repo_root,
         dedup_path=config.data_root / "dedup" / "entry_evidence.json",
+    )
+
+    _fitness_issue_fetcher = _make_fitness_issue_fetcher(prs)
+    fitness_scorecard_loop = FitnessScorecardLoop(
+        config=config,
+        deps=loop_deps,
+        issue_fetcher=_fitness_issue_fetcher,
+        repo_root=config.repo_root,
     )
 
     return ServiceRegistry(
@@ -1461,4 +1575,6 @@ def build_services(
         entry_evidence_loop=entry_evidence_loop,
         live_corpus_replay_loop=_live_corpus_replay_loop,
         triage_retry_loop=triage_retry_loop,
+        convergence_oscillation_loop=convergence_oscillation_loop,
+        fitness_scorecard_loop=fitness_scorecard_loop,
     )

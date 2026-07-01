@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from mockworld.fakes import FakeLLM
 from review_advisor import (
+    _POST_VERIFY_LENS_GUIDANCE,
     BLAST_RADIUS_RETRIES,
     CRITICAL_PATHS,
     SURFACE_ADVISOR_CONFIGS,
@@ -2002,3 +2003,95 @@ class TestReviewBlastRadiusState:
 
     def test_min_review_passes_high(self):
         assert min_review_passes_for_blast_radius("high") == 3
+
+
+class TestPostVerifyInputLens:
+    def test_post_verify_input_accepts_lens(self):
+        inp = PostVerifyInput(
+            surface="pr_review", diff="d", executor_verdict_summary="s", lens="security"
+        )
+        assert inp.lens == "security"
+
+    def test_post_verify_input_round_trips(self):
+        inp = PostVerifyInput(
+            surface="pr_review", diff="d", executor_verdict_summary="s", lens="spec"
+        )
+        assert PostVerifyInput.model_validate_json(inp.model_dump_json()).lens == "spec"
+
+    def test_build_prompt_varies_by_lens(self):
+        runner = _StubAdvisorRunner(
+            '{"verdict":"APPROVE","reasoning":"ok","disagreements":[]}'
+        )
+        adv = PostVerifyAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        base = adv._build_prompt(
+            PostVerifyInput(surface="pr_review", diff="d", executor_verdict_summary="s")
+        )
+        sec = adv._build_prompt(
+            PostVerifyInput(
+                surface="pr_review",
+                diff="d",
+                executor_verdict_summary="s",
+                lens="security",
+            )
+        )
+        assert sec != base
+        assert "security" in sec.lower()
+
+    def test_lens_guidance_dict_is_importable_and_has_three_keys(self):
+        assert set(_POST_VERIFY_LENS_GUIDANCE) == {"correctness", "security", "spec"}
+        for v in _POST_VERIFY_LENS_GUIDANCE.values():
+            assert isinstance(v, str) and len(v) > 0
+
+
+class TestPostVerifyLensRoleTag:
+    """FIX 1: pin that the lens value propagates as the role tag to the runner.
+
+    The role tag is the only routing signal MockWorld has to dispatch advisor
+    calls to the correct scripted queue. If lens is set, the runner must see
+    'post_verify:<lens>'; if lens is None, the runner must see 'post_verify'.
+    """
+
+    def test_role_tag_with_lens_reaches_runner(self):
+        runner = _StubAdvisorRunner(
+            '{"verdict":"APPROVE","reasoning":"ok","disagreements":[]}'
+        )
+        advisor = PostVerifyAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        asyncio.run(
+            advisor.run(
+                PostVerifyInput(
+                    surface="pr_review",
+                    diff="d",
+                    executor_verdict_summary="x",
+                    lens="security",
+                )
+            )
+        )
+        assert len(runner.calls) == 1
+        assert runner.calls[0]["role"] == "post_verify:security"
+
+    def test_role_tag_without_lens_reaches_runner(self):
+        runner = _StubAdvisorRunner(
+            '{"verdict":"APPROVE","reasoning":"ok","disagreements":[]}'
+        )
+        advisor = PostVerifyAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        asyncio.run(
+            advisor.run(
+                PostVerifyInput(
+                    surface="pr_review",
+                    diff="d",
+                    executor_verdict_summary="x",
+                    lens=None,
+                )
+            )
+        )
+        assert len(runner.calls) == 1
+        assert runner.calls[0]["role"] == "post_verify"

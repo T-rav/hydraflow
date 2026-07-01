@@ -946,14 +946,16 @@ def _build_corpus_learning(ports: dict[str, Any], config: Any, deps: Any) -> Any
         deps=deps,
     )
 
-    # Optional: replace the auto_pr seam on the loop's module with a
-    # seeded async callable so tests can assert the opened PR without
-    # shelling out to ``git``/``gh``.
+    # Optional: replace the auto_pr seam with a seeded async callable so
+    # tests can assert the opened PR without shelling out to ``git``/``gh``.
+    # The loop now generates the case tree inside the worktree (#9539) and
+    # lazily imports :func:`auto_pr.generate_and_open_pr_async`, so the seam
+    # to patch is on the ``auto_pr`` module itself (mirrors DiagramLoop).
     auto_pr_stub = ports.get("corpus_learning_auto_pr")
     if auto_pr_stub is not None:
-        import corpus_learning_loop as _mod  # noqa: PLC0415
+        import auto_pr as _auto_pr  # noqa: PLC0415
 
-        _mod.open_automated_pr_async = auto_pr_stub  # type: ignore[assignment]
+        _auto_pr.generate_and_open_pr_async = auto_pr_stub  # type: ignore[assignment]
 
     return loop
 
@@ -1087,7 +1089,9 @@ def _build_contract_refresh(ports: dict[str, Any], config: Any, deps: Any) -> An
     * ``contract_refresh_record_git`` → ``record_git``
     * ``contract_refresh_record_docker`` → ``record_docker``
     * ``contract_refresh_record_claude`` → ``record_claude_stream``
-    * ``contract_refresh_auto_pr`` → ``open_automated_pr_async``
+    * ``contract_refresh_auto_pr`` → ``auto_pr.generate_and_open_pr_async``
+      (generate-in-worktree, #9539 — the loop imports it lazily so the
+      seam lives on the ``auto_pr`` module, not ``crl_module``)
 
     ``state`` defaults to a MagicMock wired with int-returning stubs for
     the Task 18 attempt counters (``get_contract_refresh_attempts`` →
@@ -1124,13 +1128,16 @@ def _build_contract_refresh(ports: dict[str, Any], config: Any, deps: Any) -> An
         "contract_refresh_record_claude", default_empty
     )
 
-    # Optional: replace the auto_pr seam on the loop's module with a
-    # seeded async callable so tests can assert the opened PR shape
-    # without shelling out to ``git`` / ``gh``. Mirrors the F1
-    # corpus-learning pattern.
+    # Optional: replace the generate-in-worktree seam (#9539) with a seeded
+    # async callable so tests can assert the opened PR shape without shelling
+    # out to ``git`` / ``gh`` or creating a real worktree. The loop imports
+    # ``generate_and_open_pr_async`` lazily from ``auto_pr`` at call time, so
+    # the seam must be patched on the ``auto_pr`` module (not ``_module``).
     auto_pr_stub = ports.get("contract_refresh_auto_pr")
     if auto_pr_stub is not None:
-        _module.open_automated_pr_async = auto_pr_stub  # type: ignore[assignment]
+        import auto_pr as _auto_pr_module  # noqa: PLC0415
+
+        _auto_pr_module.generate_and_open_pr_async = auto_pr_stub  # type: ignore[assignment]
 
     loop = ContractRefreshLoop(
         config=config,
@@ -1418,6 +1425,63 @@ def _build_triage_retry(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
+def _build_convergence_oscillation(
+    ports: dict[str, Any], config: Any, deps: Any
+) -> Any:
+    """Build ConvergenceOscillationLoop for scenarios (ADR-0098).
+
+    Caretaker loop that scans ConvergenceLedger entries held in StateTracker
+    and escalates cross-boundary oscillation to HITL once per issue.  Tests
+    seed a FakeGitHub via ``ports['github']``; the optional
+    ``convergence_oscillation_state`` port lets a scenario inject a pre-built
+    StateTracker mock when it needs to assert on ledger scanning or escalation.
+    """
+    from convergence_oscillation_loop import ConvergenceOscillationLoop  # noqa: PLC0415
+
+    state = ports.get("convergence_oscillation_state")
+    if state is None:
+        state = MagicMock()
+        state.iter_convergence_ledgers.return_value = []
+        state.mark_oscillation_escalated.return_value = None
+        ports["convergence_oscillation_state"] = state
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return ConvergenceOscillationLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        deps=deps,
+    )
+
+
+def _build_fitness_scorecard(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build FitnessScorecardLoop for scenarios (ADR-0093).
+
+    Read-only caretaker loop. Scenarios that need to assert on emitted
+    LOOP_FITNESS_UPDATE events can seed ``ports['fitness_issue_fetcher']``
+    with an async callable returning a list of IssueRecord-like objects.
+    The default is a no-op async function returning an empty list, which
+    is sufficient for smoke/wiring tests.
+    """
+    from fitness_scorecard_loop import FitnessScorecardLoop  # noqa: PLC0415
+
+    issue_fetcher = ports.get("fitness_issue_fetcher")
+    if issue_fetcher is None:
+
+        async def _no_issues() -> list:
+            return []
+
+        issue_fetcher = _no_issues
+        ports["fitness_issue_fetcher"] = issue_fetcher
+
+    return FitnessScorecardLoop(
+        config=config,
+        deps=deps,
+        issue_fetcher=issue_fetcher,
+    )
+
+
 _BUILDERS: dict[str, Any] = {
     # phase 1
     "ci_monitor": _build_ci_monitor,
@@ -1481,6 +1545,10 @@ _BUILDERS: dict[str, Any] = {
     "staging_promotion": _build_staging_promotion,
     # factory-phase drift mitigation (ADR-0063 W2)
     "triage_retry": _build_triage_retry,
+    # convergence oscillation escalation (ADR-0098)
+    "convergence_oscillation": _build_convergence_oscillation,
+    # loop fitness scorecard (ADR-0093)
+    "fitness_scorecard": _build_fitness_scorecard,
 }
 
 

@@ -4,7 +4,8 @@ topic: gotchas
 source_issue: 8376
 source_phase: synthesis
 created_at: 2026-04-21T00:00:00+00:00
-status: active
+status: superseded
+superseded_by: 0012
 ---
 
 # Ruff Strips Unused Imports Mid-TDD Cycle

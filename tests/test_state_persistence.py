@@ -107,6 +107,20 @@ class TestAtomicSave:
 
 
 class TestReviewAttemptTracking:
+    def test_increment_review_attempts_uses_ledger(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        assert tracker.get_review_attempts(7) == 0
+        assert tracker.increment_review_attempts(7) == 1
+        # the count lives ONLY in the ledger — no legacy field
+        assert tracker.get_convergence_ledger(7).get_attempts("review") == 1
+        assert not hasattr(tracker._data, "review_attempts")
+
+    def test_min_review_passes_reads_ledger_blast_radius(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        ledger = tracker.ensure_convergence_ledger(7, blast_radius="high")
+        tracker.save_convergence_ledger(7, ledger)
+        assert tracker.min_review_passes_required(7) == 3  # high -> 3
+
     def test_get_review_attempts_defaults_to_zero(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
         assert tracker.get_review_attempts(42) == 0
@@ -150,6 +164,49 @@ class TestReviewAttemptTracking:
         tracker.increment_review_attempts(42)
         tracker.reset()
         assert tracker.get_review_attempts(42) == 0
+
+
+# ---------------------------------------------------------------------------
+# Quality-fix attempt ledger
+# ---------------------------------------------------------------------------
+
+
+class TestQualityFixLedger:
+    def test_set_quality_fix_attempts_records_in_ledger(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_quality_fix_attempts(42, 3)
+        led = tracker.get_convergence_ledger(42)
+        assert led is not None
+        assert led.stage_state["quality_fix"].attempts == 3
+
+    def test_set_quality_fix_attempts_overwrites(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_quality_fix_attempts(42, 2)
+        tracker.set_quality_fix_attempts(42, 5)
+        led = tracker.get_convergence_ledger(42)
+        assert led.stage_state["quality_fix"].attempts == 5
+
+    def test_set_quality_fix_attempts_zero(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_quality_fix_attempts(42, 0)
+        led = tracker.get_convergence_ledger(42)
+        assert led.stage_state["quality_fix"].attempts == 0
+
+    def test_get_convergence_ledger_returns_zero_when_absent(
+        self, tmp_path: Path
+    ) -> None:
+        tracker = make_tracker(tmp_path)
+        led = tracker.get_convergence_ledger(99)
+        assert led is None
+
+    def test_quality_fix_attempts_persist_across_reload(self, tmp_path: Path) -> None:
+        state_file = tmp_path / "state.json"
+        tracker = StateTracker(state_file)
+        tracker.set_quality_fix_attempts(42, 4)
+
+        tracker2 = StateTracker(state_file)
+        led = tracker2.get_convergence_ledger(42)
+        assert led.stage_state["quality_fix"].attempts == 4
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +273,6 @@ class TestStateDataModel:
         assert data.reviewed_prs == {}
         assert data.hitl_origins == {}
         assert data.hitl_causes == {}
-        assert data.review_attempts == {}
         assert data.review_feedback == {}
         assert data.worker_result_meta == {}
         assert data.issue_attempts == {}
@@ -283,7 +339,11 @@ class TestStateDataModel:
 class TestWorkerResultMeta:
     def test_set_and_get_worker_result_meta(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
-        meta = {"quality_fix_attempts": 2, "duration_seconds": 120.5, "error": None}
+        meta = {
+            "pre_quality_review_attempts": 2,
+            "duration_seconds": 120.5,
+            "error": None,
+        }
         tracker.set_worker_result_meta(42, meta)
         assert tracker.get_worker_result_meta(42) == meta
 
@@ -294,13 +354,13 @@ class TestWorkerResultMeta:
     def test_set_triggers_save(self, tmp_path: Path) -> None:
         state_file = tmp_path / "state.json"
         tracker = StateTracker(state_file)
-        tracker.set_worker_result_meta(42, {"quality_fix_attempts": 1})
+        tracker.set_worker_result_meta(42, {"pre_quality_review_attempts": 1})
         assert state_file.exists()
 
     def test_persists_across_reload(self, tmp_path: Path) -> None:
         state_file = tmp_path / "state.json"
         tracker = StateTracker(state_file)
-        meta = {"quality_fix_attempts": 3, "duration_seconds": 200.0}
+        meta = {"pre_quality_review_attempts": 3, "duration_seconds": 200.0}
         tracker.set_worker_result_meta(42, meta)
 
         tracker2 = StateTracker(state_file)
@@ -308,16 +368,16 @@ class TestWorkerResultMeta:
 
     def test_multiple_issues_tracked_independently(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
-        tracker.set_worker_result_meta(1, {"quality_fix_attempts": 0})
-        tracker.set_worker_result_meta(2, {"quality_fix_attempts": 3})
-        assert tracker.get_worker_result_meta(1) == {"quality_fix_attempts": 0}
-        assert tracker.get_worker_result_meta(2) == {"quality_fix_attempts": 3}
+        tracker.set_worker_result_meta(1, {"pre_quality_review_attempts": 0})
+        tracker.set_worker_result_meta(2, {"pre_quality_review_attempts": 3})
+        assert tracker.get_worker_result_meta(1) == {"pre_quality_review_attempts": 0}
+        assert tracker.get_worker_result_meta(2) == {"pre_quality_review_attempts": 3}
 
     def test_overwrites_previous_meta(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
-        tracker.set_worker_result_meta(42, {"quality_fix_attempts": 1})
-        tracker.set_worker_result_meta(42, {"quality_fix_attempts": 5})
-        assert tracker.get_worker_result_meta(42) == {"quality_fix_attempts": 5}
+        tracker.set_worker_result_meta(42, {"pre_quality_review_attempts": 1})
+        tracker.set_worker_result_meta(42, {"pre_quality_review_attempts": 5})
+        assert tracker.get_worker_result_meta(42) == {"pre_quality_review_attempts": 5}
 
     def test_migration_adds_worker_result_meta_to_old_file(
         self, tmp_path: Path

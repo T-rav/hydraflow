@@ -11,6 +11,7 @@ graph LR
   end
   subgraph caretaker
     ADRCouncilReviewer["ADRCouncilReviewer<br/><i>service</i>"]
+    ADRPreValidator["ADRPreValidator<br/><i>service</i>"]
     ADRReviewerLoop["ADRReviewerLoop<br/><i>loop</i>"]
     AdrTouchpointAuditorLoop["AdrTouchpointAuditorLoop<br/><i>loop</i>"]
     CIMonitorLoop["CIMonitorLoop<br/><i>loop</i>"]
@@ -22,10 +23,13 @@ graph LR
     EdgeProposerLoop["EdgeProposerLoop<br/><i>loop</i>"]
     EntryEvidenceLoop["EntryEvidenceLoop<br/><i>loop</i>"]
     FakeCoverageAuditorLoop["FakeCoverageAuditorLoop<br/><i>loop</i>"]
+    FitnessContext["FitnessContext<br/><i>value_object</i>"]
+    FitnessScorecardLoop["FitnessScorecardLoop<br/><i>loop</i>"]
     FlakeTrackerLoop["FlakeTrackerLoop<br/><i>loop</i>"]
     GitHubCacheLoop["GitHubCacheLoop<br/><i>loop</i>"]
     GitHubCacheLoop["GitHubCacheLoop<br/><i>loop</i>"]
     LiveCorpusReplayLoop["LiveCorpusReplayLoop<br/><i>loop</i>"]
+    LoopFitness["LoopFitness<br/><i>value_object</i>"]
     MergeStateWatcherLoop["MergeStateWatcherLoop<br/><i>loop</i>"]
     PricingRefreshLoop["PricingRefreshLoop<br/><i>loop</i>"]
     PRUnstickerLoop["PRUnstickerLoop<br/><i>loop</i>"]
@@ -39,10 +43,12 @@ graph LR
   end
   subgraph shared-kernel
     Actuator["Actuator<br/><i>control_role</i>"]
+    ADRIndex["ADRIndex<br/><i>service</i>"]
     AgentPort["AgentPort<br/><i>port</i>"]
     BaseBackgroundLoop["BaseBackgroundLoop<br/><i>loop</i>"]
     BotPRPort["BotPRPort<br/><i>port</i>"]
     Controller["Controller<br/><i>control_role</i>"]
+    Credentials["Credentials<br/><i>value_object</i>"]
     Error["Error<br/><i>control_role</i>"]
     EventBus["EventBus<br/><i>service</i>"]
     Governor["Governor<br/><i>control_role</i>"]
@@ -62,6 +68,7 @@ graph LR
   end
   ADRCouncilReviewer -->|depends_on| EventBus
   ADRCouncilReviewer -->|depends_on| HydraFlowConfig
+  ADRCouncilReviewer -->|depends_on| Credentials
   ADRReviewerLoop -->|depends_on| HydraFlowConfig
   ADRReviewerLoop -->|depends_on| BaseBackgroundLoop
   ADRReviewerLoop -->|implements| BaseBackgroundLoop
@@ -155,12 +162,14 @@ graph LR
   ReportIssueLoop -->|depends_on| HydraFlowConfig
   ReportIssueLoop -->|depends_on| StateTracker
   ReportIssueLoop -->|implements| BaseBackgroundLoop
+  ReportIssueLoop -->|depends_on| Credentials
   ReviewInsightStorePort -->|depends_on| Task
   RouteBackCounterPort -->|depends_on| PRPort
   SentryLoop -->|depends_on| BaseBackgroundLoop
   SentryLoop -->|depends_on| HydraFlowConfig
   SentryLoop -->|depends_on| StateTracker
   SentryLoop -->|implements| BaseBackgroundLoop
+  SentryLoop -->|depends_on| Credentials
   SkillPromptEvalLoop -->|depends_on| BaseBackgroundLoop
   SkillPromptEvalLoop -->|depends_on| HydraFlowConfig
   SkillPromptEvalLoop -->|depends_on| StateTracker
@@ -184,5 +193,6 @@ graph LR
   WorkspaceGCLoop -->|depends_on| WorkspacePort
   WorkspaceGCLoop -->|depends_on| PRPort
   WorkspaceGCLoop -->|implements| BaseBackgroundLoop
+  WorkspaceGCLoop -->|depends_on| Credentials
   WorkspacePort -->|depends_on| Task
 ```
