@@ -26,6 +26,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,14 @@ _TITLE_RE = re.compile(r"^#\s*ADR-(\d{4}):\s*(.+?)\s*$", re.MULTILINE)
 _STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(.+?)\s*$", re.MULTILINE)
 _CONTEXT_RE = re.compile(r"##\s+Context\s*\n\s*\n(.+?)(?=\n\s*\n|\n##\s|\Z)", re.DOTALL)
 _SUPERSEDED_RE = re.compile(r"Superseded\s+by\s+(ADR-\d{4})", re.IGNORECASE)
+_ENFORCEMENT_RE = re.compile(r"\*\*Enforcement:\*\*\s*(.+?)\s*$", re.MULTILINE)
+# Capture the Enforced-by block: the field line plus any indented/continued
+# lines until the next blank line or the next **Field:** / ## heading.
+_ENFORCED_BY_RE = re.compile(
+    r"\*\*Enforced by:\*\*[ \t]*(.*?)(?=\n\s*\n|\n\*\*[A-Z]|\n##\s|\Z)",
+    re.DOTALL,
+)
+_KNOWN_ENFORCEMENT = frozenset({"enforced", "manual", "decision-of-record"})
 # Matches `src/some/path.py` or `src/some/path.py:Symbol[.attr...]` citations.
 # Shared with adr_pre_validator._SOURCE_SYMBOL_RE. Used for
 # ADR↔source-file inverse indexing so the CI gate can flag PRs
@@ -44,6 +53,45 @@ _SUPERSEDED_RE = re.compile(r"Superseded\s+by\s+(ADR-\d{4})", re.IGNORECASE)
 _SOURCE_FILE_CITATION_RE = re.compile(
     r"`(src/[^`:\s]+\.py)(?::([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*))?`"
 )
+
+
+@dataclass(frozen=True)
+class Check:
+    """One executable/resolvable check cited by an ADR's Enforced-by field."""
+
+    kind: Literal["pytest", "make", "prose"]
+    target: str
+    raw: str
+
+
+def parse_enforced_by(block: str) -> tuple[Check, ...]:
+    """Parse an Enforced-by block into typed checks. One check per line.
+
+    Commas are NOT separators (so `manual` prose with commas stays intact).
+    A line beginning `pytest:` or `make:` is typed; anything else is `prose`
+    (legal only under Enforcement: manual — the coverage ratchet enforces that).
+    """
+    checks: list[Check] = []
+    for raw_line in block.splitlines():
+        line = raw_line.strip().rstrip(",").strip()
+        if not line:
+            continue
+        if line.startswith("pytest:"):
+            checks.append(
+                Check(kind="pytest", target=line[len("pytest:") :].strip(), raw=line)
+            )
+        elif line.startswith("make:"):
+            checks.append(
+                Check(kind="make", target=line[len("make:") :].strip(), raw=line)
+            )
+        else:
+            checks.append(Check(kind="prose", target=line, raw=line))
+    return tuple(checks)
+
+
+def _normalize_enforcement(raw: str) -> str:
+    low = raw.strip().lower()
+    return low if low in _KNOWN_ENFORCEMENT else "unknown"
 
 
 @dataclass(frozen=True)
@@ -63,6 +111,10 @@ class ADR:
     change to that file (backwards-compatible with pre-symbol citations).
     A non-empty frozenset means *only* changes to those symbols fire the
     gate."""
+    enforcement: str = "unknown"
+    """enforced | manual | decision-of-record | unknown (ADR-0094)."""
+    enforced_by: tuple[Check, ...] = ()
+    """Typed checks parsed from **Enforced by:**; () for decision-of-record."""
 
 
 def parse_adr_file(path: Path) -> ADR:
@@ -111,6 +163,11 @@ def parse_adr_file(path: Path) -> ADR:
     source_files = frozenset(source_symbols.keys())
     source_symbols_frozen = {f: frozenset(s) for f, s in source_symbols.items()}
 
+    enf_match = _ENFORCEMENT_RE.search(text)
+    enforcement = _normalize_enforcement(enf_match.group(1)) if enf_match else "unknown"
+    eb_match = _ENFORCED_BY_RE.search(text)
+    enforced_by = parse_enforced_by(eb_match.group(1)) if eb_match else ()
+
     return ADR(
         number=number,
         title=title,
@@ -119,6 +176,8 @@ def parse_adr_file(path: Path) -> ADR:
         superseded_by=superseded_by,
         source_files=source_files,
         source_symbols=source_symbols_frozen,
+        enforcement=enforcement,
+        enforced_by=enforced_by,
     )
 
 
