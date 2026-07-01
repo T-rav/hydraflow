@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from analysis import PlanAnalyzer
 from config import HydraFlowConfig
+from convergence_recording import record_stage_verdict, signatures_from_concerns
 from events import EventBus
 from exception_classify import reraise_on_credit_or_bug
 from harness_insights import FailureCategory, HarnessInsightStore
@@ -59,6 +60,16 @@ if TYPE_CHECKING:
     from wiki_compiler import CorroborationDecision, WikiCompiler  # noqa: TCH004
 
 logger = logging.getLogger("hydraflow.plan_phase")
+
+# Verdict map for ConvergenceLedger boundary recording (ADR-0045 / convergence gate).
+# "ADVANCE" = issue moves forward in the pipeline.
+# "LOOP_BACK" = issue failed planning and must re-enter the plan stage.
+# "ESCALATE" = issue is handed off to HITL.
+_PLAN_VERDICT_MAP: dict[str, str] = {
+    "success": "ADVANCE",
+    "failed": "LOOP_BACK",
+    "escalated": "ESCALATE",
+}
 
 # Minimum body length for auto-filed sub-issues discovered during planning.
 _MIN_ISSUE_BODY_CHARS: int = 50
@@ -1303,6 +1314,16 @@ class PlanPhase:
                         else:
                             closed = await self._handle_already_satisfied(issue, result)
                             if closed:
+                                record_stage_verdict(
+                                    self._state,
+                                    enabled=self._config.convergence_gate_enabled,
+                                    issue_number=issue.id,
+                                    stage="plan",
+                                    decision="ADVANCE",
+                                    signatures=signatures_from_concerns(
+                                        adv.pending_concerns
+                                    ),
+                                )
                                 return result
                             # Evidence validation failed — escalate directly
                             # to HITL (do NOT fall through to _handle_plan_failure
@@ -1347,6 +1368,16 @@ class PlanPhase:
                         ts_status = "failed"
 
                     await self._post_plan_transcript(issue, result, status=ts_status)
+                    _verdict = _PLAN_VERDICT_MAP.get(ts_status)
+                    if _verdict is not None:
+                        record_stage_verdict(
+                            self._state,
+                            enabled=self._config.convergence_gate_enabled,
+                            issue_number=issue.id,
+                            stage="plan",
+                            decision=_verdict,
+                            signatures=signatures_from_concerns(adv.pending_concerns),
+                        )
                     return result
 
     def _plan_one_with_context(
