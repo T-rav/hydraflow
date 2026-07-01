@@ -102,6 +102,13 @@ def seed() -> MockWorldSeed:
     ``plan-LOOP_BACK`` state until the oscillation loop escalates it.
     """
     return MockWorldSeed(
+        # Only the convergence-oscillation caretaker is enabled; pipeline phase
+        # orchestrators (triage/shape/plan) run regardless (loops_enabled gates
+        # caretakers only, per sandbox_main._build_caretaker_enabled_cb). This
+        # also makes the Tier-1 in-process parity test use the run_with_loops
+        # path instead of single-shot run_pipeline (which cannot reproduce the
+        # multi-cycle triage+plan LOOP_BACK oscillation).
+        loops_enabled=["convergence_oscillation"],
         issues=[
             {
                 "number": 1,

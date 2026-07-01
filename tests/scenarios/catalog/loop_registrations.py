@@ -1441,7 +1441,7 @@ def _build_convergence_oscillation(
     state = ports.get("convergence_oscillation_state")
     if state is None:
         state = MagicMock()
-        state.iter_convergence_ledgers.return_value = iter([])
+        state.iter_convergence_ledgers.return_value = []
         state.mark_oscillation_escalated.return_value = None
         ports["convergence_oscillation_state"] = state
 

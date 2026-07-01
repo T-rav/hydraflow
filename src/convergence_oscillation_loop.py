@@ -128,7 +128,7 @@ class ConvergenceOscillationLoop(BaseBackgroundLoop):
                     "converging. Autonomous re-routing has not resolved the churn; "
                     "a human decision is required to unblock it.\n\n"
                     "Per ADR-0029 (caretaker pattern) and ADR-0049 (kill-switch "
-                    "convention), this escalation will not be repeated — the ledger "
+                    "convention), this escalation will not be repeated. The ledger "
                     "is flagged so subsequent ticks skip this issue."
                 )
                 labels = [
