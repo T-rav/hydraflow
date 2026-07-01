@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import tokenize
 from pathlib import Path
 
 from disturbance.models import Finding
@@ -38,8 +39,15 @@ class SuppressionsDetector:
     def _scan(self, repo_root: Path, path: Path) -> list[Finding]:
         rel = path.relative_to(repo_root).as_posix()
         out: list[Finding] = []
-        for line in path.read_text(encoding="utf-8").splitlines():
-            m = _SUPPRESSION_RE.search(line)
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                tokens = list(tokenize.generate_tokens(fh.readline))
+        except (tokenize.TokenError, SyntaxError, IndentationError, UnicodeDecodeError):
+            return out
+        for tok in tokens:
+            if tok.type != tokenize.COMMENT:
+                continue
+            m = _SUPPRESSION_RE.search(tok.string)
             if not m:
                 continue
             code = _normalize(m.group("kind"), m.group("detail"))
@@ -48,7 +56,7 @@ class SuppressionsDetector:
                     dimension="suppressions",
                     path=rel,
                     signature=f"{rel}::{code}",
-                    message=f"suppression `{m.group(0).strip()}`",
+                    message=f"suppression `{tok.string.strip()}`",
                 )
             )
         return out

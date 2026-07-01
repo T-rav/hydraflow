@@ -43,3 +43,10 @@ def test_signature_is_line_number_independent(tmp_path: Path) -> None:
 def test_clean_file_yields_nothing(tmp_path: Path) -> None:
     _write(tmp_path, "src/a.py", "x = 1\n")
     assert SuppressionsDetector().detect(tmp_path) == []
+
+
+def test_ignores_suppression_inside_string_literal(tmp_path: Path) -> None:
+    _write(tmp_path, "src/a.py", 'x = "# type: ignore[foo]"\ny = 1  # noqa: E501\n')
+    findings = SuppressionsDetector().detect(tmp_path)
+    # Only the real trailing comment counts; the string literal is ignored.
+    assert [f.signature for f in findings] == ["src/a.py::noqa:E501"]
