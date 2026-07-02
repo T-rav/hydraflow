@@ -6,49 +6,13 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
-- `6dbf0e9` — Merge remote-tracking branch 'origin/staging' into worktree-control-theory-adr *(2026-07-01)*
-- `9914531` — ADR conformance as a measured contract (ADR-0098) (#9684) (#9684) *(2026-07-01)*
-- `ff073fb` — Merge remote-tracking branch 'origin/staging' into worktree-control-theory-adr *(2026-07-01)*
-- `cd3404d` — chore(adr): renumber control-theory ADR 0094->0099 (staging claimed 0094 for convergence) *(2026-07-01)*
-- `7eb71e4` — Two-level convergence Phase 2d: oscillation caretaker loop (#9683) (#9683) *(2026-07-01)*
-- `7503e7e` — Two-level convergence Phase 2c: migrate attempt counters into the ledger (#9681) (#9681) *(2026-07-01)*
-- `684e516` — chore(arch): regenerate generated docs for ADR-0094 + control-role terms *(2026-06-30)*
-- `7674bb5` — docs(adr): add ADR-0094 orchestration as a control system (Proposed) *(2026-06-30)*
-- `5476b45` — fix(ul): tighten Governor/Set-point term definitions to match anchors (review) *(2026-06-30)*
-- `8ef7487` — feat(ul): seed seven control-theory role terms (ADR-0094) *(2026-06-30)*
-- `62cd012` — Two-level convergence Phase 2b: boundary verdict recording (Triage/Shape/Plan) (#9677) (#9677) *(2026-06-30)*
-- `e396bad` — Merge origin/staging into Phase1+2a; resolve ADR-0093 collision (convergence ADRs -> 0094/0095), union config + README *(2026-06-30)*
-- `1877391` — feat: loop-fitness scorecard (read-only measurement substrate) (#9672) (#9672) *(2026-06-30)*
-- `a642ac1` — docs(adr-0094): soften escalate-parity wording (reject adds oscillation cause) *(2026-06-30)*
-- `5a5a105` — docs(adr): ADR-0094 approve-path gating + live convergence (Phase 2a) *(2026-06-30)*
-- `4c9e6dc` — docs(adr): ADR-0093 two-level convergence (Gate + ConvergenceLedger) *(2026-06-30)*
-
-## 2026-W26
-
-- `5e72016` — Fixes #9080: Provision isolated GitHub contracts sandbox (sandbox session + teardown) (#9512) (#9512) *(2026-06-22)*
-- `0117ea0` — feat(test-adequacy): add deterministic coverage-delta cross-check (#9567) (#9646) (#9646) *(2026-06-22)*
-- `8e3a40d` — feat(ul): term-proposer batch — 1 drafts (#9655) (#9655) *(2026-06-22)*
-- `efdb1cb` — feat(ul): term-proposer batch — 1 drafts (#9654) (#9654) *(2026-06-22)*
-- `6f1dc99` — feat(ul): entry-evidence — 3 new entry links across 1 terms (#9653) (#9653) *(2026-06-22)*
-- `e4d1ef8` — feat(ul): entry-evidence — 27 new entry links across 12 terms (#9638) (#9638) *(2026-06-22)*
-- `1b9ef5b` — feat(ul): edge-proposer — 5 new edges across 5 terms (#9637) (#9637) *(2026-06-22)*
-- `e81d29d` — feat(ul): entry-evidence — 10 new entry links across 5 terms (#9620) (#9620) *(2026-06-22)*
+- `9bf9123` — chore(disturbance): update refs to retired mock-spec test after migration *(2026-07-01)*
+- `185875f` — feat(disturbance): mock-spec detector adapter over existing AST detector *(2026-07-01)*
+- `a63f101` — feat(disturbance): suppression-count detector (type:ignore / noqa) *(2026-07-01)*
+- `7634e20` — feat(disturbance): add Finding/RatchetResult models + ViolationDetector protocol *(2026-07-01)*
 
 ## 2026-W25
 
-- `ef30b34` — feat(ul): edge-proposer — 5 new edges across 5 terms (#9619) (#9619) *(2026-06-21)*
-- `2865085` — feat(ul): term-proposer batch — 1 drafts (#9612) (#9612) *(2026-06-21)*
-- `376ea77` — feat(ul): entry-evidence — 3 new entry links across 2 terms (#9611) (#9611) *(2026-06-21)*
-- `dada382` — feat(ul): entry-evidence — 14 new entry links across 5 terms (#9573) (#9573) *(2026-06-21)*
-- `4dc2b15` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9571) (#9571) *(2026-06-21)*
-- `74c6d83` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9560) (#9560) *(2026-06-21)*
-- `79f2109` — feat(ul): entry-evidence — 20 new entry links across 11 terms (#9549) (#9549) *(2026-06-21)*
-- `27a4fe5` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9534) (#9534) *(2026-06-21)*
-- `9f3ae72` — feat(ul): entry-evidence — 7 new entry links across 4 terms (#9533) (#9533) *(2026-06-21)*
-- `5f5fb99` — feat(ul): entry-evidence — 5 new entry links across 4 terms (#9495) (#9495) *(2026-06-21)*
-- `bfc5425` — feat(ul): entry-evidence — 21 new entry links across 11 terms (#9610) (#9610) *(2026-06-21)*
-- `1e288b0` — feat(ul): entry-evidence — 8 new entry links across 5 terms (#9492) (#9492) *(2026-06-21)*
-- `5e24e54` — Accept ADR-0027: duplicate class merge artifact pattern (#9493) (#9493) *(2026-06-21)*
 - `d1d7e11` — Fixes #9507: ADR-0007/0013/0019 carry the same dashboard drift FP +... (#9518) (#9518) *(2026-06-20)*
 - `69fea6a` — feat(factory): generate-in-worktree foundation + DiagramLoop migration (#9539 pt1) (#9614) (#9614) *(2026-06-19)*
 - `e920762` — feat(loops): per-loop work-cycle watchdog (closes #9556) (#9594) (#9594) *(2026-06-19)*
