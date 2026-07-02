@@ -5,6 +5,8 @@
 - **Refines:** ADR-0094 (two-level convergence: Gate + ConvergenceLedger)
 - **Related:** ADR-0051 (blast-radius review passes), ADR-0059 (advisor-pattern self-repairing review / PostVerifyAdvisor), ADR-0049 (kill-switch convention)
 
+> **Superseded in part by [ADR-0099](0099-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
+
 ## Context
 
 ADR-0094 shipped the convergence `Gate` + `ConvergenceLedger` wired only into the Review **reject** boundary. It explicitly left two things for a later phase and named the supersession trigger: "supersede when the APPROVE path is gated (making `converged` live)." Under Phase 1, `ledger.converged` was structurally unreachable, because the reject path only ever records `LOOP_BACK`/`ESCALATE`, never `ADVANCE`.

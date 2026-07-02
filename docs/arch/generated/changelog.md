@@ -6,9 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
-- `969eb8f` — docs(adr): ADR-0098 convergence oscillation caretaker (Phase 2d) *(2026-07-01)*
-- `eb802af` — feat(convergence): wire ConvergenceOscillationLoop into orchestrator + registries *(2026-07-01)*
-- `036e91c` — feat(convergence): ConvergenceOscillationLoop caretaker (detect + escalate) *(2026-07-01)*
+- `7eb71e4` — Two-level convergence Phase 2d: oscillation caretaker loop (#9683) (#9683) *(2026-07-01)*
 - `7503e7e` — Two-level convergence Phase 2c: migrate attempt counters into the ledger (#9681) (#9681) *(2026-07-01)*
 - `62cd012` — Two-level convergence Phase 2b: boundary verdict recording (Triage/Shape/Plan) (#9677) (#9677) *(2026-06-30)*
 - `e396bad` — Merge origin/staging into Phase1+2a; resolve ADR-0093 collision (convergence ADRs -> 0094/0095), union config + README *(2026-06-30)*

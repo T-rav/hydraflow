@@ -130,6 +130,7 @@ ADR and that named test files actually exist.
 | [0096](0096-boundary-verdict-recording.md) | Boundary verdict recording (Phase 2b) | Accepted |
 | [0097](0097-attempt-counter-migration-to-ledger.md) | Attempt counter migration into the ledger (Phase 2c) | Accepted |
 | [0098](0098-convergence-oscillation-caretaker.md) | Convergence oscillation caretaker (Phase 2d) | Accepted |
+| [0099](0099-convergence-gate-general-availability.md) | Convergence gate general availability (flag removed) | Accepted |
 
 ## Adding a new ADR
 
