@@ -57,6 +57,7 @@ export const initialState = {
   troubleshooting: null,
   trackedReports: [],
   loopFitness: {},
+  adrConformance: {},
   // True when the orchestrator backend is wired to Fake adapters (sandbox tier).
   // Set from /api/control/status. Drives the persistent MOCKWORLD MODE banner.
   mockworldActive: false,
@@ -547,6 +548,8 @@ export function reducer(state, action) {
 
     case 'LOOP_FITNESS':
       return { ...state, loopFitness: action.data }
+    case 'ADR_CONFORMANCE':
+      return { ...state, adrConformance: action.data }
 
     case 'metrics_update':
       return {
@@ -1036,6 +1039,13 @@ export function HydraFlowProvider({ children }) {
     fetchWithRepo('/api/loop-fitness')
       .then(r => r.json())
       .then(data => dispatch({ type: 'LOOP_FITNESS', data }))
+      .catch(() => {})
+  }, [fetchWithRepo])
+
+  const fetchAdrConformance = useCallback(() => {
+    fetchWithRepo('/api/adr-conformance')
+      .then(r => r.json())
+      .then(data => dispatch({ type: 'ADR_CONFORMANCE', data }))
       .catch(() => {})
   }, [fetchWithRepo])
 
@@ -1618,6 +1628,7 @@ export function HydraFlowProvider({ children }) {
       fetchGithubMetrics()
       fetchMetricsHistory()
       fetchLoopFitness()
+      fetchAdrConformance()
       fetchPipeline()
       fetchPipelineStats()
       fetchEpics()
@@ -1653,6 +1664,9 @@ export function HydraFlowProvider({ children }) {
         }
         if (event.type === 'loop_fitness_update') {
           fetchLoopFitness()
+        }
+        if (event.type === 'adr_conformance_update') {
+          fetchAdrConformance()
         }
         // queue_update no longer triggers a pipeline fetch: the QUEUE_UPDATE
         // storm is the source of the REST-poll thrash. The authoritative
@@ -1695,7 +1709,7 @@ export function HydraFlowProvider({ children }) {
       console.warn('[HydraFlow] WebSocket error; awaiting close for reconnect', err)
     }
     wsRef.current = ws
-  }, [state.selectedRepoSlug, applyRepoParam, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchLoopFitness, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo])
+  }, [state.selectedRepoSlug, applyRepoParam, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchLoopFitness, fetchAdrConformance, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo])
 
   useEffect(() => {
     const poll = () => {

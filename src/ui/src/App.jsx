@@ -11,10 +11,11 @@ import { SessionSidebar } from './components/SessionSidebar'
 import { AtlasExplorer } from './components/atlas/AtlasExplorer'
 import { ProjectView } from './components/ProjectView'
 import { LoopFitnessPanel } from './components/LoopFitnessPanel'
+import { AdrConformancePanel } from './components/AdrConformancePanel'
 import { theme } from './theme'
 import { canonicalRepoSlug } from './constants'
 
-const TABS = ['issues', 'hitl', 'outcomes', 'atlas', 'loop-fitness', 'system']
+const TABS = ['issues', 'hitl', 'outcomes', 'atlas', 'loop-fitness', 'adr-conformance', 'system']
 
 const TAB_LABELS = {
   issues: 'Work Stream',
@@ -22,6 +23,7 @@ const TAB_LABELS = {
   hitl: 'HITL',
   atlas: 'Atlas',
   'loop-fitness': 'Loop Fitness',
+  'adr-conformance': 'ADR Conformance',
   system: 'System',
 }
 
@@ -275,6 +277,7 @@ function AppContent() {
           )}
           {activeTab === 'atlas' && <AtlasExplorer />}
           {activeTab === 'loop-fitness' && <LoopFitnessPanel />}
+          {activeTab === 'adr-conformance' && <AdrConformancePanel />}
           {activeTab === 'system' && (
             <SystemPanel
               backgroundWorkers={backgroundWorkers}
