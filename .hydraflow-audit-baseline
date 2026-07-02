@@ -1,6 +1,9 @@
 # Principles-audit baseline. The P10.3 check (regression-test discipline)
-# scans fix commits between this SHA and HEAD; commits before this point
-# are excluded as historical drift predating the rule's adoption.
+# scans fix commits after this point — a commit SHA or an ISO date/timestamp;
+# commits before it are excluded as historical drift predating the rule's
+# adoption. Dates become `git log --since=` filters (branch-independent);
+# SHAs become a `<sha>..HEAD` range and must be an ancestor of every branch
+# the audit runs on.
 #
 # History:
 # - 2026-05-02 d0d18382: ADR-0044 + the P3/P10 audit framework began
@@ -23,4 +26,17 @@
 #      baseline is reset to the current adoption point — accurate
 #      forward-enforcement starts here. Pre-fix historical drift is
 #      excluded as designed.
-97005928
+#
+# Reset 2026-07-02 (bead advisor-vm0r): the CI `audit` job had been running
+# on a depth-1 checkout with a depth-1 fetch of main, so `git log
+# <baseline>..HEAD` could not resolve the baseline SHA and P5.6 could not
+# see a main ref — BOTH checks silently degraded to NA in CI. Enforcement
+# was not real since that regression (same failure shape as the 2026-06-12
+# reset). The checkout is fixed (fetch-depth: 0, un-shallowed main fetch);
+# the baseline resets to the fix's ship time so accurate forward-enforcement
+# restarts here. A timestamp rather than a SHA because the audit runs
+# against PR merge commits on staging AND against main: RC promotion means
+# no recent SHA is an ancestor of both (the newest common ancestor is the
+# last RC merge, which predates 13 uncovered fix commits), while a
+# timestamp is branch-independent.
+2026-07-02T21:00:00Z

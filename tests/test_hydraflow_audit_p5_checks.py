@@ -248,3 +248,49 @@ def test_git_log_warns_when_no_pr_attribution(tmp_path: Path) -> None:
 
 def test_git_log_na_outside_repo(tmp_path: Path) -> None:
     assert _run("P5.6", _ctx(tmp_path)).status is Status.NA
+
+
+def test_git_log_falls_back_to_origin_main_when_local_main_absent(
+    tmp_path: Path,
+) -> None:
+    """CI checks out a detached PR merge commit with only origin/main fetched.
+
+    Bare ``main`` never resolves to ``refs/remotes/origin/main`` under git's
+    refname shorthand, so P5.6 must probe the remote-tracking ref explicitly
+    instead of degrading to NA (bead advisor-vm0r).
+    """
+    _git_init_with_commits(
+        tmp_path,
+        [f"feat: thing {i} (#{1000 + i})" for i in range(5)],
+    )
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "checkout", "-q", "--detach"], cwd=tmp_path, check=True, env=_git_env()
+    )
+    subprocess.run(
+        ["git", "branch", "-q", "-D", "main"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    result = _run("P5.6", _ctx(tmp_path))
+    assert result.status is Status.PASS
+
+
+def test_git_log_na_when_no_main_ref_anywhere(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q", "-b", "trunk"], cwd=tmp_path, check=True)
+    (tmp_path / "f.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, env=_git_env())
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "feat: seed (#1)"],
+        cwd=tmp_path,
+        check=True,
+        env=_git_env(),
+    )
+    result = _run("P5.6", _ctx(tmp_path))
+    assert result.status is Status.NA
+    assert "no main/master ref" in (result.message or "")
