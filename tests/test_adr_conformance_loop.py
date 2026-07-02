@@ -257,6 +257,34 @@ async def test_tick_persists_jsonl_files_issue_on_fail_and_emits_event(
     assert outcomes["ADR-0051"] == "unresolved"
 
 
+async def test_jsonl_compacted_to_latest_row_per_adr_across_ticks(
+    loop_fixture,
+) -> None:
+    """The metrics jsonl has snapshot semantics (the dashboard serves only the
+    latest row per adr_id), so after each tick it must contain exactly one row
+    per ADR — bounded by #ADRs, not leaking ~#ADRs rows per tick forever.
+    The surviving row must carry the SECOND tick's outcome."""
+    loop, fakes = loop_fixture
+    await run_tick(loop)
+    # Flip the failing check to PASS so tick 2's rows are distinguishable.
+    fakes.runner._outcomes["make:conformance-fail-fixture"] = CheckOutcome.PASS
+
+    await run_tick(loop)
+
+    jsonl_path = fakes.metrics_dir / "adr_conformance.jsonl"
+    rows = [json.loads(line) for line in jsonl_path.read_text().strip().splitlines()]
+    by_adr: dict[str, dict] = {}
+    for row in rows:
+        assert row["adr_id"] not in by_adr, (
+            f"duplicate row for {row['adr_id']} — compaction did not run"
+        )
+        by_adr[row["adr_id"]] = row
+    assert len(rows) == 3  # exactly one row per ADR fixture
+    assert by_adr["ADR-0049"]["outcome"] == "pass"  # tick 2's outcome, not tick 1's
+    assert by_adr["ADR-0050"]["outcome"] == "skipped"
+    assert by_adr["ADR-0051"]["outcome"] == "unresolved"
+
+
 async def test_decision_of_record_never_remediated(loop_fixture) -> None:
     loop, fakes = loop_fixture
     await run_tick(loop)

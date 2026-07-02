@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from config import HydraFlowConfig
 from dashboard_routes._routes import RouteContext
+from file_util import is_newer_timestamp
 
 logger = logging.getLogger("hydraflow.dashboard")
 
@@ -19,8 +20,13 @@ def latest_conformance_by_adr(config: HydraFlowConfig) -> dict[str, dict]:
 
     Reads ``<repo_data_root>/metrics/adr_conformance.jsonl`` (the same path
     ``AdrConformanceLoop._metrics_path()`` persists to) and keeps the row
-    with the maximum ``timestamp`` for each ``adr_id``. Returns ``{}`` when
-    the file is absent or unreadable.
+    with the maximum ``timestamp`` for each ``adr_id``. Timestamps are
+    compared as parsed datetimes via ``file_util.is_newer_timestamp`` (the
+    same rule the loop's compact-on-write uses), never as strings — Pydantic
+    serializes ``...56Z`` vs ``...56.000001Z`` and lexically ``.`` < ``Z``
+    would sort the newer row first. Rows with unparseable timestamps are
+    treated as oldest; they never crash the route. Returns ``{}`` when the
+    file is absent or unreadable.
     """
     path = config.repo_data_root / "metrics" / "adr_conformance.jsonl"
     if not path.exists():
@@ -44,8 +50,8 @@ def latest_conformance_by_adr(config: HydraFlowConfig) -> dict[str, dict]:
                 if not adr_id:
                     continue
                 existing = latest.get(adr_id)
-                if existing is None or row.get("timestamp", "") > existing.get(
-                    "timestamp", ""
+                if existing is None or is_newer_timestamp(
+                    row.get("timestamp"), existing.get("timestamp")
                 ):
                     latest[adr_id] = row
     except OSError:
