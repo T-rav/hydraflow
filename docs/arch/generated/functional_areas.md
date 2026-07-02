@@ -81,6 +81,7 @@ flowchart LR
     subgraph auto_agent["Auto-Agent (HITL Pre-Flight)"]
         auto_agent_AutoAgentPreflightLoop([AutoAgentPreflightLoop])
         auto_agent_ConvergenceOscillationLoop([ConvergenceOscillationLoop])
+        auto_agent_DisturbanceDampenerLoop([DisturbanceDampenerLoop])
         auto_agent_SandboxFailureFixerLoop([SandboxFailureFixerLoop])
         auto_agent_TriageRetryLoop([TriageRetryLoop])
     end
@@ -251,6 +252,7 @@ The Auto-Agent HITL pre-flight loop intercepts every `hitl-escalation` issue bef
 
 - `AutoAgentPreflightLoop` — `src.auto_agent_preflight_loop`
 - `ConvergenceOscillationLoop` — `src.convergence_oscillation_loop`
+- `DisturbanceDampenerLoop` — `src.disturbance_dampener_loop`
 - `SandboxFailureFixerLoop` — `src.sandbox_failure_fixer_loop`
 - `TriageRetryLoop` — `src.triage_retry_loop`
 

@@ -1,0 +1,3 @@
+comment: mock_spec disturbance baseline. MUST NOT grow (gate fails on increase); MAY
+  shrink (prune when fixed).
+entries: {}

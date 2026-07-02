@@ -49,6 +49,8 @@ graph LR
     BotPRPort["BotPRPort<br/><i>port</i>"]
     Controller["Controller<br/><i>control_role</i>"]
     Credentials["Credentials<br/><i>value_object</i>"]
+    DimensionBaseline["DimensionBaseline<br/><i>control_role</i>"]
+    DisturbanceDampenerLoop["DisturbanceDampenerLoop<br/><i>loop</i>"]
     Error["Error<br/><i>control_role</i>"]
     EventBus["EventBus<br/><i>service</i>"]
     Governor["Governor<br/><i>control_role</i>"]
@@ -64,6 +66,7 @@ graph LR
     Sensor["Sensor<br/><i>control_role</i>"]
     Set-point["Set-point<br/><i>control_role</i>"]
     StateTracker["StateTracker<br/><i>service</i>"]
+    ViolationDetector["ViolationDetector<br/><i>control_role</i>"]
     WorkspacePort["WorkspacePort<br/><i>port</i>"]
   end
   ADRCouncilReviewer -->|depends_on| EventBus

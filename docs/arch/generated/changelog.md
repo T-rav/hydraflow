@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `73433b8` — fix(adr): ADR-0101 enforcement metadata; remove orphaned veto metrics (do-not-coexist) *(2026-07-01)*
 - `661d2f8` — Merge remote-tracking branch 'origin/staging' into worktree-convergence-gate-ga *(2026-07-01)*
 - `82ef1ce` — docs(adr): renumber gate-GA ADR 0099->0100 (staging claimed 0099 for control-system) *(2026-07-01)*
 - `bc57c32` — docs(adr): ADR-0099 convergence gate general availability (flag removed) *(2026-07-01)*

@@ -1,4 +1,4 @@
-# ADR-0101: Convergence gate general availability (flag removed)
+# ADR-0102: Convergence gate general availability (flag removed)
 
 **Status:** Accepted
 **Date:** 2026-07-01

@@ -5,7 +5,7 @@
 - **Refines:** ADR-0094 (two-level convergence: Gate + ConvergenceLedger)
 - **Related:** ADR-0051 (blast-radius review passes), ADR-0059 (advisor-pattern self-repairing review / PostVerifyAdvisor), ADR-0049 (kill-switch convention)
 
-> **Superseded in part by [ADR-0101](0101-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
+> **Superseded in part by [ADR-0102](0102-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
 
 ## Context
 

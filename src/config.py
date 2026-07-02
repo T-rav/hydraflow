@@ -2651,6 +2651,18 @@ class HydraFlowConfig(BaseModel):
             "production `sonnet`."
         ),
     )
+    disturbance_dampener_enabled: bool = Field(
+        default=False,
+        description="Enable the DisturbanceDampenerLoop burn-down loop (ADR-0095). Dark by default.",
+    )
+    disturbance_dampener_interval_seconds: int = Field(
+        default=3600,
+        description="DisturbanceDampenerLoop tick interval in seconds.",
+    )
+    disturbance_dampener_max_prs_per_tick: int = Field(
+        default=1,
+        description="Max burn-down PRs DisturbanceDampenerLoop opens per tick. Bounds blast radius.",
+    )
 
     # Trust fleet — ContractRefreshLoop (spec §4.2)
     contract_refresh_interval: int = Field(
