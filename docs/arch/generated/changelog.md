@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `95fecbf` — docs(adr): drain grandfather set to zero (annotate 59, README going-forward) *(2026-07-02)*
 - `26f0a79` — docs(adr): backfill Enforcement for batch F (ADRs 89-98) *(2026-07-02)*
 - `ffb5105` — docs(adr): backfill Enforcement for batch E (ADRs 58-88) *(2026-07-02)*
 - `3044c15` — docs(adr): backfill Enforcement for batch D (ADRs 41-57) *(2026-07-02)*
