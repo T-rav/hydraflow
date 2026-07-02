@@ -4,6 +4,12 @@
 - **Date:** 2026-06-30
 - **Refines:** ADR-0094 (two-level convergence: Gate + ConvergenceLedger)
 - **Related:** ADR-0051 (blast-radius review passes), ADR-0059 (advisor-pattern self-repairing review / PostVerifyAdvisor), ADR-0049 (kill-switch convention)
+- **Enforcement:** enforced
+- **Enforced by:**
+pytest:tests/test_review_advisor.py
+pytest:tests/test_review_phase_core.py::TestApproveConvergenceGate
+pytest:tests/scenarios/test_convergence_review_mockworld.py
+pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py
 
 ## Context
 

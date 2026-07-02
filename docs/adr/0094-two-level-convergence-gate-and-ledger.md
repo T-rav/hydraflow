@@ -4,6 +4,12 @@
 - **Date:** 2026-06-30
 - **Supersedes:** none
 - **Related:** ADR-0001 (five concurrent async loops), ADR-0002 (labels as state machine), ADR-0029 (caretaker loop pattern), ADR-0049 (kill-switch convention), ADR-0051 (iterative production-readiness review), ADR-0059 (advisor-pattern self-repairing review)
+- **Enforcement:** enforced
+- **Enforced by:**
+pytest:tests/test_convergence_ledger.py
+pytest:tests/test_convergence_gate.py
+pytest:tests/scenarios/test_convergence_review_mockworld.py
+pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py
 
 ## Context
 

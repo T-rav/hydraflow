@@ -4,6 +4,8 @@
 - **Date:** 2026-06-30
 - **Refines:** ADR-0094 (two-level convergence: Gate + ConvergenceLedger)
 - **Extends:** ADR-0095 (approve-path gating)
+- **Enforcement:** enforced
+- **Enforced by:** pytest:tests/scenarios/test_convergence_pipeline_mockworld.py
 
 ## Context
 
