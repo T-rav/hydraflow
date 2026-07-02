@@ -63,6 +63,10 @@ def _write_adr_decision(
 _STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(\w+)", re.IGNORECASE)
 _ENFORCEMENT_LINE_RE = re.compile(r"^\*\*Enforcement:\*\*", re.MULTILINE)
 _STATUS_LINE_RE = re.compile(r"^(\*\*Status:\*\*[^\n]*)$", re.MULTILINE)
+# Fallback anchor for the `## Status` H2 heading form (13 ADRs on disk, e.g.
+# ADR-0053): capture the heading plus its value line so the injection lands
+# under the value, as its own paragraph.
+_STATUS_H2_BLOCK_RE = re.compile(r"^(##\s+Status\s*\n+[^\n]+)$", re.MULTILINE)
 
 
 def _ensure_enforcement_line(content: str) -> str:
@@ -88,8 +92,14 @@ def _ensure_enforcement_line(content: str) -> str:
     """
     if _ENFORCEMENT_LINE_RE.search(content):
         return content
-    return _STATUS_LINE_RE.sub(
-        r"\1\n**Enforcement:** decision-of-record", content, count=1
+    if _STATUS_LINE_RE.search(content):
+        return _STATUS_LINE_RE.sub(
+            r"\1\n**Enforcement:** decision-of-record", content, count=1
+        )
+    # `## Status` H2 heading form: previously a silent no-op — the ADR then
+    # failed the ratchet the moment it flipped to Accepted.
+    return _STATUS_H2_BLOCK_RE.sub(
+        r"\1\n\n**Enforcement:** decision-of-record", content, count=1
     )
 
 

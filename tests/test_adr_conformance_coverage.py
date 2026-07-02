@@ -145,6 +145,32 @@ def _accepted():
     return [a for a in scan_adr_directory(ADR_DIR) if a.status == "Accepted"]
 
 
+# Detects an `**Enforced by:**` line that IS present in the file even though
+# parse_enforced_by returned zero checks — the bulleted-list footgun:
+# adr_index._ENFORCED_BY_RE deliberately stops its capture at the first
+# markdown bullet, so `**Enforced by:**\n- pytest:...` parses to (). The
+# ratchet already fails on that (enforced + no checks), but without this
+# diagnosis the error message blames a *missing* line and sends the author
+# hunting the wrong cause.
+_ENFORCED_BY_PRESENT_RE = re.compile(r"^\*\*Enforced by:\*\*", re.MULTILINE)
+
+
+def _diagnose_enforced_without_checks(number: int, text: str) -> str:
+    """Message for an `enforced` ADR whose parsed checks came back empty:
+    distinguish "line absent" from "line present but in the bulleted-list
+    form the parser rejects"."""
+    if _ENFORCED_BY_PRESENT_RE.search(text):
+        return (
+            f"ADR-{number:04d}: enforced, and an **Enforced by:** line exists "
+            "but parsed to zero checks — likely the bulleted-list form "
+            "(`**Enforced by:**` followed by `- pytest:...` bullets), which "
+            "the parser rejects. Put each check on its own unbulleted line "
+            "after **Enforced by:** (see ADR-0049/0053 for the sanctioned "
+            "multi-check form)."
+        )
+    return f"ADR-{number:04d}: enforced but no Enforced-by"
+
+
 def test_every_adr_file_parses():
     """No silent skips: every docs/adr/*.md file with an ADR heading must
     come back from scan_adr_directory. This is the regression test for the
@@ -232,7 +258,9 @@ def test_enforced_adrs_name_resolvable_nonmutating_checks():
         if a.number in _GRANDFATHERED or a.enforcement != "enforced":
             continue
         if not a.enforced_by:
-            problems.append(f"ADR-{a.number:04d}: enforced but no Enforced-by")
+            files = sorted(ADR_DIR.glob(f"{a.number:04d}-*.md"))
+            text = files[0].read_text() if files else ""
+            problems.append(_diagnose_enforced_without_checks(a.number, text))
             continue
         for chk in a.enforced_by:
             if chk.kind == "prose":
@@ -257,6 +285,26 @@ def test_manual_adrs_have_a_process_pointer():
         and not a.enforced_by
     ]
     assert not offenders, f"manual ADRs missing an Enforced-by pointer: {offenders}"
+
+
+def test_diagnosis_names_the_bulleted_form_when_line_is_present():
+    text = (
+        "# ADR-0999: Example\n\n"
+        "**Status:** Accepted\n"
+        "**Enforcement:** enforced\n"
+        "**Enforced by:**\n"
+        "- pytest:tests/test_a.py::test_x\n"
+        "- pytest:tests/test_b.py::test_y\n"
+    )
+    msg = _diagnose_enforced_without_checks(999, text)
+    assert "bulleted-list form" in msg
+    assert "own unbulleted line" in msg
+
+
+def test_diagnosis_reports_plain_absence_when_line_is_missing():
+    text = "# ADR-0999: Example\n\n**Status:** Accepted\n**Enforcement:** enforced\n"
+    msg = _diagnose_enforced_without_checks(999, text)
+    assert msg == "ADR-0999: enforced but no Enforced-by"
 
 
 def test_grandfather_only_shrinks():
