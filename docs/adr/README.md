@@ -142,5 +142,33 @@ cadence and files remediation issues on drift.
 
 ## Adding a new ADR
 
-Copy the template, increment the number, fill in the sections.
+Increment the number and copy an existing ADR's metadata block (e.g.
+[ADR-0002](0002-labels-as-state-machine.md) for a single check, or
+[ADR-0049](0049-trust-loop-kill-switch-convention.md) / [ADR-0053](0053-ubiquitous-language-as-living-artifact.md)
+for multiple), then fill in the sections. There is no separate template file.
+
+Every **Accepted** ADR MUST declare an `**Enforcement:**` line — this is
+CI-enforced by `tests/test_adr_conformance_coverage.py` (ADR-0100), which
+blocks a new Accepted ADR that omits or mis-declares it. Choose one:
+
+- `**Enforcement:** enforced` — a runnable check proves the decision holds.
+  Add an `**Enforced by:**` line whose value is TYPED: it starts with
+  `pytest:` (e.g. `pytest:tests/test_foo.py` or `pytest:tests/test_foo.py::test_bar`)
+  or `make:` (a non-mutating Makefile target). A bare or backtick-wrapped path
+  parses as prose and fails the ratchet. For **multiple** checks, put the
+  marker on its own line and list one check per plain continuation line:
+
+  ```
+  **Enforced by:**
+  pytest:tests/test_a.py
+  pytest:tests/test_b.py
+  ```
+
+  Never repeat `**Enforced by:**` (only the first is parsed); never comma-join.
+- `**Enforcement:** manual` — a process/review guardrail with no runnable
+  predicate. Add an `**Enforced by:**` line with a one-line prose pointer
+  (a doc/section/review-checklist/workflow reference); it must be non-empty.
+- `**Enforcement:** decision-of-record` — a pure architectural decision with
+  nothing runnable to assert. No `**Enforced by:**` line needed.
+
 Mark superseded ADRs by setting `**Status:** Superseded` and adding a `Superseded by: ADR-XXXX` entry in the Related section rather than deleting them.

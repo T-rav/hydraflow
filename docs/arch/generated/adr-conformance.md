@@ -8,70 +8,70 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 
 | ADR | Enforcement | Cited checks |
 |---|---|---|
-| ADR-0001 | unknown | `tests/test_orchestrator_loops.py, tests/architecture/test_loop_count_matches_adr0001.py` |
+| ADR-0001 | enforced | `pytest:tests/test_orchestrator_loops.py`, `pytest:tests/architecture/test_loop_count_matches_adr0001.py` |
 | ADR-0002 | enforced | `pytest:tests/test_state_machine.py` |
 | ADR-0003 | decision-of-record | — |
-| ADR-0004 | unknown | `tests/test_agent_cli.py, tests/test_base_runner.py` |
-| ADR-0005 | unknown | `tests/test_implement_phase.py` |
-| ADR-0007 | unknown | `tests/test_dashboard_routes_repo.py` |
-| ADR-0008 | unknown | `tests/test_dashboard_routes_repo.py` |
-| ADR-0009 | unknown | `(process)` |
-| ADR-0010 | unknown | `tests/test_integration_worktree.py` |
-| ADR-0011 | unknown | `tests/test_epic.py, tests/test_release.py` |
-| ADR-0012 | unknown | `tests/test_epic_merge_coordination.py` |
-| ADR-0014 | unknown | `tests/test_state_machine.py` |
-| ADR-0015 | unknown | `tests/test_review_phase_hooks.py` |
-| ADR-0016 | unknown | `tests/test_visual_validation.py` |
-| ADR-0017 | unknown | `tests/test_state_machine.py` |
-| ADR-0018 | unknown | `tests/test_screenshot_scanner.py, tests/test_report_issue_loop.py` |
-| ADR-0019 | unknown | `tests/test_epic_manager.py, tests/test_post_merge_handler.py` |
-| ADR-0021 | unknown | `tests/test_state_persistence.py, tests/test_event_persistence.py, tests/test_data_migration_d2.py` |
-| ADR-0022 | unknown | `tests/test_integration_pipeline.py` |
-| ADR-0023 | unknown | `(process)` |
-| ADR-0024 | unknown | `tests/test_implement_phase.py, tests/scenarios/fakes/test_prior_failure_propagation.py` |
-| ADR-0025 | unknown | `(process)` |
-| ADR-0027 | unknown | `(none)` |
-| ADR-0028 | unknown | — |
-| ADR-0029 | unknown | — |
-| ADR-0030 | unknown | — |
-| ADR-0031 | unknown | `tests/test_discover_phase.py, tests/test_shape_phase.py, tests/test_discover_runner.py, tests/test_shape_runner.py, tests/architecture/test_functional_area_coverage.py` |
-| ADR-0032 | unknown | `tests/test_repo_wiki.py, tests/test_repo_wiki_store_git.py, tests/test_repo_wiki_ingest.py, tests/test_wiki_drift_detector.py, tests/test_wiki_drift_symbols.py, tests/test_wiki_semantic_drift.py, tests/test_repo_wiki_temporal.py, tests/test_wiki_corroboration.py` |
-| ADR-0034 | unknown | `tests/test_state_machine.py` |
-| ADR-0035 | unknown | `(process)` |
-| ADR-0036 | unknown | `(process)` |
-| ADR-0037 | unknown | `tests/test_adr_pre_validator.py` |
-| ADR-0041 | unknown | `tests/test_issue_cache.py, tests/test_precondition_gate.py` |
+| ADR-0004 | enforced | `pytest:tests/test_agent_cli.py`, `pytest:tests/test_base_runner.py` |
+| ADR-0005 | enforced | `pytest:tests/test_implement_phase.py` |
+| ADR-0007 | enforced | `pytest:tests/test_dashboard_routes_repo.py` |
+| ADR-0008 | enforced | `pytest:tests/test_dashboard_routes_repo.py` |
+| ADR-0009 | manual | `Process guardrail — reviewed at PR time via the process-per-repo model's operational invariants (one 'cli.py' subprocess per repo slug, no shared mutable state); no automated test asserts subprocess isolation directly.` |
+| ADR-0010 | enforced | `pytest:tests/test_integration_worktree.py` |
+| ADR-0011 | enforced | `pytest:tests/test_epic.py`, `pytest:tests/test_release.py` |
+| ADR-0012 | enforced | `pytest:tests/test_epic_merge_coordination.py` |
+| ADR-0014 | enforced | `pytest:tests/test_state_machine.py` |
+| ADR-0015 | enforced | `pytest:tests/test_review_phase_hooks.py` |
+| ADR-0016 | enforced | `pytest:tests/test_visual_validation.py` |
+| ADR-0017 | enforced | `pytest:tests/test_state_machine.py` |
+| ADR-0018 | enforced | `pytest:tests/test_screenshot_scanner.py`, `pytest:tests/test_report_issue_loop.py` |
+| ADR-0019 | enforced | `pytest:tests/test_epic_manager.py`, `pytest:tests/test_post_merge_handler.py` |
+| ADR-0021 | enforced | `pytest:tests/test_state_persistence.py`, `pytest:tests/test_event_persistence.py`, `pytest:tests/test_data_migration_d2.py` |
+| ADR-0022 | enforced | `pytest:tests/test_integration_pipeline.py` |
+| ADR-0023 | manual | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` |
+| ADR-0024 | enforced | `pytest:tests/test_implement_phase.py`, `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` |
+| ADR-0025 | manual | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
+| ADR-0027 | decision-of-record | — |
+| ADR-0028 | enforced | `pytest:tests/test_report_event_flow.py` |
+| ADR-0029 | enforced | `pytest:tests/test_caretaker_loop_wiring.py` |
+| ADR-0030 | decision-of-record | — |
+| ADR-0031 | enforced | `pytest:tests/test_discover_phase.py`, `pytest:tests/test_shape_phase.py`, `pytest:tests/test_discover_runner.py`, `pytest:tests/test_shape_runner.py`, `pytest:tests/architecture/test_functional_area_coverage.py` |
+| ADR-0032 | enforced | `pytest:tests/test_repo_wiki.py`, `pytest:tests/test_repo_wiki_store_git.py`, `pytest:tests/test_repo_wiki_ingest.py`, `pytest:tests/test_wiki_drift_detector.py`, `pytest:tests/test_wiki_drift_symbols.py`, `pytest:tests/test_wiki_semantic_drift.py`, `pytest:tests/test_repo_wiki_temporal.py`, `pytest:tests/test_wiki_corroboration.py` |
+| ADR-0034 | enforced | `pytest:tests/test_state_machine.py` |
+| ADR-0035 | manual | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
+| ADR-0036 | manual | `Code review of 'src/cli.py:build_config()' and 'src/hf_cli/__main__.py' dispatch wiring during PR review of CLI/config changes.` |
+| ADR-0037 | enforced | `pytest:tests/test_adr_pre_validator.py` |
+| ADR-0041 | enforced | `pytest:tests/test_issue_cache.py`, `pytest:tests/test_precondition_gate.py` |
 | ADR-0042 | manual | `branch-protection ruleset review per docs/standards/branch_protection` |
-| ADR-0043 | unknown | — |
-| ADR-0045 | unknown | `tests/test_trust_fleet_sanity_loop.py, tests/test_loop_wiring_completeness.py, tests/test_trust_fleet_anomaly_detectors.py` |
-| ADR-0047 | unknown | `'make trust-contracts'; 'tests/trust/contracts/test_fake_*_contract.py'; 'src/contract_refresh_loop.py' (the weekly refresh loop that keeps cassettes in sync with reality).` |
+| ADR-0043 | enforced | `pytest:tests/test_preflight_plugins.py`, `pytest:tests/test_phase_skill_filter.py` |
+| ADR-0045 | enforced | `pytest:tests/test_trust_fleet_sanity_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/test_trust_fleet_anomaly_detectors.py` |
+| ADR-0047 | enforced | `make:trust-contracts`, `pytest:tests/trust/contracts/test_fake_github_contract.py` |
 | ADR-0049 | enforced | `pytest:tests/test_loop_kill_switch_completeness.py`, `pytest:tests/regressions/test_canonical_killswitch.py` |
-| ADR-0050 | unknown | `'tests/test_auto_agent_preflight_loop.py'; 'tests/scenarios/test_auto_agent_preflight_scenario.py'; 'tests/test_loop_wiring_completeness.py'.` |
-| ADR-0051 | unknown | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer).` |
-| ADR-0052 | unknown | `'tests/test_mockworld_fakes_conformance.py' (Port↔Fake signature parity), 'tests/test_sandbox_scenario_contract.py' (scenario catalog contract), '.github/workflows/ci.yml' 'sandbox' job (CI gate).` |
+| ADR-0050 | enforced | `pytest:tests/test_auto_agent_preflight_loop.py`, `pytest:tests/scenarios/test_auto_agent_preflight.py`, `pytest:tests/test_loop_wiring_completeness.py` |
+| ADR-0051 | manual | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` |
+| ADR-0052 | enforced | `pytest:tests/test_mockworld_fakes_conformance.py`, `pytest:tests/test_sandbox_scenario_contract.py` |
 | ADR-0053 | enforced | `pytest:tests/test_ubiquitous_language_drift.py`, `pytest:tests/test_seed_terms.py` |
-| ADR-0054 | unknown | — |
-| ADR-0055 | unknown | — |
+| ADR-0054 | enforced | `pytest:tests/test_term_proposer_loop.py`, `pytest:tests/architecture/test_term_proposer_wiring.py` |
+| ADR-0055 | enforced | `pytest:tests/architecture/test_otel_invariants.py`, `pytest:tests/regressions/test_otel_disabled_is_noop.py`, `pytest:tests/scenarios/test_telemetry_e2e.py` |
 | ADR-0056 | enforced | `pytest:tests/test_adr_touchpoint_auditor_loop.py` |
-| ADR-0057 | unknown | — |
-| ADR-0058 | unknown | — |
-| ADR-0060 | unknown | — |
-| ADR-0061 | unknown | — |
-| ADR-0062 | unknown | — |
-| ADR-0064 | unknown | `'src/adversarial_retry_loop.py:AdversarialRetryLoop' (shared retry primitive), 'src/complexity_gate.py:ComplexityGate' (routing), 'src/plan_phase.py:PlanPhase' / 'src/shape_phase.py:ShapePhase' / 'src/discovery_council.py:DiscoveryCouncil' (call sites), 'src/wiki_carryover.py:build_wiki_entry' (carryover→knowledge), 'tests/scenarios/test_adversarial_pipeline.py' + 'tests/regressions/test_adversarial_pipeline_regressions.py' (behaviour pinning).` |
-| ADR-0065 | unknown | `(process)` |
-| ADR-0071 | unknown | `tests/test_route_back.py` |
-| ADR-0083 | unknown | `'tests/test_sandbox_scenario_contract.py', 'tests/test_no_screenshot_regression_tests.py'` |
-| ADR-0085 | unknown | `tests/test_secret_scrub.py` |
-| ADR-0088 | unknown | — |
-| ADR-0089 | unknown | `'tests/test_memory_backlog_loop.py', 'tests/test_loop_wiring_completeness.py' (auto-discovery confirms 5-checkpoint wire), 'tests/architecture/test_functional_area_coverage.py' (loop assigned in 'functional_areas.yml').` |
-| ADR-0090 | unknown | — |
-| ADR-0091 | unknown | — |
-| ADR-0092 | unknown | `tests/test_untrusted_text.py, tests/test_preflight_untrusted_fencing.py, tests/test_agent_cli.py, tests/test_agent_advanced.py` |
+| ADR-0057 | enforced | `pytest:tests/test_term_pruner_loop.py`, `pytest:tests/architecture/test_term_pruner_wiring.py` |
+| ADR-0058 | enforced | `pytest:tests/test_edge_proposer_loop.py`, `pytest:tests/architecture/test_edge_proposer_wiring.py` |
+| ADR-0060 | enforced | `pytest:tests/test_atlas_routes.py` |
+| ADR-0061 | enforced | `pytest:tests/test_atlas_routes.py` |
+| ADR-0062 | enforced | `pytest:tests/test_entry_evidence_loop.py`, `pytest:tests/scenarios/test_entry_evidence_loop_scenario.py` |
+| ADR-0064 | decision-of-record | `'src/adversarial_retry_loop.py:AdversarialRetryLoop' (shared retry primitive), 'src/complexity_gate.py:ComplexityGate' (routing), 'src/plan_phase.py:PlanPhase' / 'src/shape_phase.py:ShapePhase' / 'src/discovery_council.py:DiscoveryCouncil' (call sites), 'src/wiki_carryover.py:build_wiki_entry' (carryover→knowledge), 'tests/scenarios/test_adversarial_pipeline.py' + 'tests/regressions/test_adversarial_pipeline_regressions.py' (behaviour pinning).` |
+| ADR-0065 | manual | `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` |
+| ADR-0071 | enforced | `pytest:tests/test_route_back.py` |
+| ADR-0083 | enforced | `pytest:tests/test_sandbox_scenario_contract.py`, `pytest:tests/test_no_screenshot_regression_tests.py` |
+| ADR-0085 | enforced | `pytest:tests/test_secret_scrub.py` |
+| ADR-0088 | enforced | `pytest:tests/test_label_drift_watcher_loop.py`, `pytest:tests/test_label_drift_watcher_integration.py` |
+| ADR-0089 | enforced | `pytest:tests/test_memory_backlog_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/architecture/test_functional_area_coverage.py` |
+| ADR-0090 | enforced | `pytest:tests/test_atlas_routes.py` |
+| ADR-0091 | decision-of-record | — |
+| ADR-0092 | enforced | `pytest:tests/test_untrusted_text.py`, `pytest:tests/test_preflight_untrusted_fencing.py`, `pytest:tests/test_agent_cli.py`, `pytest:tests/test_agent_advanced.py` |
 | ADR-0093 | enforced | `pytest:tests/test_loop_fitness_completeness.py` |
-| ADR-0094 | unknown | — |
-| ADR-0095 | unknown | — |
-| ADR-0096 | unknown | — |
+| ADR-0094 | enforced | `pytest:tests/test_convergence_ledger.py`, `pytest:tests/test_convergence_gate.py`, `pytest:tests/scenarios/test_convergence_review_mockworld.py`, `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` |
+| ADR-0095 | enforced | `pytest:tests/test_review_advisor.py`, `pytest:tests/test_review_phase_core.py::TestApproveConvergenceGate`, `pytest:tests/scenarios/test_convergence_review_mockworld.py`, `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` |
+| ADR-0096 | enforced | `pytest:tests/scenarios/test_convergence_pipeline_mockworld.py` |
 | ADR-0097 | enforced | `pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py` |
 | ADR-0098 | enforced | `pytest:tests/scenarios/test_convergence_oscillation_mockworld.py` |
 | ADR-0100 | enforced | `pytest:tests/test_adr_conformance_coverage.py` |
@@ -80,54 +80,115 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 
 | Check | Protects |
 |---|---|
-| `'make trust-contracts'; 'tests/trust/contracts/test_fake_*_contract.py'; 'src/contract_refresh_loop.py' (the weekly refresh loop that keeps cassettes in sync with reality).` | ADR-0047 |
 | `'src/adversarial_retry_loop.py:AdversarialRetryLoop' (shared retry primitive), 'src/complexity_gate.py:ComplexityGate' (routing), 'src/plan_phase.py:PlanPhase' / 'src/shape_phase.py:ShapePhase' / 'src/discovery_council.py:DiscoveryCouncil' (call sites), 'src/wiki_carryover.py:build_wiki_entry' (carryover→knowledge), 'tests/scenarios/test_adversarial_pipeline.py' + 'tests/regressions/test_adversarial_pipeline_regressions.py' (behaviour pinning).` | ADR-0064 |
-| `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer).` | ADR-0051 |
-| `'tests/test_auto_agent_preflight_loop.py'; 'tests/scenarios/test_auto_agent_preflight_scenario.py'; 'tests/test_loop_wiring_completeness.py'.` | ADR-0050 |
-| `'tests/test_memory_backlog_loop.py', 'tests/test_loop_wiring_completeness.py' (auto-discovery confirms 5-checkpoint wire), 'tests/architecture/test_functional_area_coverage.py' (loop assigned in 'functional_areas.yml').` | ADR-0089 |
-| `'tests/test_mockworld_fakes_conformance.py' (Port↔Fake signature parity), 'tests/test_sandbox_scenario_contract.py' (scenario catalog contract), '.github/workflows/ci.yml' 'sandbox' job (CI gate).` | ADR-0052 |
-| `'tests/test_sandbox_scenario_contract.py', 'tests/test_no_screenshot_regression_tests.py'` | ADR-0083 |
-| `(none)` | ADR-0027 |
-| `(process)` | ADR-0009, ADR-0023, ADR-0025, ADR-0035, ADR-0036, ADR-0065 |
+| `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` | ADR-0051 |
+| `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` | ADR-0023 |
+| `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` | ADR-0035 |
+| `Code review of 'src/cli.py:build_config()' and 'src/hf_cli/__main__.py' dispatch wiring during PR review of CLI/config changes.` | ADR-0036 |
+| `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` | ADR-0065 |
+| `Process guardrail — reviewed at PR time via the process-per-repo model's operational invariants (one 'cli.py' subprocess per repo slug, no shared mutable state); no automated test asserts subprocess isolation directly.` | ADR-0009 |
+| `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` | ADR-0025 |
 | `branch-protection ruleset review per docs/standards/branch_protection` | ADR-0042 |
+| `make:trust-contracts` | ADR-0047 |
+| `pytest:tests/architecture/test_edge_proposer_wiring.py` | ADR-0058 |
+| `pytest:tests/architecture/test_functional_area_coverage.py` | ADR-0031, ADR-0089 |
+| `pytest:tests/architecture/test_loop_count_matches_adr0001.py` | ADR-0001 |
+| `pytest:tests/architecture/test_otel_invariants.py` | ADR-0055 |
+| `pytest:tests/architecture/test_term_proposer_wiring.py` | ADR-0054 |
+| `pytest:tests/architecture/test_term_pruner_wiring.py` | ADR-0057 |
 | `pytest:tests/regressions/test_canonical_killswitch.py` | ADR-0049 |
+| `pytest:tests/regressions/test_otel_disabled_is_noop.py` | ADR-0055 |
+| `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` | ADR-0094, ADR-0095 |
+| `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` | ADR-0024 |
+| `pytest:tests/scenarios/test_auto_agent_preflight.py` | ADR-0050 |
 | `pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py` | ADR-0097 |
 | `pytest:tests/scenarios/test_convergence_oscillation_mockworld.py` | ADR-0098 |
+| `pytest:tests/scenarios/test_convergence_pipeline_mockworld.py` | ADR-0096 |
+| `pytest:tests/scenarios/test_convergence_review_mockworld.py` | ADR-0094, ADR-0095 |
+| `pytest:tests/scenarios/test_entry_evidence_loop_scenario.py` | ADR-0062 |
+| `pytest:tests/scenarios/test_telemetry_e2e.py` | ADR-0055 |
 | `pytest:tests/test_adr_conformance_coverage.py` | ADR-0100 |
+| `pytest:tests/test_adr_pre_validator.py` | ADR-0037 |
 | `pytest:tests/test_adr_touchpoint_auditor_loop.py` | ADR-0056 |
+| `pytest:tests/test_agent_advanced.py` | ADR-0092 |
+| `pytest:tests/test_agent_cli.py` | ADR-0004, ADR-0092 |
+| `pytest:tests/test_atlas_routes.py` | ADR-0060, ADR-0061, ADR-0090 |
+| `pytest:tests/test_auto_agent_preflight_loop.py` | ADR-0050 |
+| `pytest:tests/test_base_runner.py` | ADR-0004 |
+| `pytest:tests/test_caretaker_loop_wiring.py` | ADR-0029 |
+| `pytest:tests/test_convergence_gate.py` | ADR-0094 |
+| `pytest:tests/test_convergence_ledger.py` | ADR-0094 |
+| `pytest:tests/test_dashboard_routes_repo.py` | ADR-0007, ADR-0008 |
+| `pytest:tests/test_data_migration_d2.py` | ADR-0021 |
+| `pytest:tests/test_discover_phase.py` | ADR-0031 |
+| `pytest:tests/test_discover_runner.py` | ADR-0031 |
+| `pytest:tests/test_edge_proposer_loop.py` | ADR-0058 |
+| `pytest:tests/test_entry_evidence_loop.py` | ADR-0062 |
+| `pytest:tests/test_epic.py` | ADR-0011 |
+| `pytest:tests/test_epic_manager.py` | ADR-0019 |
+| `pytest:tests/test_epic_merge_coordination.py` | ADR-0012 |
+| `pytest:tests/test_event_persistence.py` | ADR-0021 |
+| `pytest:tests/test_implement_phase.py` | ADR-0005, ADR-0024 |
+| `pytest:tests/test_integration_pipeline.py` | ADR-0022 |
+| `pytest:tests/test_integration_worktree.py` | ADR-0010 |
+| `pytest:tests/test_issue_cache.py` | ADR-0041 |
+| `pytest:tests/test_label_drift_watcher_integration.py` | ADR-0088 |
+| `pytest:tests/test_label_drift_watcher_loop.py` | ADR-0088 |
 | `pytest:tests/test_loop_fitness_completeness.py` | ADR-0093 |
 | `pytest:tests/test_loop_kill_switch_completeness.py` | ADR-0049 |
+| `pytest:tests/test_loop_wiring_completeness.py` | ADR-0045, ADR-0050, ADR-0089 |
+| `pytest:tests/test_memory_backlog_loop.py` | ADR-0089 |
+| `pytest:tests/test_mockworld_fakes_conformance.py` | ADR-0052 |
+| `pytest:tests/test_no_screenshot_regression_tests.py` | ADR-0083 |
+| `pytest:tests/test_orchestrator_loops.py` | ADR-0001 |
+| `pytest:tests/test_phase_skill_filter.py` | ADR-0043 |
+| `pytest:tests/test_post_merge_handler.py` | ADR-0019 |
+| `pytest:tests/test_precondition_gate.py` | ADR-0041 |
+| `pytest:tests/test_preflight_plugins.py` | ADR-0043 |
+| `pytest:tests/test_preflight_untrusted_fencing.py` | ADR-0092 |
+| `pytest:tests/test_release.py` | ADR-0011 |
+| `pytest:tests/test_repo_wiki.py` | ADR-0032 |
+| `pytest:tests/test_repo_wiki_ingest.py` | ADR-0032 |
+| `pytest:tests/test_repo_wiki_store_git.py` | ADR-0032 |
+| `pytest:tests/test_repo_wiki_temporal.py` | ADR-0032 |
+| `pytest:tests/test_report_event_flow.py` | ADR-0028 |
+| `pytest:tests/test_report_issue_loop.py` | ADR-0018 |
+| `pytest:tests/test_review_advisor.py` | ADR-0095 |
+| `pytest:tests/test_review_phase_core.py::TestApproveConvergenceGate` | ADR-0095 |
+| `pytest:tests/test_review_phase_hooks.py` | ADR-0015 |
+| `pytest:tests/test_route_back.py` | ADR-0071 |
+| `pytest:tests/test_sandbox_scenario_contract.py` | ADR-0052, ADR-0083 |
+| `pytest:tests/test_screenshot_scanner.py` | ADR-0018 |
+| `pytest:tests/test_secret_scrub.py` | ADR-0085 |
 | `pytest:tests/test_seed_terms.py` | ADR-0053 |
-| `pytest:tests/test_state_machine.py` | ADR-0002 |
+| `pytest:tests/test_shape_phase.py` | ADR-0031 |
+| `pytest:tests/test_shape_runner.py` | ADR-0031 |
+| `pytest:tests/test_state_machine.py` | ADR-0002, ADR-0014, ADR-0017, ADR-0034 |
+| `pytest:tests/test_state_persistence.py` | ADR-0021 |
+| `pytest:tests/test_term_proposer_loop.py` | ADR-0054 |
+| `pytest:tests/test_term_pruner_loop.py` | ADR-0057 |
+| `pytest:tests/test_trust_fleet_anomaly_detectors.py` | ADR-0045 |
+| `pytest:tests/test_trust_fleet_sanity_loop.py` | ADR-0045 |
 | `pytest:tests/test_ubiquitous_language_drift.py` | ADR-0053 |
-| `tests/test_adr_pre_validator.py` | ADR-0037 |
-| `tests/test_agent_cli.py, tests/test_base_runner.py` | ADR-0004 |
-| `tests/test_dashboard_routes_repo.py` | ADR-0007, ADR-0008 |
-| `tests/test_discover_phase.py, tests/test_shape_phase.py, tests/test_discover_runner.py, tests/test_shape_runner.py, tests/architecture/test_functional_area_coverage.py` | ADR-0031 |
-| `tests/test_epic.py, tests/test_release.py` | ADR-0011 |
-| `tests/test_epic_manager.py, tests/test_post_merge_handler.py` | ADR-0019 |
-| `tests/test_epic_merge_coordination.py` | ADR-0012 |
-| `tests/test_implement_phase.py, tests/scenarios/fakes/test_prior_failure_propagation.py` | ADR-0024 |
-| `tests/test_implement_phase.py` | ADR-0005 |
-| `tests/test_integration_pipeline.py` | ADR-0022 |
-| `tests/test_integration_worktree.py` | ADR-0010 |
-| `tests/test_issue_cache.py, tests/test_precondition_gate.py` | ADR-0041 |
-| `tests/test_orchestrator_loops.py, tests/architecture/test_loop_count_matches_adr0001.py` | ADR-0001 |
-| `tests/test_repo_wiki.py, tests/test_repo_wiki_store_git.py, tests/test_repo_wiki_ingest.py, tests/test_wiki_drift_detector.py, tests/test_wiki_drift_symbols.py, tests/test_wiki_semantic_drift.py, tests/test_repo_wiki_temporal.py, tests/test_wiki_corroboration.py` | ADR-0032 |
-| `tests/test_review_phase_hooks.py` | ADR-0015 |
-| `tests/test_route_back.py` | ADR-0071 |
-| `tests/test_screenshot_scanner.py, tests/test_report_issue_loop.py` | ADR-0018 |
-| `tests/test_secret_scrub.py` | ADR-0085 |
-| `tests/test_state_machine.py` | ADR-0014, ADR-0017, ADR-0034 |
-| `tests/test_state_persistence.py, tests/test_event_persistence.py, tests/test_data_migration_d2.py` | ADR-0021 |
-| `tests/test_trust_fleet_sanity_loop.py, tests/test_loop_wiring_completeness.py, tests/test_trust_fleet_anomaly_detectors.py` | ADR-0045 |
-| `tests/test_untrusted_text.py, tests/test_preflight_untrusted_fencing.py, tests/test_agent_cli.py, tests/test_agent_advanced.py` | ADR-0092 |
-| `tests/test_visual_validation.py` | ADR-0016 |
+| `pytest:tests/test_untrusted_text.py` | ADR-0092 |
+| `pytest:tests/test_visual_validation.py` | ADR-0016 |
+| `pytest:tests/test_wiki_corroboration.py` | ADR-0032 |
+| `pytest:tests/test_wiki_drift_detector.py` | ADR-0032 |
+| `pytest:tests/test_wiki_drift_symbols.py` | ADR-0032 |
+| `pytest:tests/test_wiki_semantic_drift.py` | ADR-0032 |
+| `pytest:tests/trust/contracts/test_fake_github_contract.py` | ADR-0047 |
 
 ## Manual ADRs
 
 | ADR | Prose pointer |
 |---|---|
+| ADR-0009 | `Process guardrail — reviewed at PR time via the process-per-repo model's operational invariants (one 'cli.py' subprocess per repo slug, no shared mutable state); no automated test asserts subprocess isolation directly.` |
+| ADR-0023 | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` |
+| ADR-0025 | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
+| ADR-0035 | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
+| ADR-0036 | `Code review of 'src/cli.py:build_config()' and 'src/hf_cli/__main__.py' dispatch wiring during PR review of CLI/config changes.` |
 | ADR-0042 | `branch-protection ruleset review per docs/standards/branch_protection` |
+| ADR-0051 | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` |
+| ADR-0065 | `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` |
 
 <!-- arch:generated -->
