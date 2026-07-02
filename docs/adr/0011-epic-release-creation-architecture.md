@@ -3,8 +3,9 @@
 **Status:** Accepted
 **Date:** 2026-03-01
 **Enforcement:** enforced
-**Enforced by:** pytest:tests/test_epic.py
-**Enforced by:** pytest:tests/test_release.py
+**Enforced by:**
+pytest:tests/test_epic.py
+pytest:tests/test_release.py
 
 ## Context
 

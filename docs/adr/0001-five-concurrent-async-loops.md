@@ -3,8 +3,9 @@
 **Status:** Accepted (amended 2026-04-25)
 **Date:** 2026-02-26
 **Enforcement:** enforced
-**Enforced by:** pytest:tests/test_orchestrator_loops.py
-**Enforced by:** pytest:tests/architecture/test_loop_count_matches_adr0001.py
+**Enforced by:**
+pytest:tests/test_orchestrator_loops.py
+pytest:tests/architecture/test_loop_count_matches_adr0001.py
 
 ## Context
 

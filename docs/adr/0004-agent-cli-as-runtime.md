@@ -3,8 +3,9 @@
 **Status:** Accepted
 **Date:** 2026-02-26
 **Enforcement:** enforced
-**Enforced by:** pytest:tests/test_agent_cli.py
-**Enforced by:** pytest:tests/test_base_runner.py
+**Enforced by:**
+pytest:tests/test_agent_cli.py
+pytest:tests/test_base_runner.py
 
 ## Context
 
