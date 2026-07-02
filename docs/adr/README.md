@@ -138,6 +138,7 @@ cadence and files remediation issues on drift.
 | [0098](0098-convergence-oscillation-caretaker.md) | Convergence oscillation caretaker (Phase 2d) | Accepted |
 | [0099](0099-orchestration-as-a-control-system.md) | Orchestration as a Control System | Proposed |
 | [0100](0100-adr-conformance-as-a-measured-contract.md) | ADR conformance as a measured contract | Accepted |
+| [0101](0101-disturbance-dampener.md) | Disturbance Dampener — feedforward ratchet + burn-down loop | Proposed |
 
 ## Adding a new ADR
 

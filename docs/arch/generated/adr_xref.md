@@ -107,11 +107,13 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0098 | `src.convergence_oscillation_loop`, `src.models`, `src.state._convergence` | `pytest:tests/scenarios/test_convergence_oscillation_mockworld.py` |
 | ADR-0099 | `src.base_background_loop`, `src.base_runner`, `src.harness_insights`, `src.issue_store`, `src.models`, `src.review_advisor`, `src.ubiquitous_language` | `'tests/test_seed_terms.py' (the seven 'control_role' glossary terms load, resolve to 'main' classes, and ship 'accepted'), '(process)' (every orchestration component declares its control role)` |
 | ADR-0100 | `src.adr_conformance`, `src.adr_conformance_loop`, `src.adr_index` | `pytest:tests/test_adr_conformance_coverage.py` |
+| ADR-0101 | `src._mock_spec_detector`, `src.auto_pr`, `src.disturbance.baseline`, `src.disturbance.burndown`, `src.disturbance.detectors.base`, `src.disturbance.detectors.mock_spec`, `src.disturbance.detectors.suppressions`, `src.disturbance.gate`, `src.disturbance.registry`, `src.disturbance_dampener_loop` | `tests/test_disturbance_ratchet.py, tests/test_disturbance_dampener_loop.py` |
 
 ## Module → ADRs
 
 | Module | Cited by |
 |---|---|
+| `src._mock_spec_detector` | ADR-0101 |
 | `src.adr_conformance` | ADR-0100 |
 | `src.adr_conformance_loop` | ADR-0100 |
 | `src.adr_drift` | ADR-0056 |
@@ -126,6 +128,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.agent_cli` | ADR-0004 |
 | `src.assumption_surfacer` | ADR-0064 |
 | `src.auto_agent_preflight_loop` | ADR-0050, ADR-0063, ADR-0084 |
+| `src.auto_pr` | ADR-0101 |
 | `src.base_background_loop` | ADR-0049, ADR-0055, ADR-0084, ADR-0093, ADR-0099 |
 | `src.base_runner` | ADR-0004, ADR-0032, ADR-0055, ADR-0066, ADR-0099 |
 | `src.bg_worker_manager` | ADR-0049 |
@@ -155,6 +158,14 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.discover_runner` | ADR-0031, ADR-0045, ADR-0063 |
 | `src.discovery_council` | ADR-0064 |
 | `src.discovery_council_prompts` | ADR-0064 |
+| `src.disturbance.baseline` | ADR-0101 |
+| `src.disturbance.burndown` | ADR-0101 |
+| `src.disturbance.detectors.base` | ADR-0101 |
+| `src.disturbance.detectors.mock_spec` | ADR-0101 |
+| `src.disturbance.detectors.suppressions` | ADR-0101 |
+| `src.disturbance.gate` | ADR-0101 |
+| `src.disturbance.registry` | ADR-0101 |
+| `src.disturbance_dampener_loop` | ADR-0101 |
 | `src.docker_runner` | ADR-0010, ADR-0043 |
 | `src.edge_proposer_loop` | ADR-0058 |
 | `src.entry_evidence_loop` | ADR-0062 |

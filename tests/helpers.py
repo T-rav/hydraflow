@@ -395,6 +395,12 @@ class ConfigFactory:
         # actually run must pass `sandbox_failure_fixer_enabled=True` to
         # `_make_loop`/`make_bg_loop_deps`.
         sandbox_failure_fixer_enabled: bool = False,
+        disturbance_dampener_interval_seconds: int = 3600,
+        # Mirrors config.py's dark-by-default static config. Scenarios that
+        # exercise the burn-down path must pass
+        # `disturbance_dampener_enabled=True` explicitly.
+        disturbance_dampener_enabled: bool = False,
+        disturbance_dampener_max_prs_per_tick: int = 1,
         auto_agent_preflight_interval: int = 120,
         auto_agent_daily_budget_usd: float | None = None,
         auto_agent_cost_cap_usd: float | None = None,
@@ -639,6 +645,9 @@ class ConfigFactory:
                 security_patch_severity_threshold=security_patch_severity_threshold,
                 sandbox_failure_fixer_interval=sandbox_failure_fixer_interval,
                 sandbox_failure_fixer_enabled=sandbox_failure_fixer_enabled,
+                disturbance_dampener_interval_seconds=disturbance_dampener_interval_seconds,
+                disturbance_dampener_enabled=disturbance_dampener_enabled,
+                disturbance_dampener_max_prs_per_tick=disturbance_dampener_max_prs_per_tick,
                 auto_agent_preflight_interval=auto_agent_preflight_interval,
                 auto_agent_daily_budget_usd=auto_agent_daily_budget_usd,
                 auto_agent_cost_cap_usd=auto_agent_cost_cap_usd,

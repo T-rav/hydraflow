@@ -90,6 +90,8 @@ entries:
   src/discover_phase.py::type-ignore[arg-type]: 1
   src/discover_runner.py::type-ignore[attr-defined]: 1
   src/discover_runner.py::type-ignore[override]: 1
+  src/disturbance_dampener_loop.py::noqa:BLE001: 1
+  src/disturbance_dampener_loop.py::noqa:S101: 1
   src/docker_runner.py::noqa:A002: 1
   src/docker_runner.py::noqa:ARG002: 6
   src/docker_runner.py::noqa:PLC0415: 8
@@ -250,7 +252,7 @@ entries:
   src/server.py::noqa:PLC0415: 18
   src/server.py::type-ignore[arg-type]: 2
   src/server.py::type-ignore[no-untyped-def]: 1
-  src/service_registry.py::noqa:F841: 32
+  src/service_registry.py::noqa:F841: 33
   src/service_registry.py::noqa:PLC0415: 14
   src/service_registry.py::noqa:TCH001: 14
   "src/service_registry.py::noqa:TCH001\u2014dataclassannotation": 1

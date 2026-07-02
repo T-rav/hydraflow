@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_56 terms across 3 bounded contexts._
+_59 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -214,6 +214,26 @@ Caretaker loop (L24) that keeps `docs/arch/generated/` in sync with `src/` by ru
 - The regen PR always targets the fixed branch `arch-regen-auto`; a force-push updates any existing open PR rather than opening duplicates.
 - The functional-area coverage issue is separate from the regen PR — one concern per artifact.
 - Kill-switch is `HYDRAFLOW_DISABLE_DIAGRAM_LOOP=1` (ADR-0049 convention; no config field).
+
+## DimensionBaseline
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/disturbance/registry.py:DimensionSpec` · **Confidence:** `accepted`
+
+The Set-point (ADR-0094) for one disturbance dimension in the Disturbance Dampener (ADR-0095): a version-controlled, count-per-signature YAML snapshot (disturbance/baselines/<dimension>.yaml) of a dimension's known violations at the point it was last accepted. DimensionSpec is the registry entry binding a dimension's name, its ViolationDetector, its baseline path, and its fix prompt. The feedforward ratchet gate (src/disturbance/gate.py:run_gate) diffs a fresh detector pass against this baseline: any signature exceeding its baselined count is new and blocks the PR; a signature below its baselined count is burn-down progress. DisturbanceDampenerLoop's fix agents are instructed to prune resolved signatures from this baseline as part of each fix.
+
+**Invariants:**
+- A baseline only blocks growth past its recorded per-signature count; it never requires the pre-existing backlog to be cleared before the gate can be enabled for a dimension.
+- Pruning a baseline entry without actually fixing the underlying violation is self-correcting: the next gate run re-diffs the detector's live findings against the pruned baseline and reports the signature as new, blocking the PR.
+
+## DisturbanceDampenerLoop
+
+**Kind:** `loop` · **Context:** `shared-kernel` · **Anchor:** `src/disturbance_dampener_loop.py:DisturbanceDampenerLoop` · **Confidence:** `accepted`
+
+The burn-down actuator half of the Disturbance Dampener (ADR-0095). Each tick it runs every registered dimension's ViolationDetector, loads that dimension's baseline, and selects a capped, smallest-first, deduped batch of BurndownUnits (one per dimension+file). For each unit it dispatches a coding agent via generate_and_open_pr_async to fix the violations in that file and prune the corresponding baseline entries, opening one PR per file (Pattern A). It follows SandboxFailureFixerLoop's caretaker shape: LoopDeps wiring, a kill-switch, max-PRs-per-tick saturation, per-unit attempt caps, and dedup so an already-opened unit is not redispatched.
+
+**Invariants:**
+- Every per-unit exception handler calls reraise_on_credit_or_bug before recording a failure, so a credit-exhaustion signal is never absorbed as a per-file crash.
+- A unit is only marked opened (and deduped) after generate_and_open_pr_async reports status == 'opened'; a crashed or skipped unit leaves the unit eligible for retry up to auto_agent_max_attempts.
 
 ## EdgeProposerLoop
 
@@ -624,6 +644,16 @@ Caretaker background loop that autonomously prunes stale terms from the ubiquito
 - Opens at most one PR per tick, bundling all eligible terms into a single `hydraflow-ul-deprecated`-labelled PR.
 - `ReviewPhase` skips routing for PRs carrying `TERM_PRUNER_PR_LABEL` so the deprecation PR is not sent through the agent pipeline.
 - Companion to `TermProposerLoop`: together they implement the two-tick grow/prune cycle that keeps `make lint-ul` anchor-resolution green without human intervention.
+
+## ViolationDetector
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/disturbance/detectors/base.py:ViolationDetector` · **Confidence:** `accepted`
+
+The Sensor role (ADR-0094) in the Disturbance Dampener (ADR-0095): a pluggable protocol with a single pure method, detect(repo_root) -> list[Finding], that reads files only and produces no side effects. Each dimension in the registry (mock_spec, suppressions) binds one concrete ViolationDetector implementation. Findings carry a stable per-occurrence signature so the ratchet gate and the burn-down loop can count and diff violations per signature rather than as an undifferentiated total.
+
+**Invariants:**
+- detect() must be pure: it reads repository files and returns Findings, and must not mutate the repository or any baseline.
+- Every Finding's signature must be stable across repeated detect() calls against unchanged source, since the ratchet gate diffs signatures against a persisted baseline.
 
 ## WikiRotDetectorLoop
 

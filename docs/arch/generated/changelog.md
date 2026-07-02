@@ -6,6 +6,14 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `8bef9b1` — chore(adr): renumber disturbance ADR 0095->0101 (staging claimed 0095/0100); fix ADR-0094->0099 refs *(2026-07-01)*
+- `4355900` — chore(arch): regenerate UL docs for disturbance glossary terms *(2026-07-01)*
+- `2c7dcc3` — docs(ul): seed DisturbanceDampenerLoop/ViolationDetector/DimensionBaseline terms *(2026-07-01)*
+- `7fc9928` — docs(adr): ADR-0095 disturbance dampener (feedforward ratchet + burn-down) *(2026-07-01)*
+- `ca4e571` — test(disturbance): MockWorld scenario for burn-down loop *(2026-07-01)*
+- `affa3dc` — chore(disturbance): move DisturbanceDampenerLoop to auto_agent functional area (review) *(2026-07-01)*
+- `3d11bc1` — feat(disturbance): wire DisturbanceDampenerLoop into orchestrator + arch *(2026-07-01)*
+- `473ffe2` — feat(disturbance): DisturbanceDampenerLoop burn-down actuator (Pattern A) *(2026-07-01)*
 - `9bf9123` — chore(disturbance): update refs to retired mock-spec test after migration *(2026-07-01)*
 - `185875f` — feat(disturbance): mock-spec detector adapter over existing AST detector *(2026-07-01)*
 - `a63f101` — feat(disturbance): suppression-count detector (type:ignore / noqa) *(2026-07-01)*

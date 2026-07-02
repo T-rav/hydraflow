@@ -37,6 +37,7 @@ from diagnostic_runner import DiagnosticRunner
 from diagram_loop import DiagramLoop  # noqa: TCH001
 from discover_phase import DiscoverPhase  # noqa: TCH001
 from discover_runner import DiscoverRunner
+from disturbance_dampener_loop import DisturbanceDampenerLoop
 from docker_runner import get_docker_runner
 from edge_proposer_loop import EdgeProposerLoop
 from entry_evidence_loop import EntryEvidenceLoop
@@ -321,6 +322,7 @@ class ServiceRegistry:
     corpus_learning_loop: CorpusLearningLoop
     auto_agent_preflight_loop: AutoAgentPreflightLoop
     sandbox_failure_fixer_loop: SandboxFailureFixerLoop
+    disturbance_dampener_loop: DisturbanceDampenerLoop
     diagram_loop: DiagramLoop
     cost_budget_watcher_loop: CostBudgetWatcherLoop
     pricing_refresh_loop: PricingRefreshLoop
@@ -1426,6 +1428,22 @@ def build_services(
         workspaces=workspaces,
     )
 
+    # Disturbance dampener burn-down actuator (ADR-0095, Pattern A). Reuses
+    # the same AutoAgentRunner subprocess wrapper as the sandbox fixer above.
+    disturbance_dampener_runner = AutoAgentRunner(config=config, event_bus=event_bus)
+    disturbance_dampener_dedup = DedupStore(
+        "disturbance_dampener",
+        config.data_root / "dedup" / "disturbance_dampener.json",
+    )
+    disturbance_dampener_loop = DisturbanceDampenerLoop(  # noqa: F841
+        config=config,
+        state=state,
+        prs=prs,
+        dedup=disturbance_dampener_dedup,
+        deps=loop_deps,
+        runner=disturbance_dampener_runner,
+    )
+
     # Term-Proposer (ADR-0054). Production adapters wire the loop to:
     # - ClaudeCLIClient: shells out to `claude -p` via SubprocessRunner,
     #   mirroring `wiki_compiler.WikiCompiler._call_model`.
@@ -1584,6 +1602,7 @@ def build_services(
         corpus_learning_loop=corpus_learning_loop,
         auto_agent_preflight_loop=auto_agent_preflight_loop,
         sandbox_failure_fixer_loop=sandbox_failure_fixer_loop,
+        disturbance_dampener_loop=disturbance_dampener_loop,
         diagram_loop=diagram_loop,
         cost_budget_watcher_loop=cost_budget_watcher_loop,
         pricing_refresh_loop=pricing_refresh_loop,
