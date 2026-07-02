@@ -1,7 +1,8 @@
 # ADR-0035: Tests Must Match Toggle State They Assert
 
 **Status:** Accepted
-**Enforced by:** (process)
+**Enforcement:** manual
+**Enforced by:** Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also `docs/wiki/testing.md`.
 **Date:** 2026-03-08
 
 ## Context

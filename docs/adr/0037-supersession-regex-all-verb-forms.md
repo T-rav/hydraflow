@@ -1,7 +1,8 @@
 # ADR-0037: Supersession Regex Must Include All Verb Forms
 
 **Status:** Accepted
-**Enforced by:** tests/test_adr_pre_validator.py
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_adr_pre_validator.py
 **Date:** 2026-03-08
 
 ## Context

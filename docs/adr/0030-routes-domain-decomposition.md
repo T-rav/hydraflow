@@ -4,6 +4,8 @@
 
 Accepted
 
+**Enforcement:** decision-of-record
+
 ## Context
 
 `src/dashboard_routes/_routes.py` was 4,178 lines with 95 route handlers in a single `create_router()` function. Route handlers captured 17+ closure variables (config, event_bus, state, pr_manager, etc.). Navigation, testing, and modification were difficult.

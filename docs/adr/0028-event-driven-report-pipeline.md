@@ -4,6 +4,10 @@
 
 Accepted
 
+**Enforcement:** enforced
+
+**Enforced by:** pytest:tests/test_report_event_flow.py
+
 ## Context
 
 The bug report pipeline (`ReportIssueLoop`) silently updated `TrackedReport` status on disk but never notified the frontend. Users submitted bugs and saw "queued" indefinitely until the next 30-second HTTP poll. The `BugReportTracker` was a modal with no filtering, sorting, or inline submission — unusable for power users.

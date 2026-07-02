@@ -1,7 +1,17 @@
 # ADR-0032: Per-Repo Wiki Knowledge Base (Karpathy Pattern)
 
 **Status:** Accepted
-**Enforced by:** tests/test_repo_wiki.py, tests/test_repo_wiki_store_git.py, tests/test_repo_wiki_ingest.py, tests/test_wiki_drift_detector.py, tests/test_wiki_drift_symbols.py, tests/test_wiki_semantic_drift.py, tests/test_repo_wiki_temporal.py, tests/test_wiki_corroboration.py
+**Enforcement:** enforced
+
+**Enforced by:**
+pytest:tests/test_repo_wiki.py
+pytest:tests/test_repo_wiki_store_git.py
+pytest:tests/test_repo_wiki_ingest.py
+pytest:tests/test_wiki_drift_detector.py
+pytest:tests/test_wiki_drift_symbols.py
+pytest:tests/test_wiki_semantic_drift.py
+pytest:tests/test_repo_wiki_temporal.py
+pytest:tests/test_wiki_corroboration.py
 **Date:** 2026-04-05
 
 ## Context
