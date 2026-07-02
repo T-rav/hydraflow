@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `4355900` — chore(arch): regenerate UL docs for disturbance glossary terms *(2026-07-01)*
 - `2c7dcc3` — docs(ul): seed DisturbanceDampenerLoop/ViolationDetector/DimensionBaseline terms *(2026-07-01)*
 - `7fc9928` — docs(adr): ADR-0095 disturbance dampener (feedforward ratchet + burn-down) *(2026-07-01)*
 - `ca4e571` — test(disturbance): MockWorld scenario for burn-down loop *(2026-07-01)*
