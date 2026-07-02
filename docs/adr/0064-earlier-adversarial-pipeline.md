@@ -6,6 +6,7 @@
 - **Superseded by:** none
 - **Related:** [ADR-0001](0001-five-concurrent-async-loops.md) (five async loops), [ADR-0002](0002-labels-as-state-machine.md) (labels as state machine), [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker loop pattern), [ADR-0051](0051-iterative-production-readiness-review.md) (iterative production-readiness review), [ADR-0053](0053-ubiquitous-language-as-living-artifact.md) (ubiquitous language as living artifact). See also `docs/wiki/dark-factory.md` §3 (convergence loop).
 - **Enforced by:** `src/adversarial_retry_loop.py:AdversarialRetryLoop` (shared retry primitive), `src/complexity_gate.py:ComplexityGate` (routing), `src/plan_phase.py:PlanPhase` / `src/shape_phase.py:ShapePhase` / `src/discovery_council.py:DiscoveryCouncil` (call sites), `src/wiki_carryover.py:build_wiki_entry` (carryover→knowledge), `tests/scenarios/test_adversarial_pipeline.py` + `tests/regressions/test_adversarial_pipeline_regressions.py` (behaviour pinning).
+- **Enforcement:** decision-of-record
 
 ## Context
 
