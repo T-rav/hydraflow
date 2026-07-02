@@ -52,3 +52,20 @@ def test_no_status_line_leaves_content_untouched() -> None:
     content = "# ADR-0099: Malformed\n\nNo status line present.\n"
     result = _ensure_enforcement_line(content)
     assert result == content
+
+
+def test_injects_under_h2_status_heading() -> None:
+    """ADRs using the ``## Status`` H2 form (13 exist on disk, e.g.
+    ADR-0053) must also get the injection — previously the bold-inline
+    anchor made this a silent no-op and the ADR failed the ratchet on
+    acceptance."""
+    content = (
+        "# ADR-0099: Test ADR\n\n## Status\n\nAccepted\n\n## Context\n\nSomething.\n"
+    )
+    result = _ensure_enforcement_line(content)
+    assert "**Enforcement:** decision-of-record" in result
+    # Must land after the status value, before the next section.
+    status_idx = result.index("Accepted")
+    enforcement_idx = result.index("**Enforcement:**")
+    context_idx = result.index("## Context")
+    assert status_idx < enforcement_idx < context_idx

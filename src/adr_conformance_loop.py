@@ -210,7 +210,13 @@ class AdrConformanceLoop(BaseBackgroundLoop):
         self, conf: AdrConformance, rename_match: str
     ) -> None:
         """File a dedup'd issue proposing a rename — the loop does NOT edit
-        the ADR file itself; a human/pipeline applies the computed rename."""
+        the ADR file itself; a human/pipeline applies the computed rename.
+
+        Deliberately bypasses the attempt budget/escalation path: a rename
+        has one clear fix, so the same idempotent proposal (deduped by its
+        stable title via ``find_existing_issue``) is re-filed until the ADR
+        is repointed — it never escalates to HITL (ADR-0100 split-class
+        model)."""
         title = f"ADR conformance: {conf.adr_id} check may have been renamed"
         body = (
             "## ADR conformance — proposed repoint\n\n"

@@ -6,16 +6,19 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `ce0335c` — Merge origin/staging into adr-conformance-backfill *(2026-07-02)*
 - `2f9f8bf` — docs(adr): reclassify ADR-0064 decision-of-record -> enforced (review fix) *(2026-07-02)*
 - `95fecbf` — docs(adr): drain grandfather set to zero (annotate 59, README going-forward) *(2026-07-02)*
 - `26f0a79` — docs(adr): backfill Enforcement for batch F (ADRs 89-98) *(2026-07-02)*
 - `ffb5105` — docs(adr): backfill Enforcement for batch E (ADRs 58-88) *(2026-07-02)*
 - `3044c15` — docs(adr): backfill Enforcement for batch D (ADRs 41-57) *(2026-07-02)*
 - `5e54612` — docs(adr): backfill Enforcement for batch C (ADRs 27-37) *(2026-07-02)*
+- `f170b89` — fix(adr-0101): drop line-number citation to satisfy P1.16 (#9692) (#9692) *(2026-07-02)*
 - `23e92a9` — docs(adr): backfill Enforcement for batch B (ADRs 15-25) *(2026-07-02)*
 - `b2e936d` — fix(adr): use single Enforced-by marker + continuation lines for multi-check ADRs (batch A) *(2026-07-02)*
 - `aae9526` — feat(disturbance): Phase B — burn-down loop (ADR-0095) (#9686) (#9686) *(2026-07-02)*
 - `83eb4d2` — docs(adr): backfill Enforcement for batch A (ADRs 1-14) *(2026-07-01)*
+- `8f35ebb` — Convergence gate GA: remove convergence_gate_enabled (gate is the sole review path) (#9688) (#9688) *(2026-07-01)*
 - `8358094` — feat(disturbance): Phase A — feedforward disturbance dampener (gate + 2 detectors) (#9682) (#9682) *(2026-07-01)*
 - `54a0365` — docs(adr): ADR-0094 — orchestration as a control system + control-role vocabulary (#9679) (#9679) *(2026-07-01)*
 - `9914531` — ADR conformance as a measured contract (ADR-0098) (#9684) (#9684) *(2026-07-01)*
