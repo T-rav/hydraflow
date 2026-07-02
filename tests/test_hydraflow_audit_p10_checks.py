@@ -146,6 +146,44 @@ def test_na_outside_git(tmp_path: Path) -> None:
     assert _run("P10.3", _ctx(tmp_path)).status is Status.NA
 
 
+def test_future_date_baseline_excludes_all_fix_commits(tmp_path: Path) -> None:
+    """A date baseline uses --since, so no ancestry/SHA resolution is needed."""
+    _git_init(tmp_path)
+    _git_commit(tmp_path, "fix: old drift", {"src/a.py": "def f(): return 1\n"})
+    _write(tmp_path / ".hydraflow-audit-baseline", "# rule adopted\n2099-01-01\n")
+    result = _run("P10.3", _ctx(tmp_path))
+    assert result.status is Status.PASS
+    assert "no fix/bug commits" in (result.message or "")
+    assert "2099-01-01" in (result.message or "")
+
+
+def test_past_date_baseline_counts_newer_fix_commits(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _git_commit(tmp_path, "fix: typo", {"src/a.py": "def f(): return 1\n"})
+    _write(tmp_path / ".hydraflow-audit-baseline", "2020-01-01\n")
+    assert _run("P10.3", _ctx(tmp_path)).status is Status.WARN
+
+
+def test_timestamp_baseline_supported(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _git_commit(tmp_path, "fix: typo", {"src/a.py": "def f(): return 1\n"})
+    _write(tmp_path / ".hydraflow-audit-baseline", "2099-01-01T00:00:00Z\n")
+    result = _run("P10.3", _ctx(tmp_path))
+    assert result.status is Status.PASS
+    assert "no fix/bug commits" in (result.message or "")
+
+
+def test_baseline_selector_pins_midnight_on_bare_dates() -> None:
+    """git approxidate fills missing time-of-day from the CURRENT clock, so a
+    bare --since=<date> run in the afternoon would exclude that morning's
+    commits; the selector must pin midnight explicitly."""
+    from scripts.hydraflow_audit.checks.p10_tdd import _baseline_selector
+
+    assert _baseline_selector("2026-07-02") == "--since=2026-07-02T00:00:00"
+    assert _baseline_selector("2026-07-02T21:00:00Z") == "--since=2026-07-02T21:00:00Z"
+    assert _baseline_selector("97005928") == "97005928..HEAD"
+
+
 # --- P10.4 ----------------------------------------------------------------
 
 
