@@ -5,7 +5,7 @@
 - **Refines:** ADR-0094 (two-level convergence: Gate + ConvergenceLedger)
 - **Extends:** ADR-0095 (approve-path gating)
 
-> **Superseded in part by [ADR-0099](0099-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
+> **Superseded in part by [ADR-0100](0100-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
 
 ## Context
 
