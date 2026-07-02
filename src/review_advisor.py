@@ -401,29 +401,6 @@ def min_review_passes_for_blast_radius(
     return BLAST_RADIUS_RETRIES[blast_radius]
 
 
-def post_verify_retry_budget(
-    blast_radius: Literal["low", "medium", "high"],
-    post_verify_authority: Literal["advisory", "veto"],
-) -> int:
-    """Return the PostVerifyAdvisor veto-retry budget for a diff (refinement R-2).
-
-    For veto-authority surfaces the budget is stratified by blast radius
-    (``BLAST_RADIUS_RETRIES``) so high-blast changes earn more automated fix
-    attempts before escalating to a human and trivial ones escalate sooner.
-
-    Advisory surfaces (``post_verify_authority == "advisory"``) are HARD-CAPPED
-    to 0: they never retry and never block a merge, preserving the zero-budget
-    contract. The cap derives from the authority — the single source of truth
-    for advisory-vs-veto — rather than a separate retry-count field. It is
-    defensive for the retry loop, which only the veto-authority PR-review
-    surfaces (pr_review, pre_merge_spec_check) reach; the advisory wiki_ingest
-    surface and the one-shot visual_gate/adr_review surfaces never enter it.
-    """
-    if post_verify_authority == "advisory":
-        return 0
-    return BLAST_RADIUS_RETRIES[blast_radius]
-
-
 def diff_stats_from_text(diff: str) -> DiffStats:
     """Compute a coarse :class:`DiffStats` from a raw unified-diff string.
 

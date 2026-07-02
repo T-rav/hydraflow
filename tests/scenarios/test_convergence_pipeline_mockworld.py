@@ -32,14 +32,13 @@ pytestmark = pytest.mark.scenario
 
 
 def _make_world_with_gate(tmp_path, *, max_convergence_laps: int = 3) -> MockWorld:
-    """Return a fresh MockWorld with the convergence gate enabled.
+    """Return a fresh MockWorld for convergence-gate scenarios.
 
+    The convergence gate is unconditional: boundary recording and the
+    HybridGate decision path are always-on, so no flag toggle is needed.
     We pass a config built before constructing MockWorld so that
-    ``ReviewPhase`` (wired in ``PipelineHarness.__init__``) picks up the flag
-    at construction time.  Mutating ``world.harness.config`` after the fact
-    would also work because ``ReviewPhase._uses_convergence_gate()`` reads
-    ``self._config.convergence_gate_enabled`` at call time, but passing it in
-    is the cleaner contract.
+    ``ReviewPhase`` (wired in ``PipelineHarness.__init__``) picks up
+    ``max_convergence_laps`` at construction time.
     """
     from tests.helpers import ConfigFactory
 
@@ -53,7 +52,6 @@ def _make_world_with_gate(tmp_path, *, max_convergence_laps: int = 3) -> MockWor
         visual_validation_enabled=False,
         max_ci_fix_attempts=0,
     )
-    cfg.convergence_gate_enabled = True
     cfg.max_convergence_laps = max_convergence_laps
     return MockWorld(tmp_path, config=cfg)
 

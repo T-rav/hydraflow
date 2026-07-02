@@ -5,6 +5,8 @@
 - **Supersedes:** none
 - **Related:** ADR-0001 (five concurrent async loops), ADR-0002 (labels as state machine), ADR-0029 (caretaker loop pattern), ADR-0049 (kill-switch convention), ADR-0051 (iterative production-readiness review), ADR-0059 (advisor-pattern self-repairing review)
 
+> **Superseded in part by [ADR-0102](0102-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
+
 ## Context
 
 HydraFlow's pipeline already converged in places, but unevenly, and nothing represented "this issue has converged across the whole pipeline."

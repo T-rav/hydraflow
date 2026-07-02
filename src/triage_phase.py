@@ -485,7 +485,6 @@ class TriagePhase:
                     if _verdict is not None:
                         record_stage_verdict(
                             self._state,
-                            enabled=self._config.convergence_gate_enabled,
                             issue_number=issue.id,
                             stage="triage",
                             decision=_verdict,
@@ -522,7 +521,6 @@ class TriagePhase:
         if _verdict is not None:
             record_stage_verdict(
                 self._state,
-                enabled=self._config.convergence_gate_enabled,
                 issue_number=issue.id,
                 stage="triage",
                 decision=_verdict,

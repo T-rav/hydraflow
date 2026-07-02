@@ -1,7 +1,6 @@
 """MockWorld scenarios — convergence gate at the review boundary.
 
-Verifies three behaviours introduced by the convergence gate
-(``convergence_gate_enabled=True``):
+Verifies three behaviours of the unconditional convergence gate:
 
 1. ``test_loop_back_records_lap`` — a PR that fails review on pass 1
    (REQUEST_CHANGES) loops back to the ready queue; the ledger records the
@@ -45,14 +44,12 @@ pytestmark = pytest.mark.scenario
 
 
 def _make_world_with_gate(tmp_path, *, max_convergence_laps: int = 3) -> MockWorld:
-    """Return a fresh MockWorld with the convergence gate enabled.
+    """Return a fresh MockWorld for convergence-gate scenarios.
 
+    The gate is always-on (unconditional since the legacy fork was removed).
     We pass a config built before constructing MockWorld so that
-    ``ReviewPhase`` (wired in ``PipelineHarness.__init__``) picks up the flag
-    at construction time.  Mutating ``world.harness.config`` after the fact
-    would also work because ``ReviewPhase._uses_convergence_gate()`` reads
-    ``self._config.convergence_gate_enabled`` at call time, but passing it in
-    is the cleaner contract.
+    ``ReviewPhase`` (wired in ``PipelineHarness.__init__``) picks up
+    ``max_convergence_laps`` at construction time.
     """
     from tests.helpers import ConfigFactory
 
@@ -66,7 +63,6 @@ def _make_world_with_gate(tmp_path, *, max_convergence_laps: int = 3) -> MockWor
         visual_validation_enabled=False,
         max_ci_fix_attempts=0,
     )
-    cfg.convergence_gate_enabled = True
     cfg.max_convergence_laps = max_convergence_laps
     return MockWorld(tmp_path, config=cfg)
 

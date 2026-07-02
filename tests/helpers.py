@@ -1735,6 +1735,13 @@ def make_review_phase(
     _no_fix = _RR(pr_number=0, issue_number=0, fixes_made=False)
     phase._reviewers.fix_review_findings = AsyncMock(return_value=_no_fix)
 
+    # The convergence gate runs on every APPROVE; the deterministic check
+    # blocks on truthy code-scanning alert objects from an unset AsyncMock.
+    # Explicitly return None (no alerts) so the gate's approve-det is GREEN.
+    # This applies regardless of default_mocks — every test that reaches
+    # an APPROVE verdict needs the gate's det check to pass.
+    phase._prs.fetch_code_scanning_alerts = AsyncMock(return_value=None)
+
     if default_mocks:
         from tests.conftest import ReviewResultFactory
 

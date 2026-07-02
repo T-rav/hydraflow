@@ -3,13 +3,12 @@ from __future__ import annotations
 from convergence_recording import record_stage_verdict, signatures_from_concerns
 
 
-def test_records_verdict_when_enabled(tmp_path):
+def test_records_verdict(tmp_path):
     from tests.helpers import make_tracker
 
     t = make_tracker(tmp_path)
     record_stage_verdict(
         t,
-        enabled=True,
         issue_number=7,
         stage="triage",
         decision="ADVANCE",
@@ -18,21 +17,6 @@ def test_records_verdict_when_enabled(tmp_path):
     led = t.get_convergence_ledger(7)
     assert led is not None
     assert led.stage_state["triage"].last_verdict == "ADVANCE"
-
-
-def test_noop_when_disabled(tmp_path):
-    from tests.helpers import make_tracker
-
-    t = make_tracker(tmp_path)
-    record_stage_verdict(
-        t,
-        enabled=False,
-        issue_number=7,
-        stage="triage",
-        decision="ADVANCE",
-        signatures=[],
-    )
-    assert t.get_convergence_ledger(7) is None
 
 
 def test_signatures_from_concerns_filters_high_critical():

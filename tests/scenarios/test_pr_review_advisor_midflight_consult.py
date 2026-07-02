@@ -64,7 +64,7 @@ class TestPRReviewMidFlightConsult:
         # Also script post-verify (which the standard pipeline calls).
         world._llm.script_advisor(
             40,
-            "post_verify",
+            "post_verify:correctness",
             [
                 json.dumps(
                     {
@@ -82,7 +82,7 @@ class TestPRReviewMidFlightConsult:
         assert outcome.review_result is not None
 
         # Post-verify ran exactly once on the APPROVE path.
-        assert world._llm.advisor_call_count_for("post_verify") == 1
+        assert world._llm.advisor_call_count_for("post_verify:correctness") == 1
 
         # Direct-runner smoke: invoke the adapter with a mid-flight prompt
         # to pin the role-detection contract the executor's in-session

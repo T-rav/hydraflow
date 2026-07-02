@@ -7,6 +7,8 @@
 - **Enforcement:** enforced
 - **Enforced by:** pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py
 
+> **Superseded in part by [ADR-0102](0102-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
+
 ## Context
 
 ADR-0094 introduced the `ConvergenceLedger` as the single source of truth for per-issue convergence state. Phase 1 migrated `review_attempts` and `review_blast_radii` from bespoke `StateData` fields into the ledger. Phase 2b (ADR-0096) added cross-boundary verdict recording into `StageRecord.last_verdict`.
