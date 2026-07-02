@@ -4,8 +4,10 @@
 - **Date:** 2026-07-01
 - **Refines:** ADR-0094 (two-level convergence: Gate + ConvergenceLedger)
 - **Extends:** ADR-0096 (boundary verdict recording)
+- **Enforcement:** enforced
+- **Enforced by:** pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py
 
-> **Superseded in part by [ADR-0100](0100-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
+> **Superseded in part by [ADR-0101](0101-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
 
 ## Context
 

@@ -10,6 +10,22 @@ graph LR
     AgentPort -.-> FakeAgent
     BotPRPort --> OpenAutoPRBotPRPort
     BotPRPort -.-> FakeBotPR
+    ConformanceRunnerPort --> AdversarialRetryLoop
+    ConformanceRunnerPort --> AgentRunner
+    ConformanceRunnerPort --> AgentSubagentRunnerAdapter
+    ConformanceRunnerPort --> AssumptionSurfacer
+    ConformanceRunnerPort --> BaseBackgroundLoop
+    ConformanceRunnerPort --> BaseSubprocessRunner
+    ConformanceRunnerPort --> HITLRunner
+    ConformanceRunnerPort --> HydraFlowOrchestrator
+    ConformanceRunnerPort --> PostVerifyAdvisor
+    ConformanceRunnerPort --> PreFlightAdvisor
+    ConformanceRunnerPort --> RepoRuntime
+    ConformanceRunnerPort --> ReportIssueLoop
+    ConformanceRunnerPort --> ShapeChallenger
+    ConformanceRunnerPort --> SubprocessAgentRunner
+    ConformanceRunnerPort --> SubprocessConformanceRunner
+    ConformanceRunnerPort -.-> FakeConformanceRunner
     IssueFetcherPort --> IssueFetcher
     IssueFetcherPort -.-> FakeIssueFetcher
     IssueStorePort --> IssueStore
@@ -43,6 +59,28 @@ graph LR
 - Adapters:
   - `OpenAutoPRBotPRPort` (`src.term_proposer_runtime`)
 - Fake: `FakeBotPR` (`mockworld.fakes.fake_bot_pr`)
+
+### ConformanceRunnerPort
+
+- Module: `src.ports`
+- Methods: `run`
+- Adapters:
+  - `AdversarialRetryLoop` (`src.adversarial_retry_loop`)
+  - `AgentRunner` (`src.agent`)
+  - `AgentSubagentRunnerAdapter` (`src.implement_spec_reviewer`)
+  - `AssumptionSurfacer` (`src.assumption_surfacer`)
+  - `BaseBackgroundLoop` (`src.base_background_loop`)
+  - `BaseSubprocessRunner` (`src.runners.base_subprocess_runner`)
+  - `HITLRunner` (`src.hitl_runner`)
+  - `HydraFlowOrchestrator` (`src.orchestrator`)
+  - `PostVerifyAdvisor` (`src.review_advisor`)
+  - `PreFlightAdvisor` (`src.review_advisor`)
+  - `RepoRuntime` (`src.repo_runtime`)
+  - `ReportIssueLoop` (`src.report_issue_loop`)
+  - `ShapeChallenger` (`src.shape_challenger`)
+  - `SubprocessAgentRunner` (`src.adversarial_agent_runner`)
+  - `SubprocessConformanceRunner` (`src.adr_conformance_runner`)
+- Fake: `FakeConformanceRunner` (`mockworld.fakes.fake_conformance_runner`)
 
 ### IssueFetcherPort
 

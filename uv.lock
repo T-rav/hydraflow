@@ -368,6 +368,7 @@ docs = [
 test = [
     { name = "httpx" },
     { name = "hypothesis" },
+    { name = "markdown" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -393,6 +394,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27.0" },
     { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6.100.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
+    { name = "markdown", marker = "extra == 'test'", specifier = ">=3.0" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6.0" },
     { name = "mkdocs-git-revision-date-localized-plugin", marker = "extra == 'docs'", specifier = ">=1.2.4" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5.0" },

@@ -30,6 +30,14 @@ EXPECTED_NAMES = {
     "WorkspacePort",
     "IssueStorePort",
     "AgentRunner",
+    # Control-theory role terms (ADR-0094)
+    "Plant",
+    "Sensor",
+    "Set-point",
+    "Error",
+    "Controller",
+    "Actuator",
+    "Governor",
 }
 
 

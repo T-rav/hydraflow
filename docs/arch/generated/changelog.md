@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `82ef1ce` — docs(adr): renumber gate-GA ADR 0099->0100 (staging claimed 0099 for control-system) *(2026-07-01)*
 - `bc57c32` — docs(adr): ADR-0099 convergence gate general availability (flag removed) *(2026-07-01)*
 - `7eb71e4` — Two-level convergence Phase 2d: oscillation caretaker loop (#9683) (#9683) *(2026-07-01)*
 - `7503e7e` — Two-level convergence Phase 2c: migrate attempt counters into the ledger (#9681) (#9681) *(2026-07-01)*
