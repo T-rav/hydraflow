@@ -99,10 +99,37 @@ class ConvergenceOscillationLoop(BaseBackgroundLoop):
             if ledger.converged or ledger.oscillation_escalated:
                 continue
 
-            if ledger.detect_cross_boundary_oscillation(
-                window=self._config.convergence_oscillation_window,
-                min_loopback_stages=self._config.convergence_oscillation_min_loopback_stages,
-            ):
+            # Temporal arm: defer while the review loop still owns the retry
+            # budget. Only allow temporal detection when laps==0 (no laps yet,
+            # snapshot handles it) or laps >= cap (budget exhausted, escalation
+            # appropriate). This prevents the caretaker from racing the review
+            # loop's own outer-oscillation detection on laps that are still live.
+            temporal_ok = (
+                ledger.laps == 0 or ledger.laps >= self._config.max_convergence_laps
+            )
+
+            if temporal_ok:
+                fires = ledger.detect_cross_boundary_oscillation(
+                    window=self._config.convergence_oscillation_window,
+                    min_loopback_stages=self._config.convergence_oscillation_min_loopback_stages,
+                )
+            else:
+                # Snapshot arm only: count how many boundary stages are LOOP_BACK.
+                boundary_stages = {"triage", "shape", "plan"}
+                loopback_count = sum(
+                    1
+                    for stage in boundary_stages
+                    if (
+                        ledger.stage_state.get(stage) is not None
+                        and ledger.stage_state[stage].last_verdict == "LOOP_BACK"
+                    )
+                )
+                fires = (
+                    loopback_count
+                    >= self._config.convergence_oscillation_min_loopback_stages
+                )
+
+            if fires:
                 # Identify which boundary stages are currently LOOP_BACK so the
                 # body gives operators a quick read on where the churn is.
                 boundary_stages = {"triage", "shape", "plan"}

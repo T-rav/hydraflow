@@ -1612,6 +1612,128 @@ class TestReviewConvergenceGate:
         assert ledger is not None
         assert ledger.stage_state["review"].last_verdict == "ESCALATE"
 
+    @pytest.mark.asyncio
+    async def test_reject_with_summary_records_normalized_signature(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Reject path records normalized summary as lap signature (F1)."""
+        from convergence_gate import GateDecision
+
+        phase = make_review_phase(config, default_mocks=True)
+        config.max_convergence_laps = 20  # Plenty of budget
+
+        result = ReviewResultFactory.create(
+            verdict=ReviewVerdict.REQUEST_CHANGES,
+            summary="  needs X  and  Y  ",
+        )
+
+        decision = await phase._convergence_decision(
+            issue_number=7,
+            review_approved=False,
+            reject_review_result=result,
+        )
+
+        assert decision.decision is GateDecision.LOOP_BACK
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        # The review stage must record the normalized summary as signature.
+        sigs = ledger.stage_state["review"].last_finding_signatures
+        assert sigs == ["needs X and Y"]
+
+    @pytest.mark.asyncio
+    async def test_reject_with_empty_summary_records_empty_signatures(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Reject path with blank summary records [] (F1 fallback)."""
+        from convergence_gate import GateDecision
+
+        phase = make_review_phase(config, default_mocks=True)
+        config.max_convergence_laps = 20
+
+        result = ReviewResultFactory.create(
+            verdict=ReviewVerdict.REQUEST_CHANGES,
+            summary="",
+        )
+
+        decision = await phase._convergence_decision(
+            issue_number=7,
+            review_approved=False,
+            reject_review_result=result,
+        )
+
+        assert decision.decision is GateDecision.LOOP_BACK
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        sigs = ledger.stage_state["review"].last_finding_signatures
+        assert sigs == []
+
+    @pytest.mark.asyncio
+    async def test_two_laps_same_review_findings_detect_outer_oscillation(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Two laps with IDENTICAL review findings -> detect_outer_oscillation True (F1)."""
+        config.max_convergence_laps = 20
+        config.max_review_fix_attempts = 100
+        phase = make_review_phase(config, default_mocks=True)
+
+        result = ReviewResultFactory.create(
+            verdict=ReviewVerdict.REQUEST_CHANGES,
+            summary="needs auth check",
+        )
+
+        for _ in range(2):
+            await phase._convergence_decision(
+                issue_number=7,
+                review_approved=False,
+                reject_review_result=result,
+            )
+
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        assert ledger.detect_outer_oscillation() is True
+
+    @pytest.mark.asyncio
+    async def test_two_laps_different_review_findings_no_false_positive(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Two laps with DIFFERENT review findings -> detect_outer_oscillation False.
+
+        This is the F1 false-positive killer: static pre-review stage signatures +
+        differing review signatures must NOT fire oscillation detection.
+        """
+        config.max_convergence_laps = 20
+        config.max_review_fix_attempts = 100
+        phase = make_review_phase(config, default_mocks=True)
+
+        # Seed pre-review stage signatures (static, won't change between laps).
+        ledger = phase._state.ensure_convergence_ledger(7)
+        ledger.record_gate_result("triage", "ADVANCE", ["static-finding"])
+        phase._state.save_convergence_ledger(7, ledger)
+
+        # Lap 1: finding "needs auth check"
+        await phase._convergence_decision(
+            issue_number=7,
+            review_approved=False,
+            reject_review_result=ReviewResultFactory.create(
+                verdict=ReviewVerdict.REQUEST_CHANGES,
+                summary="needs auth check",
+            ),
+        )
+        # Lap 2: different finding "needs test coverage"
+        await phase._convergence_decision(
+            issue_number=7,
+            review_approved=False,
+            reject_review_result=ReviewResultFactory.create(
+                verdict=ReviewVerdict.REQUEST_CHANGES,
+                summary="needs test coverage",
+            ),
+        )
+
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        # Different review findings -> no oscillation, even with static pre-review sigs.
+        assert ledger.detect_outer_oscillation() is False
+
 
 # ---------------------------------------------------------------------------
 # _attempt_review_fix
@@ -3105,6 +3227,67 @@ class TestApproveConvergenceGate:
         assert captured_lenses == ["correctness", "security", "spec"]
         assert all(isinstance(v, JudgeVerdict) for v in verdicts)
         assert all(v.approve is True for v in verdicts)
+
+    @pytest.mark.asyncio
+    async def test_veto_with_disagreements_records_lens_disagreement_signatures(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Approve-veto path records lens:disagreement for each disagreement (F1)."""
+        from convergence_gate import GateDecision, JudgeVerdict
+
+        phase = make_review_phase(config, default_mocks=True)
+
+        async def _veto_judge_with_disagreements(_ctx, _i):
+            return JudgeVerdict(
+                approve=False,
+                feedback="fix correctness",
+                signatures=[
+                    "correctness:missing null check",
+                    "correctness:wrong return",
+                ],
+            )
+
+        decision = await phase._convergence_decision(
+            issue_number=7,
+            review_approved=True,
+            code_scanning_alerts=None,
+            post_verify_judge=_veto_judge_with_disagreements,
+        )
+
+        assert decision.decision is GateDecision.LOOP_BACK
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        sigs = ledger.stage_state["review"].last_finding_signatures
+        # Should contain the lens:disagreement sigs from the judge verdict.
+        assert "correctness:missing null check" in sigs
+        assert "correctness:wrong return" in sigs
+
+    @pytest.mark.asyncio
+    async def test_veto_without_disagreements_records_lens_name_fallback(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Veto with no disagreements falls back to recording the lens name (F1)."""
+        from convergence_gate import GateDecision, JudgeVerdict
+
+        phase = make_review_phase(config, default_mocks=True)
+
+        async def _veto_judge_no_disagreements(_ctx, _i):
+            return JudgeVerdict(
+                approve=False, feedback="veto", signatures=["correctness"]
+            )
+
+        decision = await phase._convergence_decision(
+            issue_number=7,
+            review_approved=True,
+            code_scanning_alerts=None,
+            post_verify_judge=_veto_judge_no_disagreements,
+        )
+
+        assert decision.decision is GateDecision.LOOP_BACK
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        sigs = ledger.stage_state["review"].last_finding_signatures
+        assert "correctness" in sigs
 
 
 # ---------------------------------------------------------------------------

@@ -3443,10 +3443,19 @@ class ReviewPhase:
             if pv is None:
                 # Advisor degraded (kill-switch off or runner crash) — fail open.
                 return JudgeVerdict(approve=True, feedback="judge-degraded")
+            # On VETO, record lens:disagreement for each blocking disagreement
+            # so lap signatures reflect the actual disagreement content.
+            sigs: list[str]
+            if pv.verdict != "APPROVE" and pv.disagreements:
+                sigs = sorted(
+                    {f"{lens}:{d.advisor_assessment}" for d in pv.disagreements}
+                )
+            else:
+                sigs = [lens]
             return JudgeVerdict(
                 approve=pv.verdict == "APPROVE",
                 feedback=pv.suggested_fix_direction,
-                signatures=[lens],
+                signatures=sigs,
             )
 
         return _judge
@@ -3458,6 +3467,7 @@ class ReviewPhase:
         review_approved: bool,
         code_scanning_alerts: list[Any] | None = None,
         post_verify_judge: Callable[..., Any] | None = None,
+        reject_review_result: Any | None = None,
     ) -> GateResult:
         """Run the convergence HybridGate for a review boundary.
 
@@ -3470,7 +3480,8 @@ class ReviewPhase:
 
         * **reject** (``review_approved=False``): the deterministic check is
           RED (the verdict itself), so the gate loops back without judging —
-          the Phase-1 behavior, preserved byte-for-byte.
+          signatures derived from *reject_review_result.summary* (normalized)
+          are recorded to enable lap-level oscillation detection.
         * **approve** (``review_approved=True``): the deterministic check is
           :meth:`_approve_deterministic_check` (RED when open code-scanning
           alerts exist → LOOP_BACK without judging; GREEN → the injected
@@ -3518,12 +3529,23 @@ class ReviewPhase:
                 async def _judge(_ctx: GateContext, _i: int) -> JudgeVerdict:
                     return JudgeVerdict(approve=True)
         else:
+            # Derive signatures from review result content for lap-signature
+            # discrimination. ReviewResult has no separate comments list;
+            # fall back to summary.
+            from convergence_recording import _normalize_text  # noqa: PLC0415
+
+            _reject_sigs: list[str] = []
+            if reject_review_result is not None:
+                _summary = _normalize_text(reject_review_result.summary)
+                if _summary:
+                    _reject_sigs = [_summary]
 
             async def _det(_ctx: GateContext) -> DetResult:
                 # Reject boundary: the review verdict itself is the
                 # deterministic signal. review_approved is False, so the gate
-                # never reaches the judge below.
-                return DetResult(ok=review_approved)
+                # never reaches the judge below. Signatures are passed so the
+                # gate records them via loop_back for oscillation detection.
+                return DetResult(ok=review_approved, signatures=_reject_sigs)
 
             async def _judge(_ctx: GateContext, _i: int) -> JudgeVerdict:
                 # Unreached at the reject boundary (det is RED).
@@ -3600,7 +3622,9 @@ class ReviewPhase:
         from convergence_gate import GateDecision  # noqa: PLC0415
 
         decision = await self._convergence_decision(
-            issue_number=pr.issue_number, review_approved=False
+            issue_number=pr.issue_number,
+            review_approved=False,
+            reject_review_result=result,
         )
 
         if decision.decision is GateDecision.LOOP_BACK:

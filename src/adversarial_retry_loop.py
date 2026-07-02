@@ -340,10 +340,9 @@ class AdversarialRetryLoop(Generic[Ctx, F]):
 
 def _signature_for(findings: HasFindings) -> str:
     """Stable signature of CRITICAL/HIGH concerns for oscillation detection."""
-    items = sorted(
-        f.concern for f in findings.findings if f.severity in {"CRITICAL", "HIGH"}
-    )
-    return "|".join(items)
+    from convergence_recording import _critical_high_concerns  # noqa: PLC0415
+
+    return "|".join(_critical_high_concerns(findings.findings))
 
 
 def _synthetic_crash_concern(exc: Exception) -> Concern:
