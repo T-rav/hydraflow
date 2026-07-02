@@ -47,7 +47,7 @@ class TestPRReviewPostVerifyHappyPath:
                 "suggested_fix_direction": None,
             }
         )
-        world._llm.script_advisor(7, "post_verify", [advisor_payload])
+        world._llm.script_advisor(7, "post_verify:correctness", [advisor_payload])
 
         result = await world.run_pipeline()
 
@@ -56,4 +56,4 @@ class TestPRReviewPostVerifyHappyPath:
         assert outcome.merged is True, "PR should merge after advisor APPROVE"
         # The advisor's pop_advisor_result is invoked exactly once for the
         # one post-verify call this scenario produces.
-        assert world._llm.advisor_call_count_for("post_verify") == 1
+        assert world._llm.advisor_call_count_for("post_verify:correctness") == 1

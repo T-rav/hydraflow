@@ -232,7 +232,7 @@ entries:
   src/review_phase/_phase.py::noqa:ARG002: 2
   src/review_phase/_phase.py::noqa:BLE001: 4
   "src/review_phase/_phase.py::noqa:E402,F401\u2014usedbycallsitesbelow": 1
-  src/review_phase/_phase.py::noqa:PLC0415: 45
+  src/review_phase/_phase.py::noqa:PLC0415: 43
   "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__+sig": 1
   "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__signature": 1
   src/review_phase/_phase.py::type-ignore[arg-type]: 2

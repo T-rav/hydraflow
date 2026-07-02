@@ -11,6 +11,8 @@ pytest:tests/test_convergence_gate.py
 pytest:tests/scenarios/test_convergence_review_mockworld.py
 pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py
 
+> **Superseded in part by [ADR-0102](0102-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
+
 ## Context
 
 HydraFlow's pipeline already converged in places, but unevenly, and nothing represented "this issue has converged across the whole pipeline."

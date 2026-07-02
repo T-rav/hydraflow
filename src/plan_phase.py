@@ -1316,7 +1316,6 @@ class PlanPhase:
                             if closed:
                                 record_stage_verdict(
                                     self._state,
-                                    enabled=self._config.convergence_gate_enabled,
                                     issue_number=issue.id,
                                     stage="plan",
                                     decision="ADVANCE",
@@ -1372,7 +1371,6 @@ class PlanPhase:
                     if _verdict is not None:
                         record_stage_verdict(
                             self._state,
-                            enabled=self._config.convergence_gate_enabled,
                             issue_number=issue.id,
                             stage="plan",
                             decision=_verdict,

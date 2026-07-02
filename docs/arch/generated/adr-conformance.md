@@ -75,6 +75,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0097 | enforced | `pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py` |
 | ADR-0098 | enforced | `pytest:tests/scenarios/test_convergence_oscillation_mockworld.py` |
 | ADR-0100 | enforced | `pytest:tests/test_adr_conformance_coverage.py` |
+| ADR-0102 | enforced | `pytest:tests/test_review_phase_core.py` |
 
 ## Check → ADRs it protects
 
@@ -155,6 +156,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_report_issue_loop.py` | ADR-0018 |
 | `pytest:tests/test_review_advisor.py` | ADR-0095 |
 | `pytest:tests/test_review_phase_core.py::TestApproveConvergenceGate` | ADR-0095 |
+| `pytest:tests/test_review_phase_core.py` | ADR-0102 |
 | `pytest:tests/test_review_phase_hooks.py` | ADR-0015 |
 | `pytest:tests/test_route_back.py` | ADR-0071 |
 | `pytest:tests/test_sandbox_scenario_contract.py` | ADR-0052, ADR-0083 |

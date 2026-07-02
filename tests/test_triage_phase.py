@@ -666,11 +666,10 @@ class TestTriageConvergenceLedger:
     """Triage phase records boundary verdicts into the ConvergenceLedger."""
 
     @pytest.mark.asyncio
-    async def test_plan_routing_records_advance_verdict_when_gate_on(
+    async def test_plan_routing_records_advance_verdict(
         self, config: HydraFlowConfig
     ) -> None:
-        """Gate ON + issue triaged to 'plan' -> ledger stage_state['triage'].last_verdict == 'ADVANCE'."""
-        config.convergence_gate_enabled = True
+        """Issue triaged to 'plan' -> ledger stage_state['triage'].last_verdict == 'ADVANCE'."""
         phase, state, triage, prs, store, _stop = make_triage_phase(config)
         issue = TaskFactory.create(
             id=101, title="Add pagination to the API", body="A" * 100
@@ -688,15 +687,14 @@ class TestTriageConvergenceLedger:
         await phase.triage_issues()
 
         ledger = state.get_convergence_ledger(101)
-        assert ledger is not None, "Ledger must be created when gate is on"
+        assert ledger is not None, "Ledger must be created"
         assert ledger.stage_state["triage"].last_verdict == "ADVANCE"
 
     @pytest.mark.asyncio
-    async def test_parked_routing_records_loop_back_verdict_when_gate_on(
+    async def test_parked_routing_records_loop_back_verdict(
         self, config: HydraFlowConfig
     ) -> None:
-        """Gate ON + issue parked -> ledger stage_state['triage'].last_verdict == 'LOOP_BACK'."""
-        config.convergence_gate_enabled = True
+        """Issue parked -> ledger stage_state['triage'].last_verdict == 'LOOP_BACK'."""
         phase, state, triage, prs, store, _stop = make_triage_phase(config)
         issue = TaskFactory.create(id=102, title="Fix the thing", body="")
 
@@ -712,26 +710,5 @@ class TestTriageConvergenceLedger:
         await phase.triage_issues()
 
         ledger = state.get_convergence_ledger(102)
-        assert ledger is not None, "Ledger must be created when gate is on"
+        assert ledger is not None, "Ledger must be created"
         assert ledger.stage_state["triage"].last_verdict == "LOOP_BACK"
-
-    @pytest.mark.asyncio
-    async def test_gate_off_records_no_ledger(self, config: HydraFlowConfig) -> None:
-        """Gate OFF -> no ledger created, even when issue is triaged to 'plan'."""
-        config.convergence_gate_enabled = False
-        phase, state, triage, prs, store, _stop = make_triage_phase(config)
-        issue = TaskFactory.create(id=103, title="Add export feature", body="A" * 100)
-
-        triage.evaluate = AsyncMock(
-            return_value=TriageResultFactory.create(
-                issue_number=103,
-                ready=True,
-                clarity_score=9,
-            )
-        )
-        store.get_triageable = supply_once([issue])
-
-        await phase.triage_issues()
-
-        ledger = state.get_convergence_ledger(103)
-        assert ledger is None, "No ledger should be created when gate is off"

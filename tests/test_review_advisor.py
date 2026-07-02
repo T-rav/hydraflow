@@ -28,7 +28,6 @@ from review_advisor import (
     compute_blast_radius,
     is_advisor_enabled,
     min_review_passes_for_blast_radius,
-    post_verify_retry_budget,
     resolve_model,
     should_pre_flight,
 )
@@ -982,60 +981,6 @@ class TestAdvisorTelemetry:
             == 0
         )
 
-    def test_review_phase_loop_counters_emit_via_helper(self, metric_recorder):
-        # The retry-loop counters live on review_phase. We exercise the
-        # module-level helper directly so this test stays independent of the
-        # full ReviewPhase wiring (covered by tests/scenarios/test_pr_review_advisor_*).
-        from review_phase import (
-            _emit_advisor_loop_metric,
-            _veto_exhausted_total,
-            _veto_recovered_total,
-            _veto_retries_total,
-        )
-
-        _emit_advisor_loop_metric(
-            _veto_retries_total, {"surface": "pr_review", "attempt": "1"}
-        )
-        _emit_advisor_loop_metric(
-            _veto_retries_total, {"surface": "pr_review", "attempt": "2"}
-        )
-        _emit_advisor_loop_metric(
-            _veto_retries_total, {"surface": "pr_review", "attempt": "exhausted"}
-        )
-        _emit_advisor_loop_metric(_veto_recovered_total, {"surface": "pr_review"})
-        _emit_advisor_loop_metric(_veto_exhausted_total, {"surface": "pr_review"})
-
-        assert (
-            metric_recorder.counter_value(
-                "review_advisor_veto_retries_total",
-                surface="pr_review",
-                attempt="1",
-            )
-            == 1
-        )
-        assert (
-            metric_recorder.counter_value(
-                "review_advisor_veto_retries_total",
-                surface="pr_review",
-                attempt="exhausted",
-            )
-            == 1
-        )
-        assert (
-            metric_recorder.counter_value(
-                "review_advisor_veto_recovered_total",
-                surface="pr_review",
-            )
-            == 1
-        )
-        assert (
-            metric_recorder.counter_value(
-                "review_advisor_veto_exhausted_total",
-                surface="pr_review",
-            )
-            == 1
-        )
-
     def test_disagreements_emit_disagreement_total(self, metric_recorder):
         runner = _StubAdvisorRunner(
             '{"verdict":"VETO","reasoning":"missed two issues",'
@@ -1298,7 +1243,7 @@ class TestProductionPathJSONExtraction:
 
 class TestAdvisorBudgetResetAcrossReviews:
     """Regression test for C2 — _advisor_attempt must reset on every
-    _run_post_verify_advisor entry, not persist across reviews of the same PR.
+    review cycle entry, not persist across reviews of the same PR.
 
     Pinning the reset semantics catches the regression class even though
     the cross-review behavior is hard to test without a full PR-replay
@@ -1316,7 +1261,7 @@ class TestAdvisorBudgetResetAcrossReviews:
         attempts = {100: 2}
         results = {100: ["stale-result-1", "stale-result-2", "stale-result-3"]}
 
-        # Simulate the reset that _run_post_verify_advisor must do on entry
+        # Simulate the reset the review cycle must do on entry
         attempts[100] = 0
         results[100] = []
 
@@ -1937,21 +1882,6 @@ class TestBlastRadius:
 class TestBlastRadiusRetryBudget:
     def test_BLAST_RADIUS_RETRIES_table_covers_all_tiers(self):
         assert BLAST_RADIUS_RETRIES == {"low": 1, "medium": 2, "high": 3}
-
-    def test_veto_authority_budget_matches_blast_tier(self):
-        # Veto-authority surfaces (pr_review, pre_merge_spec_check): budget is
-        # purely blast-driven (low=1/medium=2/high=3) — no separate cap.
-        assert post_verify_retry_budget("low", "veto") == 1
-        assert post_verify_retry_budget("medium", "veto") == 2
-        assert post_verify_retry_budget("high", "veto") == 3
-
-    def test_advisory_authority_hard_caps_every_tier_to_zero(self):
-        # Advisory surfaces (wiki_ingest) must NEVER gain a retry budget from
-        # blast radius — they stay at 0 and never block a merge, regardless of
-        # how risky the diff is. The cap derives from post_verify_authority.
-        assert post_verify_retry_budget("low", "advisory") == 0
-        assert post_verify_retry_budget("medium", "advisory") == 0
-        assert post_verify_retry_budget("high", "advisory") == 0
 
 
 class TestSecondOrderFailureProbe:

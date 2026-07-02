@@ -7,6 +7,8 @@
 - **Enforcement:** enforced
 - **Enforced by:** pytest:tests/scenarios/test_convergence_pipeline_mockworld.py
 
+> **Superseded in part by [ADR-0102](0102-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
+
 ## Context
 
 ADR-0094 wired the convergence Gate and ConvergenceLedger at the Review boundary only. Phase 2a (ADR-0095) then gated the approve path so that `ledger.converged` became a real, reachable signal. Lap accounting and `mark_lap`/`recompute_converged` are Review-owned throughout both phases.

@@ -1,10 +1,9 @@
 """s50 — convergence gate: REQUEST_CHANGES loops back, APPROVE converges and merges.
 
-Exercises the end-to-end convergence gate path (``convergence_gate_enabled=True``,
-enabled via ``HYDRAFLOW_CONVERGENCE_GATE_ENABLED=true`` in the hydraflow service
-environment — see docker-compose.sandbox.yml):
+Exercises the end-to-end convergence gate path (the gate is unconditional;
+no flag or env override is required):
 
-1. Gate ON — the convergence ``HybridGate`` is wired into BOTH the REJECT path
+1. The convergence ``HybridGate`` is wired into BOTH the REJECT path
    (``_handle_rejected_review`` → ``_convergence_decision``) AND the APPROVE path
    (``_handle_approved_review_gated`` → ``_convergence_decision``) in Phase 2a.
 2. First review returns REQUEST_CHANGES → gate's deterministic check is RED (review

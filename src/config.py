@@ -423,11 +423,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_PRECONDITION_GATE_ENABLED",
         False,
     ),
-    (
-        "convergence_gate_enabled",
-        "HYDRAFLOW_CONVERGENCE_GATE_ENABLED",
-        False,
-    ),
     ("docker_read_only_root", "HYDRAFLOW_DOCKER_READ_ONLY_ROOT", True),
     ("docker_no_new_privileges", "HYDRAFLOW_DOCKER_NO_NEW_PRIVILEGES", True),
     (
@@ -1642,19 +1637,6 @@ class HydraFlowConfig(BaseModel):
             "to False to give operators a separate opt-in switch."
         ),
     )
-    convergence_gate_enabled: bool = Field(
-        default=False,
-        description=(
-            "Route the review retry/escalate decision through the "
-            "convergence HybridGate + ConvergenceLedger (ADR-0094). "
-            "Off by default so rollout is opt-in; the "
-            "ledger storage is always-on, only the gate decision is gated. "
-            "When enabled, escalation at the review reject boundary is "
-            "governed by max_convergence_laps (plus oscillation detection), "
-            "NOT max_review_fix_attempts."
-        ),
-    )
-
     # Shadow corpus (#8786) — opt-in live sampling of production
     # subprocess calls. When enabled, every gh/git/docker/claude call
     # feeds a bounded, normalized, PII-scrubbed YAML corpus that

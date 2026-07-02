@@ -1324,8 +1324,7 @@ class TestPlanConvergenceLedger:
 
     @pytest.mark.asyncio
     async def test_plan_success_records_advance(self, config: HydraFlowConfig) -> None:
-        """Gate ON + plan succeeds -> ledger stage_state['plan'].last_verdict == 'ADVANCE'."""
-        config.convergence_gate_enabled = True
+        """Plan succeeds -> ledger stage_state['plan'].last_verdict == 'ADVANCE'."""
         phase, state, planners, prs, store, _stop = make_plan_phase(config)
         issue = TaskFactory.create(id=201)
         plan_result = PlanResultFactory.create(
@@ -1342,13 +1341,12 @@ class TestPlanConvergenceLedger:
         await phase.plan_issues()
 
         ledger = state.get_convergence_ledger(201)
-        assert ledger is not None, "Ledger must be created when gate is on"
+        assert ledger is not None, "Ledger must be created"
         assert ledger.stage_state["plan"].last_verdict == "ADVANCE"
 
     @pytest.mark.asyncio
     async def test_plan_failed_records_loop_back(self, config: HydraFlowConfig) -> None:
-        """Gate ON + plan fails (no plan) -> ledger stage_state['plan'].last_verdict == 'LOOP_BACK'."""
-        config.convergence_gate_enabled = True
+        """Plan fails (no plan) -> ledger stage_state['plan'].last_verdict == 'LOOP_BACK'."""
         phase, state, planners, prs, store, _stop = make_plan_phase(config)
         issue = TaskFactory.create(id=202)
         plan_result = PlanResultFactory.create(
@@ -1364,15 +1362,14 @@ class TestPlanConvergenceLedger:
         await phase.plan_issues()
 
         ledger = state.get_convergence_ledger(202)
-        assert ledger is not None, "Ledger must be created when gate is on"
+        assert ledger is not None, "Ledger must be created"
         assert ledger.stage_state["plan"].last_verdict == "LOOP_BACK"
 
     @pytest.mark.asyncio
     async def test_plan_escalated_records_escalate(
         self, config: HydraFlowConfig
     ) -> None:
-        """Gate ON + epic-child already_satisfied (escalated path) -> last_verdict == 'ESCALATE'."""
-        config.convergence_gate_enabled = True
+        """Epic-child already_satisfied (escalated path) -> last_verdict == 'ESCALATE'."""
         phase, state, planners, prs, store, _stop = make_plan_phase(config)
         # Epic child: _is_epic_child returns True for issues with an epic_number
         issue = TaskFactory.create(id=203)
@@ -1392,15 +1389,14 @@ class TestPlanConvergenceLedger:
         await phase.plan_issues()
 
         ledger = state.get_convergence_ledger(203)
-        assert ledger is not None, "Ledger must be created when gate is on"
+        assert ledger is not None, "Ledger must be created"
         assert ledger.stage_state["plan"].last_verdict == "ESCALATE"
 
     @pytest.mark.asyncio
     async def test_plan_already_satisfied_closed_records_advance(
         self, config: HydraFlowConfig
     ) -> None:
-        """Gate ON + already_satisfied closed (early return) -> last_verdict == 'ADVANCE', NOT 'LOOP_BACK'."""
-        config.convergence_gate_enabled = True
+        """Already_satisfied closed (early return) -> last_verdict == 'ADVANCE', NOT 'LOOP_BACK'."""
         phase, state, planners, prs, store, _stop = make_plan_phase(config)
         issue = TaskFactory.create(id=204)
         plan_result = PlanResultFactory.create(
@@ -1420,29 +1416,5 @@ class TestPlanConvergenceLedger:
         await phase.plan_issues()
 
         ledger = state.get_convergence_ledger(204)
-        assert ledger is not None, "Ledger must be created when gate is on"
+        assert ledger is not None, "Ledger must be created"
         assert ledger.stage_state["plan"].last_verdict == "ADVANCE"
-
-    @pytest.mark.asyncio
-    async def test_plan_gate_off_records_no_ledger(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """Gate OFF -> no ledger created even on a successful plan."""
-        config.convergence_gate_enabled = False
-        phase, state, planners, prs, store, _stop = make_plan_phase(config)
-        issue = TaskFactory.create(id=205)
-        plan_result = PlanResultFactory.create(
-            issue_number=205,
-            success=True,
-            plan="## Plan\n\n1. Do the thing",
-            summary="Plan done",
-            use_defaults=True,
-        )
-
-        planners.plan = AsyncMock(return_value=plan_result)
-        store.get_plannable = supply_once([issue])
-
-        await phase.plan_issues()
-
-        ledger = state.get_convergence_ledger(205)
-        assert ledger is None, "No ledger should be created when gate is off"
