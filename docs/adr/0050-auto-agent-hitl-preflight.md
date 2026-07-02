@@ -5,7 +5,12 @@
 - **Supersedes:** none
 - **Superseded by:** none
 - **Related:** [ADR-0002](0002-labels-as-state-machine.md) (label state machine); [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker loop pattern); [ADR-0044](0044-hydraflow-principles.md) (principles audit); [ADR-0045](0045-trust-architecture-hardening.md) (trust fleet + `hitl-escalation` label); [ADR-0049](0049-trust-loop-kill-switch-convention.md) (`enabled_cb` kill-switch convention).
-- **Enforced by:** `tests/test_auto_agent_preflight_loop.py`; `tests/scenarios/test_auto_agent_preflight_scenario.py`; `tests/test_loop_wiring_completeness.py`.
+- **Enforcement:** enforced
+
+**Enforced by:**
+pytest:tests/test_auto_agent_preflight_loop.py
+pytest:tests/scenarios/test_auto_agent_preflight.py
+pytest:tests/test_loop_wiring_completeness.py
 - **Spec:** [docs/superpowers/specs/2026-04-25-auto-agent-hitl-preflight-design.md](../superpowers/specs/2026-04-25-auto-agent-hitl-preflight-design.md)
 - **Plan:** [docs/superpowers/plans/2026-04-25-auto-agent-hitl-preflight.md](../superpowers/plans/2026-04-25-auto-agent-hitl-preflight.md)
 

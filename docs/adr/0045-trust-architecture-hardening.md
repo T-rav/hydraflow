@@ -5,7 +5,12 @@
 - **Accepted:** 2026-05-30
 - **Supersedes:** none
 - **Superseded by:** none
-- **Enforced by:** tests/test_trust_fleet_sanity_loop.py, tests/test_loop_wiring_completeness.py, tests/test_trust_fleet_anomaly_detectors.py
+- **Enforcement:** enforced
+
+**Enforced by:**
+pytest:tests/test_trust_fleet_sanity_loop.py
+pytest:tests/test_loop_wiring_completeness.py
+pytest:tests/test_trust_fleet_anomaly_detectors.py
 - **Spec:** [docs/superpowers/specs/2026-04-22-trust-architecture-hardening-design.md](../superpowers/specs/2026-04-22-trust-architecture-hardening-design.md)
 - **Implementation plans:** 11 plans under [docs/superpowers/plans/2026-04-22-*.md](../superpowers/plans/) — one per trust loop and subsystem.
 

@@ -5,7 +5,11 @@
 - **Supersedes:** none
 - **Superseded by:** none
 - **Related:** [ADR-0029](0029-caretaker-loop-pattern.md), [ADR-0042](0042-two-tier-branch-release-promotion.md), [ADR-0049](0049-trust-loop-kill-switch-convention.md), [ADR-0050](0050-auto-agent-hitl-preflight.md), [ADR-0051](0051-iterative-production-readiness-review.md)
-- **Enforced by:** `tests/test_mockworld_fakes_conformance.py` (Port↔Fake signature parity), `tests/test_sandbox_scenario_contract.py` (scenario catalog contract), `.github/workflows/ci.yml` `sandbox` job (CI gate).
+- **Enforcement:** enforced
+
+**Enforced by:**
+pytest:tests/test_mockworld_fakes_conformance.py
+pytest:tests/test_sandbox_scenario_contract.py
 
 ## Context
 
