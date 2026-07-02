@@ -2,8 +2,10 @@
 
 - **Status:** Accepted
 - **Date:** 2026-04-17
+- **Enforcement:** manual
 - **Supersedes:** none
 - **Superseded by:** none
+- **Enforced by:** branch-protection ruleset review per docs/standards/branch_protection
 
 ## Context
 

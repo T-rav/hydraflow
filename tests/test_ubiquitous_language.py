@@ -809,3 +809,21 @@ class TestValidateDraft:
         )
         assert term is None
         assert "incomplete" in reason.lower() or "definition" in reason.lower()
+
+
+class TestControlRoleKind:
+    def test_control_role_kind_exists_and_value(self) -> None:
+        assert TermKind.CONTROL_ROLE == "control_role"
+
+    def test_term_with_control_role_round_trips(self) -> None:
+        term = Term(
+            name="Sensor",
+            kind=TermKind.CONTROL_ROLE,
+            bounded_context=BoundedContext.SHARED_KERNEL,
+            definition="A component that measures the current state of the Plant.",
+            code_anchor="src/models.py:MetricsSnapshot",
+            confidence="accepted",
+        )
+        rebuilt = Term.model_validate_json(term.model_dump_json())
+        assert rebuilt.kind == TermKind.CONTROL_ROLE
+        assert rebuilt == term

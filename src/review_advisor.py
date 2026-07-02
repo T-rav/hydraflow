@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from opentelemetry import metrics
 from pydantic import BaseModel, Field
@@ -146,12 +146,22 @@ class PostVerifyInput(BaseModel):
     # Production callers can leave this unset; the field only changes prompt
     # text when populated.
     issue_number: int | None = None
+    lens: Literal["correctness", "security", "spec"] | None = None
 
 
 # Signals shorter than this are too generic to validate against — short
 # words like "test gaps" false-positive against any disagreement that
 # contains those words coincidentally (T24.5 closed I5).
 _MIN_SIGNAL_MATCH_LEN = 10
+
+# Per-lens focus preambles prepended to the PostVerifyAdvisor prompt when a
+# lens is set. Promoted to module-level so tests can import the mapping and
+# verify prompt content without instantiating the full advisor.
+_POST_VERIFY_LENS_GUIDANCE: dict[str, str] = {
+    "correctness": "Focus this review pass on CORRECTNESS: logic errors, broken edge cases, race conditions, wrong behavior.",
+    "security": "Focus this review pass on SECURITY and RISK: injection, authz/authn, secrets, unsafe deserialization, blast radius.",
+    "spec": "Focus this review pass on SPEC ADHERENCE: does the diff do what the issue/spec requires, nothing more, nothing less.",
+}
 
 
 def _validate_disagreements_against_plan(
@@ -555,7 +565,14 @@ class _AdvisorSubagentRunner(Protocol):
         model: str,
         subagent_type: str,
         prompt: str,
-        role: Literal["pre_flight", "mid_flight", "post_verify"],
+        role: Literal[
+            "pre_flight",
+            "mid_flight",
+            "post_verify",
+            "post_verify:correctness",
+            "post_verify:security",
+            "post_verify:spec",
+        ],
     ) -> str: ...  # pragma: no cover - protocol
 
 
@@ -594,12 +611,23 @@ class PostVerifyAdvisor:
     async def run(self, inp: PostVerifyInput) -> PostVerifyResult:
         prompt = self._build_prompt(inp)
         start = time.monotonic()
+        _role = cast(
+            Literal[
+                "pre_flight",
+                "mid_flight",
+                "post_verify",
+                "post_verify:correctness",
+                "post_verify:security",
+                "post_verify:spec",
+            ],
+            f"post_verify:{inp.lens}" if inp.lens else "post_verify",
+        )
         try:
             payload = await self._runner.run(
                 model=self._cfg.advisor_model,
                 subagent_type="hydraflow-review-advisor",
                 prompt=prompt,
-                role="post_verify",
+                role=_role,
             )
         except Exception as exc:
             # Authentication, credit, and likely-bug errors must propagate
@@ -825,7 +853,10 @@ class PostVerifyAdvisor:
             '"severity":"blocking"|"concern"}],'
             '"suggested_fix_direction":str|null}'
         )
-        return "\n".join(sections)
+        prompt = "\n".join(sections)
+        if inp.lens:
+            prompt = f"{_POST_VERIFY_LENS_GUIDANCE[inp.lens]}\n\n{prompt}"
+        return prompt
 
 
 class PreFlightAdvisor:

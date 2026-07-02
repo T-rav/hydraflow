@@ -9,6 +9,7 @@ from mockworld.fakes.fake_agent import FakeAgent
 from mockworld.fakes.fake_beads import FakeBeads
 from mockworld.fakes.fake_bot_pr import FakeBotPR
 from mockworld.fakes.fake_clock import FakeClock
+from mockworld.fakes.fake_conformance_runner import FakeConformanceRunner
 from mockworld.fakes.fake_docker import FakeDocker
 from mockworld.fakes.fake_fs import FakeFS
 from mockworld.fakes.fake_git import FakeGit
@@ -30,6 +31,7 @@ __all__ = [
     "FakeBeads",
     "FakeBotPR",
     "FakeClock",
+    "FakeConformanceRunner",
     "FakeDocker",
     "FakeFS",
     "FakeGit",

@@ -1,7 +1,7 @@
 ---
 id: "01KWFR9AWM3NX19D0C1W10NNMM"
 name: "ViolationDetector"
-kind: "port"
+kind: "control_role"
 bounded_context: "shared-kernel"
 code_anchor: "src/disturbance/detectors/base.py:ViolationDetector"
 aliases: []

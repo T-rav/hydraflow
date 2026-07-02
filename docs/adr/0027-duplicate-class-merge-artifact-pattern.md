@@ -1,6 +1,7 @@
 # ADR-0027: Duplicate Class Definitions — Merge-Artifact Pattern
 
-**Status:** Proposed
+**Status:** Accepted
+**Enforced by:** (none)
 **Date:** 2026-03-18
 
 ## Context

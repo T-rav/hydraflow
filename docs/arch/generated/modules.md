@@ -32,7 +32,7 @@ graph LR
     src -- "1" --> src_observability
     src -- "12" --> src_preflight
     src -- "1" --> src_review_phase
-    src -- "50" --> src_state
+    src -- "52" --> src_state
     src -- "7" --> src_telemetry
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "11" --> src_arch
@@ -40,7 +40,7 @@ graph LR
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "2" --> src_state
     src_disturbance_detectors -- "3" --> src_disturbance
-    src_mockworld_fakes -- "30" --> src_mockworld
+    src_mockworld_fakes -- "31" --> src_mockworld
     src_mockworld_fakes -- "1" --> src_telemetry
     src_preflight -- "1" --> src_runners
     src_preflight -- "1" --> src_sentry

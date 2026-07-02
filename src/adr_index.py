@@ -15,6 +15,23 @@ File format (from docs/adr/0001-five-concurrent-async-loops.md):
 
     HydraFlow must process GitHub issues through five distinct stages...
 
+The separator after the ADR number is flexible: colon, em-dash, en-dash,
+hyphen, or bare whitespace are all accepted (e.g.
+``# ADR-0093 — Loop fitness as a measured contract``). Every
+``# ADR-NNNN...`` heading in docs/adr/*.md MUST parse — see
+``tests/test_adr_conformance_coverage.py::test_every_adr_file_parses``.
+
+Status also accepts an H2-heading form used by ~13 ADRs (e.g. ADR-0053):
+
+    ## Status
+
+    Accepted
+
+Every ADR file that declares a status via either the bold-inline
+``**Status:**`` form or the ``## Status`` heading form MUST parse to a
+non-"Unknown" status — see
+``tests/test_adr_conformance_coverage.py::test_every_adr_with_a_status_section_parses_known_status``.
+
 Status is normalized to one of: "Accepted", "Proposed", "Superseded",
 "Deprecated". "Superseded by ADR-NNNN" populates ``superseded_by``.
 """
@@ -26,13 +43,36 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 
-_TITLE_RE = re.compile(r"^#\s*ADR-(\d{4}):\s*(.+?)\s*$", re.MULTILINE)
+_TITLE_RE = re.compile(r"^#\s*ADR-(\d{4})\s*[:–—-]?\s*(.+?)\s*$", re.MULTILINE)
 _STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(.+?)\s*$", re.MULTILINE)
+# H2 heading form used by ~13 ADRs (e.g. ADR-0053):
+#
+#     ## Status
+#
+#     Accepted
+#
+# Value is the first non-empty line after the heading. Matched independently
+# of _STATUS_RE (rather than folded into one alternation) so each regex stays
+# readable and the "first non-empty line" semantics are explicit here rather
+# than smuggled into a shared capture group.
+_STATUS_H2_RE = re.compile(r"^##\s+Status\s*\n+([^\n]+)", re.MULTILINE)
 _CONTEXT_RE = re.compile(r"##\s+Context\s*\n\s*\n(.+?)(?=\n\s*\n|\n##\s|\Z)", re.DOTALL)
 _SUPERSEDED_RE = re.compile(r"Superseded\s+by\s+(ADR-\d{4})", re.IGNORECASE)
+_ENFORCEMENT_RE = re.compile(r"\*\*Enforcement:\*\*\s*(.+?)\s*$", re.MULTILINE)
+# Capture the Enforced-by block: the field line plus any indented/continued
+# lines until the next blank line, the next **Field:** / ## heading, or the
+# next Markdown bullet (`- **Spec:**`, `- **Plan:**`, etc.). Without the
+# bullet stop, a trailing sibling bullet on the *same* frontmatter list (no
+# blank line between them) gets swallowed into the Enforced-by capture.
+_ENFORCED_BY_RE = re.compile(
+    r"\*\*Enforced by:\*\*[ \t]*(.*?)(?=\n\s*\n|\n\*\*[A-Z]|\n##\s|\n\s*[-*]\s|\Z)",
+    re.DOTALL,
+)
+_KNOWN_ENFORCEMENT = frozenset({"enforced", "manual", "decision-of-record"})
 # Matches `src/some/path.py` or `src/some/path.py:Symbol[.attr...]` citations.
 # Shared with adr_pre_validator._SOURCE_SYMBOL_RE. Used for
 # ADR↔source-file inverse indexing so the CI gate can flag PRs
@@ -44,6 +84,69 @@ _SUPERSEDED_RE = re.compile(r"Superseded\s+by\s+(ADR-\d{4})", re.IGNORECASE)
 _SOURCE_FILE_CITATION_RE = re.compile(
     r"`(src/[^`:\s]+\.py)(?::([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*))?`"
 )
+# Matches a Markdown inline link `[text](url)`, used by Check.as_code_span
+# to defuse links embedded in raw Enforced-by prose before they're wrapped
+# in a code span for display in generated docs tables.
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
+
+
+@dataclass(frozen=True)
+class Check:
+    """One executable/resolvable check cited by an ADR's Enforced-by field."""
+
+    kind: Literal["pytest", "make", "prose"]
+    target: str
+    raw: str
+
+    def as_code_span(self) -> str:
+        """Render ``raw`` as a Markdown inline code span, safe for embedding
+        in generated docs tables.
+
+        Manual/prose Enforced-by fields sometimes carry ADR-body Markdown
+        verbatim (bullet lists, bold, and relative links into the
+        gitignored ``docs/superpowers/`` tree). Naively wrapping ``raw`` in
+        a single pair of backticks is unsafe on two counts: (1) if ``raw``
+        itself contains a backtick, the code span closes early and any
+        ``[text](url)`` after it renders as a *real* link; (2) even without
+        an early close, some Markdown link syntax can still leak through.
+        Stripping link syntax and backticks first makes the code span
+        closure unconditionally safe, which keeps `mkdocs build --strict`
+        from flagging a broken/excluded target for links that were only
+        ever meant to be inert prose.
+        """
+        text = _MARKDOWN_LINK_RE.sub(r"\1 (\2)", self.raw)
+        text = text.replace("`", "'")
+        return f"`{text}`"
+
+
+def parse_enforced_by(block: str) -> tuple[Check, ...]:
+    """Parse an Enforced-by block into typed checks. One check per line.
+
+    Commas are NOT separators (so `manual` prose with commas stays intact).
+    A line beginning `pytest:` or `make:` is typed; anything else is `prose`
+    (legal only under Enforcement: manual — the coverage ratchet enforces that).
+    """
+    checks: list[Check] = []
+    for raw_line in block.splitlines():
+        line = raw_line.strip().rstrip(",").strip()
+        if not line:
+            continue
+        if line.startswith("pytest:"):
+            checks.append(
+                Check(kind="pytest", target=line[len("pytest:") :].strip(), raw=line)
+            )
+        elif line.startswith("make:"):
+            checks.append(
+                Check(kind="make", target=line[len("make:") :].strip(), raw=line)
+            )
+        else:
+            checks.append(Check(kind="prose", target=line, raw=line))
+    return tuple(checks)
+
+
+def _normalize_enforcement(raw: str) -> str:
+    low = raw.strip().lower()
+    return low if low in _KNOWN_ENFORCEMENT else "unknown"
 
 
 @dataclass(frozen=True)
@@ -63,6 +166,10 @@ class ADR:
     change to that file (backwards-compatible with pre-symbol citations).
     A non-empty frozenset means *only* changes to those symbols fire the
     gate."""
+    enforcement: str = "unknown"
+    """enforced | manual | decision-of-record | unknown (ADR-0100)."""
+    enforced_by: tuple[Check, ...] = ()
+    """Typed checks parsed from **Enforced by:**; () for decision-of-record."""
 
 
 def parse_adr_file(path: Path) -> ADR:
@@ -82,6 +189,10 @@ def parse_adr_file(path: Path) -> ADR:
     status_match = _STATUS_RE.search(text)
     if status_match:
         status_raw = status_match.group(1).strip()
+    else:
+        status_h2_match = _STATUS_H2_RE.search(text)
+        if status_h2_match:
+            status_raw = status_h2_match.group(1).strip()
 
     superseded_by = None
     sup_match = _SUPERSEDED_RE.search(status_raw)
@@ -111,6 +222,11 @@ def parse_adr_file(path: Path) -> ADR:
     source_files = frozenset(source_symbols.keys())
     source_symbols_frozen = {f: frozenset(s) for f, s in source_symbols.items()}
 
+    enf_match = _ENFORCEMENT_RE.search(text)
+    enforcement = _normalize_enforcement(enf_match.group(1)) if enf_match else "unknown"
+    eb_match = _ENFORCED_BY_RE.search(text)
+    enforced_by = parse_enforced_by(eb_match.group(1)) if eb_match else ()
+
     return ADR(
         number=number,
         title=title,
@@ -119,6 +235,8 @@ def parse_adr_file(path: Path) -> ADR:
         superseded_by=superseded_by,
         source_files=source_files,
         source_symbols=source_symbols_frozen,
+        enforcement=enforcement,
+        enforced_by=enforced_by,
     )
 
 

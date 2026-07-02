@@ -59,6 +59,9 @@ class FakeBackgroundLoop:
     def set_bg_workers(self, bg_workers: object) -> None:
         """Post-ctor BGWorkerManager injection hook (TrustFleetSanityLoop)."""
 
+    def set_loops(self, loops: object) -> None:
+        """Post-ctor loop registry injection hook (FitnessScorecardLoop)."""
+
 
 class FakeWorkspaceManager:
     """Tracks worktree cleanup calls."""
@@ -497,6 +500,7 @@ def build_scripted_services(
     services.skill_prompt_eval_loop = FakeBackgroundLoop()
     services.fake_coverage_auditor_loop = FakeBackgroundLoop()
     services.adr_touchpoint_auditor_loop = FakeBackgroundLoop()
+    services.adr_conformance_loop = FakeBackgroundLoop()
     services.memory_backlog_loop = FakeBackgroundLoop()
     services.rc_budget_loop = FakeBackgroundLoop()
     services.wiki_rot_detector_loop = FakeBackgroundLoop()
@@ -515,6 +519,8 @@ def build_scripted_services(
     services.edge_proposer_loop = FakeBackgroundLoop()
     services.live_corpus_replay_loop = None
     services.triage_retry_loop = FakeBackgroundLoop()
+    services.fitness_scorecard_loop = FakeBackgroundLoop()
+    services.convergence_oscillation_loop = FakeBackgroundLoop()
     services.entry_evidence_loop = FakeBackgroundLoop()
     services.repo_wiki_store = SimpleNamespace(
         is_ingested=MagicMock(return_value=False),

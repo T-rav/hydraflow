@@ -6,107 +6,118 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 
 ## ADR → Modules
 
-| ADR | Modules cited |
-|---|---|
-| ADR-0001 | — |
-| ADR-0002 | `src.config`, `src.pr_manager` |
-| ADR-0003 | `src.ports`, `src.worktree` |
-| ADR-0004 | `src.agent_cli`, `src.base_runner` |
-| ADR-0005 | `src.implement_phase`, `src.pr_manager` |
-| ADR-0006 | `src.events`, `src.hf_cli.supervisor_service`, `src.issue_store`, `src.orchestrator`, `src.state` |
-| ADR-0007 | `src.dashboard`, `src.dashboard_routes._routes`, `src.hf_cli.supervisor_client`, `src.hf_cli.supervisor_service` |
-| ADR-0008 | `src.dashboard`, `src.dashboard_routes`, `src.hf_cli.supervisor_service` |
-| ADR-0009 | `src.config`, `src.orchestrator`, `src.repo_runtime`, `src.workspace` |
-| ADR-0010 | `src.config`, `src.docker_runner`, `src.metrics_manager`, `src.worktree` |
-| ADR-0011 | `src.epic`, `src.models`, `src.pr_manager` |
-| ADR-0012 | `src.epic`, `src.epic_monitor_loop`, `src.models`, `src.post_merge_handler`, `src.review_phase` |
-| ADR-0013 | `src.dashboard_routes`, `src.models`, `src.pr_manager`, `src.report_issue_loop`, `src.state` |
-| ADR-0014 | `src.implement_phase`, `src.models`, `src.orchestrator`, `src.plan_phase`, `src.post_merge_handler`, `src.review_phase`, `src.state`, `src.triage_phase` |
-| ADR-0015 | `src.escalation_gate`, `src.models`, `src.post_merge_handler`, `src.review_phase`, `src.visual_validation` |
-| ADR-0016 | `src.models`, `src.post_merge_handler` |
-| ADR-0017 | `src.state`, `src.triage_phase` |
-| ADR-0018 | `src.config`, `src.pr_manager`, `src.report_issue_loop`, `src.screenshot_scanner` |
-| ADR-0019 | `src.dashboard_routes`, `src.epic`, `src.issue_fetcher`, `src.post_merge_handler` |
-| ADR-0020 | — |
-| ADR-0021 | `src.config`, `src.data_migration`, `src.file_util`, `src.metrics_manager`, `src.state._session` |
-| ADR-0022 | `src.config`, `src.issue_store` |
-| ADR-0023 | — |
-| ADR-0024 | `src.agent`, `src.implement_phase`, `src.state` |
-| ADR-0025 | `src.models`, `src.reviewer` |
-| ADR-0027 | `src.agent`, `src.reviewer` |
-| ADR-0028 | — |
-| ADR-0029 | — |
-| ADR-0030 | `src.dashboard_routes._routes` |
-| ADR-0031 | `src.config`, `src.discover_phase`, `src.discover_runner`, `src.models`, `src.plan_phase`, `src.review_phase`, `src.shape_phase`, `src.shape_runner`, `src.triage_phase` |
-| ADR-0032 | `src.base_runner`, `src.repo_wiki`, `src.repo_wiki_loop`, `src.wiki_compiler` |
-| ADR-0033 | `src.adr_reviewer`, `src.config` |
-| ADR-0034 | `src.adr_reviewer`, `src.config` |
-| ADR-0035 | `src.config` |
-| ADR-0036 | `src.cli`, `src.config`, `src.hf_cli.__main__` |
-| ADR-0037 | `src.adr_pre_validator`, `src.adr_reviewer`, `src.models` |
-| ADR-0038 | `src.dashboard`, `src.dashboard_routes`, `src.repo_runtime`, `src.server` |
-| ADR-0039 | `src.adr_reviewer`, `src.triage_phase` |
-| ADR-0040 | `src.adr_reviewer` |
-| ADR-0041 | `src.caching_issue_store`, `src.issue_cache`, `src.issue_store`, `src.precondition_gate`, `src.route_back` |
-| ADR-0042 | — |
-| ADR-0043 | `src.docker_runner`, `src.preflight` |
-| ADR-0044 | `src.orchestrator`, `src.ports` |
-| ADR-0045 | `src.config`, `src.contract_refresh_loop`, `src.corpus_learning_loop`, `src.dashboard_routes._cost_rollups`, `src.discover_phase`, `src.discover_runner`, `src.fake_coverage_auditor_loop`, `src.flake_tracker_loop`, `src.health_monitor_loop`, `src.models`, `src.orchestrator`, `src.pr_manager`, `src.principles_audit_loop`, `src.rc_budget_loop`, `src.report_issue_loop`, `src.service_registry`, `src.shape_phase`, `src.shape_runner`, `src.skill_prompt_eval_loop`, `src.staging_bisect_loop`, `src.trust_fleet_sanity_loop`, `src.wiki_rot_detector_loop` |
-| ADR-0046 | `src.health_monitor_loop`, `src.trust_fleet_sanity_loop` |
-| ADR-0047 | `src.contract_diff`, `src.contract_recording`, `src.contract_refresh_loop` |
-| ADR-0048 | `src.staging_bisect_loop` |
-| ADR-0049 | `src.base_background_loop`, `src.bg_worker_manager` |
-| ADR-0050 | `src.auto_agent_preflight_loop`, `src.config`, `src.dashboard_routes._diagnostics_routes`, `src.models`, `src.preflight.agent`, `src.preflight.audit`, `src.preflight.auto_agent_runner`, `src.preflight.context`, `src.preflight.decision`, `src.preflight.runner`, `src.sentry.reverse_lookup`, `src.state._auto_agent` |
-| ADR-0051 | — |
-| ADR-0052 | `src.contract_diff`, `src.contract_recording`, `src.mockworld.sandbox_main` |
-| ADR-0053 | `src.repo_wiki`, `src.repo_wiki_loop` |
-| ADR-0054 | `src.term_proposer_loop`, `src.ubiquitous_language` |
-| ADR-0055 | `src.base_background_loop`, `src.base_runner`, `src.config`, `src.events`, `src.exception_classify`, `src.mockworld.fakes.fake_honeycomb`, `src.pr_manager`, `src.server`, `src.telemetry.__init__`, `src.telemetry.otel`, `src.telemetry.slugs`, `src.telemetry.spans`, `src.telemetry.subprocess_bridge`, `src.trace_collector`, `src.workspace` |
-| ADR-0056 | `src.adr_drift`, `src.adr_touchpoint_auditor_loop`, `src.state._adr_audit` |
-| ADR-0057 | `src.term_pruner_loop`, `src.ubiquitous_language` |
-| ADR-0058 | `src.edge_proposer_loop`, `src.ubiquitous_language` |
-| ADR-0059 | `src.mockworld.fakes.fake_llm`, `src.review_advisor`, `src.review_phase`, `src.reviewer` |
-| ADR-0060 | `src.dashboard_routes._atlas_routes` |
-| ADR-0061 | `src.repo_wiki` |
-| ADR-0062 | `src.entry_evidence_loop`, `src.term_proposer_llm` |
-| ADR-0063 | `src.auto_agent_preflight_loop`, `src.discover_runner`, `src.implement_phase`, `src.plan_phase`, `src.review_phase._phase`, `src.shape_phase`, `src.triage_phase` |
-| ADR-0064 | `src.adversarial_labels`, `src.adversarial_retry_loop`, `src.assumption_surfacer`, `src.complexity_gate`, `src.discovery_council`, `src.discovery_council_prompts`, `src.events`, `src.models`, `src.pending_concerns`, `src.plan_council`, `src.plan_council_prompts`, `src.plan_phase`, `src.post_merge_handler`, `src.shape_challenger`, `src.shape_expert_council`, `src.shape_phase`, `src.spec_ac_generator`, `src.spec_judge`, `src.wiki_carryover` |
-| ADR-0065 | `src.code_grooming_loop`, `src.config`, `src.skill_registry` |
-| ADR-0066 | `src.agent`, `src.base_runner`, `src.ports` |
-| ADR-0067 | `src.issue_fetcher`, `src.ports` |
-| ADR-0068 | `src.ports`, `src.term_proposer_loop`, `src.term_pruner_loop` |
-| ADR-0069 | `src.ports`, `src.workspace_gc_loop` |
-| ADR-0070 | `src.ports`, `src.review_insights` |
-| ADR-0071 | `src.route_back`, `src.state` |
-| ADR-0072 | `src.stale_issue_gc_loop`, `src.stale_issue_loop` |
-| ADR-0073 | `src.run_recorder`, `src.runs_gc_loop` |
-| ADR-0074 | `src.retrospective`, `src.retrospective_loop`, `src.retrospective_queue` |
-| ADR-0075 | `src.merge_state_watcher`, `src.merge_state_watcher_loop` |
-| ADR-0076 | `src.github_cache_loop` |
-| ADR-0077 | `src.pr_unsticker`, `src.pr_unsticker_loop` |
-| ADR-0078 | `src.pricing_refresh_diff`, `src.pricing_refresh_loop` |
-| ADR-0079 | `src.adr_reviewer`, `src.adr_reviewer_loop` |
-| ADR-0080 | `src.epic`, `src.epic_monitor_loop` |
-| ADR-0081 | `src.epic`, `src.epic_sweeper_loop` |
-| ADR-0082 | `src.branch_protection_audit`, `src.branch_protection_auditor_loop`, `src.gate_activation_check`, `src.gate_activator_loop` |
-| ADR-0083 | — |
-| ADR-0084 | `src.auto_agent_preflight_loop`, `src.base_background_loop`, `src.config`, `src.issue_store`, `src.models`, `src.pr_manager`, `src.preflight.agent`, `src.preflight.context`, `src.preflight.decision`, `src.preflight.runner` |
-| ADR-0085 | `src.secret_scrub` |
-| ADR-0086 | `src.contracts.shadow`, `src.live_corpus_replay_loop` |
-| ADR-0087 | `src.prompt_builder`, `src.prompt_template` |
-| ADR-0088 | `src.label_drift_watcher_loop`, `src.models`, `src.pr_manager` |
-| ADR-0089 | `src.memory_backlog_loop`, `src.memory_backlog_mirror` |
-| ADR-0090 | `src.dashboard_routes._atlas_routes`, `src.ubiquitous_language` |
-| ADR-0091 | — |
-| ADR-0092 | `src.agent`, `src.preflight.runner`, `src.untrusted_text` |
-| ADR-0101 | `src._mock_spec_detector`, `src.auto_pr`, `src.disturbance.baseline`, `src.disturbance.burndown`, `src.disturbance.detectors.base`, `src.disturbance.detectors.mock_spec`, `src.disturbance.detectors.suppressions`, `src.disturbance.gate`, `src.disturbance.registry`, `src.disturbance_dampener_loop` |
+| ADR | Modules cited | Enforced by |
+|---|---|---|
+| ADR-0001 | — | `tests/test_orchestrator_loops.py, tests/architecture/test_loop_count_matches_adr0001.py` |
+| ADR-0002 | `src.config`, `src.pr_manager` | `pytest:tests/test_state_machine.py` |
+| ADR-0003 | `src.ports`, `src.worktree` | — |
+| ADR-0004 | `src.agent_cli`, `src.base_runner` | `tests/test_agent_cli.py, tests/test_base_runner.py` |
+| ADR-0005 | `src.implement_phase`, `src.pr_manager` | `tests/test_implement_phase.py` |
+| ADR-0006 | `src.events`, `src.hf_cli.supervisor_service`, `src.issue_store`, `src.orchestrator`, `src.state` | — |
+| ADR-0007 | `src.dashboard`, `src.dashboard_routes._routes`, `src.hf_cli.supervisor_client`, `src.hf_cli.supervisor_service` | `tests/test_dashboard_routes_repo.py` |
+| ADR-0008 | `src.dashboard`, `src.dashboard_routes`, `src.hf_cli.supervisor_service` | `tests/test_dashboard_routes_repo.py` |
+| ADR-0009 | `src.config`, `src.orchestrator`, `src.repo_runtime`, `src.workspace` | `(process)` |
+| ADR-0010 | `src.config`, `src.docker_runner`, `src.metrics_manager`, `src.worktree` | `tests/test_integration_worktree.py` |
+| ADR-0011 | `src.epic`, `src.models`, `src.pr_manager` | `tests/test_epic.py, tests/test_release.py` |
+| ADR-0012 | `src.epic`, `src.epic_monitor_loop`, `src.models`, `src.post_merge_handler`, `src.review_phase` | `tests/test_epic_merge_coordination.py` |
+| ADR-0013 | `src.dashboard_routes`, `src.models`, `src.pr_manager`, `src.report_issue_loop`, `src.state` | — |
+| ADR-0014 | `src.implement_phase`, `src.models`, `src.orchestrator`, `src.plan_phase`, `src.post_merge_handler`, `src.review_phase`, `src.state`, `src.triage_phase` | `tests/test_state_machine.py` |
+| ADR-0015 | `src.escalation_gate`, `src.models`, `src.post_merge_handler`, `src.review_phase`, `src.visual_validation` | `tests/test_review_phase_hooks.py` |
+| ADR-0016 | `src.models`, `src.post_merge_handler` | `tests/test_visual_validation.py` |
+| ADR-0017 | `src.state`, `src.triage_phase` | `tests/test_state_machine.py` |
+| ADR-0018 | `src.config`, `src.pr_manager`, `src.report_issue_loop`, `src.screenshot_scanner` | `tests/test_screenshot_scanner.py, tests/test_report_issue_loop.py` |
+| ADR-0019 | `src.dashboard_routes`, `src.epic`, `src.issue_fetcher`, `src.post_merge_handler` | `tests/test_epic_manager.py, tests/test_post_merge_handler.py` |
+| ADR-0020 | — | — |
+| ADR-0021 | `src.config`, `src.data_migration`, `src.file_util`, `src.metrics_manager`, `src.state._session` | `tests/test_state_persistence.py, tests/test_event_persistence.py, tests/test_data_migration_d2.py` |
+| ADR-0022 | `src.config`, `src.issue_store` | `tests/test_integration_pipeline.py` |
+| ADR-0023 | — | `(process)` |
+| ADR-0024 | `src.agent`, `src.implement_phase`, `src.state` | `tests/test_implement_phase.py, tests/scenarios/fakes/test_prior_failure_propagation.py` |
+| ADR-0025 | `src.models`, `src.reviewer` | `(process)` |
+| ADR-0027 | `src.agent`, `src.reviewer` | `(none)` |
+| ADR-0028 | — | — |
+| ADR-0029 | — | — |
+| ADR-0030 | `src.dashboard_routes._routes` | — |
+| ADR-0031 | `src.config`, `src.discover_phase`, `src.discover_runner`, `src.models`, `src.plan_phase`, `src.review_phase`, `src.shape_phase`, `src.shape_runner`, `src.triage_phase` | `tests/test_discover_phase.py, tests/test_shape_phase.py, tests/test_discover_runner.py, tests/test_shape_runner.py, tests/architecture/test_functional_area_coverage.py` |
+| ADR-0032 | `src.base_runner`, `src.repo_wiki`, `src.repo_wiki_loop`, `src.wiki_compiler` | `tests/test_repo_wiki.py, tests/test_repo_wiki_store_git.py, tests/test_repo_wiki_ingest.py, tests/test_wiki_drift_detector.py, tests/test_wiki_drift_symbols.py, tests/test_wiki_semantic_drift.py, tests/test_repo_wiki_temporal.py, tests/test_wiki_corroboration.py` |
+| ADR-0033 | `src.adr_reviewer`, `src.config` | — |
+| ADR-0034 | `src.adr_reviewer`, `src.config` | `tests/test_state_machine.py` |
+| ADR-0035 | `src.config` | `(process)` |
+| ADR-0036 | `src.cli`, `src.config`, `src.hf_cli.__main__` | `(process)` |
+| ADR-0037 | `src.adr_pre_validator`, `src.adr_reviewer`, `src.models` | `tests/test_adr_pre_validator.py` |
+| ADR-0038 | `src.dashboard`, `src.dashboard_routes`, `src.repo_runtime`, `src.server` | — |
+| ADR-0039 | `src.adr_reviewer`, `src.triage_phase` | — |
+| ADR-0040 | `src.adr_reviewer` | — |
+| ADR-0041 | `src.caching_issue_store`, `src.issue_cache`, `src.issue_store`, `src.precondition_gate`, `src.route_back` | `tests/test_issue_cache.py, tests/test_precondition_gate.py` |
+| ADR-0042 | — | `branch-protection ruleset review per docs/standards/branch_protection` |
+| ADR-0043 | `src.docker_runner`, `src.preflight` | — |
+| ADR-0044 | `src.orchestrator`, `src.ports` | `scripts/hydraflow_audit/* (structural/behavioural checks), tests/test_planner.py::test_build_prompt_includes_principles_checklist, tests/test_reviewer.py::test_build_review_prompt_includes_hydraflow_principles_checks (prompt-level enforcement in plan + review phases)` |
+| ADR-0045 | `src.config`, `src.contract_refresh_loop`, `src.corpus_learning_loop`, `src.dashboard_routes._cost_rollups`, `src.discover_phase`, `src.discover_runner`, `src.fake_coverage_auditor_loop`, `src.flake_tracker_loop`, `src.health_monitor_loop`, `src.models`, `src.orchestrator`, `src.pr_manager`, `src.principles_audit_loop`, `src.rc_budget_loop`, `src.report_issue_loop`, `src.service_registry`, `src.shape_phase`, `src.shape_runner`, `src.skill_prompt_eval_loop`, `src.staging_bisect_loop`, `src.trust_fleet_sanity_loop`, `src.wiki_rot_detector_loop` | `tests/test_trust_fleet_sanity_loop.py, tests/test_loop_wiring_completeness.py, tests/test_trust_fleet_anomaly_detectors.py` |
+| ADR-0046 | `src.health_monitor_loop`, `src.trust_fleet_sanity_loop` | `'src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop' (the meta-observer); 'src/health_monitor_loop.py::_check_sanity_loop_staleness' (the dead-man-switch watching the meta-observer); 'tests/test_health_monitor_sanity_stall.py' (runtime enforcement test).` |
+| ADR-0047 | `src.contract_diff`, `src.contract_recording`, `src.contract_refresh_loop` | `'make trust-contracts'; 'tests/trust/contracts/test_fake_*_contract.py'; 'src/contract_refresh_loop.py' (the weekly refresh loop that keeps cassettes in sync with reality).` |
+| ADR-0048 | `src.staging_bisect_loop` | `'src/staging_bisect_loop.py' (the loop that performs the auto-revert); 'tests/test_staging_bisect_loop.py'; 'tests/scenarios/test_staging_bisect_scenario.py'; 'tests/test_staging_bisect_e2e.py' (three-commit fixture); watchdog in '_check_pending_watchdog'; guardrail in '_check_guardrail_and_maybe_escalate'.` |
+| ADR-0049 | `src.base_background_loop`, `src.bg_worker_manager` | `pytest:tests/test_loop_kill_switch_completeness.py`, `pytest:tests/regressions/test_canonical_killswitch.py` |
+| ADR-0050 | `src.auto_agent_preflight_loop`, `src.config`, `src.dashboard_routes._diagnostics_routes`, `src.models`, `src.preflight.agent`, `src.preflight.audit`, `src.preflight.auto_agent_runner`, `src.preflight.context`, `src.preflight.decision`, `src.preflight.runner`, `src.sentry.reverse_lookup`, `src.state._auto_agent` | `'tests/test_auto_agent_preflight_loop.py'; 'tests/scenarios/test_auto_agent_preflight_scenario.py'; 'tests/test_loop_wiring_completeness.py'.` |
+| ADR-0051 | — | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer).` |
+| ADR-0052 | `src.contract_diff`, `src.contract_recording`, `src.mockworld.sandbox_main` | `'tests/test_mockworld_fakes_conformance.py' (Port↔Fake signature parity), 'tests/test_sandbox_scenario_contract.py' (scenario catalog contract), '.github/workflows/ci.yml' 'sandbox' job (CI gate).` |
+| ADR-0053 | `src.repo_wiki`, `src.repo_wiki_loop` | `pytest:tests/test_ubiquitous_language_drift.py`, `pytest:tests/test_seed_terms.py` |
+| ADR-0054 | `src.term_proposer_loop`, `src.ubiquitous_language` | — |
+| ADR-0055 | `src.base_background_loop`, `src.base_runner`, `src.config`, `src.events`, `src.exception_classify`, `src.mockworld.fakes.fake_honeycomb`, `src.pr_manager`, `src.server`, `src.telemetry.__init__`, `src.telemetry.otel`, `src.telemetry.slugs`, `src.telemetry.spans`, `src.telemetry.subprocess_bridge`, `src.trace_collector`, `src.workspace` | — |
+| ADR-0056 | `src.adr_drift`, `src.adr_touchpoint_auditor_loop`, `src.state._adr_audit` | `pytest:tests/test_adr_touchpoint_auditor_loop.py` |
+| ADR-0057 | `src.term_pruner_loop`, `src.ubiquitous_language` | — |
+| ADR-0058 | `src.edge_proposer_loop`, `src.ubiquitous_language` | — |
+| ADR-0059 | `src.mockworld.fakes.fake_llm`, `src.review_advisor`, `src.review_phase`, `src.reviewer` | `'tests/test_review_advisor.py' (~100+ unit tests covering all 5 surfaces); 'tests/scenarios/test_pr_review_advisor_*.py' (11 Tier-1 MockWorld scenarios); 'tests/test_review_phase_core.py::TestSelfModificationGuard' (T29 self-modification guard); 'make quality' CI gate.` |
+| ADR-0060 | `src.dashboard_routes._atlas_routes` | — |
+| ADR-0061 | `src.repo_wiki` | — |
+| ADR-0062 | `src.entry_evidence_loop`, `src.term_proposer_llm` | — |
+| ADR-0063 | `src.auto_agent_preflight_loop`, `src.discover_runner`, `src.implement_phase`, `src.plan_phase`, `src.review_phase._phase`, `src.shape_phase`, `src.triage_phase` | — |
+| ADR-0064 | `src.adversarial_labels`, `src.adversarial_retry_loop`, `src.assumption_surfacer`, `src.complexity_gate`, `src.discovery_council`, `src.discovery_council_prompts`, `src.events`, `src.models`, `src.pending_concerns`, `src.plan_council`, `src.plan_council_prompts`, `src.plan_phase`, `src.post_merge_handler`, `src.shape_challenger`, `src.shape_expert_council`, `src.shape_phase`, `src.spec_ac_generator`, `src.spec_judge`, `src.wiki_carryover` | `'src/adversarial_retry_loop.py:AdversarialRetryLoop' (shared retry primitive), 'src/complexity_gate.py:ComplexityGate' (routing), 'src/plan_phase.py:PlanPhase' / 'src/shape_phase.py:ShapePhase' / 'src/discovery_council.py:DiscoveryCouncil' (call sites), 'src/wiki_carryover.py:build_wiki_entry' (carryover→knowledge), 'tests/scenarios/test_adversarial_pipeline.py' + 'tests/regressions/test_adversarial_pipeline_regressions.py' (behaviour pinning).` |
+| ADR-0065 | `src.code_grooming_loop`, `src.config`, `src.skill_registry` | `(process)` |
+| ADR-0066 | `src.agent`, `src.base_runner`, `src.ports` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
+| ADR-0067 | `src.issue_fetcher`, `src.ports` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
+| ADR-0068 | `src.ports`, `src.term_proposer_loop`, `src.term_pruner_loop` | `(none) — structural subtype check planned in follow-up` |
+| ADR-0069 | `src.ports`, `src.workspace_gc_loop` | `tests/test_workspace_gc_loop.py` |
+| ADR-0070 | `src.ports`, `src.review_insights` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
+| ADR-0071 | `src.route_back`, `src.state` | `tests/test_route_back.py` |
+| ADR-0072 | `src.stale_issue_gc_loop`, `src.stale_issue_loop` | `tests/test_stale_issue_loop.py` |
+| ADR-0073 | `src.run_recorder`, `src.runs_gc_loop` | — |
+| ADR-0074 | `src.retrospective`, `src.retrospective_loop`, `src.retrospective_queue` | — |
+| ADR-0075 | `src.merge_state_watcher`, `src.merge_state_watcher_loop` | — |
+| ADR-0076 | `src.github_cache_loop` | — |
+| ADR-0077 | `src.pr_unsticker`, `src.pr_unsticker_loop` | — |
+| ADR-0078 | `src.pricing_refresh_diff`, `src.pricing_refresh_loop` | — |
+| ADR-0079 | `src.adr_reviewer`, `src.adr_reviewer_loop` | — |
+| ADR-0080 | `src.epic`, `src.epic_monitor_loop` | — |
+| ADR-0081 | `src.epic`, `src.epic_sweeper_loop` | — |
+| ADR-0082 | `src.branch_protection_audit`, `src.branch_protection_auditor_loop`, `src.gate_activation_check`, `src.gate_activator_loop` | — |
+| ADR-0083 | — | `'tests/test_sandbox_scenario_contract.py', 'tests/test_no_screenshot_regression_tests.py'` |
+| ADR-0084 | `src.auto_agent_preflight_loop`, `src.base_background_loop`, `src.config`, `src.issue_store`, `src.models`, `src.pr_manager`, `src.preflight.agent`, `src.preflight.context`, `src.preflight.decision`, `src.preflight.runner` | — |
+| ADR-0085 | `src.secret_scrub` | `tests/test_secret_scrub.py` |
+| ADR-0086 | `src.contracts.shadow`, `src.live_corpus_replay_loop` | — |
+| ADR-0087 | `src.prompt_builder`, `src.prompt_template` | — |
+| ADR-0088 | `src.label_drift_watcher_loop`, `src.models`, `src.pr_manager` | — |
+| ADR-0089 | `src.memory_backlog_loop`, `src.memory_backlog_mirror` | `'tests/test_memory_backlog_loop.py', 'tests/test_loop_wiring_completeness.py' (auto-discovery confirms 5-checkpoint wire), 'tests/architecture/test_functional_area_coverage.py' (loop assigned in 'functional_areas.yml').` |
+| ADR-0090 | `src.dashboard_routes._atlas_routes`, `src.ubiquitous_language` | — |
+| ADR-0091 | — | — |
+| ADR-0092 | `src.agent`, `src.preflight.runner`, `src.untrusted_text` | `tests/test_untrusted_text.py, tests/test_preflight_untrusted_fencing.py, tests/test_agent_cli.py, tests/test_agent_advanced.py` |
+| ADR-0093 | `src.base_background_loop`, `src.fitness_scorecard_loop`, `src.loop_fitness` | `pytest:tests/test_loop_fitness_completeness.py` |
+| ADR-0094 | `src.config`, `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase`, `src.state._convergence` | — |
+| ADR-0095 | `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase` | — |
+| ADR-0096 | `src.convergence_recording`, `src.plan_phase`, `src.shape_phase`, `src.triage_phase` | — |
+| ADR-0097 | `src.implement_phase`, `src.retrospective`, `src.state._auto_agent`, `src.state._convergence`, `src.state._sandbox_failure_fixer` | `pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py` |
+| ADR-0098 | `src.convergence_oscillation_loop`, `src.models`, `src.state._convergence` | `pytest:tests/scenarios/test_convergence_oscillation_mockworld.py` |
+| ADR-0099 | `src.base_background_loop`, `src.base_runner`, `src.harness_insights`, `src.issue_store`, `src.models`, `src.review_advisor`, `src.ubiquitous_language` | `'tests/test_seed_terms.py' (the seven 'control_role' glossary terms load, resolve to 'main' classes, and ship 'accepted'), '(process)' (every orchestration component declares its control role)` |
+| ADR-0100 | `src.adr_conformance`, `src.adr_conformance_loop`, `src.adr_index` | `pytest:tests/test_adr_conformance_coverage.py` |
+| ADR-0101 | `src._mock_spec_detector`, `src.auto_pr`, `src.disturbance.baseline`, `src.disturbance.burndown`, `src.disturbance.detectors.base`, `src.disturbance.detectors.mock_spec`, `src.disturbance.detectors.suppressions`, `src.disturbance.gate`, `src.disturbance.registry`, `src.disturbance_dampener_loop` | `tests/test_disturbance_ratchet.py, tests/test_disturbance_dampener_loop.py` |
 
 ## Module → ADRs
 
 | Module | Cited by |
 |---|---|
 | `src._mock_spec_detector` | ADR-0101 |
+| `src.adr_conformance` | ADR-0100 |
+| `src.adr_conformance_loop` | ADR-0100 |
 | `src.adr_drift` | ADR-0056 |
+| `src.adr_index` | ADR-0100 |
 | `src.adr_pre_validator` | ADR-0037 |
 | `src.adr_reviewer` | ADR-0033, ADR-0034, ADR-0037, ADR-0039, ADR-0040, ADR-0079 |
 | `src.adr_reviewer_loop` | ADR-0079 |
@@ -118,8 +129,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.assumption_surfacer` | ADR-0064 |
 | `src.auto_agent_preflight_loop` | ADR-0050, ADR-0063, ADR-0084 |
 | `src.auto_pr` | ADR-0101 |
-| `src.base_background_loop` | ADR-0049, ADR-0055, ADR-0084 |
-| `src.base_runner` | ADR-0004, ADR-0032, ADR-0055, ADR-0066 |
+| `src.base_background_loop` | ADR-0049, ADR-0055, ADR-0084, ADR-0093, ADR-0099 |
+| `src.base_runner` | ADR-0004, ADR-0032, ADR-0055, ADR-0066, ADR-0099 |
 | `src.bg_worker_manager` | ADR-0049 |
 | `src.branch_protection_audit` | ADR-0082 |
 | `src.branch_protection_auditor_loop` | ADR-0082 |
@@ -127,11 +138,14 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.cli` | ADR-0036 |
 | `src.code_grooming_loop` | ADR-0065 |
 | `src.complexity_gate` | ADR-0064 |
-| `src.config` | ADR-0002, ADR-0009, ADR-0010, ADR-0018, ADR-0021, ADR-0022, ADR-0031, ADR-0033, ADR-0034, ADR-0035, ADR-0036, ADR-0045, ADR-0050, ADR-0055, ADR-0065, ADR-0084 |
+| `src.config` | ADR-0002, ADR-0009, ADR-0010, ADR-0018, ADR-0021, ADR-0022, ADR-0031, ADR-0033, ADR-0034, ADR-0035, ADR-0036, ADR-0045, ADR-0050, ADR-0055, ADR-0065, ADR-0084, ADR-0094 |
 | `src.contract_diff` | ADR-0047, ADR-0052 |
 | `src.contract_recording` | ADR-0047, ADR-0052 |
 | `src.contract_refresh_loop` | ADR-0045, ADR-0047 |
 | `src.contracts.shadow` | ADR-0086 |
+| `src.convergence_gate` | ADR-0094, ADR-0095 |
+| `src.convergence_oscillation_loop` | ADR-0098 |
+| `src.convergence_recording` | ADR-0096 |
 | `src.corpus_learning_loop` | ADR-0045 |
 | `src.dashboard` | ADR-0007, ADR-0008, ADR-0038 |
 | `src.dashboard_routes` | ADR-0008, ADR-0013, ADR-0019, ADR-0038 |
@@ -163,20 +177,23 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.exception_classify` | ADR-0055 |
 | `src.fake_coverage_auditor_loop` | ADR-0045 |
 | `src.file_util` | ADR-0021 |
+| `src.fitness_scorecard_loop` | ADR-0093 |
 | `src.flake_tracker_loop` | ADR-0045 |
 | `src.gate_activation_check` | ADR-0082 |
 | `src.gate_activator_loop` | ADR-0082 |
 | `src.github_cache_loop` | ADR-0076 |
+| `src.harness_insights` | ADR-0099 |
 | `src.health_monitor_loop` | ADR-0045, ADR-0046 |
 | `src.hf_cli.__main__` | ADR-0036 |
 | `src.hf_cli.supervisor_client` | ADR-0007 |
 | `src.hf_cli.supervisor_service` | ADR-0006, ADR-0007, ADR-0008 |
-| `src.implement_phase` | ADR-0005, ADR-0014, ADR-0024, ADR-0063 |
+| `src.implement_phase` | ADR-0005, ADR-0014, ADR-0024, ADR-0063, ADR-0097 |
 | `src.issue_cache` | ADR-0041 |
 | `src.issue_fetcher` | ADR-0019, ADR-0067 |
-| `src.issue_store` | ADR-0006, ADR-0022, ADR-0041, ADR-0084 |
+| `src.issue_store` | ADR-0006, ADR-0022, ADR-0041, ADR-0084, ADR-0099 |
 | `src.label_drift_watcher_loop` | ADR-0088 |
 | `src.live_corpus_replay_loop` | ADR-0086 |
+| `src.loop_fitness` | ADR-0093 |
 | `src.memory_backlog_loop` | ADR-0089 |
 | `src.memory_backlog_mirror` | ADR-0089 |
 | `src.merge_state_watcher` | ADR-0075 |
@@ -185,12 +202,12 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.mockworld.fakes.fake_honeycomb` | ADR-0055 |
 | `src.mockworld.fakes.fake_llm` | ADR-0059 |
 | `src.mockworld.sandbox_main` | ADR-0052 |
-| `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0064, ADR-0084, ADR-0088 |
+| `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0064, ADR-0084, ADR-0088, ADR-0094, ADR-0095, ADR-0098, ADR-0099 |
 | `src.orchestrator` | ADR-0006, ADR-0009, ADR-0014, ADR-0044, ADR-0045 |
 | `src.pending_concerns` | ADR-0064 |
 | `src.plan_council` | ADR-0064 |
 | `src.plan_council_prompts` | ADR-0064 |
-| `src.plan_phase` | ADR-0014, ADR-0031, ADR-0063, ADR-0064 |
+| `src.plan_phase` | ADR-0014, ADR-0031, ADR-0063, ADR-0064, ADR-0096 |
 | `src.ports` | ADR-0003, ADR-0044, ADR-0066, ADR-0067, ADR-0068, ADR-0069, ADR-0070 |
 | `src.post_merge_handler` | ADR-0012, ADR-0014, ADR-0015, ADR-0016, ADR-0019, ADR-0064 |
 | `src.pr_manager` | ADR-0002, ADR-0005, ADR-0011, ADR-0013, ADR-0018, ADR-0045, ADR-0055, ADR-0084, ADR-0088 |
@@ -214,13 +231,13 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.repo_wiki` | ADR-0032, ADR-0053, ADR-0061 |
 | `src.repo_wiki_loop` | ADR-0032, ADR-0053 |
 | `src.report_issue_loop` | ADR-0013, ADR-0018, ADR-0045 |
-| `src.retrospective` | ADR-0074 |
+| `src.retrospective` | ADR-0074, ADR-0097 |
 | `src.retrospective_loop` | ADR-0074 |
 | `src.retrospective_queue` | ADR-0074 |
-| `src.review_advisor` | ADR-0059 |
+| `src.review_advisor` | ADR-0059, ADR-0094, ADR-0095, ADR-0099 |
 | `src.review_insights` | ADR-0070 |
 | `src.review_phase` | ADR-0012, ADR-0014, ADR-0015, ADR-0031, ADR-0059 |
-| `src.review_phase._phase` | ADR-0063 |
+| `src.review_phase._phase` | ADR-0063, ADR-0094, ADR-0095 |
 | `src.reviewer` | ADR-0025, ADR-0027, ADR-0059 |
 | `src.route_back` | ADR-0041, ADR-0071 |
 | `src.run_recorder` | ADR-0073 |
@@ -232,7 +249,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.service_registry` | ADR-0045 |
 | `src.shape_challenger` | ADR-0064 |
 | `src.shape_expert_council` | ADR-0064 |
-| `src.shape_phase` | ADR-0031, ADR-0045, ADR-0063, ADR-0064 |
+| `src.shape_phase` | ADR-0031, ADR-0045, ADR-0063, ADR-0064, ADR-0096 |
 | `src.shape_runner` | ADR-0031, ADR-0045 |
 | `src.skill_prompt_eval_loop` | ADR-0045 |
 | `src.skill_registry` | ADR-0065 |
@@ -243,7 +260,9 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.stale_issue_loop` | ADR-0072 |
 | `src.state` | ADR-0006, ADR-0013, ADR-0014, ADR-0017, ADR-0024, ADR-0071 |
 | `src.state._adr_audit` | ADR-0056 |
-| `src.state._auto_agent` | ADR-0050 |
+| `src.state._auto_agent` | ADR-0050, ADR-0097 |
+| `src.state._convergence` | ADR-0094, ADR-0097, ADR-0098 |
+| `src.state._sandbox_failure_fixer` | ADR-0097 |
 | `src.state._session` | ADR-0021 |
 | `src.telemetry.__init__` | ADR-0055 |
 | `src.telemetry.otel` | ADR-0055 |
@@ -254,9 +273,9 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.term_proposer_loop` | ADR-0054, ADR-0068 |
 | `src.term_pruner_loop` | ADR-0057, ADR-0068 |
 | `src.trace_collector` | ADR-0055 |
-| `src.triage_phase` | ADR-0014, ADR-0017, ADR-0031, ADR-0039, ADR-0063 |
+| `src.triage_phase` | ADR-0014, ADR-0017, ADR-0031, ADR-0039, ADR-0063, ADR-0096 |
 | `src.trust_fleet_sanity_loop` | ADR-0045, ADR-0046 |
-| `src.ubiquitous_language` | ADR-0054, ADR-0057, ADR-0058, ADR-0090 |
+| `src.ubiquitous_language` | ADR-0054, ADR-0057, ADR-0058, ADR-0090, ADR-0099 |
 | `src.untrusted_text` | ADR-0092 |
 | `src.visual_validation` | ADR-0015 |
 | `src.wiki_carryover` | ADR-0064 |

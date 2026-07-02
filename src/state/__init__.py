@@ -27,6 +27,7 @@ from ._adversarial import AdversarialStateMixin
 from ._auto_agent import AutoAgentStateMixin
 from ._ci_monitor import CIMonitorStateMixin
 from ._contract_refresh import ContractRefreshStateMixin
+from ._convergence import ConvergenceStateMixin
 from ._corpus_learning import CorpusLearningStateMixin
 from ._dependabot_merge import DependabotMergeStateMixin
 from ._diagnostic import DiagnosticStateMixin
@@ -109,6 +110,7 @@ class StateTracker(
     AdversarialStateMixin,
     TriageRetryStateMixin,
     DisturbanceStateMixin,
+    ConvergenceStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 

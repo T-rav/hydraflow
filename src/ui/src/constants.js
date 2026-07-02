@@ -262,7 +262,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry', 'convergence_oscillation'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -289,6 +289,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   skill_prompt_eval: 604800,
   fake_coverage_auditor: 604800,
   adr_touchpoint_auditor: 14400,
+  adr_conformance: 86400,
   memory_backlog: 86400,
   rc_budget: 14400,
   wiki_rot_detector: 604800,
@@ -305,6 +306,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   runs_gc: 3600,
   label_drift_watcher: 600,
   triage_retry: 86400,
+  convergence_oscillation: 3600,
 }
 
 /**
@@ -353,6 +355,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'skill_prompt_eval', label: 'Skill Prompt Eval', description: 'Runs the full adversarial skill corpus weekly and files drift + weak-case issues.', color: theme.blue, group: 'learning', tags: ['quality'] },
   { key: 'fake_coverage_auditor', label: 'Fake Coverage Auditor', description: 'Flags un-cassetted fake adapter methods and un-exercised test helpers.', color: theme.accent, group: 'learning', tags: ['quality'] },
   { key: 'adr_touchpoint_auditor', label: 'ADR Touchpoint Auditor', description: 'Scans recently-merged PRs for ADR drift — cited src/ modules changed without the ADR being updated. Replaces the synchronous touchpoint gate. See ADR-0056.', color: theme.purple, group: 'governance', tags: ['audit', 'drift'] },
+  { key: 'adr_conformance', label: 'ADR Conformance', description: 'Evaluates every Accepted ADR\'s `Enforced by:` checks and files/updates remediation issues on drift. See ADR-0100.', color: theme.purple, group: 'governance', tags: ['audit', 'compliance'] },
   { key: 'memory_backlog', label: 'Memory Backlog', description: 'Files hydraflow-find issues for pending entries in docs/wiki/memory-feedback/.', color: theme.purple, group: 'learning', tags: ['knowledge'] },
   { key: 'rc_budget', label: 'RC Budget', description: 'Detects RC CI wall-clock bloat via rolling-median + spike-vs-recent-max signals; files hydraflow-find issues.', color: theme.orange, group: 'repo_health', tags: ['quality'] },
   { key: 'term_proposer', label: 'Term Proposer', description: 'Caretaker that grows the ubiquitous-language glossary by detecting load-bearing classes without terms (S1+S2+S5 signals), drafting them via LLM, and opening auto-merging bot PRs as `confidence: proposed`. See ADR-0054.', color: theme.cyan, group: 'learning', tags: ['knowledge'] },
@@ -366,6 +369,8 @@ export const BACKGROUND_WORKERS = [
   { key: 'live_corpus_replay', label: 'Live Corpus Replay', description: 'Diffs fresh shadow-corpus samples against fake-adapter outputs to catch value-level drift between real and fake adapters; files one hydraflow-find issue per unique drift signature. See #8786 / ADR-0045.', color: theme.accent, group: 'governance', tags: ['audit', 'drift'] },
   { key: 'auto_agent_preflight', label: 'Auto-Agent Pre-Flight', description: 'Intercepts hitl-escalation issues; runs an emulated-engineer subprocess to attempt autonomous resolution before the issue surfaces to a human (spec §1–§11; ADR-0050).', color: theme.purple, group: 'autonomy', tags: ['hitl', 'autonomy'] },
   { key: 'triage_retry', label: 'Triage Retry', description: 'Re-runs parked-issue triage every 24h with the original parking reason as context. Caps at 3 retries before escalating to HITL with the triage-retry-exhausted sub-label. Closes the only factory phase with no autonomous re-entry path. See ADR-0063 W2.', color: theme.purple, group: 'autonomy', tags: ['recovery', 'autonomy'] },
+  { key: 'convergence_oscillation', label: 'Convergence Oscillation', description: 'Scans issue convergence ledgers for cross-boundary oscillation (repeated LOOP_BACK across triage/shape/plan or recurring review-lap findings) and escalates stuck issues to HITL, once each. See ADR-0098.', color: theme.purple, group: 'autonomy', tags: ['recovery', 'autonomy'] },
+  { key: 'fitness_scorecard', label: 'Fitness Scorecard', description: 'Computes per-loop fitness scores each tick by combining event history and issue attribution. Persists to fitness.jsonl and regenerates docs/arch/generated/loop-fitness.md. Read-only caretaker per ADR-0029.', color: theme.cyan, group: 'governance', tags: ['audit', 'drift'] },
   { key: 'sandbox_failure_fixer', label: 'Sandbox Failure Fixer', description: 'Auto-fixes promotion PRs failing sandbox CI by dispatching the auto-agent', color: theme.purple, group: 'autonomy', tags: ['scaffold'] },
   { key: 'disturbance_dampener', label: 'Disturbance Dampener', description: 'Burns down disturbance backlog by selecting units per dimension+file, dispatching an auto-agent fix, and opening one PR per file. See ADR-0095.', color: theme.purple, group: 'autonomy', tags: ['scaffold'] },
   { key: 'diagram_loop', label: 'Diagram Loop (L24)', description: 'Self-documenting architecture caretaker. Walks src/, tests/, docs/adr/ every 4h; emits regenerated docs/arch/generated/ markdown + opens a PR when the live truth has drifted. Per ADR-0029 (caretaker pattern) and the Architecture Knowledge System spec.', color: theme.cyan, group: 'governance', tags: ['drift'] },

@@ -1,7 +1,7 @@
 ---
 id: "01KWFR9AWM3NX19D0C1W10NNMN"
 name: "DimensionBaseline"
-kind: "policy"
+kind: "control_role"
 bounded_context: "shared-kernel"
 code_anchor: "src/disturbance/registry.py:DimensionSpec"
 aliases: []

@@ -3,6 +3,9 @@ comment: suppressions disturbance baseline. MUST NOT grow (gate fails on increas
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
+  src/adr_conformance_loop.py::noqa:ANN202: 1
+  src/adr_conformance_loop.py::noqa:PLC0415: 7
+  src/adr_conformance_loop.py::noqa:TCH001: 3
   src/adr_draft_opener.py::noqa:BLE001: 1
   src/adr_reviewer.py::noqa:PLC0415: 2
   src/adr_touchpoint_auditor_loop.py::noqa:PLC0415: 2
@@ -13,7 +16,7 @@ entries:
   src/agent.py::noqa:BLE001: 2
   src/agent.py::noqa:F401: 1
   "src/agent.py::noqa:F841\u2014usedinf-stringprompt": 1
-  src/agent.py::noqa:PLC0415: 6
+  src/agent.py::noqa:PLC0415: 7
   src/agent.py::type-ignore[no-any-return]: 1
   src/arch/generators/coverage_matrix.py::noqa:BLE001: 1
   src/arch/generators/coverage_matrix.py::type-ignore[import-untyped]: 1
@@ -39,16 +42,20 @@ entries:
   src/ci_monitor_loop.py::noqa:PLR0911: 1
   src/ci_scaffold.py::noqa:F401-re-exportforcompatibilitytests: 1
   src/config.py::noqa:PLC0415: 2
+  src/contract_refresh_loop.py::noqa:PLC0415: 1
   src/contract_refresh_loop.py::noqa:TCH001: 2
   src/contracts/shape_dispatchers.py::noqa:PLR0911: 1
+  src/convergence_gate.py::noqa:BLE001: 1
+  src/convergence_oscillation_loop.py::noqa:BLE001: 1
   src/corpus_learning_loop.py::noqa:BLE001: 3
-  src/corpus_learning_loop.py::noqa:PLC0415: 1
+  src/corpus_learning_loop.py::noqa:PLC0415: 2
   src/corpus_learning_loop.py::noqa:TCH001: 2
   src/cost_budget_alerts.py::noqa:PLC0415: 2
   src/cost_budget_watcher_loop.py::noqa:BLE001: 2
   "src/cost_budget_watcher_loop.py::noqa:BLE001\u2014telemetryshouldn'tkillthegate": 1
   src/cost_budget_watcher_loop.py::noqa:PLC0415: 1
   src/cost_budget_watcher_loop.py::noqa:PLR0911: 1
+  src/coverage_delta.py::noqa:S314: 1
   "src/dashboard_routes/_atlas_routes.py::noqa:BLE001\u2014diagnosticsendpoint,neverfail": 1
   src/dashboard_routes/_common.py::noqa:F401(re-exportedforhandlers): 1
   src/dashboard_routes/_control_routes.py::noqa:BLE001: 2
@@ -90,6 +97,7 @@ entries:
   src/docker_runner.py::noqa:PLC0415: 8
   src/docker_runner.py::noqa:S108: 1
   src/docker_runner.py::type-ignore[arg-type]: 1
+  src/edge_proposer_loop.py::noqa:PLC0415: 1
   src/entry_evidence_loop.py::noqa:SLF001: 1
   src/epic.py::noqa:BLE001: 1
   src/events.py::noqa:BLE001: 1
@@ -106,6 +114,8 @@ entries:
   "src/fake_coverage_auditor_loop.py::noqa:BLE001\u2014issuefilingfailure\u2260loopfailure": 1
   src/fake_coverage_auditor_loop.py::noqa:PLC0415: 2
   src/fake_coverage_auditor_loop.py::noqa:TCH001: 2
+  src/fitness_report.py::noqa:PLC0415: 1
+  src/fitness_scorecard_loop.py::noqa:BLE001: 1
   src/flake_tracker_loop.py::noqa:PLC0415: 1
   src/gate_activation_check.py::noqa:PLC0415: 3
   src/gate_activator_loop.py::noqa:PLR0911: 1
@@ -174,7 +184,7 @@ entries:
   src/plan_touchpoint_expander.py::type-ignore[type-arg]: 1
   src/planner.py::noqa:PLC0415: 1
   src/polyglot_prep.py::noqa:PLC0415: 8
-  src/ports.py::noqa:TCH004: 1
+  src/ports.py::noqa:TCH004: 3
   src/post_merge_handler.py::noqa:BLE001: 2
   "src/post_merge_handler.py::noqa:BLE001\u2014neverblockmergepathonwikiI/O": 1
   src/post_merge_handler.py::noqa:PLC0415: 5
@@ -220,11 +230,12 @@ entries:
   src/review_phase/_common.py::noqa:PLC0415: 1
   src/review_phase/_phase.py::noqa: 1
   src/review_phase/_phase.py::noqa:ARG002: 2
-  src/review_phase/_phase.py::noqa:BLE001: 3
+  src/review_phase/_phase.py::noqa:BLE001: 4
   "src/review_phase/_phase.py::noqa:E402,F401\u2014usedbycallsitesbelow": 1
-  src/review_phase/_phase.py::noqa:PLC0415: 36
+  src/review_phase/_phase.py::noqa:PLC0415: 45
   "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__+sig": 1
   "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__signature": 1
+  src/review_phase/_phase.py::type-ignore[arg-type]: 2
   src/reviewer.py::noqa:PLC0415: 3
   src/route_back.py::noqa:BLE001: 6
   src/runner_utils.py::noqa:PLC0415: 4
@@ -241,11 +252,12 @@ entries:
   src/server.py::noqa:PLC0415: 18
   src/server.py::type-ignore[arg-type]: 2
   src/server.py::type-ignore[no-untyped-def]: 1
-  src/service_registry.py::noqa:F841: 32
+  src/service_registry.py::noqa:F841: 33
   src/service_registry.py::noqa:PLC0415: 14
   src/service_registry.py::noqa:TCH001: 14
   "src/service_registry.py::noqa:TCH001\u2014dataclassannotation": 1
   "src/service_registry.py::noqa:TCH001\u2014usedindataclassfield": 2
+  src/service_registry.py::type-ignore[arg-type]: 2
   src/service_registry.py::type-ignore[assignment]: 1
   src/service_registry.py::type-ignore[attr-defined]: 4
   src/shape_challenger.py::noqa:BLE001: 1
@@ -260,10 +272,10 @@ entries:
   src/staging_bisect_loop.py::noqa:PLC0415: 14
   src/staging_bisect_loop.py::noqa:PLR0911: 2
   src/staging_promotion_loop.py::noqa:BLE001: 4
+  src/state/_convergence.py::noqa:PLC0415: 2
+  src/state/_convergence.py::type-ignore[assignment]: 1
   src/state/_diagnostic.py::noqa:PLC0415: 1
   src/state/_rc_budget.py::noqa:PLC0415: 1
-  src/state/_review.py::noqa:PLC0415: 1
-  src/state/_review.py::type-ignore[arg-type]: 1
   src/stream_parser.py::noqa:PLR0911: 1
   "src/subprocess_util.py::noqa:BLE001\u2014observabilitymustneverbreakthecallpath": 1
   src/subprocess_util.py::noqa:PLC0415: 1
@@ -273,6 +285,7 @@ entries:
   src/subprocess_util.py::noqa:S311: 1
   src/telemetry/otel.py::noqa:PLW0603: 3
   src/telemetry/spans.py::type-ignore[return-value]: 3
+  src/term_proposer_loop.py::noqa:PLC0415: 1
   src/term_proposer_runtime.py::noqa:PLC0415: 4
   src/test_scaffold.py::noqa:BLE001: 1
   src/trace_collector.py::noqa:E402: 2

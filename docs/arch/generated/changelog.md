@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `8bef9b1` — chore(adr): renumber disturbance ADR 0095->0101 (staging claimed 0095/0100); fix ADR-0094->0099 refs *(2026-07-01)*
 - `4355900` — chore(arch): regenerate UL docs for disturbance glossary terms *(2026-07-01)*
 - `2c7dcc3` — docs(ul): seed DisturbanceDampenerLoop/ViolationDetector/DimensionBaseline terms *(2026-07-01)*
 - `7fc9928` — docs(adr): ADR-0095 disturbance dampener (feedforward ratchet + burn-down) *(2026-07-01)*

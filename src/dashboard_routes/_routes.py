@@ -1879,6 +1879,11 @@ def create_router(
 
     _register_metrics(router, ctx)
 
+    # --- Fitness routes (loop fitness scorecard read endpoint) ---
+    from dashboard_routes._fitness_routes import register as _register_fitness
+
+    _register_fitness(router, ctx)
+
     # --- Diagnostics routes (factory metrics + trace artifacts) ---
     from dashboard_routes._diagnostics_routes import build_diagnostics_router
 

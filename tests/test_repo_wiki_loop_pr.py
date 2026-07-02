@@ -1,9 +1,10 @@
 """Tests for the Phase 4 maintenance-PR path on ``RepoWikiLoop``.
 
-Exercises ``_maybe_open_maintenance_pr`` and the module helpers
-``_porcelain_paths`` + ``_maintenance_pr_body`` without reconstructing
-the full loop lifecycle — instead stubs just the attributes the method
-reads.  Matches the Phase 3.5 ``test_phase_wiki_wiring`` approach.
+Exercises ``_heal_and_open_maintenance_pr`` (the #9539 generate-in-worktree
+heal+PR) and the module helpers ``_porcelain_paths`` + ``_maintenance_pr_body``
+without reconstructing the full loop lifecycle — instead stubs just the
+attributes the method reads.  Matches the Phase 3.5 ``test_phase_wiki_wiring``
+approach.
 """
 
 from __future__ import annotations
@@ -135,54 +136,61 @@ class TestMaintenancePrBody:
         assert gotchas_idx < patterns_idx
 
 
-class TestMaybeOpenMaintenancePR:
+class TestHealAndOpenMaintenancePR:
+    """``_heal_and_open_maintenance_pr`` runs the heal INSIDE the ephemeral
+    worktree (via ``generate_and_open_pr_async``) and never touches
+    ``repo_root`` (#9539). These tests mock the PR helper to assert the
+    orchestration; the actual heal+clean-checkout invariant is covered by
+    ``test_heal_leaves_repo_root_clean_real_git`` below.
+    """
+
     @pytest.mark.asyncio
     async def test_no_op_when_credentials_missing(
         self, git_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         called = False
 
-        async def fake_open(**_: Any) -> AutoPrResult:
+        async def fake_gen(**_: Any) -> AutoPrResult:
             nonlocal called
             called = True
             return AutoPrResult(status="opened", pr_url="x", branch="y")
 
-        monkeypatch.setattr("repo_wiki_loop.open_automated_pr_async", fake_open)
-        (git_repo / "repo_wiki" / "new.md").write_text("x\n")
+        monkeypatch.setattr("repo_wiki_loop.generate_and_open_pr_async", fake_gen)
 
         loop = _stub_loop(_make_config(git_repo), credentials=None)
-        await loop._maybe_open_maintenance_pr({})
+        await loop._heal_and_open_maintenance_pr(set(), {})
 
         assert called is False
 
     @pytest.mark.asyncio
-    async def test_no_op_when_no_diff(
-        self, git_repo: Path, monkeypatch: pytest.MonkeyPatch
+    async def test_no_op_when_not_a_git_repo(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         called = False
 
-        async def fake_open(**_: Any) -> AutoPrResult:
+        async def fake_gen(**_: Any) -> AutoPrResult:
             nonlocal called
             called = True
             return AutoPrResult(status="opened", pr_url="x", branch="y")
 
-        monkeypatch.setattr("repo_wiki_loop.open_automated_pr_async", fake_open)
+        monkeypatch.setattr("repo_wiki_loop.generate_and_open_pr_async", fake_gen)
+        non_git = tmp_path / "plain"
+        non_git.mkdir()
 
         loop = _stub_loop(
-            _make_config(git_repo),
-            credentials=Credentials(gh_token="ghs_test"),
+            _make_config(non_git), credentials=Credentials(gh_token="ghs_test")
         )
-        await loop._maybe_open_maintenance_pr({})
+        await loop._heal_and_open_maintenance_pr(set(), {})
 
         assert called is False
 
     @pytest.mark.asyncio
-    async def test_opens_pr_when_diff_exists(
+    async def test_opens_pr_with_expected_args_and_tracks_branch(
         self, git_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         captured: dict[str, Any] = {}
 
-        async def fake_open(**kwargs: Any) -> AutoPrResult:
+        async def fake_gen(**kwargs: Any) -> AutoPrResult:
             captured.update(kwargs)
             return AutoPrResult(
                 status="opened",
@@ -190,76 +198,55 @@ class TestMaybeOpenMaintenancePR:
                 branch=kwargs["branch"],
             )
 
-        monkeypatch.setattr("repo_wiki_loop.open_automated_pr_async", fake_open)
-        (git_repo / "repo_wiki" / "new.md").write_text("new entry\n")
+        monkeypatch.setattr("repo_wiki_loop.generate_and_open_pr_async", fake_gen)
 
-        stats: dict[str, Any] = {"entries_marked_stale": 2}
+        stats: dict[str, Any] = {"queue_drained": 0}
         loop = _stub_loop(
             _make_config(git_repo),
             credentials=Credentials(gh_token="ghs_test"),
         )
-        await loop._maybe_open_maintenance_pr(stats)
+        await loop._heal_and_open_maintenance_pr(set(), stats)
 
         assert captured["gh_token"] == "ghs_test"
         # Auto-merge is off — the loop reviews + merges itself after CI green.
         assert captured["auto_merge"] is False
+        # The heal generates straight into the worktree's tracked layout.
+        assert captured["path_specs"] == ["repo_wiki"]
+        assert captured["labels"] == ["hydraflow-wiki-maintenance"]
+        assert captured["raise_on_failure"] is False
         assert captured["branch"].startswith("hydraflow/wiki-maint-")
         assert "chore(wiki): maintenance" in captured["pr_title"]
-        assert captured["raise_on_failure"] is False
+        # The body + the file-state generator are both deferred callables.
+        assert callable(captured["pr_body"])
+        assert callable(captured["generate"])
         assert loop._open_pr_url == "https://github.com/x/y/pull/99"
+        assert loop._open_pr_branch == captured["branch"]
         assert stats["maintenance_pr"] == "https://github.com/x/y/pull/99"
 
     @pytest.mark.asyncio
-    async def test_coalesces_into_open_pr_when_already_open(
+    async def test_no_diff_result_opens_no_pr(
         self, git_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        mock_open = AsyncMock()
-        monkeypatch.setattr("repo_wiki_loop.open_automated_pr_async", mock_open)
-        (git_repo / "repo_wiki" / "new.md").write_text("new\n")
+        async def fake_gen(**kwargs: Any) -> AutoPrResult:
+            return AutoPrResult(status="no-diff", pr_url=None, branch=kwargs["branch"])
+
+        monkeypatch.setattr("repo_wiki_loop.generate_and_open_pr_async", fake_gen)
 
         loop = _stub_loop(
-            _make_config(git_repo, coalesce=True),
+            _make_config(git_repo),
             credentials=Credentials(gh_token="ghs_test"),
         )
-        loop._open_pr_branch = "hydraflow/wiki-maint-prior"
-        loop._open_pr_url = "https://github.com/x/y/pull/42"
+        await loop._heal_and_open_maintenance_pr(set(), {})
 
-        stats: dict[str, Any] = {}
-        await loop._maybe_open_maintenance_pr(stats)
-
-        mock_open.assert_not_called()
-        assert stats["maintenance_pr"] == "https://github.com/x/y/pull/42"
-
-    @pytest.mark.asyncio
-    async def test_opens_new_pr_when_coalesce_disabled(
-        self, git_repo: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        calls: list[dict[str, Any]] = []
-
-        async def fake_open(**kwargs: Any) -> AutoPrResult:
-            calls.append(kwargs)
-            return AutoPrResult(
-                status="opened", pr_url="https://x", branch=kwargs["branch"]
-            )
-
-        monkeypatch.setattr("repo_wiki_loop.open_automated_pr_async", fake_open)
-        (git_repo / "repo_wiki" / "new.md").write_text("new\n")
-
-        loop = _stub_loop(
-            _make_config(git_repo, coalesce=False),
-            credentials=Credentials(gh_token="ghs_test"),
-        )
-        loop._open_pr_branch = "hydraflow/wiki-maint-prior"  # existing
-
-        await loop._maybe_open_maintenance_pr({})
-
-        assert len(calls) == 1  # still opens a new PR
+        # No diff → no PR tracked, so the next tick heals again.
+        assert loop._open_pr_branch is None
+        assert loop._open_pr_url is None
 
     @pytest.mark.asyncio
     async def test_pr_helper_failure_is_logged_not_raised(
         self, git_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        async def fake_open(**kwargs: Any) -> AutoPrResult:
+        async def fake_gen(**kwargs: Any) -> AutoPrResult:
             return AutoPrResult(
                 status="failed",
                 pr_url=None,
@@ -267,15 +254,14 @@ class TestMaybeOpenMaintenancePR:
                 error="push rejected",
             )
 
-        monkeypatch.setattr("repo_wiki_loop.open_automated_pr_async", fake_open)
-        (git_repo / "repo_wiki" / "new.md").write_text("new\n")
+        monkeypatch.setattr("repo_wiki_loop.generate_and_open_pr_async", fake_gen)
 
         loop = _stub_loop(
             _make_config(git_repo),
             credentials=Credentials(gh_token="ghs_test"),
         )
         # Should not raise — keep the next tick alive.
-        await loop._maybe_open_maintenance_pr({})
+        await loop._heal_and_open_maintenance_pr(set(), {})
         assert loop._open_pr_branch is None
 
 
@@ -313,43 +299,13 @@ class TestQueueDrainIntegration:
         loop._state = None
 
         # Stub both async PR hooks so we don't try to open/poll a PR.
-        monkeypatch.setattr(loop, "_maybe_open_maintenance_pr", AsyncMock())
+        monkeypatch.setattr(loop, "_heal_and_open_maintenance_pr", AsyncMock())
         monkeypatch.setattr(loop, "_poll_and_merge_open_pr", AsyncMock())
 
         stats = await loop._do_work()
         assert stats is not None
         assert stats["queue_drained"] == 2
         assert queue.peek() == []  # drained
-
-
-class TestMaintenancePrLabeling:
-    @pytest.mark.asyncio
-    async def test_opens_pr_with_hydraflow_wiki_maintenance_label(
-        self, git_repo: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        captured: dict[str, Any] = {}
-
-        async def fake_open(**kwargs: Any) -> AutoPrResult:
-            captured.update(kwargs)
-            return AutoPrResult(
-                status="opened",
-                pr_url="https://github.com/x/y/pull/7",
-                branch=kwargs["branch"],
-            )
-
-        monkeypatch.setattr("repo_wiki_loop.open_automated_pr_async", fake_open)
-        (git_repo / "repo_wiki" / "new.md").write_text("new\n")
-
-        loop = _stub_loop(
-            _make_config(git_repo),
-            credentials=Credentials(gh_token="ghs_test"),
-        )
-        await loop._maybe_open_maintenance_pr({})
-
-        assert captured["labels"] == ["hydraflow-wiki-maintenance"]
-        # Auto-merge is off — the loop handles review/merge itself on the
-        # next ticks once CI is green.
-        assert captured["auto_merge"] is False
 
 
 class TestPollAndMergeOpenPR:
@@ -533,17 +489,19 @@ class TestPollAndMergeOpenPR:
 
 
 class TestTrackedActiveLintIntegration:
-    """Phase 7: the loop's lint pass now also writes to the tracked
-    layout, which turns into the diff that
-    ``_maybe_open_maintenance_pr`` picks up and opens a PR for.
+    """Phase 7: the heal's lint pass writes to the tracked layout, which
+    becomes the diff ``_heal_and_open_maintenance_pr`` PRs. Post-#9539 the
+    heal runs inside a worktree, so these tests drive the now-parameterized
+    ``_lint_and_compile_repos`` directly against a tracked-layout root rather
+    than the worktree.
     """
 
     @pytest.mark.asyncio
     async def test_flips_entry_status_when_source_issue_closed(
-        self, git_repo: Path, monkeypatch: pytest.MonkeyPatch
+        self, git_repo: Path
     ) -> None:
         from datetime import UTC, datetime
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import MagicMock
 
         from repo_wiki import RepoWikiStore
 
@@ -563,14 +521,11 @@ class TestTrackedActiveLintIntegration:
             "---\n\n# Entry\n\nBody.\n",
             encoding="utf-8",
         )
-        # index.md so _list_tracked_repos enumerates the repo.
-        (tracked_root / "acme" / "widget" / "index.md").write_text(
-            "# index\n", encoding="utf-8"
-        )
 
-        legacy_store = MagicMock(spec=RepoWikiStore)
-        legacy_store.list_repos.return_value = []
-        legacy_store.active_lint.return_value = MagicMock(
+        # MagicMock store isolates the legacy layout so only the tracked
+        # lint (against ``tracked_root``) can flip the entry.
+        store = MagicMock(spec=RepoWikiStore)
+        store.active_lint.return_value = MagicMock(
             stale_entries=0,
             orphan_entries=0,
             total_entries=0,
@@ -579,31 +534,24 @@ class TestTrackedActiveLintIntegration:
             empty_topics=[],
         )
 
-        state = MagicMock()
-        state.get_all_outcomes.return_value = {
-            "42": MagicMock(outcome="merged"),
-        }
-
         loop = _stub_loop(_make_config(git_repo))
-        loop._wiki_store = legacy_store
         loop._wiki_compiler = None
-        loop._state = state
-        monkeypatch.setattr(loop, "_maybe_open_maintenance_pr", AsyncMock())
 
-        stats = await loop._do_work()
+        result = await loop._lint_and_compile_repos(
+            ["acme/widget"], tracked_root, {42}, store=store
+        )
 
         text = entry_path.read_text(encoding="utf-8")
         assert "status: stale" in text
         assert "stale_reason: source issue #42 closed" in text
-        assert stats is not None
-        assert stats["entries_marked_stale"] >= 1
+        assert result["entries_marked_stale"] >= 1
 
     @pytest.mark.asyncio
-    async def test_skips_tracked_lint_when_flag_disabled(
-        self, git_repo: Path, monkeypatch: pytest.MonkeyPatch
+    async def test_skips_tracked_lint_when_tracked_root_none(
+        self, git_repo: Path
     ) -> None:
         from datetime import UTC, datetime
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import MagicMock
 
         from repo_wiki import RepoWikiStore
 
@@ -624,9 +572,8 @@ class TestTrackedActiveLintIntegration:
             encoding="utf-8",
         )
 
-        legacy_store = MagicMock(spec=RepoWikiStore)
-        legacy_store.list_repos.return_value = []
-        legacy_store.active_lint.return_value = MagicMock(
+        store = MagicMock(spec=RepoWikiStore)
+        store.active_lint.return_value = MagicMock(
             stale_entries=0,
             orphan_entries=0,
             total_entries=0,
@@ -635,28 +582,18 @@ class TestTrackedActiveLintIntegration:
             empty_topics=[],
         )
 
-        state = MagicMock()
-        state.get_all_outcomes.return_value = {
-            "42": MagicMock(outcome="merged"),
-        }
-
-        config = _make_config(git_repo)
-        object.__setattr__(config, "repo_wiki_git_backed", False)
-
-        loop = _stub_loop(config)
-        loop._wiki_store = legacy_store
+        loop = _stub_loop(_make_config(git_repo))
         loop._wiki_compiler = None
-        loop._state = state
-        monkeypatch.setattr(loop, "_maybe_open_maintenance_pr", AsyncMock())
 
-        await loop._do_work()
+        # tracked_root=None mirrors the git-backed-disabled path.
+        await loop._lint_and_compile_repos(["acme/widget"], None, {42}, store=store)
 
-        # Tracked file untouched — lint only scans when the flag is on.
+        # Tracked file untouched — lint only scans when tracked_root is set.
         assert "status: active" in entry_path.read_text(encoding="utf-8")
 
 
 class TestTrackedCompileStatsReporting:
-    """Regression for the ``total_compiled`` overcount: the loop must
+    """Regression for the ``total_compiled`` overcount: the heal must
     report the *post-synthesis* count returned by
     ``compile_topic_tracked`` rather than the pre-synthesis active
     count.  Using ``active_count`` would inflate ``entries_compiled``
@@ -666,7 +603,7 @@ class TestTrackedCompileStatsReporting:
 
     @pytest.mark.asyncio
     async def test_adds_post_synthesis_count_not_active_count(
-        self, git_repo: Path, monkeypatch: pytest.MonkeyPatch
+        self, git_repo: Path
     ) -> None:
         from datetime import UTC, datetime
         from unittest.mock import AsyncMock, MagicMock
@@ -689,13 +626,9 @@ class TestTrackedCompileStatsReporting:
                 "---\n\n# Entry\n",
                 encoding="utf-8",
             )
-        (tracked_root / "acme" / "widget" / "index.md").write_text(
-            "# index\n", encoding="utf-8"
-        )
 
-        legacy_store = MagicMock(spec=RepoWikiStore)
-        legacy_store.list_repos.return_value = []
-        legacy_store.active_lint.return_value = MagicMock(
+        store = MagicMock(spec=RepoWikiStore)
+        store.active_lint.return_value = MagicMock(
             stale_entries=0,
             orphan_entries=0,
             total_entries=0,
@@ -708,18 +641,130 @@ class TestTrackedCompileStatsReporting:
         compiler.compile_topic_tracked = AsyncMock(return_value=2)
 
         loop = _stub_loop(_make_config(git_repo))
-        loop._wiki_store = legacy_store
         loop._wiki_compiler = compiler
-        loop._state = None
-        monkeypatch.setattr(loop, "_maybe_open_maintenance_pr", AsyncMock())
 
-        stats = await loop._do_work()
+        result = await loop._lint_and_compile_repos(
+            ["acme/widget"], tracked_root, set(), store=store
+        )
 
-        assert stats is not None
         # Must be 2 (post-synthesis), not 8 (active_count pre-fix).
-        assert stats["entries_compiled"] == 2
+        assert result["entries_compiled"] == 2
         # Defence-in-depth: if the 5-entry threshold is ever raised above
         # our 8-entry fixture, the outer assertion would still pass with
         # entries_compiled == 0 (0 != 2 → fail, but for the wrong reason).
         # Pinning await_count guarantees the compiler was actually invoked.
         compiler.compile_topic_tracked.assert_awaited_once()
+
+
+def _git(cwd: Path, *args: str) -> str:
+    """Run a real git command in ``cwd`` and return stripped stdout."""
+    proc = subprocess.run(
+        ["git", *args], check=False, cwd=cwd, capture_output=True, text=True, timeout=60
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)} failed: {proc.stderr}")
+    return proc.stdout.strip()
+
+
+class TestHealLeavesRepoRootClean:
+    """#9539 load-bearing invariant: the heal+PR runs entirely inside an
+    ephemeral worktree off ``origin/<base>``. ``repo_root`` is never mutated,
+    so the factory's checkout stays clean — and the healed content lands on
+    the pushed maintenance branch, not the host checkout.
+    """
+
+    @pytest.mark.asyncio
+    async def test_heal_leaves_repo_root_clean_and_pushes_healed_content(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from datetime import UTC, datetime
+
+        # --- bare remote + local checkout with a stale-able tracked entry ---
+        remote = tmp_path / "remote.git"
+        subprocess.run(["git", "init", "--bare", str(remote)], check=True)
+
+        local = tmp_path / "local"
+        subprocess.run(["git", "clone", str(remote), str(local)], check=True)
+        _git(local, "checkout", "-b", "main")
+        _git(local, "config", "user.email", "t@t")
+        _git(local, "config", "user.name", "t")
+
+        entry_rel = "repo_wiki/acme/widget/patterns/0001-issue-42-x.md"
+        entry_path = local / entry_rel
+        entry_path.parent.mkdir(parents=True)
+        entry_path.write_text(
+            "---\n"
+            "id: 0001\n"
+            "topic: patterns\n"
+            "source_issue: 42\n"
+            "source_phase: plan\n"
+            f"created_at: {datetime.now(UTC).isoformat()}\n"
+            "status: active\n"
+            "---\n\n# Entry\n\nBody.\n",
+            encoding="utf-8",
+        )
+        (local / "repo_wiki" / "acme" / "widget" / "index.md").write_text(
+            "# index\n", encoding="utf-8"
+        )
+        # A committed legacy docs/wiki dir so the worktree's legacy store is
+        # distinct from the tracked layout (matches the factory checkout).
+        (local / "docs" / "wiki").mkdir(parents=True)
+        (local / "docs" / "wiki" / ".keep").write_text("", encoding="utf-8")
+        _git(local, "add", "-A")
+        _git(local, "commit", "-m", "seed wiki")
+        # Push both base candidates so config.base_branch() resolves either way.
+        _git(local, "push", "-u", "origin", "main")
+        _git(local, "checkout", "-b", "staging")
+        _git(local, "push", "-u", "origin", "staging")
+        _git(local, "checkout", "main")
+
+        # --- stub run_subprocess: real git passthrough, gh stubbed ---
+        async def fake_run(
+            *cmd: str,
+            cwd: Any = None,
+            gh_token: str = "",
+            timeout: float = 120.0,
+            runner: Any = None,
+        ) -> str:
+            del gh_token, timeout, runner
+            if cmd[:2] == ("gh", "pr") and cmd[2] == "create":
+                return "https://github.com/acme/widget/pull/123\n"
+            if cmd[:2] == ("gh", "pr"):
+                return ""
+            proc = subprocess.run(
+                list(cmd),
+                check=False,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(f"{cmd}: {proc.stderr}")
+            return proc.stdout.strip()
+
+        monkeypatch.setattr("subprocess_util.run_subprocess", fake_run)
+
+        config = _make_config(local)
+        loop = _stub_loop(config, credentials=Credentials(gh_token="ghs_test"))
+        loop._wiki_compiler = None
+
+        stats: dict[str, Any] = {"queue_drained": 0}
+        await loop._heal_and_open_maintenance_pr({42}, stats)
+
+        # KEY INVARIANT: repo_root's working tree is untouched.
+        assert _git(local, "status", "--porcelain") == ""
+        # The host entry is still ACTIVE — the heal happened in the worktree.
+        assert "status: active" in entry_path.read_text(encoding="utf-8")
+        # The PR was tracked and the worktree cleaned up.
+        assert loop._open_pr_url == "https://github.com/acme/widget/pull/123"
+        assert stats["maintenance_pr"] == "https://github.com/acme/widget/pull/123"
+        assert not list(tmp_path.glob("genpr-*"))
+
+        # The healed (stale-flipped) content was pushed to the maintenance
+        # branch on the remote, NOT left in repo_root.
+        branch = loop._open_pr_branch
+        assert branch is not None
+        pushed = _git(remote, "show", f"{branch}:{entry_rel}")
+        assert "status: stale" in pushed
+        assert "stale_reason: source issue #42 closed" in pushed

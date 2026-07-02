@@ -63,6 +63,7 @@ class AgentSkill:
     blocking: bool
     prompt_builder: Callable[..., str]
     result_parser: Callable[[str], tuple[bool, str, list[str]]]
+    coverage_check: bool = False
 
 
 # Built-in skills — registered in execution order
@@ -98,6 +99,7 @@ BUILTIN_SKILLS: list[AgentSkill] = [
         blocking=False,
         prompt_builder=build_test_adequacy_prompt,
         result_parser=parse_test_adequacy_result,
+        coverage_check=True,
     ),
     AgentSkill(
         name="discover-completeness",

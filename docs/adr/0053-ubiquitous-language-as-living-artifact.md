@@ -8,9 +8,11 @@ Accepted
 
 2026-05-04
 
-## Enforced by
+**Enforcement:** enforced
 
-`tests/test_ubiquitous_language.py`, `tests/test_seed_terms.py`
+**Enforced by:**
+pytest:tests/test_ubiquitous_language_drift.py
+pytest:tests/test_seed_terms.py
 
 ## Context
 

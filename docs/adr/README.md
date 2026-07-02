@@ -4,30 +4,36 @@ Lightweight ADRs documenting key design decisions in HydraFlow.
 
 ## Format
 
-Each ADR has: **Status**, **Date**, **Enforced by**, **Context**, **Decision**,
-**Consequences**, and optionally **Alternatives considered** and **Related** links.
+Each ADR has: **Status**, **Date**, **Enforcement**, **Enforced by** (when
+required), **Context**, **Decision**, **Consequences**, and optionally
+**Alternatives considered** and **Related** links.
 
 When referencing source code anywhere in an ADR (Related, Context, Decision,
 Consequences), use `module:function_or_class` format (e.g. `src/config.py:HydraFlowConfig`).
 **Omit line numbers** — they drift as code evolves and become stale quickly.
 
-### Enforced by
+### Enforcement
 
-Every ADR with **Status: Accepted** MUST declare how it's enforced. Value is one of:
+Every ADR with **Status: Accepted** (outside a shrinking grandfather list)
+MUST declare an `**Enforcement:**` kind — see [ADR-0100](0100-adr-conformance-as-a-measured-contract.md).
+Value is one of:
 
-- **Test references** — comma-separated paths to test files/functions that would fail
-  if the decision were violated (e.g. `tests/test_worktree.py`,
-  `tests/test_state_machine.py::test_labels_transition`). Files named here must exist.
-- `(process)` — the ADR enforces a workflow/convention (e.g. branch protection,
-  ADR authoring style) rather than code behaviour.
-- `(historical)` — the ADR codifies a past decision worth keeping but no longer
-  directly testable.
-- `(none)` — placeholder for Accepted ADRs still awaiting an enforcement test.
-  Flagged by `tests/test_adr_enforcement.py` for follow-up; should be replaced
-  with real references over time.
+- `enforced` — asserts a runnable invariant. Requires an `**Enforced by:**`
+  line naming typed-prefix checks (`pytest:tests/test_x.py`,
+  `make:some-target`) that must resolve (the file/function/target must exist)
+  and be side-effect-free.
+- `manual` — a real guardrail that is human-verified rather than
+  machine-run. Requires an `**Enforced by:**` process pointer.
+- `decision-of-record` — a choice with no runtime predicate to check (no
+  `**Enforced by:**` required).
 
-`tests/test_adr_enforcement.py` validates this line exists on every Accepted
-ADR and that named test files actually exist.
+`tests/test_adr_conformance_coverage.py` is the CI-blocking coverage ratchet:
+it validates every non-grandfathered Accepted ADR declares a recognized
+`**Enforcement:**` value, that `enforced` checks resolve to a real
+pytest node or Makefile target and aren't on the mutating-target denylist,
+and that the grandfather list only shrinks. `AdrConformanceLoop` is the
+post-merge companion that actually executes `enforced` checks on a slow
+cadence and files remediation issues on drift.
 
 ## Index
 
@@ -124,6 +130,14 @@ ADR and that named test files actually exist.
 | [0090](0090-atlas-knowledge-graph-dashboard.md) | Atlas — Knowledge Graph Dashboard Surface | Accepted |
 | [0091](0091-epic-monitor-completion-sweep.md) | Fold Epic Completion Sweep into Epic Monitor | Accepted |
 | [0092](0092-untrusted-text-trust-boundary.md) | Untrusted-text trust boundary for agent prompts | Accepted |
+| [0093](0093-loop-fitness-as-measured-contract.md) | Loop fitness as a measured contract | Accepted |
+| [0094](0094-two-level-convergence-gate-and-ledger.md) | Two-level convergence: Gate + ConvergenceLedger | Accepted |
+| [0095](0095-approve-path-gating-and-converged.md) | Approve-path gating and live convergence (Phase 2a) | Accepted |
+| [0096](0096-boundary-verdict-recording.md) | Boundary verdict recording (Phase 2b) | Accepted |
+| [0097](0097-attempt-counter-migration-to-ledger.md) | Attempt counter migration into the ledger (Phase 2c) | Accepted |
+| [0098](0098-convergence-oscillation-caretaker.md) | Convergence oscillation caretaker (Phase 2d) | Accepted |
+| [0099](0099-orchestration-as-a-control-system.md) | Orchestration as a Control System | Proposed |
+| [0100](0100-adr-conformance-as-a-measured-contract.md) | ADR conformance as a measured contract | Accepted |
 | [0101](0101-disturbance-dampener.md) | Disturbance Dampener — feedforward ratchet + burn-down loop | Proposed |
 
 ## Adding a new ADR

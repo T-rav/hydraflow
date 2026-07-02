@@ -56,6 +56,7 @@ export const initialState = {
   retrospectives: null,
   troubleshooting: null,
   trackedReports: [],
+  loopFitness: {},
   // True when the orchestrator backend is wired to Fake adapters (sandbox tier).
   // Set from /api/control/status. Drives the persistent MOCKWORLD MODE banner.
   mockworldActive: false,
@@ -544,6 +545,9 @@ export function reducer(state, action) {
     case 'METRICS_HISTORY':
       return { ...state, metricsHistory: action.data }
 
+    case 'LOOP_FITNESS':
+      return { ...state, loopFitness: action.data }
+
     case 'metrics_update':
       return {
         ...addEvent(state, action),
@@ -1025,6 +1029,13 @@ export function HydraFlowProvider({ children }) {
     fetchWithRepo('/api/metrics/history')
       .then(r => r.json())
       .then(data => dispatch({ type: 'METRICS_HISTORY', data }))
+      .catch(() => {})
+  }, [fetchWithRepo])
+
+  const fetchLoopFitness = useCallback(() => {
+    fetchWithRepo('/api/loop-fitness')
+      .then(r => r.json())
+      .then(data => dispatch({ type: 'LOOP_FITNESS', data }))
       .catch(() => {})
   }, [fetchWithRepo])
 
@@ -1606,6 +1617,7 @@ export function HydraFlowProvider({ children }) {
         .catch(() => {})
       fetchGithubMetrics()
       fetchMetricsHistory()
+      fetchLoopFitness()
       fetchPipeline()
       fetchPipelineStats()
       fetchEpics()
@@ -1638,6 +1650,9 @@ export function HydraFlowProvider({ children }) {
           fetchWithRepo('/api/metrics').then(r => r.json()).then(data => dispatch({ type: 'METRICS', data })).catch(() => {})
           fetchGithubMetrics()
           fetchMetricsHistory()
+        }
+        if (event.type === 'loop_fitness_update') {
+          fetchLoopFitness()
         }
         // queue_update no longer triggers a pipeline fetch: the QUEUE_UPDATE
         // storm is the source of the REST-poll thrash. The authoritative
@@ -1680,7 +1695,7 @@ export function HydraFlowProvider({ children }) {
       console.warn('[HydraFlow] WebSocket error; awaiting close for reconnect', err)
     }
     wsRef.current = ws
-  }, [state.selectedRepoSlug, applyRepoParam, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo])
+  }, [state.selectedRepoSlug, applyRepoParam, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchLoopFitness, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo])
 
   useEffect(() => {
     const poll = () => {
