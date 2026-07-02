@@ -115,6 +115,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_diff_sanity_attempts", "HYDRAFLOW_MAX_DIFF_SANITY_ATTEMPTS", 1),
     ("max_scope_check_attempts", "HYDRAFLOW_MAX_SCOPE_CHECK_ATTEMPTS", 1),
     ("max_test_adequacy_attempts", "HYDRAFLOW_MAX_TEST_ADEQUACY_ATTEMPTS", 1),
+    (
+        "test_adequacy_coverage_timeout_secs",
+        "HYDRAFLOW_TEST_ADEQUACY_COVERAGE_TIMEOUT_SECS",
+        300,
+    ),
     ("max_plan_compliance_attempts", "HYDRAFLOW_MAX_PLAN_COMPLIANCE_ATTEMPTS", 1),
     ("max_discover_attempts", "HYDRAFLOW_MAX_DISCOVER_ATTEMPTS", 3),
     ("max_discover_expansions", "HYDRAFLOW_MAX_DISCOVER_EXPANSIONS", 1),
@@ -278,6 +283,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_INTERVAL",
         14400,
     ),
+    (
+        "adr_conformance_interval",
+        "HYDRAFLOW_ADR_CONFORMANCE_INTERVAL",
+        86400,
+    ),
     ("term_proposer_interval", "HYDRAFLOW_TERM_PROPOSER_INTERVAL", 14400),
     ("term_proposer_max_per_tick", "HYDRAFLOW_TERM_PROPOSER_MAX_PER_TICK", 10),
     (
@@ -304,6 +314,25 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 3600),
     ("contract_refresh_interval", "HYDRAFLOW_CONTRACT_REFRESH_INTERVAL", 604800),
     ("max_fake_repair_attempts", "HYDRAFLOW_MAX_FAKE_REPAIR_ATTEMPTS", 3),
+    ("max_convergence_laps", "HYDRAFLOW_MAX_CONVERGENCE_LAPS", 3),
+    (
+        "convergence_oscillation_interval",
+        "HYDRAFLOW_CONVERGENCE_OSCILLATION_INTERVAL",
+        3600,
+    ),
+    (
+        "convergence_oscillation_window",
+        "HYDRAFLOW_CONVERGENCE_OSCILLATION_WINDOW",
+        2,
+    ),
+    (
+        "convergence_oscillation_min_loopback_stages",
+        "HYDRAFLOW_CONVERGENCE_OSCILLATION_MIN_LOOPBACK_STAGES",
+        2,
+    ),
+    ("fitness_scorecard_interval", "HYDRAFLOW_FITNESS_SCORECARD_INTERVAL", 86400),
+    ("fitness_window_days", "HYDRAFLOW_FITNESS_WINDOW_DAYS", 30),
+    ("fitness_min_samples", "HYDRAFLOW_FITNESS_MIN_SAMPLES", 20),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -394,6 +423,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_PRECONDITION_GATE_ENABLED",
         False,
     ),
+    (
+        "convergence_gate_enabled",
+        "HYDRAFLOW_CONVERGENCE_GATE_ENABLED",
+        False,
+    ),
     ("docker_read_only_root", "HYDRAFLOW_DOCKER_READ_ONLY_ROOT", True),
     ("docker_no_new_privileges", "HYDRAFLOW_DOCKER_NO_NEW_PRIVILEGES", True),
     (
@@ -448,6 +482,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "adr_touchpoint_auditor_loop_enabled",
         "HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_LOOP_ENABLED",
         True,
+    ),
+    (
+        "adr_conformance_loop_enabled",
+        "HYDRAFLOW_ADR_CONFORMANCE_LOOP_ENABLED",
+        False,
     ),
     ("ci_monitor_loop_enabled", "HYDRAFLOW_CI_MONITOR_LOOP_ENABLED", True),
     (
@@ -513,6 +552,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("stale_issue_gc_loop_enabled", "HYDRAFLOW_STALE_ISSUE_GC_LOOP_ENABLED", True),
     ("stale_issue_loop_enabled", "HYDRAFLOW_STALE_ISSUE_LOOP_ENABLED", True),
     ("triage_retry_loop_enabled", "HYDRAFLOW_TRIAGE_RETRY_LOOP_ENABLED", True),
+    (
+        "convergence_oscillation_loop_enabled",
+        "HYDRAFLOW_CONVERGENCE_OSCILLATION_LOOP_ENABLED",
+        True,
+    ),
     (
         "trust_fleet_sanity_loop_enabled",
         "HYDRAFLOW_TRUST_FLEET_SANITY_LOOP_ENABLED",
@@ -789,6 +833,12 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         le=3,
         description="Max test adequacy check passes (0 = disabled)",
+    )
+    test_adequacy_coverage_timeout_secs: int = Field(
+        default=300,
+        ge=60,
+        le=1800,
+        description="Timeout in seconds for the coverage-delta make coverage run",
     )
     max_plan_compliance_attempts: int = Field(
         default=1,
@@ -1592,6 +1642,18 @@ class HydraFlowConfig(BaseModel):
             "to False to give operators a separate opt-in switch."
         ),
     )
+    convergence_gate_enabled: bool = Field(
+        default=False,
+        description=(
+            "Route the review retry/escalate decision through the "
+            "convergence HybridGate + ConvergenceLedger (ADR-0094). "
+            "Off by default so rollout is opt-in; the "
+            "ledger storage is always-on, only the gate decision is gated. "
+            "When enabled, escalation at the review reject boundary is "
+            "governed by max_convergence_laps (plus oscillation detection), "
+            "NOT max_review_fix_attempts."
+        ),
+    )
 
     # Shadow corpus (#8786) — opt-in live sampling of production
     # subprocess calls. When enabled, every gh/git/docker/claude call
@@ -2343,6 +2405,26 @@ class HydraFlowConfig(BaseModel):
         description="Poll interval in seconds for retrospective analysis loop",
     )
 
+    # Trust fleet — LoopFitnessScorecard (spec §5)
+    fitness_scorecard_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description="Seconds between loop-fitness scorecard cycles",
+    )
+    fitness_window_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="Rolling window (days) over which loop fitness is computed",
+    )
+    fitness_min_samples: int = Field(
+        default=20,
+        ge=1,
+        le=10000,
+        description="Min samples before a SCORED loop reports OK confidence",
+    )
+
     # Trust fleet — FlakeTrackerLoop (spec §4.5)
     flake_tracker_interval: int = Field(
         default=14400,
@@ -2399,6 +2481,14 @@ class HydraFlowConfig(BaseModel):
     adr_drift_stuck_label: list[str] = Field(
         default=["hydraflow-adr-drift-stuck"],
         description="Labels for stuck ADR drift escalations (paired with hitl_escalation_label)",
+    )
+
+    # Trust fleet — AdrConformanceLoop (ADR-0100)
+    adr_conformance_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description="Seconds between AdrConformanceLoop ticks (default 24h)",
     )
 
     # Trust fleet — MemoryBacklogLoop (ADR-0089)
@@ -2594,6 +2684,51 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Max per-adapter consecutive drift ticks before ContractRefreshLoop "
             "escalates a fake-drift issue to hitl-escalation (spec §4.2 Task 18)."
+        ),
+    )
+    max_convergence_laps: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Maximum outer-convergence laps allowed before a ConvergenceLedger "
+            "escalates an issue (ADR-0094)."
+        ),
+    )
+    convergence_oscillation_interval: int = Field(
+        default=3600,
+        ge=300,
+        le=86400,
+        description=(
+            "Seconds between ConvergenceOscillationLoop ticks (default 1h). "
+            "Must be between 5 minutes and 24 hours."
+        ),
+    )
+    convergence_oscillation_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable the ConvergenceOscillationLoop caretaker that scans "
+            "ConvergenceLedgers for cross-boundary oscillation and escalates "
+            "stuck issues to HITL."
+        ),
+    )
+    convergence_oscillation_window: int = Field(
+        default=2,
+        ge=2,
+        le=10,
+        description=(
+            "Number of recent lap signatures to compare when detecting temporal "
+            "outer oscillation (detect_outer_oscillation window parameter)."
+        ),
+    )
+    convergence_oscillation_min_loopback_stages: int = Field(
+        default=2,
+        ge=1,
+        le=3,
+        description=(
+            "Minimum number of distinct boundary stages (triage/shape/plan) "
+            "that must have last_verdict==LOOP_BACK to trigger snapshot "
+            "oscillation escalation."
         ),
     )
     contracts_sandbox_repo: str = Field(
@@ -2888,6 +3023,10 @@ class HydraFlowConfig(BaseModel):
     adr_touchpoint_auditor_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for AdrTouchpointAuditorLoop.",
+    )
+    adr_conformance_loop_enabled: bool = Field(
+        default=False,
+        description="Deploy-time kill-switch for AdrConformanceLoop (ADR-0100).",
     )
     ci_monitor_loop_enabled: bool = Field(
         default=True,

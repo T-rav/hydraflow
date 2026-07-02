@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hydraflow.dashboard.atlas")
 
 _ADR_FILENAME_RE = re.compile(r"^(\d{4,5})-(.+)\.md$")
-_ADR_TITLE_RE = re.compile(r"^#\s+ADR-\d{4,5}:\s+(.+?)\s*$", re.MULTILINE)
+_ADR_TITLE_RE = re.compile(r"^#\s+ADR-\d{4,5}\s*[:–—-]?\s+(.+?)\s*$", re.MULTILINE)
 # Same shape as _ENTRY_FILENAME_RE in _wiki_routes.py — kept duplicated to
 # avoid coupling _atlas_routes to wiki internals.
 _ENTRY_FILENAME_RE = re.compile(r"^(\d+)-issue-(\S+?)-(.+)\.md$")

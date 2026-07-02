@@ -77,8 +77,7 @@ class TestInitialization:
             "tracked_reports",
             "processed_issues",
             "releases",
-            "review_attempts",
-            "review_blast_radii",
+            "convergence_ledgers",
             "review_feedback",
             "completed_timelines",
             "digest_hashes",
@@ -140,16 +139,20 @@ class TestInitialization:
             "live_corpus_drift_rollup",
             "live_corpus_escalation_issue",
             # Auto-Agent — AutoAgentPreflightLoop (spec §3.6)
-            "auto_agent_attempts",
+            # auto_agent_attempts migrated to convergence_ledgers (Task 1)
             "auto_agent_daily_spend",
             # SandboxFailureFixerLoop (sandbox-tier scenario testing track)
-            "sandbox_failure_fixer_attempts",
+            # sandbox_failure_fixer_attempts migrated to convergence_ledgers (Task 2)
             # AdrTouchpointAuditorLoop (ADR-0056)
             "adr_audit_cursor",
             "adr_audit_attempts",
             # Per-ADR rollup tracking (#8987) — see ADR-0056 amendment.
             "adr_rollup_issues",
             "rollup_issues",
+            # AdrConformanceLoop (ADR-0100) — mirrors adr_audit_attempts/
+            # adr_rollup_issues above under a distinct namespace.
+            "adr_conformance_attempts",
+            "adr_conformance_rollup_issues",
             # MemoryBacklogLoop (ADR-0089)
             "memory_backlog_attempts",
             # TriageRetryLoop (ADR-0063 W2)
@@ -952,8 +955,6 @@ class TestToDict:
             "reviewed_prs",
             "hitl_origins",
             "hitl_causes",
-            "review_attempts",
-            "review_blast_radii",
             "review_feedback",
             "worker_result_meta",
             "issue_attempts",

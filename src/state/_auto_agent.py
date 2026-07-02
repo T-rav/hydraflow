@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from models import ConvergenceLedger
+
 if TYPE_CHECKING:
     from models import StateData
 
@@ -16,23 +18,24 @@ class AutoAgentStateMixin:
     def save(self) -> None: ...  # provided by CoreMixin
 
     def get_auto_agent_attempts(self, issue: int) -> int:
-        return int(self._data.auto_agent_attempts.get(str(issue), 0))
+        cl = self._data.convergence_ledgers.get(str(issue))
+        return cl.get_attempts("auto_agent") if cl else 0
 
     def bump_auto_agent_attempts(self, issue: int) -> int:
         key = str(issue)
-        current = int(self._data.auto_agent_attempts.get(key, 0))
-        attempts = dict(self._data.auto_agent_attempts)
-        attempts[key] = current + 1
-        self._data.auto_agent_attempts = attempts
+        cl = self._data.convergence_ledgers.get(key)
+        if cl is None:
+            cl = ConvergenceLedger(issue_number=issue)
+            self._data.convergence_ledgers[key] = cl
+        n = cl.increment_attempts("auto_agent")
         self.save()
-        return current + 1
+        return n
 
     def clear_auto_agent_attempts(self, issue: int) -> None:
-        key = str(issue)
-        attempts = dict(self._data.auto_agent_attempts)
-        attempts.pop(key, None)
-        self._data.auto_agent_attempts = attempts
-        self.save()
+        cl = self._data.convergence_ledgers.get(str(issue))
+        if cl is not None and "auto_agent" in cl.stage_state:
+            cl.stage_state["auto_agent"].attempts = 0
+            self.save()
 
     def refund_auto_agent_attempt(self, issue: int) -> int:
         """Decrement the attempt counter by one (floor 0).
@@ -42,17 +45,15 @@ class AutoAgentStateMixin:
         transient outage from consuming the issue's attempt budget and wrongly
         exhausting it to ``human-required`` across repeated outages.
         """
-        key = str(issue)
-        current = int(self._data.auto_agent_attempts.get(key, 0))
-        new_value = max(0, current - 1)
-        attempts = dict(self._data.auto_agent_attempts)
-        if new_value == 0:
-            attempts.pop(key, None)
-        else:
-            attempts[key] = new_value
-        self._data.auto_agent_attempts = attempts
+        cl = self._data.convergence_ledgers.get(str(issue))
+        if cl is None:
+            return 0
+        rec = cl.stage_state.get("auto_agent")
+        if rec is None:
+            return 0
+        rec.attempts = max(0, rec.attempts - 1)
         self.save()
-        return new_value
+        return rec.attempts
 
     def get_auto_agent_daily_spend(self, date_iso: str) -> float:
         return float(self._data.auto_agent_daily_spend.get(date_iso, 0.0))

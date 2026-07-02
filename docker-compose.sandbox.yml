@@ -36,6 +36,22 @@ services:
       # disable it explicitly here.  Sandbox scenarios assert lifecycle
       # outcomes, never summarizer comment text.
       HYDRAFLOW_TRANSCRIPT_SUMMARIZATION_ENABLED: "false"
+      # Convergence gate: route the review reject/escalate decision through
+      # HybridGate + ConvergenceLedger (ADR: two-level convergence).
+      # Safe to enable globally — the gate only activates on REQUEST_CHANGES
+      # verdicts and produces the same net outcome (loop-back or HITL) as the
+      # non-gate path; existing scenarios s03 and s05 are unaffected.
+      HYDRAFLOW_CONVERGENCE_GATE_ENABLED: "true"
+      # ConvergenceOscillationLoop interval (s51). Intent: tick every 5 s for
+      # fast sandbox validation. NOTE: the pydantic field enforces ge=300 (5 min
+      # minimum); _apply_env_overrides raises ValueError (suppressed) so the
+      # config field stays at its default 3600. This is harmless in sandbox
+      # because WorkerRegistryCallbacks(get_interval=lambda *_: 60) overrides
+      # every caretaker loop's interval to 60 s via LoopDeps.interval_cb,
+      # which takes precedence over _get_default_interval(). Effective interval
+      # is 60 s regardless of this env var.
+      HYDRAFLOW_CONVERGENCE_OSCILLATION_INTERVAL: "5"
+      HYDRAFLOW_CONVERGENCE_OSCILLATION_LOOP_ENABLED: "true"
     volumes:
       - ./tests/sandbox_scenarios/seeds:/seed:ro
     networks: [sandbox]

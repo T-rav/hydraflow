@@ -15,6 +15,7 @@ flowchart LR
         caretaking_EntryEvidenceLoop([EntryEvidenceLoop])
         caretaking_EpicMonitorLoop([EpicMonitorLoop])
         caretaking_EpicSweeperLoop([EpicSweeperLoop])
+        caretaking_FitnessScorecardLoop([FitnessScorecardLoop])
         caretaking_GitHubCacheLoop([GitHubCacheLoop])
         caretaking_HealthMonitorLoop([HealthMonitorLoop])
         caretaking_LabelDriftWatcherLoop([LabelDriftWatcherLoop])
@@ -44,6 +45,7 @@ flowchart LR
         quality_gates_GateActivatorLoop([GateActivatorLoop])
     end
     subgraph trust_fleet["Trust Fleet"]
+        trust_fleet_AdrConformanceLoop([AdrConformanceLoop])
         trust_fleet_AdrTouchpointAuditorLoop([AdrTouchpointAuditorLoop])
         trust_fleet_ContractRefreshLoop([ContractRefreshLoop])
         trust_fleet_CorpusLearningLoop([CorpusLearningLoop])
@@ -54,6 +56,7 @@ flowchart LR
         trust_fleet_RCBudgetLoop([RCBudgetLoop])
         trust_fleet_StagingBisectLoop([StagingBisectLoop])
         trust_fleet_TrustFleetSanityLoop([TrustFleetSanityLoop])
+        trust_fleet_ConformanceRunnerPort[/ConformanceRunnerPort/]
     end
     subgraph hexagonal_boundaries["Hexagonal Boundaries"]
         hexagonal_boundaries_AgentPort[/AgentPort/]
@@ -77,6 +80,7 @@ flowchart LR
     end
     subgraph auto_agent["Auto-Agent (HITL Pre-Flight)"]
         auto_agent_AutoAgentPreflightLoop([AutoAgentPreflightLoop])
+        auto_agent_ConvergenceOscillationLoop([ConvergenceOscillationLoop])
         auto_agent_SandboxFailureFixerLoop([SandboxFailureFixerLoop])
         auto_agent_TriageRetryLoop([TriageRetryLoop])
     end
@@ -101,6 +105,7 @@ Autonomous background loops that maintain the system without human input — wik
 - `EntryEvidenceLoop` — `src.entry_evidence_loop`
 - `EpicMonitorLoop` — `src.epic_monitor_loop`
 - `EpicSweeperLoop` — `src.epic_sweeper_loop`
+- `FitnessScorecardLoop` — `src.fitness_scorecard_loop`
 - `GitHubCacheLoop` — `src.github_cache_loop`
 - `HealthMonitorLoop` — `src.health_monitor_loop`
 - `LabelDriftWatcherLoop` — `src.label_drift_watcher_loop`
@@ -146,6 +151,7 @@ The trust-architecture hardening fleet (ADR-0045) — RC promotion gate, staging
 
 **Loops**
 
+- `AdrConformanceLoop` — `src.adr_conformance_loop`
 - `AdrTouchpointAuditorLoop` — `src.adr_touchpoint_auditor_loop`
 - `ContractRefreshLoop` — `src.contract_refresh_loop`
 - `CorpusLearningLoop` — `src.corpus_learning_loop`
@@ -157,7 +163,11 @@ The trust-architecture hardening fleet (ADR-0045) — RC promotion gate, staging
 - `StagingBisectLoop` — `src.staging_bisect_loop`
 - `TrustFleetSanityLoop` — `src.trust_fleet_sanity_loop`
 
-**Related ADRs:** `ADR-0042`, `ADR-0045`, `ADR-0048`, `ADR-0056`
+**Ports**
+
+- `ConformanceRunnerPort` — `src.ports`
+
+**Related ADRs:** `ADR-0042`, `ADR-0045`, `ADR-0048`, `ADR-0056`, `ADR-0100`
 
 
 ## Hexagonal Boundaries
@@ -240,6 +250,7 @@ The Auto-Agent HITL pre-flight loop intercepts every `hitl-escalation` issue bef
 **Loops**
 
 - `AutoAgentPreflightLoop` — `src.auto_agent_preflight_loop`
+- `ConvergenceOscillationLoop` — `src.convergence_oscillation_loop`
 - `SandboxFailureFixerLoop` — `src.sandbox_failure_fixer_loop`
 - `TriageRetryLoop` — `src.triage_retry_loop`
 
@@ -248,8 +259,9 @@ The Auto-Agent HITL pre-flight loop intercepts every `hitl-escalation` issue bef
 - `src/auto_agent_preflight_loop.py`
 - `src/preflight/**`
 - `src/triage_retry_loop.py`
+- `src/convergence_oscillation_loop.py`
 
-**Related ADRs:** `ADR-0050`, `ADR-0063`
+**Related ADRs:** `ADR-0050`, `ADR-0063`, `ADR-0098`
 
 
 ## Goal-Driven Development

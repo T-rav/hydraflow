@@ -2,9 +2,18 @@
 
 # Ubiquitous Language
 
-_43 terms across 3 bounded contexts._
+_56 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
+
+## Actuator
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/base_runner.py:BaseRunner` · **Confidence:** `accepted`
+
+The component that applies a Controller's action to the Plant: dispatches an agent runner, opens a PR, swaps a pipeline label. BaseRunner is the canonical actuator; PRManager realizes the PR-creation and label-swap actions.
+
+**Invariants:**
+- Every Actuator action is subject to the Governor's saturation and safety limits.
 
 ## ADRCouncilReviewer
 
@@ -17,6 +26,29 @@ ADRCouncilReviewer is the domain service that runs multi-agent council review se
 - CreditExhaustedError and AuthenticationError propagate out of the review batch rather than being swallowed per-item, so BaseBackgroundLoop can pause on a fatal billing signal.
 - Every ADR that reaches Accepted status is guaranteed to carry an **Enforced by:** line (injected as '(none)' if absent) before it is written back.
 - Pre-validation must pass before a council session is started; a failing ADR is routed and counted separately without blocking the rest of the batch.
+
+## ADRIndex
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/adr_index.py:ADRIndex` · **Confidence:** `accepted`
+**Aliases:** `adr cache`, `adr catalog`, `architecture decision index`
+
+Mtime-based runtime cache over the ADR directory that parses docs/adr/*.md on first access and re-scans only when the directory mtime changes. Exposes parsed ADR records — including normalized status, context summary, cited source files, and symbol-level citations — to caretaker loops and agent prompts. Acts as the authoritative in-process view of architecture decisions, enabling loops such as AdrTouchpointAuditorLoop to check which Accepted ADRs cite a given source file without re-reading the filesystem on every tick. The module docstring frames it explicitly as load-bearing: agents must know what has already been decided before they plan.
+
+**Invariants:**
+- Re-scans the ADR directory only when its mtime changes; returns the cached ADR list on a stable directory
+- Status values are normalized to one of Accepted, Proposed, Superseded, Deprecated, or Unknown — no raw status strings escape the parser
+
+## ADRPreValidator
+
+**Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/adr_pre_validator.py:ADRPreValidator` · **Confidence:** `accepted`
+**Aliases:** `adr pre-validator`, `adr structural validator`
+
+A service that validates ADR structure before submission to the ADRCouncilReviewer, catching structural defects early in the review pipeline. Checks include: status field presence and validity, required section presence and non-emptiness (Context, Decision, Consequences), ADR number collisions, supersession integrity, volatile line citations, stale 'requires amending' notes, bare ADR references lacking title annotations, source-symbol references against the live repo, and cross-reference title accuracy. Returns an ADRValidationResult that distinguishes auto-fixable issues from blocking ones, allowing the council to skip reviews for trivially malformed drafts.
+
+**Invariants:**
+- Runs all structural checks in a single `validate()` call and returns an ADRValidationResult — never raises on malformed input.
+- Issues are classified as fixable or non-fixable; `has_fixable_only` lets callers auto-repair before escalating to the council.
+- Cross-ADR checks (number collision, supersession, cross-reference titles) are skipped when `all_adrs` is not supplied, so single-ADR validation is always safe.
 
 ## ADRReviewerLoop
 
@@ -115,6 +147,15 @@ Trust-fleet loop that refreshes cassettes for fake contract tests on a weekly ca
 - The replay gate failure opens a companion issue but does not block the auto-merge PR.
 - Kill-switch is via `enabled_cb("contract_refresh")` (ADR-0049); no config field.
 
+## Controller
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/issue_store.py:IssueStore` · **Confidence:** `accepted`
+
+The component that converts Error into a control action — which unit to act on next and how hard. HydraFlow has a supervisory controller (which issue to admit/route, today FIFO in IssueStore) and an inner controller (the per-issue gate decision, e.g. the review_advisor PostVerifyResult APPROVE/VETO).
+
+**Invariants:**
+- A Controller decides; it does not itself touch the Plant (that is the Actuator).
+
 ## CorpusLearningLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/corpus_learning_loop.py:CorpusLearningLoop` · **Confidence:** `accepted`
@@ -126,6 +167,17 @@ Trust-fleet loop that autonomously grows the adversarial test corpus from escape
 - All three validation gates must pass before a case reaches disk: harness accepts it, expected catcher trips, no other catcher also trips.
 - Cases that trip more than one catcher are rejected as ambiguous before they can corrupt the corpus.
 - No `corpus_learning_enabled` config field exists — kill-switch is purely via `enabled_cb("corpus_learning")` (spec §12.2, ADR-0049).
+
+## Credentials
+
+**Kind:** `value_object` · **Context:** `shared-kernel` · **Anchor:** `src/config.py:Credentials` · **Confidence:** `accepted`
+**Aliases:** `infrastructure credentials`, `secrets bundle`
+
+A frozen value object that bundles raw infrastructure secrets — GitHub token, Sentry auth token, and WhatsApp API credentials — needed by runners and loops to authenticate with external services. Explicitly separated from HydraFlowConfig to ensure secrets never appear in domain-model serialization. Built from environment variables at startup via build_credentials() and injected as a constructor parameter into every loop or runner that calls an authenticated external API.
+
+**Invariants:**
+- Immutable once constructed (frozen=True); no field may be mutated after build.
+- Never serialized as part of domain state — kept separate from HydraFlowConfig by design.
 
 ## DependabotMergeLoop
 
@@ -188,6 +240,15 @@ Caretaker loop that backfills `Term.evidence` links by matching wiki entries to 
 - Kill-switch is via `enabled_cb("entry_evidence")` (ADR-0049); no config field.
 - `entry_evidence_max_entries_per_tick` bounds the LLM spend per cycle.
 
+## Error
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/harness_insights.py:FailureRecord` · **Confidence:** `accepted`
+
+The gap between Set-point and measured state that a Controller acts to reduce: unresolved review concerns, a REQUEST_CHANGES verdict, route-backs, or a recorded FailureRecord. On main the signal is largely binary; a continuous per-issue error is a known-open surface.
+
+**Invariants:**
+- Error is derived (Set-point minus measured state), never authored directly.
+
 ## EventBus
 
 **Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/events.py:EventBus` · **Confidence:** `accepted`
@@ -212,6 +273,30 @@ Trust-fleet loop that detects uncovered methods on fake adapters under `src/mock
 - Issue bodies are updated in-place on repeat ticks, not replaced.
 - Maximum 3 repair attempts before HITL escalation.
 - Kill-switch is via `enabled_cb("fake_coverage_auditor")` (ADR-0049).
+
+## FitnessContext
+
+**Kind:** `value_object` · **Context:** `caretaker` · **Anchor:** `src/loop_fitness.py:FitnessContext` · **Confidence:** `accepted`
+**Aliases:** `fitness context`, `loop fitness context`
+
+Frozen, data-only Pydantic model that is the **sole input** to any `loop_fitness()` call. Carries the evaluation window (`window_start`, `window_end`), this loop's `BACKGROUND_WORKER_STATUS` events pre-filtered to the window, a snapshot list of `IssueRecord`s relevant to the loop, and optional per-loop cost. Contains no live GitHub client. The purity constraint (ADR-0093 §2) requires that `loop_fitness()` reads only from `ctx` — no network, no clock, no mutable self state — which lets the same function score live history now and replayed history in the future optimizer.
+
+**Invariants:**
+- Carries no live client or callable; the model is frozen (`model_config = {"frozen": True}`).
+- `issues` is a snapshot list of `IssueRecord` rows; each loop attributes its own artifacts by querying this list for its label.
+- The same `FitnessContext` instance that powers the live scorecard can power an offline optimizer replay — that equivalence is the design invariant this type enforces.
+
+## FitnessScorecardLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/fitness_scorecard_loop.py:FitnessScorecardLoop` · **Confidence:** `accepted`
+**Aliases:** `fitness scorecard`, `fitness scorecard loop`, `loop fitness scorecard`
+
+Read-only caretaker loop (ADR-0029) that produces the per-loop fitness scorecard on a configurable cadence (default 86400 s). Each tick it builds one `FitnessContext` per registered loop, calls every loop's `loop_fitness(ctx)`, persists results to `fitness.jsonl`, regenerates `docs/arch/generated/loop-fitness.md`, and emits a `LOOP_FITNESS_UPDATE` event. Mutates no loop state, so it sits off the ADR-0046 recursion ladder. Kill-switch via `enabled_cb("fitness_scorecard")` per ADR-0049. (ADR-0093)
+
+**Invariants:**
+- Kill-switch is via `enabled_cb("fitness_scorecard")` at the top of `_do_work()` (ADR-0049).
+- The loop is read-only: it calls `loop_fitness()` on peer loops but changes no loop config or state.
+- Declares its own fitness as `HOUSEKEEPING` — it produces no GitHub proposals or artifacts that have an acceptance lifecycle.
 
 ## FlakeTrackerLoop
 
@@ -249,6 +334,15 @@ Centralized GitHub data poller that replaces the pattern where every dashboard e
 - Only one instance per repo runtime; all read consumers share the same cache snapshot.
 - Write operations bypass the cache and call `gh` directly.
 - Cache staleness is observable: each `CacheSnapshot` carries a `fetched_at` timestamp; `age_seconds` is infinite until the first poll completes.
+
+## Governor
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/base_background_loop.py:LoopDeps` · **Confidence:** `accepted`
+
+The saturation limiter and safety interlock that bounds every Actuator regardless of Controller intent. LoopDeps carries a loop's per-cycle safety controls — the kill switch (enabled_cb) and the watchdog timeout bound (timeout_cb); the wider Governor role (concurrency caps, credit holds) is realized elsewhere, by the max_workers/max_planners semaphores and the credit-exhaustion signal. The v2 Governor generalizes these into an explicit capacity-and-safety authority.
+
+**Invariants:**
+- The Governor can veto or throttle any actuation; a Controller cannot override it.
 
 ## HydraFlowConfig
 
@@ -301,6 +395,18 @@ configured drift retry budget is exhausted.
 - Drift issues are auto-agent routed before any human escalation.
 - Dispatcher registration is keyed by `(adapter, command)` so cassette
 
+## LoopFitness
+
+**Kind:** `value_object` · **Context:** `caretaker` · **Anchor:** `src/loop_fitness.py:LoopFitness` · **Confidence:** `accepted`
+**Aliases:** `loop fitness`, `loop fitness score`, `fitness result`
+
+The result of calling a background loop's `loop_fitness(ctx)` method for one evaluation window. Carries `kind` (`SCORED` or `HOUSEKEEPING`), an optional normalized `score` in [0, 1] valid only for intra-loop trend comparison, raw `components` for diagnosis, `sample_count`, and a `Confidence` signal (`OK` or `INSUFFICIENT_DATA`) keyed off `sample_count` vs a per-loop threshold. Produced by every `BaseBackgroundLoop` subclass; consumed by `FitnessScorecardLoop` and persisted to `fitness.jsonl`. (ADR-0093)
+
+**Invariants:**
+- `score` is normalized 0–1 and valid **only for intra-loop use** (trend over time, or intra-loop config ranking). Cross-loop comparison of `score` is architecturally invalid.
+- When `kind` is `HOUSEKEEPING`, `score` is always `None`; `components` carries raw counters.
+- `confidence` is `INSUFFICIENT_DATA` when `sample_count` is below the loop's `min_samples` threshold; `score` is `None` in that case regardless of `kind`.
+
 ## MergeStateWatcherLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/merge_state_watcher_loop.py:MergeStateWatcherLoop` · **Confidence:** `accepted`
@@ -324,6 +430,15 @@ Hexagonal port for the observability boundary (ADR-0044 P7.7). Exposes five meth
 - Pure Protocol — no implementation, no state.
 - The adapter is a no-op when `sentry_sdk` is absent; every method returns silently so callers never need a try/except around port calls.
 - Domain code never imports `sentry_sdk` directly; all observability routes through the injected `ObservabilityPort` so a future OTLP, structured-log, or sidecar adapter can replace Sentry without touching call sites.
+
+## Plant
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/models.py:StateData` · **Confidence:** `accepted`
+
+The process an orchestration loop drives and observes: the repository plus an issue's lifecycle. Its durable, observable state is captured in StateData (and, in v2, the ConvergenceLedger). Controllers act on the Plant through Actuators; Sensors read it.
+
+**Invariants:**
+- The Plant is only mutated through an Actuator, never by a Controller directly.
 
 ## PricingRefreshLoop
 
@@ -419,6 +534,15 @@ Hexagonal port for the per-issue route-back counter. Lives in `src/route_back.py
 - Three methods: `get_route_back_count` reads the current count; `increment_route_back_count` returns the new count after incrementing; `decrement_route_back_count` rolls back an increment when a subsequent label swap fails, preventing transient network blips from burning route-back budget without any actual route-back occurring.
 - `decrement_route_back_count` must be a no-op (returning 0) when the counter is already at zero.
 
+## Sensor
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/models.py:MetricsSnapshot` · **Confidence:** `accepted`
+
+Any component that measures the current state of the Plant and emits a signal a Controller can read — deterministic (drift detectors, lint) or LLM-based (spec/review judges). MetricsSnapshot is the canonical aggregate reading.
+
+**Invariants:**
+- A Sensor observes; it does not mutate the Plant.
+
 ## SentryLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/sentry_loop.py:SentryLoop` · **Confidence:** `accepted`
@@ -430,6 +554,15 @@ Background loop that polls the Sentry API for unresolved issues across configure
 - Issues are deduplicated before filing; re-ingestion of the same Sentry event does not produce duplicate GitHub issues.
 - Kill-switch is via `enabled_cb("sentry")` (ADR-0049).
 - Sentry errors in the `ERROR+` level range trigger the issue-filing path; `WARNING` and below are skipped.
+
+## Set-point
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/issue_store.py:IssueStoreStage` · **Confidence:** `accepted`
+
+The desired state an orchestration loop drives toward — an issue reaching its terminal pipeline stage (the MERGED value of the IssueStoreStage state space), or a regulator holding a quantity at zero. A first-class converged flag arrives with the v2 ConvergenceLedger.
+
+**Invariants:**
+- The Set-point is the loop's target, not its current state (that is the Sensor reading).
 
 ## SkillPromptEvalLoop
 

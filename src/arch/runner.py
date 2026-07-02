@@ -23,6 +23,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+from adr_index import scan_adr_directory
 from arch._functional_areas_schema import load_functional_areas
 from arch._models import CommitInfo
 from arch.extractors.adr_xref import extract_adr_refs
@@ -32,6 +33,7 @@ from arch.extractors.loops import extract_loops
 from arch.extractors.mockworld import extract_mockworld_map
 from arch.extractors.modules import extract_module_graph
 from arch.extractors.ports import extract_ports
+from arch.generators.adr_conformance import render_adr_conformance
 from arch.generators.adr_cross_reference import render_adr_cross_reference
 from arch.generators.changelog import render_changelog
 from arch.generators.coverage_matrix import render_coverage_matrix
@@ -56,6 +58,7 @@ _ARTIFACT_FILES = [
     "coverage_matrix.md",
     "ubiquitous-language.md",
     "ubiquitous-language-context-map.md",
+    "adr-conformance.md",
 ]
 
 
@@ -121,6 +124,7 @@ def _compute_artifacts(repo_root: Path) -> dict[str, str]:
 
     loops = extract_loops(src_dir)
     ports = extract_ports(src_dir=src_dir, fakes_dir=fakes_dir)
+    adrs = scan_adr_directory(adr_dir)
 
     artifacts = {
         "loops.md": render_loop_registry(loops),
@@ -128,12 +132,13 @@ def _compute_artifacts(repo_root: Path) -> dict[str, str]:
         "labels.md": render_label_state(extract_labels(src_dir)),
         "modules.md": render_module_graph(extract_module_graph(src_dir)),
         "events.md": render_event_bus(extract_event_topology(src_dir)),
-        "adr_xref.md": render_adr_cross_reference(extract_adr_refs(adr_dir)),
+        "adr_xref.md": render_adr_cross_reference(extract_adr_refs(adr_dir), adrs),
         "mockworld.md": render_mockworld_map(
             extract_mockworld_map(fakes_dir=fakes_dir, scenarios_dir=scenarios_dir)
         ),
         "changelog.md": render_changelog(_git_log_changelog(repo_root)),
         "coverage_matrix.md": render_coverage_matrix(loops, ports, repo_root=repo_root),
+        "adr-conformance.md": render_adr_conformance(adrs),
     }
     if fa_path.exists():
         fa = load_functional_areas(fa_path)

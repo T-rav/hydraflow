@@ -1115,18 +1115,21 @@ SUMMARY: <one-line summary>
         if commits == 0:
             return LoopResult(passed=True, summary="No commits to check")
 
-        diff = await self._get_branch_diff(worktree_path, branch)
-        if not diff.strip():
+        full_diff = await self._get_branch_diff(worktree_path, branch)
+        if not full_diff.strip():
             return LoopResult(passed=True, summary="Empty diff")
 
         max_diff = self._config.max_review_diff_chars
-        if len(diff) > max_diff:
-            diff = diff[:max_diff] + f"\n[Diff truncated at {max_diff:,} chars]"
+        prompt_diff = (
+            full_diff[:max_diff] + f"\n[Diff truncated at {max_diff:,} chars]"
+            if len(full_diff) > max_diff
+            else full_diff
+        )
 
         prompt = skill.prompt_builder(
             issue_number=issue.id,
             issue_title=issue.title,
-            diff=diff,
+            diff=prompt_diff,
             plan_text=plan_text,
         )
         if not prompt.strip():
@@ -1160,6 +1163,30 @@ SUMMARY: <one-line summary>
         else:
             result = LoopResult(passed=False, summary=summary, attempts=max_attempts)
 
+        # Coverage delta runs once after the LLM attempt loop — not per-attempt.
+        # Running make coverage on each retry is expensive and redundant because
+        # the worktree code doesn't change between LLM attempts.
+        if result.passed and skill.coverage_check:
+            uncovered = await self._run_coverage_delta_check(
+                worktree_path, full_diff, issue.id
+            )
+            if uncovered:
+                cov_summary = (
+                    f"Coverage delta: {len(uncovered)} uncovered changed line(s): "
+                    + "; ".join(uncovered[:5])
+                    + (f" (+ {len(uncovered) - 5} more)" if len(uncovered) > 5 else "")
+                )
+                logger.info(
+                    "coverage-delta findings for #%d: %s",
+                    issue.id,
+                    "; ".join(uncovered[:5]),
+                )
+                result = LoopResult(
+                    passed=False,
+                    summary=cov_summary,
+                    attempts=result.attempts,
+                )
+
         # Append the skill result to run-N/skill_results.json alongside
         # the parent run. This is the source of truth for skill-effectiveness
         # scoring in trace_rollup.
@@ -1175,6 +1202,66 @@ SUMMARY: <one-line summary>
             )
 
         return result
+
+    async def _run_coverage_delta_check(
+        self,
+        worktree_path: Path,
+        diff: str,
+        issue_id: int,
+    ) -> list[str]:
+        """Run ``make coverage 0`` and return uncovered changed-line refs.
+
+        Returns a list of ``path:line`` strings for changed production lines
+        that the test suite does not exercise.  Returns an empty list when
+        make fails, times out, or no coverage XML is produced — preserving
+        the LLM verdict in those cases.
+        """
+        from coverage_delta import (  # noqa: PLC0415
+            compute_uncovered_changed_lines,
+            parse_cobertura_covered_lines,
+            parse_diff_changed_lines,
+        )
+
+        try:
+            timeout_secs = self._config.test_adequacy_coverage_timeout_secs
+            cov_result = await self._runner.run_simple(
+                ["make", "coverage", "0"],
+                cwd=str(worktree_path),
+                timeout=float(timeout_secs),
+            )
+        except (TimeoutError, FileNotFoundError):
+            logger.warning(
+                "Coverage delta check failed for #%d (timeout or make not found)",
+                issue_id,
+            )
+            return []
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "Coverage delta check unexpected error for #%d: %s", issue_id, exc
+            )
+            return []
+
+        if cov_result.returncode != 0:
+            logger.warning(
+                "Coverage delta: make coverage 0 returned rc=%d for #%d",
+                cov_result.returncode,
+                issue_id,
+            )
+            return []
+
+        coverage_xml = worktree_path / "coverage.xml"
+        if not coverage_xml.is_file():
+            logger.warning(
+                "Coverage delta: coverage.xml not found at %s for #%d",
+                coverage_xml,
+                issue_id,
+            )
+            return []
+
+        changed = parse_diff_changed_lines(diff)
+        covered = parse_cobertura_covered_lines(coverage_xml, worktree_path)
+        return compute_uncovered_changed_lines(changed, covered)
 
     def _append_skill_result(
         self,

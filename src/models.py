@@ -15,6 +15,7 @@ from typing import (
     NamedTuple,
     NotRequired,
     Protocol,
+    cast,
 )
 from uuid import uuid4
 
@@ -31,7 +32,7 @@ from pydantic.alias_generators import (
 )
 from typing_extensions import TypedDict
 
-from src.pending_concerns import AdversarialState
+from src.pending_concerns import AdversarialState, Concern
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -1766,6 +1767,119 @@ class RcBudgetDurationEntry(BaseModel):
     conclusion: str
 
 
+VerdictStr = Literal["ADVANCE", "LOOP_BACK", "ESCALATE", "UNVISITED"]
+
+
+class StageRecord(BaseModel):
+    """Per-stage convergence record inside a ConvergenceLedger."""
+
+    last_verdict: VerdictStr = "UNVISITED"
+    attempts: int = 0
+    last_finding_signatures: list[str] = Field(default_factory=list)
+
+
+class ConvergenceLedger(BaseModel):
+    """Single source of truth for one issue's two-level convergence state.
+
+    Replaces the scattered per-issue attempt counters (no dual-write). The
+    ledger is always-on storage; the Gate decision that writes to it is the
+    only flag-gated part (see ADR for the storage/decision split).
+    """
+
+    issue_number: int
+    laps: int = 0
+    blast_radius: Literal["low", "medium", "high"] = "low"
+    stage_state: dict[str, StageRecord] = Field(default_factory=dict)
+    open_concerns: list[Concern] = Field(default_factory=list)
+    lap_signatures: list[list[str]] = Field(default_factory=list)
+    converged: bool = False
+    oscillation_escalated: bool = False
+
+    def _stage(self, stage: str) -> StageRecord:
+        rec = self.stage_state.get(stage)
+        if rec is None:
+            rec = StageRecord()
+            self.stage_state[stage] = rec
+        return rec
+
+    def get_attempts(self, stage: str) -> int:
+        rec = self.stage_state.get(stage)
+        return rec.attempts if rec else 0
+
+    def increment_attempts(self, stage: str) -> int:
+        rec = self._stage(stage)
+        rec.attempts += 1
+        return rec.attempts
+
+    def record_gate_result(
+        self, stage: str, decision: str, signatures: list[str]
+    ) -> None:
+        # Records verdict + signatures ONLY. Does NOT touch attempts —
+        # increment_attempts is the sole counter bumper.
+        if decision not in ("ADVANCE", "LOOP_BACK", "ESCALATE", "UNVISITED"):
+            raise ValueError(f"invalid gate verdict: {decision!r}")
+        rec = self._stage(stage)
+        rec.last_verdict = cast(VerdictStr, decision)
+        rec.last_finding_signatures = list(signatures)
+
+    def mark_lap(self) -> None:
+        """Close the current lap: snapshot the union of stage signatures."""
+        sig: list[str] = sorted(
+            {
+                s
+                for rec in self.stage_state.values()
+                for s in rec.last_finding_signatures
+            }
+        )
+        self.lap_signatures.append(sig)
+        self.laps += 1
+
+    def all_gated_advanced(self, gated_stages: list[str]) -> bool:
+        if not gated_stages:
+            return False
+        return all(
+            self.stage_state.get(s, StageRecord()).last_verdict == "ADVANCE"
+            for s in gated_stages
+        )
+
+    def recompute_converged(self, gated_stages: list[str]) -> bool:
+        self.converged = (
+            self.all_gated_advanced(gated_stages) and not self.open_concerns
+        )
+        return self.converged
+
+    def detect_outer_oscillation(self, window: int = 2) -> bool:
+        if len(self.lap_signatures) < window:
+            return False
+        tail = self.lap_signatures[-window:]
+        first = tail[0]
+        return bool(first) and all(s == first for s in tail)
+
+    def detect_cross_boundary_oscillation(
+        self, *, window: int = 2, min_loopback_stages: int = 2
+    ) -> bool:
+        """Return True if the ledger shows cross-boundary oscillation.
+
+        Two conditions (either is sufficient):
+        (a) Temporal: ``detect_outer_oscillation(window)`` is True — recurring
+            identical findings across review laps.
+        (b) Snapshot: at least ``min_loopback_stages`` DISTINCT stages among
+            ``{"triage", "shape", "plan"}`` currently have
+            ``last_verdict == "LOOP_BACK"`` — pre-review cross-boundary churn.
+
+        Pure function of ledger state; no mutation.
+        """
+        if self.detect_outer_oscillation(window):
+            return True
+        boundary_stages = {"triage", "shape", "plan"}
+        loopback_count = sum(
+            1
+            for stage in boundary_stages
+            if self.stage_state.get(stage, StageRecord()).last_verdict == "LOOP_BACK"
+        )
+        return loopback_count >= min_loopback_stages
+
+
 class StateData(BaseModel):
     """Typed schema for the JSON-backed crash-recovery state."""
 
@@ -1786,7 +1900,6 @@ class StateData(BaseModel):
         default_factory=dict
     )
     hitl_visual_evidence: dict[str, VisualEvidence] = Field(default_factory=dict)
-    review_attempts: dict[str, int] = Field(default_factory=dict)
     review_feedback: dict[str, str] = Field(default_factory=dict)
     worker_result_meta: dict[str, WorkerResultMeta] = Field(default_factory=dict)
     bg_worker_states: dict[str, BackgroundWorkerState] = Field(default_factory=dict)
@@ -1814,16 +1927,10 @@ class StateData(BaseModel):
     )
     interrupted_issues: dict[str, str] = Field(default_factory=dict)
     last_reviewed_shas: dict[str, str] = Field(default_factory=dict)
-    review_blast_radii: dict[str, str] = Field(
-        default_factory=dict,
-        description=(
-            "Per-issue blast-radius tier ('low'|'medium'|'high') computed at "
-            "pre-flight time. Used by the dashboard and ADR-0051 iteration planning."
-        ),
-    )
     pending_reports: list[PendingReport] = Field(default_factory=list)
     tracked_reports: list[TrackedReport] = Field(default_factory=list)
     issue_outcomes: dict[str, IssueOutcome] = Field(default_factory=dict)
+    convergence_ledgers: dict[str, ConvergenceLedger] = Field(default_factory=dict)
     hook_failures: dict[str, list[HookFailureRecord]] = Field(default_factory=dict)
     epic_states: dict[str, EpicState] = Field(default_factory=dict)
     releases: dict[str, Release] = Field(default_factory=dict)
@@ -1865,7 +1972,7 @@ class StateData(BaseModel):
     # Trust fleet — ContractRefreshLoop (spec §4.2 Task 18)
     contract_refresh_attempts: dict[str, int] = Field(default_factory=dict)
     # Auto-Agent — AutoAgentPreflightLoop (spec §3.6)
-    auto_agent_attempts: dict[str, int] = Field(default_factory=dict)
+    # NOTE: auto_agent_attempts migrated to convergence_ledgers["N"].stage_state["auto_agent"].attempts
     auto_agent_daily_spend: dict[str, float] = Field(default_factory=dict)
     # Trust fleet — TrustFleetSanityLoop (spec §12.1)
     trust_fleet_sanity_attempts: dict[str, int] = Field(default_factory=dict)
@@ -1875,8 +1982,8 @@ class StateData(BaseModel):
     )
     # Trust fleet — caretaker loops (Plan 5)
     flake_counts: dict[str, int] = Field(default_factory=dict)
+    # NOTE: sandbox_failure_fixer_attempts migrated to convergence_ledgers[str(pr_number)].stage_state["sandbox_fix"].attempts
     # SandboxFailureFixerLoop state
-    sandbox_failure_fixer_attempts: dict[str, int] = Field(default_factory=dict)
     flake_attempts: dict[str, int] = Field(default_factory=dict)
     skill_prompt_last_green: dict[str, str] = Field(default_factory=dict)
     skill_prompt_attempts: dict[str, int] = Field(default_factory=dict)
@@ -1894,6 +2001,11 @@ class StateData(BaseModel):
     # rollup issue number + the set of PR numbers currently listed in the body.
     # Used so subsequent ticks update the body in-place rather than re-filing.
     adr_rollup_issues: dict[str, dict] = Field(default_factory=dict)
+    # AdrConformanceLoop (ADR-0100) — remediation attempt counters + rollup
+    # tracking. Mirrors adr_audit_attempts/adr_rollup_issues above under a
+    # distinct namespace so the two auditors' counters never collide.
+    adr_conformance_attempts: dict[str, int] = Field(default_factory=dict)
+    adr_conformance_rollup_issues: dict[str, dict] = Field(default_factory=dict)
     # Generic rollup tracking for RollupIssueManager (#9359 hygiene). Keyed by
     # "{namespace}:{subject}" (e.g. "staging_promotion:rc_ci"); value is
     # {"issue_number": int, "content_hash": str}. Lets any loop keep ONE open
@@ -2348,6 +2460,7 @@ class ControlStatusConfig(BaseModel):
     model: str = ""
     pr_unstick_batch_size: int = 10
     workspace_base: str = ""
+    test_adequacy_coverage_timeout_secs: int = 300
 
 
 class ControlStatusResponse(BaseModel):
@@ -2508,6 +2621,15 @@ class BackgroundWorkerStatusPayload(TypedDict):
     status: str
     last_run: str
     details: dict[str, object]
+
+
+class LoopFitnessUpdatePayload(TypedDict):
+    """Payload for ``EventType.LOOP_FITNESS_UPDATE``."""
+
+    generated_at: str
+    window_days: int
+    loop_count: int
+    scored_count: int
 
 
 class OrchestratorStatusPayload(TypedDict, total=False):
@@ -2835,9 +2957,14 @@ class LabelCounts(TypedDict):
 
 
 class WorkerResultMeta(TypedDict, total=False):
-    """Metadata stored by ``StateTracker.set_worker_result_meta``."""
+    """Metadata stored by ``StateTracker.set_worker_result_meta``.
 
-    quality_fix_attempts: int
+    Note: ``quality_fix_attempts`` has been migrated to the convergence ledger
+    (``ConvergenceLedger.stage_state["quality_fix"].attempts``). Use
+    ``StateTracker.set_quality_fix_attempts`` / ``get_convergence_ledger`` to
+    read or write that count.
+    """
+
     pre_quality_review_attempts: int
     duration_seconds: float
     error: str | None

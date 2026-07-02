@@ -60,6 +60,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "skill_prompt_eval": (86400, 2_592_000),  # 1d min, 30d max
     "fake_coverage_auditor": (86400, 2_592_000),  # 1d min, 30d max
     "adr_touchpoint_auditor": (900, 86400),  # 15m min, 1d max (default 4h, ADR-0056)
+    "adr_conformance": (3600, 604800),  # 1h min, 7d max (default 24h, ADR-0100)
     "memory_backlog": (3_600, 604_800),  # 1h min, 7d max
     "rc_budget": (3600, 604800),  # 1h min, 7d max
     "wiki_rot_detector": (86400, 2_592_000),  # 1d min, 30d max
@@ -79,6 +80,8 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "live_corpus_replay": (60, 86400),  # 1m min, 1d max (default 15m, ADR-0045 / #8786)
     "github_cache": (10, 3600),  # 10s min, 1h max (single-poller cache)
     "triage_retry": (3600, 604800),  # 1h min, 7d max (default 24h, ADR-0063 W2)
+    "fitness_scorecard": (3600, 604800),  # 1h min, 7d max (default 24h)
+    "convergence_oscillation": (300, 86400),  # 5m min, 1d max (default 1h, ADR-0098)
 }
 
 # Internal pipeline labels that must not be treated as epic names in the history panel.

@@ -47,6 +47,8 @@ from typing import TYPE_CHECKING, Any, runtime_checkable
 from typing_extensions import Protocol
 
 if TYPE_CHECKING:
+    from adr_conformance import CheckResult  # noqa: TCH004
+    from adr_index import Check  # noqa: TCH004
     from review_insights import ProposalMetadata, ReviewRecord  # noqa: TCH004
 
 from merge_state_watcher import ConflictingPR
@@ -65,6 +67,7 @@ from models import (
 
 __all__ = [
     "AgentPort",
+    "ConformanceRunnerPort",
     "IssueFetcherPort",
     "IssueStorePort",
     "ObservabilityPort",
@@ -700,3 +703,21 @@ class ObservabilityPort(Protocol):
     def set_measurement(self, name: str, value: float, unit: str = "") -> None: ...
 
     def flush(self, timeout_ms: int = 2000) -> bool: ...
+
+
+@runtime_checkable
+class ConformanceRunnerPort(Protocol):
+    """Executes an ADR conformance Check. Injected so the loop stays testable.
+
+    Implemented by: ``adr_conformance_runner.SubprocessConformanceRunner``
+    """
+
+    def run(
+        self, check: Check, *, repo_root: Path, timeout_s: float = 300.0
+    ) -> CheckResult:
+        """Execute *check* (pytest/make/prose) and return its outcome.
+
+        Matches ``adr_conformance_runner.SubprocessConformanceRunner.run``
+        exactly.
+        """
+        ...
