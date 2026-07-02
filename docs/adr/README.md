@@ -143,5 +143,32 @@ cadence and files remediation issues on drift.
 
 ## Adding a new ADR
 
-Copy the template, increment the number, fill in the sections.
+Increment the number and copy an existing ADR's metadata block (e.g.
+[ADR-0002](0002-labels-as-state-machine.md) for a single check, or
+[ADR-0049](0049-trust-loop-kill-switch-convention.md) / [ADR-0053](0053-ubiquitous-language-as-living-artifact.md)
+for multiple), then fill in the sections. There is no separate template file.
+
+Every **Accepted** ADR MUST declare an `**Enforcement:**` line — see the
+[Enforcement](#enforcement) section above for the three kinds and what each
+requires. The coverage ratchet blocks a new Accepted ADR that omits or
+mis-declares it. When you choose `enforced`, get the `**Enforced by:**`
+SHAPE right (this is the common footgun):
+
+- Each check is TYPED: it starts with `pytest:` (e.g.
+  `pytest:tests/test_foo.py` or `pytest:tests/test_foo.py::test_bar`) or
+  `make:` (a non-mutating target). A bare or backtick-wrapped path parses as
+  prose and fails the ratchet.
+- ONE check goes inline on the marker: `**Enforced by:** pytest:tests/test_foo.py`.
+- For MULTIPLE checks, put the marker on its own line and list one check per
+  plain continuation line:
+
+  ```
+  **Enforced by:**
+  pytest:tests/test_a.py
+  pytest:tests/test_b.py
+  ```
+
+- Never repeat the `**Enforced by:**` marker (only the first is parsed, so the
+  rest are silently dropped); never comma-join checks on one line.
+
 Mark superseded ADRs by setting `**Status:** Superseded` and adding a `Superseded by: ADR-XXXX` entry in the Related section rather than deleting them.

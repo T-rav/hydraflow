@@ -5,6 +5,11 @@
 - **Supersedes:** none
 - **Superseded by:** none
 - **Related spec:** [`docs/superpowers/specs/2026-04-20-dynamic-skill-loading-design.md`](https://github.com/T-rav/hydraflow/blob/main/docs/superpowers/specs/2026-04-20-dynamic-skill-loading-design.md)
+- **Enforcement:** enforced
+
+**Enforced by:**
+pytest:tests/test_preflight_plugins.py
+pytest:tests/test_phase_skill_filter.py
 
 ## Context
 

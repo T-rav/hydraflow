@@ -1,7 +1,8 @@
 # ADR-0036: CLI Architecture — argparse with Config Builder Pattern
 
 **Status:** Accepted
-**Enforced by:** (process)
+**Enforcement:** manual
+**Enforced by:** Code review of `src/cli.py:build_config()` and `src/hf_cli/__main__.py` dispatch wiring during PR review of CLI/config changes.
 **Date:** 2026-03-08
 
 ## Context

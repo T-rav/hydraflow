@@ -6,6 +6,10 @@ Date: 2026-05-22
 
 Accepted
 
+## Enforcement
+
+**Enforcement:** decision-of-record
+
 ## Context
 
 Epic lifecycle maintenance had two caretaker loops: one for stale detection and

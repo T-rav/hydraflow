@@ -2,7 +2,12 @@
 
 **Status:** Accepted
 **Date:** 2026-05-29
-**Enforced by:** tests/test_untrusted_text.py, tests/test_preflight_untrusted_fencing.py, tests/test_agent_cli.py, tests/test_agent_advanced.py
+**Enforcement:** enforced
+**Enforced by:**
+pytest:tests/test_untrusted_text.py
+pytest:tests/test_preflight_untrusted_fencing.py
+pytest:tests/test_agent_cli.py
+pytest:tests/test_agent_advanced.py
 
 ## Context
 

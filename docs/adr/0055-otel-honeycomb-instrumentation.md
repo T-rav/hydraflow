@@ -4,6 +4,13 @@
 
 Accepted
 
+**Enforcement:** enforced
+
+**Enforced by:**
+pytest:tests/architecture/test_otel_invariants.py
+pytest:tests/regressions/test_otel_disabled_is_noop.py
+pytest:tests/scenarios/test_telemetry_e2e.py
+
 ## Date
 
 2026-05-06

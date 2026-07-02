@@ -1,8 +1,9 @@
 # ADR-0007: Dashboard API Architecture for Multi-Repo Scoping
 
 **Status:** Accepted
-**Enforced by:** tests/test_dashboard_routes_repo.py
 **Date:** 2026-02-28
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_dashboard_routes_repo.py
 
 ## Context
 

@@ -5,7 +5,10 @@
 - **Supersedes:** none
 - **Superseded by:** none
 - **Related:** [ADR-0052](0052-sandbox-tier-scenarios.md)
-- **Enforced by:** `tests/test_sandbox_scenario_contract.py`, `tests/test_no_screenshot_regression_tests.py`
+- **Enforcement:** enforced
+- **Enforced by:**
+pytest:tests/test_sandbox_scenario_contract.py
+pytest:tests/test_no_screenshot_regression_tests.py
 
 ## Context
 

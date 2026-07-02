@@ -123,17 +123,89 @@ _GRANDFATHER_BASELINE: frozenset[int] = frozenset(
 )
 
 # ADRs annotated with **Enforcement:** by backfill tasks, removed from the
-# live grandfathered set. Task 13 annotates 0002/0003/0042/0056/0093; later
-# backfill tasks (14, 15, 16) grow this set as they annotate more ADRs.
-# Task 14/15 add 49 (kill-switch convention) and 53 (ubiquitous language).
-# As of the status-completeness fix (this task), 53's `## Status` H2 heading
-# is now recognized by adr_index._STATUS_H2_RE, so it parses as
-# status="Accepted" and enters _accepted() for the first time — its
-# **Enforcement:** enforced annotation is genuinely exercised now, not a
-# no-op. 49 and 53 are both in _ANNOTATED and both NOT in
-# _GRANDFATHER_BASELINE (49 was already excluded pre-fix; 53 is newly
-# excluded here since it skips grandfathering entirely).
-_ANNOTATED: frozenset[int] = frozenset({2, 3, 42, 49, 53, 56, 93})
+# live grandfathered set. Task 13 annotates 0002/0003/0042/0056/0093; Tasks
+# 14/15 added 49 (kill-switch convention) and 53 (ubiquitous language) — both
+# in _ANNOTATED and both NOT in _GRANDFATHER_BASELINE (49 was already excluded
+# pre-fix; 53 skips grandfathering entirely via the status-completeness fix).
+#
+# The grandfather-backfill campaign (2026-07-01) then annotated ALL 59
+# remaining baseline ADRs with a real **Enforcement:** declaration and added
+# their numbers here, draining the live grandfathered set to ∅. There is no
+# standing conformance exemption left: every Accepted ADR now declares its
+# enforcement. New Accepted ADRs are held to the same bar by
+# test_every_accepted_adr_declares_enforcement (see docs/adr/README.md
+# "Adding a new ADR"). _GRANDFATHER_BASELINE stays a fixed size-59 snapshot;
+# the set only ever shrinks by growing _ANNOTATED, never by editing it.
+_ANNOTATED: frozenset[int] = frozenset(
+    {
+        1,
+        2,
+        3,
+        4,
+        5,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        21,
+        22,
+        23,
+        24,
+        25,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        34,
+        35,
+        36,
+        37,
+        41,
+        42,
+        43,
+        45,
+        47,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        60,
+        61,
+        62,
+        64,
+        65,
+        71,
+        83,
+        85,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+    }
+)
 
 # Live grandfathered set: baseline minus everything annotated so far. A true
 # subset of the baseline, so it can only shrink — never grow, and never swap

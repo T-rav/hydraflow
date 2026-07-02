@@ -8,9 +8,11 @@ Accepted
 
 2026-05-08
 
-## Enforced by
+## Enforcement
 
-`tests/test_atlas_routes.py`, `src/ui/src/components/atlas/__tests__/`
+**Enforcement:** enforced
+
+**Enforced by:** pytest:tests/test_atlas_routes.py
 
 ## Context
 

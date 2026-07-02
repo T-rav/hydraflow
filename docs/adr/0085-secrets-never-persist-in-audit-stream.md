@@ -2,7 +2,8 @@
 
 **Status:** Accepted
 **Date:** 2026-05-30
-**Enforced by:** tests/test_secret_scrub.py
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_secret_scrub.py
 
 ## Context
 

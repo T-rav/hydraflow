@@ -4,6 +4,12 @@
 
 Accepted
 
+**Enforcement:** enforced
+
+**Enforced by:**
+pytest:tests/test_term_proposer_loop.py
+pytest:tests/architecture/test_term_proposer_wiring.py
+
 ## Date
 
 2026-05-06

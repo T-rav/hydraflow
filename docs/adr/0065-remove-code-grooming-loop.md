@@ -2,9 +2,8 @@
 
 **Status:** Accepted
 **Date:** 2026-05-19
-**Enforced by:** (process)
-
-The factory enforces this via `grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/` returning no live references — only this ADR and historical date-stamped snapshots in `docs/arch/area_review_caretaking_2026-05-12.md` are allowed to mention the removed loop. Closes #8984.
+**Enforcement:** manual
+**Enforced by:** Process check — `grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/` must return no live references; only this ADR and the historical date-stamped snapshot in `docs/arch/area_review_caretaking_2026-05-12.md` are allowed to mention the removed loop. Closes #8984.
 **Related:** [ADR-0029](0029-caretaker-loop-pattern.md) — Caretaker Loop Pattern (this ADR removes one of the four original caretakers); `.claude/commands/hf.audit-code.md`; `.codex/skills/hf.audit-code/SKILL.md`.
 
 ## Context
