@@ -981,60 +981,6 @@ class TestAdvisorTelemetry:
             == 0
         )
 
-    def test_review_phase_loop_counters_emit_via_helper(self, metric_recorder):
-        # The retry-loop counters live on review_phase. We exercise the
-        # module-level helper directly so this test stays independent of the
-        # full ReviewPhase wiring (covered by tests/scenarios/test_pr_review_advisor_*).
-        from review_phase import (
-            _emit_advisor_loop_metric,
-            _veto_exhausted_total,
-            _veto_recovered_total,
-            _veto_retries_total,
-        )
-
-        _emit_advisor_loop_metric(
-            _veto_retries_total, {"surface": "pr_review", "attempt": "1"}
-        )
-        _emit_advisor_loop_metric(
-            _veto_retries_total, {"surface": "pr_review", "attempt": "2"}
-        )
-        _emit_advisor_loop_metric(
-            _veto_retries_total, {"surface": "pr_review", "attempt": "exhausted"}
-        )
-        _emit_advisor_loop_metric(_veto_recovered_total, {"surface": "pr_review"})
-        _emit_advisor_loop_metric(_veto_exhausted_total, {"surface": "pr_review"})
-
-        assert (
-            metric_recorder.counter_value(
-                "review_advisor_veto_retries_total",
-                surface="pr_review",
-                attempt="1",
-            )
-            == 1
-        )
-        assert (
-            metric_recorder.counter_value(
-                "review_advisor_veto_retries_total",
-                surface="pr_review",
-                attempt="exhausted",
-            )
-            == 1
-        )
-        assert (
-            metric_recorder.counter_value(
-                "review_advisor_veto_recovered_total",
-                surface="pr_review",
-            )
-            == 1
-        )
-        assert (
-            metric_recorder.counter_value(
-                "review_advisor_veto_exhausted_total",
-                surface="pr_review",
-            )
-            == 1
-        )
-
     def test_disagreements_emit_disagreement_total(self, metric_recorder):
         runner = _StubAdvisorRunner(
             '{"verdict":"VETO","reasoning":"missed two issues",'

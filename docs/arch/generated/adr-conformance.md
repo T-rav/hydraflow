@@ -75,7 +75,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0097 | enforced | `pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py` |
 | ADR-0098 | enforced | `pytest:tests/scenarios/test_convergence_oscillation_mockworld.py` |
 | ADR-0100 | enforced | `pytest:tests/test_adr_conformance_coverage.py` |
-| ADR-0101 | unknown | `'tests/test_review_phase_core.py', 'tests/scenarios/test_convergence_review_mockworld.py', 'tests/sandbox_scenarios/scenarios/s50_convergence_review.py'` |
+| ADR-0101 | enforced | `pytest:tests/test_review_phase_core.py` |
 
 ## Check → ADRs it protects
 
@@ -87,7 +87,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `'tests/test_auto_agent_preflight_loop.py'; 'tests/scenarios/test_auto_agent_preflight_scenario.py'; 'tests/test_loop_wiring_completeness.py'.` | ADR-0050 |
 | `'tests/test_memory_backlog_loop.py', 'tests/test_loop_wiring_completeness.py' (auto-discovery confirms 5-checkpoint wire), 'tests/architecture/test_functional_area_coverage.py' (loop assigned in 'functional_areas.yml').` | ADR-0089 |
 | `'tests/test_mockworld_fakes_conformance.py' (Port↔Fake signature parity), 'tests/test_sandbox_scenario_contract.py' (scenario catalog contract), '.github/workflows/ci.yml' 'sandbox' job (CI gate).` | ADR-0052 |
-| `'tests/test_review_phase_core.py', 'tests/scenarios/test_convergence_review_mockworld.py', 'tests/sandbox_scenarios/scenarios/s50_convergence_review.py'` | ADR-0101 |
 | `'tests/test_sandbox_scenario_contract.py', 'tests/test_no_screenshot_regression_tests.py'` | ADR-0083 |
 | `(none)` | ADR-0027 |
 | `(process)` | ADR-0009, ADR-0023, ADR-0025, ADR-0035, ADR-0036, ADR-0065 |
@@ -99,6 +98,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_adr_touchpoint_auditor_loop.py` | ADR-0056 |
 | `pytest:tests/test_loop_fitness_completeness.py` | ADR-0093 |
 | `pytest:tests/test_loop_kill_switch_completeness.py` | ADR-0049 |
+| `pytest:tests/test_review_phase_core.py` | ADR-0101 |
 | `pytest:tests/test_seed_terms.py` | ADR-0053 |
 | `pytest:tests/test_state_machine.py` | ADR-0002 |
 | `pytest:tests/test_ubiquitous_language_drift.py` | ADR-0053 |

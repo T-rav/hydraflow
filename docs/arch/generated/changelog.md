@@ -6,8 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `661d2f8` — Merge remote-tracking branch 'origin/staging' into worktree-convergence-gate-ga *(2026-07-01)*
 - `82ef1ce` — docs(adr): renumber gate-GA ADR 0099->0100 (staging claimed 0099 for control-system) *(2026-07-01)*
 - `bc57c32` — docs(adr): ADR-0099 convergence gate general availability (flag removed) *(2026-07-01)*
+- `54a0365` — docs(adr): ADR-0094 — orchestration as a control system + control-role vocabulary (#9679) (#9679) *(2026-07-01)*
+- `9914531` — ADR conformance as a measured contract (ADR-0098) (#9684) (#9684) *(2026-07-01)*
 - `7eb71e4` — Two-level convergence Phase 2d: oscillation caretaker loop (#9683) (#9683) *(2026-07-01)*
 - `7503e7e` — Two-level convergence Phase 2c: migrate attempt counters into the ledger (#9681) (#9681) *(2026-07-01)*
 - `62cd012` — Two-level convergence Phase 2b: boundary verdict recording (Triage/Shape/Plan) (#9677) (#9677) *(2026-06-30)*

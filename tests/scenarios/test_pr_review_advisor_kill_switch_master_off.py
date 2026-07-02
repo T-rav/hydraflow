@@ -1,10 +1,10 @@
 """Tier-1 scenario: HYDRAFLOW_REVIEW_ADVISOR_ENABLED=false → no advisor calls.
 
 T15 of the advisor-pattern feature. When the master kill-switch is off,
-``ReviewPhase._run_post_verify_advisor`` short-circuits before invoking the
-advisor; ``FakeLLM.advisor_call_count_for("post_verify")`` therefore stays
-at zero. PR-merge behavior reverts to the pre-advisor path: the executor's
-APPROVE flows through to merge unaffected.
+``ReviewPhase._run_post_verify_for_surface`` short-circuits before invoking
+the advisor; ``FakeLLM.advisor_call_count_for("post_verify")`` therefore
+stays at zero. PR-merge behavior reverts to the pre-advisor path: the
+executor's APPROVE flows through to merge unaffected.
 """
 
 from __future__ import annotations

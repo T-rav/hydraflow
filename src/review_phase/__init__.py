@@ -7,18 +7,15 @@ continue to work:
     from review_phase import ReviewPhase            # still works
     from review_phase import PreReviewContext       # still works
     from review_phase import _is_meaningful_verdict # still works
-    from review_phase import _emit_advisor_loop_metric, _veto_retries_total
-    # ... etc.
 
 External-module symbols that tests monkeypatch via ``patch("review_phase.X")``
 are also re-exported here so the patches take effect — see the
 ``# Re-exports for unittest.mock.patch back-compat`` block below.
 
 Layout:
-  * ``_common.py``  — module-level constants, regex patterns, metric
-    instruments, dataclasses (``ReviewGuardContext``, ``PreReviewContext``),
-    standalone helper functions (``_is_meaningful_verdict``,
-    ``_run_fallback_ingest_review``, ``_emit_advisor_loop_metric``,
+  * ``_common.py``  — module-level constants, regex patterns, dataclasses
+    (``ReviewGuardContext``, ``PreReviewContext``), standalone helper
+    functions (``_is_meaningful_verdict``, ``_run_fallback_ingest_review``,
     ``_detect_self_modification_context``).
   * ``_phase.py``   — the ``ReviewPhase`` class.
 """
@@ -59,12 +56,8 @@ from ._common import (
     ReviewGuardContext,
     _AdvisorRole,
     _detect_self_modification_context,
-    _emit_advisor_loop_metric,
     _is_meaningful_verdict,
     _run_fallback_ingest_review,
-    _veto_exhausted_total,
-    _veto_recovered_total,
-    _veto_retries_total,
     logger,
 )
 from ._phase import ReviewPhase
@@ -89,12 +82,8 @@ __all__ = [
     "_NON_VERDICT_SUMMARY_MARKERS",
     "_SELF_MOD_SYNTHESIS_PATTERNS",
     "_detect_self_modification_context",
-    "_emit_advisor_loop_metric",
     "_is_meaningful_verdict",
     "_run_fallback_ingest_review",
-    "_veto_exhausted_total",
-    "_veto_recovered_total",
-    "_veto_retries_total",
     "analyze_patterns",
     "logger",
     "record_harness_failure",

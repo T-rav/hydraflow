@@ -107,7 +107,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0098 | `src.convergence_oscillation_loop`, `src.models`, `src.state._convergence` | `pytest:tests/scenarios/test_convergence_oscillation_mockworld.py` |
 | ADR-0099 | `src.base_background_loop`, `src.base_runner`, `src.harness_insights`, `src.issue_store`, `src.models`, `src.review_advisor`, `src.ubiquitous_language` | `'tests/test_seed_terms.py' (the seven 'control_role' glossary terms load, resolve to 'main' classes, and ship 'accepted'), '(process)' (every orchestration component declares its control role)` |
 | ADR-0100 | `src.adr_conformance`, `src.adr_conformance_loop`, `src.adr_index` | `pytest:tests/test_adr_conformance_coverage.py` |
-| ADR-0101 | `src.config`, `src.convergence_recording`, `src.review_phase._phase` | `'tests/test_review_phase_core.py', 'tests/scenarios/test_convergence_review_mockworld.py', 'tests/sandbox_scenarios/scenarios/s50_convergence_review.py'` |
+| ADR-0101 | `src.config`, `src.convergence_recording`, `src.review_phase._phase` | `pytest:tests/test_review_phase_core.py` |
 
 ## Module → ADRs
 

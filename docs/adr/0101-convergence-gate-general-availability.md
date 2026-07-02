@@ -1,10 +1,11 @@
 # ADR-0101: Convergence gate general availability (flag removed)
 
-- **Status:** Accepted
-- **Date:** 2026-07-01
-- **Supersedes (in part):** ADR-0094, ADR-0095 (their dark-ship / flag-gated clauses)
-- **Refines:** ADR-0094
-- **Enforced by:** `tests/test_review_phase_core.py`, `tests/scenarios/test_convergence_review_mockworld.py`, `tests/sandbox_scenarios/scenarios/s50_convergence_review.py`
+**Status:** Accepted
+**Date:** 2026-07-01
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_review_phase_core.py
+**Supersedes (in part):** ADR-0094, ADR-0095 (their dark-ship / flag-gated clauses)
+**Refines:** ADR-0094
 
 ## Context
 

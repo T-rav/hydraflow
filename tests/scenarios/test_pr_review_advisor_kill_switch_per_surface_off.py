@@ -3,7 +3,7 @@ surface's advisor is disabled even with master + role enabled.
 
 T15 of the advisor-pattern feature. Validates the per-surface tier of
 ``is_advisor_enabled``: master and per-role both enabled, per-surface
-off — ``_run_post_verify_advisor`` must short-circuit so no advisor
+off — ``_run_post_verify_for_surface`` must short-circuit so no advisor
 call is recorded for the pr_review surface.
 """
 
