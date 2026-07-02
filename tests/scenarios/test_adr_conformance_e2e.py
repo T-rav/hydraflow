@@ -1,9 +1,10 @@
 """End-to-end test for AdrConformanceLoop (ADR-0100).
 
-Exercises the full producer path with real I/O (no mocks-of-mocks):
+Exercises the full producer-to-route path with real I/O (no mocks-of-mocks):
   producer tick → adr_conformance.jsonl persisted → jsonl read back off disk
   and re-parsed via ``AdrConformance.model_validate_json`` → real EventBus
-  carries the ``ADR_CONFORMANCE_UPDATE`` event.
+  carries the ``ADR_CONFORMANCE_UPDATE`` event → ``latest_conformance_by_adr()``
+  route helper serves the persisted data back out.
 
 Convention mirrored: tests/scenarios/test_fitness_scorecard_e2e.py — real
 ``EventBus``, real ``HydraFlowConfig``, real ``StateTracker``/``DedupStore``/
@@ -23,12 +24,12 @@ Task 17 scenario's ``_build_loop`` helper.
 The added value over Task 17's scenario test is the **round-trip**: rows
 are not just asserted present in the jsonl file, they are read back off
 disk and re-parsed through the real Pydantic model, catching
-serialization/schema bugs that a write-only assertion would miss.
-
-Out of scope (intentionally, per the task brief): a dashboard READ-route
-e2e analogous to the fitness sibling's ``latest_fitness_by_worker``
-assertion. The ADR-conformance dashboard panel/route is a separate,
-deferred follow-up — there is no equivalent route to exercise yet.
+serialization/schema bugs that a write-only assertion would miss. The
+route-helper assertion (mirroring the fitness e2e's
+``latest_fitness_by_worker`` check) closes out the previously-deferred gap:
+now that ``dashboard_routes._conformance_routes.latest_conformance_by_adr``
+exists, this test proves the full producer→persist→route read path, not
+just producer→persist.
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ from adr_conformance_loop import AdrConformanceLoop
 from adr_index import ADRIndex
 from base_background_loop import LoopDeps
 from config import HydraFlowConfig
+from dashboard_routes._conformance_routes import latest_conformance_by_adr
 from dedup_store import DedupStore
 from events import EventBus, EventType
 from mockworld.fakes import FakeConformanceRunner, FakeGitHub
@@ -121,6 +123,11 @@ async def test_adr_conformance_e2e(tmp_path) -> None:
        the on-disk schema is loadable, not just writable.
     3. An ADR_CONFORMANCE_UPDATE event was published on the real EventBus
        with per-ADR outcomes in the payload.
+    4. ``latest_conformance_by_adr(config)`` — the dashboard read route's
+       helper — returns the latest row per ADR straight off the jsonl the
+       loop just wrote, with the expected adr_id/kind/outcome. This is the
+       producer→persist→route link the fitness e2e's
+       ``latest_fitness_by_worker`` assertion exercises for its own loop.
     """
     repo_root = _seed_repo(tmp_path)
 
@@ -197,3 +204,19 @@ async def test_adr_conformance_e2e(tmp_path) -> None:
     assert payload_by_adr["ADR-0049"]["outcome"] == "fail"
     assert payload_by_adr["ADR-0052"]["outcome"] == "pass"
     assert payload_by_adr["ADR-0050"]["outcome"] == "skipped"
+
+    # ── 4. Route helper returns the latest row per ADR, reading the same jsonl ─
+    # This is the end-to-end link: persisted jsonl → route helper → served data.
+    # `config` here is the exact HydraFlowConfig the loop ticked against, so
+    # `latest_conformance_by_adr` reads `config.repo_data_root / "metrics" /
+    # "adr_conformance.jsonl"` — the same path asserted at `jsonl_path` above.
+    latest = latest_conformance_by_adr(config)
+
+    assert latest["ADR-0049"]["kind"] == "enforced"
+    assert latest["ADR-0049"]["outcome"] == "fail"
+
+    assert latest["ADR-0052"]["kind"] == "enforced"
+    assert latest["ADR-0052"]["outcome"] == "pass"
+
+    assert latest["ADR-0050"]["kind"] == "decision-of-record"
+    assert latest["ADR-0050"]["outcome"] == "skipped"
