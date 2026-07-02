@@ -1,8 +1,9 @@
 # ADR-0017: Auto-Decompose Triage Path Excluded from Session Counter
 
 **Status:** Accepted
-**Enforced by:** tests/test_state_machine.py
 **Date:** 2026-03-01
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_state_machine.py
 
 ## Context
 

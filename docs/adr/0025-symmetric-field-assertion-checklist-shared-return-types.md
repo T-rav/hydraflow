@@ -1,8 +1,9 @@
 # ADR-0025: Symmetric Field Assertion Checklist for Shared Return Types
 
 **Status:** Accepted
-**Enforced by:** (process)
 **Date:** 2026-03-16
+**Enforcement:** manual
+**Enforced by:** Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).
 
 ## Context
 
