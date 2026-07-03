@@ -72,6 +72,7 @@ from adr_utils import (
 from baseline_policy import BaselinePolicy
 from comment_formatter import SelfReviewError
 from config import HydraFlowConfig
+from convergence_recording import _normalize_text
 from events import EventBus, EventType, HydraFlowEvent
 from harness_insights import FailureCategory, HarnessInsightStore
 from merge_conflict_resolver import MergeConflictResolver
@@ -3532,8 +3533,6 @@ class ReviewPhase:
             # Derive signatures from review result content for lap-signature
             # discrimination. ReviewResult has no separate comments list;
             # fall back to summary.
-            from convergence_recording import _normalize_text  # noqa: PLC0415
-
             _reject_sigs: list[str] = []
             if reject_review_result is not None:
                 _summary = _normalize_text(reject_review_result.summary)

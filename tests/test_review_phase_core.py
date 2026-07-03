@@ -3289,6 +3289,109 @@ class TestApproveConvergenceGate:
         sigs = ledger.stage_state["review"].last_finding_signatures
         assert "correctness" in sigs
 
+    @pytest.mark.asyncio
+    async def test_real_lens_judge_veto_with_disagreements_records_sorted_sigs(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Real ``_post_verify_lens_judge`` VETO branch: 2 disagreements → sorted sigs.
+
+        Exercises the branch in ``_post_verify_lens_judge`` (src/review_phase/_phase.py
+        ~3450-3455) that converts ``pv.disagreements`` into sorted-unique
+        ``f"{lens}:{d.advisor_assessment}"`` signatures.  The two existing veto tests
+        inject their own pre-built judge, so this branch had zero coverage against the
+        real implementation.  This test stubs ``_run_post_verify_for_surface`` directly
+        and calls the real judge via ``_convergence_decision``.
+        """
+        from convergence_gate import GateContext, JudgeVerdict
+        from review_advisor import Disagreement, PostVerifyResult
+
+        phase = make_review_phase(config, default_mocks=True)
+
+        issue = TaskFactory.create()
+        pr = PRInfoFactory.create(issue_number=issue.id)
+        wt_path = config.workspace_path_for_issue(issue.id)
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        # Set blast radius so the judge resolves to 1 lens (low → correctness only).
+        phase._state.set_review_blast_radius(issue.id, "low")
+
+        d1 = Disagreement(
+            executor_claim="return value is correct",
+            advisor_assessment="missing null check",
+            severity="blocking",
+        )
+        d2 = Disagreement(
+            executor_claim="loop terminates",
+            advisor_assessment="off-by-one on upper bound",
+            severity="blocking",
+        )
+
+        async def _fake_post_verify(*, lens=None, **_kwargs):
+            return PostVerifyResult(
+                verdict="VETO",
+                reasoning="two blocking issues found",
+                disagreements=[d1, d2],
+                suggested_fix_direction="fix null check and loop bound",
+            )
+
+        phase._run_post_verify_for_surface = _fake_post_verify  # type: ignore[method-assign]
+
+        result_stub = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
+        judge = phase._post_verify_lens_judge(
+            pr=pr,
+            task=issue,
+            wt_path=wt_path,
+            result=result_stub,
+            diff="diff text",
+            worker_id=0,
+            surface="pr_review",
+        )
+
+        # Drive i=0 (low blast → 1 lens: "correctness").
+        ctx = GateContext(
+            issue_number=issue.id,
+            stage="review",
+            blast_radius="low",
+            attempts=0,
+            max_attempts=5,
+        )
+        verdict = await judge(ctx, 0)
+
+        # Judge returns VETO with sorted lens:advisor_assessment sigs.
+        assert isinstance(verdict, JudgeVerdict)
+        assert verdict.approve is False
+        expected_sigs = sorted(
+            {
+                f"correctness:{d1.advisor_assessment}",
+                f"correctness:{d2.advisor_assessment}",
+            }
+        )
+        assert verdict.signatures == expected_sigs
+
+        # Also verify: when no disagreements, VETO still yields the lens name.
+        async def _fake_no_disagreements(*, lens=None, **_kwargs):
+            return PostVerifyResult(
+                verdict="VETO",
+                reasoning="no detailed disagreements",
+                disagreements=[],
+                suggested_fix_direction="rethink",
+            )
+
+        phase._run_post_verify_for_surface = _fake_no_disagreements  # type: ignore[method-assign]
+        judge2 = phase._post_verify_lens_judge(
+            pr=pr,
+            task=issue,
+            wt_path=wt_path,
+            result=result_stub,
+            diff="diff text",
+            worker_id=0,
+            surface="pr_review",
+        )
+        verdict2 = await judge2(ctx, 0)
+        assert isinstance(verdict2, JudgeVerdict)
+        assert verdict2.approve is False
+        assert verdict2.signatures == ["correctness"]
+
 
 # ---------------------------------------------------------------------------
 # Baseline policy integration in _review_one_inner
