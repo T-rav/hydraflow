@@ -36,6 +36,7 @@ from ._epic import EpicStateMixin
 from ._fake_coverage import FakeCoverageStateMixin
 from ._flake_tracker import FlakeTrackerStateMixin
 from ._hitl import HITLStateMixin
+from ._human_steering import HumanSteeringStateMixin
 from ._issue import IssueStateMixin
 from ._lifetime import LifetimeStatsMixin
 from ._live_corpus_replay import LiveCorpusReplayStateMixin
@@ -111,6 +112,7 @@ class StateTracker(
     TriageRetryStateMixin,
     DisturbanceStateMixin,
     ConvergenceStateMixin,
+    HumanSteeringStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 
