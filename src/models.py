@@ -1001,6 +1001,16 @@ class AttemptRecord(BaseModel):
     timestamp: IsoTimestamp
 
 
+class SteeringState(BaseModel):
+    """Per-issue human-steering reference (ADR-0099 surface #4)."""
+
+    guidance: str | None = None
+    flow: str = "running"  # running | paused | abort
+    redo_phase: str | None = None
+    redo_count: int = 0
+    last_applied_ts: str | None = None
+
+
 class EscalationContext(BaseModel):
     """Full context captured at escalation time for the diagnostic agent."""
 
@@ -2096,6 +2106,8 @@ class StateData(BaseModel):
     # Default empty dict — schema-evolution safe: legacy state files load
     # cleanly because Pydantic fills the default.
     adversarial_states: dict[str, AdversarialState] = Field(default_factory=dict)
+    # Continuous human-steering reference, keyed by str(issue_id) (ADR-0099 #4).
+    human_steering: dict[str, SteeringState] = Field(default_factory=dict)
     last_updated: str | None = None
 
 
