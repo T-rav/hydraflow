@@ -3019,8 +3019,13 @@ class HydraFlowConfig(BaseModel):
         description="Deploy-time kill-switch for AdrTouchpointAuditorLoop.",
     )
     adr_conformance_loop_enabled: bool = Field(
-        default=False,
-        description="Deploy-time kill-switch for AdrConformanceLoop (ADR-0100).",
+        default=True,
+        description=(
+            "Deploy-time kill-switch for AdrConformanceLoop (ADR-0100). "
+            "Enabled by default (like sibling caretaker loops) after a dry-run "
+            "against the full ADR corpus confirmed zero false-positive issue "
+            "filing; set False to disable."
+        ),
     )
     ci_monitor_loop_enabled: bool = Field(
         default=True,
