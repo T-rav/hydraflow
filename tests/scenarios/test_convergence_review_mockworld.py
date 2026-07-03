@@ -14,7 +14,7 @@ Verifies three behaviours of the unconditional convergence gate:
    escalation to HITL.  After escalation ``reset_outer_laps`` resets
    ``laps=0`` and ``lap_signatures=[]`` so a human-fixed re-queued issue
    starts with a fresh outer budget (the "fresh-budget-after-HITL" contract
-   introduced in commit 71cd08b6).  ``stage_state``, ``blast_radius``,
+   introduced in commit #9693).  ``stage_state``, ``blast_radius``,
    ``converged``, and ``oscillation_escalated`` are preserved.
 
 3. ``test_approve_converges`` — a PR with an APPROVE review verdict and a
@@ -23,7 +23,7 @@ Verifies three behaviours of the unconditional convergence gate:
    (low blast radius = 1 pass), records ``last_verdict=="ADVANCE"``, flips
    ``ledger.converged`` to True, and merges the PR.  After the merge
    ``PostMergeHandler.handle_approved`` clears the ledger via
-   ``clear_convergence_ledger`` (commit e6f166d3).  The test captures the
+   ``clear_convergence_ledger`` (commit #9693).  The test captures the
    pre-clear ledger state through a monkeypatch observer so the converged=True
    proof survives the clear.
 
@@ -163,7 +163,7 @@ class TestOscillationEscalates:
     ``_escalate_to_hitl``, which transitions the issue to the diagnose label
     (``hydraflow-diagnose``), not directly to ``hydraflow-hitl``).
 
-    **Fresh-budget-after-HITL contract (commit 71cd08b6)**: after every
+    **Fresh-budget-after-HITL contract (commit #9693)**: after every
     gate-driven HITL escalation ``reset_outer_laps`` sets ``laps=0`` and
     clears ``lap_signatures`` so a human-fixed, re-queued issue starts with a
     fresh outer budget rather than immediately re-escalating.  ``stage_state``,
@@ -258,7 +258,7 @@ class TestApproveConverges:
     ``recompute_converged``, and flips ``converged`` to True — all without
     hand-touching the ledger.
 
-    **Clear-on-merge contract (commit e6f166d3)**: after a successful merge
+    **Clear-on-merge contract (commit #9693)**: after a successful merge
     ``PostMergeHandler.handle_approved`` calls ``clear_convergence_ledger`` so
     the post-run ledger is ``None``.  The ADVANCE/converged=True proof is
     captured via a monkeypatch observer that wraps ``clear_convergence_ledger``
@@ -344,6 +344,29 @@ class TestApproveConverges:
 
         # Inspect the pre-clear snapshot (the state the ledger held at merge time).
         pre_clear = captured_pre_clear[0]
+
+        # Triage and plan stages ran before review; both should be present in the
+        # pre-clear snapshot with last_verdict=="ADVANCE" (the pipeline advances
+        # straight through on a happy-path scripted run).
+        triage_record = pre_clear.stage_state.get("triage")
+        assert triage_record is not None, (
+            "No 'triage' stage record in the pre-clear ledger — "
+            "triage_phase did not call record_stage_verdict for this issue."
+        )
+        assert triage_record.last_verdict == "ADVANCE", (
+            f"Expected triage stage_state last_verdict=='ADVANCE'; "
+            f"got {triage_record.last_verdict!r}"
+        )
+
+        plan_record = pre_clear.stage_state.get("plan")
+        assert plan_record is not None, (
+            "No 'plan' stage record in the pre-clear ledger — "
+            "plan_phase did not call record_stage_verdict for this issue."
+        )
+        assert plan_record.last_verdict == "ADVANCE", (
+            f"Expected plan stage_state last_verdict=='ADVANCE'; "
+            f"got {plan_record.last_verdict!r}"
+        )
 
         # The gate recorded ADVANCE for the review stage, which flips converged.
         review_record = pre_clear.stage_state.get("review")

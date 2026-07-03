@@ -3577,6 +3577,36 @@ class TestNarrowedExceptionHandling:
         result = await phase._fetch_code_scanning_alerts(pr)
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_fetch_code_scanning_alerts_catches_oserror(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """OSError (e.g., network failure) is caught gracefully."""
+        phase = make_review_phase(config, default_mocks=True)
+        # code_scanning is always enabled
+        phase._prs.fetch_code_scanning_alerts = AsyncMock(
+            side_effect=OSError("network unreachable")
+        )
+        pr = PRInfoFactory.create()
+
+        result = await phase._fetch_code_scanning_alerts(pr)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_code_scanning_alerts_propagates_type_error(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """TypeError (code bug) must propagate through narrowed handler."""
+        phase = make_review_phase(config, default_mocks=True)
+        # code_scanning is always enabled
+        phase._prs.fetch_code_scanning_alerts = AsyncMock(
+            side_effect=TypeError("bad arg")
+        )
+        pr = PRInfoFactory.create()
+
+        with pytest.raises(TypeError, match="bad arg"):
+            await phase._fetch_code_scanning_alerts(pr)
+
 
 # ---------------------------------------------------------------------------
 # Ledger lifecycle — F2 (reset after HITL) + M1 (clear on merge)
@@ -3706,36 +3736,6 @@ class TestLedgerLifecycle:
 
         # Ledger must survive a failed merge
         assert phase._state.get_convergence_ledger(pr.issue_number) is not None
-
-    @pytest.mark.asyncio
-    async def test_fetch_code_scanning_alerts_catches_oserror(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """OSError (e.g., network failure) is caught gracefully."""
-        phase = make_review_phase(config, default_mocks=True)
-        # code_scanning is always enabled
-        phase._prs.fetch_code_scanning_alerts = AsyncMock(
-            side_effect=OSError("network unreachable")
-        )
-        pr = PRInfoFactory.create()
-
-        result = await phase._fetch_code_scanning_alerts(pr)
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_fetch_code_scanning_alerts_propagates_type_error(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """TypeError (code bug) must propagate through narrowed handler."""
-        phase = make_review_phase(config, default_mocks=True)
-        # code_scanning is always enabled
-        phase._prs.fetch_code_scanning_alerts = AsyncMock(
-            side_effect=TypeError("bad arg")
-        )
-        pr = PRInfoFactory.create()
-
-        with pytest.raises(TypeError, match="bad arg"):
-            await phase._fetch_code_scanning_alerts(pr)
 
     @pytest.mark.asyncio
     async def test_visual_validation_catches_runtime_error(

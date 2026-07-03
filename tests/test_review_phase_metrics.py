@@ -836,7 +836,7 @@ class TestSelfFixReReview:
         phase._prs.transition.assert_any_await(
             pr.issue_number, "ready", pr_number=pr.number
         )
-        assert phase._state.get_review_attempts(42) == 1
+        assert phase._state.ensure_convergence_ledger(42).get_attempts("review") == 1
 
     @pytest.mark.asyncio
     async def test_no_fixes_no_re_review(self, config: HydraFlowConfig) -> None:
@@ -921,7 +921,7 @@ class TestSelfFixReReview:
 
         await phase.review_prs([pr], [issue])
 
-        assert phase._state.get_review_attempts(42) == 0
+        assert phase._state.ensure_convergence_ledger(42).get_attempts("review") == 0
 
     @pytest.mark.asyncio
     async def test_re_review_exception_falls_back_to_rejection(
@@ -948,7 +948,12 @@ class TestSelfFixReReview:
         phase._prs.transition.assert_any_await(
             pr.issue_number, "ready", pr_number=pr.number
         )
-        assert phase._state.get_review_attempts(pr.issue_number) == 1
+        assert (
+            phase._state.ensure_convergence_ledger(pr.issue_number).get_attempts(
+                "review"
+            )
+            == 1
+        )
 
 
 # ---------------------------------------------------------------------------

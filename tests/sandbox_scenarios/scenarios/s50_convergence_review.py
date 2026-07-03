@@ -18,7 +18,7 @@ no flag or env override is required):
 5. PR is merged via ``_handle_approved_merge``; ``/api/issues/history`` shows
    ``outcome=="merged"`` for issue #1.
 6. After the merge ``PostMergeHandler.handle_approved`` calls
-   ``clear_convergence_ledger`` (commit e6f166d3), so the ``convergence_ledgers``
+   ``clear_convergence_ledger`` (commit #9693), so the ``convergence_ledgers``
    entry for issue #1 is ABSENT from ``/api/state`` once the merge completes.
 
 **Lifecycle contract and test-layer split**: the converged=True proof (gate ran,
@@ -139,7 +139,7 @@ async def assert_outcome(api, page) -> None:
 
     # --- 2. /api/state shows convergence_ledgers ABSENT for issue #1 ---
     # After a successful merge PostMergeHandler.handle_approved calls
-    # clear_convergence_ledger (commit e6f166d3), removing the entry entirely.
+    # clear_convergence_ledger (commit #9693), removing the entry entirely.
     # The converged=True proof is covered at the unit layer
     # (test_ledger_ordering_retrospective_reads_before_clear) and MockWorld layer
     # (TestApproveConverges pre-clear observer).  The sandbox asserts the
