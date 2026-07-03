@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from models import SteeringState
+
 _FLOW_RUNNING = "running"
 _FLOW_PAUSED = "paused"
 _FLOW_ABORT = "abort"
@@ -75,4 +77,69 @@ def parse_directives(
         flow=flow,
         redo_phase=redo_phase,
         new_last_applied_ts=new_mark,
+    )
+
+
+@dataclass(frozen=True)
+class SteeringDecision:
+    """Actuator decision for one issue at a phase boundary (orchestrator seam).
+
+    Pure translation of a per-issue `SteeringState` into what the orchestrator
+    should enact this cycle: skip scheduling (pause), park at the recoverable
+    terminal label (abort), re-enqueue to a phase (redo), and/or fold fenced
+    guidance into the next phase prompt. No I/O; the orchestrator stays thin
+    by calling `apply_steering` and enacting the result verbatim.
+    """
+
+    skip: bool  # paused -> don't schedule a new phase this cycle
+    park: bool  # abort -> move to recoverable terminal label
+    redo_phase: str | None
+    new_redo_count: int
+    guidance: str | None
+
+
+def apply_steering(
+    state: SteeringState,
+    issue: str,
+    known_phases: set[str],
+    max_redos: int,
+) -> SteeringDecision:
+    """Decide what the orchestrator should do for `issue` this phase boundary.
+
+    Precedence (per steering-global-constraints): abort > pause > redo. Redo is
+    only honored for a phase name present in `known_phases` and while
+    `state.redo_count < max_redos`; otherwise it is silently ignored (dropped,
+    not retried) so a stale/bogus `/redo` doesn't stall the issue forever.
+    """
+    if state.flow == _FLOW_ABORT:
+        return SteeringDecision(
+            skip=False,
+            park=True,
+            redo_phase=None,
+            new_redo_count=state.redo_count,
+            guidance=state.guidance,
+        )
+    if state.flow == _FLOW_PAUSED:
+        return SteeringDecision(
+            skip=True,
+            park=False,
+            redo_phase=None,
+            new_redo_count=state.redo_count,
+            guidance=state.guidance,
+        )
+    redo_phase = None
+    new_redo_count = state.redo_count
+    if (
+        state.redo_phase
+        and state.redo_phase in known_phases
+        and state.redo_count < max_redos
+    ):
+        redo_phase = state.redo_phase
+        new_redo_count = state.redo_count + 1
+    return SteeringDecision(
+        skip=False,
+        park=False,
+        redo_phase=redo_phase,
+        new_redo_count=new_redo_count,
+        guidance=state.guidance,
     )

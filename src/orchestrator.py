@@ -14,6 +14,7 @@ from bg_worker_manager import BGWorkerManager
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from hitl_controller import HITLController
+from human_steering import apply_steering
 from models import (
     BackgroundWorkerState,
     ErrorPayload,
@@ -26,6 +27,7 @@ from models import (
     SessionStartPayload,
     SessionStatus,
     StageStats,
+    SteeringState,
     SystemAlertPayload,
     Task,
     ThroughputStats,
@@ -531,6 +533,69 @@ class HydraFlowOrchestrator:
         """Backward-compatible access to HITL corrections dict."""
         return self._hitl_ctrl.hitl_corrections
 
+    async def _apply_human_steering(self) -> None:
+        """Actuate pending steering directives for active issues (ADR-0099 #4).
+
+        Pure decision logic lives in ``human_steering.apply_steering``; this
+        method only enumerates active issues and enacts the decision —
+        phase-boundary actuation, not a mid-phase interrupt (a running phase
+        always completes first; see steering-global-constraints). No-op when
+        ``human_steering_enabled`` is off.
+
+        - ``skip`` (paused): drop from this cycle — simply don't re-enqueue.
+        - ``park`` (abort): swap to the existing recoverable HITL label
+          (``hitl_label``) so the issue leaves active scheduling but a human
+          can un-escalate it later, exactly like any other HITL escalation.
+        - ``redo_phase``: re-enqueue to the named phase (when valid and under
+          the redo cap) and persist the incremented ``redo_count`` with
+          ``redo_phase`` cleared so it isn't replayed next cycle.
+        """
+        if not self._config.human_steering_enabled:
+            return
+
+        from issue_store import IssueStoreStage  # noqa: PLC0415
+
+        known_phases = {stage.value for stage in IssueStoreStage} - {
+            IssueStoreStage.MERGED.value
+        }
+        store: IssueStore = cast("IssueStore", self._svc.store)
+        active_issues = store.get_active_issues()
+        if not active_issues:
+            return
+
+        for issue_number in active_issues:
+            key = str(issue_number)
+            prev = self._state.get_human_steering(key)
+            decision = apply_steering(
+                prev, key, known_phases, self._config.human_steering_max_redos
+            )
+
+            if decision.park:
+                await self._svc.prs.swap_pipeline_labels(
+                    issue_number, self._config.hitl_label[0]
+                )
+                continue
+
+            if decision.skip:
+                # Paused — leave the issue exactly where it is this cycle;
+                # the next phase-poll simply won't pick it up as new work.
+                continue
+
+            if decision.redo_phase is not None:
+                task = store.get_cached(issue_number)
+                if task is not None:
+                    store.enqueue_transition(task, decision.redo_phase)
+                self._state.set_human_steering(
+                    key,
+                    SteeringState(
+                        guidance=prev.guidance,
+                        flow=prev.flow,
+                        redo_phase=None,
+                        redo_count=decision.new_redo_count,
+                        last_applied_ts=prev.last_applied_ts,
+                    ),
+                )
+
     def _sync_active_issue_numbers(self) -> None:
         """Persist the combined active issue set to state.
 
@@ -1016,6 +1081,7 @@ class HydraFlowOrchestrator:
             ("implement", self._implement_loop),
             ("review", self._review_loop),
             ("hitl", self._hitl_loop),
+            ("human_steering_actuator", self._human_steering_actuator_loop),
             ("pr_unsticker", self._svc.pr_unsticker_loop.run),
             ("merge_state_watcher", self._svc.merge_state_watcher_loop.run),
             ("report_issue", self._svc.report_issue_loop.run),
@@ -1335,6 +1401,29 @@ class HydraFlowOrchestrator:
             "hitl",
             _work,
             self._config.poll_interval,
+            is_pipeline=True,
+        )
+
+    async def _human_steering_actuator_loop(self) -> None:
+        """Continuously enact pending steering directives (ADR-0099 #4).
+
+        Runs as its own single-task polling loop — not folded into the
+        6 phase loops' shared ``_pipeline_work_wrapper`` — so pause/abort/redo
+        decisions for a given issue are enacted from exactly one coroutine at
+        a time. The phase loops themselves are unaware of steering; they
+        simply won't see a paused/parked/re-enqueued issue reappear until the
+        next phase-poll after this loop acts. No-op when
+        ``human_steering_enabled`` is off (checked inside ``_apply_human_steering``).
+        """
+
+        async def _work() -> object:
+            await self._apply_human_steering()
+            return False  # never "did work" — always sleep the full interval
+
+        await self._polling_loop(
+            "human_steering_actuator",
+            _work,
+            self._config.human_steering_interval_seconds,
             is_pipeline=True,
         )
 
