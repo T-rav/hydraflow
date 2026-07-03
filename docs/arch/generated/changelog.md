@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `a482385` — docs(adr): correct ADR-0102 Rule 3 (gate fails OPEN on advisor degradation by design) (#9695) (#9695) *(2026-07-02)*
 - `f170b89` — fix(adr-0101): drop line-number citation to satisfy P1.16 (#9692) (#9692) *(2026-07-02)*
 - `aae9526` — feat(disturbance): Phase B — burn-down loop (ADR-0095) (#9686) (#9686) *(2026-07-02)*
 - `8f35ebb` — Convergence gate GA: remove convergence_gate_enabled (gate is the sole review path) (#9688) (#9688) *(2026-07-01)*

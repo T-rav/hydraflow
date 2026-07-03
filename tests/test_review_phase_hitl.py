@@ -270,17 +270,6 @@ class TestRequestChangesRetry:
         assert feedback == "Looks good."
 
     @pytest.mark.asyncio
-    async def test_request_changes_under_cap_increments_attempt_counter(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """REQUEST_CHANGES under cap should increment the attempt counter."""
-        phase, pr, issue = self._setup_phase_for_retry(config)
-
-        await phase.review_prs([pr], [issue])
-
-        assert phase._state.get_review_attempts(42) == 1
-
-    @pytest.mark.asyncio
     async def test_comment_verdict_treated_as_soft_rejection(
         self, config: HydraFlowConfig
     ) -> None:
@@ -307,32 +296,6 @@ class TestRequestChangesRetry:
         phase._prs.transition.assert_any_await(42, "ready", pr_number=101)
         # Worktree should be preserved
         phase._workspaces.destroy.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_approve_resets_review_attempts(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """APPROVE should reset review attempt counter on successful merge."""
-        phase = make_review_phase(config)
-        issue = TaskFactory.create()
-        pr = PRInfoFactory.create()
-
-        # Simulate previous review attempts
-        phase._state.increment_review_attempts(42)
-
-        phase._reviewers.review = AsyncMock(return_value=ReviewResultFactory.create())
-        phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
-        phase._prs.push_branch = AsyncMock(return_value=True)
-        phase._prs.merge_pr = AsyncMock(return_value=True)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-
-        wt = config.workspace_path_for_issue(42)
-        wt.mkdir(parents=True, exist_ok=True)
-
-        await phase.review_prs([pr], [issue])
-
-        assert phase._state.get_review_attempts(42) == 0
 
     @pytest.mark.asyncio
     async def test_approve_clears_review_feedback(

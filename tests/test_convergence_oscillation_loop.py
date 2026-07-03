@@ -75,6 +75,7 @@ def _seed_oscillating_ledger(state: StateTracker, issue_number: int) -> None:
 
 def _seed_converged_ledger(state: StateTracker, issue_number: int) -> None:
     ledger = state.ensure_convergence_ledger(issue_number)
+    ledger.record_gate_result("review", "ADVANCE", [])
     ledger.converged = True
     state.save_convergence_ledger(issue_number, ledger)
 
@@ -312,3 +313,35 @@ async def test_snapshot_arm_unaffected_by_temporal_deferral(tmp_path: Path) -> N
 
     assert result == {"status": "ok", "scanned": 1, "escalated": 1}
     pr.create_issue.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sandbox_fix_only_ledger_is_skipped_not_scanned(tmp_path: Path) -> None:
+    """(l) PR-key guard: a ledger with only a sandbox_fix stage record is not scanned.
+
+    sandbox_fix rows are PR-keyed entries written by _sandbox_failure_fixer.py.
+    They share the GitHub number namespace with issues.  The caretaker must never
+    reason over them; they have no boundary/review stage record and must be skipped
+    before the scanned counter is incremented.
+    """
+    from models import StageRecord
+
+    state = StateTracker(tmp_path / "state.json")
+
+    # Seed a ledger that looks like a sandbox_fix PR row (only sandbox_fix stage).
+    ledger = state.ensure_convergence_ledger(200)
+    ledger.stage_state["sandbox_fix"] = StageRecord(attempts=3)
+    # Two boundary LOOP_BACKs to ensure it *would* escalate if not for the guard.
+    ledger.record_gate_result("triage", "LOOP_BACK", ["x"])
+    # Only sandbox_fix in stage_state means we overwrite stage_state entirely.
+    ledger.stage_state = {"sandbox_fix": StageRecord(attempts=3)}
+    state.save_convergence_ledger(200, ledger)
+
+    pr = _make_pr_manager()
+    loop = _make_loop(tmp_path, state, pr)
+
+    result = await loop._do_work()
+
+    # scanned=0: the sandbox_fix ledger is filtered before the scanned counter.
+    assert result == {"status": "ok", "scanned": 0, "escalated": 0}
+    pr.create_issue.assert_not_called()

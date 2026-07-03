@@ -94,6 +94,16 @@ class ConvergenceOscillationLoop(BaseBackgroundLoop):
         scanned = 0
 
         for issue_number, ledger in self._state.iter_convergence_ledgers():
+            # PR-keyed sandbox_fix rows share the GitHub issue-number namespace
+            # and may appear in the ledger store. The caretaker must only reason
+            # over issue ledgers, which always have at least one boundary/review
+            # stage record. Skip ledgers that lack any such stage — this guards
+            # against non-issue ledgers (e.g. sandbox_fix rows from
+            # state/_sandbox_failure_fixer.py) even if the number-namespace
+            # invariant were ever to break.
+            if not (set(ledger.stage_state) & {"triage", "shape", "plan", "review"}):
+                continue
+
             scanned += 1
 
             if ledger.converged or ledger.oscillation_escalated:
@@ -108,26 +118,11 @@ class ConvergenceOscillationLoop(BaseBackgroundLoop):
                 ledger.laps == 0 or ledger.laps >= self._config.max_convergence_laps
             )
 
-            if temporal_ok:
-                fires = ledger.detect_cross_boundary_oscillation(
-                    window=self._config.convergence_oscillation_window,
-                    min_loopback_stages=self._config.convergence_oscillation_min_loopback_stages,
-                )
-            else:
-                # Snapshot arm only: count how many boundary stages are LOOP_BACK.
-                boundary_stages = {"triage", "shape", "plan"}
-                loopback_count = sum(
-                    1
-                    for stage in boundary_stages
-                    if (
-                        ledger.stage_state.get(stage) is not None
-                        and ledger.stage_state[stage].last_verdict == "LOOP_BACK"
-                    )
-                )
-                fires = (
-                    loopback_count
-                    >= self._config.convergence_oscillation_min_loopback_stages
-                )
+            fires = ledger.detect_cross_boundary_oscillation(
+                window=self._config.convergence_oscillation_window,
+                min_loopback_stages=self._config.convergence_oscillation_min_loopback_stages,
+                include_temporal=temporal_ok,
+            )
 
             if fires:
                 # Identify which boundary stages are currently LOOP_BACK so the

@@ -136,6 +136,53 @@ class TestDetectCrossBoundaryOscillation:
         # Act + Assert: min_loopback_stages=2 not met
         assert ledger.detect_cross_boundary_oscillation(min_loopback_stages=2) is False
 
+    def test_include_temporal_false_suppresses_temporal_arm_but_snapshot_still_fires(
+        self,
+    ) -> None:
+        """include_temporal=False: temporal arm ignored, snapshot arm still evaluated."""
+        ledger = ConvergenceLedger(issue_number=7)
+        # Seed two identical laps (temporal oscillation would fire normally).
+        ledger.record_gate_result("review", "LOOP_BACK", ["sig-x"])
+        ledger.mark_lap()
+        ledger.record_gate_result("review", "LOOP_BACK", ["sig-x"])
+        ledger.mark_lap()
+        assert ledger.detect_outer_oscillation(window=2) is True
+
+        # With include_temporal=False the temporal arm is suppressed and no
+        # boundary stage is LOOP_BACK, so the snapshot arm returns False.
+        assert (
+            ledger.detect_cross_boundary_oscillation(
+                window=2, min_loopback_stages=2, include_temporal=False
+            )
+            is False
+        )
+
+        # Add two boundary LOOP_BACKs — snapshot arm must fire even with
+        # include_temporal=False.
+        ledger.record_gate_result("triage", "LOOP_BACK", [])
+        ledger.record_gate_result("plan", "LOOP_BACK", [])
+        assert (
+            ledger.detect_cross_boundary_oscillation(
+                window=2, min_loopback_stages=2, include_temporal=False
+            )
+            is True
+        )
+
+    def test_old_open_concerns_key_in_persisted_data_loads_clean(self) -> None:
+        """A ledger dict with an open_concerns key (legacy field) still validates.
+
+        Pydantic v2 ignores extra fields by default, so old persisted ledgers
+        with this key do not raise ValidationError after the field was removed.
+        """
+        data = {
+            "issue_number": 7,
+            "laps": 0,
+            "open_concerns": [{"description": "old concern", "severity": "low"}],
+        }
+        ledger = ConvergenceLedger.model_validate(data)
+        assert ledger.issue_number == 7
+        assert ledger.laps == 0
+
     def test_oscillation_escalated_field_defaults_false(self) -> None:
         ledger = ConvergenceLedger(issue_number=7)
         assert ledger.oscillation_escalated is False

@@ -1515,8 +1515,10 @@ class TestReviewConvergenceGate:
         phase = make_review_phase(config, default_mocks=True)
 
         # Pre-seed attempts well past the fix cap on the ledger.
+        ledger = phase._state.ensure_convergence_ledger(7)
         for _ in range(config.max_review_fix_attempts + 3):
-            phase._state.increment_review_attempts(7)
+            ledger.increment_attempts("review")
+        phase._state.save_convergence_ledger(7, ledger)
 
         decision = await phase._convergence_decision(
             issue_number=7, review_approved=False

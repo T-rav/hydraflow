@@ -169,15 +169,6 @@ class TestAccessorMethodsUseHelpers:
         assert result is not None
         assert result.tag == "v2"
 
-    def test_review_attempts_roundtrip(self, tmp_path: Path) -> None:
-        tracker = make_tracker(tmp_path)
-        assert tracker.get_review_attempts(3) == 0
-        count = tracker.increment_review_attempts(3)
-        assert count == 1
-        assert tracker.get_review_attempts(3) == 1
-        tracker.reset_review_attempts(3)
-        assert tracker.get_review_attempts(3) == 0
-
     def test_issue_attempts_roundtrip(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
         assert tracker.get_issue_attempts(4) == 0
@@ -240,8 +231,10 @@ class TestStateRoundtrip:
         tracker.mark_pr(4, "approved")
         tracker.set_hitl_origin(5, "hydraflow-implement")
         tracker.set_hitl_cause(6, "timeout")
-        tracker.increment_review_attempts(7)
-        tracker.increment_review_attempts(7)
+        ledger7 = tracker.ensure_convergence_ledger(7)
+        ledger7.increment_attempts("review")
+        ledger7.increment_attempts("review")
+        tracker.save_convergence_ledger(7, ledger7)
         tracker.increment_issue_attempts(8)
         tracker.set_verification_issue(9, 19)
         tracker.set_interrupted_issues({10: "review"})
@@ -260,7 +253,7 @@ class TestStateRoundtrip:
         assert tracker2.to_dict()["reviewed_prs"]["4"] == "approved"
         assert tracker2.get_hitl_origin(5) == "hydraflow-implement"
         assert tracker2.get_hitl_cause(6) == "timeout"
-        assert tracker2.get_review_attempts(7) == 2
+        assert tracker2.get_convergence_ledger(7).get_attempts("review") == 2
         assert tracker2.get_issue_attempts(8) == 1
         assert tracker2.get_verification_issue(9) == 19
         assert tracker2.get_interrupted_issues() == {10: "review"}
@@ -275,7 +268,9 @@ class TestStateRoundtrip:
         """Verify the persisted JSON file uses string keys (backwards compat)."""
         tracker = make_tracker(tmp_path)
         tracker.set_workspace(42, "/tmp/wt-42")
-        tracker.increment_review_attempts(99)
+        ledger99 = tracker.ensure_convergence_ledger(99)
+        ledger99.increment_attempts("review")
+        tracker.save_convergence_ledger(99, ledger99)
 
         raw = json.loads((tmp_path / "state.json").read_text())
         # JSON keys must be strings
