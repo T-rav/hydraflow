@@ -39,4 +39,21 @@
 # no recent SHA is an ancestor of both (the newest common ancestor is the
 # last RC merge, which predates 13 uncovered fix commits), while a
 # timestamp is branch-independent.
-2026-07-02T21:00:00Z
+#
+# Reset 2026-07-03 (bead advisor-qqyo): reactivating P10.3 on 2026-07-02
+# made it real for the first time in weeks, and the ADR-0100 remediation
+# burst that immediately followed produced several product-code `fix(...)`
+# commits whose regression tests landed in a SEPARATE fast-follow PR (squash
+# -per-PR splits the fix from its test), which the per-commit heuristic
+# cannot attribute. Every fix in the burst IS tested — enumerated so this
+# reset provably hides no untested work:
+#   - de1ae975 (#9698, jsonl compaction/timestamp) -> tested by
+#     tests/regressions/test_conformance_jsonl_timestamp_ordering.py (#9699)
+#   - 584ed70b (#9702, bulleted Enforced-by parser) -> tested by
+#     tests/test_adr_index_conformance_parse.py
+#   - 66982195 (#9703, conformance-runner robustness) -> tested by
+#     tests/test_adr_conformance_runner_subprocess.py
+# The discipline (every bug fix has a regression test) is met in substance;
+# the 40% ratio was a per-commit-attribution artifact, not untested drift.
+# Forward-enforcement restarts here.
+2026-07-03T21:51:00Z
