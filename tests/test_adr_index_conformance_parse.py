@@ -84,6 +84,81 @@ def test_enforced_by_stops_at_next_bullet_not_just_blank_line(tmp_path):
     )
 
 
+def test_bulleted_enforced_by_list_is_parsed(tmp_path):
+    """Idiomatic markdown bulleted **Enforced by:** lists parse to typed
+    checks, not zero. The inline capture stops at the first bullet, so a
+    dedicated fallback collects the immediately-following typed-check
+    bullets (bead advisor-z7o9)."""
+    adr = parse_adr_file(
+        _write(
+            tmp_path,
+            (
+                "# ADR-0099: X\n\n**Status:** Accepted\n"
+                "**Enforcement:** enforced\n"
+                "**Enforced by:**\n"
+                "- pytest:tests/test_x.py::test_a\n"
+                "- pytest:tests/test_y.py::test_b\n"
+                "\n## Context\n\nc\n"
+            ),
+        )
+    )
+    assert adr.enforced_by == (
+        Check(
+            kind="pytest",
+            target="tests/test_x.py::test_a",
+            raw="pytest:tests/test_x.py::test_a",
+        ),
+        Check(
+            kind="pytest",
+            target="tests/test_y.py::test_b",
+            raw="pytest:tests/test_y.py::test_b",
+        ),
+    )
+
+
+def test_bulleted_fallback_stops_at_non_check_bullet(tmp_path):
+    """A non-check bullet after **Enforced by:** (e.g. a sibling
+    `- **Spec:**`) must NOT be absorbed as a check — the fallback stops at
+    the first bullet that isn't a typed check, preserving the same
+    sibling-bullet safety the inline path has."""
+    adr = parse_adr_file(
+        _write(
+            tmp_path,
+            (
+                "# ADR-0099: X\n\n**Status:** Accepted\n"
+                "**Enforcement:** manual\n"
+                "**Enforced by:**\n"
+                "- **Spec:** docs/superpowers/x.md\n\n## Context\n\nc\n"
+            ),
+        )
+    )
+    assert adr.enforced_by == ()
+
+
+def test_bulleted_fallback_stops_at_first_non_check_after_valid_checks(tmp_path):
+    """Once the typed-check bullets end, a following non-check bullet ends
+    the list rather than being swallowed."""
+    adr = parse_adr_file(
+        _write(
+            tmp_path,
+            (
+                "# ADR-0099: X\n\n**Status:** Accepted\n"
+                "**Enforcement:** enforced\n"
+                "**Enforced by:**\n"
+                "- pytest:tests/test_x.py::test_a\n"
+                "- **Spec:** docs/superpowers/x.md\n\n## Context\n\nc\n"
+            ),
+        )
+    )
+    assert adr.enforced_by == (
+        Check(
+            kind="pytest",
+            target="tests/test_x.py::test_a",
+            raw="pytest:tests/test_x.py::test_a",
+        ),
+    )
+
+
 def test_manual_prose_is_one_check_per_line_not_comma_split():
     # commas inside manual prose must NOT fragment
     checks = parse_enforced_by("branch protection review, per PR checklist\n")
