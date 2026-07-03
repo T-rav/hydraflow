@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `eff7794` — docs(steering): ADR-0103 + glossary terms closing control surface #4 (MVP scope documented) *(2026-07-03)*
 - `b0a782b` — feat(steering): wire HumanSteeringLoop into runtime + scenario catalog *(2026-07-03)*
 - `c1cdbc8` — feat(steering): HumanSteeringLoop sensor + config *(2026-07-03)*
 - `ed627b8` — docs(adr): backfill Enforcement for all 59 grandfathered ADRs (drain grandfather set to ∅) (#9696) (#9696) *(2026-07-02)*
