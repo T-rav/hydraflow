@@ -125,6 +125,24 @@ class ConvergenceStateMixin:
         cl.oscillation_escalated = True
         self.save()
 
+    def reset_outer_laps(self, issue_number: int) -> None:
+        """Reset the outer lap budget for *issue_number* after a gate-driven HITL escalation.
+
+        Sets ``laps = 0`` and clears ``lap_signatures`` on the live ledger so a
+        human-fixed, re-queued issue starts with a fresh outer budget and can
+        loop back through the gate without immediately re-escalating.
+
+        Preserves ``stage_state``, ``blast_radius``, ``converged``, and
+        ``oscillation_escalated`` (caretaker dedup is separate by design).
+        No-op when no ledger exists for *issue_number*.
+        """
+        cl = self._data.convergence_ledgers.get(self._key(issue_number))
+        if cl is None:
+            return
+        cl.laps = 0
+        cl.lap_signatures = []
+        self.save()
+
     def min_review_passes_required(self, issue_number: int) -> int:
         """Return the minimum fresh-eyes review passes for *issue_number*.
 

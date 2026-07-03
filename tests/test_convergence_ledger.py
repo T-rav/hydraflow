@@ -197,3 +197,58 @@ class TestIterConvergenceLedgers:
         ledger = tracker.get_convergence_ledger(99)
         assert ledger is not None
         assert ledger.oscillation_escalated is True
+
+
+class TestResetOuterLaps:
+    """reset_outer_laps accessor (F2/M1 lifecycle)."""
+
+    def test_reset_clears_laps_and_signatures(self, tmp_path) -> None:
+        """After reset: laps==0, lap_signatures==[], other fields preserved."""
+        tracker = make_tracker(tmp_path)
+        ledger = tracker.ensure_convergence_ledger(7, blast_radius="high")
+        # Seed some lap state
+        ledger.record_gate_result("review", "LOOP_BACK", ["sig-a"])
+        ledger.mark_lap()
+        ledger.record_gate_result("review", "LOOP_BACK", ["sig-b"])
+        ledger.mark_lap()
+        ledger.oscillation_escalated = True
+        tracker.save_convergence_ledger(7, ledger)
+        assert tracker.get_convergence_ledger(7).laps == 2
+
+        tracker.reset_outer_laps(7)
+
+        after = tracker.get_convergence_ledger(7)
+        assert after is not None
+        assert after.laps == 0
+        assert after.lap_signatures == []
+        # Preserved fields
+        assert after.blast_radius == "high"
+        assert after.oscillation_escalated is True
+        assert "review" in after.stage_state
+
+    def test_reset_persists_across_reload(self, tmp_path) -> None:
+        """reset_outer_laps must call save() so state survives a reload."""
+        from state import StateTracker
+
+        tracker = make_tracker(tmp_path)
+        ledger = tracker.ensure_convergence_ledger(7)
+        ledger.record_gate_result("review", "LOOP_BACK", ["sig-x"])
+        ledger.mark_lap()
+        tracker.save_convergence_ledger(7, ledger)
+
+        tracker.reset_outer_laps(7)
+
+        reloaded = StateTracker(tmp_path / "state.json")
+        reloaded.load()
+        restored = reloaded.get_convergence_ledger(7)
+        assert restored is not None
+        assert restored.laps == 0
+        assert restored.lap_signatures == []
+
+    def test_reset_noop_when_no_ledger(self, tmp_path) -> None:
+        """reset_outer_laps is a no-op when the issue has no ledger."""
+        tracker = make_tracker(tmp_path)
+        assert tracker.get_convergence_ledger(42) is None
+        # Must not raise
+        tracker.reset_outer_laps(42)
+        assert tracker.get_convergence_ledger(42) is None

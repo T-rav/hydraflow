@@ -3695,6 +3695,9 @@ class ReviewPhase:
                 task=task,
             )
         )
+        # Reset the outer lap budget so a human-fixed, re-queued issue can
+        # loop back through the gate rather than insta-re-escalating (F2).
+        self._state.reset_outer_laps(pr.issue_number)
         if result.transcript:
             await self._suggest_memory(
                 result.transcript,
@@ -3825,6 +3828,9 @@ class ReviewPhase:
                 task=task,
             )
         )
+        # Reset the outer lap budget so a human-fixed, re-queued issue can
+        # loop back through the gate rather than insta-re-escalating (F2).
+        self._state.reset_outer_laps(pr.issue_number)
         if result.transcript:
             await self._suggest_memory(
                 result.transcript,

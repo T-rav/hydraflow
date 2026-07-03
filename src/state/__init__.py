@@ -286,4 +286,5 @@ class StateTracker(
         self.reset_review_attempts(issue_number)
         self.reset_issue_attempts(issue_number)
         self.clear_review_feedback(issue_number)
+        self.clear_convergence_ledger(issue_number)
         return proposals

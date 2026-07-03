@@ -3575,6 +3575,136 @@ class TestNarrowedExceptionHandling:
         result = await phase._fetch_code_scanning_alerts(pr)
         assert result is None
 
+
+# ---------------------------------------------------------------------------
+# Ledger lifecycle — F2 (reset after HITL) + M1 (clear on merge)
+# ---------------------------------------------------------------------------
+
+
+class TestLedgerLifecycle:
+    """Convergence ledger lifecycle: fresh lap budget after HITL, clear on merge (F2/M1)."""
+
+    @pytest.mark.asyncio
+    async def test_reject_escalate_resets_laps_to_zero(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """After lap-cap ESCALATE via reject path, laps==0 so re-queued issue can loop back."""
+        config.max_review_fix_attempts = 100
+        config.max_convergence_laps = 1  # escalate on very first lap
+        phase = make_review_phase(config, default_mocks=True)
+        pr = PRInfoFactory.create()
+        task = TaskFactory.create(id=pr.issue_number)
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
+
+        _setup_rejected_review_mocks(phase)
+        phase._prs.post_pr_comment = AsyncMock()
+
+        returned = await phase._handle_rejected_review(pr, task, result, 0)
+
+        assert returned is False  # ESCALATE path taken
+        ledger = phase._state.get_convergence_ledger(pr.issue_number)
+        assert ledger is not None
+        assert ledger.stage_state["review"].last_verdict == "ESCALATE"
+        # F2: laps must be reset after escalation
+        assert ledger.laps == 0
+        assert ledger.lap_signatures == []
+
+    @pytest.mark.asyncio
+    async def test_f2_regression_post_hitl_resumption_loops_back_not_escalates(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """F2 regression: after HITL escalation resets laps, a subsequent reject loops back.
+
+        Pre-fix: laps were never reset so the FIRST reject after human fix
+        immediately re-escalated (insta-re-escalate ping-pong).
+        Post-fix: laps==0 after escalation so the next reject loops back normally,
+        as long as the new lap count stays under the cap.
+
+        Uses cap=2: the escalating path exhausts laps=2 (at cap), resets to 0,
+        then the post-HITL path runs mark_lap -> laps=1 < 2, so LOOP_BACK.
+        """
+        from convergence_gate import GateDecision
+
+        config.max_review_fix_attempts = 100
+        config.max_convergence_laps = 2  # cap at 2 so post-reset lap=1 stays under
+        phase = make_review_phase(config, default_mocks=True)
+        pr = PRInfoFactory.create()
+        task = TaskFactory.create(id=pr.issue_number)
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
+
+        _setup_rejected_review_mocks(phase)
+        phase._prs.post_pr_comment = AsyncMock()
+
+        # Drive to ESCALATE: need 2 laps to hit the cap.
+        # First call loops back (laps=1 < 2).
+        first_decision = await phase._convergence_decision(
+            issue_number=pr.issue_number, review_approved=False
+        )
+        assert first_decision.decision is GateDecision.LOOP_BACK
+
+        # Second call hits cap (laps=2 >= 2) -> escalates via _handle_rejected_review.
+        first_return = await phase._handle_rejected_review(pr, task, result, 0)
+        assert first_return is False  # escalated
+
+        # Verify reset occurred
+        ledger_after = phase._state.get_convergence_ledger(pr.issue_number)
+        assert ledger_after is not None
+        assert ledger_after.laps == 0, (
+            "Laps must be reset to 0 after HITL escalation (F2)."
+        )
+
+        # Simulate human fix: re-queue (human transitions label; pipeline re-runs review).
+        # The next _convergence_decision increments laps to 1 < cap(2) -> LOOP_BACK.
+        decision = await phase._convergence_decision(
+            issue_number=pr.issue_number, review_approved=False
+        )
+        assert decision.decision is GateDecision.LOOP_BACK, (
+            "After HITL escalation the lap budget must be reset so the first "
+            "post-HITL review loops back instead of insta-re-escalating (F2)."
+        )
+
+    @pytest.mark.asyncio
+    async def test_successful_merge_clears_convergence_ledger(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """After a successful merge the convergence ledger is cleared (M1)."""
+        phase = make_review_phase(config, default_mocks=True)
+        pr = PRInfoFactory.create()
+        issue = TaskFactory.create(id=pr.issue_number)
+
+        # Pre-seed a ledger (simulates earlier review laps)
+        ledger = phase._state.ensure_convergence_ledger(pr.issue_number)
+        ledger.record_gate_result("review", "LOOP_BACK", ["some-sig"])
+        ledger.mark_lap()
+        phase._state.save_convergence_ledger(pr.issue_number, ledger)
+        assert phase._state.get_convergence_ledger(pr.issue_number) is not None
+
+        await phase.review_prs([pr], [issue])
+
+        # After successful merge the ledger must be gone
+        assert phase._state.get_convergence_ledger(pr.issue_number) is None
+
+    @pytest.mark.asyncio
+    async def test_failed_merge_does_not_clear_convergence_ledger(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A failed merge must NOT clear the convergence ledger."""
+        phase = make_review_phase(config, default_mocks=True)
+        phase._prs.merge_pr = AsyncMock(return_value=False)
+        pr = PRInfoFactory.create()
+        issue = TaskFactory.create(id=pr.issue_number)
+
+        # Pre-seed a ledger
+        ledger = phase._state.ensure_convergence_ledger(pr.issue_number)
+        ledger.record_gate_result("review", "LOOP_BACK", ["some-sig"])
+        ledger.mark_lap()
+        phase._state.save_convergence_ledger(pr.issue_number, ledger)
+
+        await phase.review_prs([pr], [issue])
+
+        # Ledger must survive a failed merge
+        assert phase._state.get_convergence_ledger(pr.issue_number) is not None
+
     @pytest.mark.asyncio
     async def test_fetch_code_scanning_alerts_catches_oserror(
         self, config: HydraFlowConfig
