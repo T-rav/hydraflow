@@ -56,6 +56,7 @@ from harness_insights import HarnessInsightStore
 from health_monitor_loop import HealthMonitorLoop
 from hitl_phase import HITLPhase
 from hitl_runner import HITLRunner
+from human_steering_loop import HumanSteeringLoop
 from implement_phase import ImplementPhase
 from issue_cache import IssueCache
 from issue_fetcher import GitHubTaskFetcher, IssueFetcher
@@ -323,6 +324,7 @@ class ServiceRegistry:
     auto_agent_preflight_loop: AutoAgentPreflightLoop
     sandbox_failure_fixer_loop: SandboxFailureFixerLoop
     disturbance_dampener_loop: DisturbanceDampenerLoop
+    human_steering_loop: HumanSteeringLoop
     diagram_loop: DiagramLoop
     cost_budget_watcher_loop: CostBudgetWatcherLoop
     pricing_refresh_loop: PricingRefreshLoop
@@ -1444,6 +1446,18 @@ def build_services(
         runner=disturbance_dampener_runner,
     )
 
+    # Human-on-the-loop continuous steering sensor (ADR-0099 #4). Reads
+    # active issue numbers straight off the persisted StateTracker set —
+    # the same source the orchestrator maintains via
+    # ``_sync_active_issue_numbers`` on every phase transition.
+    human_steering_loop = HumanSteeringLoop(  # noqa: F841
+        config=config,
+        state=state,
+        prs=prs,
+        deps=loop_deps,
+        active_issues_cb=state.get_active_issue_numbers,
+    )
+
     # Term-Proposer (ADR-0054). Production adapters wire the loop to:
     # - ClaudeCLIClient: shells out to `claude -p` via SubprocessRunner,
     #   mirroring `wiki_compiler.WikiCompiler._call_model`.
@@ -1603,6 +1617,7 @@ def build_services(
         auto_agent_preflight_loop=auto_agent_preflight_loop,
         sandbox_failure_fixer_loop=sandbox_failure_fixer_loop,
         disturbance_dampener_loop=disturbance_dampener_loop,
+        human_steering_loop=human_steering_loop,
         diagram_loop=diagram_loop,
         cost_budget_watcher_loop=cost_budget_watcher_loop,
         pricing_refresh_loop=pricing_refresh_loop,

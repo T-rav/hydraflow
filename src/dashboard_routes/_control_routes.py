@@ -291,6 +291,11 @@ _bg_worker_defs = [
         "Burns down disturbance backlog by selecting units per dimension+file, dispatching an auto-agent fix, and opening one PR per file (ADR-0095).",
     ),
     (
+        "human_steering",
+        "Human Steering",
+        "Senses per-issue GitHub-comment steering directives (/steer, /pause, /resume, /redo, /abort) each tick and writes the steering reference (ADR-0099 #4).",
+    ),
+    (
         "security_patch",
         "Security Patch",
         "Polls Dependabot alerts and files issues for fixable vulnerabilities.",

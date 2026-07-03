@@ -950,6 +950,47 @@ def _build_disturbance_dampener(ports: dict[str, Any], config: Any, deps: Any) -
     )
 
 
+def _build_human_steering(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build HumanSteeringLoop for scenarios (ADR-0099 #4).
+
+    ``prs`` defaults to a MagicMock whose ``list_issue_comments`` is an
+    AsyncMock returning ``[]`` (no comments, no directives parsed).
+    ``state`` defaults to a MagicMock whose ``get_human_steering`` returns a
+    clean ``SteeringState()``, mirroring the disturbance-dampener builder's
+    clean-slate default. ``active_issues_cb`` defaults to a no-op returning
+    ``[]`` so scenarios that only need scaffold-wiring smoke tick with zero
+    work; scenarios exercising the sensing path should seed
+    ``ports['human_steering_active_issues_cb']``.
+    """
+    from human_steering_loop import HumanSteeringLoop  # noqa: PLC0415
+    from models import SteeringState  # noqa: PLC0415
+
+    prs = ports.get("github")
+    if prs is None:
+        prs = MagicMock()
+        prs.list_issue_comments = AsyncMock(return_value=[])
+        ports["github"] = prs
+
+    state = ports.get("human_steering_state")
+    if state is None:
+        state = MagicMock()
+        state.get_human_steering.return_value = SteeringState()
+        ports["human_steering_state"] = state
+
+    active_issues_cb = ports.get("human_steering_active_issues_cb")
+    if active_issues_cb is None:
+        active_issues_cb = lambda: []  # noqa: E731
+        ports["human_steering_active_issues_cb"] = active_issues_cb
+
+    return HumanSteeringLoop(
+        config=config,
+        state=state,
+        prs=prs,
+        deps=deps,
+        active_issues_cb=active_issues_cb,
+    )
+
+
 def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build AutoAgentPreflightLoop for scenarios (spec §1–§11).
 
@@ -1620,6 +1661,8 @@ _BUILDERS: dict[str, Any] = {
     "sandbox_failure_fixer": _build_sandbox_failure_fixer,
     # disturbance dampener burn-down actuator (ADR-0095, Pattern A)
     "disturbance_dampener": _build_disturbance_dampener,
+    # human-on-the-loop continuous steering sensor (ADR-0099 #4)
+    "human_steering": _build_human_steering,
     # ubiquitous-language (ADR-0054 + ADR-0057 + ADR-0058 + ADR-0062)
     "edge_proposer": _build_edge_proposer,
     "entry_evidence": _build_entry_evidence,

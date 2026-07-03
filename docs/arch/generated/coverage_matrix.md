@@ -34,7 +34,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `GateActivatorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_gate_activator_loop.py` | ✅ in catalog | ✅ `s45_gate_activator_no_proposals.py` |
 | `GitHubCacheLoop` | ✅ [0076] | ✅ [git-hub-cache-loop.md, github-cache-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_github_cache_loop.py` | ✅ in catalog | ✅ `s44_github_cache_idle_poll.py` |
 | `HealthMonitorLoop` | ✅ [0045, 0046, 0093] | ✅ [testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_health_monitor_loop_primary_cycle.py` | ✅ in catalog | ✅ `s48_health_monitor_idle_poll.py` |
-| `HumanSteeringLoop` | ❌ | ❌ | ❌ | ❌ | ✅ `test_human_steering_loop.py` | ❌ | ❌ |
+| `HumanSteeringLoop` | ❌ | ❌ | ❌ | ❌ | ✅ `test_human_steering_loop.py` | ⚠️ in catalog (no scenario file) | ❌ |
 | `LabelDriftWatcherLoop` | ✅ [0088] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_label_drift_watcher_loop.py` | ✅ in catalog | ❌ |
 | `LiveCorpusReplayLoop` | ✅ [0086] | ✅ [live-corpus-replay-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_live_corpus_replay_loop.py` | ✅ in catalog | ✅ `s43_live_corpus_replay_idle.py` |
 | `LogIngestLoop` | ❌ | ❌ | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_log_ingest_loop.py` | ✅ in catalog | ❌ |

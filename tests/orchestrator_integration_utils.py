@@ -511,6 +511,7 @@ def build_scripted_services(
     services.auto_agent_preflight_loop = FakeBackgroundLoop()
     services.sandbox_failure_fixer_loop = FakeBackgroundLoop()
     services.disturbance_dampener_loop = FakeBackgroundLoop()
+    services.human_steering_loop = FakeBackgroundLoop()
     services.diagram_loop = FakeBackgroundLoop()
     services.pricing_refresh_loop = FakeBackgroundLoop()
     services.cost_budget_watcher_loop = FakeBackgroundLoop()
