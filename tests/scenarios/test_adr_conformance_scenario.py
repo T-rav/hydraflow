@@ -278,11 +278,15 @@ class TestAdrConformanceScenario:
         for event in conformance_events:
             assert len(event.data["results"]) == 3
 
-        # jsonl accumulates 3 rows per tick (append-only ledger).
+        # jsonl is compacted to the latest row per adr_id each tick (snapshot
+        # semantics, bead advisor-sqsv) — bounded at one row per ADR, not an
+        # append-only ledger. Two ticks over three ADRs → three rows (one per
+        # adr_id carrying the second tick's outcome), not six.
         jsonl_path = config.repo_data_root / "metrics" / "adr_conformance.jsonl"
         rows = [
             json.loads(line)
             for line in jsonl_path.read_text().splitlines()
             if line.strip()
         ]
-        assert len(rows) == 6
+        assert len(rows) == 3
+        assert {r["adr_id"] for r in rows} == {"ADR-0049", "ADR-0050", "ADR-0051"}
