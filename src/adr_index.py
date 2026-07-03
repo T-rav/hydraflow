@@ -144,6 +144,37 @@ def parse_enforced_by(block: str) -> tuple[Check, ...]:
     return tuple(checks)
 
 
+_BULLET_RE = re.compile(r"^[-*]\s+(.*)$")
+
+
+def _parse_bulleted_enforced_by(text: str, start: int) -> tuple[Check, ...]:
+    """Collect a bulleted `**Enforced by:**` list into typed checks.
+
+    Scans the lines after *start* (the end of the `**Enforced by:**` marker).
+    A bullet whose content (after the ``-``/``*`` marker) begins with
+    ``pytest:`` or ``make:`` is a typed check; the first bullet that is NOT a
+    typed check, or the first non-bullet/blank line once checks have begun,
+    ends the list. This keeps unrelated sibling bullets (e.g. ``- **Spec:**``)
+    from being absorbed, matching the inline path's safety.
+    """
+    checks: list[Check] = []
+    for raw_line in text[start:].splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            if checks:
+                break
+            continue  # skip the blank between the marker line and the list
+        m = _BULLET_RE.match(stripped)
+        if not m:
+            break  # a non-bullet line ends the list
+        item = m.group(1).strip().rstrip(",").strip()
+        if item.startswith("pytest:") or item.startswith("make:"):
+            checks.extend(parse_enforced_by(item))
+        else:
+            break  # a non-check bullet (e.g. `- **Spec:**`) ends the list
+    return tuple(checks)
+
+
 def _normalize_enforcement(raw: str) -> str:
     low = raw.strip().lower()
     return low if low in _KNOWN_ENFORCEMENT else "unknown"
@@ -226,6 +257,15 @@ def parse_adr_file(path: Path) -> ADR:
     enforcement = _normalize_enforcement(enf_match.group(1)) if enf_match else "unknown"
     eb_match = _ENFORCED_BY_RE.search(text)
     enforced_by = parse_enforced_by(eb_match.group(1)) if eb_match else ()
+    if eb_match and not enforced_by:
+        # Bulleted form: `**Enforced by:**` on its own line followed by
+        # `- pytest:...` / `- make:...` bullets. _ENFORCED_BY_RE deliberately
+        # stops its inline capture at the first bullet (to avoid swallowing
+        # unrelated sibling frontmatter bullets), so the inline group is empty
+        # here. Collect the immediately-following bullets that ARE typed
+        # checks; stop at the first bullet that isn't (preserving the same
+        # sibling-bullet safety the inline path has).
+        enforced_by = _parse_bulleted_enforced_by(text, eb_match.end())
 
     return ADR(
         number=number,
