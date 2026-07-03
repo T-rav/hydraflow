@@ -11,13 +11,21 @@ Verifies three behaviours of the unconditional convergence gate:
 
 2. ``test_oscillation_escalates`` — a single REQUEST_CHANGES result pushes the
    issue over the outer lap budget (``max_convergence_laps=1``), causing
-   escalation to HITL and the ledger's lap count to hit the budget.
+   escalation to HITL.  After escalation ``reset_outer_laps`` resets
+   ``laps=0`` and ``lap_signatures=[]`` so a human-fixed re-queued issue
+   starts with a fresh outer budget (the "fresh-budget-after-HITL" contract
+   introduced in commit 71cd08b6).  ``stage_state``, ``blast_radius``,
+   ``converged``, and ``oscillation_escalated`` are preserved.
 
 3. ``test_approve_converges`` — a PR with an APPROVE review verdict and a
    scripted post-verify advisor APPROVE passes the gated path end-to-end:
    ``_convergence_decision(review_approved=True)`` runs the lens judge once
    (low blast radius = 1 pass), records ``last_verdict=="ADVANCE"``, flips
-   ``ledger.converged`` to True, and merges the PR.
+   ``ledger.converged`` to True, and merges the PR.  After the merge
+   ``PostMergeHandler.handle_approved`` clears the ledger via
+   ``clear_convergence_ledger`` (commit e6f166d3).  The test captures the
+   pre-clear ledger state through a monkeypatch observer so the converged=True
+   proof survives the clear.
 
 These are **integration-level** scenarios: the real ``ReviewPhase._handle_approved_review_gated``
 / ``_handle_rejected_review_gated`` and ``ConvergenceLedger`` run; nothing is
@@ -143,7 +151,7 @@ class TestLoopBackRecordsLap:
 
 
 class TestOscillationEscalates:
-    """Gate ON, lap budget exhausted → issue escalates to HITL.
+    """Gate ON, lap budget exhausted → HITL escalation + fresh outer budget.
 
     We lower ``max_convergence_laps`` to 1 so that a single REQUEST_CHANGES
     lap immediately triggers the budget check inside ``_convergence_decision``:
@@ -153,12 +161,22 @@ class TestOscillationEscalates:
 
     After escalation ``_handle_rejected_review_gated`` calls
     ``_escalate_to_hitl``, which transitions the issue to the diagnose label
-    (``hydraflow-diagnose``), not directly to ``hydraflow-hitl``.
+    (``hydraflow-diagnose``), not directly to ``hydraflow-hitl``).
+
+    **Fresh-budget-after-HITL contract (commit 71cd08b6)**: after every
+    gate-driven HITL escalation ``reset_outer_laps`` sets ``laps=0`` and
+    clears ``lap_signatures`` so a human-fixed, re-queued issue starts with a
+    fresh outer budget rather than immediately re-escalating.  ``stage_state``,
+    ``blast_radius``, ``converged``, and ``oscillation_escalated`` are
+    intentionally preserved (they carry diagnostic context the caretaker needs).
+
     The test asserts:
 
-    - The ledger records exactly 1 lap (the budget-exhausting lap).
-    - The issue carries the diagnose label (escalation completed).
+    - The escalation occurred: issue carries the diagnose label.
     - The issue is NOT merged.
+    - Post-escalation ledger: ``laps == 0`` (reset), ``lap_signatures == []``
+      (reset), ``stage_state["review"]`` still present and records the
+      ESCALATE verdict (preserved).
     """
 
     async def test_oscillation_escalates(self, tmp_path) -> None:
@@ -178,30 +196,46 @@ class TestOscillationEscalates:
 
         result = await world.run_pipeline()
 
-        # --- probe: gate must have run ---
+        # --- probe: gate must have run and the ledger must still exist ---
+        # (reset_outer_laps only resets counters; it does NOT delete the ledger)
         ledger = world.harness.state.get_convergence_ledger(1)
         assert ledger is not None, (
             "ConvergenceLedger is None after a gated REQUEST_CHANGES — "
             "the real gate did not run. BLOCKED."
         )
 
-        # The lap budget was exhausted: exactly 1 lap (max_convergence_laps=1).
-        assert ledger.laps == 1, (
-            f"Expected laps==1 after budget-exhausting reject at max_convergence_laps=1; got {ledger.laps}"
-        )
-
-        # Issue must be escalated to HITL and NOT merged.
-        outcome = result.issue(1)
-        assert outcome.merged is False
-
+        # --- escalation confirmation: issue carries the diagnose label ---
         # Convergence escalation routes through the diagnostic loop first:
         # _escalate_to_hitl transitions to "diagnose" (hydraflow-diagnose),
-        # not directly to hydraflow-hitl.  Assert the diagnose label is applied.
+        # not directly to hydraflow-hitl.
+        outcome = result.issue(1)
+        assert outcome.merged is False
         diagnose_label = world.harness.config.diagnose_label[0]
         issue_labels = outcome.labels
         assert diagnose_label in issue_labels, (
             f"Expected diagnose label {diagnose_label!r} in issue labels after "
             f"convergence escalation; got {issue_labels}"
+        )
+
+        # --- fresh-budget-after-HITL contract ---
+        # reset_outer_laps was called after escalation: laps resets to 0 so the
+        # human-fixed re-queued issue starts with a clean outer budget.
+        assert ledger.laps == 0, (
+            f"Expected laps==0 after HITL escalation (reset_outer_laps); got {ledger.laps}"
+        )
+        assert ledger.lap_signatures == [], (
+            f"Expected lap_signatures==[] after reset_outer_laps; got {ledger.lap_signatures}"
+        )
+
+        # stage_state is preserved (diagnostic context survives the lap reset):
+        # _convergence_decision recorded ESCALATE into stage_state["review"]
+        # before reset_outer_laps was called.
+        review_rec = ledger.stage_state.get("review")
+        assert review_rec is not None, (
+            "stage_state['review'] was wiped by reset_outer_laps — it should be preserved"
+        )
+        assert review_rec.last_verdict == "ESCALATE", (
+            f"Expected stage_state['review'].last_verdict=='ESCALATE'; got {review_rec.last_verdict!r}"
         )
 
 
@@ -216,13 +250,21 @@ class TestApproveConverges:
     This is the critical Phase-2 proof: the gated approve path runs
     ``_handle_approved_review_gated`` → ``_convergence_decision(review_approved=True)``
     → the HybridGate lens judge (one pass for low blast radius) → the scripted
-    ``post_verify`` advisor → ADVANCE → ``ledger.converged = True``.
+    ``post_verify`` advisor → ADVANCE → ``ledger.converged = True`` → merge.
 
     Phase 1 could only exercise the reject path (REQUEST_CHANGES → LOOP_BACK).
     This scenario proves the ADVANCE branch is plumbed end-to-end in MockWorld:
     the real gate logic records ``last_verdict=="ADVANCE"``, calls
     ``recompute_converged``, and flips ``converged`` to True — all without
     hand-touching the ledger.
+
+    **Clear-on-merge contract (commit e6f166d3)**: after a successful merge
+    ``PostMergeHandler.handle_approved`` calls ``clear_convergence_ledger`` so
+    the post-run ledger is ``None``.  The ADVANCE/converged=True proof is
+    captured via a monkeypatch observer that wraps ``clear_convergence_ledger``
+    and snapshots the live ledger immediately before delegating to the real
+    method (mirroring the ``test_ledger_ordering_retrospective_reads_before_clear``
+    pattern in ``tests/test_post_merge_handler.py``).
 
     Post-verify advisor is scriptable in MockWorld via
     ``world._llm.script_advisor(issue, "post_verify", [payload])``.
@@ -275,20 +317,38 @@ class TestApproveConverges:
         )
         world._llm.script_advisor(1, "post_verify:correctness", [advisor_payload])
 
+        # --- pre-clear observer ---
+        # After a successful merge clear_convergence_ledger wipes the ledger.
+        # We capture a deep copy of the ledger BEFORE the clear so the
+        # converged=True proof survives the post-merge clear.
+        captured_pre_clear: list[object] = []
+        state = world.harness.state
+        _real_clear = state.clear_convergence_ledger
+
+        def _capturing_clear(issue_number: int) -> None:
+            snap = state.get_convergence_ledger(issue_number)
+            if snap is not None:
+                captured_pre_clear.append(snap)
+            _real_clear(issue_number)
+
+        monkeypatch.setattr(state, "clear_convergence_ledger", _capturing_clear)
+
         result = await world.run_pipeline()
 
-        # --- probe: confirm the gate ran and created the ledger ---
-        ledger = world.harness.state.get_convergence_ledger(1)
-        assert ledger is not None, (
-            "ConvergenceLedger is None after a gated APPROVE — "
-            "_handle_approved_review_gated did not run through MockWorld. "
-            "BLOCKED: the approve-gate path is not exercised at this injection level."
+        # --- probe: confirm the gate ran (observer must have captured something) ---
+        assert captured_pre_clear, (
+            "clear_convergence_ledger was never called with a live ledger — "
+            "_handle_approved_review_gated did not run through MockWorld, or "
+            "the merge did not complete. BLOCKED: approve-gate path not exercised."
         )
 
+        # Inspect the pre-clear snapshot (the state the ledger held at merge time).
+        pre_clear = captured_pre_clear[0]
+
         # The gate recorded ADVANCE for the review stage, which flips converged.
-        review_record = ledger.stage_state.get("review")
+        review_record = pre_clear.stage_state.get("review")
         assert review_record is not None, (
-            "No 'review' stage record in the ledger after APPROVE path ran."
+            "No 'review' stage record in the pre-clear ledger after APPROVE path ran."
         )
         assert review_record.last_verdict == "ADVANCE", (
             f"Expected last_verdict=='ADVANCE' after gated APPROVE; "
@@ -297,14 +357,22 @@ class TestApproveConverges:
 
         # converged must be True: recompute_converged(["review"]) was called
         # inside _convergence_decision after recording ADVANCE.
-        assert ledger.converged is True, (
-            f"Expected ledger.converged==True after ADVANCE decision; "
-            f"got converged={ledger.converged!r}, laps={ledger.laps}"
+        assert pre_clear.converged is True, (
+            f"Expected ledger.converged==True after ADVANCE decision (pre-clear snapshot); "
+            f"got converged={pre_clear.converged!r}, laps={pre_clear.laps}"
         )
 
         # One lap was closed (mark_lap() is called in _convergence_decision).
-        assert ledger.laps >= 1, (
-            f"Expected ledger.laps >= 1 after gated approve path; got {ledger.laps}"
+        assert pre_clear.laps >= 1, (
+            f"Expected ledger.laps >= 1 after gated approve path (pre-clear snapshot); "
+            f"got {pre_clear.laps}"
+        )
+
+        # --- clear-on-merge contract ---
+        # After handle_approved returns the ledger must be gone.
+        assert state.get_convergence_ledger(1) is None, (
+            "Expected convergence ledger to be cleared after successful merge "
+            "(clear_convergence_ledger was called but ledger still exists)."
         )
 
         # The PR was merged: _handle_approved_review_gated calls

@@ -17,9 +17,18 @@ no flag or env override is required):
    ``recompute_converged(["review"])`` flips ``ledger.converged`` to ``True``.
 5. PR is merged via ``_handle_approved_merge``; ``/api/issues/history`` shows
    ``outcome=="merged"`` for issue #1.
-6. ``/api/state`` shows the ``convergence_ledgers`` entry with ``laps >= 1``,
-   ``stage_state["review"]["last_verdict"] == "ADVANCE"``, and
-   ``converged == True`` — confirming the full Phase 2a gate path completed.
+6. After the merge ``PostMergeHandler.handle_approved`` calls
+   ``clear_convergence_ledger`` (commit e6f166d3), so the ``convergence_ledgers``
+   entry for issue #1 is ABSENT from ``/api/state`` once the merge completes.
+
+**Lifecycle contract and test-layer split**: the converged=True proof (gate ran,
+ADVANCE recorded, ``recompute_converged`` flipped the flag) is verified at the
+unit layer (``tests/test_post_merge_handler.py::test_ledger_ordering_retrospective_reads_before_clear``)
+and at the MockWorld layer (``tests/scenarios/test_convergence_review_mockworld.py::TestApproveConverges``),
+where a pre-clear observer captures the ledger state before the clear fires.
+This sandbox e2e confirms the merge completed AND that clear-on-merge ran in
+the real orchestrator.  Do NOT try to race the pre-clear window in Docker — the
+window is too narrow to be reliable.
 
 Advisor scripting note: the gated approve calls ``PostVerifyAdvisor`` with the
 lens-tagged role ``"post_verify:correctness"`` (correctness lens for low blast
@@ -128,41 +137,30 @@ async def assert_outcome(api, page) -> None:
         timeout=240.0,
     )
 
-    # --- 2. /api/state shows convergence_ledgers with full Phase 2a gate path ---
-    # Phase 2a gates BOTH the REJECT and APPROVE paths. On REQUEST_CHANGES the gate
-    # records LOOP_BACK and closes lap 1 via mark_lap(). On APPROVE the gate runs
-    # the post_verify lens judge → records ADVANCE → recompute_converged flips
-    # ledger.converged to True. Assert all three: laps >= 1, last_verdict == "ADVANCE",
-    # and converged is True.
-    def _ledger_converged(payload: object) -> bool:
+    # --- 2. /api/state shows convergence_ledgers ABSENT for issue #1 ---
+    # After a successful merge PostMergeHandler.handle_approved calls
+    # clear_convergence_ledger (commit e6f166d3), removing the entry entirely.
+    # The converged=True proof is covered at the unit layer
+    # (test_ledger_ordering_retrospective_reads_before_clear) and MockWorld layer
+    # (TestApproveConverges pre-clear observer).  The sandbox asserts the
+    # clear-on-merge end state: no ledger entry for issue #1 in the real
+    # orchestrator's state after the merge completes.
+    def _ledger_absent(payload: object) -> bool:
         if not isinstance(payload, dict):
             return False
         ledgers = payload.get("convergence_ledgers")
         if not isinstance(ledgers, dict):
-            return False
-        # The ledger key is the repo-qualified issue key produced by
-        # StateTracker._key(); in the single-repo sandbox it resolves to "1"
-        # or a namespaced variant. Accept any entry whose issue_number == 1.
-        for entry in ledgers.values():
-            if not isinstance(entry, dict):
-                continue
-            if entry.get("issue_number") != 1:
-                continue
-            # The reject closed lap 1 — laps >= 1.
-            if entry.get("laps", 0) < 1:
-                continue
-            # The gate recorded ADVANCE on the approve pass.
-            review_stage = entry.get("stage_state", {}).get("review", {})
-            if review_stage.get("last_verdict") != "ADVANCE":
-                continue
-            # recompute_converged flipped converged to True after ADVANCE.
-            if entry.get("converged") is not True:
-                continue
+            # No convergence_ledgers key at all → cleared (vacuous absence OK
+            # only if the merge was already confirmed above).
             return True
-        return False
+        # Accept if there is no entry whose issue_number == 1.
+        for entry in ledgers.values():
+            if isinstance(entry, dict) and entry.get("issue_number") == 1:
+                return False  # Still present — clear hasn't propagated yet.
+        return True
 
     await api.wait_until(
         "/api/state",
-        _ledger_converged,
+        _ledger_absent,
         timeout=30.0,
     )
