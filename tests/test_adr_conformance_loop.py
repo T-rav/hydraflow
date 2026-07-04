@@ -18,11 +18,17 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from adr_conformance import CheckOutcome
+from adr_conformance import (
+    AdrConformance,
+    CheckOutcome,
+    CheckResult,
+    ConformanceKind,
+)
 from adr_conformance_loop import AdrConformanceLoop
 from adr_index import ADRIndex
 from base_background_loop import LoopDeps
@@ -365,6 +371,31 @@ async def test_unresolved_with_ambiguous_rename_still_files_plain_issue(
         for title, _body, _labels in fakes.pr.created_issues
         if "ADR-0051" in title
     )
+
+
+def test_detect_rename_returns_none_for_unresolved_make_target(loop_fixture) -> None:
+    """Make-target renames are never auto-detected (bead advisor-w6zf).
+
+    A make target's identity IS its name — unlike a pytest node, which keeps
+    its function/class name when it moves files, a renamed make target offers
+    no content signal to match, so any guessed REPOINT would be unsafe. An
+    UNRESOLVED make check therefore yields no rename and routes to FILE_ISSUE
+    (then ESCALATE by recurrence). This is conservative-by-design, not a gap:
+    _detect_rename only ever inspects pytest: checks.
+    """
+    loop, _ = loop_fixture
+    conf = AdrConformance(
+        adr_id="ADR-0099",
+        kind=ConformanceKind.ENFORCED,
+        outcome=CheckOutcome.UNRESOLVED,
+        checks=[
+            CheckResult(
+                check="make:some-renamed-target", outcome=CheckOutcome.UNRESOLVED
+            )
+        ],
+        timestamp=datetime(2026, 7, 4, tzinfo=UTC),
+    )
+    assert loop._detect_rename(conf) is None
 
 
 async def test_pass_clears_attempt_counter(loop_fixture) -> None:
