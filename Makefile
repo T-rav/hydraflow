@@ -357,6 +357,7 @@ quality: deps lint-ul
 		$(UV) pyright && echo "[typecheck OK]" & \
 		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
 		PYTHONPATH=src $(UV) pytest tests/ && echo "[tests OK]" & \
+		PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -q && echo "[scenarios OK]" & \
 		wait_result=0; \
 		for job in $$(jobs -p); do wait $$job || wait_result=1; done; \
 		exit $$wait_result; \

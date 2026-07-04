@@ -104,6 +104,28 @@ def _skip_module(path: Path) -> bool:
 
 _FIX_COMMIT_RE = re.compile(r"^(fix|bugfix|bug)[\(:]", re.IGNORECASE)
 _BASELINE_FILE = ".hydraflow-audit-baseline"
+# ISO date (2026-07-02) or timestamp (2026-07-02T21:00:00Z). Anything else
+# in the baseline file is treated as a commit-ish.
+_DATE_BASELINE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ].+)?$")
+
+
+def _baseline_selector(baseline: str) -> str:
+    """Turn the declared baseline into a ``git log`` selector argument.
+
+    Dates become ``--since=`` filters, which are branch-independent: they
+    work on PR merge commits into staging AND on main, with no requirement
+    that the baseline commit be an ancestor of HEAD (squash-based RC
+    promotion means no post-promotion staging SHA ever is). Bare dates get
+    an explicit midnight because git's approxidate fills missing
+    time-of-day fields from the *current* clock — ``--since=2026-07-02``
+    run at 14:00 silently excludes that morning's commits. Anything
+    non-date-shaped is treated as a commit-ish range start.
+    """
+    if not _DATE_BASELINE_RE.match(baseline):
+        return f"{baseline}..HEAD"
+    if "T" in baseline or " " in baseline:
+        return f"--since={baseline}"
+    return f"--since={baseline}T00:00:00"
 
 
 @register("P10.3")
@@ -125,7 +147,7 @@ def _bug_fixes_land_with_regression_tests(ctx: CheckContext) -> Finding:  # noqa
     baseline = _read_baseline(ctx.root)
     git_args = ["git", "log", "--no-merges", "-n", "50", "--format=%H%x09%s"]
     if baseline is not None:
-        git_args.append(f"{baseline}..HEAD")
+        git_args.append(_baseline_selector(baseline))
     try:
         result = subprocess.run(
             git_args,
@@ -144,7 +166,22 @@ def _bug_fixes_land_with_regression_tests(ctx: CheckContext) -> Finding:  # noqa
         for line in result.stdout.splitlines()
         if "\t" in line and _FIX_COMMIT_RE.match(line.split("\t", 1)[1])
     ]
-    scope = f"since baseline {baseline[:7]}" if baseline else "last 50 commits"
+    # A `fix(...)` commit that touches ONLY files under tests/ is test
+    # maintenance (updating a test to match intended behaviour, adding a
+    # regression test), not a product bug fix — demanding it add *another*
+    # regression test is nonsensical, and such commits would otherwise drag
+    # the ratio down purely on their conventional-commit prefix. Exclude
+    # them: the principle is "every bug fix in *product code* lands with a
+    # regression test."
+    fix_commits = [
+        sha for sha in fix_commits if not _is_test_only_commit(ctx.root, sha)
+    ]
+    if baseline is None:
+        scope = "last 50 commits"
+    elif _DATE_BASELINE_RE.match(baseline):
+        scope = f"since baseline {baseline}"
+    else:
+        scope = f"since baseline {baseline[:7]}"
     if not fix_commits:
         return finding(
             "P10.3", Status.PASS, f"no fix/bug commits {scope} — nothing to audit"
@@ -172,7 +209,8 @@ def _bug_fixes_land_with_regression_tests(ctx: CheckContext) -> Finding:  # noqa
         "P10.3",
         Status.WARN,
         f"{len(missing)}/{len(fix_commits)} fix commits {scope} without a regression test ({sample}) — "
-        "set .hydraflow-audit-baseline to a post-adoption commit to exclude historical drift",
+        "set .hydraflow-audit-baseline to a post-adoption commit or ISO date "
+        "to exclude historical drift",
     )
 
 
@@ -191,6 +229,34 @@ def _read_baseline(root: Path) -> str | None:
         if line.strip() and not line.strip().startswith("#")
     ]
     return lines[0] if lines else None
+
+
+def _is_test_only_commit(root: Path, sha: str) -> bool:
+    """True when every file *sha* touched lives under ``tests/``.
+
+    Such a commit is test maintenance, not a product bug fix, so P10.3
+    excludes it from the regression-test-discipline ratio. A commit that
+    touches no files (empty) is not treated as test-only (returns False) so
+    it can't silently drop out. Errors return False — never exclude a
+    commit we couldn't inspect, so the check fails safe toward *counting*.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "show", "--name-only", "--format=", sha],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    if result.returncode != 0:
+        return False
+    files = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if not files:
+        return False
+    return all(f.startswith("tests/") for f in files)
 
 
 def _touched_regressions(root: Path, sha: str) -> bool:

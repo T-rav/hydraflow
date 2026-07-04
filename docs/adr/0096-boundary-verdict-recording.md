@@ -4,6 +4,8 @@
 - **Date:** 2026-06-30
 - **Refines:** ADR-0094 (two-level convergence: Gate + ConvergenceLedger)
 - **Extends:** ADR-0095 (approve-path gating)
+- **Enforcement:** enforced
+- **Enforced by:** pytest:tests/scenarios/test_convergence_pipeline_mockworld.py
 
 > **Superseded in part by [ADR-0102](0102-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
 

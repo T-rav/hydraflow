@@ -134,11 +134,24 @@ class AdrConformanceLoop(BaseBackgroundLoop):
         return self._config.repo_data_root / "metrics" / "adr_conformance.jsonl"
 
     def _persist_jsonl(self, results: list[AdrConformance]) -> None:
-        from file_util import append_jsonl  # noqa: PLC0415
+        """Append this tick's rows, then compact to the latest row per adr_id.
+
+        The metrics jsonl has snapshot semantics — the dashboard route
+        (``latest_conformance_by_adr``) serves only the newest row per
+        ``adr_id`` — so after every tick the file is compacted to exactly one
+        row per Accepted ADR, bounding its size at #ADRs rows instead of
+        leaking ~#ADRs rows per tick forever. Append-then-compact (rather
+        than merge-and-rewrite) keeps ``append_jsonl``'s crash-safe fsync and
+        ADR-0085 secret scrubbing on the write path; the compaction rewrite
+        is atomic (``os.replace``), and this loop is the file's only writer,
+        so the dashboard reader never observes a torn file.
+        """
+        from file_util import append_jsonl, compact_jsonl_latest_by_key  # noqa: PLC0415
 
         path = self._metrics_path()
         for conf in results:
             append_jsonl(path, conf.model_dump_json())
+        compact_jsonl_latest_by_key(path, key="adr_id", ts_key="timestamp")
 
     def _issue_title(self, conf: AdrConformance) -> str:
         return f"ADR conformance: {conf.adr_id} is {conf.outcome.value}"

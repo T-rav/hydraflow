@@ -5,7 +5,7 @@ builder (Task 11) against a seeded ADR fixture directory, a real
 ``ADRIndex``/``StateTracker``/``DedupStore`` on ``tmp_path``, and
 ``world.github`` (``FakeGitHub``) as the ``PRManager`` write surface.
 
-``config.adr_conformance_loop_enabled`` defaults to ``False`` and is not a
+``config.adr_conformance_loop_enabled`` defaults to ``True`` and is not a
 named ``ConfigFactory.create`` param (unlike e.g.
 ``sandbox_failure_fixer_enabled``) — matching the direct-construction
 pattern documented in ``tests/scenarios/test_sandbox_failure_fixer_scenario.py``
@@ -117,8 +117,8 @@ def _build_loop(world: MockWorld, repo_root: Path):
     """Construct AdrConformanceLoop via the Task 11 catalog builder.
 
     Direct construction (not ``world.run_with_loops``): the catalog has no
-    config-enable seam for ``adr_conformance_loop_enabled`` (defaults
-    False, and isn't a named ``ConfigFactory.create`` kwarg), and
+    config-enable seam for ``adr_conformance_loop_enabled`` (isn't a
+    named ``ConfigFactory.create`` kwarg), and
     ``run_with_loops`` would also leave ``data_root`` at its unsafe
     ``Path(".")`` default. Mirrors ``test_sandbox_failure_fixer_scenario.py``.
     """
@@ -278,11 +278,15 @@ class TestAdrConformanceScenario:
         for event in conformance_events:
             assert len(event.data["results"]) == 3
 
-        # jsonl accumulates 3 rows per tick (append-only ledger).
+        # jsonl is compacted to the latest row per adr_id each tick (snapshot
+        # semantics, bead advisor-sqsv) — bounded at one row per ADR, not an
+        # append-only ledger. Two ticks over three ADRs → three rows (one per
+        # adr_id carrying the second tick's outcome), not six.
         jsonl_path = config.repo_data_root / "metrics" / "adr_conformance.jsonl"
         rows = [
             json.loads(line)
             for line in jsonl_path.read_text().splitlines()
             if line.strip()
         ]
-        assert len(rows) == 6
+        assert len(rows) == 3
+        assert {r["adr_id"] for r in rows} == {"ADR-0049", "ADR-0050", "ADR-0051"}

@@ -1,8 +1,9 @@
 # ADR-0009: Multi-Repo Process-Per-Repo Model
 
 **Status:** Accepted
-**Enforced by:** (process)
 **Date:** 2026-02-28
+**Enforcement:** manual
+**Enforced by:** Process guardrail — reviewed at PR time via the process-per-repo model's operational invariants (one `cli.py` subprocess per repo slug, no shared mutable state); no automated test asserts subprocess isolation directly.
 
 ## Context
 

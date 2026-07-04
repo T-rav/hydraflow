@@ -297,13 +297,21 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          # P5.6 (`git log origin/main`) and P10.3 (fix-commit history since
+          # the baseline) read real git history. The default depth-1 checkout
+          # made both `git log` calls fail, silently degrading two principles
+          # to NA in CI. Full history keeps them honest; the clone stays well
+          # inside this job's 5-minute timeout.
+          fetch-depth: 0
       - name: Resolve origin HEAD
         # actions/checkout leaves refs/remotes/origin/HEAD unset on PR
         # checkouts (which are a merge commit, not a fetched branch).
         # P5.5 (branch-protection probe) needs origin/HEAD to detect the
         # default branch, so fetch main explicitly and point HEAD at it.
+        # No --depth here: P5.6 walks the last 100 commits of origin/main.
         run: |
-          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          git fetch --no-tags origin main:refs/remotes/origin/main
           git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
       - uses: astral-sh/setup-uv@v4
         with:

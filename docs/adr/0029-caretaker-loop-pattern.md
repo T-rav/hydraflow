@@ -4,6 +4,10 @@
 
 Accepted (CodeGroomingLoop removed in ADR-0065 — the pattern itself remains in use by the other three caretaker loops listed below)
 
+**Enforcement:** enforced
+
+**Enforced by:** pytest:tests/test_caretaker_loop_wiring.py
+
 ## Context
 
 HydraFlow needed proactive maintenance workers — auto-closing stale issues, monitoring CI health, patching security vulnerabilities, and (originally) running code audits. These are "caretaker" concerns: low-priority, periodic, zero-token, and independent of the main pipeline.
