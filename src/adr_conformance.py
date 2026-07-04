@@ -74,8 +74,81 @@ MUTATING_MAKE_TARGETS: frozenset[str] = frozenset(
 _PARAM_SUFFIX_RE = re.compile(r"\[.*\]$")
 
 
-def is_mutating(check: Check) -> bool:
-    return check.kind == "make" and check.target in MUTATING_MAKE_TARGETS
+# High-confidence mutation signals scanned in a make target's recipe. Chosen
+# to be unambiguous — a read-only check (pytest, arch-check, lint-check,
+# `git diff`/`git log`) never contains these — so the recipe scan hardens the
+# denylist toward fail-CLOSED (an unknown target that writes to the repo/remote
+# is caught) without false-flagging legitimate side-effect-free checks.
+_RECIPE_MUTATION_SIGNALS: tuple[str, ...] = (
+    "git commit",
+    "git push",
+    "git add",
+    "git checkout",
+    "git reset",
+    "git rm",
+    "git mv",
+    "git stash",
+    "git merge",
+    "git rebase",
+    "git tag",
+    "git apply",
+    "gh pr create",
+    "gh pr merge",
+    "gh issue create",
+    "gh release",
+    "sed -i",
+    "pip install",
+    "uv sync",
+    "npm install",
+    "npm ci",
+)
+
+
+def _make_recipe(repo_root: Path, target: str) -> str:
+    """Return the recipe body of a Makefile *target* (its tab-indented lines).
+
+    A make recipe is the contiguous run of tab-prefixed lines following the
+    ``target:`` line; it ends at the first non-tab line. Returns "" when the
+    Makefile or target is absent.
+    """
+    makefile = repo_root / "Makefile"
+    if not makefile.is_file():
+        return ""
+    target_re = re.compile(rf"^{re.escape(target)}\s*:")
+    recipe: list[str] = []
+    in_target = False
+    for line in makefile.read_text().splitlines():
+        if target_re.match(line):
+            in_target = True
+            continue
+        if in_target:
+            if line.startswith("\t"):
+                recipe.append(line)
+            else:
+                break
+    return "\n".join(recipe)
+
+
+def _recipe_mutates(repo_root: Path, target: str) -> bool:
+    recipe = _make_recipe(repo_root, target)
+    return any(sig in recipe for sig in _RECIPE_MUTATION_SIGNALS)
+
+
+def is_mutating(check: Check, repo_root: Path | None = None) -> bool:
+    """True when a make check has side effects and so may not be `enforced`.
+
+    Two layers: the ``MUTATING_MAKE_TARGETS`` denylist (authoritative for
+    known-mutating targets whose mutation isn't visible in the recipe text,
+    e.g. ``arch-regen`` writing files via a python entrypoint), plus — when
+    *repo_root* is given — a recipe scan for high-confidence mutation commands.
+    The scan closes the denylist's fail-open gap: a NEW mutating target that
+    isn't listed is still caught if its recipe pushes/commits/opens PRs/etc.
+    """
+    if check.kind != "make":
+        return False
+    if check.target in MUTATING_MAKE_TARGETS:
+        return True
+    return repo_root is not None and _recipe_mutates(repo_root, check.target)
 
 
 def _module_level_name_defined(tree: ast.Module, wanted: str) -> bool:
