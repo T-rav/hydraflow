@@ -481,7 +481,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "adr_conformance_loop_enabled",
         "HYDRAFLOW_ADR_CONFORMANCE_LOOP_ENABLED",
-        False,
+        True,
     ),
     ("ci_monitor_loop_enabled", "HYDRAFLOW_CI_MONITOR_LOOP_ENABLED", True),
     (
