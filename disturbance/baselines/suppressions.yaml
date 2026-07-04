@@ -274,7 +274,7 @@ entries:
   src/staging_bisect_loop.py::noqa:PLC0415: 14
   src/staging_bisect_loop.py::noqa:PLR0911: 2
   src/staging_promotion_loop.py::noqa:BLE001: 4
-  src/state/_convergence.py::noqa:PLC0415: 2
+  src/state/_convergence.py::noqa:PLC0415: 1
   src/state/_convergence.py::type-ignore[assignment]: 1
   src/state/_diagnostic.py::noqa:PLC0415: 1
   src/state/_rc_budget.py::noqa:PLC0415: 1

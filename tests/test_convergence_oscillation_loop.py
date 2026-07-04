@@ -75,6 +75,7 @@ def _seed_oscillating_ledger(state: StateTracker, issue_number: int) -> None:
 
 def _seed_converged_ledger(state: StateTracker, issue_number: int) -> None:
     ledger = state.ensure_convergence_ledger(issue_number)
+    ledger.record_gate_result("review", "ADVANCE", [])
     ledger.converged = True
     state.save_convergence_ledger(issue_number, ledger)
 
@@ -229,3 +230,118 @@ async def test_dedup_two_cycles_escalate_once(tmp_path: Path) -> None:
     assert result2 == {"status": "ok", "scanned": 1, "escalated": 0}
     # create_issue must be called exactly once across both cycles.
     assert pr.create_issue.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_temporal_oscillation_deferred_while_laps_below_cap(
+    tmp_path: Path,
+) -> None:
+    """(i) Temporal arm deferred: laps=2, cap=3 -> NOT escalated.
+
+    The caretaker must not fire temporal oscillation while the review loop still
+    owns the retry budget (0 < laps < max_convergence_laps).
+    """
+    state = StateTracker(tmp_path / "state.json")
+
+    # Seed a ledger that would trigger temporal oscillation (identical lap sigs)
+    # but is only at lap 2 of 3 budget.
+    ledger = state.ensure_convergence_ledger(55)
+    ledger.record_gate_result("review", "LOOP_BACK", ["finding-x"])
+    ledger.mark_lap()
+    ledger.record_gate_result("review", "LOOP_BACK", ["finding-x"])
+    ledger.mark_lap()
+    # 2 identical laps -> detect_outer_oscillation would be True...
+    assert ledger.detect_outer_oscillation() is True
+    # ...but laps=2 < cap=3, so temporal arm should defer.
+    state.save_convergence_ledger(55, ledger)
+
+    pr = _make_pr_manager()
+    loop = _make_loop(tmp_path, state, pr)
+    # Ensure cap=3 on config.
+    object.__setattr__(loop._config, "max_convergence_laps", 3)
+
+    result = await loop._do_work()
+
+    # Should NOT escalate because laps < cap.
+    assert result == {"status": "ok", "scanned": 1, "escalated": 0}
+    pr.create_issue.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_temporal_oscillation_fires_at_cap(tmp_path: Path) -> None:
+    """(j) Temporal arm fires when laps >= max_convergence_laps."""
+    state = StateTracker(tmp_path / "state.json")
+
+    ledger = state.ensure_convergence_ledger(56)
+    ledger.record_gate_result("review", "LOOP_BACK", ["finding-y"])
+    ledger.mark_lap()
+    ledger.record_gate_result("review", "LOOP_BACK", ["finding-y"])
+    ledger.mark_lap()
+    ledger.record_gate_result("review", "LOOP_BACK", ["finding-y"])
+    ledger.mark_lap()
+    # 3 identical laps at cap=3 -> should fire.
+    assert ledger.detect_outer_oscillation() is True
+    state.save_convergence_ledger(56, ledger)
+
+    pr = _make_pr_manager()
+    loop = _make_loop(tmp_path, state, pr)
+    object.__setattr__(loop._config, "max_convergence_laps", 3)
+
+    result = await loop._do_work()
+
+    assert result == {"status": "ok", "scanned": 1, "escalated": 1}
+    pr.create_issue.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_snapshot_arm_unaffected_by_temporal_deferral(tmp_path: Path) -> None:
+    """(k) Snapshot arm still fires when 2 boundary stages are LOOP_BACK (laps=0)."""
+    state = StateTracker(tmp_path / "state.json")
+    # Seed snapshot oscillation: 2 boundary stages LOOP_BACK, no laps yet.
+    ledger = state.ensure_convergence_ledger(57)
+    ledger.record_gate_result("triage", "LOOP_BACK", ["finding-a"])
+    ledger.record_gate_result("plan", "LOOP_BACK", ["finding-b"])
+    # laps=0 -> temporal_ok=True (laps==0) -> full detect_cross_boundary_oscillation.
+    # The snapshot arm (min 2 boundary LOOP_BACKs) should fire.
+    state.save_convergence_ledger(57, ledger)
+
+    pr = _make_pr_manager()
+    loop = _make_loop(tmp_path, state, pr)
+    object.__setattr__(loop._config, "max_convergence_laps", 3)
+
+    result = await loop._do_work()
+
+    assert result == {"status": "ok", "scanned": 1, "escalated": 1}
+    pr.create_issue.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sandbox_fix_only_ledger_is_skipped_not_scanned(tmp_path: Path) -> None:
+    """(l) PR-key guard: a ledger with only a sandbox_fix stage record is not scanned.
+
+    sandbox_fix rows are PR-keyed entries written by _sandbox_failure_fixer.py.
+    They share the GitHub number namespace with issues.  The caretaker must never
+    reason over them; they have no boundary/review stage record and must be skipped
+    before the scanned counter is incremented.
+    """
+    from models import StageRecord
+
+    state = StateTracker(tmp_path / "state.json")
+
+    # Seed a ledger that looks like a sandbox_fix PR row (only sandbox_fix stage).
+    ledger = state.ensure_convergence_ledger(200)
+    ledger.stage_state["sandbox_fix"] = StageRecord(attempts=3)
+    # Two boundary LOOP_BACKs to ensure it *would* escalate if not for the guard.
+    ledger.record_gate_result("triage", "LOOP_BACK", ["x"])
+    # Only sandbox_fix in stage_state means we overwrite stage_state entirely.
+    ledger.stage_state = {"sandbox_fix": StageRecord(attempts=3)}
+    state.save_convergence_ledger(200, ledger)
+
+    pr = _make_pr_manager()
+    loop = _make_loop(tmp_path, state, pr)
+
+    result = await loop._do_work()
+
+    # scanned=0: the sandbox_fix ledger is filtered before the scanned counter.
+    assert result == {"status": "ok", "scanned": 0, "escalated": 0}
+    pr.create_issue.assert_not_called()

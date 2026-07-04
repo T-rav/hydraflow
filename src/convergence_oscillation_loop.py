@@ -94,15 +94,37 @@ class ConvergenceOscillationLoop(BaseBackgroundLoop):
         scanned = 0
 
         for issue_number, ledger in self._state.iter_convergence_ledgers():
+            # PR-keyed sandbox_fix rows share the GitHub issue-number namespace
+            # and may appear in the ledger store. The caretaker must only reason
+            # over issue ledgers, which always have at least one boundary/review
+            # stage record. Skip ledgers that lack any such stage — this guards
+            # against non-issue ledgers (e.g. sandbox_fix rows from
+            # state/_sandbox_failure_fixer.py) even if the number-namespace
+            # invariant were ever to break.
+            if not (set(ledger.stage_state) & {"triage", "shape", "plan", "review"}):
+                continue
+
             scanned += 1
 
             if ledger.converged or ledger.oscillation_escalated:
                 continue
 
-            if ledger.detect_cross_boundary_oscillation(
+            # Temporal arm: defer while the review loop still owns the retry
+            # budget. Only allow temporal detection when laps==0 (no laps yet,
+            # snapshot handles it) or laps >= cap (budget exhausted, escalation
+            # appropriate). This prevents the caretaker from racing the review
+            # loop's own outer-oscillation detection on laps that are still live.
+            temporal_ok = (
+                ledger.laps == 0 or ledger.laps >= self._config.max_convergence_laps
+            )
+
+            fires = ledger.detect_cross_boundary_oscillation(
                 window=self._config.convergence_oscillation_window,
                 min_loopback_stages=self._config.convergence_oscillation_min_loopback_stages,
-            ):
+                include_temporal=temporal_ok,
+            )
+
+            if fires:
                 # Identify which boundary stages are currently LOOP_BACK so the
                 # body gives operators a quick read on where the churn is.
                 boundary_stages = {"triage", "shape", "plan"}

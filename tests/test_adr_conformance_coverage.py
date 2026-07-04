@@ -339,7 +339,7 @@ def test_enforced_adrs_name_resolvable_nonmutating_checks():
                 problems.append(
                     f"ADR-{a.number:04d}: prose check under enforced ({chk.raw!r})"
                 )
-            elif is_mutating(chk):
+            elif is_mutating(chk, REPO):
                 problems.append(
                     f"ADR-{a.number:04d}: mutating target {chk.target!r} not allowed"
                 )

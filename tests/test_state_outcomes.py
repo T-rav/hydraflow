@@ -822,8 +822,9 @@ class TestStateKeyHelpers:
         tracker.set_branch(100, "agent/issue-100")
         tracker.increment_issue_attempts(100)
         tracker.set_hitl_origin(100, "hydraflow-review")
-        tracker.increment_review_attempts(100)
-        tracker.save()
+        ledger = tracker.ensure_convergence_ledger(100)
+        ledger.increment_attempts("review")
+        tracker.save_convergence_ledger(100, ledger)
 
         tracker2 = StateTracker(state_file)
         assert tracker2._data.processed_issues["100"] == "reviewed"
@@ -831,4 +832,4 @@ class TestStateKeyHelpers:
         assert tracker2.get_branch(100) == "agent/issue-100"
         assert tracker2.get_issue_attempts(100) == 1
         assert tracker2.get_hitl_origin(100) == "hydraflow-review"
-        assert tracker2.get_review_attempts(100) == 1
+        assert tracker2.ensure_convergence_ledger(100).get_attempts("review") == 1

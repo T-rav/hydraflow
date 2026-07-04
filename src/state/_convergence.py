@@ -54,22 +54,6 @@ class ConvergenceStateMixin:
 
     # --- review attempt + blast-radius accessors (delegating to ledger) ---
 
-    def get_review_attempts(self, issue_number: int) -> int:
-        """Return the current review attempt count for *issue_number* (default 0)."""
-        cl = self._data.convergence_ledgers.get(self._key(issue_number))
-        return cl.get_attempts("review") if cl else 0
-
-    def increment_review_attempts(self, issue_number: int) -> int:
-        """Increment and return the new review attempt count for *issue_number*."""
-        key = self._key(issue_number)
-        cl = self._data.convergence_ledgers.get(key)
-        if cl is None:
-            cl = ConvergenceLedger(issue_number=issue_number)
-            self._data.convergence_ledgers[key] = cl
-        n = cl.increment_attempts("review")
-        self.save()
-        return n
-
     def set_quality_fix_attempts(self, issue_number: int, count: int) -> None:
         """Record the per-run quality-fix attempt count for *issue_number* into the ledger."""
         from models import StageRecord  # noqa: PLC0415
@@ -125,15 +109,20 @@ class ConvergenceStateMixin:
         cl.oscillation_escalated = True
         self.save()
 
-    def min_review_passes_required(self, issue_number: int) -> int:
-        """Return the minimum fresh-eyes review passes for *issue_number*.
+    def reset_outer_laps(self, issue_number: int) -> None:
+        """Reset the outer lap budget for *issue_number* after a gate-driven HITL escalation.
 
-        Defaults to 1 (low) when no blast radius has been recorded yet.
-        Delegates the tier->count mapping to ``review_advisor`` so there is a
-        single source of truth (ADR-0051 stratified table).
+        Sets ``laps = 0`` and clears ``lap_signatures`` on the live ledger so a
+        human-fixed, re-queued issue starts with a fresh outer budget and can
+        loop back through the gate without immediately re-escalating.
+
+        Preserves ``stage_state``, ``blast_radius``, ``converged``, and
+        ``oscillation_escalated`` (caretaker dedup is separate by design).
+        No-op when no ledger exists for *issue_number*.
         """
-        from review_advisor import min_review_passes_for_blast_radius  # noqa: PLC0415
-
         cl = self._data.convergence_ledgers.get(self._key(issue_number))
-        radius = cl.blast_radius if cl else "low"
-        return min_review_passes_for_blast_radius(radius)
+        if cl is None:
+            return
+        cl.laps = 0
+        cl.lap_signatures = []
+        self.save()

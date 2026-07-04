@@ -32,7 +32,7 @@ from pydantic.alias_generators import (
 )
 from typing_extensions import TypedDict
 
-from src.pending_concerns import AdversarialState, Concern
+from src.pending_concerns import AdversarialState
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -1800,7 +1800,6 @@ class ConvergenceLedger(BaseModel):
     laps: int = 0
     blast_radius: Literal["low", "medium", "high"] = "low"
     stage_state: dict[str, StageRecord] = Field(default_factory=dict)
-    open_concerns: list[Concern] = Field(default_factory=list)
     lap_signatures: list[list[str]] = Field(default_factory=list)
     converged: bool = False
     oscillation_escalated: bool = False
@@ -1853,9 +1852,7 @@ class ConvergenceLedger(BaseModel):
         )
 
     def recompute_converged(self, gated_stages: list[str]) -> bool:
-        self.converged = (
-            self.all_gated_advanced(gated_stages) and not self.open_concerns
-        )
+        self.converged = self.all_gated_advanced(gated_stages)
         return self.converged
 
     def detect_outer_oscillation(self, window: int = 2) -> bool:
@@ -1866,20 +1863,29 @@ class ConvergenceLedger(BaseModel):
         return bool(first) and all(s == first for s in tail)
 
     def detect_cross_boundary_oscillation(
-        self, *, window: int = 2, min_loopback_stages: int = 2
+        self,
+        *,
+        window: int = 2,
+        min_loopback_stages: int = 2,
+        include_temporal: bool = True,
     ) -> bool:
         """Return True if the ledger shows cross-boundary oscillation.
 
         Two conditions (either is sufficient):
         (a) Temporal: ``detect_outer_oscillation(window)`` is True — recurring
-            identical findings across review laps.
+            identical findings across review laps.  Evaluated only when
+            *include_temporal* is True.
         (b) Snapshot: at least ``min_loopback_stages`` DISTINCT stages among
             ``{"triage", "shape", "plan"}`` currently have
             ``last_verdict == "LOOP_BACK"`` — pre-review cross-boundary churn.
 
+        Pass ``include_temporal=False`` to suppress the temporal arm and check
+        only the snapshot arm (used by the caretaker when the review loop still
+        owns the retry budget and temporal deferral applies).
+
         Pure function of ledger state; no mutation.
         """
-        if self.detect_outer_oscillation(window):
+        if include_temporal and self.detect_outer_oscillation(window):
             return True
         boundary_stages = {"triage", "shape", "plan"}
         loopback_count = sum(

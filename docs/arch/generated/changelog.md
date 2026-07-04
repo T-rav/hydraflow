@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `1cd2d32` — chore(steering): arch-regen after feature completion *(2026-07-03)*
 - `eff7794` — docs(steering): ADR-0103 + glossary terms closing control surface #4 (MVP scope documented) *(2026-07-03)*
 - `b0a782b` — feat(steering): wire HumanSteeringLoop into runtime + scenario catalog *(2026-07-03)*
 - `c1cdbc8` — feat(steering): HumanSteeringLoop sensor + config *(2026-07-03)*
@@ -482,7 +483,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 - `494f736` — docs: ADR-0032 Per-Repo Wiki Knowledge Base (Karpathy pattern) (#6096) (#6096) *(2026-04-05)*
 - `f65f00b` — docs: accept ADR-0023 pair + add diagnostic and HITL plans (#6093) (#6093) *(2026-04-05)*
-- `2977a62` — docs: ADR-0031 Product Track Architecture (Discover/Shape phases) (#6010) (#6010) *(2026-04-05)*
 
 
 <!-- arch:generated -->

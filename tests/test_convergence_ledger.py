@@ -136,6 +136,53 @@ class TestDetectCrossBoundaryOscillation:
         # Act + Assert: min_loopback_stages=2 not met
         assert ledger.detect_cross_boundary_oscillation(min_loopback_stages=2) is False
 
+    def test_include_temporal_false_suppresses_temporal_arm_but_snapshot_still_fires(
+        self,
+    ) -> None:
+        """include_temporal=False: temporal arm ignored, snapshot arm still evaluated."""
+        ledger = ConvergenceLedger(issue_number=7)
+        # Seed two identical laps (temporal oscillation would fire normally).
+        ledger.record_gate_result("review", "LOOP_BACK", ["sig-x"])
+        ledger.mark_lap()
+        ledger.record_gate_result("review", "LOOP_BACK", ["sig-x"])
+        ledger.mark_lap()
+        assert ledger.detect_outer_oscillation(window=2) is True
+
+        # With include_temporal=False the temporal arm is suppressed and no
+        # boundary stage is LOOP_BACK, so the snapshot arm returns False.
+        assert (
+            ledger.detect_cross_boundary_oscillation(
+                window=2, min_loopback_stages=2, include_temporal=False
+            )
+            is False
+        )
+
+        # Add two boundary LOOP_BACKs — snapshot arm must fire even with
+        # include_temporal=False.
+        ledger.record_gate_result("triage", "LOOP_BACK", [])
+        ledger.record_gate_result("plan", "LOOP_BACK", [])
+        assert (
+            ledger.detect_cross_boundary_oscillation(
+                window=2, min_loopback_stages=2, include_temporal=False
+            )
+            is True
+        )
+
+    def test_old_open_concerns_key_in_persisted_data_loads_clean(self) -> None:
+        """A ledger dict with an open_concerns key (legacy field) still validates.
+
+        Pydantic v2 ignores extra fields by default, so old persisted ledgers
+        with this key do not raise ValidationError after the field was removed.
+        """
+        data = {
+            "issue_number": 7,
+            "laps": 0,
+            "open_concerns": [{"description": "old concern", "severity": "low"}],
+        }
+        ledger = ConvergenceLedger.model_validate(data)
+        assert ledger.issue_number == 7
+        assert ledger.laps == 0
+
     def test_oscillation_escalated_field_defaults_false(self) -> None:
         ledger = ConvergenceLedger(issue_number=7)
         assert ledger.oscillation_escalated is False
@@ -197,3 +244,58 @@ class TestIterConvergenceLedgers:
         ledger = tracker.get_convergence_ledger(99)
         assert ledger is not None
         assert ledger.oscillation_escalated is True
+
+
+class TestResetOuterLaps:
+    """reset_outer_laps accessor (F2/M1 lifecycle)."""
+
+    def test_reset_clears_laps_and_signatures(self, tmp_path) -> None:
+        """After reset: laps==0, lap_signatures==[], other fields preserved."""
+        tracker = make_tracker(tmp_path)
+        ledger = tracker.ensure_convergence_ledger(7, blast_radius="high")
+        # Seed some lap state
+        ledger.record_gate_result("review", "LOOP_BACK", ["sig-a"])
+        ledger.mark_lap()
+        ledger.record_gate_result("review", "LOOP_BACK", ["sig-b"])
+        ledger.mark_lap()
+        ledger.oscillation_escalated = True
+        tracker.save_convergence_ledger(7, ledger)
+        assert tracker.get_convergence_ledger(7).laps == 2
+
+        tracker.reset_outer_laps(7)
+
+        after = tracker.get_convergence_ledger(7)
+        assert after is not None
+        assert after.laps == 0
+        assert after.lap_signatures == []
+        # Preserved fields
+        assert after.blast_radius == "high"
+        assert after.oscillation_escalated is True
+        assert "review" in after.stage_state
+
+    def test_reset_persists_across_reload(self, tmp_path) -> None:
+        """reset_outer_laps must call save() so state survives a reload."""
+        from state import StateTracker
+
+        tracker = make_tracker(tmp_path)
+        ledger = tracker.ensure_convergence_ledger(7)
+        ledger.record_gate_result("review", "LOOP_BACK", ["sig-x"])
+        ledger.mark_lap()
+        tracker.save_convergence_ledger(7, ledger)
+
+        tracker.reset_outer_laps(7)
+
+        reloaded = StateTracker(tmp_path / "state.json")
+        reloaded.load()
+        restored = reloaded.get_convergence_ledger(7)
+        assert restored is not None
+        assert restored.laps == 0
+        assert restored.lap_signatures == []
+
+    def test_reset_noop_when_no_ledger(self, tmp_path) -> None:
+        """reset_outer_laps is a no-op when the issue has no ledger."""
+        tracker = make_tracker(tmp_path)
+        assert tracker.get_convergence_ledger(42) is None
+        # Must not raise
+        tracker.reset_outer_laps(42)
+        assert tracker.get_convergence_ledger(42) is None

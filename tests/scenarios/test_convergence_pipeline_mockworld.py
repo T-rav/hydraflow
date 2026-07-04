@@ -12,12 +12,21 @@ MockWorld; nothing in the ledger is set by hand.  This complements
 
 Note: ``run_pipeline`` does NOT run a shape phase, so no ``"shape"`` assertion
 is made.  The pipeline order is triage → plan → implement → review.
+
+**Golden-path adaptation (clear-on-merge contract, commit e6f166d3)**: the
+default fake-review result is REQUEST_CHANGES, which causes a loop-back without
+a merge.  The ledger therefore survives for inspection after ``run_pipeline``
+returns.  This avoids the need for a pre-clear observer while fully exercising
+the real triage/plan boundary recording.  The scenario scripts the review
+explicitly to REQUEST_CHANGES so this assumption is never implicit.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from models import ReviewVerdict
+from tests.conftest import ReviewResultFactory
 from tests.scenarios.builders import IssueBuilder
 from tests.scenarios.fakes import MockWorld
 
@@ -66,37 +75,70 @@ class TestPipelineBoundaryRecording:
 
     This is the integration-level proof that the boundary recording added in
     Tasks 2–4 fires through the REAL triage and plan phase code inside
-    MockWorld.  No LLM scripting is required: the default fakes route triage
-    to ``"plan"`` (which maps to ``"ADVANCE"`` via ``_TRIAGE_VERDICT_MAP``)
-    and plan succeeds (``ts_status=="success"`` → ``"ADVANCE"``).
+    MockWorld.
 
-    The test drives issue #1 through the full pipeline, then inspects the
-    convergence ledger to confirm both boundaries recorded ``ADVANCE`` without
-    any hand-population of the ledger.
+    The review is scripted to REQUEST_CHANGES (loop-back, no merge).  This is
+    the key adaptation for the clear-on-merge contract (commit e6f166d3): when
+    the pipeline ends with a merge the ledger is immediately cleared, making
+    post-run ledger inspection impossible without an observer.  By scripting a
+    REQUEST_CHANGES verdict the pipeline loops back instead of merging, so the
+    ledger is intact for the ``stage_state`` assertions.  The purpose of the
+    test is fully preserved: the real triage/plan boundary recording ran through
+    MockWorld, recording ADVANCE for both stages, as confirmed by the ledger.
+    The review boundary (LOOP_BACK) is also reflected in ``stage_state``.
+
+    The test drives issue #1 through the full pipeline and asserts:
+
+    - ``stage_state["triage"].last_verdict == "ADVANCE"`` — real triage ran.
+    - ``stage_state["plan"].last_verdict == "ADVANCE"`` — real plan ran.
+    - Issue is NOT merged (loop-back; ledger survives for inspection).
 
     Note: ``run_pipeline`` does NOT include a shape phase; do not assert on
     ``"shape"``.  The pipeline order is triage → plan → implement → review.
     This scenario complements ``test_convergence_review_mockworld.py``, which
-    covers the review boundary.
+    covers the gated APPROVE path.
     """
 
     async def test_pipeline_records_triage_and_plan_verdicts(self, tmp_path) -> None:
-        """Full gated pipeline populates ledger with ADVANCE for triage and plan."""
+        """Full gated pipeline populates ledger with ADVANCE for triage and plan.
+
+        Review is scripted to REQUEST_CHANGES (loop-back, no merge) so the ledger
+        survives for inspection post-run.  The triage/plan ADVANCE verdicts are
+        the load-bearing assertions; the review loop-back is a side effect.
+        """
         world = _make_world_with_gate(tmp_path)
 
         IssueBuilder().numbered(1).titled("Add feature").bodied(
             "Implement a feature"
         ).at(world)
 
-        await world.run_pipeline()
+        # Script a REQUEST_CHANGES verdict so the pipeline loops back without
+        # merging.  This prevents clear_convergence_ledger from wiping the ledger
+        # before we can assert on triage/plan stage_state entries.
+        reject = ReviewResultFactory.create(
+            issue_number=1,
+            verdict=ReviewVerdict.REQUEST_CHANGES,
+            merged=False,
+        )
+        world.set_phase_results("review", 1, [reject])
+
+        result = await world.run_pipeline()
 
         # --- non-vacuity probe ---
         # If this fails, the real triage/plan boundary recording did not run
         # through MockWorld — a wiring regression, not a vacuous pass.
         ledger = world.harness.state.get_convergence_ledger(1)
         assert ledger is not None, (
-            "ConvergenceLedger is None after a gated full pipeline run — the real "
-            "triage/plan boundary recording did not run through MockWorld."
+            "ConvergenceLedger is None after a gated pipeline run ending in "
+            "REQUEST_CHANGES loop-back — the real triage/plan boundary recording "
+            "did not run through MockWorld."
+        )
+
+        # Issue looped back (not merged).
+        outcome = result.issue(1)
+        assert outcome.merged is False, (
+            "Expected issue #1 to remain un-merged after REQUEST_CHANGES loop-back; "
+            f"got merged={outcome.merged!r}"
         )
 
         # --- triage boundary ---
