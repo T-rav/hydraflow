@@ -15,6 +15,7 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from hitl_controller import HITLController
 from human_steering import apply_steering
+from issue_store import IssueStoreStage
 from models import (
     BackgroundWorkerState,
     ErrorPayload,
@@ -552,8 +553,6 @@ class HydraFlowOrchestrator:
         """
         if not self._config.human_steering_enabled:
             return
-
-        from issue_store import IssueStoreStage  # noqa: PLC0415
 
         known_phases = {stage.value for stage in IssueStoreStage} - {
             IssueStoreStage.MERGED.value

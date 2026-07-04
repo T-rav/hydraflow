@@ -1450,7 +1450,7 @@ def build_services(
     # active issue numbers straight off the persisted StateTracker set —
     # the same source the orchestrator maintains via
     # ``_sync_active_issue_numbers`` on every phase transition.
-    human_steering_loop = HumanSteeringLoop(  # noqa: F841
+    human_steering_loop = HumanSteeringLoop(
         config=config,
         state=state,
         prs=prs,
