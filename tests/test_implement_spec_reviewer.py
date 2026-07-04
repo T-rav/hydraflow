@@ -430,6 +430,8 @@ class TestSpecReviewFeedsNextAttempt:
             worker_id: int = 0,
             review_feedback: str = "",
             prior_failure: str = "",
+            bead_mapping: dict[str, str] | None = None,
+            human_guidance: str = "",
         ) -> WorkerResult:
             captured.append(prior_failure)
             return WorkerResultFactory.create(
@@ -476,6 +478,8 @@ class TestSpecReviewFeedsNextAttempt:
             worker_id: int = 0,
             review_feedback: str = "",
             prior_failure: str = "",
+            bead_mapping: dict[str, str] | None = None,
+            human_guidance: str = "",
         ) -> WorkerResult:
             captured.append(prior_failure)
             return WorkerResultFactory.create(

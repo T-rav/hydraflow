@@ -140,6 +140,7 @@ cadence and files remediation issues on drift.
 | [0100](0100-adr-conformance-as-a-measured-contract.md) | ADR conformance as a measured contract | Accepted |
 | [0101](0101-disturbance-dampener.md) | Disturbance Dampener — feedforward ratchet + burn-down loop | Proposed |
 | [0102](0102-convergence-gate-general-availability.md) | Convergence gate general availability (flag removed) | Accepted |
+| [0103](0103-continuous-human-steering-channel.md) | Continuous Human-on-the-Loop Steering Channel | Accepted |
 
 ## Adding a new ADR
 

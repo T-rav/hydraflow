@@ -165,6 +165,7 @@ areas:
     loops:
       - AutoAgentPreflightLoop
       - DisturbanceDampenerLoop
+      - HumanSteeringLoop
       - SandboxFailureFixerLoop
       - TriageRetryLoop
       - ConvergenceOscillationLoop
@@ -173,7 +174,9 @@ areas:
       - src/preflight/**
       - src/triage_retry_loop.py
       - src/convergence_oscillation_loop.py
-    related_adrs: ['0050', '0063', '0098']
+      - src/human_steering_loop.py
+      - src/human_steering.py
+    related_adrs: ['0050', '0063', '0098', '0099']
 
   goal_driven_dev:
     label: Goal-Driven Development

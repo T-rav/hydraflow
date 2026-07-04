@@ -164,6 +164,8 @@ class TestInitialization:
             # rebase; the enumeration needs the entry so set-equality
             # holds against the live StateData.
             "adversarial_states",
+            # HumanSteeringLoop per-issue steering reference (ADR-0099 #4)
+            "human_steering",
         }
         assert set(d.keys()) == expected_keys
 
@@ -1094,3 +1096,15 @@ class TestLifetimeStats:
         assert stats.total_hitl_escalations == 0
         # Existing data is preserved
         assert tracker.to_dict()["processed_issues"].get(str(1)) == "success"
+
+
+def test_human_steering_get_set_round_trip(tmp_path: Path) -> None:
+    from models import SteeringState
+
+    t = make_tracker(tmp_path)
+    assert t.get_human_steering("7").flow == "running"  # default
+    t.set_human_steering("7", SteeringState(guidance="g", flow="paused"))
+    fresh = make_tracker(tmp_path)  # reload from disk
+    fresh.load()
+    assert fresh.get_human_steering("7").guidance == "g"
+    assert fresh.get_human_steering("7").flow == "paused"

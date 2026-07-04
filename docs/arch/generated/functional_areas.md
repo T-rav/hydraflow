@@ -82,6 +82,7 @@ flowchart LR
         auto_agent_AutoAgentPreflightLoop([AutoAgentPreflightLoop])
         auto_agent_ConvergenceOscillationLoop([ConvergenceOscillationLoop])
         auto_agent_DisturbanceDampenerLoop([DisturbanceDampenerLoop])
+        auto_agent_HumanSteeringLoop([HumanSteeringLoop])
         auto_agent_SandboxFailureFixerLoop([SandboxFailureFixerLoop])
         auto_agent_TriageRetryLoop([TriageRetryLoop])
     end
@@ -253,6 +254,7 @@ The Auto-Agent HITL pre-flight loop intercepts every `hitl-escalation` issue bef
 - `AutoAgentPreflightLoop` — `src.auto_agent_preflight_loop`
 - `ConvergenceOscillationLoop` — `src.convergence_oscillation_loop`
 - `DisturbanceDampenerLoop` — `src.disturbance_dampener_loop`
+- `HumanSteeringLoop` — `src.human_steering_loop`
 - `SandboxFailureFixerLoop` — `src.sandbox_failure_fixer_loop`
 - `TriageRetryLoop` — `src.triage_retry_loop`
 
@@ -262,8 +264,10 @@ The Auto-Agent HITL pre-flight loop intercepts every `hitl-escalation` issue bef
 - `src/preflight/**`
 - `src/triage_retry_loop.py`
 - `src/convergence_oscillation_loop.py`
+- `src/human_steering_loop.py`
+- `src/human_steering.py`
 
-**Related ADRs:** `ADR-0050`, `ADR-0063`, `ADR-0098`
+**Related ADRs:** `ADR-0050`, `ADR-0063`, `ADR-0098`, `ADR-0099`
 
 
 ## Goal-Driven Development

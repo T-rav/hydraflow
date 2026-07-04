@@ -54,6 +54,7 @@ graph LR
     Error["Error<br/><i>control_role</i>"]
     EventBus["EventBus<br/><i>service</i>"]
     Governor["Governor<br/><i>control_role</i>"]
+    HumanSteeringLoop["HumanSteeringLoop<br/><i>control_role</i>"]
     HydraFlowConfig["HydraFlowConfig<br/><i>aggregate</i>"]
     IssueFetcherPort["IssueFetcherPort<br/><i>port</i>"]
     IssueStorePort["IssueStorePort<br/><i>port</i>"]
@@ -66,6 +67,8 @@ graph LR
     Sensor["Sensor<br/><i>control_role</i>"]
     Set-point["Set-point<br/><i>control_role</i>"]
     StateTracker["StateTracker<br/><i>service</i>"]
+    SteeringChannel["SteeringChannel<br/><i>control_role</i>"]
+    SteeringState["SteeringState<br/><i>control_role</i>"]
     ViolationDetector["ViolationDetector<br/><i>control_role</i>"]
     WorkspacePort["WorkspacePort<br/><i>port</i>"]
   end

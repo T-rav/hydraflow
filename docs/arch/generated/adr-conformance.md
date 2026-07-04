@@ -76,6 +76,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0098 | enforced | `pytest:tests/scenarios/test_convergence_oscillation_mockworld.py` |
 | ADR-0100 | enforced | `pytest:tests/test_adr_conformance_coverage.py` |
 | ADR-0102 | enforced | `pytest:tests/test_review_phase_core.py` |
+| ADR-0103 | enforced | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_orchestrator_human_steering.py` |
 
 ## Check → ADRs it protects
 
@@ -129,6 +130,9 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_epic_manager.py` | ADR-0019 |
 | `pytest:tests/test_epic_merge_coordination.py` | ADR-0012 |
 | `pytest:tests/test_event_persistence.py` | ADR-0021 |
+| `pytest:tests/test_human_steering.py` | ADR-0103 |
+| `pytest:tests/test_human_steering_actuator.py` | ADR-0103 |
+| `pytest:tests/test_human_steering_loop.py` | ADR-0103 |
 | `pytest:tests/test_implement_phase.py` | ADR-0005, ADR-0024 |
 | `pytest:tests/test_integration_pipeline.py` | ADR-0022 |
 | `pytest:tests/test_integration_worktree.py` | ADR-0010 |
@@ -141,6 +145,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_memory_backlog_loop.py` | ADR-0089 |
 | `pytest:tests/test_mockworld_fakes_conformance.py` | ADR-0052 |
 | `pytest:tests/test_no_screenshot_regression_tests.py` | ADR-0083 |
+| `pytest:tests/test_orchestrator_human_steering.py` | ADR-0103 |
 | `pytest:tests/test_orchestrator_loops.py` | ADR-0001 |
 | `pytest:tests/test_phase_skill_filter.py` | ADR-0043 |
 | `pytest:tests/test_post_merge_handler.py` | ADR-0019 |

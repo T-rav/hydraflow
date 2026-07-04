@@ -2664,6 +2664,20 @@ class HydraFlowConfig(BaseModel):
         description="Max burn-down PRs DisturbanceDampenerLoop opens per tick. Bounds blast radius.",
     )
 
+    # Human-on-the-loop continuous steering (ADR-0099 surface #4)
+    human_steering_enabled: bool = Field(
+        default=False,
+        description="Enable the HumanSteeringLoop sensor for continuous human-on-the-loop steering (ADR-0099 #4). Dark by default.",
+    )
+    human_steering_interval_seconds: int = Field(
+        default=60,
+        description="HumanSteeringLoop tick interval in seconds.",
+    )
+    human_steering_max_redos: int = Field(
+        default=3,
+        description="Max redo directives HumanSteeringLoop honors per issue before capping to prevent infinite redo.",
+    )
+
     # Trust fleet — ContractRefreshLoop (spec §4.2)
     contract_refresh_interval: int = Field(
         default=604800,

@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_59 terms across 3 bounded contexts._
+_62 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -364,6 +364,16 @@ The saturation limiter and safety interlock that bounds every Actuator regardles
 **Invariants:**
 - The Governor can veto or throttle any actuation; a Controller cannot override it.
 
+## HumanSteeringLoop
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/human_steering_loop.py:HumanSteeringLoop` · **Confidence:** `accepted`
+
+The Sensor half of the `SteeringChannel` (ADR-0099 §6 surface #4, closed by ADR-0103): a `BaseBackgroundLoop` that, each tick, fetches GitHub comments for every active issue and calls the pure parser `human_steering.parse_directives` to derive the latest `SteeringState`, then persists it via `state.set_human_steering`. Purely a sensor: it never mutates issue phase, labels, or the pipeline directly — the orchestrator's actuator half reads the persisted state and enacts it at the next phase boundary. Gated by `human_steering_enabled` (default `False`) and a kill-switch (`enabled_cb`), per ADR-0049.
+
+**Invariants:**
+- `_do_work` never applies a decision to the plant; it only fetches comments, parses, and writes `SteeringState` — enactment is the orchestrator's job, keeping the sensor/actuator split total.
+- On a comment-fetch failure for one issue, the loop logs and continues to the next issue rather than aborting the whole tick, so one flaky issue cannot starve steering for the rest of the fleet.
+
 ## HydraFlowConfig
 
 **Kind:** `aggregate` · **Context:** `shared-kernel` · **Anchor:** `src/config.py:HydraFlowConfig` · **Confidence:** `accepted`
@@ -619,6 +629,26 @@ JSON-file backed state service for crash recovery. Composes ~30 domain mixins (i
 - Every mutating method persists state to disk before returning.
 - Issue/PR/epic numbers are stored as string keys; helpers convert to int on read.
 - On corrupt primary file, load() falls back to the most recent .bak before defaulting to an empty StateData.
+
+## SteeringChannel
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/human_steering_loop.py:HumanSteeringLoop` · **Confidence:** `accepted`
+
+The continuous Human reference-input path (ADR-0099 §6 surface #4, closed by ADR-0103): a live, per-issue channel from an operator's GitHub comments into the running pipeline, replacing the discrete single-shot `pending_correction` + suspend/wake mechanism. The channel has a sensor half (`HumanSteeringLoop` parses `/steer`, `/pause`, `/resume`, `/redo`, `/abort` comment directives into a persisted `SteeringState` each tick) and an actuator half (the orchestrator's `_apply_human_steering` enacts the latest state at the next phase boundary — skip, park, redo, or fold guidance into the next prompt). The two halves never share a process step: the sensor only senses, the actuator only enacts, so the orchestrator stays thin.
+
+**Invariants:**
+- The channel applies at phase boundaries only; it never interrupts a running phase mid-flight (the only mid-phase stop is the fleet-wide `SIGKILL`).
+- Declarative directives (`/steer`, `/pause`, `/resume`) are recomputed latest-wins from the full comment history every tick; imperative directives (`/redo`, `/abort`) fire at most once, gated by a per-issue `created_at` high-water-mark so a re-tick cannot replay them.
+
+## SteeringState
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/models.py:SteeringState` · **Confidence:** `accepted`
+
+The persisted Error/reference-state register for one issue's `SteeringChannel` (ADR-0099 §6 surface #4, closed by ADR-0103): a `guidance` string, a `flow` (`running` | `paused` | `abort`), a pending `redo_phase`, a `redo_count`, and a `last_applied_ts` high-water-mark gating imperative directives. `HumanSteeringLoop` (Sensor) writes it each tick from parsed comments; the orchestrator's `apply_steering` (Controller) reads it to compute a `SteeringDecision` that the orchestrator (Actuator) enacts at the next phase boundary. Keyed `str(issue_number)` in `StateData.human_steering`, matching the per-issue-map convention.
+
+**Invariants:**
+- Precedence within one poll is fixed: abort beats pause beats redo beats steer — `apply_steering` checks `flow == abort` first, then `paused`, before considering `redo_phase`.
+- `redo_phase` is only honored while `redo_count < human_steering_max_redos` and the phase name is a known internal stage; otherwise it is silently dropped rather than retried, so a stale or bogus `/redo` cannot stall an issue forever.
 
 ## Task
 

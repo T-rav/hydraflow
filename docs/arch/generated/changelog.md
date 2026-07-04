@@ -6,7 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
-- `b3085bd` — chore(convergence): caretaker PR-key guard + snapshot-arm dedup, prune dead ledger surface, blast-radius doc (C1/I1/M2/F4/F5) *(2026-07-03)*
+- `1cd2d32` — chore(steering): arch-regen after feature completion *(2026-07-03)*
+- `eff7794` — docs(steering): ADR-0103 + glossary terms closing control surface #4 (MVP scope documented) *(2026-07-03)*
+- `b0a782b` — feat(steering): wire HumanSteeringLoop into runtime + scenario catalog *(2026-07-03)*
+- `c1cdbc8` — feat(steering): HumanSteeringLoop sensor + config *(2026-07-03)*
+- `ed627b8` — docs(adr): backfill Enforcement for all 59 grandfathered ADRs (drain grandfather set to ∅) (#9696) (#9696) *(2026-07-02)*
 - `a482385` — docs(adr): correct ADR-0102 Rule 3 (gate fails OPEN on advisor degradation by design) (#9695) (#9695) *(2026-07-02)*
 - `f170b89` — fix(adr-0101): drop line-number citation to satisfy P1.16 (#9692) (#9692) *(2026-07-02)*
 - `aae9526` — feat(disturbance): Phase B — burn-down loop (ADR-0095) (#9686) (#9686) *(2026-07-02)*
