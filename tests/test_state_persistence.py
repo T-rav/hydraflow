@@ -102,68 +102,28 @@ class TestAtomicSave:
 
 
 # ---------------------------------------------------------------------------
-# Review attempt tracking
+# Review attempt tracking (reset_review_attempts — live src caller in state/__init__.py)
 # ---------------------------------------------------------------------------
 
 
 class TestReviewAttemptTracking:
-    def test_increment_review_attempts_uses_ledger(self, tmp_path: Path) -> None:
+    def test_reset_review_attempts_clears_stage_counter(self, tmp_path: Path) -> None:
+        """reset_review_attempts zeroes the review stage attempt count via the ledger."""
         tracker = make_tracker(tmp_path)
-        assert tracker.get_review_attempts(7) == 0
-        assert tracker.increment_review_attempts(7) == 1
-        # the count lives ONLY in the ledger — no legacy field
-        assert tracker.get_convergence_ledger(7).get_attempts("review") == 1
-        assert not hasattr(tracker._data, "review_attempts")
+        ledger = tracker.ensure_convergence_ledger(42)
+        ledger.increment_attempts("review")
+        ledger.increment_attempts("review")
+        tracker.save_convergence_ledger(42, ledger)
+        assert tracker.get_convergence_ledger(42).get_attempts("review") == 2
 
-    def test_min_review_passes_reads_ledger_blast_radius(self, tmp_path: Path) -> None:
-        tracker = make_tracker(tmp_path)
-        ledger = tracker.ensure_convergence_ledger(7, blast_radius="high")
-        tracker.save_convergence_ledger(7, ledger)
-        assert tracker.min_review_passes_required(7) == 3  # high -> 3
-
-    def test_get_review_attempts_defaults_to_zero(self, tmp_path: Path) -> None:
-        tracker = make_tracker(tmp_path)
-        assert tracker.get_review_attempts(42) == 0
-
-    def test_increment_review_attempts_returns_new_count(self, tmp_path: Path) -> None:
-        tracker = make_tracker(tmp_path)
-        assert tracker.increment_review_attempts(42) == 1
-        assert tracker.increment_review_attempts(42) == 2
-
-    def test_reset_review_attempts_clears_counter(self, tmp_path: Path) -> None:
-        tracker = make_tracker(tmp_path)
-        tracker.increment_review_attempts(42)
-        tracker.increment_review_attempts(42)
         tracker.reset_review_attempts(42)
-        assert tracker.get_review_attempts(42) == 0
+
+        assert tracker.get_convergence_ledger(42).get_attempts("review") == 0
 
     def test_reset_review_attempts_nonexistent_is_noop(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
         tracker.reset_review_attempts(999)
-        assert tracker.get_review_attempts(999) == 0
-
-    def test_multiple_issues_tracked_independently(self, tmp_path: Path) -> None:
-        tracker = make_tracker(tmp_path)
-        tracker.increment_review_attempts(1)
-        tracker.increment_review_attempts(1)
-        tracker.increment_review_attempts(2)
-        assert tracker.get_review_attempts(1) == 2
-        assert tracker.get_review_attempts(2) == 1
-
-    def test_review_attempts_persist_across_reload(self, tmp_path: Path) -> None:
-        state_file = tmp_path / "state.json"
-        tracker = StateTracker(state_file)
-        tracker.increment_review_attempts(42)
-        tracker.increment_review_attempts(42)
-
-        tracker2 = StateTracker(state_file)
-        assert tracker2.get_review_attempts(42) == 2
-
-    def test_reset_clears_review_attempts(self, tmp_path: Path) -> None:
-        tracker = make_tracker(tmp_path)
-        tracker.increment_review_attempts(42)
-        tracker.reset()
-        assert tracker.get_review_attempts(42) == 0
+        assert tracker.get_convergence_ledger(999) is None
 
 
 # ---------------------------------------------------------------------------

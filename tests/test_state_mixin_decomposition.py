@@ -92,7 +92,9 @@ class TestCrossMixinPersistence:
         tracker.set_hitl_cause(1, "ci_failure")
 
         # Review domain
-        tracker.increment_review_attempts(1)
+        _ledger1 = tracker.ensure_convergence_ledger(1)
+        _ledger1.increment_attempts("review")
+        tracker.save_convergence_ledger(1, _ledger1)
         tracker.set_review_feedback(1, "needs tests")
 
         # Epic domain
@@ -121,7 +123,7 @@ class TestCrossMixinPersistence:
         assert tracker2.get_branch(1) == "agent/issue-1"
         assert tracker2.get_hitl_origin(1) == "review"
         assert tracker2.get_hitl_cause(1) == "ci_failure"
-        assert tracker2.get_review_attempts(1) == 1
+        assert tracker2.get_convergence_ledger(1).get_attempts("review") == 1
         assert tracker2.get_review_feedback(1) == "needs tests"
         assert tracker2.get_epic_state(10) is not None
         assert tracker2.get_lifetime_stats().issues_completed == 1
@@ -316,12 +318,15 @@ class TestHITLStateMixin:
 
 
 class TestReviewStateMixin:
-    def test_review_attempts_lifecycle(self, tmp_path: Path) -> None:
+    def test_reset_review_attempts_zeroes_stage_count(self, tmp_path: Path) -> None:
+        """reset_review_attempts zeroes the per-stage attempt counter on the ledger."""
         t = make_tracker(tmp_path)
-        assert t.get_review_attempts(1) == 0
-        assert t.increment_review_attempts(1) == 1
+        ledger = t.ensure_convergence_ledger(1)
+        ledger.increment_attempts("review")
+        t.save_convergence_ledger(1, ledger)
+        assert t.get_convergence_ledger(1).get_attempts("review") == 1
         t.reset_review_attempts(1)
-        assert t.get_review_attempts(1) == 0
+        assert t.get_convergence_ledger(1).get_attempts("review") == 0
 
     def test_review_feedback(self, tmp_path: Path) -> None:
         t = make_tracker(tmp_path)
@@ -346,15 +351,6 @@ class TestReviewStateMixin:
         # Reload from disk — the field must survive serialization.
         t2 = make_tracker(tmp_path)
         assert t2.get_review_blast_radius(1) == "high"
-
-    def test_min_review_passes_required_defaults_to_low(self, tmp_path: Path) -> None:
-        t = make_tracker(tmp_path)
-        # No radius recorded yet -> low tier -> 1 pass.
-        assert t.min_review_passes_required(1) == 1
-        t.set_review_blast_radius(1, "high")
-        assert t.min_review_passes_required(1) == 3
-        t.set_review_blast_radius(1, "medium")
-        assert t.min_review_passes_required(1) == 2
 
 
 class TestEpicStateMixin:

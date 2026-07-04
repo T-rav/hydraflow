@@ -1387,6 +1387,163 @@ class TestNarrowedExceptionHandling:
         await handler._notify_epic_approval(42)
         mock_epic_manager.on_child_approved.assert_awaited_once()
 
+    @pytest.mark.asyncio
+    async def test_ledger_ordering_retrospective_reads_before_clear(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """C1 ordering regression: retrospective hook observes ledger attempts BEFORE
+        clear; ledger is None AFTER handle_approved returns (successful merge).
+
+        Seeds quality_fix attempts=2 in the convergence ledger, wires a stub
+        retrospective that captures get_convergence_ledger() during its call,
+        drives handle_approved through a successful merge, then asserts:
+          (i)  the stub saw quality_fix_attempts == 2 during hook execution
+          (ii) the ledger is None after handle_approved returns
+        """
+        from state import StateTracker
+
+        state = StateTracker(config.state_file)
+
+        # Seed the ledger with 2 quality_fix attempts before merge
+        state.set_quality_fix_attempts(7, 2)
+
+        # Stub retrospective that reads the ledger during its record() call
+        observed_attempts: list[int] = []
+
+        async def _stub_record(
+            issue_number: int,
+            pr_number: int,
+            review_result,
+        ) -> None:
+            led = state.get_convergence_ledger(issue_number)
+            observed_attempts.append(led.get_attempts("quality_fix") if led else -1)
+
+        mock_retro = AsyncMock()
+        mock_retro.record = AsyncMock(side_effect=_stub_record)
+
+        handler = PostMergeHandler(
+            config=config,
+            state=state,
+            prs=AsyncMock(),
+            event_bus=EventBus(),
+            ac_generator=None,
+            retrospective=mock_retro,
+            verification_judge=None,
+            epic_checker=None,
+        )
+        handler._prs.merge_pr = AsyncMock(return_value=True)
+
+        pr = PRInfoFactory.create(issue_number=7)
+        issue = TaskFactory.create(id=7)
+        result = ReviewResultFactory.create()
+        ctx = MergeApprovalContext(
+            pr=pr,
+            issue=issue,
+            result=result,
+            diff="diff",
+            worker_id=0,
+            ci_gate_fn=AsyncMock(return_value=True),
+            escalate_fn=AsyncMock(),
+            publish_fn=AsyncMock(),
+        )
+        await handler.handle_approved(ctx)
+
+        # (i) retrospective saw the ledger with 2 attempts — not 0 (pre-clear)
+        assert observed_attempts == [2], (
+            f"Retrospective observed {observed_attempts!r}; expected [2]. "
+            "Ledger was cleared before hooks ran (C1 regression)."
+        )
+        # (ii) ledger is gone after handle_approved returns
+        assert state.get_convergence_ledger(7) is None, (
+            "Convergence ledger was not cleared after handle_approved completed."
+        )
+
+    @pytest.mark.asyncio
+    async def test_successful_merge_clears_convergence_ledger(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """After a successful handle_approved the convergence ledger is cleared."""
+        from state import StateTracker
+
+        state = StateTracker(config.state_file)
+        ledger = state.ensure_convergence_ledger(7, blast_radius="medium")
+        ledger.record_gate_result("review", "LOOP_BACK", ["some-sig"])
+        ledger.mark_lap()
+        state.save_convergence_ledger(7, ledger)
+        assert state.get_convergence_ledger(7) is not None
+
+        handler = PostMergeHandler(
+            config=config,
+            state=state,
+            prs=AsyncMock(),
+            event_bus=EventBus(),
+            ac_generator=None,
+            retrospective=None,
+            verification_judge=None,
+            epic_checker=None,
+        )
+        handler._prs.merge_pr = AsyncMock(return_value=True)
+
+        pr = PRInfoFactory.create(issue_number=7)
+        issue = TaskFactory.create(id=7)
+        result = ReviewResultFactory.create()
+        ctx = MergeApprovalContext(
+            pr=pr,
+            issue=issue,
+            result=result,
+            diff="diff",
+            worker_id=0,
+            ci_gate_fn=AsyncMock(return_value=True),
+            escalate_fn=AsyncMock(),
+            publish_fn=AsyncMock(),
+        )
+        await handler.handle_approved(ctx)
+
+        assert state.get_convergence_ledger(7) is None
+
+    @pytest.mark.asyncio
+    async def test_failed_merge_does_not_clear_convergence_ledger(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A failed merge must NOT clear the convergence ledger (unchanged invariant)."""
+        from state import StateTracker
+
+        state = StateTracker(config.state_file)
+        ledger = state.ensure_convergence_ledger(7, blast_radius="medium")
+        ledger.record_gate_result("review", "LOOP_BACK", ["some-sig"])
+        ledger.mark_lap()
+        state.save_convergence_ledger(7, ledger)
+
+        handler = PostMergeHandler(
+            config=config,
+            state=state,
+            prs=AsyncMock(),
+            event_bus=EventBus(),
+            ac_generator=None,
+            retrospective=None,
+            verification_judge=None,
+            epic_checker=None,
+        )
+        handler._prs.merge_pr = AsyncMock(return_value=False)
+
+        pr = PRInfoFactory.create(issue_number=7)
+        issue = TaskFactory.create(id=7)
+        result = ReviewResultFactory.create()
+        ctx = MergeApprovalContext(
+            pr=pr,
+            issue=issue,
+            result=result,
+            diff="diff",
+            worker_id=0,
+            ci_gate_fn=AsyncMock(return_value=True),
+            escalate_fn=AsyncMock(),
+            publish_fn=AsyncMock(),
+        )
+        await handler.handle_approved(ctx)
+
+        # Ledger survives a failed merge
+        assert state.get_convergence_ledger(7) is not None
+
 
 # ---------------------------------------------------------------------------
 # Extracted private method tests — _run_ci_gate

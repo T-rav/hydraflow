@@ -423,6 +423,9 @@ class PostMergeHandler:
             await self._prs.close_issue(pr.issue_number)
             await self._post_inference_totals_comment(pr, issue)
             await self._run_post_merge_hooks(pr, issue, result, diff, visual_decision)
+            # Clear convergence ledger AFTER hooks so retrospective and other
+            # hooks can read quality_fix_rounds before it is wiped (C1 fix).
+            self._state.clear_convergence_ledger(pr.issue_number)
         else:
             logger.warning("PR #%d merge failed — escalating to HITL", pr.number)
             await publish_fn(pr, worker_id, "escalating")

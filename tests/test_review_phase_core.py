@@ -1515,8 +1515,10 @@ class TestReviewConvergenceGate:
         phase = make_review_phase(config, default_mocks=True)
 
         # Pre-seed attempts well past the fix cap on the ledger.
+        ledger = phase._state.ensure_convergence_ledger(7)
         for _ in range(config.max_review_fix_attempts + 3):
-            phase._state.increment_review_attempts(7)
+            ledger.increment_attempts("review")
+        phase._state.save_convergence_ledger(7, ledger)
 
         decision = await phase._convergence_decision(
             issue_number=7, review_approved=False
@@ -1611,6 +1613,128 @@ class TestReviewConvergenceGate:
         ledger = phase._state.get_convergence_ledger(pr.issue_number)
         assert ledger is not None
         assert ledger.stage_state["review"].last_verdict == "ESCALATE"
+
+    @pytest.mark.asyncio
+    async def test_reject_with_summary_records_normalized_signature(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Reject path records normalized summary as lap signature (F1)."""
+        from convergence_gate import GateDecision
+
+        phase = make_review_phase(config, default_mocks=True)
+        config.max_convergence_laps = 20  # Plenty of budget
+
+        result = ReviewResultFactory.create(
+            verdict=ReviewVerdict.REQUEST_CHANGES,
+            summary="  needs X  and  Y  ",
+        )
+
+        decision = await phase._convergence_decision(
+            issue_number=7,
+            review_approved=False,
+            reject_review_result=result,
+        )
+
+        assert decision.decision is GateDecision.LOOP_BACK
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        # The review stage must record the normalized summary as signature.
+        sigs = ledger.stage_state["review"].last_finding_signatures
+        assert sigs == ["needs X and Y"]
+
+    @pytest.mark.asyncio
+    async def test_reject_with_empty_summary_records_empty_signatures(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Reject path with blank summary records [] (F1 fallback)."""
+        from convergence_gate import GateDecision
+
+        phase = make_review_phase(config, default_mocks=True)
+        config.max_convergence_laps = 20
+
+        result = ReviewResultFactory.create(
+            verdict=ReviewVerdict.REQUEST_CHANGES,
+            summary="",
+        )
+
+        decision = await phase._convergence_decision(
+            issue_number=7,
+            review_approved=False,
+            reject_review_result=result,
+        )
+
+        assert decision.decision is GateDecision.LOOP_BACK
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        sigs = ledger.stage_state["review"].last_finding_signatures
+        assert sigs == []
+
+    @pytest.mark.asyncio
+    async def test_two_laps_same_review_findings_detect_outer_oscillation(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Two laps with IDENTICAL review findings -> detect_outer_oscillation True (F1)."""
+        config.max_convergence_laps = 20
+        config.max_review_fix_attempts = 100
+        phase = make_review_phase(config, default_mocks=True)
+
+        result = ReviewResultFactory.create(
+            verdict=ReviewVerdict.REQUEST_CHANGES,
+            summary="needs auth check",
+        )
+
+        for _ in range(2):
+            await phase._convergence_decision(
+                issue_number=7,
+                review_approved=False,
+                reject_review_result=result,
+            )
+
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        assert ledger.detect_outer_oscillation() is True
+
+    @pytest.mark.asyncio
+    async def test_two_laps_different_review_findings_no_false_positive(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Two laps with DIFFERENT review findings -> detect_outer_oscillation False.
+
+        This is the F1 false-positive killer: static pre-review stage signatures +
+        differing review signatures must NOT fire oscillation detection.
+        """
+        config.max_convergence_laps = 20
+        config.max_review_fix_attempts = 100
+        phase = make_review_phase(config, default_mocks=True)
+
+        # Seed pre-review stage signatures (static, won't change between laps).
+        ledger = phase._state.ensure_convergence_ledger(7)
+        ledger.record_gate_result("triage", "ADVANCE", ["static-finding"])
+        phase._state.save_convergence_ledger(7, ledger)
+
+        # Lap 1: finding "needs auth check"
+        await phase._convergence_decision(
+            issue_number=7,
+            review_approved=False,
+            reject_review_result=ReviewResultFactory.create(
+                verdict=ReviewVerdict.REQUEST_CHANGES,
+                summary="needs auth check",
+            ),
+        )
+        # Lap 2: different finding "needs test coverage"
+        await phase._convergence_decision(
+            issue_number=7,
+            review_approved=False,
+            reject_review_result=ReviewResultFactory.create(
+                verdict=ReviewVerdict.REQUEST_CHANGES,
+                summary="needs test coverage",
+            ),
+        )
+
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        # Different review findings -> no oscillation, even with static pre-review sigs.
+        assert ledger.detect_outer_oscillation() is False
 
 
 # ---------------------------------------------------------------------------
@@ -3106,6 +3230,170 @@ class TestApproveConvergenceGate:
         assert all(isinstance(v, JudgeVerdict) for v in verdicts)
         assert all(v.approve is True for v in verdicts)
 
+    @pytest.mark.asyncio
+    async def test_veto_with_disagreements_records_lens_disagreement_signatures(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Approve-veto path records lens:disagreement for each disagreement (F1)."""
+        from convergence_gate import GateDecision, JudgeVerdict
+
+        phase = make_review_phase(config, default_mocks=True)
+
+        async def _veto_judge_with_disagreements(_ctx, _i):
+            return JudgeVerdict(
+                approve=False,
+                feedback="fix correctness",
+                signatures=[
+                    "correctness:missing null check",
+                    "correctness:wrong return",
+                ],
+            )
+
+        decision = await phase._convergence_decision(
+            issue_number=7,
+            review_approved=True,
+            code_scanning_alerts=None,
+            post_verify_judge=_veto_judge_with_disagreements,
+        )
+
+        assert decision.decision is GateDecision.LOOP_BACK
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        sigs = ledger.stage_state["review"].last_finding_signatures
+        # Should contain the lens:disagreement sigs from the judge verdict.
+        assert "correctness:missing null check" in sigs
+        assert "correctness:wrong return" in sigs
+
+    @pytest.mark.asyncio
+    async def test_veto_without_disagreements_records_lens_name_fallback(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Veto with no disagreements falls back to recording the lens name (F1)."""
+        from convergence_gate import GateDecision, JudgeVerdict
+
+        phase = make_review_phase(config, default_mocks=True)
+
+        async def _veto_judge_no_disagreements(_ctx, _i):
+            return JudgeVerdict(
+                approve=False, feedback="veto", signatures=["correctness"]
+            )
+
+        decision = await phase._convergence_decision(
+            issue_number=7,
+            review_approved=True,
+            code_scanning_alerts=None,
+            post_verify_judge=_veto_judge_no_disagreements,
+        )
+
+        assert decision.decision is GateDecision.LOOP_BACK
+        ledger = phase._state.get_convergence_ledger(7)
+        assert ledger is not None
+        sigs = ledger.stage_state["review"].last_finding_signatures
+        assert "correctness" in sigs
+
+    @pytest.mark.asyncio
+    async def test_real_lens_judge_veto_with_disagreements_records_sorted_sigs(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Real ``_post_verify_lens_judge`` VETO branch: 2 disagreements → sorted sigs.
+
+        Exercises the branch in ``_post_verify_lens_judge`` (src/review_phase/_phase.py
+        ~3450-3455) that converts ``pv.disagreements`` into sorted-unique
+        ``f"{lens}:{d.advisor_assessment}"`` signatures.  The two existing veto tests
+        inject their own pre-built judge, so this branch had zero coverage against the
+        real implementation.  This test stubs ``_run_post_verify_for_surface`` directly
+        and calls the real judge via ``_convergence_decision``.
+        """
+        from convergence_gate import GateContext, JudgeVerdict
+        from review_advisor import Disagreement, PostVerifyResult
+
+        phase = make_review_phase(config, default_mocks=True)
+
+        issue = TaskFactory.create()
+        pr = PRInfoFactory.create(issue_number=issue.id)
+        wt_path = config.workspace_path_for_issue(issue.id)
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        # Set blast radius so the judge resolves to 1 lens (low → correctness only).
+        phase._state.set_review_blast_radius(issue.id, "low")
+
+        d1 = Disagreement(
+            executor_claim="return value is correct",
+            advisor_assessment="missing null check",
+            severity="blocking",
+        )
+        d2 = Disagreement(
+            executor_claim="loop terminates",
+            advisor_assessment="off-by-one on upper bound",
+            severity="blocking",
+        )
+
+        async def _fake_post_verify(*, lens=None, **_kwargs):
+            return PostVerifyResult(
+                verdict="VETO",
+                reasoning="two blocking issues found",
+                disagreements=[d1, d2],
+                suggested_fix_direction="fix null check and loop bound",
+            )
+
+        phase._run_post_verify_for_surface = _fake_post_verify  # type: ignore[method-assign]
+
+        result_stub = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
+        judge = phase._post_verify_lens_judge(
+            pr=pr,
+            task=issue,
+            wt_path=wt_path,
+            result=result_stub,
+            diff="diff text",
+            worker_id=0,
+            surface="pr_review",
+        )
+
+        # Drive i=0 (low blast → 1 lens: "correctness").
+        ctx = GateContext(
+            issue_number=issue.id,
+            stage="review",
+            blast_radius="low",
+            attempts=0,
+            max_attempts=5,
+        )
+        verdict = await judge(ctx, 0)
+
+        # Judge returns VETO with sorted lens:advisor_assessment sigs.
+        assert isinstance(verdict, JudgeVerdict)
+        assert verdict.approve is False
+        expected_sigs = sorted(
+            {
+                f"correctness:{d1.advisor_assessment}",
+                f"correctness:{d2.advisor_assessment}",
+            }
+        )
+        assert verdict.signatures == expected_sigs
+
+        # Also verify: when no disagreements, VETO still yields the lens name.
+        async def _fake_no_disagreements(*, lens=None, **_kwargs):
+            return PostVerifyResult(
+                verdict="VETO",
+                reasoning="no detailed disagreements",
+                disagreements=[],
+                suggested_fix_direction="rethink",
+            )
+
+        phase._run_post_verify_for_surface = _fake_no_disagreements  # type: ignore[method-assign]
+        judge2 = phase._post_verify_lens_judge(
+            pr=pr,
+            task=issue,
+            wt_path=wt_path,
+            result=result_stub,
+            diff="diff text",
+            worker_id=0,
+            surface="pr_review",
+        )
+        verdict2 = await judge2(ctx, 0)
+        assert isinstance(verdict2, JudgeVerdict)
+        assert verdict2.approve is False
+        assert verdict2.signatures == ["correctness"]
+
 
 # ---------------------------------------------------------------------------
 # Baseline policy integration in _review_one_inner
@@ -3318,6 +3606,136 @@ class TestNarrowedExceptionHandling:
 
         with pytest.raises(TypeError, match="bad arg"):
             await phase._fetch_code_scanning_alerts(pr)
+
+
+# ---------------------------------------------------------------------------
+# Ledger lifecycle — F2 (reset after HITL) + M1 (clear on merge)
+# ---------------------------------------------------------------------------
+
+
+class TestLedgerLifecycle:
+    """Convergence ledger lifecycle: fresh lap budget after HITL, clear on merge (F2/M1)."""
+
+    @pytest.mark.asyncio
+    async def test_reject_escalate_resets_laps_to_zero(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """After lap-cap ESCALATE via reject path, laps==0 so re-queued issue can loop back."""
+        config.max_review_fix_attempts = 100
+        config.max_convergence_laps = 1  # escalate on very first lap
+        phase = make_review_phase(config, default_mocks=True)
+        pr = PRInfoFactory.create()
+        task = TaskFactory.create(id=pr.issue_number)
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
+
+        _setup_rejected_review_mocks(phase)
+        phase._prs.post_pr_comment = AsyncMock()
+
+        returned = await phase._handle_rejected_review(pr, task, result, 0)
+
+        assert returned is False  # ESCALATE path taken
+        ledger = phase._state.get_convergence_ledger(pr.issue_number)
+        assert ledger is not None
+        assert ledger.stage_state["review"].last_verdict == "ESCALATE"
+        # F2: laps must be reset after escalation
+        assert ledger.laps == 0
+        assert ledger.lap_signatures == []
+
+    @pytest.mark.asyncio
+    async def test_f2_regression_post_hitl_resumption_loops_back_not_escalates(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """F2 regression: after HITL escalation resets laps, a subsequent reject loops back.
+
+        Pre-fix: laps were never reset so the FIRST reject after human fix
+        immediately re-escalated (insta-re-escalate ping-pong).
+        Post-fix: laps==0 after escalation so the next reject loops back normally,
+        as long as the new lap count stays under the cap.
+
+        Uses cap=2: the escalating path exhausts laps=2 (at cap), resets to 0,
+        then the post-HITL path runs mark_lap -> laps=1 < 2, so LOOP_BACK.
+        """
+        from convergence_gate import GateDecision
+
+        config.max_review_fix_attempts = 100
+        config.max_convergence_laps = 2  # cap at 2 so post-reset lap=1 stays under
+        phase = make_review_phase(config, default_mocks=True)
+        pr = PRInfoFactory.create()
+        task = TaskFactory.create(id=pr.issue_number)
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
+
+        _setup_rejected_review_mocks(phase)
+        phase._prs.post_pr_comment = AsyncMock()
+
+        # Drive to ESCALATE: need 2 laps to hit the cap.
+        # First call loops back (laps=1 < 2).
+        first_decision = await phase._convergence_decision(
+            issue_number=pr.issue_number, review_approved=False
+        )
+        assert first_decision.decision is GateDecision.LOOP_BACK
+
+        # Second call hits cap (laps=2 >= 2) -> escalates via _handle_rejected_review.
+        first_return = await phase._handle_rejected_review(pr, task, result, 0)
+        assert first_return is False  # escalated
+
+        # Verify reset occurred
+        ledger_after = phase._state.get_convergence_ledger(pr.issue_number)
+        assert ledger_after is not None
+        assert ledger_after.laps == 0, (
+            "Laps must be reset to 0 after HITL escalation (F2)."
+        )
+
+        # Simulate human fix: re-queue (human transitions label; pipeline re-runs review).
+        # The next _convergence_decision increments laps to 1 < cap(2) -> LOOP_BACK.
+        decision = await phase._convergence_decision(
+            issue_number=pr.issue_number, review_approved=False
+        )
+        assert decision.decision is GateDecision.LOOP_BACK, (
+            "After HITL escalation the lap budget must be reset so the first "
+            "post-HITL review loops back instead of insta-re-escalating (F2)."
+        )
+
+    @pytest.mark.asyncio
+    async def test_successful_merge_clears_convergence_ledger(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """After a successful merge the convergence ledger is cleared (M1)."""
+        phase = make_review_phase(config, default_mocks=True)
+        pr = PRInfoFactory.create()
+        issue = TaskFactory.create(id=pr.issue_number)
+
+        # Pre-seed a ledger (simulates earlier review laps)
+        ledger = phase._state.ensure_convergence_ledger(pr.issue_number)
+        ledger.record_gate_result("review", "LOOP_BACK", ["some-sig"])
+        ledger.mark_lap()
+        phase._state.save_convergence_ledger(pr.issue_number, ledger)
+        assert phase._state.get_convergence_ledger(pr.issue_number) is not None
+
+        await phase.review_prs([pr], [issue])
+
+        # After successful merge the ledger must be gone
+        assert phase._state.get_convergence_ledger(pr.issue_number) is None
+
+    @pytest.mark.asyncio
+    async def test_failed_merge_does_not_clear_convergence_ledger(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A failed merge must NOT clear the convergence ledger."""
+        phase = make_review_phase(config, default_mocks=True)
+        phase._prs.merge_pr = AsyncMock(return_value=False)
+        pr = PRInfoFactory.create()
+        issue = TaskFactory.create(id=pr.issue_number)
+
+        # Pre-seed a ledger
+        ledger = phase._state.ensure_convergence_ledger(pr.issue_number)
+        ledger.record_gate_result("review", "LOOP_BACK", ["some-sig"])
+        ledger.mark_lap()
+        phase._state.save_convergence_ledger(pr.issue_number, ledger)
+
+        await phase.review_prs([pr], [issue])
+
+        # Ledger must survive a failed merge
+        assert phase._state.get_convergence_ledger(pr.issue_number) is not None
 
     @pytest.mark.asyncio
     async def test_visual_validation_catches_runtime_error(
