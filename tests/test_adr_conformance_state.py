@@ -22,7 +22,9 @@ def state_tracker(tmp_path: Path) -> StateTracker:
 
 def test_config_defaults():
     c = HydraFlowConfig()
-    assert c.adr_conformance_loop_enabled is False
+    # Enabled by default (ADR-0100) once proven safe — a dry-run against the
+    # full ADR corpus filed zero false-positive issues (bead advisor-qqyo).
+    assert c.adr_conformance_loop_enabled is True
     assert c.adr_conformance_interval == 86400
 
 
