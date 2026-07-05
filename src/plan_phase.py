@@ -1232,11 +1232,23 @@ class PlanPhase:
                             run_id=run_id,
                         )
                     )
+                    # Human-on-the-loop continuous steering (ADR-0099 #4):
+                    # fold live operator guidance into the plan prompt.
+                    # Reference signal only — never blocking; empty when
+                    # the feature is off or no guidance was posted for
+                    # this issue. Named `human_guidance` (not bare
+                    # `guidance`) to avoid colliding with the unrelated
+                    # `EpicGapReview.guidance` field used elsewhere in
+                    # this module.
+                    human_guidance = (
+                        self._state.get_human_steering(str(issue.id)).guidance or ""
+                    )
                     try:
                         result = await self._planners.plan(
                             issue,
                             worker_id=idx,
                             research_context=research_context,
+                            guidance=human_guidance,
                         )
                     finally:
                         self._planners.clear_tracing_context()

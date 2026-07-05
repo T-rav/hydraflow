@@ -13,6 +13,7 @@ from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventType, HydraFlowEvent
 from exception_classify import exc_detail, reraise_on_credit_or_bug
+from human_steering import fenced_steering_guidance
 from models import NewIssueSpec, PlannerStatus, PlannerUpdatePayload, PlanResult, Task
 from plan_constants import (
     LITE_BODY_THRESHOLD,
@@ -50,6 +51,7 @@ class PlannerRunner(BaseRunner):
         task: Task,
         worker_id: int = 0,
         research_context: str = "",
+        guidance: str = "",
     ) -> PlanResult:
         """Run the planning agent for *task*.
 
@@ -58,6 +60,13 @@ class PlannerRunner(BaseRunner):
         On validation failure the planner is retried once with specific
         feedback.  If the second attempt also fails, the result carries
         ``retry_attempted=True`` so the orchestrator can escalate to HITL.
+
+        ``guidance`` (ADR-0099 #4, human-on-the-loop continuous steering)
+        is live operator guidance for this issue, sourced by
+        :class:`PlanPhase` from ``StateTracker.get_human_steering``. It is
+        folded into the prompt fenced via :func:`fenced_steering_guidance`.
+        Empty string when the feature is off or no guidance was posted —
+        behavior is then unchanged.
         """
         start = time.monotonic()
         result = PlanResult(issue_number=task.id)
@@ -81,6 +90,7 @@ class PlannerRunner(BaseRunner):
                 task,
                 scale=scale,
                 research_context=research_context,
+                guidance=guidance,
             )
 
             def _check_plan_complete(accumulated: str) -> bool:
@@ -303,11 +313,17 @@ class PlannerRunner(BaseRunner):
         *,
         scale: PlanScale = "full",
         research_context: str = "",
+        guidance: str = "",
     ) -> tuple[str, dict[str, object]]:
         """Build the planning prompt and pruning stats.
 
         *scale* is ``"lite"`` or ``"full"``.  The prompt adjusts which
         sections are required and whether to include the pre-mortem step.
+
+        ``guidance`` (ADR-0099 #4) is live operator steering for this
+        issue; folded in fenced via :func:`fenced_steering_guidance`,
+        which returns ``""`` when there is no guidance so behavior is
+        unchanged when the feature is off.
         """
         builder = PromptBuilder()
         comments_section = ""
@@ -578,6 +594,7 @@ This closes the issue automatically. False positives waste significant human tim
         if plugin_skills_section:
             prompt = f"{prompt}\n\n{plugin_skills_section}"
 
+        prompt += fenced_steering_guidance(guidance)
         return prompt, builder.build_stats()
 
     def _detect_plan_scale(self, issue: Task) -> PlanScale:
