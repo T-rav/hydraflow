@@ -14,3 +14,21 @@ def test_attributes_pr_touching_paths():
 def test_returns_none_when_no_touch():
     r = AttributionResolver(list_merged_prs=lambda since: [PRS[0]])
     assert r.attribute(["tests/", "src/"], since_iso="2026-06-30T00:00:00Z") is None
+
+
+def test_returns_first_match_when_multiple_prs_match():
+    prs = [{"number": 5, "files": ["src/a.py"]}, {"number": 9, "files": ["tests/b.py"]}]
+    r = AttributionResolver(list_merged_prs=lambda since: prs)
+    assert r.attribute(["tests/", "src/"], since_iso="x") == 5
+
+
+def test_forwards_since_iso_to_lister():
+    received = {}
+
+    def lister(since):
+        received["since"] = since
+        return []
+
+    r = AttributionResolver(list_merged_prs=lister)
+    r.attribute(["tests/"], since_iso="2026-07-01T00:00:00Z")
+    assert received["since"] == "2026-07-01T00:00:00Z"
