@@ -72,7 +72,7 @@ def _make_runner(
 
     runner._execute = AsyncMock(side_effect=_fake_execute)  # type: ignore[assignment]
     runner._build_command = lambda _w=None: ["claude"]  # type: ignore[assignment]
-    runner._build_prompt = lambda t: "p"  # type: ignore[assignment]
+    runner._build_prompt = lambda t, **kw: "p"  # type: ignore[assignment]
     runner._save_transcript = lambda *a, **k: None  # type: ignore[assignment]
     runner._inject_memory = AsyncMock(return_value="")  # type: ignore[assignment]
     runner._extract_result = lambda tx, n: DiscoverResult(  # type: ignore[assignment]
@@ -144,3 +144,80 @@ class TestDiscoverRunnerEvaluator:
         with caplog.at_level(logging.WARNING, logger="hydraflow.discover"):
             await runner.discover(_make_task(99))
         assert any("PRManager not bound" in r.message for r in caplog.records)
+
+
+class TestEvaluateBriefThreadsGuidance:
+    """ADR-0099 #4 — ``_evaluate_brief`` threads guidance to its skill.
+
+    ``_evaluate_brief`` is the second of discover's two prompt-construction
+    sites (the first being ``_build_prompt``). It must pass ``guidance``
+    through to ``build_discover_completeness_prompt`` unmodified so the
+    fence invariant is enforced at the single builder, not re-implemented
+    here.
+    """
+
+    async def test_evaluate_brief_passes_guidance_to_skill_prompt_builder(
+        self, config
+    ) -> None:
+        import dataclasses
+
+        config.repo_root = Path("/tmp")
+        config.dry_run = False
+        runner = DiscoverRunner(config=config, event_bus=MagicMock(spec=EventBus))
+        runner._execute = AsyncMock(return_value=_OK)  # type: ignore[assignment]
+        runner._build_command = lambda _w=None: ["claude"]  # type: ignore[assignment]
+
+        captured: dict[str, object] = {}
+        from skill_registry import BUILTIN_SKILLS
+
+        idx, skill = next(
+            (i, s)
+            for i, s in enumerate(BUILTIN_SKILLS)
+            if s.name == "discover-completeness"
+        )
+        real_builder = skill.prompt_builder
+
+        def _spy_builder(**kwargs):
+            captured.update(kwargs)
+            return real_builder(**kwargs)
+
+        BUILTIN_SKILLS[idx] = dataclasses.replace(skill, prompt_builder=_spy_builder)
+        try:
+            await runner._evaluate_brief(
+                _make_task(7), "some brief", guidance="Focus on SSO."
+            )
+        finally:
+            BUILTIN_SKILLS[idx] = skill
+
+        assert captured["guidance"] == "Focus on SSO."
+
+    async def test_evaluate_brief_defaults_guidance_to_empty(self, config) -> None:
+        import dataclasses
+
+        config.repo_root = Path("/tmp")
+        config.dry_run = False
+        runner = DiscoverRunner(config=config, event_bus=MagicMock(spec=EventBus))
+        runner._execute = AsyncMock(return_value=_OK)  # type: ignore[assignment]
+        runner._build_command = lambda _w=None: ["claude"]  # type: ignore[assignment]
+
+        captured: dict[str, object] = {}
+        from skill_registry import BUILTIN_SKILLS
+
+        idx, skill = next(
+            (i, s)
+            for i, s in enumerate(BUILTIN_SKILLS)
+            if s.name == "discover-completeness"
+        )
+        real_builder = skill.prompt_builder
+
+        def _spy_builder(**kwargs):
+            captured.update(kwargs)
+            return real_builder(**kwargs)
+
+        BUILTIN_SKILLS[idx] = dataclasses.replace(skill, prompt_builder=_spy_builder)
+        try:
+            await runner._evaluate_brief(_make_task(7), "some brief")
+        finally:
+            BUILTIN_SKILLS[idx] = skill
+
+        assert captured["guidance"] == ""
