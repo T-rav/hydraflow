@@ -70,6 +70,50 @@ class TestHumanSteeringAbort:
             7, config.hitl_label[0]
         )
 
+    @pytest.mark.asyncio
+    async def test_abort_escalates_with_operator_abort_origin(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """`/abort` records a distinct HITL origin so operator aborts are
+        distinguishable from failure-driven escalations on the dashboard."""
+        config.human_steering_enabled = True
+        orch = HydraFlowOrchestrator(config)
+        orch._svc.store.get_active_issues = lambda: {7: "ready"}  # type: ignore[method-assign]
+        orch._svc.prs.swap_pipeline_labels = AsyncMock()  # type: ignore[method-assign]
+        orch._state.set_human_steering("7", SteeringState(flow="abort"))
+
+        await orch._apply_human_steering()
+
+        orch._svc.prs.swap_pipeline_labels.assert_awaited_once_with(
+            7, config.hitl_label[0]
+        )
+        assert orch._state.get_hitl_origin(7) == "operator-abort"
+        assert orch._state.get_hitl_cause(7) == "/abort steering directive"
+
+    @pytest.mark.asyncio
+    async def test_reabort_is_idempotent(self, config: HydraFlowConfig) -> None:
+        """A second `/abort` on an issue already parked with operator-abort
+        origin must not double-count the lifetime HITL escalation counter."""
+        config.human_steering_enabled = True
+        orch = HydraFlowOrchestrator(config)
+        orch._svc.store.get_active_issues = lambda: {7: "ready"}  # type: ignore[method-assign]
+        orch._svc.prs.swap_pipeline_labels = AsyncMock()  # type: ignore[method-assign]
+        orch._state.set_human_steering("7", SteeringState(flow="abort"))
+
+        await orch._apply_human_steering()
+        before = orch._state.get_lifetime_stats().total_hitl_escalations
+
+        # Simulate a second /abort directive arriving on the same
+        # already-operator-aborted issue.
+        orch._state.set_human_steering("7", SteeringState(flow="abort"))
+        orch._svc.prs.swap_pipeline_labels.reset_mock()
+
+        await orch._apply_human_steering()
+
+        orch._svc.prs.swap_pipeline_labels.assert_not_awaited()
+        after = orch._state.get_lifetime_stats().total_hitl_escalations
+        assert after == before
+
 
 class TestHumanSteeringRedo:
     @pytest.mark.asyncio

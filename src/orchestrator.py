@@ -35,6 +35,7 @@ from models import (
     WorkFn,
 )
 from phase_utils import (
+    escalate_to_hitl,
     is_likely_bug,
     log_exception_with_bug_classification,
     release_batch_in_flight,
@@ -544,9 +545,13 @@ class HydraFlowOrchestrator:
         ``human_steering_enabled`` is off.
 
         - ``skip`` (paused): drop from this cycle — simply don't re-enqueue.
-        - ``park`` (abort): swap to the existing recoverable HITL label
-          (``hitl_label``) so the issue leaves active scheduling but a human
-          can un-escalate it later, exactly like any other HITL escalation.
+        - ``park`` (abort): escalate to HITL (``hitl_label``) with a distinct
+          ``operator-abort`` origin so the issue leaves active scheduling but
+          a human can un-escalate it later, exactly like any other HITL
+          escalation — while the dashboard can still tell an operator abort
+          apart from a failure-driven escalation. Guarded for idempotency: a
+          new ``/abort`` on an issue already at the ``operator-abort`` origin
+          does not re-fire the (non-idempotent) escalation.
         - ``redo_phase``: resolve a dashboard-facing or internal phase token
           (``human_steering.resolve_redo_phase``) then re-enqueue to the
           resolved phase (when valid and under the redo cap) and persist the
@@ -590,9 +595,21 @@ class HydraFlowOrchestrator:
             )
 
             if decision.park:
-                await self._svc.prs.swap_pipeline_labels(
-                    issue_number, self._config.hitl_label[0]
-                )
+                # Idempotency guard: `escalate_to_hitl` increments a
+                # lifetime counter on every call, so a fresh `/abort` on an
+                # issue that's already parked with the operator-abort origin
+                # must not re-fire it (the steering high-water-mark already
+                # prevents the *same* comment from re-triggering; this
+                # guards a *new* /abort on an already-aborted issue).
+                if self._state.get_hitl_origin(issue_number) != "operator-abort":
+                    await escalate_to_hitl(
+                        self._state,
+                        self._svc.prs,
+                        issue_number,
+                        cause="/abort steering directive",
+                        origin_label="operator-abort",
+                        hitl_label=self._config.hitl_label[0],
+                    )
                 continue
 
             if decision.skip:

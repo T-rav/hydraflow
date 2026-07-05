@@ -30,6 +30,7 @@ _HITL_ORIGIN_DISPLAY: dict[str, str] = {
     "hydraflow-plan": "from plan",
     "hydraflow-ready": "from implement",
     "hydraflow-review": "from review",
+    "operator-abort": "Operator abort",
 }
 
 
