@@ -242,7 +242,7 @@ class TestHITLPhaseProcessing:
         first_task_started = asyncio.Event()
         task_43_running = asyncio.Event()
 
-        async def run_by_issue(issue, correction, cause, wt_path):  # noqa: ANN001, ANN202, ARG001
+        async def run_by_issue(issue, correction, cause, wt_path, guidance=""):  # noqa: ANN001, ANN202, ARG001
             if issue.id == 42:
                 first_task_started.set()
                 # Wait for task 43 to be truly blocked inside runner.run, then stop
@@ -347,6 +347,71 @@ class TestHITLPhaseProcessing:
         await phase._process_one_hitl(42, "Fix it", semaphore)
 
         wt.destroy.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# HITL phase — human-on-the-loop continuous steering (ADR-0099 #4)
+# ---------------------------------------------------------------------------
+
+
+class TestHITLPhaseHumanSteering:
+    """``HITLPhase`` sources guidance via ``StateTracker.get_human_steering``.
+
+    HITL folds guidance into a cause-keyed instruction TEMPLATE, not a plain
+    prompt string (see ``HITLRunner._build_prompt_with_stats`` /
+    ``_CAUSE_INSTRUCTIONS``) — a different injection shape than the
+    discover/shape/plan/review builders. Guidance is keyed by
+    ``str(issue_number)`` (the method parameter), NOT ``str(issue.number)``,
+    because ``fetch_issue_by_number`` returns a ``GitHubIssue`` in production
+    but this suite's fakes return ``Task``-shaped doubles that don't expose
+    ``.number``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_sources_guidance_and_passes_to_hitl_runner(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Non-empty steering guidance is sourced and threaded to the runner."""
+        from models import SteeringState
+
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42, title="Test HITL", body="Fix it")
+
+        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        state.set_hitl_origin(42, "hydraflow-review")
+        state.set_hitl_cause(42, "CI failed")
+        state.set_human_steering(
+            "42", SteeringState(guidance="Watch out for the flaky auth fixture.")
+        )
+
+        runner.run = AsyncMock(return_value=HITLResultFactory.create())
+
+        semaphore = asyncio.Semaphore(1)
+        await phase._process_one_hitl(42, "Fix the tests", semaphore)
+
+        runner.run.assert_awaited_once()
+        _args, kwargs = runner.run.call_args
+        assert kwargs["guidance"] == "Watch out for the flaky auth fixture."
+
+    @pytest.mark.asyncio
+    async def test_passes_empty_guidance_when_none_posted(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """No steering guidance posted -> runner receives an empty string."""
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42, title="Test HITL", body="Fix it")
+
+        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        state.set_hitl_origin(42, "hydraflow-review")
+        state.set_hitl_cause(42, "CI failed")
+
+        runner.run = AsyncMock(return_value=HITLResultFactory.create())
+
+        semaphore = asyncio.Semaphore(1)
+        await phase._process_one_hitl(42, "Fix the tests", semaphore)
+
+        _args, kwargs = runner.run.call_args
+        assert kwargs["guidance"] == ""
 
 
 # ---------------------------------------------------------------------------
