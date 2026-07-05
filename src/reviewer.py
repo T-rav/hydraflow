@@ -15,6 +15,7 @@ from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventType, HydraFlowEvent
 from exception_classify import exc_detail, reraise_on_credit_or_bug
+from human_steering import fenced_steering_guidance
 from models import (
     CICheckPayload,
     CodeScanningAlert,
@@ -156,6 +157,7 @@ class ReviewRunner(BaseRunner):
         bead_tasks: list[dict[str, object]] | None = None,
         pre_flight_plan: ReviewPlan | None = None,
         surface: str = "pr_review",
+        human_guidance: str = "",
     ) -> ReviewResult:
         """Run the review agent for *pr*.
 
@@ -170,6 +172,13 @@ class ReviewRunner(BaseRunner):
         prompt assembly. Defaults to ``"pr_review"`` for back-compat; Phase
         4 wires other surfaces (``adr_review``, ``visual_gate``, etc.) by
         passing the surface name explicitly.
+
+        ``human_guidance`` (ADR-0099 #4, human-on-the-loop continuous
+        steering) is live operator guidance for this issue, sourced by
+        :class:`ReviewPhase` from ``StateTracker.get_human_steering``. It
+        is folded into the prompt fenced via :func:`fenced_steering_guidance`.
+        Empty string when the feature is off or no guidance was posted —
+        the fold is then a no-op.
         """
         start = time.monotonic()
         result = ReviewResult(
@@ -212,6 +221,7 @@ class ReviewRunner(BaseRunner):
                 bead_tasks=bead_tasks,
                 pre_flight_plan=pre_flight_plan,
                 surface=surface,
+                human_guidance=human_guidance,
             )
             before_sha = await self._get_head_sha(worktree_path)
             transcript = await self._execute(
@@ -754,8 +764,15 @@ Then a brief summary on the next line starting with "SUMMARY: ".
         bead_tasks: list[dict[str, object]] | None = None,
         pre_flight_plan: ReviewPlan | None = None,
         surface: str = "pr_review",
+        human_guidance: str = "",
     ) -> tuple[str, dict[str, object]]:
-        """Build the review prompt and pruning stats."""
+        """Build the review prompt and pruning stats.
+
+        ``human_guidance`` (ADR-0099 #4) is live operator steering for this
+        issue; folded in fenced via :func:`fenced_steering_guidance`, which
+        returns ``""`` when there is no guidance so behavior is unchanged
+        for issues with the feature off or no posted guidance.
+        """
         ci_enabled = self._config.max_ci_fix_attempts > 0
         test_cmd = self._config.test_command
         ui_criteria = ""
@@ -984,6 +1001,8 @@ SUMMARY: Implementation looks good, tests are comprehensive, all checks pass.
         )
         if plugin_skills_section:
             prompt = f"{prompt}\n\n{plugin_skills_section}"
+
+        prompt += fenced_steering_guidance(human_guidance)
 
         review_builder = PromptBuilder()
         review_builder.record_context("Issue body", issue.body or "", issue_body)

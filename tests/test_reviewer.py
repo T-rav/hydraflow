@@ -262,6 +262,56 @@ async def test_build_review_prompt_fix_section_runs_tests_when_ci_disabled(
 
 
 # ---------------------------------------------------------------------------
+# Human-on-the-loop continuous steering (ADR-0099 #4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_build_review_prompt_folds_fenced_human_steering_guidance(
+    config, event_bus, pr_info, task
+):
+    """Live operator guidance is folded into the review prompt FENCED.
+
+    Guidance must reach the prompt only via ``fenced_steering_guidance`` —
+    never as raw comment text (ADR-0092 fence invariant).
+    """
+    from human_steering import fenced_steering_guidance
+
+    runner = _make_runner(config, event_bus)
+    guidance = "Prioritize the auth-bypass edge case over style nits."
+    prompt, _ = await runner._build_review_prompt_with_stats(
+        pr_info, task, "some diff", human_guidance=guidance
+    )
+
+    assert "## Human Steering Guidance" in prompt
+    assert fenced_steering_guidance(guidance) in prompt
+
+
+@pytest.mark.asyncio
+async def test_build_review_prompt_empty_guidance_produces_no_steering_section(
+    config, event_bus, pr_info, task
+):
+    """No guidance posted -> no steering section (unchanged behavior)."""
+    runner = _make_runner(config, event_bus)
+    prompt, _ = await runner._build_review_prompt_with_stats(
+        pr_info, task, "some diff", human_guidance=""
+    )
+
+    assert "## Human Steering Guidance" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_build_review_prompt_default_guidance_produces_no_steering_section(
+    config, event_bus, pr_info, task
+):
+    """Callers that omit ``human_guidance`` entirely get unchanged behavior."""
+    runner = _make_runner(config, event_bus)
+    prompt, _ = await runner._build_review_prompt_with_stats(pr_info, task, "some diff")
+
+    assert "## Human Steering Guidance" not in prompt
+
+
+# ---------------------------------------------------------------------------
 # _parse_verdict
 # ---------------------------------------------------------------------------
 
