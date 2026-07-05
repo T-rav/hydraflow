@@ -15,7 +15,7 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from hitl_controller import HITLController
 from human_steering import apply_steering, resolve_redo_phase
-from issue_store import IssueStoreStage
+from issue_store import STAGE_NAME_MAP, IssueStoreStage
 from models import (
     BackgroundWorkerState,
     ErrorPayload,
@@ -626,10 +626,20 @@ class HydraFlowOrchestrator:
                 reason = (
                     "unknown phase" if resolved_phase is None else "redo cap reached"
                 )
+                # Derive the operator-facing list from known_phases (the same
+                # source of truth apply_steering validates against) mapped
+                # through STAGE_NAME_MAP to dashboard-facing display names,
+                # so it can't drift out of sync with what /redo actually
+                # accepts (e.g. missing "triage", the display name for FIND).
+                valid_phase_names = ", ".join(
+                    STAGE_NAME_MAP[stage]
+                    for stage in IssueStoreStage
+                    if stage.value in known_phases
+                )
                 await self._svc.prs.post_comment(
                     issue_number,
                     f"⚠️ steering: /redo '{raw_token}' not applied — {reason}; "
-                    "valid: implement, shape, plan, review, hitl, discover",
+                    f"valid: {valid_phase_names}",
                 )
                 self._state.set_human_steering(
                     key,
