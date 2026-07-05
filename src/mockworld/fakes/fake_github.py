@@ -33,6 +33,36 @@ class RateLimitError(Exception):
         super().__init__(f"FakeGitHub rate limit{suffix}; reset in {reset_in}s")
 
 
+class FakeComment(str):
+    """A single seeded/posted comment, structured but string-shaped.
+
+    Subclasses ``str`` so every existing reader that treats
+    ``FakeIssue.comments`` as ``list[str]`` (``in``, indexing, ``.lower()``,
+    ``len()``) keeps working unmodified, while ``list_issue_comments`` (and
+    any new reader) can pull the real per-comment ``login``/``created_at``
+    off the same object instead of a hardcoded constant.
+    """
+
+    login: str
+    created_at: str
+
+    def __new__(
+        cls,
+        body: str,
+        *,
+        login: str = "fake-author",
+        created_at: str = "2026-01-01T00:00:00Z",
+    ) -> FakeComment:
+        obj = super().__new__(cls, body)
+        obj.login = login
+        obj.created_at = created_at
+        return obj
+
+    @property
+    def body(self) -> str:
+        return str(self)
+
+
 @dataclass
 class FakeIssue:
     number: int
@@ -40,10 +70,11 @@ class FakeIssue:
     body: str
     labels: list[str] = field(default_factory=list)
     state: str = "open"
-    # Stored as raw bodies; list_issue_comments wraps each into a
-    # `gh issue view --json comments`-shaped dict. Tests that need richer
-    # comment metadata (author, timestamp) can post-process this list.
-    comments: list[str] = field(default_factory=list)
+    # Each entry is a FakeComment (str subclass carrying login/created_at).
+    # list_issue_comments reads the structured fields directly; callers that
+    # still treat this as list[str] (in/indexing/.lower()/len()) keep working
+    # because FakeComment *is* a str.
+    comments: list[FakeComment] = field(default_factory=list)
     updated_at: str = "2026-01-01T00:00:00Z"
 
 
@@ -123,6 +154,14 @@ class FakeGitHub:
                 body=issue_dict["body"],
                 labels=list(issue_dict.get("labels", [])),
             )
+        for issue_number, comment_dicts in seed.comments.items():
+            for comment_dict in comment_dicts:
+                gh.add_seeded_comment(
+                    issue_number,
+                    comment_dict.get("body", ""),
+                    login=comment_dict.get("login", "fake-author"),
+                    created_at=comment_dict.get("created_at", "2026-01-01T00:00:00Z"),
+                )
         for pr_dict in seed.prs:
             gh.add_pr(
                 number=pr_dict["number"],
@@ -154,6 +193,27 @@ class FakeGitHub:
             title=title,
             body=body,
             labels=labels or [],
+        )
+
+    def add_seeded_comment(
+        self,
+        issue_number: int,
+        body: str,
+        *,
+        login: str = "fake-author",
+        created_at: str = "2026-01-01T00:00:00Z",
+    ) -> None:
+        """Seed-API helper: attach a structured comment to a fake issue.
+
+        Unlike ``post_comment`` (the runtime path bots/routes call), this
+        lets a scenario control the comment's author and timestamp — needed
+        for e.g. human-steering directive sequences that rely on a real
+        ``created_at`` high-water-mark across distinct authors.
+        """
+        if issue_number not in self._issues:
+            raise KeyError(f"FakeGitHub: no issue {issue_number}")
+        self._issues[issue_number].comments.append(
+            FakeComment(body, login=login, created_at=created_at)
         )
 
     def add_pr(
@@ -360,7 +420,7 @@ class FakeGitHub:
         self._maybe_rate_limit()
         self._comments.append((issue_number, body))
         if issue_number in self._issues:
-            self._issues[issue_number].comments.append(body)
+            self._issues[issue_number].comments.append(FakeComment(body))
 
     async def post_pr_comment(self, pr_number: int, body: str) -> None:
         self._maybe_rate_limit()
@@ -682,7 +742,8 @@ class FakeGitHub:
     async def list_issue_comments(self, issue_number: int) -> list[dict[str, Any]]:
         """Return comments seeded on the issue (oldest first).
 
-        FakeIssue.comments stores raw body strings; this method wraps each
+        FakeIssue.comments stores structured FakeComment records (each a str
+        subclass carrying its own login/created_at); this method wraps each
         into a `gh issue view --json comments`-shaped dict so callers (notably
         gather_context, which does `c.get("user", {}).get("login", ...)`)
         operate on dicts as the real PRPort contract requires.
@@ -693,11 +754,11 @@ class FakeGitHub:
             return []
         return [
             {
-                "user": {"login": "fake-author"},
-                "body": body,
-                "created_at": "2026-01-01T00:00:00Z",
+                "user": {"login": getattr(comment, "login", "fake-author")},
+                "body": str(comment),
+                "created_at": getattr(comment, "created_at", "2026-01-01T00:00:00Z"),
             }
-            for body in (getattr(issue, "comments", []) or [])
+            for comment in (getattr(issue, "comments", []) or [])
         ]
 
     async def get_issue_updated_at(self, issue_number: int) -> str:
