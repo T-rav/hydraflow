@@ -1,3 +1,5 @@
+import pytest
+
 from auto_tighten.engine import TighteningEngine
 from auto_tighten.models import Observation
 from tests.auto_tighten.test_ratchet_adapter import (
@@ -44,3 +46,25 @@ def test_confirm_holds_when_margin_erases_gain():
         )
         is None
     )
+
+
+def test_confirm_rejects_zero_stability_ticks():
+    eng, a = TighteningEngine(), _FakeAdapter()
+    with pytest.raises(ValueError):
+        eng.confirm(a, [_obs(80.0)], baseline=70.0, stability_ticks=0)
+
+
+def test_confirm_rejects_negative_stability_ticks():
+    eng, a = TighteningEngine(), _FakeAdapter()
+    with pytest.raises(ValueError):
+        eng.confirm(
+            a,
+            [_obs(60.0), _obs(80.0), _obs(80.0)],
+            baseline=70.0,
+            stability_ticks=-1,
+        )
+
+
+def test_confirm_empty_window_returns_none():
+    eng, a = TighteningEngine(), _FakeAdapter()
+    assert eng.confirm(a, [], baseline=70.0, stability_ticks=3) is None

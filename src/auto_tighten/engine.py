@@ -27,6 +27,8 @@ class TighteningEngine:
         baseline: Measurement,
         stability_ticks: int,
     ) -> Measurement | None:
+        if stability_ticks < 1:
+            raise ValueError(f"stability_ticks must be >= 1, got {stability_ticks}")
         if len(window) < stability_ticks:
             return None
         recent = window[-stability_ticks:]
