@@ -47,6 +47,8 @@ class CoverageAdapter:
     def render_tightened(self, repo_root: Path, value: float) -> list[FileEdit]:
         path = repo_root / "pyproject.toml"
         text = path.read_text()
+        if _FAIL_UNDER.search(text) is None:
+            raise ValueError("fail_under not found in pyproject.toml")
         new_val = int(value) if float(value).is_integer() else value
         new_text = _FAIL_UNDER.sub(
             lambda m: f"{m.group('pre')}{new_val}", text, count=1

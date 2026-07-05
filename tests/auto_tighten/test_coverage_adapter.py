@@ -1,4 +1,6 @@
 # tests/auto_tighten/test_coverage_adapter.py
+import pytest
+
 from auto_tighten.coverage_adapter import CoverageAdapter
 from auto_tighten.models import CoverageRecord
 
@@ -40,3 +42,28 @@ def test_render_tightened_rewrites_fail_under(tmp_path):
     edits = a.render_tightened(tmp_path, 77.0)
     assert "fail_under = 77" in edits[0].new_text
     assert "show_missing = true" in edits[0].new_text  # only the floor line changes
+
+
+def test_render_tightened_raises_when_fail_under_absent(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.coverage.report]\nshow_missing = true\n"
+    )
+    a = CoverageAdapter(coverage_jsonl=tmp_path / "c.jsonl", margin=1.0)
+    with pytest.raises(ValueError, match="fail_under not found"):
+        a.render_tightened(tmp_path, 77.0)
+
+
+def test_current_raises_when_no_coverage_recorded(tmp_path):
+    cov = tmp_path / "coverage.jsonl"
+    a = CoverageAdapter(coverage_jsonl=cov, margin=1.0)
+    with pytest.raises(FileNotFoundError, match="no recorded coverage"):
+        a.current(tmp_path)
+
+
+def test_baseline_raises_when_fail_under_missing(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.coverage.report]\nshow_missing = true\n"
+    )
+    a = CoverageAdapter(coverage_jsonl=tmp_path / "c.jsonl", margin=1.0)
+    with pytest.raises(ValueError, match="fail_under not found"):
+        a.baseline(tmp_path)
