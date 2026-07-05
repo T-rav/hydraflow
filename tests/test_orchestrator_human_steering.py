@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from human_steering_loop import HumanSteeringLoop
 from models import SteeringState
 from orchestrator import HydraFlowOrchestrator
 from tests.conftest import TaskFactory
@@ -276,3 +277,92 @@ class TestHumanSteeringGuidanceFold:
         await implementer._run_implementation(issue, "agent/issue-42", 0, "")
 
         assert captured.get("human_guidance") == "focus on the retry path"
+
+
+class TestHumanSteeringEnabledPathEndToEnd:
+    """Sensor -> actuator, wired together, at the (now-default) enabled config.
+
+    Unlike the per-behavior tests above (which set `human_steering_enabled =
+    True` directly on the config and drive the actuator with a hand-built
+    `SteeringState`), this test drives the real `HumanSteeringLoop` sensor
+    against an authorized comment and asserts the state it *writes* is what
+    the orchestrator actuator then *acts on*. It exercises the authorization
+    choke point (`parse_directives`) and the sensor/actuator wiring together,
+    so it fails if either the default flip or the allowlist plumbing regresses.
+    """
+
+    @pytest.mark.asyncio
+    async def test_authorized_pause_is_sensed_and_actuated_as_skip(
+        self, config: HydraFlowConfig
+    ) -> None:
+        # human_steering_enabled is left at its config default (now True) —
+        # this is the point of the enabled-path test.
+        assert config.human_steering_enabled is True
+        config.human_steering_authorized_users = ["ops-operator"]
+        orch = HydraFlowOrchestrator(config)
+        orch._svc.store.get_active_issues = lambda: {23: "ready"}  # type: ignore[method-assign]
+        orch._svc.prs.swap_pipeline_labels = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.store.enqueue_transition = MagicMock()  # type: ignore[method-assign]
+        orch._svc.prs.list_issue_comments = AsyncMock(  # type: ignore[method-assign]
+            return_value=[
+                {
+                    "user": {"login": "ops-operator"},
+                    "body": "/pause",
+                    "created_at": "2026-07-04T10:00:00Z",
+                },
+            ]
+        )
+
+        sensor = HumanSteeringLoop(
+            config=config,
+            state=orch._state,
+            prs=orch._svc.prs,
+            deps=MagicMock(),
+            active_issues_cb=orch._svc.store.get_active_issues,
+        )
+        sensor._enabled_cb = lambda _name: True  # kill-switch open
+
+        sense_result = await sensor._do_work()
+        assert sense_result["status"] == "ok"
+        assert sense_result["updated"] == 1
+        assert orch._state.get_human_steering("23").flow == "paused"
+
+        await orch._apply_human_steering()
+
+        orch._svc.prs.swap_pipeline_labels.assert_not_awaited()
+        orch._svc.store.enqueue_transition.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unauthorized_pause_is_dropped_at_the_sensor(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Empty allowlist ⇒ honor nobody: the same `/pause` comment from a
+        login absent from `human_steering_authorized_users` never reaches
+        SteeringState, so the actuator sees a running issue and proceeds."""
+        assert config.human_steering_enabled is True
+        assert config.human_steering_authorized_users == []
+        orch = HydraFlowOrchestrator(config)
+        orch._svc.store.get_active_issues = lambda: {24: "ready"}  # type: ignore[method-assign]
+        orch._svc.prs.swap_pipeline_labels = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.prs.list_issue_comments = AsyncMock(  # type: ignore[method-assign]
+            return_value=[
+                {
+                    "user": {"login": "random-passerby"},
+                    "body": "/pause",
+                    "created_at": "2026-07-04T10:00:00Z",
+                },
+            ]
+        )
+
+        sensor = HumanSteeringLoop(
+            config=config,
+            state=orch._state,
+            prs=orch._svc.prs,
+            deps=MagicMock(),
+            active_issues_cb=orch._svc.store.get_active_issues,
+        )
+        sensor._enabled_cb = lambda _name: True
+
+        await sensor._do_work()
+
+        assert orch._state.get_human_steering("24").flow == "running"
