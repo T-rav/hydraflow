@@ -7,7 +7,7 @@ from auto_tighten.models import FileEdit, Measurement
 
 
 @runtime_checkable
-class RatchetPort(Protocol):
+class RatchetAdapter(Protocol):
     ratchet_id: str
 
     def current(self, repo_root: Path) -> Measurement: ...

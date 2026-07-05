@@ -114,13 +114,6 @@ graph LR
   - `PRManager` (`src.pr_manager`)
 - Fake: `FakePR` (`mockworld.fakes.fake_github`)
 
-### RatchetPort
-
-- Module: `src.auto_tighten.ratchet_port`
-- Methods: `apply_margin`, `baseline`, `current`, `dedup_key`, `is_tighter`, `render_tightened`, `weakest`
-- Adapters: —
-- Fake: ⚠️ no fake (every Port needs a fake per ADR-0047)
-
 ### ReviewInsightStorePort
 
 - Module: `src.ports`

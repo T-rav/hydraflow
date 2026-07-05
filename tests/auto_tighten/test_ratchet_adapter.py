@@ -1,5 +1,5 @@
 from auto_tighten.models import FileEdit
-from auto_tighten.ratchet_port import RatchetPort
+from auto_tighten.ratchet_adapter import RatchetAdapter
 
 
 class _FakeAdapter:
@@ -28,4 +28,4 @@ class _FakeAdapter:
 
 
 def test_fake_adapter_satisfies_protocol():
-    assert isinstance(_FakeAdapter(), RatchetPort)
+    assert isinstance(_FakeAdapter(), RatchetAdapter)
