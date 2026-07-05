@@ -323,6 +323,54 @@ class TestWorkerRegistryCallbacks:
         assert isinstance(registry, ServiceRegistry)
 
 
+class TestHumanSteeringLoopActiveIssuesCb:
+    """The steering sensor must widen to the full-pipeline active set.
+
+    ``human_steering_loop.active_issues_cb`` used to read
+    ``state.get_active_issue_numbers`` — the narrower implement/review/HITL
+    set the orchestrator maintains via ``_sync_active_issue_numbers``. A
+    ``/pause`` posted while an issue sits in triage/discover/shape/plan was
+    never sensed. The cb must instead mirror the actuator's own
+    enumeration: ``store.get_active_issues()`` (every active phase).
+    """
+
+    def test_cb_returns_stores_full_active_issue_numbers(
+        self, config: HydraFlowConfig
+    ) -> None:
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        stop_event = asyncio.Event()
+        callbacks = _make_callbacks()
+
+        registry = build_services(config, bus, state, stop_event, callbacks)
+
+        # Simulate issues active in phases the old, narrower cb could not
+        # see (shape) alongside one it could (review).
+        registry.store.mark_active(7, "shape")
+        registry.store.mark_active(9, "review")
+
+        assert sorted(registry.human_steering_loop._active_issues_cb()) == [7, 9]
+
+    def test_cb_reflects_store_not_state_active_issue_numbers(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Regression guard: the cb must read the store, not the narrower
+        state-tracker set — even when the two disagree."""
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        stop_event = asyncio.Event()
+        callbacks = _make_callbacks()
+
+        registry = build_services(config, bus, state, stop_event, callbacks)
+
+        # state's narrower set has nothing; the store has a shape-phase issue
+        # the old wiring would have missed entirely.
+        state.set_active_issue_numbers([])
+        registry.store.mark_active(7, "shape")
+
+        assert registry.human_steering_loop._active_issues_cb() == [7]
+
+
 class TestAdversarialPipelineWiring:
     """Factory wiring for the earlier-adversarial pipeline (ADR-0064).
 

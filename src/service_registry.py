@@ -1447,15 +1447,19 @@ def build_services(
     )
 
     # Human-on-the-loop continuous steering sensor (ADR-0099 #4). Reads
-    # active issue numbers straight off the persisted StateTracker set —
-    # the same source the orchestrator maintains via
-    # ``_sync_active_issue_numbers`` on every phase transition.
+    # the full-pipeline active-issue set straight off the IssueStore
+    # (queued/in-flight/active — every phase from triage through HITL),
+    # not just the narrower implement/review/HITL-in-flight set that
+    # ``state.get_active_issue_numbers`` exposes via the orchestrator's
+    # ``_sync_active_issue_numbers``. This ensures a directive posted on
+    # an issue in triage/discover/shape/plan is sensed too, matching the
+    # actuator's own enumeration (``store.get_active_issues()``).
     human_steering_loop = HumanSteeringLoop(
         config=config,
         state=state,
         prs=prs,
         deps=loop_deps,
-        active_issues_cb=state.get_active_issue_numbers,
+        active_issues_cb=lambda: list(store.get_active_issues().keys()),
     )
 
     # Term-Proposer (ADR-0054). Production adapters wire the loop to:
