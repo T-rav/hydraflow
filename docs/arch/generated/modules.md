@@ -10,6 +10,7 @@ graph LR
     src_arch["src.arch"]
     src_arch_extractors["src.arch.extractors"]
     src_arch_generators["src.arch.generators"]
+    src_auto_tighten["src.auto_tighten"]
     src_contracts["src.contracts"]
     src_dashboard_routes["src.dashboard_routes"]
     src_disturbance["src.disturbance"]
