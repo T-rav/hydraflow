@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `59c88c0` — feat(auto-tighten): add core models *(2026-07-05)*
 - `83cf489` — feat(steering): continuous human-on-the-loop steering channel (ADR-0103, control surface #4) (#9709) (#9709) *(2026-07-04)*
 - `ef22341` — Convergence hardening: real lap signatures, ledger lifecycle, caretaker guards (#9693) (#9706) (#9706) *(2026-07-04)*
 - `ed627b8` — docs(adr): backfill Enforcement for all 59 grandfathered ADRs (drain grandfather set to ∅) (#9696) (#9696) *(2026-07-02)*
