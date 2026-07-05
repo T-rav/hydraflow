@@ -20,7 +20,7 @@ class ObservationStore:
         if not self._path.exists():
             return []
         out: list[Observation] = []
-        for raw_line in self._path.read_text().splitlines():
+        for raw_line in self._path.read_text(encoding="utf-8").splitlines():
             line = raw_line.strip()
             if not line:
                 continue
