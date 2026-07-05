@@ -2677,6 +2677,10 @@ class HydraFlowConfig(BaseModel):
         default=3,
         description="Max redo directives HumanSteeringLoop honors per issue before capping to prevent infinite redo.",
     )
+    human_steering_authorized_users: list[str] = Field(
+        default_factory=list,
+        description="GitHub logins authorized to issue human-steering directives. Empty list honors nobody (safe default-on).",
+    )
 
     # Trust fleet — ContractRefreshLoop (spec §4.2)
     contract_refresh_interval: int = Field(

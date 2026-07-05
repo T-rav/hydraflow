@@ -118,6 +118,11 @@ def _build_loop(tmp_path: Path, *, github: Any, state: Any, max_redos: int = 3) 
     # tests/test_orchestrator_human_steering.py.
     bg.config.human_steering_enabled = True
     bg.config.human_steering_max_redos = max_redos
+    # Comments in this scenario are seeded as authored by "fake-human"
+    # (see _TimestampedCommentsGitHub.seed_comment); the loop now filters
+    # directives through an authorization allowlist (Task 1), so it must
+    # include that login or every directive is silently dropped.
+    bg.config.human_steering_authorized_users = ["fake-human"]
     from base_background_loop import LoopDeps  # noqa: PLC0415
 
     loop_deps = LoopDeps(

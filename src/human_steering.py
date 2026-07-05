@@ -4,6 +4,10 @@ A directive is a comment line beginning with '/' + a known verb. Declarative
 verbs (steer/pause/resume) are recomputed latest-wins each tick (idempotent);
 imperative verbs (redo/abort) fire once, gated by a created_at high-water-mark.
 No I/O.
+
+Authorization is enforced here as the single choke point for all directives:
+a comment whose `user.login` is not in `authorized_users` is skipped entirely
+before any verb is parsed. An empty allowlist honors nobody (safe default-on).
 """
 
 from __future__ import annotations
@@ -34,7 +38,9 @@ def _verb_and_rest(body: str) -> tuple[str, str] | None:
 
 
 def parse_directives(
-    comments: list[dict], last_applied_ts: str | None
+    comments: list[dict],
+    last_applied_ts: str | None,
+    authorized_users: frozenset[str],
 ) -> SteeringDirectives:
     guidance: str | None = None
     flow = _FLOW_RUNNING
@@ -43,6 +49,9 @@ def parse_directives(
     saw_abort = False
 
     for c in comments:  # oldest-first
+        login = str(c.get("user", {}).get("login", ""))
+        if login not in authorized_users:
+            continue
         parsed = _verb_and_rest(str(c.get("body", "")))
         if parsed is None:
             continue

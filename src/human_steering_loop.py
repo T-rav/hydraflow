@@ -64,7 +64,11 @@ class HumanSteeringLoop(BaseBackgroundLoop):
                 logger.warning("steering: comment fetch failed for #%s: %s", key, exc)
                 continue
             prev = self._state.get_human_steering(key)
-            d = parse_directives(comments, prev.last_applied_ts)
+            d = parse_directives(
+                comments,
+                prev.last_applied_ts,
+                frozenset(self._config.human_steering_authorized_users),
+            )
             self._state.set_human_steering(
                 key,
                 SteeringState(

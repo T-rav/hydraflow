@@ -26,7 +26,11 @@ async def test_loop_writes_steering_state_for_active_issue():
     )
     state = MagicMock()
     state.get_human_steering.return_value = SteeringState()
-    config = MagicMock(human_steering_enabled=True, human_steering_interval_seconds=60)
+    config = MagicMock(
+        human_steering_enabled=True,
+        human_steering_interval_seconds=60,
+        human_steering_authorized_users=["a"],
+    )
     deps = MagicMock()
     loop = HumanSteeringLoop(
         config=config, state=state, prs=prs, deps=deps, active_issues_cb=lambda: [42]
@@ -77,7 +81,11 @@ async def test_loop_preserves_unconsumed_redo_on_retick():
     state.get_human_steering.return_value = SteeringState(
         redo_phase="shape", redo_count=0, last_applied_ts="2026-07-03T10:00:00Z"
     )
-    config = MagicMock(human_steering_enabled=True, human_steering_interval_seconds=60)
+    config = MagicMock(
+        human_steering_enabled=True,
+        human_steering_interval_seconds=60,
+        human_steering_authorized_users=["a"],
+    )
     loop = HumanSteeringLoop(
         config=config,
         state=state,
