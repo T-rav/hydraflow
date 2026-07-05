@@ -521,6 +521,71 @@ class TestPlanPhase:
         prs.transition.assert_awaited_once_with(42, "ready")
 
 
+class TestPlanPhaseHumanSteering:
+    """ADR-0099 #4 — live operator guidance threaded to the PlannerRunner.
+
+    ``PlanPhase`` sources guidance via ``StateTracker.get_human_steering``
+    keyed by ``str(issue.id)`` and passes it as the ``guidance=`` kwarg to
+    ``PlannerRunner.plan``, which is responsible for fencing it into the
+    plan prompt via ``fenced_steering_guidance``. Named ``human_guidance``
+    at the call site (not bare ``guidance``) to avoid colliding with the
+    unrelated ``EpicGapReview.guidance`` field used elsewhere in
+    ``plan_phase.py``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_plan_one_sources_guidance_and_passes_to_planner(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Non-empty steering guidance is sourced and threaded to the planner."""
+        from models import SteeringState
+
+        phase, state, planners, prs, store, _stop = make_plan_phase(config)
+        issue = TaskFactory.create(id=42)
+        plan_result = PlanResultFactory.create(
+            issue_number=42,
+            success=True,
+            plan="The plan",
+            summary="Done",
+            use_defaults=True,
+        )
+
+        state.set_human_steering(
+            "42", SteeringState(guidance="Focus on the enterprise SSO angle.")
+        )
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        planners.plan.assert_awaited_once()
+        _args, kwargs = planners.plan.call_args
+        assert kwargs["guidance"] == "Focus on the enterprise SSO angle."
+
+    @pytest.mark.asyncio
+    async def test_plan_one_passes_empty_guidance_when_none_posted(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """No steering guidance posted -> planner receives an empty string."""
+        phase, _state, planners, prs, store, _stop = make_plan_phase(config)
+        issue = TaskFactory.create(id=42)
+        plan_result = PlanResultFactory.create(
+            issue_number=42,
+            success=True,
+            plan="The plan",
+            summary="Done",
+            use_defaults=True,
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        _args, kwargs = planners.plan.call_args
+        assert kwargs["guidance"] == ""
+
+
 # ---------------------------------------------------------------------------
 # Plan phase — already_satisfied
 # ---------------------------------------------------------------------------

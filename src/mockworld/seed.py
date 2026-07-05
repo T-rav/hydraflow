@@ -25,6 +25,14 @@ class MockWorldSeed:
     # Each issue is a dict with keys: number, title, body, labels[].
     issues: list[dict[str, Any]] = field(default_factory=list)
 
+    # Per-issue seeded comments, keyed by issue number. Each entry is a dict
+    # with keys: login, body, created_at (all optional — FakeGitHub.from_seed
+    # fills sensible defaults for callers that only care about body). Lets a
+    # scenario seed comments from distinct authors at distinct timestamps
+    # (e.g. human-steering directive sequences that need a real
+    # created_at high-water-mark), which a bare list[str] can't express.
+    comments: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
+
     # Each PR is a dict with keys: number, issue_number, branch,
     # ci_status, merged, labels[].
     prs: list[dict[str, Any]] = field(default_factory=list)
@@ -104,6 +112,12 @@ class MockWorldSeed:
             data["advisor_scripts"] = {
                 int(issue): by_role
                 for issue, by_role in data["advisor_scripts"].items()
+            }
+        # Same coercion for comments (issue is the OUTER key here).
+        if "comments" in data:
+            data["comments"] = {
+                int(issue): comment_list
+                for issue, comment_list in data["comments"].items()
             }
         # phase_scripts (ADR-0063): outer key is phase name, inner key is
         # issue number (JSON string → int). The ``shape_council`` payload's

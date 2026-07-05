@@ -477,6 +477,52 @@ class TestPostVerifyAdvisorHappyPath:
         assert "Pre-flight plan" in call["prompt"]
         assert "check 1" in call["prompt"]
 
+    def test_folds_fenced_human_steering_guidance(self):
+        """ADR-0099 #4 — live operator guidance is folded in FENCED.
+
+        The post-verify advisor reviews the same issue as the executor, so
+        an operator's steering should reach its prompt too. Guidance must
+        reach the prompt only via ``fenced_steering_guidance`` — never as
+        raw comment text (ADR-0092 fence invariant).
+        """
+        from human_steering import fenced_steering_guidance
+
+        runner = _StubAdvisorRunner(
+            '{"verdict":"APPROVE","reasoning":"ok","disagreements":[]}'
+        )
+        advisor = PostVerifyAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        guidance = "Prioritize the auth-bypass edge case over style nits."
+        inp = PostVerifyInput(
+            surface="pr_review",
+            diff="d",
+            executor_verdict_summary="x",
+            human_guidance=guidance,
+        )
+        asyncio.run(advisor.run(inp))
+        prompt = runner.calls[0]["prompt"]
+        assert "## Human Steering Guidance" in prompt
+        assert fenced_steering_guidance(guidance) in prompt
+
+    def test_empty_guidance_produces_no_steering_section(self):
+        """No guidance posted -> no steering section (unchanged behavior)."""
+        runner = _StubAdvisorRunner(
+            '{"verdict":"APPROVE","reasoning":"ok","disagreements":[]}'
+        )
+        advisor = PostVerifyAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        inp = PostVerifyInput(
+            surface="pr_review",
+            diff="d",
+            executor_verdict_summary="x",
+        )
+        asyncio.run(advisor.run(inp))
+        assert "## Human Steering Guidance" not in runner.calls[0]["prompt"]
+
 
 class TestPostVerifyAdvisorFailureModes:
     def test_runner_error_default_treats_as_approve(self, monkeypatch):
@@ -1419,6 +1465,43 @@ class TestPreFlightAdvisor:
         )
         with pytest.raises(CreditExhaustedError):
             asyncio.run(advisor.run(PreFlightInput(surface="pr_review", diff="d")))
+
+    def test_folds_fenced_human_steering_guidance(self):
+        """ADR-0099 #4 — live operator guidance is folded in FENCED.
+
+        The pre-flight advisor reviews the same issue as the executor, so
+        an operator's steering should reach its prompt too. Guidance must
+        reach the prompt only via ``fenced_steering_guidance`` — never as
+        raw comment text (ADR-0092 fence invariant).
+        """
+        from human_steering import fenced_steering_guidance
+
+        runner = _StubAdvisorRunner(
+            '{"risk_summary":"r","focus_areas":[],"rubric":[],"escalation_signals":[]}'
+        )
+        advisor = PreFlightAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        guidance = "Prioritize the auth-bypass edge case over style nits."
+        inp = PreFlightInput(surface="pr_review", diff="d", human_guidance=guidance)
+        asyncio.run(advisor.run(inp))
+        prompt = runner.calls[0]["prompt"]
+        assert "## Human Steering Guidance" in prompt
+        assert fenced_steering_guidance(guidance) in prompt
+
+    def test_empty_guidance_produces_no_steering_section(self):
+        """No guidance posted -> no steering section (unchanged behavior)."""
+        runner = _StubAdvisorRunner(
+            '{"risk_summary":"r","focus_areas":[],"rubric":[],"escalation_signals":[]}'
+        )
+        advisor = PreFlightAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        inp = PreFlightInput(surface="pr_review", diff="d")
+        asyncio.run(advisor.run(inp))
+        assert "## Human Steering Guidance" not in runner.calls[0]["prompt"]
 
 
 class TestMidFlightAdvisor:

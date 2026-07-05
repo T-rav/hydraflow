@@ -6,10 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
-- `1cd2d32` — chore(steering): arch-regen after feature completion *(2026-07-03)*
-- `eff7794` — docs(steering): ADR-0103 + glossary terms closing control surface #4 (MVP scope documented) *(2026-07-03)*
-- `b0a782b` — feat(steering): wire HumanSteeringLoop into runtime + scenario catalog *(2026-07-03)*
-- `c1cdbc8` — feat(steering): HumanSteeringLoop sensor + config *(2026-07-03)*
+- `83cf489` — feat(steering): continuous human-on-the-loop steering channel (ADR-0103, control surface #4) (#9709) (#9709) *(2026-07-04)*
+- `ef22341` — Convergence hardening: real lap signatures, ledger lifecycle, caretaker guards (#9693) (#9706) (#9706) *(2026-07-04)*
 - `ed627b8` — docs(adr): backfill Enforcement for all 59 grandfathered ADRs (drain grandfather set to ∅) (#9696) (#9696) *(2026-07-02)*
 - `a482385` — docs(adr): correct ADR-0102 Rule 3 (gate fails OPEN on advisor degradation by design) (#9695) (#9695) *(2026-07-02)*
 - `f170b89` — fix(adr-0101): drop line-number citation to satisfy P1.16 (#9692) (#9692) *(2026-07-02)*
@@ -477,12 +475,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 - `6e18c3b` — Issue cache: append-only JSONL mirror with typed record API (#6429) (#6429) *(2026-04-08)*
 - `a30d132` — chore: accept ADR-0023 (dead class artifacts in mock-based tests) (#6189) (#6189) *(2026-04-06)*
-- `7e7bd72` — Fixes #6011: Fix ADR 0023 numbering collision — 9 ADRs share same n... (#6147) (#6147) *(2026-04-06)*
-
-## 2026-W14
-
-- `494f736` — docs: ADR-0032 Per-Repo Wiki Knowledge Base (Karpathy pattern) (#6096) (#6096) *(2026-04-05)*
-- `f65f00b` — docs: accept ADR-0023 pair + add diagnostic and HITL plans (#6093) (#6093) *(2026-04-05)*
 
 
 <!-- arch:generated -->

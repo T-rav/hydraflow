@@ -471,6 +471,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_REVIEW_USE_QUALITY_GATE",
         True,
     ),
+    (
+        "human_steering_enabled",
+        "HYDRAFLOW_HUMAN_STEERING_ENABLED",
+        True,
+    ),
     # Static config gates — 34 loops (dark-factory §2.1 #3 defense-in-depth)
     ("adr_reviewer_loop_enabled", "HYDRAFLOW_ADR_REVIEWER_LOOP_ENABLED", True),
     (
@@ -2666,8 +2671,14 @@ class HydraFlowConfig(BaseModel):
 
     # Human-on-the-loop continuous steering (ADR-0099 surface #4)
     human_steering_enabled: bool = Field(
-        default=False,
-        description="Enable the HumanSteeringLoop sensor for continuous human-on-the-loop steering (ADR-0099 #4). Dark by default.",
+        default=True,
+        description=(
+            "Enable the HumanSteeringLoop sensor for continuous human-on-the-loop "
+            "steering (ADR-0099 #4). Default-on: safe because an empty "
+            "human_steering_authorized_users allowlist honors nobody, so the "
+            "sensor is inert until an operator login is explicitly allow-listed. "
+            "Set HYDRAFLOW_HUMAN_STEERING_ENABLED=false to disable at deploy time."
+        ),
     )
     human_steering_interval_seconds: int = Field(
         default=60,
@@ -2676,6 +2687,10 @@ class HydraFlowConfig(BaseModel):
     human_steering_max_redos: int = Field(
         default=3,
         description="Max redo directives HumanSteeringLoop honors per issue before capping to prevent infinite redo.",
+    )
+    human_steering_authorized_users: list[str] = Field(
+        default_factory=list,
+        description="GitHub logins authorized to issue human-steering directives. Empty list honors nobody (safe default-on).",
     )
 
     # Trust fleet — ContractRefreshLoop (spec §4.2)

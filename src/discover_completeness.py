@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import re
 
+from human_steering import fenced_steering_guidance
+
 
 def build_discover_completeness_prompt(
     *,
@@ -25,15 +27,20 @@ def build_discover_completeness_prompt(
     issue_title: str,
     issue_body: str = "",
     brief: str = "",
+    guidance: str = "",
     **_kwargs: object,
 ) -> str:
     """Build a prompt that asks an agent to evaluate a Discover brief.
 
     ``issue_body`` is the original issue text the brief was produced from.
     ``brief`` is the discovery brief to evaluate. Both are required for a
-    meaningful rubric check — the rubric compares the two.
+    meaningful rubric check — the rubric compares the two. ``guidance``
+    (ADR-0099 #4) is live operator steering for this issue, folded in
+    fenced via :func:`fenced_steering_guidance`, which returns ``""``
+    when there is no guidance so behavior is unchanged when the feature
+    is off.
     """
-    return f"""You are running the Discover Completeness skill for issue #{issue_number}: {issue_title}.
+    prompt = f"""You are running the Discover Completeness skill for issue #{issue_number}: {issue_title}.
 
 You are evaluating a DISCOVERY BRIEF against the five-criterion rubric
 below. You are NOT producing a brief — you are judging one.
@@ -111,6 +118,7 @@ SUMMARY: <first-failing-keyword> — <short description>
 FINDINGS:
 - <keyword> — <specific evidence, quoting the brief or issue body>
 """
+    return prompt + fenced_steering_guidance(guidance)
 
 
 _STATUS_RE = re.compile(r"DISCOVER_COMPLETENESS_RESULT:\s*(OK|RETRY)", re.IGNORECASE)

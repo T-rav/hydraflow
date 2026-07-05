@@ -64,12 +64,24 @@ class HumanSteeringLoop(BaseBackgroundLoop):
                 logger.warning("steering: comment fetch failed for #%s: %s", key, exc)
                 continue
             prev = self._state.get_human_steering(key)
-            d = parse_directives(comments, prev.last_applied_ts)
+            d = parse_directives(
+                comments,
+                prev.last_applied_ts,
+                frozenset(self._config.human_steering_authorized_users),
+            )
             self._state.set_human_steering(
                 key,
                 SteeringState(
                     guidance=d.guidance,
-                    flow=d.flow,
+                    # Abort is a sticky terminal flow: parse_directives only
+                    # reports "abort" on the tick where the high-water-mark
+                    # advances past the /abort comment, so a re-tick with no
+                    # new comments would otherwise recompute "running" and
+                    # clobber the persisted abort (the actuator polls
+                    # independently and could miss the one-tick window
+                    # entirely). Pause stays a live declarative recompute
+                    # each tick (resumable) — do not make it sticky here.
+                    flow="abort" if prev.flow == "abort" else d.flow,
                     # Preserve an unconsumed redo: parse only emits redo_phase once
                     # (high-water-mark), so if the actuator hasn't cleared prev's
                     # redo yet, don't clobber it to None on a re-tick.

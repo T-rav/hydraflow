@@ -11,6 +11,7 @@ from typing import Literal
 from base_runner import BaseRunner
 from events import EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
+from human_steering import fenced_steering_guidance
 from models import GitHubIssue, HITLResult, HITLUpdatePayload
 from prompt_builder import PromptBuilder
 from runner_constants import MEMORY_SUGGESTION_PROMPT
@@ -101,8 +102,16 @@ class HITLRunner(BaseRunner):
         cause: str,
         worktree_path: Path,
         worker_id: int = 0,
+        guidance: str = "",
     ) -> HITLResult:
         """Run the HITL correction agent for *issue*.
+
+        ``guidance`` is live human-on-the-loop steering (ADR-0099 #4) for
+        this issue, sourced by the caller from
+        ``StateTracker.get_human_steering``. It is folded into the
+        cause-template prompt fenced via :func:`fenced_steering_guidance`,
+        which returns ``""`` when there is no guidance so behavior is
+        unchanged when the feature is off.
 
         Returns a :class:`HITLResult` with success/failure info.
         """
@@ -130,7 +139,7 @@ class HITLRunner(BaseRunner):
         try:
             cmd = self._build_command(worktree_path)
             prompt, prompt_stats = await self._build_prompt_with_stats(
-                issue, correction, cause
+                issue, correction, cause, guidance
             )
             transcript = await self._execute(
                 cmd,
@@ -173,9 +182,15 @@ class HITLRunner(BaseRunner):
         return result
 
     async def _build_prompt_with_stats(
-        self, issue: GitHubIssue, correction: str, cause: str
+        self, issue: GitHubIssue, correction: str, cause: str, guidance: str = ""
     ) -> tuple[str, dict[str, object]]:
-        """Build the HITL prompt with pruning stats."""
+        """Build the HITL prompt with pruning stats.
+
+        ``guidance`` (ADR-0099 #4) is live operator steering for this issue,
+        folded into the rendered cause-template fenced via
+        :func:`fenced_steering_guidance`, which returns ``""`` when there is
+        no guidance so behavior is unchanged when the feature is off.
+        """
         cause_key = _classify_cause(cause)
         instructions = _CAUSE_INSTRUCTIONS[cause_key].replace(
             "#{issue}", f"#{issue.number}"
@@ -227,5 +242,6 @@ class HITLRunner(BaseRunner):
   in files you are not otherwise changing for the issue. Each concern is a separate PR.
 
 {MEMORY_SUGGESTION_PROMPT.format(context="correction")}"""
+        prompt += fenced_steering_guidance(guidance)
         stats = builder.build_stats()
         return prompt, stats

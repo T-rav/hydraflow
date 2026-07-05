@@ -356,11 +356,18 @@ class ShapePhase:
 
         research_brief = self._extract_research_brief(issue)
         assert self._runner is not None  # guaranteed by caller
+        # Human-on-the-loop continuous steering (ADR-0099 #4): fold live
+        # operator guidance into both shape prompt-construction sites
+        # (the turn prompt + the shape-coherence evaluator). Reference
+        # signal only — never blocking; empty when the feature is off or
+        # no guidance was posted for this issue.
+        guidance = self._state.get_human_steering(str(issue.id)).guidance or ""
         result = await self._runner.run_turn(
             issue,
             conv,
             research_brief=research_brief,
             learned_preferences="",
+            guidance=guidance,
         )
 
         conv.turns.append(

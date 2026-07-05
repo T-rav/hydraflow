@@ -21,6 +21,8 @@ from typing import Literal, Protocol, cast
 from opentelemetry import metrics
 from pydantic import BaseModel, Field
 
+from human_steering import fenced_steering_guidance
+
 logger = logging.getLogger(__name__)
 
 
@@ -118,6 +120,12 @@ class PreFlightInput(BaseModel):
     # Production callers can leave this unset; the field only changes prompt
     # text when populated.
     issue_number: int | None = None
+    # Human-on-the-loop continuous steering (ADR-0099 #4): live operator
+    # guidance for this issue, sourced by :class:`ReviewPhase` from
+    # ``StateTracker.get_human_steering``. Folded into the prompt fenced
+    # via :func:`fenced_steering_guidance`. Empty when the feature is off
+    # or no guidance was posted — the fold is then a no-op.
+    human_guidance: str = ""
 
 
 class Disagreement(BaseModel):
@@ -147,6 +155,12 @@ class PostVerifyInput(BaseModel):
     # text when populated.
     issue_number: int | None = None
     lens: Literal["correctness", "security", "spec"] | None = None
+    # Human-on-the-loop continuous steering (ADR-0099 #4): live operator
+    # guidance for this issue, sourced by :class:`ReviewPhase` from
+    # ``StateTracker.get_human_steering``. Folded into the prompt fenced
+    # via :func:`fenced_steering_guidance`. Empty when the feature is off
+    # or no guidance was posted — the fold is then a no-op.
+    human_guidance: str = ""
 
 
 # Signals shorter than this are too generic to validate against — short
@@ -833,7 +847,7 @@ class PostVerifyAdvisor:
         prompt = "\n".join(sections)
         if inp.lens:
             prompt = f"{_POST_VERIFY_LENS_GUIDANCE[inp.lens]}\n\n{prompt}"
-        return prompt
+        return prompt + fenced_steering_guidance(inp.human_guidance)
 
 
 class PreFlightAdvisor:
@@ -982,7 +996,8 @@ class PreFlightAdvisor:
             "\nFocus on: what could go wrong with this diff, what the reviewer "
             "should look for, and any signals that suggest mid-flight consult."
         )
-        return "\n".join(sections)
+        prompt = "\n".join(sections)
+        return prompt + fenced_steering_guidance(inp.human_guidance)
 
 
 class MidFlightAdvisor:

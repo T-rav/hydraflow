@@ -13,6 +13,7 @@ import pytest
 
 from base_runner import BaseRunner
 from events import EventType
+from human_steering import fenced_steering_guidance
 from models import PlannerStatus
 from planner import PlannerRunner
 from tests.conftest import TaskFactory
@@ -232,6 +233,40 @@ async def test_build_prompt_includes_principles_checklist(config, event_bus, iss
     )
     # 3As test layout.
     assert "3As" in prompt or "Arrange" in prompt
+
+
+@pytest.mark.asyncio
+async def test_build_prompt_folds_fenced_human_steering_guidance(
+    config, event_bus, issue
+):
+    """ADR-0099 #4 — live operator guidance is folded in FENCED.
+
+    Plan has a single prompt-construction site (``_build_prompt_with_stats``,
+    unlike discover/shape's two builders). Guidance must reach the prompt
+    only via ``fenced_steering_guidance`` — never as raw comment text
+    (ADR-0092 fence invariant).
+    """
+    runner = _make_runner(config, event_bus)
+    task = issue.to_task()
+
+    guidance = "Prioritize the enterprise SSO angle over consumer features."
+    prompt, _ = await runner._build_prompt_with_stats(task, guidance=guidance)
+
+    assert "## Human Steering Guidance" in prompt
+    assert fenced_steering_guidance(guidance) in prompt
+
+
+@pytest.mark.asyncio
+async def test_build_prompt_empty_guidance_produces_no_steering_section(
+    config, event_bus, issue
+):
+    """No guidance posted -> no steering section (unchanged behavior)."""
+    runner = _make_runner(config, event_bus)
+    task = issue.to_task()
+
+    prompt, _ = await runner._build_prompt_with_stats(task, guidance="")
+
+    assert "## Human Steering Guidance" not in prompt
 
 
 @pytest.mark.asyncio
