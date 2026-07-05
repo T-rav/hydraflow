@@ -14,7 +14,7 @@ from bg_worker_manager import BGWorkerManager
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from hitl_controller import HITLController
-from human_steering import apply_steering
+from human_steering import apply_steering, resolve_redo_phase
 from issue_store import IssueStoreStage
 from models import (
     BackgroundWorkerState,
@@ -547,9 +547,14 @@ class HydraFlowOrchestrator:
         - ``park`` (abort): swap to the existing recoverable HITL label
           (``hitl_label``) so the issue leaves active scheduling but a human
           can un-escalate it later, exactly like any other HITL escalation.
-        - ``redo_phase``: re-enqueue to the named phase (when valid and under
-          the redo cap) and persist the incremented ``redo_count`` with
-          ``redo_phase`` cleared so it isn't replayed next cycle.
+        - ``redo_phase``: resolve a dashboard-facing or internal phase token
+          (``human_steering.resolve_redo_phase``) then re-enqueue to the
+          resolved phase (when valid and under the redo cap) and persist the
+          incremented ``redo_count`` with ``redo_phase`` cleared so it isn't
+          replayed next cycle. An unrecognized token or a redo dropped by the
+          cap gets one operator-facing PR comment (gated on the same
+          ``redo_phase`` high-water-mark so it posts once, not every tick)
+          and ``redo_phase`` is cleared the same way.
         """
         if not self._config.human_steering_enabled:
             return
@@ -565,8 +570,23 @@ class HydraFlowOrchestrator:
         for issue_number in active_issues:
             key = str(issue_number)
             prev = self._state.get_human_steering(key)
+            raw_token = prev.redo_phase
+            resolved_phase = (
+                resolve_redo_phase(raw_token) if raw_token is not None else None
+            )
+            lookup_state = (
+                prev
+                if raw_token is None
+                else SteeringState(
+                    guidance=prev.guidance,
+                    flow=prev.flow,
+                    redo_phase=resolved_phase,
+                    redo_count=prev.redo_count,
+                    last_applied_ts=prev.last_applied_ts,
+                )
+            )
             decision = apply_steering(
-                prev, key, known_phases, self._config.human_steering_max_redos
+                lookup_state, key, known_phases, self._config.human_steering_max_redos
             )
 
             if decision.park:
@@ -578,6 +598,32 @@ class HydraFlowOrchestrator:
             if decision.skip:
                 # Paused — leave the issue exactly where it is this cycle;
                 # the next phase-poll simply won't pick it up as new work.
+                continue
+
+            if raw_token is not None and decision.redo_phase is None:
+                # Redo was present this cycle but dropped: either the token
+                # didn't resolve to a known phase, or it resolved but was
+                # dropped by the redo cap. Gated on raw_token being freshly
+                # consumed (not None), so this fires once per directive, not
+                # every tick — matches the redo high-water-mark semantics.
+                reason = (
+                    "unknown phase" if resolved_phase is None else "redo cap reached"
+                )
+                await self._svc.prs.post_comment(
+                    issue_number,
+                    f"⚠️ steering: /redo '{raw_token}' not applied — {reason}; "
+                    "valid: implement, shape, plan, review, hitl, discover",
+                )
+                self._state.set_human_steering(
+                    key,
+                    SteeringState(
+                        guidance=prev.guidance,
+                        flow=prev.flow,
+                        redo_phase=None,
+                        redo_count=decision.new_redo_count,
+                        last_applied_ts=prev.last_applied_ts,
+                    ),
+                )
                 continue
 
             if decision.redo_phase is not None:

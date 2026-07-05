@@ -1,4 +1,4 @@
-from human_steering import parse_directives
+from human_steering import parse_directives, resolve_redo_phase
 
 
 def _c(body, ts, login="alice"):
@@ -96,3 +96,14 @@ def test_empty_allowlist_honors_nobody():
         }
     ]
     assert parse_directives(cs, None, frozenset()).flow == "running"  # empty ⇒ nobody
+
+
+def test_resolve_redo_phase_dashboard_and_internal():
+    assert resolve_redo_phase("implement") == "ready"  # dashboard → internal
+    assert resolve_redo_phase("ready") == "ready"  # internal passthrough
+    assert resolve_redo_phase("shape") == "shape"
+    assert resolve_redo_phase("bogus") is None
+
+
+def test_resolve_redo_phase_excludes_merged():
+    assert resolve_redo_phase("merged") is None

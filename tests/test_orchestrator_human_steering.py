@@ -122,6 +122,81 @@ class TestHumanSteeringRedo:
 
         orch._svc.store.enqueue_transition.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_redo_dashboard_name_resolves_and_reenqueues(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A dashboard-facing token ('implement') resolves to the internal
+        phase ('ready') and is enacted — no operator feedback needed."""
+        config.human_steering_enabled = True
+        orch = HydraFlowOrchestrator(config)
+        task = TaskFactory.create(id=21)
+        orch._svc.store.get_active_issues = lambda: {21: "shape"}  # type: ignore[method-assign]
+        orch._svc.store.get_cached = lambda _n: task  # type: ignore[method-assign]
+        orch._svc.store.enqueue_transition = MagicMock()  # type: ignore[method-assign]
+        orch._svc.prs.post_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._state.set_human_steering(
+            "21", SteeringState(redo_phase="implement", redo_count=0)
+        )
+
+        await orch._apply_human_steering()
+
+        orch._svc.store.enqueue_transition.assert_called_once_with(task, "ready")
+        orch._svc.prs.post_comment.assert_not_awaited()
+        persisted = orch._state.get_human_steering("21")
+        assert persisted.redo_phase is None
+        assert persisted.redo_count == 1
+
+    @pytest.mark.asyncio
+    async def test_redo_unknown_token_posts_operator_feedback_once(
+        self, config: HydraFlowConfig
+    ) -> None:
+        config.human_steering_enabled = True
+        orch = HydraFlowOrchestrator(config)
+        orch._svc.store.get_active_issues = lambda: {17: "ready"}  # type: ignore[method-assign]
+        orch._svc.store.enqueue_transition = MagicMock()  # type: ignore[method-assign]
+        orch._svc.prs.post_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._state.set_human_steering("17", SteeringState(redo_phase="bogus"))
+
+        await orch._apply_human_steering()
+
+        orch._svc.store.enqueue_transition.assert_not_called()
+        orch._svc.prs.post_comment.assert_awaited_once()
+        args, _ = orch._svc.prs.post_comment.await_args
+        assert args[0] == 17
+        assert "bogus" in args[1]
+        assert "unknown phase" in args[1]
+
+        # Freshness gate: redo_phase is now cleared, so a second tick must
+        # not re-post feedback for the same (stale) directive.
+        orch._svc.prs.post_comment.reset_mock()
+        await orch._apply_human_steering()
+        orch._svc.prs.post_comment.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_redo_cap_reached_posts_operator_feedback(
+        self, config: HydraFlowConfig
+    ) -> None:
+        config.human_steering_enabled = True
+        orch = HydraFlowOrchestrator(config)
+        orch._svc.store.get_active_issues = lambda: {19: "ready"}  # type: ignore[method-assign]
+        orch._svc.store.enqueue_transition = MagicMock()  # type: ignore[method-assign]
+        orch._svc.prs.post_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._state.set_human_steering(
+            "19",
+            SteeringState(
+                redo_phase="implement", redo_count=config.human_steering_max_redos
+            ),
+        )
+
+        await orch._apply_human_steering()
+
+        orch._svc.store.enqueue_transition.assert_not_called()
+        orch._svc.prs.post_comment.assert_awaited_once()
+        args, _ = orch._svc.prs.post_comment.await_args
+        assert args[0] == 19
+        assert "redo cap reached" in args[1]
+
 
 class TestHumanSteeringGuidanceFold:
     @pytest.mark.asyncio
