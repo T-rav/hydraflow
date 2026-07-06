@@ -472,6 +472,14 @@ class TestEnvVarOverrideTable:
             )
 
 
+def test_auto_tighten_loop_enabled_defaults_false_and_env_overrides(monkeypatch):
+    from config import HydraFlowConfig
+
+    assert HydraFlowConfig().auto_tighten_loop_enabled is False
+    monkeypatch.setenv("HYDRAFLOW_AUTO_TIGHTEN_LOOP_ENABLED", "true")
+    assert HydraFlowConfig().auto_tighten_loop_enabled is True
+
+
 class TestOtelConfigFields:
     def test_config_otel_defaults(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
