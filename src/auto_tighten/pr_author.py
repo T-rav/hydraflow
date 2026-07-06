@@ -16,12 +16,15 @@ class TighteningPrAuthor:
         self._opener = opener
 
     async def open(self, ct: ConfirmedTightening) -> str | None:
+        from auto_pr import _sanitize_branch_for_path  # noqa: PLC0415
+
         files = []
         for edit in ct.file_edits:
             p = Path(edit.path)
+            p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(edit.new_text)
             files.append(p)
-        branch = f"auto-tighten/{ct.dedup_key.replace(':', '-')}"
+        branch = f"auto-tighten/{_sanitize_branch_for_path(ct.dedup_key)}"
         result = await self._opener(
             repo_root=self._root,
             branch=branch,
