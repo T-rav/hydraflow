@@ -46,6 +46,15 @@ services:
       # is 60 s regardless of this env var.
       HYDRAFLOW_CONVERGENCE_OSCILLATION_INTERVAL: "5"
       HYDRAFLOW_CONVERGENCE_OSCILLATION_LOOP_ENABLED: "true"
+      # HumanSteeringLoop (ADR-0099 #4, s52). human_steering_enabled is
+      # already default-on (src/config.py) but is set explicitly here for
+      # clarity. The allowlist defaults to [] (honors nobody, safe-by-
+      # default) so s52's seeded /pause comment needs its author explicitly
+      # allow-listed here — "steer-bot" must match the login s52 seeds the
+      # /pause comment from (tests/sandbox_scenarios/scenarios/
+      # s52_human_steering_directive.py).
+      HYDRAFLOW_HUMAN_STEERING_ENABLED: "true"
+      HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS: "steer-bot"
     volumes:
       - ./tests/sandbox_scenarios/seeds:/seed:ro
     networks: [sandbox]

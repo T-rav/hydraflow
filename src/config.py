@@ -4060,6 +4060,13 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
         if parsed:
             object.__setattr__(config, "lite_plan_labels", parsed)
 
+    # Human-steering authorized users (comma-separated list, special-case)
+    env_steering_users = os.environ.get("HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS")
+    if env_steering_users is not None and config.human_steering_authorized_users == []:
+        parsed = [u.strip() for u in env_steering_users.split(",") if u.strip()]
+        if parsed:
+            object.__setattr__(config, "human_steering_authorized_users", parsed)
+
     # Docker resource limit overrides (validated fields handled manually
     # because str/int overrides need format/bounds validation that
     # the data-driven tables don't provide)

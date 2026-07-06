@@ -472,6 +472,67 @@ class TestEnvVarOverrideTable:
             )
 
 
+class TestHumanSteeringAuthorizedUsersEnvOverride:
+    """HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS (comma-separated list, special-case)."""
+
+    def test_default_is_empty_list(self, tmp_path: Path) -> None:
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.human_steering_authorized_users == []
+
+    def test_env_var_override_applies_when_at_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(
+            "HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS", "steer-bot,octocat"
+        )
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.human_steering_authorized_users == ["steer-bot", "octocat"]
+
+    def test_env_var_override_strips_whitespace_and_drops_empties(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(
+            "HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS", " steer-bot , , octocat "
+        )
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.human_steering_authorized_users == ["steer-bot", "octocat"]
+
+    def test_explicit_value_overrides_env_var(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS", "steer-bot")
+        cfg = HydraFlowConfig(
+            human_steering_authorized_users=["custom-user"],
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.human_steering_authorized_users == ["custom-user"]
+
+    def test_env_var_all_whitespace_leaves_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS", "  ,  ")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.human_steering_authorized_users == []
+
+
 class TestOtelConfigFields:
     def test_config_otel_defaults(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
