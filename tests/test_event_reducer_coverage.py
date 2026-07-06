@@ -80,6 +80,9 @@ SKIP_LIST: set[str] = {
     # artifact regeneration), the same passive-dashboard shape as
     # loop_fitness_update/metrics_update; no direct reducer case.
     "adr_conformance_update",
+    # Ratchet-tightened events are observability-only: consumed server-side by
+    # AutoTightenLoop metrics/dashboard, no pipeline UI action.
+    "ratchet_tightened",
 }
 
 
