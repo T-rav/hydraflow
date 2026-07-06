@@ -26,6 +26,8 @@ entries:
   src/auto_pr.py::noqa:PLC0415: 3
   "src/auto_pr.py::noqa:PLR0911\u2014linearstep-by-stepguards,eachwithitsownfail/outcomepath": 1
   "src/auto_pr.py::noqa:PLR0911\u2014linearstep-by-stepguards,eachwithitsownfailpath": 1
+  src/auto_tighten/pr_author.py::noqa:PLC0415: 2
+  src/auto_tighten_loop.py::noqa:PLC0415: 1
   src/base_background_loop.py::noqa:BLE001: 2
   src/base_background_loop.py::noqa:E402: 1
   src/base_background_loop.py::noqa:TCH002: 1
@@ -254,7 +256,7 @@ entries:
   src/server.py::noqa:PLC0415: 18
   src/server.py::type-ignore[arg-type]: 2
   src/server.py::type-ignore[no-untyped-def]: 1
-  src/service_registry.py::noqa:F841: 33
+  src/service_registry.py::noqa:F841: 34
   src/service_registry.py::noqa:PLC0415: 14
   src/service_registry.py::noqa:TCH001: 14
   "src/service_registry.py::noqa:TCH001\u2014dataclassannotation": 1

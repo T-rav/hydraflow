@@ -15,11 +15,9 @@ safety property (never actuate a non-tightening value) is enforced
 separately by ``TighteningEngine.guard_is_tighter`` immediately before
 rendering the edit.
 
-This is the wiring task only (Task 12). The loop is intentionally NOT yet
-registered in the service registry, orchestrator, dashboard, or scenario
-catalog — that's Task 13. ``tests/test_loop_wiring_completeness.py`` and
-``tests/scenarios/catalog/test_catalog_completeness.py`` are expected to be
-red until then.
+The loop is registered in the service registry, orchestrator, dashboard, and
+scenario catalog (Task 13); it is off by default via
+``auto_tighten_loop_enabled``.
 """
 
 from __future__ import annotations
@@ -32,9 +30,9 @@ from typing import TYPE_CHECKING
 from auto_tighten.attribution import baseline_since
 from auto_tighten.engine import TighteningEngine
 from auto_tighten.models import ConfirmedTightening, Measurement, Observation
-from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
-from loop_fitness import FitnessContext, FitnessKind, LoopFitness  # noqa: TCH001
-from models import WorkCycleResult  # noqa: TCH001
+from base_background_loop import BaseBackgroundLoop, LoopDeps
+from events import EventType, HydraFlowEvent
+from loop_fitness import FitnessContext, FitnessKind, LoopFitness
 
 if TYPE_CHECKING:
     from auto_tighten.attribution import AttributionResolver
@@ -43,6 +41,7 @@ if TYPE_CHECKING:
     from auto_tighten.pr_author import TighteningPrAuthor
     from auto_tighten.ratchet_adapter import RatchetAdapter
     from config import HydraFlowConfig
+    from models import WorkCycleResult
     from state import StateTracker
 
 logger = logging.getLogger("hydraflow.auto_tighten_loop")
@@ -106,8 +105,6 @@ class AutoTightenLoop(BaseBackgroundLoop):
     async def _emit_tightened(
         self, ratchet_id: str, floor: Measurement, pr_url: str
     ) -> None:
-        from events import EventType, HydraFlowEvent  # noqa: PLC0415
-
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.RATCHET_TIGHTENED,
@@ -120,8 +117,6 @@ class AutoTightenLoop(BaseBackgroundLoop):
         )
 
     async def _emit_unattributed(self, ratchet_id: str, floor: Measurement) -> None:
-        from events import EventType, HydraFlowEvent  # noqa: PLC0415
-
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.RATCHET_TIGHTENED,

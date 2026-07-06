@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from auto_tighten.models import Observation
+from file_util import append_jsonl, file_lock
 
 
 class ObservationStore:
@@ -10,8 +11,6 @@ class ObservationStore:
         self._path = path
 
     def append(self, obs: Observation) -> None:
-        from file_util import append_jsonl, file_lock  # noqa: PLC0415
-
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with file_lock(self._path):
             append_jsonl(self._path, obs.model_dump_json())
