@@ -88,6 +88,21 @@ class MockWorldSeed:
     # ("failure", "<run_url>") to drive the red-CI path.
     main_branch_ci_status: tuple[str, str] = ("success", "")
 
+    # Artificial real-time delay (seconds) inside FakePlannerRunner.plan()
+    # before it returns. Defaults to 0.0 (no-op — every existing scenario's
+    # FakeLLM timing is unaffected). A scenario that needs an issue to stay
+    # inside the real IssueStore "active" window (store_lifecycle's
+    # mark_active/mark_complete bracket, populated while PlanPhase awaits
+    # this call) for a sustained, real wall-clock duration — rather than the
+    # near-instantaneous default — sets this to a positive value. See
+    # s52_human_steering_directive.py, which needs HumanSteeringLoop's
+    # 60-second-interval tick to reliably observe the issue as active;
+    # without an artificial hold the plan-fails-forever tight loop's actual
+    # active window is only milliseconds long even though it dominates the
+    # loop logically, making a live snapshot miss it far more often than a
+    # naive duty-cycle estimate would suggest.
+    plan_hold_seconds: float = 0.0
+
     def to_json(self) -> str:
         """Serialize to JSON for cross-process transfer."""
         return json.dumps(asdict(self), indent=2)

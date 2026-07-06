@@ -29,38 +29,58 @@ lambda *_: 60)`` overrides every caretaker's interval, per s51's precedent).
 ``lambda: list(store.get_active_issues().keys())`` — the ``FakeIssueStore``
 active set that ``store_lifecycle`` (``phase_utils.py``) populates via
 ``mark_active`` on phase entry and clears via ``mark_complete`` on phase
-exit. A phase that completes instantly (the Fakes have no artificial
-latency) holds that window open for a single event-loop tick — far too
-narrow to reliably coincide with a 60-second caretaker cadence if the issue
-is only driven through the pipeline once.
+exit.
 
-s51 (``s51_convergence_oscillation.py``) solves the identical timing problem
-for ``ConvergenceOscillationLoop`` by driving the issue into a state where a
-phase orchestrator's ``_polling_loop`` (``orchestrator.py``) keeps
-re-entering ``store_lifecycle`` in a tight loop with no sleep between
-iterations: ``_polling_loop`` only sleeps ``poll_interval`` when
-``did_work`` is falsy (``if did_work: continue`` — no sleep). Scripting plan
-to fail (``{"success": False}``) makes ``plan_issues()`` keep returning a
-non-empty (truthy) result every iteration — PlanPhase records the failure,
-skips the label swap (the issue stays on ``hydraflow-plan``), and the plan
-loop immediately re-polls and reprocesses the same issue, over and over,
-for the lifetime of the scenario run. That keeps the issue flickering
-active/inactive at effectively the event-loop's own cadence rather than
-once every ``poll_interval`` (30 s default), so ``HumanSteeringLoop``'s
-60-second tick has continuous opportunities to observe it as active over
-the scenario's run.
+s51 (``s51_convergence_oscillation.py``) keeps its issue perpetually
+cycling through a phase orchestrator's ``_polling_loop`` (``orchestrator.py``)
+tight retry (``if did_work: continue`` — no sleep between iterations, since
+plan scripted to fail forever never runs out of "work"). This scenario
+reuses that same "plan fails forever" vehicle for the same reason (keep
+the issue perpetually re-entering ``store_lifecycle`` rather than settling
+into a terminal state) — but a tight retry loop alone is NOT sufficient
+here. Measured empirically against a live Docker sandbox: even though the
+issue is nominally "active" for ~90%+ of the *logical* iterations of the
+tight loop, each individual ``mark_active``-to-``mark_complete`` window is
+only a few milliseconds of *real* wall-clock time (the Fakes have no
+artificial latency), while the gap between one ``mark_complete`` and the
+next ``mark_active`` — though tiny in absolute terms — is where
+``HumanSteeringLoop``'s tick lands far more often than the duty-cycle ratio
+would predict (roughly 1 hit in ~300 tries when temporarily sampled at a
+much faster interval than 60 s). A production deployment never hits this:
+real LLM/planning calls take real seconds, so the active window's absolute
+duration dwarfs a 60-second sampling interval. The sandbox's instant Fakes
+break that assumption.
 
-This scenario reuses that same "plan fails forever" vehicle, simplified to
-skip the discover/shape detour s51 needs for its oscillation ledger (not
-relevant here): triage scripts ``ready=True`` (default ``clarity_score=10``
-clears the discovery gate) so the issue routes straight from
-``hydraflow-find`` to ``hydraflow-plan`` in one triage pass, then plan fails
-forever. This also keeps the Tier-1 in-process parity check
-(``test_sandbox_parity.py``, which for ``loops_enabled=None`` runs a
+The fix is ``MockWorldSeed.plan_hold_seconds`` (``src/mockworld/seed.py``):
+an opt-in artificial ``asyncio.sleep`` inside ``_FakePlannerRunner.plan()``
+(``src/mockworld/fakes/fake_llm.py``) that extends the plan call's real
+wall-clock duration while ``store_lifecycle`` still holds the issue
+``mark_active``. Defaults to ``0.0`` (a no-op skip, not even an
+``await asyncio.sleep(0)`` call) so every other scenario's FakeLLM timing
+is completely unaffected. This scenario sets it to a few seconds — long
+enough that the "active" window's absolute duration comfortably dominates
+any single 60-second sampling tick, closing the gap a purely-logical tight
+retry loop leaves open.
+
+Scripting plan to fail (``{"success": False}``) makes ``plan_issues()``
+keep returning a non-empty (truthy) result every iteration — PlanPhase
+records the failure, skips the label swap (the issue stays on
+``hydraflow-plan``), and the plan loop immediately re-polls and reprocesses
+the same issue, over and over, for the lifetime of the scenario run, each
+pass now held open for ``plan_hold_seconds`` real seconds.
+
+This scenario also skips the discover/shape detour s51 needs for its
+oscillation ledger (not relevant here): triage scripts ``ready=True``
+(default ``clarity_score=10`` clears the discovery gate) so the issue
+routes straight from ``hydraflow-find`` to ``hydraflow-plan`` in one triage
+pass, then plan fails forever. This keeps the Tier-1 in-process parity
+check (``test_sandbox_parity.py``, which for ``loops_enabled=None`` runs a
 *single-shot* ``MockWorld.run_pipeline()`` — triage once, then plan once,
-no repeated cycling) satisfied: it asserts the issue's ``final_stage !=
-"triage"``, which requires the seed's single-shot outcome be a plan result,
-not merely a ``discover``-routed issue that ``run_pipeline`` never revisits.
+no repeated cycling, and no ``plan_hold_seconds`` delay since that harness
+never touches ``sandbox_main.py``'s ``FakeLLM`` wiring) satisfied: it
+asserts the issue's ``final_stage != "triage"``, which requires the seed's
+single-shot outcome be a plan result, not merely a ``discover``-routed
+issue that ``run_pipeline`` never revisits.
 
 ----------------------------------------------------------------------
 ALLOWLIST-FROM-ENV
@@ -107,9 +127,10 @@ _AUTHORIZED_LOGIN = "steer-bot"  # MUST match docker-compose.sandbox.yml's
 
 def seed() -> MockWorldSeed:
     """Seed a /pause comment from the allow-listed login and keep the issue
-    perpetually active via the "plan fails forever" tight-loop recipe (see
-    module docstring) so HumanSteeringLoop's 60-second tick has continuous
-    opportunities to observe the issue as active.
+    perpetually active via the "plan fails forever" tight-loop recipe, held
+    open for a real ``plan_hold_seconds`` duration each pass (see module
+    docstring) so HumanSteeringLoop's 60-second tick reliably observes the
+    issue as active.
     """
     return MockWorldSeed(
         # loops_enabled=None: all caretaker loops run (including
@@ -169,6 +190,14 @@ def seed() -> MockWorldSeed:
         # 60-second tick ample opportunity against the continuously-active
         # issue.
         cycles_to_run=16,
+        # Hold each plan pass open for 3 real seconds (see module docstring
+        # for why a tight retry loop alone isn't sufficient with the Fakes'
+        # instant-by-default timing). 3s comfortably dominates the
+        # millisecond-scale iteration overhead that otherwise makes the
+        # active window's absolute duration far shorter than its logical
+        # share of the loop would suggest, while staying well under the
+        # 60-second caretaker tick and the 120-second assertion timeout.
+        plan_hold_seconds=3.0,
     )
 
 
@@ -178,9 +207,11 @@ async def assert_outcome(api, page) -> None:
 
     Polls with a generous 120-second timeout so the 60-second caretaker
     tick (sandbox interval_cb override) has time to land while the issue is
-    active (the plan-failure tight loop keeps re-opening that window — see
-    module docstring) and the state write to propagate through the
-    StateTracker before the deadline.
+    active. The plan-failure tight loop keeps re-opening the active window,
+    and ``plan_hold_seconds`` (see module docstring and ``seed()``) holds
+    each pass open for a real 3 seconds, so a 60-second-interval tick
+    reliably samples a moment when the issue is genuinely active rather
+    than racing a millisecond-scale window.
     """
     _ = page  # UI interaction not needed for this caretaker assertion
 
