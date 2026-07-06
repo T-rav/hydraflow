@@ -186,6 +186,11 @@ _bg_worker_defs = [
         "Evaluates every Accepted ADR's `Enforced by:` checks and files/updates remediation issues on drift. See ADR-0100.",
     ),
     (
+        "auto_tighten",
+        "Auto-Tighten Ratchet",
+        "Locks in coverage-floor gains",
+    ),
+    (
         "auto_agent_preflight",
         "Auto-Agent Pre-Flight",
         "Intercepts hitl-escalation issues; runs an emulated-engineer subprocess to attempt autonomous resolution before the issue surfaces to a human (spec §1–§11; ADR-0050).",

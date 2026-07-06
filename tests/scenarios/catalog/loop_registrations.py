@@ -730,6 +730,51 @@ def _build_adr_conformance(ports: dict[str, Any], config: Any, deps: Any) -> Any
     )
 
 
+def _build_auto_tighten(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build AutoTightenLoop for scenarios.
+
+    Tests pre-seed:
+    * ``auto_tighten_adapters`` -> a list of ``RatchetAdapter``-shaped fakes
+      (defaults to empty, so a tick is a no-op cold start).
+    * ``auto_tighten_ingestor`` / ``auto_tighten_attribution`` /
+      ``auto_tighten_pr_author`` -> collaborator fakes (default to MagicMocks
+      that behave like a clean, no-op tick — no gh shelling in scenarios).
+    * ``auto_tighten_obs`` -> an ``ObservationStore`` (defaults to a real one
+      rooted at ``config.repo_data_root``, matching production wiring).
+
+    State defaults to a MagicMock; tests override via ``auto_tighten_state``.
+    """
+    from auto_tighten.observation_store import ObservationStore  # noqa: PLC0415
+    from auto_tighten_loop import AutoTightenLoop  # noqa: PLC0415
+
+    obs = ports.get("auto_tighten_obs") or ObservationStore(
+        config.repo_data_root / "metrics" / "tighten.jsonl"
+    )
+    adapters = ports.get("auto_tighten_adapters") or []
+    ingestor = ports.get("auto_tighten_ingestor") or MagicMock(ingest=lambda: None)
+    attribution = ports.get("auto_tighten_attribution") or MagicMock(
+        attribute=lambda *a, **k: None
+    )
+    pr_author = ports.get("auto_tighten_pr_author") or MagicMock(
+        open=AsyncMock(return_value=None)
+    )
+    state = ports.get("auto_tighten_state")
+    if state is None:
+        state = MagicMock()
+        ports["auto_tighten_state"] = state
+
+    return AutoTightenLoop(
+        config=config,
+        state=state,
+        deps=deps,
+        adapters=adapters,
+        ingestor=ingestor,
+        attribution=attribution,
+        pr_author=pr_author,
+        observation_store=obs,
+    )
+
+
 def _build_branch_protection_auditor(
     ports: dict[str, Any], config: Any, deps: Any
 ) -> Any:
@@ -1638,6 +1683,7 @@ _BUILDERS: dict[str, Any] = {
     "fake_coverage_auditor": _build_fake_coverage_auditor,
     "adr_touchpoint_auditor": _build_adr_touchpoint_auditor,
     "adr_conformance": _build_adr_conformance,
+    "auto_tighten": _build_auto_tighten,
     "memory_backlog": _build_memory_backlog,
     "rc_budget": _build_rc_budget,
     "wiki_rot_detector": _build_wiki_rot_detector,
