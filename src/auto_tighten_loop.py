@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 
 from auto_tighten.attribution import baseline_since
 from auto_tighten.engine import TighteningEngine
-from auto_tighten.models import ConfirmedTightening, Observation
+from auto_tighten.models import ConfirmedTightening, Measurement, Observation
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
 from loop_fitness import FitnessContext, FitnessKind, LoopFitness  # noqa: TCH001
 from models import WorkCycleResult  # noqa: TCH001
@@ -103,7 +103,9 @@ class AutoTightenLoop(BaseBackgroundLoop):
             timestamp=ctx.window_end,
         )
 
-    async def _emit_tightened(self, ratchet_id: str, floor, pr_url: str) -> None:
+    async def _emit_tightened(
+        self, ratchet_id: str, floor: Measurement, pr_url: str
+    ) -> None:
         from events import EventType, HydraFlowEvent  # noqa: PLC0415
 
         await self._bus.publish(
@@ -117,7 +119,7 @@ class AutoTightenLoop(BaseBackgroundLoop):
             )
         )
 
-    async def _emit_unattributed(self, ratchet_id: str, floor) -> None:
+    async def _emit_unattributed(self, ratchet_id: str, floor: Measurement) -> None:
         from events import EventType, HydraFlowEvent  # noqa: PLC0415
 
         await self._bus.publish(

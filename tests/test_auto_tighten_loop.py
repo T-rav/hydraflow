@@ -189,6 +189,21 @@ async def test_unattributed_gain_holds_without_opening_pr(make_auto_tighten_loop
     loop._pr_author.open.assert_not_awaited()
 
 
+async def test_looser_coverage_below_baseline_is_refused_without_opening_pr(
+    make_auto_tighten_loop,
+):
+    loop = make_auto_tighten_loop(
+        enabled=True,
+        config_enabled=True,
+        coverage_window=[65.0],
+        baseline=70.0,
+        attributed_pr=11,
+    )
+    result = await loop._do_work()
+    assert result["status"] == "ok"
+    loop._pr_author.open.assert_not_awaited()
+
+
 async def test_cold_start_with_no_coverage_data_is_a_noop(make_auto_tighten_loop):
     loop = make_auto_tighten_loop(
         enabled=True, config_enabled=True, coverage_window=None
