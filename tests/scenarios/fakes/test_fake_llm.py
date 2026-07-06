@@ -51,6 +51,42 @@ class TestFakeLLMScriptedResults:
         assert r1.success is False
         assert r2.success is True
 
+    async def test_plan_hold_seconds_default_is_a_noop(self):
+        """Default plan_hold_seconds=0.0 must not introduce any real delay
+        (every existing scenario's FakeLLM timing must stay unaffected)."""
+        import time
+
+        from mockworld.fakes.fake_llm import FakeLLM
+
+        llm = FakeLLM()
+        assert llm.plan_hold_seconds == 0.0
+
+        task = TaskFactory.create(id=1)
+        start = time.monotonic()
+        await llm.planners.plan(task)
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 0.1
+
+    async def test_plan_hold_seconds_delays_plan_call(self):
+        """A scenario opting into plan_hold_seconds (e.g. s52) gets a real
+        artificial delay before plan() returns — this is what extends the
+        real wall-clock duration IssueStore.mark_active holds the issue
+        active for, so a slow-interval sampler reliably observes it."""
+        import time
+
+        from mockworld.fakes.fake_llm import FakeLLM
+
+        llm = FakeLLM()
+        llm.plan_hold_seconds = 0.2
+
+        task = TaskFactory.create(id=1)
+        start = time.monotonic()
+        await llm.planners.plan(task)
+        elapsed = time.monotonic() - start
+
+        assert elapsed >= 0.2
+
     async def test_implement_returns_scripted_worker_result(self):
         from mockworld.fakes.fake_llm import FakeLLM
 
