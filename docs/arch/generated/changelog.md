@@ -4,6 +4,11 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W28
+
+- `69bf32e` — feat(auto-tighten): enable AutoTightenLoop by default (actuation e2e-verified) *(2026-07-07)*
+- `924cd79` — docs(adr): ADR-0104 auto-tightening ratchet *(2026-07-07)*
+
 ## 2026-W27
 
 - `9c7d77b` — feat(auto-tighten): wire loop into registry/orchestrator/dashboard + gh closures *(2026-07-05)*

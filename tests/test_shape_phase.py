@@ -603,3 +603,64 @@ class TestShapeConvergenceLedger:
         ledger = state.get_convergence_ledger(60)
         assert ledger is not None, "Ledger must be created"
         assert ledger.stage_state["shape"].last_verdict == "ADVANCE"
+
+
+class TestShapePhaseHumanSteering:
+    """ADR-0099 #4 — live operator guidance threaded to the ShapeRunner.
+
+    ``ShapePhase`` sources guidance via ``StateTracker.get_human_steering``
+    keyed by ``str(issue.id)`` and passes it as the ``guidance=`` kwarg to
+    ``ShapeRunner.run_turn``, which is responsible for fencing it into
+    both of shape's prompt-construction sites (the turn prompt and the
+    shape-coherence evaluator prompt).
+    """
+
+    @pytest.mark.asyncio
+    async def test_shape_with_runner_sources_guidance_and_passes_to_runner(
+        self, deps: dict, sample_task: Task
+    ) -> None:
+        """Non-empty steering guidance is sourced and threaded to the runner."""
+        from models import SteeringState
+
+        deps["state"].get_human_steering.return_value = SteeringState(
+            guidance="Focus on the enterprise SSO angle."
+        )
+        deps["state"].get_shape_conversation = MagicMock(return_value=None)
+        deps["state"].set_shape_conversation = MagicMock()
+        runner = MagicMock()
+        runner.bind_escalation_deps = MagicMock()
+        runner.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="turn content", is_final=False)
+        )
+        deps["shape_runner"] = runner
+        phase = ShapePhase(**deps)
+
+        await phase._shape_with_runner(sample_task)
+
+        deps["state"].get_human_steering.assert_called_with("42")
+        runner.run_turn.assert_awaited_once()
+        _args, kwargs = runner.run_turn.call_args
+        assert kwargs["guidance"] == "Focus on the enterprise SSO angle."
+
+    @pytest.mark.asyncio
+    async def test_shape_with_runner_passes_empty_guidance_when_none_posted(
+        self, deps: dict, sample_task: Task
+    ) -> None:
+        """No steering guidance posted -> runner receives an empty string."""
+        from models import SteeringState
+
+        deps["state"].get_human_steering.return_value = SteeringState(guidance=None)
+        deps["state"].get_shape_conversation = MagicMock(return_value=None)
+        deps["state"].set_shape_conversation = MagicMock()
+        runner = MagicMock()
+        runner.bind_escalation_deps = MagicMock()
+        runner.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="turn content", is_final=False)
+        )
+        deps["shape_runner"] = runner
+        phase = ShapePhase(**deps)
+
+        await phase._shape_with_runner(sample_task)
+
+        _args, kwargs = runner.run_turn.call_args
+        assert kwargs["guidance"] == ""

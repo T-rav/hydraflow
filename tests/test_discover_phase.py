@@ -126,3 +126,59 @@ class TestDiscoverPhase:
         assert "Acuity Scheduling" in brief
         assert "Group scheduling" in brief
         assert "Open source alternative" in brief
+
+
+class TestDiscoverPhaseHumanSteering:
+    """ADR-0099 #4 — live operator guidance threaded to the DiscoverRunner.
+
+    ``DiscoverPhase`` sources guidance via ``StateTracker.get_human_steering``
+    keyed by ``str(issue.id)`` and passes it as the ``guidance=`` kwarg to
+    ``DiscoverRunner.discover``, which is responsible for fencing it into
+    both of discover's prompt-construction sites.
+    """
+
+    @pytest.mark.asyncio
+    async def test_discover_single_sources_guidance_and_passes_to_runner(
+        self, deps: dict, sample_task: Task
+    ) -> None:
+        """Non-empty steering guidance is sourced and threaded to the runner."""
+        from models import DiscoverResult, SteeringState
+
+        deps["state"].get_human_steering.return_value = SteeringState(
+            guidance="Focus on the enterprise SSO angle."
+        )
+        runner = MagicMock()
+        runner.bind_escalation_deps = MagicMock()
+        runner.discover = AsyncMock(
+            return_value=DiscoverResult(issue_number=42, research_brief="brief")
+        )
+        deps["discover_runner"] = runner
+        phase = DiscoverPhase(**deps)
+
+        await phase._discover_single(sample_task)
+
+        deps["state"].get_human_steering.assert_called_with("42")
+        runner.discover.assert_awaited_once()
+        _args, kwargs = runner.discover.call_args
+        assert kwargs["guidance"] == "Focus on the enterprise SSO angle."
+
+    @pytest.mark.asyncio
+    async def test_discover_single_passes_empty_guidance_when_none_posted(
+        self, deps: dict, sample_task: Task
+    ) -> None:
+        """No steering guidance posted -> runner receives an empty string."""
+        from models import DiscoverResult, SteeringState
+
+        deps["state"].get_human_steering.return_value = SteeringState(guidance=None)
+        runner = MagicMock()
+        runner.bind_escalation_deps = MagicMock()
+        runner.discover = AsyncMock(
+            return_value=DiscoverResult(issue_number=42, research_brief="brief")
+        )
+        deps["discover_runner"] = runner
+        phase = DiscoverPhase(**deps)
+
+        await phase._discover_single(sample_task)
+
+        _args, kwargs = runner.discover.call_args
+        assert kwargs["guidance"] == ""

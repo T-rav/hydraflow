@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from discover_runner import _DISCOVER_END, _DISCOVER_START, DiscoverRunner
+from human_steering import fenced_steering_guidance
 
 
 class TestExtractResult:
@@ -78,3 +79,42 @@ class TestBuildPrompt:
         assert "DISCOVER_END" in prompt
         assert "competitors" in prompt.lower()
         assert "user_needs" in prompt.lower()
+
+    def test_folds_fenced_human_steering_guidance(self, config, event_bus) -> None:
+        """ADR-0099 #4 — live operator guidance is folded in FENCED.
+
+        This is the first of discover's two prompt-construction sites
+        (the second being the ``discover-completeness`` evaluator prompt,
+        ``build_discover_completeness_prompt``). Guidance must reach the
+        prompt only via ``fenced_steering_guidance`` — never as raw
+        comment text (ADR-0092 fence invariant).
+        """
+        from unittest.mock import MagicMock
+
+        runner = DiscoverRunner(config, event_bus)
+        task = MagicMock()
+        task.id = 42
+        task.title = "Build a better Calendly"
+        task.body = "I want a scheduling tool"
+
+        guidance = "Prioritize the enterprise SSO angle over consumer features."
+        prompt = runner._build_prompt(task, guidance=guidance)
+
+        assert "## Human Steering Guidance" in prompt
+        assert fenced_steering_guidance(guidance) in prompt
+
+    def test_empty_guidance_produces_no_steering_section(
+        self, config, event_bus
+    ) -> None:
+        """No guidance posted -> no steering section (unchanged behavior)."""
+        from unittest.mock import MagicMock
+
+        runner = DiscoverRunner(config, event_bus)
+        task = MagicMock()
+        task.id = 42
+        task.title = "Build a better Calendly"
+        task.body = "I want a scheduling tool"
+
+        prompt = runner._build_prompt(task, guidance="")
+
+        assert "## Human Steering Guidance" not in prompt

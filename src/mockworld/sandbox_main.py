@@ -198,6 +198,9 @@ async def main() -> None:
     # the seed.scripts payload. Without this, the sandbox would attempt
     # real LLM calls and fail under the air-gapped network.
     fake_llm = FakeLLM()
+    # Defaults to 0.0 (no-op) — see MockWorldSeed.plan_hold_seconds docstring
+    # for why a scenario (e.g. s52_human_steering_directive) might set this.
+    fake_llm.plan_hold_seconds = seed.plan_hold_seconds
     for phase, by_issue in seed.scripts.items():
         for issue_number, results in by_issue.items():
             getattr(fake_llm, f"script_{phase}")(issue_number, results)

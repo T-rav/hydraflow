@@ -1429,6 +1429,10 @@ class ReviewPhase:
             log_path=log_path,
             pr_number=pr.number,
         )
+        # Human-on-the-loop continuous steering (ADR-0099 #4): the advisor
+        # reviews the same issue as the executor, so live operator guidance
+        # should reach its prompt too.
+        human_guidance = self._state.get_human_steering(str(task.id)).guidance or ""
         try:
             plan = await advisor.run(
                 PreFlightInput(
@@ -1438,6 +1442,7 @@ class ReviewPhase:
                     related_paths=diff_stats.changed_paths,
                     prior_attempts=self._advisor_attempt.get(pr.number, 0),
                     issue_number=task.id,
+                    human_guidance=human_guidance,
                 )
             )
         except Exception as exc:
@@ -1549,6 +1554,12 @@ class ReviewPhase:
             pr_number=log_key,
             authority_override=authority,
         )
+        # Human-on-the-loop continuous steering (ADR-0099 #4): the advisor
+        # reviews the same issue as the executor, so live operator guidance
+        # should reach its prompt too.
+        human_guidance = (
+            self._state.get_human_steering(str(issue_number)).guidance or ""
+        )
         try:
             return await advisor.run(
                 PostVerifyInput(
@@ -1561,6 +1572,7 @@ class ReviewPhase:
                     attempt_number=attempt_number,
                     issue_number=issue_number,
                     lens=lens,
+                    human_guidance=human_guidance,
                 )
             )
         except Exception as exc:
@@ -1839,6 +1851,10 @@ class ReviewPhase:
             log_path=log_path,
             pr_number=issue.id,
         )
+        # Human-on-the-loop continuous steering (ADR-0099 #4): the advisor
+        # reviews the same issue as the executor, so live operator guidance
+        # should reach its prompt too.
+        human_guidance = self._state.get_human_steering(str(issue.id)).guidance or ""
         try:
             plan = await advisor.run(
                 PreFlightInput(
@@ -1848,6 +1864,7 @@ class ReviewPhase:
                     related_paths=diff_stats.changed_paths,
                     prior_attempts=0,
                     issue_number=issue.id,
+                    human_guidance=human_guidance,
                 )
             )
         except Exception as exc:
@@ -2200,6 +2217,12 @@ class ReviewPhase:
         # Build bead context for per-bead review when beads are enabled
         bead_tasks = self._build_bead_review_context(issue)
 
+        # Human-on-the-loop continuous steering (ADR-0099 #4): fold live
+        # operator guidance into the review prompt. Reference signal only
+        # — never blocking; empty when the feature is off or no guidance
+        # was posted for this issue.
+        human_guidance = self._state.get_human_steering(str(issue.id)).guidance or ""
+
         result = await self._reviewers.review(
             pr,
             issue,
@@ -2210,6 +2233,7 @@ class ReviewPhase:
             bead_tasks=bead_tasks,
             pre_flight_plan=pre_flight_plan,
             surface=surface,
+            human_guidance=human_guidance,
         )
 
         if result.fixes_made:
@@ -2282,6 +2306,12 @@ class ReviewPhase:
             updated_diff = await self._prs.get_pr_diff(pr.number)
             # Thread the pre-flight plan into retries so the executor keeps
             # the same focus rubric across the loop (T24.5 closed I3).
+            # Human-on-the-loop continuous steering (ADR-0099 #4): re-fetch
+            # guidance so a `/steer` posted mid-retry-loop reaches the
+            # re-review prompt too.
+            human_guidance = (
+                self._state.get_human_steering(str(issue.id)).guidance or ""
+            )
             re_result = await self._reviewers.review(
                 pr,
                 issue,
@@ -2291,6 +2321,7 @@ class ReviewPhase:
                 code_scanning_alerts=code_scanning_alerts,
                 pre_flight_plan=self._advisor_pre_flight_plan.get((surface, pr.number)),
                 surface=surface,
+                human_guidance=human_guidance,
             )
             if re_result.fixes_made:
                 await self._prs.push_branch(wt_path, pr.branch)
@@ -2368,6 +2399,10 @@ class ReviewPhase:
         updated_diff = await self._prs.get_pr_diff(pr.number)
         # Thread the pre-flight plan into retries so the executor keeps
         # the same focus rubric across the loop (T24.5 closed I3).
+        # Human-on-the-loop continuous steering (ADR-0099 #4): re-fetch
+        # guidance so a `/steer` posted mid-fix-loop reaches the re-review
+        # prompt too.
+        human_guidance = self._state.get_human_steering(str(task.id)).guidance or ""
         re_result = await self._reviewers.review(
             pr,
             task,
@@ -2377,6 +2412,7 @@ class ReviewPhase:
             code_scanning_alerts=code_scanning_alerts,
             pre_flight_plan=self._advisor_pre_flight_plan.get((surface, pr.number)),
             surface=surface,
+            human_guidance=human_guidance,
         )
 
         if re_result.fixes_made:
@@ -3329,6 +3365,9 @@ class ReviewPhase:
         # Adversarial-threshold re-review is pr_review-track only (it gates
         # PR approval), so we hard-code the surface here. T38 (M7) key:
         # ``(surface, identifier)``.
+        # Human-on-the-loop continuous steering (ADR-0099 #4): re-fetch
+        # guidance so a `/steer` posted mid-loop reaches this re-review too.
+        human_guidance = self._state.get_human_steering(str(issue.id)).guidance or ""
         re_result = await self._reviewers.review(
             pr,
             issue,
@@ -3337,6 +3376,7 @@ class ReviewPhase:
             worker_id=worker_id,
             code_scanning_alerts=code_scanning_alerts,
             pre_flight_plan=self._advisor_pre_flight_plan.get(("pr_review", pr.number)),
+            human_guidance=human_guidance,
         )
 
         # If re-review still under threshold without justification, accept

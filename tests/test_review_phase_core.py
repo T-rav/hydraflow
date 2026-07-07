@@ -125,6 +125,46 @@ class TestReviewPRs:
         assert phase._state.to_dict()["reviewed_prs"].get(str(101)) == "approve"
 
     @pytest.mark.asyncio
+    async def test_threads_human_steering_guidance_into_review(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ADR-0099 #4 — live operator guidance reaches the review call.
+
+        ``ReviewPhase`` sources guidance from ``StateTracker.get_human_steering``
+        keyed by the issue id and passes it through to ``ReviewRunner.review``
+        as ``human_guidance``; the runner is responsible for fencing it.
+        """
+        from models import SteeringState
+
+        phase = make_review_phase(config, default_mocks=True)
+        issue = TaskFactory.create(id=42)
+        pr = PRInfoFactory.create(issue_number=42)
+        phase._state.set_human_steering(
+            "42", SteeringState(guidance="Focus on the auth-bypass edge case.")
+        )
+
+        await phase.review_prs([pr], [issue])
+
+        phase._reviewers.review.assert_awaited_once()
+        _, kwargs = phase._reviewers.review.await_args
+        assert kwargs["human_guidance"] == "Focus on the auth-bypass edge case."
+
+    @pytest.mark.asyncio
+    async def test_no_guidance_threads_empty_string_into_review(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """No guidance posted -> empty string reaches the review call."""
+        phase = make_review_phase(config, default_mocks=True)
+        issue = TaskFactory.create(id=42)
+        pr = PRInfoFactory.create(issue_number=42)
+
+        await phase.review_prs([pr], [issue])
+
+        phase._reviewers.review.assert_awaited_once()
+        _, kwargs = phase._reviewers.review.await_args
+        assert kwargs["human_guidance"] == ""
+
+    @pytest.mark.asyncio
     async def test_reviewer_concurrency_limited_by_config_max_reviewers(
         self, config: HydraFlowConfig
     ) -> None:
