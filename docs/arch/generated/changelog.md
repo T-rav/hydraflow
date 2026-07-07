@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W27
 
+- `9c7d77b` — feat(auto-tighten): wire loop into registry/orchestrator/dashboard + gh closures *(2026-07-05)*
 - `e147f67` — feat(auto-tighten): AutoTightenLoop caretaker loop *(2026-07-05)*
 - `a8e53c6` — refactor(auto-tighten): rename RatchetPort to RatchetAdapter (not a hexagonal Port) *(2026-07-05)*
 - `476469c` — feat(auto-tighten): add RatchetPort protocol *(2026-07-05)*

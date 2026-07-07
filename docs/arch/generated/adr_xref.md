@@ -110,6 +110,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0101 | `src._mock_spec_detector`, `src.auto_pr`, `src.disturbance.baseline`, `src.disturbance.burndown`, `src.disturbance.detectors.base`, `src.disturbance.detectors.mock_spec`, `src.disturbance.detectors.suppressions`, `src.disturbance.gate`, `src.disturbance.registry`, `src.disturbance_dampener_loop` | `tests/test_disturbance_ratchet.py, tests/test_disturbance_dampener_loop.py` |
 | ADR-0102 | `src.config`, `src.convergence_recording`, `src.review_phase._phase` | `pytest:tests/test_review_phase_core.py` |
 | ADR-0103 | `src.agent`, `src.human_steering`, `src.human_steering_loop`, `src.implement_phase`, `src.models`, `src.orchestrator` | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_orchestrator_human_steering.py` |
+| ADR-0104 | — | `pytest:tests/test_auto_tighten_invariant.py` |
 
 ## Module → ADRs
 
