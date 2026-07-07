@@ -77,6 +77,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0100 | enforced | `pytest:tests/test_adr_conformance_coverage.py` |
 | ADR-0102 | enforced | `pytest:tests/test_review_phase_core.py` |
 | ADR-0103 | enforced | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_human_steering_state.py`, `pytest:tests/test_orchestrator_human_steering.py`, `pytest:tests/test_config_env.py` |
+| ADR-0104 | enforced | `pytest:tests/test_auto_tighten_invariant.py` |
 
 ## Check → ADRs it protects
 
@@ -116,6 +117,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_agent_cli.py` | ADR-0004, ADR-0092 |
 | `pytest:tests/test_atlas_routes.py` | ADR-0060, ADR-0061, ADR-0090 |
 | `pytest:tests/test_auto_agent_preflight_loop.py` | ADR-0050 |
+| `pytest:tests/test_auto_tighten_invariant.py` | ADR-0104 |
 | `pytest:tests/test_base_runner.py` | ADR-0004 |
 | `pytest:tests/test_caretaker_loop_wiring.py` | ADR-0029 |
 | `pytest:tests/test_config_env.py` | ADR-0103 |

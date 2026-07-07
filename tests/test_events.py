@@ -54,6 +54,7 @@ _EVENT_STRING_CASES: list[tuple[EventType, str]] = [
     (EventType.TRIBAL_PROMOTION, "tribal_promotion"),
     (EventType.ADR_DRAFT_OPENED, "adr_draft_opened"),
     (EventType.ADR_CONFORMANCE_UPDATE, "adr_conformance_update"),
+    (EventType.RATCHET_TIGHTENED, "ratchet_tightened"),
     (EventType.ADVERSARIAL_STAGE_STARTED, "adversarial_stage_started"),
     (EventType.ADVERSARIAL_STAGE_CONVERGED, "adversarial_stage_converged"),
     (EventType.ADVERSARIAL_STAGE_EXHAUSTED, "adversarial_stage_exhausted"),
@@ -118,6 +119,7 @@ class TestEventTypeEnum:
             "CONCERN_ADDRESSED",
             "SHIPPED_WITH_KNOWN_GAP",
             "LOOP_FITNESS_UPDATE",
+            "RATCHET_TIGHTENED",
         }
         actual = {member.name for member in EventType}
         assert expected == actual

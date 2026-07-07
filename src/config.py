@@ -333,6 +333,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("fitness_scorecard_interval", "HYDRAFLOW_FITNESS_SCORECARD_INTERVAL", 86400),
     ("fitness_window_days", "HYDRAFLOW_FITNESS_WINDOW_DAYS", 30),
     ("fitness_min_samples", "HYDRAFLOW_FITNESS_MIN_SAMPLES", 20),
+    ("auto_tighten_stability_ticks", "HYDRAFLOW_AUTO_TIGHTEN_STABILITY_TICKS", 3),
+    ("auto_tighten_interval", "HYDRAFLOW_AUTO_TIGHTEN_INTERVAL", 86400),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -387,6 +389,7 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
         "HYDRAFLOW_GH_CIRCUIT_BREAKER_RESET_TIMEOUT_S",
         60.0,
     ),
+    ("auto_tighten_coverage_margin", "HYDRAFLOW_AUTO_TIGHTEN_COVERAGE_MARGIN", 1.0),
 ]
 
 # Optional floats — `None` when env var is missing/empty/invalid.
@@ -568,6 +571,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("workspace_gc_loop_enabled", "HYDRAFLOW_WORKSPACE_GC_LOOP_ENABLED", True),
+    ("auto_tighten_loop_enabled", "HYDRAFLOW_AUTO_TIGHTEN_LOOP_ENABLED", True),
 ]
 
 # Literal-typed env-var overrides.
@@ -2546,6 +2550,11 @@ class HydraFlowConfig(BaseModel):
         description="Seconds between AdrTouchpointAuditorLoop ticks (default 4h)",
     )
 
+    # Caretaker — AutoTightenLoop (auto-tightening ratchet)
+    auto_tighten_stability_ticks: int = Field(default=3, ge=1)
+    auto_tighten_coverage_margin: float = Field(default=1.0, ge=0.0)
+    auto_tighten_interval: int = Field(default=86400, ge=60)
+
     # Trust fleet — TermProposerLoop (ADR-0054)
     term_proposer_enabled: bool = Field(
         default=True,
@@ -3054,6 +3063,14 @@ class HydraFlowConfig(BaseModel):
             "Enabled by default (like sibling caretaker loops) after a dry-run "
             "against the full ADR corpus confirmed zero false-positive issue "
             "filing; set False to disable."
+        ),
+    )
+    auto_tighten_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for AutoTightenLoop (auto-tightening ratchet). Enabled by "
+            "default (ADR-0104) once actuation was e2e-verified; set the env var to "
+            "false to disable."
         ),
     )
     ci_monitor_loop_enabled: bool = Field(

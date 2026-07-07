@@ -39,6 +39,7 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **PLANNER_UPDATE** ⚠️ | `src.planner:PlannerRunner._emit_status` | — |
 | **PR_CREATED** ⚠️ | `src.pr_manager:PRManager.create_pr`<br>`src.pr_manager:PRManager.create_promotion_pr` | — |
 | **QUEUE_UPDATE** ⚠️ | `src.issue_store:IssueStore._publish_queue_update_nowait`<br>`src.issue_store:IssueStore.refresh`<br>`src.mockworld.fakes.fake_issue_store:FakeIssueStore.refresh` | — |
+| **RATCHET_TIGHTENED** ⚠️ | `src.auto_tighten_loop:AutoTightenLoop._emit_tightened`<br>`src.auto_tighten_loop:AutoTightenLoop._emit_unattributed` | — |
 | **REPORT_UPDATE** ⚠️ | `src.report_issue_loop:ReportIssueLoop._emit_report_event` | — |
 | **RETROSPECTIVE_UPDATE** ⚠️ | `src.retrospective_loop:RetrospectiveLoop._publish_update` | — |
 | **REVIEW_UPDATE** ⚠️ | `src.merge_conflict_resolver:MergeConflictResolver._publish_review_status`<br>`src.phase_utils:publish_review_status`<br>`src.reviewer:ReviewRunner.fix_review_findings`<br>`src.reviewer:ReviewRunner.review` | — |

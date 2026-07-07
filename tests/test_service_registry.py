@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import subprocess
 import sys
 from operator import attrgetter
 from pathlib import Path
@@ -458,3 +460,134 @@ class TestAdversarialPipelineWiring:
         }
         for voter in shape_phase._shape_council_agents.values():
             assert isinstance(voter, SubprocessAgentRunner)
+
+
+class TestAutoTightenGhClosures:
+    """Unit tests for the two gh-shelling closures the AutoTighten factory
+    wiring builds: ``make_gh_coverage_fetch`` and ``make_gh_merged_pr_lister``.
+
+    Both take an injectable ``runner`` (mirrors ``auto_pr._run_gh``'s shape)
+    so these tests never shell out to the real ``gh`` CLI.
+    """
+
+    def test_coverage_fetch_picks_latest_successful_run_and_downloads_it(
+        self, config: HydraFlowConfig, tmp_path: Path
+    ) -> None:
+        from service_registry import make_gh_coverage_fetch
+
+        runs_json = (
+            '[{"databaseId": 42, "headSha": "deadbeef", "status": "completed", '
+            '"conclusion": "success"}, '
+            '{"databaseId": 41, "headSha": "old", "status": "completed", '
+            '"conclusion": "failure"}]'
+        )
+        calls = []
+
+        def fake_runner(cmd, *, cwd):
+            calls.append(cmd)
+            if cmd[:3] == ["gh", "run", "list"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout=runs_json, stderr="")
+            if cmd[:3] == ["gh", "run", "download"]:
+                # Simulate `gh run download` writing coverage.json into --dir.
+                download_dir = Path(cmd[cmd.index("--dir") + 1])
+                (download_dir / "coverage.json").write_text(
+                    '{"totals": {"percent_covered": 91.5}}'
+                )
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            raise AssertionError(f"unexpected gh command: {cmd}")
+
+        fetch = make_gh_coverage_fetch(config, runner=fake_runner)
+        result = fetch()
+
+        assert result is not None
+        run_id, head_sha, cov_text = result
+        assert run_id == "42"
+        assert head_sha == "deadbeef"
+        assert json.loads(cov_text)["totals"]["percent_covered"] == 91.5
+        # The download must target the latest *successful* run, not run 41.
+        download_cmd = next(c for c in calls if c[:3] == ["gh", "run", "download"])
+        assert "42" in download_cmd
+
+    def test_coverage_fetch_returns_none_when_no_successful_runs(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from service_registry import make_gh_coverage_fetch
+
+        def fake_runner(cmd, *, cwd):
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout=(
+                    '[{"databaseId": 1, "headSha": "x", '
+                    '"status": "completed", "conclusion": "failure"}]'
+                ),
+                stderr="",
+            )
+
+        fetch = make_gh_coverage_fetch(config, runner=fake_runner)
+        assert fetch() is None
+
+    def test_coverage_fetch_returns_none_on_nonzero_exit(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from service_registry import make_gh_coverage_fetch
+
+        def fake_runner(cmd, *, cwd):
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
+
+        fetch = make_gh_coverage_fetch(config, runner=fake_runner)
+        assert fetch() is None
+
+    def test_merged_pr_lister_maps_file_objects_to_path_strings(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """The load-bearing mapping: gh returns files as [{"path": ...}],
+        AttributionResolver expects a flat list[str] of paths."""
+        from service_registry import make_gh_merged_pr_lister
+
+        prs_json = (
+            '[{"number": 7, "files": [{"path": "src/foo.py"}, '
+            '{"path": "tests/test_foo.py"}], "mergedAt": "2026-07-01T00:00:00Z"}]'
+        )
+
+        def fake_runner(cmd, *, cwd):
+            return subprocess.CompletedProcess(cmd, 0, stdout=prs_json, stderr="")
+
+        lister = make_gh_merged_pr_lister(config, runner=fake_runner)
+        result = lister("2026-06-01T00:00:00Z")
+
+        assert result == [
+            {
+                "number": 7,
+                "files": ["src/foo.py", "tests/test_foo.py"],
+                "merged_at": "2026-07-01T00:00:00Z",
+            }
+        ]
+
+    def test_merged_pr_lister_passes_since_into_search_query(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from service_registry import make_gh_merged_pr_lister
+
+        captured = {}
+
+        def fake_runner(cmd, *, cwd):
+            captured["cmd"] = cmd
+            return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
+
+        lister = make_gh_merged_pr_lister(config, runner=fake_runner)
+        lister("2026-06-15T00:00:00Z")
+
+        search_arg = captured["cmd"][captured["cmd"].index("--search") + 1]
+        assert "2026-06-15T00:00:00Z" in search_arg
+
+    def test_merged_pr_lister_returns_empty_on_nonzero_exit(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from service_registry import make_gh_merged_pr_lister
+
+        def fake_runner(cmd, *, cwd):
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
+
+        lister = make_gh_merged_pr_lister(config, runner=fake_runner)
+        assert lister("2026-06-01T00:00:00Z") == []

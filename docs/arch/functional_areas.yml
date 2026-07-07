@@ -71,6 +71,7 @@ areas:
     loops:
       - AdrConformanceLoop
       - AdrTouchpointAuditorLoop
+      - AutoTightenLoop
       - ContractRefreshLoop
       - CorpusLearningLoop
       - FakeCoverageAuditorLoop

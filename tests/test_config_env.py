@@ -472,6 +472,14 @@ class TestEnvVarOverrideTable:
             )
 
 
+def test_auto_tighten_loop_enabled_defaults_true_and_env_can_disable(monkeypatch):
+    from config import HydraFlowConfig
+
+    assert HydraFlowConfig().auto_tighten_loop_enabled is True
+    monkeypatch.setenv("HYDRAFLOW_AUTO_TIGHTEN_LOOP_ENABLED", "false")
+    assert HydraFlowConfig().auto_tighten_loop_enabled is False
+
+
 class TestHumanSteeringAuthorizedUsersEnvOverride:
     """HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS (comma-separated list, special-case)."""
 

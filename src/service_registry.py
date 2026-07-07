@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import subprocess
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from acceptance_criteria import AcceptanceCriteriaGenerator
@@ -17,6 +21,12 @@ from adr_reviewer_loop import ADRReviewerLoop
 from adr_touchpoint_auditor_loop import AdrTouchpointAuditorLoop
 from agent import AgentRunner
 from auto_agent_preflight_loop import AutoAgentPreflightLoop
+from auto_tighten.attribution import AttributionResolver
+from auto_tighten.coverage_adapter import CoverageAdapter
+from auto_tighten.coverage_ingestor import CoverageIngestor
+from auto_tighten.observation_store import ObservationStore
+from auto_tighten.pr_author import TighteningPrAuthor
+from auto_tighten_loop import AutoTightenLoop
 from base_background_loop import LoopDeps
 from baseline_policy import BaselinePolicy
 from beads_manager import BeadsManager
@@ -132,6 +142,7 @@ from workspace_gc_loop import WorkspaceGCLoop
 if TYPE_CHECKING:
     from scripts.gates.activation import ActivationProposal
 
+    from auto_tighten.ratchet_adapter import RatchetAdapter
     from metrics_manager import MetricsManager
 
 logger = logging.getLogger("hydraflow.service_registry")
@@ -314,6 +325,7 @@ class ServiceRegistry:
     fake_coverage_auditor_loop: FakeCoverageAuditorLoop
     adr_touchpoint_auditor_loop: AdrTouchpointAuditorLoop
     adr_conformance_loop: AdrConformanceLoop
+    auto_tighten_loop: AutoTightenLoop
     memory_backlog_loop: MemoryBacklogLoop
     rc_budget_loop: RCBudgetLoop
     wiki_rot_detector_loop: WikiRotDetectorLoop
@@ -351,6 +363,161 @@ class WorkerRegistryCallbacks:
     update_status: StatusCallback
     is_enabled: Callable[[str], bool]
     get_interval: Callable[[str], int]
+
+
+_GH_SUBPROCESS_TIMEOUT_S = 120
+
+# Injectable `gh` runner type shared by the two auto-tighten closures below.
+# Mirrors `auto_pr._run_gh`'s shape (a thin `subprocess.run` wrapper) so unit
+# tests can pass a fake without monkeypatching `subprocess.run` globally.
+GhRunner = Callable[..., "subprocess.CompletedProcess[str]"]
+
+
+def run_gh_command(cmd: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Default `gh` subprocess runner for the auto-tighten closures.
+
+    Kept as a free function (mirrors `auto_pr._run_gh`) so
+    `make_gh_coverage_fetch` / `make_gh_merged_pr_lister` can be unit-tested
+    by injecting a fake `runner` instead of monkeypatching `subprocess.run`.
+    """
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=_GH_SUBPROCESS_TIMEOUT_S,
+    )
+
+
+def make_gh_coverage_fetch(
+    config: HydraFlowConfig, *, runner: GhRunner = run_gh_command
+) -> Callable[[], tuple[str, str, str] | None]:
+    """Build the ``fetch_latest`` closure ``CoverageIngestor`` needs.
+
+    Finds the most recent successful CI run on the base branch, downloads its
+    ``coverage-json`` artifact, and returns ``(run_id, head_sha, coverage_json_text)``.
+    Returns ``None`` on any failure (no successful runs yet, no artifact,
+    unreadable JSON) — a safe "nothing new to ingest" signal, never a crash.
+    """
+
+    def _fetch_latest() -> tuple[str, str, str] | None:
+        base = config.base_branch()
+        list_proc = runner(
+            [
+                "gh",
+                "run",
+                "list",
+                "--branch",
+                base,
+                "--workflow",
+                "ci.yml",
+                "--json",
+                "databaseId,headSha,status,conclusion",
+                "--limit",
+                "20",
+            ],
+            cwd=config.repo_root,
+        )
+        if list_proc.returncode != 0:
+            return None
+        try:
+            runs = json.loads(list_proc.stdout)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+        latest = next(
+            (
+                run
+                for run in runs
+                if run.get("status") == "completed"
+                and run.get("conclusion") == "success"
+            ),
+            None,
+        )
+        if latest is None:
+            return None
+
+        run_id = str(latest["databaseId"])
+        head_sha = str(latest["headSha"])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            download_proc = runner(
+                [
+                    "gh",
+                    "run",
+                    "download",
+                    run_id,
+                    "--name",
+                    "coverage-json",
+                    "--dir",
+                    tmpdir,
+                ],
+                cwd=config.repo_root,
+            )
+            if download_proc.returncode != 0:
+                return None
+            cov_path = Path(tmpdir) / "coverage.json"
+            if not cov_path.exists():
+                return None
+            cov_text = cov_path.read_text()
+
+        return (run_id, head_sha, cov_text)
+
+    return _fetch_latest
+
+
+def make_gh_merged_pr_lister(
+    config: HydraFlowConfig, *, runner: GhRunner = run_gh_command
+) -> Callable[[str], list[dict]]:
+    """Build the ``list_merged_prs`` closure ``AttributionResolver`` needs.
+
+    Lists PRs merged to the base branch since ``since_iso``, normalizing
+    ``gh``'s ``files: [{"path": ...}]`` objects to the flat
+    ``files: [path, ...]`` list of strings ``AttributionResolver.attribute``
+    expects, and ``mergedAt`` -> ``merged_at``. Returns ``[]`` on failure —
+    attribution failure is a safe HOLD downstream, never a crash.
+    """
+
+    def _list_merged_prs(since_iso: str) -> list[dict]:
+        base = config.base_branch()
+        proc = runner(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--base",
+                base,
+                "--state",
+                "merged",
+                "--search",
+                f"merged:>={since_iso}",
+                "--json",
+                "number,files,mergedAt",
+                "--limit",
+                "100",
+            ],
+            cwd=config.repo_root,
+        )
+        if proc.returncode != 0:
+            return []
+        try:
+            prs = json.loads(proc.stdout)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+        out: list[dict] = []
+        for pr in prs:
+            out.append(
+                {
+                    "number": pr["number"],
+                    "files": [f["path"] for f in pr.get("files", [])],
+                    "merged_at": pr.get("mergedAt"),
+                }
+            )
+        return out
+
+    return _list_merged_prs
 
 
 def build_state_tracker(config: HydraFlowConfig) -> StateTracker:
@@ -1262,6 +1429,42 @@ def build_services(
         deps=loop_deps,
     )
 
+    _auto_tighten_metrics = config.repo_data_root / "metrics"
+    _auto_tighten_cov_jsonl = _auto_tighten_metrics / "coverage.jsonl"
+    # CoverageAdapter's methods are typed over concrete `float` (the only
+    # Measurement shape it deals with) rather than the full `Measurement`
+    # union the RatchetAdapter Protocol declares, so pyright sees it as
+    # narrower-than-the-protocol at the list-literal boundary. Runtime-safe
+    # (CoverageAdapter is a real structural match; `RatchetAdapter` is
+    # `@runtime_checkable`) — the cast documents this rather than papering
+    # over an actual mismatch.
+    _auto_tighten_adapters = cast(
+        "list[RatchetAdapter]",
+        [
+            CoverageAdapter(
+                coverage_jsonl=_auto_tighten_cov_jsonl,
+                margin=config.auto_tighten_coverage_margin,
+            )
+        ],
+    )
+    auto_tighten_loop = AutoTightenLoop(  # noqa: F841
+        config=config,
+        state=state,
+        deps=loop_deps,
+        adapters=_auto_tighten_adapters,
+        ingestor=CoverageIngestor(
+            _auto_tighten_cov_jsonl,
+            fetch_latest=make_gh_coverage_fetch(config),
+        ),
+        attribution=AttributionResolver(
+            list_merged_prs=make_gh_merged_pr_lister(config)
+        ),
+        pr_author=TighteningPrAuthor(
+            repo_root=config.repo_root, base=config.base_branch()
+        ),
+        observation_store=ObservationStore(_auto_tighten_metrics / "tighten.jsonl"),
+    )
+
     branch_protection_auditor_dedup = DedupStore(
         "branch_protection_auditor",
         config.data_root / "dedup" / "branch_protection_auditor.json",
@@ -1611,6 +1814,7 @@ def build_services(
         fake_coverage_auditor_loop=fake_coverage_auditor_loop,
         adr_touchpoint_auditor_loop=adr_touchpoint_auditor_loop,
         adr_conformance_loop=adr_conformance_loop,
+        auto_tighten_loop=auto_tighten_loop,
         memory_backlog_loop=memory_backlog_loop,
         rc_budget_loop=rc_budget_loop,
         wiki_rot_detector_loop=wiki_rot_detector_loop,

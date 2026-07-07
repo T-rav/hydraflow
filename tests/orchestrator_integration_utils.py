@@ -501,6 +501,7 @@ def build_scripted_services(
     services.fake_coverage_auditor_loop = FakeBackgroundLoop()
     services.adr_touchpoint_auditor_loop = FakeBackgroundLoop()
     services.adr_conformance_loop = FakeBackgroundLoop()
+    services.auto_tighten_loop = FakeBackgroundLoop()
     services.memory_backlog_loop = FakeBackgroundLoop()
     services.rc_budget_loop = FakeBackgroundLoop()
     services.wiki_rot_detector_loop = FakeBackgroundLoop()
