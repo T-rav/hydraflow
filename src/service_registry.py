@@ -520,6 +520,43 @@ def make_gh_merged_pr_lister(
     return _list_merged_prs
 
 
+def make_gh_open_pr_exists(
+    config: HydraFlowConfig, *, runner: GhRunner = run_gh_command
+) -> Callable[[str], bool]:
+    """Build the open-PR probe ``TighteningPrAuthor`` uses for cross-tick dedup.
+
+    Returns True when a PR is already open for ``branch`` (its head), so the
+    loop skips re-opening a tightening PR whose prior tick's PR has not merged.
+    Fails open (returns False on any ``gh`` error): a probe failure must not
+    block a legitimate tightening, and a genuine duplicate-head open still
+    resolves to a benign hold downstream via ``raise_on_failure=False``.
+    """
+
+    def _open_pr_exists(branch: str) -> bool:
+        proc = runner(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--head",
+                branch,
+                "--state",
+                "open",
+                "--json",
+                "number",
+            ],
+            cwd=config.repo_root,
+        )
+        if proc.returncode != 0:
+            return False
+        try:
+            return bool(json.loads(proc.stdout))
+        except (json.JSONDecodeError, TypeError):
+            return False
+
+    return _open_pr_exists
+
+
 def build_state_tracker(config: HydraFlowConfig) -> StateTracker:
     """Construct a file-backed ``StateTracker``."""
     return StateTracker(config.state_file)
@@ -1460,7 +1497,9 @@ def build_services(
             list_merged_prs=make_gh_merged_pr_lister(config)
         ),
         pr_author=TighteningPrAuthor(
-            repo_root=config.repo_root, base=config.base_branch()
+            repo_root=config.repo_root,
+            base=config.base_branch(),
+            open_pr_exists=make_gh_open_pr_exists(config),
         ),
         observation_store=ObservationStore(_auto_tighten_metrics / "tighten.jsonl"),
     )
