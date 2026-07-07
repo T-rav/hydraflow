@@ -1788,6 +1788,48 @@ class StageRecord(BaseModel):
     last_finding_signatures: list[str] = Field(default_factory=list)
 
 
+DriverState = Literal[
+    "TRIAGE",
+    "DISCOVER",
+    "SHAPE",
+    "PLAN",
+    "READY",
+    "REVIEW",
+    "HITL_WAIT",
+    "HITL_APPLY",
+    "DIAGNOSE",
+    "PARKED",
+    "MERGED",
+    "CLOSED",
+    "ESCALATED",
+]
+
+
+class SuspendRecord(BaseModel):
+    """Why and where a suspended IssueDriver should resume.
+
+    ``reason`` is an open string (documented values: ``shape_human_select``,
+    ``hitl_correction``, ``ci_wait``, ``epic_gap_barrier``) so new suspend
+    causes do not require a schema change.
+    """
+
+    reason: str
+    suspended_at: str
+    wake_signal: Literal["comment", "correction", "label"]
+    resume_state: DriverState
+
+
+class PolicyEvent(BaseModel):
+    """One issue-level orchestration decision, recorded for audit/replay."""
+
+    at: str
+    from_state: DriverState
+    to_state: DriverState
+    decision: str
+    reason: str
+    counters: dict[str, int] = Field(default_factory=dict)
+
+
 class ConvergenceLedger(BaseModel):
     """Single source of truth for one issue's two-level convergence state.
 
@@ -1803,6 +1845,16 @@ class ConvergenceLedger(BaseModel):
     lap_signatures: list[list[str]] = Field(default_factory=list)
     converged: bool = False
     oscillation_escalated: bool = False
+
+    # --- IssueDriver orchestration state (HydraFlow v2, additive) ---
+    driver_state: DriverState = "TRIAGE"
+    suspend: SuspendRecord | None = None
+    pending_correction: str | None = None
+    hitl_origin: str | None = None
+    hitl_cause: str | None = None
+    route_backs: dict[str, int] = Field(default_factory=dict)
+    issue_attempts: int = 0
+    policy_log: list[PolicyEvent] = Field(default_factory=list)
 
     def _stage(self, stage: str) -> StageRecord:
         rec = self.stage_state.get(stage)
@@ -1894,6 +1946,20 @@ class ConvergenceLedger(BaseModel):
             if self.stage_state.get(stage, StageRecord()).last_verdict == "LOOP_BACK"
         )
         return loopback_count >= min_loopback_stages
+
+    def get_route_backs(self, edge: str) -> int:
+        return self.route_backs.get(edge, 0)
+
+    def increment_route_backs(self, edge: str) -> int:
+        self.route_backs[edge] = self.route_backs.get(edge, 0) + 1
+        return self.route_backs[edge]
+
+    def increment_issue_attempts(self) -> int:
+        self.issue_attempts += 1
+        return self.issue_attempts
+
+    def append_policy_event(self, event: PolicyEvent) -> None:
+        self.policy_log.append(event)
 
 
 class StateData(BaseModel):

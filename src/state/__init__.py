@@ -32,6 +32,7 @@ from ._corpus_learning import CorpusLearningStateMixin
 from ._dependabot_merge import DependabotMergeStateMixin
 from ._diagnostic import DiagnosticStateMixin
 from ._disturbance import DisturbanceStateMixin
+from ._driver import DriverStateMixin
 from ._epic import EpicStateMixin
 from ._fake_coverage import FakeCoverageStateMixin
 from ._flake_tracker import FlakeTrackerStateMixin
@@ -113,6 +114,7 @@ class StateTracker(
     DisturbanceStateMixin,
     ConvergenceStateMixin,
     HumanSteeringStateMixin,
+    DriverStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 
