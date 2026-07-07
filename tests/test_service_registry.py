@@ -591,3 +591,44 @@ class TestAutoTightenGhClosures:
 
         lister = make_gh_merged_pr_lister(config, runner=fake_runner)
         assert lister("2026-06-01T00:00:00Z") == []
+
+    def test_open_pr_exists_true_and_probes_the_head_branch(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from service_registry import make_gh_open_pr_exists
+
+        captured = {}
+
+        def fake_runner(cmd, *, cwd):
+            captured["cmd"] = cmd
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout='[{"number": 42}]', stderr=""
+            )
+
+        probe = make_gh_open_pr_exists(config, runner=fake_runner)
+        assert probe("auto-tighten/coverage-77.0") is True
+        assert "--head" in captured["cmd"]
+        assert "auto-tighten/coverage-77.0" in captured["cmd"]
+
+    def test_open_pr_exists_false_when_none_listed(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from service_registry import make_gh_open_pr_exists
+
+        def fake_runner(cmd, *, cwd):
+            return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
+
+        probe = make_gh_open_pr_exists(config, runner=fake_runner)
+        assert probe("auto-tighten/coverage-77.0") is False
+
+    def test_open_pr_exists_fails_open_on_nonzero_exit(
+        self, config: HydraFlowConfig
+    ) -> None:
+        # A gh error must not block a legitimate tightening: fail open (False).
+        from service_registry import make_gh_open_pr_exists
+
+        def fake_runner(cmd, *, cwd):
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
+
+        probe = make_gh_open_pr_exists(config, runner=fake_runner)
+        assert probe("auto-tighten/coverage-77.0") is False

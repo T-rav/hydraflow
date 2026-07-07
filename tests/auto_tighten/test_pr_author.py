@@ -118,3 +118,68 @@ async def test_branch_name_sanitized_for_unsafe_dedup_key(tmp_path):
     dynamic_segment = branch[len("auto-tighten/") :]
     assert "/" not in dynamic_segment
     assert " " not in dynamic_segment
+
+
+async def test_open_skips_when_pr_already_open(tmp_path):
+    # Cross-tick dedup: a tightening PR for this floor is already open, so
+    # skip without calling the opener or writing to the working tree.
+    edit_path = tmp_path / "pyproject.toml"
+    opener_called = False
+
+    async def fake_opener(**kwargs):
+        nonlocal opener_called
+        opener_called = True
+
+        class R:
+            pr_url = "https://gh/pr/1"
+
+        return R()
+
+    author = TighteningPrAuthor(
+        repo_root=tmp_path,
+        base="staging",
+        opener=fake_opener,
+        open_pr_exists=lambda _branch: True,
+    )
+    ct = ConfirmedTightening(
+        ratchet_id="coverage",
+        floor=77.0,
+        file_edits=[FileEdit(path=str(edit_path), new_text="fail_under = 77\n")],
+        dedup_key="coverage:77.0",
+        evidence="PR #11",
+    )
+    url = await author.open(ct)
+    assert url is None
+    assert opener_called is False
+    assert not edit_path.exists()  # working tree untouched by a skipped open
+
+
+async def test_open_proceeds_when_open_pr_exists_false(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("fail_under = 70\n")
+
+    async def fake_opener(**kwargs):
+        class R:
+            pr_url = "https://gh/pr/3"
+
+        return R()
+
+    author = TighteningPrAuthor(
+        repo_root=tmp_path,
+        base="staging",
+        opener=fake_opener,
+        open_pr_exists=lambda _branch: False,
+    )
+    ct = ConfirmedTightening(
+        ratchet_id="coverage",
+        floor=77.0,
+        file_edits=[
+            FileEdit(
+                path=str(tmp_path / "pyproject.toml"), new_text="fail_under = 77\n"
+            )
+        ],
+        dedup_key="coverage:77.0",
+        evidence="PR #11",
+    )
+    url = await author.open(ct)
+    assert url == "https://gh/pr/3"
+    assert (tmp_path / "pyproject.toml").read_text() == "fail_under = 77\n"
