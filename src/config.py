@@ -566,7 +566,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("workspace_gc_loop_enabled", "HYDRAFLOW_WORKSPACE_GC_LOOP_ENABLED", True),
-    ("auto_tighten_loop_enabled", "HYDRAFLOW_AUTO_TIGHTEN_LOOP_ENABLED", False),
+    ("auto_tighten_loop_enabled", "HYDRAFLOW_AUTO_TIGHTEN_LOOP_ENABLED", True),
 ]
 
 # Literal-typed env-var overrides.
@@ -3051,9 +3051,11 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     auto_tighten_loop_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "Kill-switch for AutoTightenLoop (auto-tightening ratchet). Off by default."
+            "Kill-switch for AutoTightenLoop (auto-tightening ratchet). Enabled by "
+            "default (ADR-0104) once actuation was e2e-verified; set the env var to "
+            "false to disable."
         ),
     )
     ci_monitor_loop_enabled: bool = Field(

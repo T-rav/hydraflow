@@ -21,7 +21,7 @@ A single `TighteningEngine` (pure orchestration, no I/O) sits behind a `RatchetA
 
 ### Actuation and the confirmation gate
 
-The dedicated caretaker loop, `AutoTightenLoop` (ADR-0029 shape: `enabled_cb`, config flag, kill-switch, off by default), asks the engine every tick to evaluate each registered ratchet and acts only on confirmed tightenings. Its entire write surface is opening a bot PR to `staging` with auto-merge, via the same `open_automated_pr_async` path other autonomous PR-authoring loops use. No direct file edits outside a PR branch, no issues filed.
+The dedicated caretaker loop, `AutoTightenLoop` (ADR-0029 shape: `enabled_cb`, config flag, kill-switch, enabled by default once actuation was e2e-verified), asks the engine every tick to evaluate each registered ratchet and acts only on confirmed tightenings. Its entire write surface is opening a bot PR to `staging` with auto-merge, via the same `open_automated_pr_async` path other autonomous PR-authoring loops use. No direct file edits outside a PR branch, no issues filed.
 
 A candidate gain is only actuated once **both halves** of a confidence gate hold:
 
@@ -40,13 +40,15 @@ ADR-0101's disturbance dampener and this loop both touch monotonic baselines, bu
 
 No loosening of any baseline by any autonomous path; loosening stays human-gated (a `git revert` of a specific tightening PR). No fixing of code to produce a gain, that is ADR-0101's job. No check generation, no loop-config optimizer, no autonomous invention of new fitness functions; each is a separate future gap.
 
-## Known pre-enable gates
+## Enablement and follow-ups
 
-`auto_tighten_loop_enabled` defaults to `False` and stays off until two gaps close, plus a canary phase:
+`auto_tighten_loop_enabled` now defaults to `True`. It was flipped on only after the real PR-authoring chain was verified end to end (`tests/scenarios/test_auto_tighten_e2e.py`: a sandboxed repo whose recorded coverage exceeds the floor by more than the margin produces a real `--cov-fail-under` bump PR whose committed tree contains the raised value, opened with `gh pr create --base staging` and auto-merge). Set `HYDRAFLOW_AUTO_TIGHTEN_LOOP_ENABLED=false` to disable at runtime.
 
-1. **Cross-tick open-PR dedup probe.** Today a stuck or slow-to-merge tightening PR degrades to a benign hold because the actuation path runs with `raise_on_failure=False`; a dedicated dedup probe across ticks is needed before enabling so a stuck PR cannot silently mask a real regression on the next tick.
-2. **Tier-C sandbox e2e** of the real PR-authoring chain (a sandboxed repo whose recorded coverage exceeds the floor by more than the margin, stable across the window, produces an actual `--cov-fail-under` bump PR that CI validates and merges).
-3. **Phase-1 rollout runs in canary posture first**: bot PR with human merge, to observe real floor-raises before flipping auto-merge on.
+One hardening follow-up remains, deliberately not a blocker for enablement:
+
+- **Cross-tick open-PR dedup probe.** A stuck or slow-to-merge tightening PR is already a benign hold: the actuation path runs with `raise_on_failure=False`, so a duplicate-head `gh pr create` returns without raising and the tick opens nothing new. The residual cost is a redundant worktree and push attempt per tick until the PR merges, which is rare given the daily cadence plus auto-merge. A dedup probe (skip when a tightening PR is already open on the branch) removes that churn. It does not touch the monotone-tighten safety property, which holds regardless.
+
+There is no separate human-merge canary mode: the actuation always sets auto-merge, so a tightening PR merges only if its own CI is green. That CI gate, plus the monotone-tighten invariant, is what makes enablement safe.
 
 ## Consequences
 
