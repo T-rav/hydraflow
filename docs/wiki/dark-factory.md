@@ -296,10 +296,22 @@ scaffold scripts that generate boilerplate with all the conventions
 correct, conformance tests that catch contract drift, pre-commit checks
 that block the most common omissions.
 
-See ADR-0051 (when written) for the formal "iterative production-readiness
-review" process and the planned infrastructure improvements
-(`BaseSubprocessRunner`, `scripts/scaffold-loop.py`, auto-PRPort
-conformance, subagent-verify wrapper, pre-commit arch-regen).
+See ADR-0051 for the formal "iterative production-readiness review"
+process. The infrastructure improvements this section originally planned
+have since SHIPPED — check for the current state before rebuilding any of
+them (two 2026-07 sessions nearly did):
+
+- `BaseSubprocessRunner` (`src/runners/base_subprocess_runner.py`, #8446)
+  — auto-applies `reraise_on_credit_or_bug` + telemetry ordering.
+- `scripts/scaffold_loop.py` + `scripts/scaffold_templates/` (#8448) —
+  atomic five-checkpoint patcher; template kept current with the ratchets
+  (kill-switch gate order, `loop_fitness` override).
+- Conformance ratchets: `tests/test_loop_wiring_completeness.py`,
+  `tests/test_loop_fitness_completeness.py`,
+  `tests/test_loop_kill_switch_completeness.py`, Port↔Fake signature
+  conformance (#8446).
+
+Still open: subagent-verify wrapper, pre-commit arch-regen.
 
 ## Onboarding a foreign managed repo
 

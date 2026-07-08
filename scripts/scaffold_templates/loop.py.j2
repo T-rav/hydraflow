@@ -11,6 +11,7 @@ from typing import Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from loop_fitness import Confidence, FitnessContext, FitnessKind, LoopFitness
 
 logger = logging.getLogger("hydraflow.{{ snake }}")
 
@@ -35,6 +36,25 @@ class {{ pascal }}Loop(BaseBackgroundLoop):
 
     def _get_default_interval(self) -> int:
         return self._config.{{ snake }}_interval
+
+    def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
+        """HOUSEKEEPING fitness (no normalized objective yet).
+
+        Required override — new loops are NOT grandfathered by
+        tests/test_loop_fitness_completeness.py. When this loop gains a
+        measurable objective, switch to FitnessKind.SCORED with real
+        components. Must stay PURE over ``ctx`` — no network, no clock,
+        no mutable ``self`` state (the deferred optimizer replays history
+        through it).
+        """
+        return LoopFitness(
+            worker_name=self._worker_name,
+            kind=FitnessKind.HOUSEKEEPING,
+            components={},
+            sample_count=0,
+            confidence=Confidence.INSUFFICIENT_DATA,
+            timestamp=ctx.window_end,
+        )
 
     async def _do_work(self) -> dict[str, Any] | None:
         # ADR-0049 in-body kill-switch (universal mandate).
