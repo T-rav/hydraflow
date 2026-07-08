@@ -409,6 +409,7 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
     ("visual_warn_threshold", "HYDRAFLOW_VISUAL_WARN_THRESHOLD", 0.05),
     ("visual_fail_threshold", "HYDRAFLOW_VISUAL_FAIL_THRESHOLD", 0.15),
     ("loop_anomaly_tick_error_ratio", "HYDRAFLOW_LOOP_ANOMALY_TICK_ERROR_RATIO", 0.2),
+    ("cost_throttle_ratio", "HYDRAFLOW_COST_THROTTLE_RATIO", 0.8),
 ]
 
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
@@ -1317,6 +1318,18 @@ class HydraFlowConfig(BaseModel):
             "Soft daily cost budget (USD). When the last-24h machinery "
             "cost exceeds this, ReportIssueLoop files a hydraflow-find "
             "issue with label cost-budget-exceeded. None disables the check."
+        ),
+    )
+    cost_throttle_ratio: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Fraction of daily_cost_budget_usd at which CostBudgetWatcherLoop "
+            "starts soft-throttling caretaker loops (interval-stretch) before "
+            "the hard-cap kill. 0 disables throttling; no effect when "
+            "daily_cost_budget_usd is None. "
+            "Env: HYDRAFLOW_COST_THROTTLE_RATIO."
         ),
     )
     issue_cost_alert_usd: float | None = Field(

@@ -6,16 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
-- `69bf32e` — feat(auto-tighten): enable AutoTightenLoop by default (actuation e2e-verified) *(2026-07-07)*
-- `924cd79` — docs(adr): ADR-0104 auto-tightening ratchet *(2026-07-07)*
+- `4768add` — feat(auto-tighten): auto-tightening ratchet loop (coverage floor, ADR-0104) (#9713) (#9713) *(2026-07-07)*
 
 ## 2026-W27
 
-- `9c7d77b` — feat(auto-tighten): wire loop into registry/orchestrator/dashboard + gh closures *(2026-07-05)*
-- `e147f67` — feat(auto-tighten): AutoTightenLoop caretaker loop *(2026-07-05)*
-- `a8e53c6` — refactor(auto-tighten): rename RatchetPort to RatchetAdapter (not a hexagonal Port) *(2026-07-05)*
-- `476469c` — feat(auto-tighten): add RatchetPort protocol *(2026-07-05)*
-- `59c88c0` — feat(auto-tighten): add core models *(2026-07-05)*
+- `a963f8f` — feat(steering): enable human-steering by default (#9710 enable-readiness, all 6 phases + allowlist) (#9711) (#9711) *(2026-07-05)*
 - `83cf489` — feat(steering): continuous human-on-the-loop steering channel (ADR-0103, control surface #4) (#9709) (#9709) *(2026-07-04)*
 - `ef22341` — Convergence hardening: real lap signatures, ledger lifecycle, caretaker guards (#9693) (#9706) (#9706) *(2026-07-04)*
 - `ed627b8` — docs(adr): backfill Enforcement for all 59 grandfathered ADRs (drain grandfather set to ∅) (#9696) (#9696) *(2026-07-02)*
@@ -480,10 +475,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 ## 2026-W16
 
 - `03cb313` — Phase 0: regression tests + CI prep for staging/RC workflow (#7518) (#7518) *(2026-04-18)*
-
-## 2026-W15
-
-- `6e18c3b` — Issue cache: append-only JSONL mirror with typed record API (#6429) (#6429) *(2026-04-08)*
 
 
 <!-- arch:generated -->
