@@ -590,3 +590,46 @@ async def test_download_junit_only_malformed_xml_returns_empty(
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
     result = await loop._download_junit({"databaseId": 3})
     assert result == {}
+
+
+async def test_reconcile_open_round_trips_spaced_test_id(loop_env) -> None:
+    """Parametrized test_ids can contain spaces (pytest emits them verbatim
+    in JUnit names) — the title parser must capture the FULL id or a
+    still-flaky test's escalation false-closes and its 3-attempt budget
+    resets (escalation churn)."""
+    _cfg, _state, pr, _dedup = loop_env
+    spaced_id = "tests.scenarios.test_fixture[hello world]"
+    pr.list_issues_by_label.return_value = [
+        {
+            "number": 99,
+            "title": f"HITL: flaky test {spaced_id} unresolved after 3 attempts",
+            "body": "",
+            "updated_at": "",
+        }
+    ]
+    loop = _make_loop(loop_env)
+
+    # Still flaky — the escalation must survive.
+    closed = await loop._escalations.reconcile_open(active_subjects={spaced_id})
+    assert closed == 0
+    pr.close_issue.assert_not_awaited()
+
+
+async def test_reconcile_open_clears_exact_spaced_subject_on_close(
+    loop_env,
+) -> None:
+    _cfg, state, pr, _dedup = loop_env
+    spaced_id = "tests.scenarios.test_fixture[hello world]"
+    pr.list_issues_by_label.return_value = [
+        {
+            "number": 99,
+            "title": f"HITL: flaky test {spaced_id} unresolved after 3 attempts",
+            "body": "",
+            "updated_at": "",
+        }
+    ]
+    loop = _make_loop(loop_env)
+
+    closed = await loop._escalations.reconcile_open(active_subjects=set())
+    assert closed == 1
+    state.clear_flake_attempts.assert_called_once_with(spaced_id)

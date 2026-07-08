@@ -28,11 +28,15 @@ Safety properties:
   skips the pass entirely. Closing on incomplete data would kill real
   escalations and reset their attempt budgets (escalation churn).
 - Close-then-clear: dedup/attempt state resets only after an actual
-  successful close; a failed close leaves everything for the next tick.
+  successful close, persisted per subject; a failed close leaves that
+  subject's state for the next tick.
 - Unparseable titles (operator-created issues carrying the label) are
   left untouched.
-- Port errors are swallowed (skip, retry next tick) — reconciliation is
-  hygiene, never worth crashing a work cycle.
+- Port errors PROPAGATE — the caller runs inside a loop cycle whose base
+  handler owns error classification (re-raises credit/auth per the
+  reraise_on_credit_or_bug rule, reports the rest as a cycle error and
+  retries next tick). No broad excepts here (disturbance ratchet); the
+  closed-path title parser self-heals any close that half-completed.
 """
 
 from __future__ import annotations
@@ -79,17 +83,9 @@ class EscalationReconciler:
 
     async def reconcile_closed(self) -> None:
         """Drop dedup keys + counters for human-closed escalations."""
-        try:
-            closed = await self._prs.list_closed_issues_by_label(
-                self._stuck_label, limit=100
-            )
-        except Exception:  # noqa: BLE001
-            logger.debug(
-                "reconcile_closed: could not list closed %s issues",
-                self._stuck_label,
-                exc_info=True,
-            )
-            return
+        closed = await self._prs.list_closed_issues_by_label(
+            self._stuck_label, limit=100
+        )
         keys = self._dedup.get()
         keep = set(keys)
         for issue in closed:
@@ -112,17 +108,8 @@ class EscalationReconciler:
         """
         if active_subjects is None:
             return 0
-        try:
-            open_escalations = await self._prs.list_issues_by_label(self._stuck_label)
-        except Exception:  # noqa: BLE001
-            logger.debug(
-                "reconcile_open: could not list open %s issues",
-                self._stuck_label,
-                exc_info=True,
-            )
-            return 0
+        open_escalations = await self._prs.list_issues_by_label(self._stuck_label)
         closed_count = 0
-        keys = self._dedup.get()
         for issue in open_escalations:
             title = issue.get("title", "")
             number = issue.get("number")
@@ -131,31 +118,23 @@ class EscalationReconciler:
                 continue
             if subject in active_subjects:
                 continue
-            try:
-                await self._prs.post_comment(
-                    number,
-                    f"`{subject}` is no longer detected at HEAD — the gap "
-                    f"was fixed by a later change or was a false positive. "
-                    f"Auto-closing; the detector re-escalates fresh if it "
-                    f"recurs.",
-                )
-                await self._prs.close_issue(number)
-            except Exception:  # noqa: BLE001
-                # Close-then-clear: leave key + counter for the next tick.
-                logger.warning(
-                    "reconcile_open: failed to close escalation #%s",
-                    number,
-                    exc_info=True,
-                )
-                continue
+            await self._prs.post_comment(
+                number,
+                f"`{subject}` is no longer detected at HEAD — the gap "
+                f"was fixed by a later change or was a false positive. "
+                f"Auto-closing; the detector re-escalates fresh if it "
+                f"recurs.",
+            )
+            await self._prs.close_issue(number)
+            # Close-then-clear, persisted per subject: a later failure
+            # propagates to the loop's cycle handler without losing the
+            # progress already made this tick.
             closed_count += 1
-            keys = keys - {self._key(subject)}
+            self._dedup.set_all(self._dedup.get() - {self._key(subject)})
             self._clear_attempts(subject)
             logger.info(
                 "Auto-closed stale escalation #%s (%s no longer detected)",
                 number,
                 subject,
             )
-        if closed_count:
-            self._dedup.set_all(keys)
         return closed_count

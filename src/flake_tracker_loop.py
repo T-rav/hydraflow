@@ -47,7 +47,11 @@ _RUN_WINDOW = 20
 _STUCK_LABEL = "flaky-test-stuck"
 
 # Parses ``_file_escalation`` titles back to the ``test_id`` subject.
-_ESCALATION_TITLE_RE = re.compile(r"^HITL: flaky test (\S+) unresolved after ")
+# ``(.+?)`` not ``(\\S+)``: parametrized test_ids can contain spaces
+# (pytest emits them verbatim in JUnit names); a whitespace-bounded
+# capture fails to match those titles AT ALL, leaving the escalation
+# permanently unreconcilable (neither open- nor closed-path clears it).
+_ESCALATION_TITLE_RE = re.compile(r"^HITL: flaky test (.+?) unresolved after ")
 
 
 def _escalation_subject(title: str) -> str | None:

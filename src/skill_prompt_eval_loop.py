@@ -48,7 +48,10 @@ _WEAK_SAMPLE_RATE = 0.10
 _STUCK_LABEL = "skill-prompt-stuck"
 
 # Parses ``_file_escalation`` titles back to the ``case_id`` subject.
-_ESCALATION_TITLE_RE = re.compile(r"^HITL: skill prompt drift (\S+) unresolved after ")
+# ``(.+?)`` — see flake_tracker: whitespace-bounded captures make any
+# spaced subject permanently unreconcilable. Case IDs are machine-named
+# today; the anchored non-greedy capture costs nothing.
+_ESCALATION_TITLE_RE = re.compile(r"^HITL: skill prompt drift (.+?) unresolved after ")
 
 
 def _escalation_subject(title: str) -> str | None:

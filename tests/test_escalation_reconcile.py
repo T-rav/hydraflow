@@ -155,20 +155,26 @@ class TestReconcileOpen:
         prs.close_issue.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_failed_close_retains_state(self, env) -> None:
+    async def test_failed_close_propagates_but_retains_state(self, env) -> None:
+        """Port errors propagate to the loop's cycle handler (which owns
+        credit/auth classification per the reraise rule); dedup key and
+        attempt budget stay intact so the next tick retries — and the
+        closed-path parser self-heals any half-closed issue."""
         rec, prs, dedup, cleared = env
         dedup.set_all({"fake_coverage_auditor:FakeGitHub:adapter-surface"})
         prs.list_issues_by_label.return_value = [_issue(9618, _STUCK_TITLE)]
         prs.close_issue.side_effect = RuntimeError("gh down mid-close")
-        closed = await rec.reconcile_open(active_subjects=set())
-        assert closed == 0
+        with pytest.raises(RuntimeError):
+            await rec.reconcile_open(active_subjects=set())
         assert dedup.get() == {"fake_coverage_auditor:FakeGitHub:adapter-surface"}
         assert cleared == []  # retry next tick with budget intact
 
     @pytest.mark.asyncio
-    async def test_port_error_is_swallowed(self, env) -> None:
-        """A gh outage must not crash the loop cycle — skip, retry next tick."""
+    async def test_list_error_propagates_without_state_change(self, env) -> None:
         rec, prs, dedup, cleared = env
+        dedup.set_all({"fake_coverage_auditor:FakeGitHub:adapter-surface"})
         prs.list_issues_by_label.side_effect = RuntimeError("gh down")
-        closed = await rec.reconcile_open(active_subjects=set())
-        assert closed == 0
+        with pytest.raises(RuntimeError):
+            await rec.reconcile_open(active_subjects=set())
+        assert dedup.get() == {"fake_coverage_auditor:FakeGitHub:adapter-surface"}
+        assert cleared == []
