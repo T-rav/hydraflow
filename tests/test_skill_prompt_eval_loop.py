@@ -32,6 +32,8 @@ def loop_env(tmp_path: Path):
     state.inc_skill_prompt_attempts.return_value = 1
     pr = AsyncMock()
     pr.create_issue = AsyncMock(return_value=42)
+    pr.list_issues_by_label = AsyncMock(return_value=[])
+    pr.list_closed_issues_by_label = AsyncMock(return_value=[])
     dedup = MagicMock()
     dedup.get.return_value = set()
     return cfg, state, pr, dedup
@@ -166,7 +168,7 @@ async def test_escalation_fires_after_three_attempts(loop_env, monkeypatch) -> N
     assert "skill-prompt-stuck" in labels
 
 
-async def test_reconcile_closed_escalations(loop_env, monkeypatch) -> None:
+async def test_reconcile_closed_escalations(loop_env) -> None:
     cfg, state, pr, dedup = loop_env
     dedup.get.return_value = {"skill_prompt_eval:case_alpha"}
     stop = asyncio.Event()
@@ -174,25 +176,137 @@ async def test_reconcile_closed_escalations(loop_env, monkeypatch) -> None:
         config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
     )
 
-    class FakeProc:
-        returncode = 0
-
-        async def communicate(self):
-            return (
-                b'[{"title": "HITL: skill prompt drift case_alpha unresolved after 3"}]',
-                b"",
-            )
-
-    async def fake_subproc(*a, **kw):
-        return FakeProc()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    pr.list_closed_issues_by_label.return_value = [
+        {
+            "number": 9618,
+            "title": "HITL: skill prompt drift case_alpha unresolved after 3",
+            "body": "",
+            "updated_at": "",
+        }
+    ]
 
     await loop._reconcile_closed_escalations()
     dedup.set_all.assert_called_once()
     remaining = dedup.set_all.call_args.args[0]
     assert "skill_prompt_eval:case_alpha" not in remaining
     state.clear_skill_prompt_attempts.assert_called_once_with("case_alpha")
+
+
+_STALE_ESCALATION = {
+    "number": 9618,
+    "title": "HITL: skill prompt drift case_shrink_001 unresolved after 3",
+    "body": "",
+    "updated_at": "",
+}
+
+
+async def test_do_work_autocloses_stale_escalation(loop_env, monkeypatch) -> None:
+    """A case passing again at HEAD auto-closes its open `skill-prompt-stuck`
+    escalation on the next completed corpus run (#9618 class). The dedup key
+    is already gone here — discovery comes from the escalation title."""
+    cfg, state, pr, dedup = loop_env
+    pr.list_issues_by_label.return_value = [_STALE_ESCALATION]
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_run_corpus() -> list[dict]:
+        return [
+            {
+                "case_id": "case_shrink_001",
+                "skill": "diff_sanity",
+                "status": "PASS",
+                "provenance": "hand-crafted",
+                "expected_catcher": "diff_sanity",
+            }
+        ]
+
+    async def fake_reconcile():
+        return None
+
+    monkeypatch.setattr(loop, "_run_corpus", fake_run_corpus)
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+
+    stats = await loop._do_work()
+
+    pr.close_issue.assert_awaited_once_with(9618)
+    state.clear_skill_prompt_attempts.assert_called_once_with("case_shrink_001")
+    assert stats["autoclosed"] == 1
+
+
+async def test_do_work_keeps_escalation_for_still_failing_case(
+    loop_env, monkeypatch
+) -> None:
+    """An escalation whose case still FAILs this run must survive."""
+    cfg, state, pr, dedup = loop_env
+    dedup.get.return_value = {"skill_prompt_eval:case_shrink_001"}
+    pr.list_issues_by_label.return_value = [_STALE_ESCALATION]
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_run_corpus() -> list[dict]:
+        return [
+            {
+                "case_id": "case_shrink_001",
+                "skill": "diff_sanity",
+                "status": "FAIL",
+                "provenance": "hand-crafted",
+                "expected_catcher": "diff_sanity",
+            }
+        ]
+
+    async def fake_reconcile():
+        return None
+
+    monkeypatch.setattr(loop, "_run_corpus", fake_run_corpus)
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+
+    stats = await loop._do_work()
+
+    pr.close_issue.assert_not_awaited()
+    state.clear_skill_prompt_attempts.assert_not_called()
+    assert stats["autoclosed"] == 0
+
+
+async def test_do_work_capped_tick_skips_open_reconcile(loop_env, monkeypatch) -> None:
+    """A capped tick only *sampled* the corpus — an escalated case absent
+    from the sample must not read as recovered, so the open-escalation
+    re-verify is skipped entirely (active_subjects=None)."""
+    cfg, state, pr, dedup = loop_env
+    cfg.skill_prompt_eval_max_corpus_cases = 10
+    # The escalated case is not in the corpus at all this tick.
+    pr.list_issues_by_label.return_value = [_STALE_ESCALATION]
+    cases = [
+        {
+            "case_id": f"c{i}",
+            "skill": "x",
+            "status": "PASS",
+            "provenance": "hand-crafted",
+        }
+        for i in range(100)
+    ]
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_run_corpus() -> list[dict]:
+        return cases
+
+    async def fake_reconcile():
+        return None
+
+    monkeypatch.setattr(loop, "_run_corpus", fake_run_corpus)
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+
+    stats = await loop._do_work()
+
+    pr.close_issue.assert_not_awaited()
+    pr.list_issues_by_label.assert_not_awaited()
+    assert stats["autoclosed"] == 0
 
 
 @pytest.mark.asyncio
