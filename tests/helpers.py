@@ -401,6 +401,8 @@ class ConfigFactory:
         # `disturbance_dampener_enabled=True` explicitly.
         disturbance_dampener_enabled: bool = False,
         disturbance_dampener_max_prs_per_tick: int = 1,
+        detector_calibration_interval: int = 3600,
+        detector_calibration_enabled: bool = True,
         auto_agent_preflight_interval: int = 120,
         auto_agent_daily_budget_usd: float | None = None,
         auto_agent_cost_cap_usd: float | None = None,
@@ -648,6 +650,8 @@ class ConfigFactory:
                 disturbance_dampener_interval_seconds=disturbance_dampener_interval_seconds,
                 disturbance_dampener_enabled=disturbance_dampener_enabled,
                 disturbance_dampener_max_prs_per_tick=disturbance_dampener_max_prs_per_tick,
+                detector_calibration_interval=detector_calibration_interval,
+                detector_calibration_enabled=detector_calibration_enabled,
                 auto_agent_preflight_interval=auto_agent_preflight_interval,
                 auto_agent_daily_budget_usd=auto_agent_daily_budget_usd,
                 auto_agent_cost_cap_usd=auto_agent_cost_cap_usd,

@@ -133,6 +133,11 @@ HYDRAFLOW_LITERAL_LABELS: tuple[tuple[str, str, str], ...] = (
     ("issue-cost-spike", "e4e669", "Per-issue cost spike detected"),
     ("arch-knowledge", "e4e669", "Architecture-knowledge coverage gap"),
     ("sanity-loop-stalled", "e4e669", "Sanity loop stalled (dead-man switch)"),
+    (
+        "detector-calibration",
+        "e4e669",
+        "Detector repeatedly escalating one subject (miscalibrated)",
+    ),
     ("loop-stalled", "e4e669", "Background loop stalled (dead-man switch)"),
     ("wiki-stale", "e4e669", "Wiki freshness dead-man switch fired"),
     ("onboarding-blocked", "e4e669", "Onboarding/auto-agent preflight blocked"),

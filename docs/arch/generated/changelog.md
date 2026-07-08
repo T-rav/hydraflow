@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
+- `d5ea9f6` — feat(loops): DetectorCalibrationLoop — the factory watches its own sensors (Fix F) *(2026-07-08)*
+- `57345f7` — feat(scaffold): bring scaffold_loop up to the current ratchets (13 wiring sites) *(2026-07-08)*
 - `4768add` — feat(auto-tighten): auto-tightening ratchet loop (coverage floor, ADR-0104) (#9713) (#9713) *(2026-07-07)*
 
 ## 2026-W27

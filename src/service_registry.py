@@ -42,6 +42,7 @@ from corpus_learning_loop import CorpusLearningLoop
 from cost_budget_watcher_loop import CostBudgetWatcherLoop  # noqa: TCH001
 from crate_manager import CrateManager
 from dependabot_merge_loop import DependabotMergeLoop
+from detector_calibration_loop import DetectorCalibrationLoop
 from diagnostic_loop import DiagnosticLoop  # noqa: TCH001
 from diagnostic_runner import DiagnosticRunner
 from diagram_loop import DiagramLoop  # noqa: TCH001
@@ -334,6 +335,7 @@ class ServiceRegistry:
     contract_refresh_loop: ContractRefreshLoop
     corpus_learning_loop: CorpusLearningLoop
     auto_agent_preflight_loop: AutoAgentPreflightLoop
+    detector_calibration_loop: DetectorCalibrationLoop
     sandbox_failure_fixer_loop: SandboxFailureFixerLoop
     disturbance_dampener_loop: DisturbanceDampenerLoop
     human_steering_loop: HumanSteeringLoop
@@ -1647,6 +1649,13 @@ def build_services(
         state=state,
     )
 
+    detector_calibration_loop = DetectorCalibrationLoop(
+        config=config,
+        state=state,
+        pr_manager=prs,
+        deps=loop_deps,
+    )
+
     auto_agent_audit_store = PreflightAuditStore(config.data_root)
     auto_agent_preflight_loop = AutoAgentPreflightLoop(  # noqa: F841
         config=config,
@@ -1862,6 +1871,7 @@ def build_services(
         contract_refresh_loop=contract_refresh_loop,
         corpus_learning_loop=corpus_learning_loop,
         auto_agent_preflight_loop=auto_agent_preflight_loop,
+        detector_calibration_loop=detector_calibration_loop,
         sandbox_failure_fixer_loop=sandbox_failure_fixer_loop,
         disturbance_dampener_loop=disturbance_dampener_loop,
         human_steering_loop=human_steering_loop,

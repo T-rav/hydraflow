@@ -1049,6 +1049,17 @@ def _build_human_steering(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
+def _build_detector_calibration(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build DetectorCalibrationLoop for scenarios."""
+    from detector_calibration_loop import DetectorCalibrationLoop  # noqa: PLC0415
+
+    state = ports.get("detector_calibration_state") or MagicMock()
+    ports.setdefault("detector_calibration_state", state)
+    return DetectorCalibrationLoop(
+        config=config, state=state, pr_manager=ports["github"], deps=deps
+    )
+
+
 def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build AutoAgentPreflightLoop for scenarios (spec §1–§11).
 
@@ -1717,6 +1728,7 @@ _BUILDERS: dict[str, Any] = {
     "cost_budget_watcher": _build_cost_budget_watcher_loop,
     # auto-agent (spec §1–§11; ADR-0050)
     "auto_agent_preflight": _build_auto_agent_preflight,
+    "detector_calibration": _build_detector_calibration,
     "sandbox_failure_fixer": _build_sandbox_failure_fixer,
     # disturbance dampener burn-down actuator (ADR-0095, Pattern A)
     "disturbance_dampener": _build_disturbance_dampener,

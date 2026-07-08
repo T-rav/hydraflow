@@ -22,6 +22,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `CorpusLearningLoop` | ✅ [0045] | ✅ [corpus-learning-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_corpus_learning_loop.py` | ✅ in catalog | ✅ `s22_corpus_learning_no_escape_issues.py` |
 | `CostBudgetWatcherLoop` | ✅ [0054] | ✅ [architecture.md, dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_cost_budget_watcher_loop.py` | ✅ in catalog | ✅ `s26_cost_budget_watcher_unlimited.py` |
 | `DependabotMergeLoop` | ✅ [0054, 0057, 0058] | ✅ [dependabot-merge-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_dependabot_merge_loop.py` | ✅ in catalog | ✅ `s09_dependabot_auto_merge.py` |
+| `DetectorCalibrationLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_detector_calibration_loop.py` | ✅ in catalog | ❌ |
 | `DiagnosticLoop` | ✅ [0050] | ✅ [diagnostic-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_diagnostic_loop.py` | ✅ in catalog | ✅ `s05_hitl_after_review_exhaustion.py` |
 | `DiagramLoop` | ✅ [0001, 0093] | ✅ [diagram-loop.md, patterns.md] | ✅ loops.md | ✅ README.md | ✅ `test_diagram_loop.py` | ✅ in catalog | ✅ `s34_diagram_loop_no_changes.py` |
 | `DisturbanceDampenerLoop` | ✅ [0101] | ✅ [dimension-baseline.md, disturbance-dampener-loop.md] | ❌ | ❌ | ✅ `test_disturbance_dampener_loop.py` | ✅ in catalog | ✅ `s50_disturbance_dampener_idle_poll.py` |
