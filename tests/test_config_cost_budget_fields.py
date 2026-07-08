@@ -46,3 +46,14 @@ def test_negative_value_rejected() -> None:
 
     with pytest.raises(ValidationError):
         HydraFlowConfig(daily_cost_budget_usd=-1.0)
+
+
+def test_cost_throttle_ratio_defaults_to_0_8() -> None:
+    cfg = HydraFlowConfig()
+    assert cfg.cost_throttle_ratio == pytest.approx(0.8)
+
+
+def test_cost_throttle_ratio_env_override(monkeypatch) -> None:
+    monkeypatch.setenv("HYDRAFLOW_COST_THROTTLE_RATIO", "0.5")
+    cfg = HydraFlowConfig()
+    assert cfg.cost_throttle_ratio == pytest.approx(0.5)

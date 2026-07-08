@@ -1,0 +1,180 @@
+"""Shared escalation reconciler: closed-escalation state clearing + open-
+escalation re-verification against the current tick's detections.
+
+Closing a stuck escalation is today the ONLY reset mechanism, and it is
+human-gated — #9618 sat six days as a dead letter while later PRs may have
+fixed the gap. `reconcile_open` parses subjects from OPEN escalation titles
+(not from dedup keys — recovery paths like fake_coverage's
+_clear_rollup_state erase the key on the very tick the gap disappears) and
+closes any whose subject is absent from the currently-detected set.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from unittest.mock import AsyncMock
+
+import pytest
+
+from dedup_store import DedupStore
+from escalation_reconcile import EscalationReconciler
+
+_TITLE_RE = re.compile(r"fake coverage gap (\S+) unresolved")
+
+
+def _subject_from_title(title: str) -> str | None:
+    m = _TITLE_RE.search(title)
+    return m.group(1) if m else None
+
+
+@pytest.fixture
+def env(tmp_path: Path):
+    prs = AsyncMock()
+    prs.list_issues_by_label = AsyncMock(return_value=[])
+    prs.list_closed_issues_by_label = AsyncMock(return_value=[])
+    dedup = DedupStore("esc_test", tmp_path / "dedup" / "esc_test.json")
+    cleared: list[str] = []
+    rec = EscalationReconciler(
+        prs=prs,
+        dedup=dedup,
+        key_prefix="fake_coverage_auditor",
+        stuck_label="hydraflow-fake-coverage-stuck",
+        clear_attempts=cleared.append,
+        subject_from_title=_subject_from_title,
+    )
+    return rec, prs, dedup, cleared
+
+
+def _issue(number: int, title: str) -> dict:
+    return {"number": number, "title": title, "body": "", "updated_at": ""}
+
+
+_STUCK_TITLE = "HITL: fake coverage gap FakeGitHub:adapter-surface unresolved after 3"
+
+
+class TestReconcileClosed:
+    @pytest.mark.asyncio
+    async def test_clears_key_and_attempts_on_matching_closed_title(self, env) -> None:
+        rec, prs, dedup, cleared = env
+        dedup.set_all({"fake_coverage_auditor:FakeGitHub:adapter-surface"})
+        prs.list_closed_issues_by_label.return_value = [_issue(9618, _STUCK_TITLE)]
+        await rec.reconcile_closed()
+        assert dedup.get() == set()
+        assert cleared == ["FakeGitHub:adapter-surface"]
+
+    @pytest.mark.asyncio
+    async def test_keeps_keys_without_matching_closed_title(self, env) -> None:
+        rec, prs, dedup, cleared = env
+        dedup.set_all({"fake_coverage_auditor:FakeGitHub:adapter-surface"})
+        prs.list_closed_issues_by_label.return_value = [
+            _issue(
+                1, "HITL: fake coverage gap FakeDocker:test-helper unresolved after 3"
+            )
+        ]
+        await rec.reconcile_closed()
+        assert dedup.get() == {"fake_coverage_auditor:FakeGitHub:adapter-surface"}
+        assert cleared == []
+
+    @pytest.mark.asyncio
+    async def test_foreign_prefix_key_untouched(self, env) -> None:
+        rec, prs, dedup, cleared = env
+        dedup.set_all({"other_loop:FakeGitHub:adapter-surface"})
+        prs.list_closed_issues_by_label.return_value = [_issue(1, _STUCK_TITLE)]
+        await rec.reconcile_closed()
+        assert dedup.get() == {"other_loop:FakeGitHub:adapter-surface"}
+        assert cleared == []
+
+    @pytest.mark.asyncio
+    async def test_unparseable_titles_skipped(self, env) -> None:
+        rec, prs, dedup, cleared = env
+        dedup.set_all({"fake_coverage_auditor:FakeGitHub:adapter-surface"})
+        prs.list_closed_issues_by_label.return_value = [
+            _issue(1, "some manually-created issue carrying the label")
+        ]
+        await rec.reconcile_closed()
+        assert dedup.get() == {"fake_coverage_auditor:FakeGitHub:adapter-surface"}
+        assert cleared == []
+
+
+class TestReconcileOpen:
+    @pytest.mark.asyncio
+    async def test_closes_escalation_when_subject_no_longer_detected(self, env) -> None:
+        rec, prs, dedup, cleared = env
+        dedup.set_all({"fake_coverage_auditor:FakeGitHub:adapter-surface"})
+        prs.list_issues_by_label.return_value = [_issue(9618, _STUCK_TITLE)]
+        closed = await rec.reconcile_open(active_subjects=set())
+        assert closed == 1
+        prs.post_comment.assert_awaited_once()
+        assert "no longer detected" in prs.post_comment.await_args.args[1]
+        prs.close_issue.assert_awaited_once_with(9618)
+        assert dedup.get() == set()
+        assert cleared == ["FakeGitHub:adapter-surface"]
+
+    @pytest.mark.asyncio
+    async def test_closes_even_when_dedup_key_already_cleared(self, env) -> None:
+        """Recovery paths (e.g. _clear_rollup_state) erase the dedup key on
+        the same tick the gap disappears — discovery must come from the open
+        escalation's TITLE, or the escalation orphans forever."""
+        rec, prs, dedup, cleared = env
+        prs.list_issues_by_label.return_value = [_issue(9618, _STUCK_TITLE)]
+        closed = await rec.reconcile_open(active_subjects=set())
+        assert closed == 1
+        prs.close_issue.assert_awaited_once_with(9618)
+        assert cleared == ["FakeGitHub:adapter-surface"]
+
+    @pytest.mark.asyncio
+    async def test_keeps_escalation_while_subject_still_detected(self, env) -> None:
+        rec, prs, dedup, cleared = env
+        dedup.set_all({"fake_coverage_auditor:FakeGitHub:adapter-surface"})
+        prs.list_issues_by_label.return_value = [_issue(9618, _STUCK_TITLE)]
+        closed = await rec.reconcile_open(
+            active_subjects={"FakeGitHub:adapter-surface"}
+        )
+        assert closed == 0
+        prs.close_issue.assert_not_awaited()
+        assert dedup.get() == {"fake_coverage_auditor:FakeGitHub:adapter-surface"}
+
+    @pytest.mark.asyncio
+    async def test_none_active_subjects_skips_entirely(self, env) -> None:
+        """Detection failed/partial this tick — closing on incomplete data
+        would kill real escalations and reset their attempt budgets."""
+        rec, prs, dedup, cleared = env
+        closed = await rec.reconcile_open(active_subjects=None)
+        assert closed == 0
+        prs.list_issues_by_label.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_unparseable_open_title_left_alone(self, env) -> None:
+        rec, prs, dedup, cleared = env
+        prs.list_issues_by_label.return_value = [
+            _issue(7, "manually created issue with the stuck label")
+        ]
+        closed = await rec.reconcile_open(active_subjects=set())
+        assert closed == 0
+        prs.close_issue.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_failed_close_propagates_but_retains_state(self, env) -> None:
+        """Port errors propagate to the loop's cycle handler (which owns
+        credit/auth classification per the reraise rule); dedup key and
+        attempt budget stay intact so the next tick retries — and the
+        closed-path parser self-heals any half-closed issue."""
+        rec, prs, dedup, cleared = env
+        dedup.set_all({"fake_coverage_auditor:FakeGitHub:adapter-surface"})
+        prs.list_issues_by_label.return_value = [_issue(9618, _STUCK_TITLE)]
+        prs.close_issue.side_effect = RuntimeError("gh down mid-close")
+        with pytest.raises(RuntimeError):
+            await rec.reconcile_open(active_subjects=set())
+        assert dedup.get() == {"fake_coverage_auditor:FakeGitHub:adapter-surface"}
+        assert cleared == []  # retry next tick with budget intact
+
+    @pytest.mark.asyncio
+    async def test_list_error_propagates_without_state_change(self, env) -> None:
+        rec, prs, dedup, cleared = env
+        dedup.set_all({"fake_coverage_auditor:FakeGitHub:adapter-surface"})
+        prs.list_issues_by_label.side_effect = RuntimeError("gh down")
+        with pytest.raises(RuntimeError):
+            await rec.reconcile_open(active_subjects=set())
+        assert dedup.get() == {"fake_coverage_auditor:FakeGitHub:adapter-surface"}
+        assert cleared == []

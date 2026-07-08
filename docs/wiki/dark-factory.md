@@ -255,6 +255,19 @@ has merge conflicts" if main moved during CI. The `--auto` flag is the
 ideal recipe but only works if the repo enables it; otherwise, monitor
 CI completion and manually merge.
 
+### 4.7 Cost-watcher operator-override windows
+
+CostBudgetWatcherLoop takes authorship of two reversible actions — the
+hard-cap **kill** (`set_enabled False`) and the soft-band **throttle**
+(interval stretch, `cost_throttled_workers` priors). In both cases an
+operator change made *inside the window* is silently superseded on
+recovery: a worker manually disabled after we killed it gets re-enabled;
+an interval changed mid-throttle is overwritten by the pre-throttle
+value (None → cleared to the loop default). Detecting either would need
+an event log keyed on (name, source, timestamp) for every control-plane
+write. Accepted trade-off: the windows are short (band crossings move at
+rolling-24h speed) and recovery restores the pre-window operator intent.
+
 ## §5 — Verifying the contract is honored
 
 Auto-discovery tests that fail when a load-bearing convention is broken:

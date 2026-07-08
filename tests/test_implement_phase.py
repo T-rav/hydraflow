@@ -508,6 +508,49 @@ class TestWorktreeCreationFailure:
         assert captured_prior_failure == ["Previous attempt failed"]
 
     @pytest.mark.asyncio
+    async def test_cycling_retry_threads_attempt_number(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Diverse-retry: the agent needs the attempt count to frame its
+        strategy-delta directive ('attempt N of M')."""
+        from state import StateTracker
+
+        issue = TaskFactory.create(id=99)
+        state = StateTracker(config.state_file)
+        state.set_worker_result_meta(99, {"error": "Previous attempt failed"})
+        state.increment_issue_attempts(99)
+
+        captured_attempts: list[int] = []
+
+        async def capturing_agent(
+            issue: Task,
+            wt_path: Path,
+            branch: str,
+            worker_id: int = 0,
+            review_feedback: str = "",
+            prior_failure: str = "",
+            attempt_number: int = 0,
+        ) -> WorkerResult:
+            captured_attempts.append(attempt_number)
+            return WorkerResultFactory.create(
+                issue_number=issue.id,
+                success=True,
+                workspace_path=str(wt_path),
+            )
+
+        phase, _mock_wt, _ = make_implement_phase(
+            config, [issue], agent_run=capturing_agent
+        )
+        wt_path = config.workspace_path_for_issue(99)
+        wt_path.mkdir(parents=True, exist_ok=True)
+        phase._state = state
+
+        await phase.run_batch()
+
+        # Setup incremented once; run_batch increments again → attempt 2.
+        assert captured_attempts == [2]
+
+    @pytest.mark.asyncio
     async def test_review_feedback_resets_worktree_to_main(
         self, config: HydraFlowConfig
     ) -> None:

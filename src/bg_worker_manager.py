@@ -142,6 +142,18 @@ class BGWorkerManager:
         self._bg_worker_intervals[name] = seconds
         self._state.set_worker_intervals(dict(self._bg_worker_intervals))
 
+    def clear_interval(self, name: str) -> None:
+        """Remove a dynamic interval override and persist (no-op if absent).
+
+        The loop falls back to its own ``_get_default_interval()`` — used by
+        the cost-throttle recovery path to undo a stretch the operator never
+        asked for.
+        """
+        if name not in self._bg_worker_intervals:
+            return
+        del self._bg_worker_intervals[name]
+        self._state.set_worker_intervals(dict(self._bg_worker_intervals))
+
     def get_interval(self, name: str) -> int:
         """Return the effective interval for a background worker.
 

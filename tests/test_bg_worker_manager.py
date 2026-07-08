@@ -264,3 +264,17 @@ class TestRestoreMethods:
         manager.update_status("x", "ok")
         manager.update_status("y", "idle")
         assert manager._known_worker_state_names() == {"x", "y"}
+
+
+class TestClearInterval:
+    def test_removes_override_and_persists(self, manager: BGWorkerManager) -> None:
+        manager.set_interval("memory_sync", 99)
+        manager.clear_interval("memory_sync")
+        assert manager.get_interval("memory_sync") == (
+            manager._config.memory_sync_interval
+        )
+        assert "memory_sync" not in manager._state.get_worker_intervals()
+
+    def test_missing_override_is_noop(self, manager: BGWorkerManager) -> None:
+        manager.clear_interval("never_set")
+        assert "never_set" not in manager._state.get_worker_intervals()

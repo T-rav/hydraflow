@@ -2007,6 +2007,16 @@ class StateData(BaseModel):
             "Preserved across restart."
         ),
     )
+    cost_throttled_workers: dict[str, int | None] = Field(
+        default_factory=dict,
+        description=(
+            "Workers interval-stretched by CostBudgetWatcherLoop in the "
+            "soft-throttle band (spend >= cap * cost_throttle_ratio). Maps "
+            "worker name to its PRE-throttle interval override (None = the "
+            "operator had none), so recovery restores exactly. Preserved "
+            "across restart."
+        ),
+    )
     interrupted_issues: dict[str, str] = Field(default_factory=dict)
     last_reviewed_shas: dict[str, str] = Field(default_factory=dict)
     pending_reports: list[PendingReport] = Field(default_factory=list)

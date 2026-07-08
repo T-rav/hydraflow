@@ -44,6 +44,10 @@ logger = logging.getLogger(__name__)
 
 _KILL_SWITCH_ENV = "HYDRAFLOW_DISABLE_COST_BUDGET_WATCHER"
 _ISSUE_TITLE = "[cost-budget] daily cap exceeded"
+# Soft-throttle interval stretch applied in the band
+# [cap * cost_throttle_ratio, cap]. Fixed module constant (not a knob):
+# the point is a coarse degrade-before-kill, not a tunable SLA.
+_THROTTLE_MULTIPLIER = 4
 # Curated list of loops the watcher gates. The watcher itself is NOT in
 # this set — it must keep running to detect recovery. Pipeline loops
 # (triage/plan/implement/review) are also out — their gating is via
@@ -150,6 +154,9 @@ class CostBudgetWatcherLoop(BaseBackgroundLoop):
         await self._close_issue_if_open(cap=cap, total=total)
 
         if previously_killed:
+            # Revived loops come back into the CURRENT band: if spend is
+            # still in the throttle band, the next tick stretches them —
+            # revive-throttled, not revive-full-cadence.
             await self._reenable_caretakers(previously_killed)
             return {
                 "action": "recovered",
@@ -158,7 +165,82 @@ class CostBudgetWatcherLoop(BaseBackgroundLoop):
                 "reenabled_count": len(previously_killed),
             }
 
+        # Soft-throttle band: a cost-killed loop is a blind spot, so degrade
+        # BEFORE the hard cap — stretch caretaker intervals to shed spend
+        # while keeping every detector alive.
+        ratio = self._config.cost_throttle_ratio
+        throttled_priors = dict(self._state.get_cost_throttled_workers() or {})
+        if ratio and total >= cap * ratio:
+            newly = self._throttle_caretakers(throttled_priors)
+            return {
+                "action": "throttled",
+                "cap": cap,
+                "total": total,
+                "threshold": cap * ratio,
+                "throttled_count": len(throttled_priors),
+                "newly_throttled": newly,
+            }
+
+        if throttled_priors:
+            self._restore_throttled_intervals(throttled_priors)
+            return {
+                "action": "unthrottled",
+                "cap": cap,
+                "total": total,
+                "restored_count": len(throttled_priors),
+            }
+
         return {"action": "ok", "cap": cap, "total": total}
+
+    def _throttle_caretakers(self, priors: dict[str, int | None]) -> int:
+        """Stretch every un-throttled target's interval; save the prior override.
+
+        Idempotent across ticks: workers already in *priors* are skipped, so
+        the multiplier never compounds. The saved value is the operator's
+        pre-throttle override (None = there was none) for exact restore.
+        """
+        newly = 0
+        for name in _TARGET_WORKERS:
+            if name in priors:
+                continue
+            prior_override = self._bg_workers.worker_intervals.get(name)
+            base = self._bg_workers.get_interval(name)
+            self._bg_workers.set_interval(name, base * _THROTTLE_MULTIPLIER)
+            priors[name] = prior_override
+            newly += 1
+        if newly:
+            self._state.set_cost_throttled_workers(priors)
+            logger.warning(
+                "CostBudgetWatcher: soft-throttled %d caretaker loop(s) "
+                "(interval x%d) — spend entered the throttle band",
+                newly,
+                _THROTTLE_MULTIPLIER,
+            )
+        return newly
+
+    def _restore_throttled_intervals(self, priors: dict[str, int | None]) -> None:
+        """Undo the throttle: restore PRE-THROTTLE overrides, clear ours.
+
+        **Known gotcha:** if the operator changed a worker's interval via
+        the UI *during* the throttle window, that change is silently lost
+        here — we restore the value in effect before the throttle was
+        applied (None = no override, so ``clear_interval`` falls back to
+        the loop default). Detecting a mid-throttle operator change would
+        need an event log keyed on (name, source, timestamp). Mirrors the
+        ``_reenable_caretakers`` kill-window gotcha; both documented in
+        dark-factory.md as the cost-watcher operator-override gotcha.
+        """
+        for name, prior in priors.items():
+            if prior is None:
+                self._bg_workers.clear_interval(name)
+            else:
+                self._bg_workers.set_interval(name, prior)
+        self._state.set_cost_throttled_workers({})
+        logger.info(
+            "CostBudgetWatcher: spend left the throttle band — restored "
+            "%d caretaker interval(s)",
+            len(priors),
+        )
 
     async def _kill_caretakers(self, previously_killed: set[str]) -> set[str]:
         """Disable every _TARGET_WORKERS member; persist the set we touched."""

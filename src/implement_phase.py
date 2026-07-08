@@ -676,6 +676,9 @@ class ImplementPhase:
             "review_feedback": review_feedback,
             "prior_failure": prior_failure,
             "human_guidance": human_guidance,
+            # Diverse-retry: the agent frames its strategy-delta directive
+            # as "attempt N of M" (rendered only when prior_failure is set).
+            "attempt_number": self._state.get_issue_attempts(issue.id),
         }
         if bead_mapping:
             run_kwargs["bead_mapping"] = bead_mapping
