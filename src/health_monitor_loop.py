@@ -69,6 +69,27 @@ _SANITY_STALL_MULTIPLIER = 3
 # loop did no real work.
 _SANITY_NOOP_STREAK_THRESHOLD = 3
 
+# Dedup marker recording that the restart-first path already cancelled and
+# recreated the sanity loop for the current stall event — the next stall
+# tick escalates to an issue instead of restart-thrashing. Cleared with the
+# stall dedup key on recovery.
+_SANITY_RESTART_KEY = "health_monitor:trust_fleet_sanity:restart-attempted"
+
+# Generic stall sweep across registry loops: a heartbeat older than
+# multiplier × interval + cycle_timeout means the loop task is wedged
+# outside its watchdog window. The cycle_timeout term keeps a legitimately
+# long LLM cycle (heartbeat only refreshes between cycles) from being
+# false-restarted.
+_WORKER_STALL_MULTIPLIER = 3
+
+# Loops excluded from the generic sweep. trust_fleet_sanity has its own
+# §12.1 dead-man-switch above (with G5 no-op detection the generic sweep
+# lacks); double coverage would double-restart and double-file.
+# health_monitor runs the sweep itself — self-cancelling mid-cycle (stale
+# persisted heartbeat after long orchestrator downtime) is harm without
+# benefit, and a truly wedged health_monitor can't sweep itself anyway.
+_WORKER_STALL_EXCLUDED = frozenset({"trust_fleet_sanity", "health_monitor"})
+
 # ---------------------------------------------------------------------------
 # Trend metrics
 # ---------------------------------------------------------------------------
@@ -356,6 +377,12 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             "health_monitor_wiki_stall",
             config.data_root / "dedup" / "health_monitor_wiki_stall.json",
         )
+        # Generic loop-stall sweep markers (restart-attempted / issue-filed
+        # per worker per stall event); cleared on that worker's recovery.
+        self._worker_stall_dedup = DedupStore(
+            "health_monitor_worker_stall",
+            config.data_root / "dedup" / "health_monitor_worker_stall.json",
+        )
 
     def set_bg_workers(self, bg_workers: BGWorkerManager) -> None:
         """Late-binding for the post-ctor BGWorkerManager wiring."""
@@ -395,6 +422,13 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             await self._check_wiki_freshness()
         except Exception:  # noqa: BLE001
             logger.debug("wiki-freshness check failed", exc_info=True)
+
+        # Generic stall sweep: restart-first for any silent registry loop.
+        # Deliberately unwrapped (unlike the grandfathered sibling checks
+        # above): a sweep failure propagates to the base cycle handler,
+        # which owns credit/auth classification and surfaces a visible
+        # cycle error instead of a debug line — the tick retries.
+        await self._check_worker_staleness()
 
         metrics = compute_trend_metrics(
             self._outcomes_path, self._scores_path, self._failures_path
@@ -1057,23 +1091,60 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             if self._sanity_noop_streak >= _SANITY_NOOP_STREAK_THRESHOLD:
                 noop_tripped = True
             else:
-                # Recovery — sanity loop ticking with real work. Close any open
-                # stall issue and clear dedup so a future stall files fresh
-                # (#9359 issue-hygiene).
+                # Loop is ticking again. Close any open stall issue and clear
+                # its dedup key (#9359 issue-hygiene) — a persistent no-op
+                # re-escalates via the streak.
                 if dedup_key in filed_keys:
                     await self._close_issues_by_label(
                         prs,
                         "sanity-loop-stalled",
-                        "trust_fleet_sanity is ticking with real work again — "
-                        "auto-closing.",
+                        "trust_fleet_sanity is ticking again — auto-closing.",
                     )
-                    self._sanity_stall_dedup.set_all(filed_keys - {dedup_key})
+                # Only re-arm restart-first on GENUINE recovery (real work).
+                # workers_scanned == 0 with streak < threshold is a no-op
+                # streak still building — clearing the marker there would
+                # restart a persistent no-op every 3 ticks forever with
+                # escalation permanently bypassed.
+                cleared = {dedup_key}
+                if workers_scanned > 0:
+                    cleared.add(_SANITY_RESTART_KEY)
+                if filed_keys & cleared:
+                    self._sanity_stall_dedup.set_all(filed_keys - cleared)
                 return
         else:
+            # Young-task window: heartbeats only refresh at cycle COMPLETION,
+            # so a freshly recreated task (restart-first tick, credit-pause
+            # resume, orchestrator restart) still carries the stale heartbeat
+            # while its first cycle is in flight. Neither recovered (clearing
+            # the restart marker here would break restart-once-then-escalate:
+            # a wedged loop would be restarted every threshold window forever)
+            # nor actionable — wait until the task itself outlives the
+            # threshold without heartbeating.
+            started_at = bg_workers.run_started_at("trust_fleet_sanity")
+            if (
+                started_at is not None
+                and (datetime.now(UTC) - started_at).total_seconds() < threshold_s
+            ):
+                return
             # Stale-heartbeat path — counter remains as last seen; no-op
             # streak may or may not be set, but we file the stale-stall
             # variant of the issue regardless.
             self._sanity_noop_streak = 0
+        # Restart-first (dark-factory): before paging a human, try the
+        # restart verb once per stall event. A wedged task is cancelled and
+        # recreated; escalation waits one more threshold window. When the
+        # verb is unwired (minimal fixtures / restart returns False) fall
+        # through to filing immediately — pre-restart behavior.
+        if _SANITY_RESTART_KEY not in filed_keys:
+            restarted = await bg_workers.restart("trust_fleet_sanity")
+            if restarted:
+                logger.warning(
+                    "trust_fleet_sanity stalled — auto-restarted "
+                    "(restart-first; escalation deferred one threshold window)"
+                )
+                self._sanity_noop_streak = 0
+                self._sanity_stall_dedup.set_all(filed_keys | {_SANITY_RESTART_KEY})
+                return
         # Heartbeat-stale or no-op-streak path: file (or dedup-skip).
         if dedup_key in filed_keys:
             # Already filed for the current stall event; wait for recovery
@@ -1111,7 +1182,10 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             f"- Interval: "
             f"`{self._config.trust_fleet_sanity_interval}s`\n"
             f"- Enabled: `True`\n"
-            f"- Workers scanned (last tick): `{workers_scanned}`\n\n"
+            f"- Workers scanned (last tick): `{workers_scanned}`\n"
+            f"- Auto-restart attempted: "
+            f"`{_SANITY_RESTART_KEY in filed_keys}` "
+            f"(restart-first did not clear the stall)\n\n"
             f"### Operator playbook\n"
             f"1. Check orchestrator logs for the `trust_fleet_sanity` "
             f"loop task (look for uncaught exceptions on the run task).\n"
@@ -1130,6 +1204,142 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         )
         filed_keys = self._sanity_stall_dedup.get()
         self._sanity_stall_dedup.set_all(filed_keys | {dedup_key})
+
+    async def _check_worker_staleness(self) -> None:
+        """Generic restart-first stall sweep across registry loops.
+
+        Third leg of loop supervision: the per-cycle watchdog (#9556)
+        bounds a cycle that hangs, the supervisor restarts a loop that
+        raises — but a loop that goes *silent* (task wedged outside the
+        watchdog window) shows only as a stale heartbeat (#9650). Restart
+        it once per stall event; escalate with a ``loop-stalled`` issue
+        only when the restart didn't clear it. Recovery auto-closes the
+        issue (title-filtered — the label is shared across loops) and
+        clears both markers so a future stall restarts fresh.
+
+        Threshold is ``_WORKER_STALL_MULTIPLIER × interval +
+        cycle_timeout`` so a legitimately long LLM cycle (heartbeat only
+        refreshes between cycles) is never false-restarted. Non-registry
+        workers (pipeline phases, store poller) are out of scope — their
+        supervision semantics differ. Silent no-op when deps are missing
+        (minimal scenario fixtures), mirroring the §12.1 check.
+        """
+        state = self._state
+        bg_workers = self._bg_workers
+        prs = self._prs
+        # ``getattr`` guard: __new__-bypassed test scaffolding constructs
+        # this loop without the ctor (see PR #8460 post-mortem).
+        dedup = getattr(self, "_worker_stall_dedup", None)
+        if state is None or bg_workers is None or prs is None or dedup is None:
+            return
+
+        heartbeats = state.get_worker_heartbeats()
+        registered = bg_workers.registered_loop_names()
+        enabled_flags = getattr(bg_workers, "worker_enabled", {})
+        keys = dedup.get()
+        now = datetime.now(UTC)
+        for name, hb in heartbeats.items():
+            if name in _WORKER_STALL_EXCLUDED or name not in registered:
+                continue
+            if not enabled_flags.get(name, True):
+                continue
+            last_run_iso = hb.get("last_run") if isinstance(hb, dict) else None
+            if not last_run_iso:
+                continue
+            try:
+                last_run = datetime.fromisoformat(last_run_iso.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if last_run.tzinfo is None:
+                last_run = last_run.replace(tzinfo=UTC)
+            elapsed_s = (now - last_run).total_seconds()
+            interval_s = bg_workers.get_interval(name)
+            threshold_s = (
+                _WORKER_STALL_MULTIPLIER * interval_s + bg_workers.cycle_timeout(name)
+            )
+            restart_key = f"health_monitor:worker-stall:restart:{name}"
+            filed_key = f"health_monitor:worker-stall:filed:{name}"
+            if elapsed_s < threshold_s:
+                # Recovery — close this worker's stall issue (if filed)
+                # and clear markers so a future stall restarts fresh.
+                if filed_key in keys:
+                    # Delimited needle (": {name} ") — a bare name would
+                    # also match prefix siblings (stale_issue ⊂
+                    # stale_issue_gc) and close the wrong loop's issue.
+                    await self._close_issues_by_label(
+                        prs,
+                        "loop-stalled",
+                        f"`{name}` is heartbeating again — auto-closing.",
+                        title_contains=f": {name} ",
+                    )
+                if keys & {restart_key, filed_key}:
+                    keys = keys - {restart_key, filed_key}
+                    dedup.set_all(keys)
+                continue
+            # Young-task window: heartbeats only refresh at cycle
+            # COMPLETION, so a freshly recreated task (restart-first tick,
+            # credit-pause resume, orchestrator restart) still carries the
+            # stale heartbeat while its first cycle is in flight. Neither
+            # recovered (clearing markers here would break restart-once-
+            # then-escalate: a wedged loop would restart every threshold
+            # window forever) nor actionable — wait until the task itself
+            # outlives the threshold without heartbeating.
+            started_at = bg_workers.run_started_at(name)
+            if (
+                started_at is not None
+                and (now - started_at).total_seconds() < threshold_s
+            ):
+                continue
+            # Stale. Restart-first: one restart per stall event; escalation
+            # waits one more sweep. Falls through to filing when the verb
+            # is unwired (returns False).
+            if restart_key not in keys:
+                restarted = await bg_workers.restart(name)
+                if restarted:
+                    logger.warning(
+                        "Loop %r stalled (%.0fs > %.0fs) — auto-restarted "
+                        "(restart-first; escalation deferred one sweep)",
+                        name,
+                        elapsed_s,
+                        threshold_s,
+                    )
+                    keys = keys | {restart_key}
+                    dedup.set_all(keys)
+                    continue
+            if filed_key in keys:
+                # Already filed for the current stall event.
+                continue
+            title = (
+                f"loop-stalled: {name} silent for {int(elapsed_s)}s "
+                f"(threshold {int(threshold_s)}s)"
+            )
+            body = (
+                f"## Background loop dead-man-switch tripped\n\n"
+                f"`{name}` has not heartbeated in `{int(elapsed_s)}s`, "
+                f"exceeding `{_WORKER_STALL_MULTIPLIER} × interval + "
+                f"cycle_timeout` = `{int(threshold_s)}s`.\n\n"
+                f"- Last heartbeat: `{last_run_iso}`\n"
+                f"- Interval: `{interval_s}s`\n"
+                f"- Watchdog bound: `{bg_workers.cycle_timeout(name)}s`\n"
+                f"- Auto-restart attempted: `{restart_key in keys}` "
+                f"(restart-first did not clear the stall)\n\n"
+                f"### Operator playbook\n"
+                f"1. Check orchestrator logs for the `{name}` loop task "
+                f"(look for a wedged await outside the cycle watchdog).\n"
+                f"2. Restart the orchestrator (`systemctl restart "
+                f"hydraflow` or equivalent).\n"
+                f"3. If the loop stalls repeatedly, flip its kill-switch "
+                f"in the **System** tab and file a HydraFlow bug report.\n\n"
+                f"_Auto-filed by HydraFlow `health_monitor` (generic "
+                f"loop-stall dead-man-switch)._"
+            )
+            await prs.create_issue(
+                title,
+                body,
+                ["hydraflow-find", "loop-stalled"],
+            )
+            keys = keys | {filed_key}
+            dedup.set_all(keys)
 
     async def _check_wiki_freshness(self) -> None:
         """Dead-man-switch for `RepoWikiLoop` via `docs/wiki/log.jsonl` mtime.
@@ -1211,11 +1421,17 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         self._wiki_stall_dedup.set_all(filed_keys | {dedup_key})
 
     async def _close_issues_by_label(
-        self, prs: PRPort, label: str, comment: str
+        self,
+        prs: PRPort,
+        label: str,
+        comment: str,
+        *,
+        title_contains: str | None = None,
     ) -> None:
         """Close every open issue carrying *label* when a dead-man-switch
         recovers (#9359). Titles embed elapsed-time so they can't be found by
-        title; the label is the stable handle."""
+        title; the label is the stable handle. ``title_contains`` narrows to
+        one worker's issues when the label is shared (generic stall sweep)."""
         try:
             issues = await prs.list_issues_by_label(label)
         except Exception:  # noqa: BLE001
@@ -1228,6 +1444,10 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         for issue in issues:
             number = issue.get("number")
             if not number:
+                continue
+            if title_contains is not None and title_contains not in str(
+                issue.get("title", "")
+            ):
                 continue
             await prs.post_comment(number, comment)
             await prs.close_issue(number)

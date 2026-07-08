@@ -128,6 +128,9 @@ class HydraFlowOrchestrator:
         self._session_issue_results: dict[int, bool] = {}
         # Loop tasks (set by _supervise_loops for stop() to cancel)
         self._loop_tasks: dict[str, asyncio.Task[None]] = {}
+        # Loop factories (retained by _supervise_loops so restart_loop_task
+        # can cancel-and-recreate a silently-stalled loop task)
+        self._loop_factories: dict[str, Callable[[], Coroutine[Any, Any, None]]] = {}
         # Strong references for fire-and-forget background tasks (#6513) —
         # without this the GC can collect the Task before it completes.
         self._deferred_tasks: set[asyncio.Task[None]] = set()
@@ -215,6 +218,9 @@ class HydraFlowOrchestrator:
             "fitness_scorecard": svc.fitness_scorecard_loop,
         }
         self._bg_workers = BGWorkerManager(config, self._state, bg_loop_registry)
+        # The restart verb reads self._loop_tasks/_loop_factories lazily, so
+        # binding it here (before _supervise_loops populates them) is safe.
+        self._bg_workers.set_restart_cb(self.restart_loop_task)
         svc.fitness_scorecard_loop.set_loops(bg_loop_registry)
         # Loops that need a reference to BGWorkerManager cannot take one
         # at construction time (chicken-and-egg: BGWorkerManager takes the
@@ -1114,6 +1120,41 @@ class HydraFlowOrchestrator:
             factory_fn(), name=f"hydraflow-{loop_name}"
         )
 
+    async def restart_loop_task(self, name: str) -> bool:
+        """Cancel a (possibly silently-stalled) loop task and start a fresh one.
+
+        The restart verb behind ``BGWorkerManager.restart`` — used by
+        HealthMonitorLoop's restart-first stall policy. The supervisor only
+        wakes on task *completion*, so a loop blocked forever on an ``await``
+        is invisible to it; this cancels the wedged task and recreates it
+        from the factory retained by :meth:`_supervise_loops`.
+
+        The replacement is registered in ``self._loop_tasks`` *synchronously*
+        after ``cancel()`` (no await between) so the supervisor's identity
+        check sees old task and replacement atomically.
+
+        Deliberately does NOT await the old task's drain: that await would
+        deliver — and a suppress would swallow — the *caller's* own
+        cancellation (e.g. the health-monitor work task being cancelled by
+        a credit-pause shutdown), letting the staleness sweep escape its
+        one cancel and spawn rogue loop tasks against an exhausted billing
+        signal. The supervisor drains the cancelled old task through its
+        done-set via the identity check; cancelled tasks emit no
+        never-retrieved warnings.
+
+        Returns ``False`` for unknown names or before supervision started.
+        """
+        old = self._loop_tasks.get(name)
+        factory = self._loop_factories.get(name)
+        if old is None or factory is None:
+            return False
+        old.cancel()
+        self._loop_tasks[name] = asyncio.create_task(
+            factory(), name=f"hydraflow-{name}"
+        )
+        logger.info("Loop %r restarted via restart_loop_task", name)
+        return True
+
     async def _handle_loop_exception(
         self,
         name: str,
@@ -1219,6 +1260,7 @@ class HydraFlowOrchestrator:
         known_worker_names = {n for n, _ in loop_factories}
         self._state_restorer.prune_stale_disabled_workers(known_worker_names)
         self._state_restorer.prune_stale_worker_states(known_worker_names)
+        self._loop_factories = dict(loop_factories)
         tasks: dict[str, asyncio.Task[None]] = {}
         for name, factory in loop_factories:
             tasks[name] = asyncio.create_task(factory(), name=f"hydraflow-{name}")
@@ -1232,6 +1274,24 @@ class HydraFlowOrchestrator:
                 for task in done:
                     name = task.get_name().removeprefix("hydraflow-")
                     if self._stop_event.is_set():
+                        break
+                    if tasks.get(name) is not task:
+                        # Externally restarted (restart_loop_task) — the
+                        # replacement is already registered and supervised;
+                        # this is the drained old task. Calling .exception()
+                        # on it would raise CancelledError here.
+                        continue
+                    if task.cancelled():
+                        # Cancelled outside shutdown and not replaced —
+                        # crash-equivalent; recreate to maintain supervision.
+                        logger.warning(
+                            "Loop %r was cancelled unexpectedly — restarting",
+                            name,
+                        )
+                        factory_fn = dict(loop_factories)[name]
+                        tasks[name] = asyncio.create_task(
+                            factory_fn(), name=f"hydraflow-{name}"
+                        )
                         break
                     exc = task.exception()
                     if exc is not None:
