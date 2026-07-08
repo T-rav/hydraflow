@@ -26,9 +26,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
+from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
 from wiki_rot_citations import (
@@ -48,6 +49,15 @@ if TYPE_CHECKING:
     from state import StateTracker
 
 logger = logging.getLogger("hydraflow.wiki_rot_detector_loop")
+
+
+class _TickResult(TypedDict):
+    """Per-repo scan result — counts plus the live broken-cite subjects."""
+
+    filed: int
+    escalated: int
+    broken_subjects: set[str]
+
 
 _MAX_ATTEMPTS = 3
 _EXCERPT_CHARS = 500
@@ -78,6 +88,17 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         self._pr = pr_manager
         self._dedup = dedup
         self._wiki = wiki_store
+        # Open-escalation re-verify (Fix B). The richer (title+body) parser
+        # stays on the closed path below; the title-only wrapper covers the
+        # standard escalation format, which is all reconcile_open sees.
+        self._escalations = EscalationReconciler(
+            prs=pr_manager,
+            dedup=dedup,
+            key_prefix="wiki_rot_detector",
+            stuck_label="wiki-rot-stuck",
+            clear_attempts=state.clear_wiki_rot_attempts,
+            subject_from_title=lambda title: _parse_escalation_subject(title, ""),
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.wiki_rot_detector_interval
@@ -110,16 +131,28 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         scanned = 0
         filed = 0
         escalated = 0
+        any_failed = False
+        active_subjects: set[str] = set()
         for slug in repos:
             try:
                 result = await self._tick_repo(slug, self_slug)
             except Exception as exc:  # noqa: BLE001
                 reraise_on_credit_or_bug(exc)
                 logger.exception("wiki_rot_detector: slug=%s failed", slug)
+                any_failed = True
                 continue
             scanned += 1
             filed += result["filed"]
             escalated += result["escalated"]
+            active_subjects |= result["broken_subjects"]
+
+        # Open-escalation re-verify: cites fixed by later changes auto-close
+        # their stuck escalations instead of waiting for a human. Skipped on
+        # a partial scan (a failed repo's subjects would look "gone") and
+        # when nothing was scanned.
+        autoclosed = await self._escalations.reconcile_open(
+            None if (any_failed or not repos) else active_subjects
+        )
 
         status = "fired" if filed or escalated else "noop"
         self._emit_trace(t0, scanned=scanned, filed=filed, escalated=escalated)
@@ -128,6 +161,7 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             "repos_scanned": scanned,
             "issues_filed": filed,
             "escalations": escalated,
+            "autoclosed": autoclosed,
         }
 
     def _emit_trace(
@@ -176,20 +210,24 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         self,
         slug: str,
         self_slug: str,
-    ) -> dict[str, int]:
+    ) -> _TickResult:
         """Scan one repo's wiki entries, verify cites, file issues, and
         escalate repeat offenders.
 
-        Returns counts ``{"filed": n, "escalated": n}``.  Failures on
+        Returns ``{"filed": n, "escalated": n, "broken_subjects": set}``
+        where ``broken_subjects`` holds every ``{slug}:{cite}`` found broken
+        this tick — INCLUDING dedup-suppressed ones (already filed, still
+        broken), which drive open-escalation re-verification. Failures on
         a single entry are logged and skipped — the tick never aborts
         mid-repo.
         """
         filed = 0
         escalated = 0
+        broken_subjects: set[str] = set()
 
         entries = self._load_wiki_entries(slug)
         if not entries:
-            return {"filed": 0, "escalated": 0}
+            return {"filed": 0, "escalated": 0, "broken_subjects": set()}
 
         is_self = slug == self_slug and bool(self_slug)
         repo_root = Path(self._config.repo_root)
@@ -203,6 +241,9 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
                 if not broken:
                     continue
                 subject = f"{slug}:{cite.raw}"
+                # Counted BEFORE the dedup guard — a dedup-suppressed cite
+                # is still broken and must keep its escalation alive.
+                broken_subjects.add(subject)
                 dedup_key = f"wiki_rot_detector:{subject}"
                 if dedup_key in dedup_seen:
                     continue
@@ -229,7 +270,11 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
                     escalated += 1
 
         self._dedup.set_all(dedup_seen)
-        return {"filed": filed, "escalated": escalated}
+        return {
+            "filed": filed,
+            "escalated": escalated,
+            "broken_subjects": broken_subjects,
+        }
 
     # -- helpers -----------------------------------------------------------
 
