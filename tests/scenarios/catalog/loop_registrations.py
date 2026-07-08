@@ -94,7 +94,20 @@ def _build_pr_unsticker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_health_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from health_monitor_loop import HealthMonitorLoop  # noqa: PLC0415
 
-    return HealthMonitorLoop(config=config, deps=deps, prs=ports["github"])
+    # ``state`` powers the dead-man-switch heartbeat reads; ``bg_workers``
+    # (seeded via seed_ports) powers the restart-first stall sweep. Both
+    # checks silently no-op when their deps are absent, so plain
+    # health-monitor scenarios are unaffected.
+    loop = HealthMonitorLoop(
+        config=config,
+        deps=deps,
+        prs=ports["github"],
+        state=ports.get("state"),
+    )
+    bg_workers = ports.get("bg_workers")
+    if bg_workers is not None:
+        loop.set_bg_workers(bg_workers)
+    return loop
 
 
 def _build_workspace_gc(ports: dict[str, Any], config: Any, deps: Any) -> Any:

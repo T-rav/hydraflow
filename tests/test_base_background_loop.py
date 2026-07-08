@@ -90,6 +90,19 @@ def _make_stub(
 
 class TestBaseBackgroundLoopRun:
     @pytest.mark.asyncio
+    async def test_run__stamps_run_started_at(self, tmp_path: Path) -> None:
+        """run() records when the current task started — the stall sweep
+        uses max(heartbeat, run_started_at) so a freshly (re)created task
+        with a stale persisted heartbeat (post credit-pause / restart)
+        isn't false-restarted mid-first-cycle."""
+        loop, _stop = _make_stub(tmp_path)
+        assert loop._run_started_at is None
+
+        await loop.run()
+
+        assert loop._run_started_at is not None
+
+    @pytest.mark.asyncio
     async def test_run__calls_do_work_and_reports_success(self, tmp_path: Path) -> None:
         """The loop calls _do_work and reports success via status_cb and bus."""
         loop, _stop = _make_stub(tmp_path, work_fn=lambda: {"count": 5})
