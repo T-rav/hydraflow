@@ -8,7 +8,9 @@ flake count crosses `flake_threshold` (default 3, comparison `>=`).
 
 After 3 repair attempts for the same test_name the loop files a
 second issue labeled `hitl-escalation` + `flaky-test-stuck`. The
-dedup key clears when the escalation issue is closed (spec §3.2).
+dedup key clears when the escalation issue is closed (spec §3.2),
+and stale open escalations — the test is no longer flaky at HEAD —
+auto-close via the shared `EscalationReconciler` (#9618 class).
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import tempfile
 import time
 import xml.etree.ElementTree as ET
@@ -24,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
+from escalation_reconcile import EscalationReconciler
 from models import WorkCycleResult
 
 if TYPE_CHECKING:
@@ -36,6 +40,24 @@ logger = logging.getLogger("hydraflow.flake_tracker_loop")
 
 _MAX_ATTEMPTS = 3
 _RUN_WINDOW = 20
+
+# Marker label on the HITL escalation issue. Single-sourced so the filing
+# path (`_file_escalation`) and the reconciler can never drift apart — no
+# config knob exists for this label (unlike e.g. fake_coverage_stuck_label).
+_STUCK_LABEL = "flaky-test-stuck"
+
+# Parses ``_file_escalation`` titles back to the ``test_id`` subject.
+# ``(.+?)`` not ``(\\S+)``: parametrized test_ids can contain spaces
+# (pytest emits them verbatim in JUnit names); a whitespace-bounded
+# capture fails to match those titles AT ALL, leaving the escalation
+# permanently unreconcilable (neither open- nor closed-path clears it).
+_ESCALATION_TITLE_RE = re.compile(r"^HITL: flaky test (.+?) unresolved after ")
+
+
+def _escalation_subject(title: str) -> str | None:
+    m = _ESCALATION_TITLE_RE.match(title)
+    return m.group(1) if m else None
+
 
 # Hard cap on each ``gh`` read/download. A wedged child must not hang the loop
 # cycle forever and freeze its heartbeat — the #9410 silent-stall failure
@@ -100,6 +122,14 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         self._state = state
         self._pr = pr_manager
         self._dedup = dedup
+        self._escalations = EscalationReconciler(
+            prs=pr_manager,
+            dedup=dedup,
+            key_prefix="flake_tracker",
+            stuck_label=_STUCK_LABEL,
+            clear_attempts=state.clear_flake_attempts,
+            subject_from_title=_escalation_subject,
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.flake_tracker_interval
@@ -259,7 +289,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
             f"dedup key and let the loop re-fire on the next drift._"
         )
         return await self._pr.create_issue(
-            title, body, ["hitl-escalation", "flaky-test-stuck"]
+            title, body, ["hitl-escalation", _STUCK_LABEL]
         )
 
     async def _resolve_flake_issue(self, test_id: str) -> bool:
@@ -280,52 +310,14 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         return True
 
     async def _reconcile_closed_escalations(self) -> None:
-        """Clear dedup keys whose escalation issue has been closed (spec §3.2)."""
-        cmd = [
-            "gh",
-            "issue",
-            "list",
-            "--repo",
-            self._config.repo,
-            "--state",
-            "closed",
-            "--label",
-            "hitl-escalation",
-            "--label",
-            "flaky-test-stuck",
-            "--author",
-            "@me",
-            "--limit",
-            "100",
-            "--json",
-            "title",
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, _ = await _communicate_bounded(proc)
-        except TimeoutError:
-            return
-        if proc.returncode != 0:
-            return
-        try:
-            closed = json.loads(stdout.decode() or "[]")
-        except json.JSONDecodeError:
-            return
-        current = self._dedup.get()
-        keep = set(current)
-        for issue in closed:
-            title = issue.get("title", "")
-            # Title shape: "HITL: flaky test <id> unresolved after N attempts"
-            for key in list(keep):
-                if key.startswith("flake_tracker:") and key.split(":", 1)[1] in title:
-                    keep.discard(key)
-                    self._state.clear_flake_attempts(key.split(":", 1)[1])
-        if keep != current:
-            self._dedup.set_all(keep)
+        """Clear dedup keys whose escalation issue has been closed (spec §3.2).
+
+        Delegates to the shared :class:`EscalationReconciler` (PRPort-based;
+        replaced the raw ``gh issue list`` subprocess). Subjects are parsed
+        from the escalation title shape
+        ``"HITL: flaky test <id> unresolved after N attempts"``.
+        """
+        await self._escalations.reconcile_closed()
 
     async def _do_work(self) -> WorkCycleResult:
         """One flake-tracking cycle (spec §4.5)."""
@@ -395,12 +387,26 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         if dedup_dirty:
             self._dedup.set_all(dedup)
 
+        # Open-escalation re-verify: flakes fixed by later PRs (or false
+        # positives) auto-close their stuck escalations instead of waiting
+        # for a human (#9618 class). Runs only after a COMPLETED detection:
+        # an empty runs fetch early-returns above and never reaches here.
+        # When runs exist but every junit download came back empty, the
+        # all-empty window is indistinguishable from "all tests healthy" —
+        # pass None so the pass is skipped (detection not meaningful). The
+        # #9359 find-issue recovery above is untouched: reconcile_open only
+        # handles the `flaky-test-stuck` escalation issues.
+        autoclosed = await self._escalations.reconcile_open(
+            flaky_now if any(per_run_results) else None
+        )
+
         self._emit_trace(t0, runs_seen=len(runs))
         return {
             "status": "ok",
             "filed": filed,
             "escalated": escalated,
             "resolved": resolved,
+            "autoclosed": autoclosed,
             "tests_seen": len(counts),
         }
 

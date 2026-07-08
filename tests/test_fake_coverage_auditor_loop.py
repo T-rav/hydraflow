@@ -47,6 +47,8 @@ def loop_env(tmp_path: Path):
     pr = AsyncMock()
     pr.create_issue = AsyncMock(return_value=42)
     pr.update_issue_body = AsyncMock(return_value=None)
+    pr.list_issues_by_label = AsyncMock(return_value=[])
+    pr.list_closed_issues_by_label = AsyncMock(return_value=[])
     dedup = MagicMock()
     dedup.get.return_value = set()
     return cfg, state, pr, dedup
@@ -291,7 +293,7 @@ async def test_escalation_fires_after_three_attempts(
 
 
 async def test_close_reconcile_clears_dedup_on_closed_escalation(
-    loop_env, monkeypatch, tmp_path
+    loop_env, tmp_path
 ) -> None:
     """Closed ``fake-coverage-stuck`` issues clear their dedup key + attempts."""
     cfg, state, pr, dedup = loop_env
@@ -305,20 +307,15 @@ async def test_close_reconcile_clears_dedup_on_closed_escalation(
         config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
     )
 
-    closed_payload = json.dumps(
-        [{"title": "HITL: fake coverage gap FakeGitHub:adapter-surface ..."}]
-    ).encode()
-
-    class _FakeProc:
-        returncode = 0
-
-        async def communicate(self):
-            return closed_payload, b""
-
-    async def fake_exec(*_args, **_kwargs):
-        return _FakeProc()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    pr.list_closed_issues_by_label.return_value = [
+        {
+            "number": 9618,
+            "title": "HITL: fake coverage gap FakeGitHub:adapter-surface "
+            "unresolved after 3",
+            "body": "",
+            "updated_at": "",
+        }
+    ]
 
     await loop._reconcile_closed_escalations()
 
@@ -330,6 +327,98 @@ async def test_close_reconcile_clears_dedup_on_closed_escalation(
     state.clear_fake_coverage_attempts.assert_called_once_with(
         "FakeGitHub:adapter-surface"
     )
+
+
+async def test_do_work_autocloses_stale_escalation(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """A gap fixed by a later PR auto-closes its open escalation on the next
+    tick (#9618 class) — even though _clear_rollup_state erases the dedup
+    key the same tick, discovery comes from the escalation title."""
+    cfg, state, pr, dedup = loop_env
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    # Fully covered fake: one surface method WITH cassette, no helpers.
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n    async def create_issue(self, title): ...\n"
+    )
+    cassettes = tmp_path / "tests" / "trust" / "contracts" / "cassettes" / "github"
+    cassettes.mkdir(parents=True)
+    (cassettes / "create_issue.yaml").write_text(
+        yaml.safe_dump({"input": {"command": "create_issue"}, "output": {}})
+    )
+    pr.list_issues_by_label.return_value = [
+        {
+            "number": 9618,
+            "title": "HITL: fake coverage gap FakeGitHub:adapter-surface "
+            "unresolved after 3",
+            "body": "",
+            "updated_at": "",
+        }
+    ]
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_list_titles():
+        return set()
+
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    stats = await loop._do_work()
+
+    pr.close_issue.assert_awaited_once_with(9618)
+    state.clear_fake_coverage_attempts.assert_called_with("FakeGitHub:adapter-surface")
+    assert stats["autoclosed"] == 1
+
+
+async def test_do_work_keeps_escalation_for_live_gap(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """An escalation whose gap is still detected this tick must survive."""
+    cfg, state, pr, dedup = loop_env
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    # close_issue has NO cassette → the adapter-surface gap is live.
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n"
+        "    async def create_issue(self, title): ...\n"
+        "    async def close_issue(self, n): ...\n"
+    )
+    cassettes = tmp_path / "tests" / "trust" / "contracts" / "cassettes" / "github"
+    cassettes.mkdir(parents=True)
+    (cassettes / "create_issue.yaml").write_text(
+        yaml.safe_dump({"input": {"command": "create_issue"}, "output": {}})
+    )
+    stuck_key = "fake_coverage_auditor:FakeGitHub:adapter-surface"
+    dedup.get.return_value = {stuck_key}
+    state.get_fake_coverage_rollup_issue.return_value = 42
+    pr.list_issues_by_label.return_value = [
+        {
+            "number": 9618,
+            "title": "HITL: fake coverage gap FakeGitHub:adapter-surface "
+            "unresolved after 3",
+            "body": "",
+            "updated_at": "",
+        }
+    ]
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_list_titles():
+        return {"Fake coverage gap: FakeGitHub adapter surface (1 methods)"}
+
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    stats = await loop._do_work()
+
+    pr.close_issue.assert_not_awaited()
+    assert stats["autoclosed"] == 0
 
 
 async def test_all_emitted_labels_are_registered_hydraflow_labels(loop_env) -> None:

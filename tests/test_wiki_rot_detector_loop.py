@@ -31,6 +31,8 @@ def loop_env(tmp_path: Path):
     state.inc_wiki_rot_attempts.return_value = 1
     pr_manager = AsyncMock()
     pr_manager.create_issue = AsyncMock(return_value=42)
+    pr_manager.list_issues_by_label = AsyncMock(return_value=[])
+    pr_manager.list_closed_issues_by_label = AsyncMock(return_value=[])
     dedup = MagicMock()
     dedup.get.return_value = set()
     wiki_store = MagicMock()
@@ -72,6 +74,97 @@ async def test_do_work_disabled_short_circuits(loop_env) -> None:
     # explicit kill-switch guard at the top of ``_do_work``.
     stats = await loop._do_work()
     assert stats["status"] == "disabled"
+
+
+async def test_do_work_autocloses_stale_escalation(tmp_path: Path, loop_env) -> None:
+    """An escalation whose broken cite no longer exists at HEAD auto-closes
+    after a complete scan (#9618 dead-letter class)."""
+    cfg, state, pr, dedup, wiki_store = loop_env
+    slug = "hydra/hydraflow"
+    wiki_dir = tmp_path / "wiki" / slug
+    wiki_dir.mkdir(parents=True)  # empty wiki — zero broken cites this tick
+    wiki_store.repo_dir.return_value = wiki_dir
+    wiki_store.list_repos.return_value = [slug]
+    pr.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 77,
+                "title": "Wiki rot stuck: hydra/hydraflow cites missing "
+                "src/gone.py:Sym",
+                "body": "",
+                "updated_at": "",
+            }
+        ]
+    )
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+
+    stats = await loop._do_work()
+
+    pr.close_issue.assert_awaited_once_with(77)
+    state.clear_wiki_rot_attempts.assert_called_with("hydra/hydraflow:src/gone.py:Sym")
+    assert stats["autoclosed"] == 1
+
+
+async def test_do_work_keeps_escalation_for_live_broken_cite(
+    tmp_path: Path, loop_env
+) -> None:
+    """Escalations for cites still broken this tick must survive — including
+    dedup-suppressed ones (already filed, still broken)."""
+    cfg, state, pr, dedup, wiki_store = loop_env
+    slug = "hydra/hydraflow"
+    wiki_dir = tmp_path / "wiki" / slug
+    wiki_dir.mkdir(parents=True)
+    (wiki_dir / "patterns.md").write_text(
+        "# Patterns\n\nThe guard lives in src/foo.py:bar - see ADR-0099.\n"
+    )
+    wiki_store.repo_dir.return_value = wiki_dir
+    wiki_store.list_repos.return_value = [slug]
+    (tmp_path / "src").mkdir(exist_ok=True)
+    (tmp_path / "src" / "foo.py").write_text("def other():\n    return 1\n")
+    cfg.repo_root = tmp_path  # type: ignore[misc]
+    # Already filed + dedup'd on a prior tick — the filing path is skipped
+    # but the cite is still broken, so the subject must count as active.
+    dedup.get.return_value = {"wiki_rot_detector:hydra/hydraflow:src/foo.py:bar"}
+    pr.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 78,
+                "title": "Wiki rot stuck: hydra/hydraflow cites missing src/foo.py:bar",
+                "body": "",
+                "updated_at": "",
+            }
+        ]
+    )
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+
+    stats = await loop._do_work()
+
+    pr.close_issue.assert_not_awaited()
+    assert stats["autoclosed"] == 0
+
+
+async def test_do_work_partial_scan_skips_autoclose(
+    tmp_path: Path, loop_env, monkeypatch
+) -> None:
+    """A failed repo tick makes the detection set partial — auto-closing on
+    it would kill real escalations for the failed repo's subjects."""
+    cfg, state, pr, dedup, wiki_store = loop_env
+    wiki_store.list_repos.return_value = ["hydra/hydraflow"]
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+
+    async def boom(slug: str, self_slug: str) -> dict:
+        raise RuntimeError("scan failed")
+
+    monkeypatch.setattr(loop, "_tick_repo", boom)
+
+    stats = await loop._do_work()
+
+    pr.list_issues_by_label.assert_not_awaited()
+    pr.close_issue.assert_not_awaited()
+    assert stats["autoclosed"] == 0
 
 
 async def test_tick_repo_files_issue_on_broken_cite(

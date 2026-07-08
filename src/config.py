@@ -409,6 +409,7 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
     ("visual_warn_threshold", "HYDRAFLOW_VISUAL_WARN_THRESHOLD", 0.05),
     ("visual_fail_threshold", "HYDRAFLOW_VISUAL_FAIL_THRESHOLD", 0.15),
     ("loop_anomaly_tick_error_ratio", "HYDRAFLOW_LOOP_ANOMALY_TICK_ERROR_RATIO", 0.2),
+    ("cost_throttle_ratio", "HYDRAFLOW_COST_THROTTLE_RATIO", 0.8),
 ]
 
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
@@ -1317,6 +1318,18 @@ class HydraFlowConfig(BaseModel):
             "Soft daily cost budget (USD). When the last-24h machinery "
             "cost exceeds this, ReportIssueLoop files a hydraflow-find "
             "issue with label cost-budget-exceeded. None disables the check."
+        ),
+    )
+    cost_throttle_ratio: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Fraction of daily_cost_budget_usd at which CostBudgetWatcherLoop "
+            "starts soft-throttling caretaker loops (interval-stretch) before "
+            "the hard-cap kill. 0 disables throttling; no effect when "
+            "daily_cost_budget_usd is None. "
+            "Env: HYDRAFLOW_COST_THROTTLE_RATIO."
         ),
     )
     issue_cost_alert_usd: float | None = Field(
@@ -4026,8 +4039,15 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
             )
             raise ValueError(msg)
         object.__setattr__(config, tool_field, tool)
+        # Register as explicitly-set: object.__setattr__ bypasses Pydantic's
+        # fields-set tracking, so without this the group cascade in
+        # _apply_profile_overrides treats the field as untouched and — when
+        # the env value equals the field default — silently overwrites the
+        # operator's per-role choice (#9717).
+        config.__pydantic_fields_set__.add(tool_field)
         if model:  # empty model only for "inherit"
             object.__setattr__(config, model_field, model)
+            config.__pydantic_fields_set__.add(model_field)
 
     # Data-driven env var overrides (Literal-typed fields)
     for field, env_key in _ENV_LITERAL_OVERRIDES:

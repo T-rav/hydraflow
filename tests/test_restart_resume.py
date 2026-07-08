@@ -298,3 +298,24 @@ class TestCostBudgetKilledWorkersPersistence:
             "watcher_killed_a",
             "watcher_killed_b",
         }
+
+
+class TestCostThrottledWorkersState:
+    def test_round_trips_priors_including_none(self, tmp_path: Path) -> None:
+        from state import StateTracker
+
+        st = StateTracker(tmp_path / "state.json")
+        st.set_cost_throttled_workers({"repo_wiki": 900, "flake_tracker": None})
+        reloaded = StateTracker(tmp_path / "state.json")
+        assert reloaded.get_cost_throttled_workers() == {
+            "repo_wiki": 900,
+            "flake_tracker": None,
+        }
+
+    def test_clearable(self, tmp_path: Path) -> None:
+        from state import StateTracker
+
+        st = StateTracker(tmp_path / "state.json")
+        st.set_cost_throttled_workers({"repo_wiki": None})
+        st.set_cost_throttled_workers({})
+        assert st.get_cost_throttled_workers() == {}
