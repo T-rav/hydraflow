@@ -213,7 +213,14 @@ jobs:
       - name: Warning gate (targeted)
         run: PYTHONPATH=src uv run pytest tests/test_execution.py tests/test_agent_advanced.py tests/test_agent_cli.py tests/test_agent_execution.py tests/test_agent_lifecycle.py tests/test_agent_output.py tests/test_hitl_runner.py tests/test_prompt_telemetry.py tests/test_dashboard_routes_control.py tests/test_dashboard_routes_core.py tests/test_dashboard_routes_hitl.py tests/test_dashboard_routes_issue_history.py tests/test_dashboard_routes_metrics.py tests/test_dashboard_routes_repo.py tests/test_dashboard_routes_state.py -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning
       - name: Run tests with coverage
-        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --cov=src --cov-fail-under=70 --cov-report=term-missing
+        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --cov=src --cov-fail-under=70 --cov-report=term-missing --cov-report=json
+      - name: Upload coverage.json
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-json
+          path: coverage.json
+          retention-days: 14
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
@@ -297,13 +304,21 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          # P5.6 (`git log origin/main`) and P10.3 (fix-commit history since
+          # the baseline) read real git history. The default depth-1 checkout
+          # made both `git log` calls fail, silently degrading two principles
+          # to NA in CI. Full history keeps them honest; the clone stays well
+          # inside this job's 5-minute timeout.
+          fetch-depth: 0
       - name: Resolve origin HEAD
         # actions/checkout leaves refs/remotes/origin/HEAD unset on PR
         # checkouts (which are a merge commit, not a fetched branch).
         # P5.5 (branch-protection probe) needs origin/HEAD to detect the
         # default branch, so fetch main explicitly and point HEAD at it.
+        # No --depth here: P5.6 walks the last 100 commits of origin/main.
         run: |
-          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          git fetch --no-tags origin main:refs/remotes/origin/main
           git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
       - uses: astral-sh/setup-uv@v4
         with:

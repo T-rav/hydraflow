@@ -6,6 +6,7 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 
 | Event | Publishers | Subscribers |
 |---|---|---|
+| **ADR_CONFORMANCE_UPDATE** ⚠️ | `src.adr_conformance_loop:AdrConformanceLoop._emit_event` | — |
 | **ADR_DRAFT_OPENED** ⚠️ | `src.base_runner:BaseRunner._process_transcript_for_adr_draft` | — |
 | **ADVERSARIAL_STAGE_CONVERGED** ⚠️ | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_stage_converged` | — |
 | **ADVERSARIAL_STAGE_EXHAUSTED** ⚠️ | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_stage_exhausted` | — |
@@ -28,6 +29,7 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **HITL_ESCALATION** ⚠️ | `src.dashboard_routes._routes:create_router.request_changes`<br>`src.review_phase._phase:ReviewPhase._escalate_to_hitl` | — |
 | **HITL_UPDATE** ⚠️ | `src.dashboard_routes._hitl_routes:register._resolve_hitl_item`<br>`src.dashboard_routes._hitl_routes:register.hitl_correct`<br>`src.hitl_phase:HITLPhase._process_one_hitl`<br>`src.hitl_runner:HITLRunner.run`<br>`src.pr_unsticker:PRUnsticker.unstick` | — |
 | **ISSUE_CREATED** ⚠️ | `src.pr_manager:PRManager.create_issue` | — |
+| **LOOP_FITNESS_UPDATE** ⚠️ | `src.fitness_scorecard_loop:FitnessScorecardLoop._do_work` | — |
 | **MERGE_UPDATE** ⚠️ | `src.pr_manager:PRManager.merge_pr`<br>`src.pr_manager:PRManager.merge_promotion_pr` | — |
 | **METRICS_UPDATE** ⚠️ | `src.metrics_manager:MetricsManager.sync` | — |
 | **ORCHESTRATOR_STATUS** ⚠️ | `src.dashboard_routes._control_routes:register.start_orchestrator`<br>`src.orchestrator:HydraFlowOrchestrator._publish_status` | — |
@@ -37,6 +39,7 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **PLANNER_UPDATE** ⚠️ | `src.planner:PlannerRunner._emit_status` | — |
 | **PR_CREATED** ⚠️ | `src.pr_manager:PRManager.create_pr`<br>`src.pr_manager:PRManager.create_promotion_pr` | — |
 | **QUEUE_UPDATE** ⚠️ | `src.issue_store:IssueStore._publish_queue_update_nowait`<br>`src.issue_store:IssueStore.refresh`<br>`src.mockworld.fakes.fake_issue_store:FakeIssueStore.refresh` | — |
+| **RATCHET_TIGHTENED** ⚠️ | `src.auto_tighten_loop:AutoTightenLoop._emit_tightened`<br>`src.auto_tighten_loop:AutoTightenLoop._emit_unattributed` | — |
 | **REPORT_UPDATE** ⚠️ | `src.report_issue_loop:ReportIssueLoop._emit_report_event` | — |
 | **RETROSPECTIVE_UPDATE** ⚠️ | `src.retrospective_loop:RetrospectiveLoop._publish_update` | — |
 | **REVIEW_UPDATE** ⚠️ | `src.merge_conflict_resolver:MergeConflictResolver._publish_review_status`<br>`src.phase_utils:publish_review_status`<br>`src.reviewer:ReviewRunner.fix_review_findings`<br>`src.reviewer:ReviewRunner.review` | — |

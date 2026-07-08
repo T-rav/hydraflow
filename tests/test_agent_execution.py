@@ -1368,3 +1368,343 @@ class TestTestAdequacyLoop:
             )
         assert result.passed is True
         assert result.attempts == 2
+
+
+# ---------------------------------------------------------------------------
+# Coverage-delta cross-check integration (TestCoverageDeltaIntegration)
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageDeltaIntegration:
+    """Coverage-delta cross-check wired into _run_skill for test-adequacy."""
+
+    # Minimal unified diff that adds lines 2 and 3 to src/cov_subject.py
+    _DIFF = (
+        "diff --git a/src/cov_subject.py b/src/cov_subject.py\n"
+        "--- a/src/cov_subject.py\n"
+        "+++ b/src/cov_subject.py\n"
+        "@@ -1,1 +1,3 @@\n"
+        " existing\n"
+        "+added_2\n"
+        "+added_3\n"
+    )
+
+    def _write_coverage_xml(
+        self, path: Path, source: str, covered_lines: dict[int, int]
+    ) -> None:
+        """Write a Cobertura XML fixture to *path*."""
+        lines_xml = "".join(
+            f'<line number="{ln}" hits="{hits}"/>' for ln, hits in covered_lines.items()
+        )
+        xml = (
+            '<?xml version="1.0" ?>'
+            "<coverage>"
+            f"<sources><source>{source}</source></sources>"
+            "<packages><package name='.'>"
+            "<classes>"
+            '<class name="cov_subject.py" filename="src/cov_subject.py">'
+            f"<lines>{lines_xml}</lines>"
+            "</class>"
+            "</classes>"
+            "</package></packages>"
+            "</coverage>"
+        )
+        path.write_text(xml)
+
+    def test_test_adequacy_skill_has_coverage_check_enabled(self) -> None:
+        """The built-in test-adequacy skill must have coverage_check=True."""
+        from skill_registry import BUILTIN_SKILLS
+
+        ta_skill = next(s for s in BUILTIN_SKILLS if s.name == "test-adequacy")
+        assert ta_skill.coverage_check is True
+
+    def test_other_skills_have_coverage_check_disabled(self) -> None:
+        """Non-test-adequacy skills must NOT have coverage_check=True."""
+        from skill_registry import BUILTIN_SKILLS
+
+        for skill in BUILTIN_SKILLS:
+            if skill.name != "test-adequacy":
+                assert skill.coverage_check is False, (
+                    f"{skill.name} unexpectedly has coverage_check=True"
+                )
+
+    @pytest.mark.asyncio
+    async def test_coverage_delta_overrides_llm_pass_when_uncovered_lines_found(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """When coverage reveals uncovered changed lines the skill result is failed."""
+        from execution import SimpleResult
+        from skill_registry import BUILTIN_SKILLS
+
+        config.max_test_adequacy_attempts = 1
+        self._write_coverage_xml(
+            tmp_path / "coverage.xml",
+            source=str(tmp_path),
+            # line 2 covered, line 3 NOT covered
+            covered_lines={1: 1, 2: 1, 3: 0},
+        )
+
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner, "_count_commits", new_callable=AsyncMock, return_value=1
+            ),
+            patch.object(
+                runner,
+                "_get_branch_diff",
+                new_callable=AsyncMock,
+                return_value=self._DIFF,
+            ),
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                return_value="TEST_ADEQUACY_RESULT: OK\nSUMMARY: adequate",
+            ),
+            patch.object(
+                runner._runner,
+                "run_simple",
+                new_callable=AsyncMock,
+                return_value=SimpleResult(returncode=0),
+            ),
+        ):
+            result = await runner._run_skill(
+                BUILTIN_SKILLS[3], agent_task, tmp_path, "branch", worker_id=0
+            )
+
+        assert result.passed is False
+        assert "src/cov_subject.py:3" in result.summary
+
+    @pytest.mark.asyncio
+    async def test_coverage_delta_preserves_llm_pass_when_all_lines_covered(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """When all changed lines are covered the skill result stays passed."""
+        from execution import SimpleResult
+        from skill_registry import BUILTIN_SKILLS
+
+        config.max_test_adequacy_attempts = 1
+        self._write_coverage_xml(
+            tmp_path / "coverage.xml",
+            source=str(tmp_path),
+            # lines 2 and 3 both covered
+            covered_lines={1: 1, 2: 1, 3: 1},
+        )
+
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner, "_count_commits", new_callable=AsyncMock, return_value=1
+            ),
+            patch.object(
+                runner,
+                "_get_branch_diff",
+                new_callable=AsyncMock,
+                return_value=self._DIFF,
+            ),
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                return_value="TEST_ADEQUACY_RESULT: OK\nSUMMARY: adequate",
+            ),
+            patch.object(
+                runner._runner,
+                "run_simple",
+                new_callable=AsyncMock,
+                return_value=SimpleResult(returncode=0),
+            ),
+        ):
+            result = await runner._run_skill(
+                BUILTIN_SKILLS[3], agent_task, tmp_path, "branch", worker_id=0
+            )
+
+        assert result.passed is True
+
+    @pytest.mark.asyncio
+    async def test_coverage_delta_skipped_when_coverage_check_is_false(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """Skills with coverage_check=False never invoke make coverage."""
+        from execution import SimpleResult
+        from skill_registry import BUILTIN_SKILLS
+
+        config.max_diff_sanity_attempts = 1
+        diff_sanity_skill = BUILTIN_SKILLS[0]
+        assert diff_sanity_skill.coverage_check is False
+
+        run_simple_mock = AsyncMock(return_value=SimpleResult(returncode=0))
+
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner, "_count_commits", new_callable=AsyncMock, return_value=1
+            ),
+            patch.object(
+                runner,
+                "_get_branch_diff",
+                new_callable=AsyncMock,
+                return_value="+import os\n",
+            ),
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                return_value="DIFF_SANITY_RESULT: OK\nSUMMARY: clean",
+            ),
+            patch.object(runner._runner, "run_simple", run_simple_mock),
+        ):
+            await runner._run_skill(
+                diff_sanity_skill, agent_task, tmp_path, "branch", worker_id=0
+            )
+
+        # run_simple should NOT have been called with make coverage
+        for call in run_simple_mock.call_args_list:
+            args = call.args[0] if call.args else call.kwargs.get("cmd", [])
+            assert "coverage" not in args, (
+                "make coverage was invoked for a skill with coverage_check=False"
+            )
+
+    @pytest.mark.asyncio
+    async def test_coverage_delta_skipped_when_llm_says_failed(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """Coverage check must not run when the LLM verdict is already failed."""
+        from execution import SimpleResult
+        from skill_registry import BUILTIN_SKILLS
+
+        config.max_test_adequacy_attempts = 1
+        run_simple_mock = AsyncMock(return_value=SimpleResult(returncode=0))
+
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner, "_count_commits", new_callable=AsyncMock, return_value=1
+            ),
+            patch.object(
+                runner,
+                "_get_branch_diff",
+                new_callable=AsyncMock,
+                return_value=self._DIFF,
+            ),
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                return_value="TEST_ADEQUACY_RESULT: RETRY\nSUMMARY: missing tests",
+            ),
+            patch.object(runner._runner, "run_simple", run_simple_mock),
+        ):
+            result = await runner._run_skill(
+                BUILTIN_SKILLS[3], agent_task, tmp_path, "branch", worker_id=0
+            )
+
+        assert result.passed is False
+        for call in run_simple_mock.call_args_list:
+            args = call.args[0] if call.args else call.kwargs.get("cmd", [])
+            assert "coverage" not in args
+
+    @pytest.mark.asyncio
+    async def test_coverage_delta_graceful_when_make_fails(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """When make coverage fails the LLM verdict is preserved (not overridden)."""
+        from execution import SimpleResult
+        from skill_registry import BUILTIN_SKILLS
+
+        config.max_test_adequacy_attempts = 1
+
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner, "_count_commits", new_callable=AsyncMock, return_value=1
+            ),
+            patch.object(
+                runner,
+                "_get_branch_diff",
+                new_callable=AsyncMock,
+                return_value=self._DIFF,
+            ),
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                return_value="TEST_ADEQUACY_RESULT: OK\nSUMMARY: adequate",
+            ),
+            patch.object(
+                runner._runner,
+                "run_simple",
+                new_callable=AsyncMock,
+                return_value=SimpleResult(returncode=1, stderr="make error"),
+            ),
+        ):
+            result = await runner._run_skill(
+                BUILTIN_SKILLS[3], agent_task, tmp_path, "branch", worker_id=0
+            )
+
+        # make failed, no coverage.xml, LLM verdict preserved
+        assert result.passed is True
+
+    def test_config_has_test_adequacy_coverage_timeout_secs(self, config) -> None:
+        """HydraFlowConfig must expose test_adequacy_coverage_timeout_secs."""
+        assert hasattr(config, "test_adequacy_coverage_timeout_secs")
+        assert config.test_adequacy_coverage_timeout_secs == 300
+
+    @pytest.mark.asyncio
+    async def test_coverage_delta_uses_full_diff_when_prompt_is_truncated(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """Coverage mapper must use the untruncated diff even when the LLM prompt is truncated.
+
+        Regression guard for the in-place diff truncation bug: if `full_diff` is
+        reassigned to the truncated form before reaching `_run_coverage_delta_check`,
+        changed lines in the tail of a large diff are silently dropped and the check
+        false-passes.
+        """
+        from execution import SimpleResult
+        from skill_registry import BUILTIN_SKILLS
+
+        config.max_test_adequacy_attempts = 1
+        # Truncate to a prefix that strips the hunk header and changed lines
+        config.max_review_diff_chars = 30
+
+        self._write_coverage_xml(
+            tmp_path / "coverage.xml",
+            source=str(tmp_path),
+            # only line 1 covered; lines 2 and 3 NOT covered
+            covered_lines={1: 1, 2: 0, 3: 0},
+        )
+
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner, "_count_commits", new_callable=AsyncMock, return_value=1
+            ),
+            patch.object(
+                runner,
+                "_get_branch_diff",
+                new_callable=AsyncMock,
+                return_value=self._DIFF,
+            ),
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                return_value="TEST_ADEQUACY_RESULT: OK\nSUMMARY: adequate",
+            ),
+            patch.object(
+                runner._runner,
+                "run_simple",
+                new_callable=AsyncMock,
+                return_value=SimpleResult(returncode=0),
+            ),
+        ):
+            result = await runner._run_skill(
+                BUILTIN_SKILLS[3], agent_task, tmp_path, "branch", worker_id=0
+            )
+
+        # The full diff contains lines 2 and 3 as added; even though the LLM
+        # prompt only saw the first 30 chars, the coverage check must still
+        # detect the uncovered changed lines and override the LLM pass.
+        assert result.passed is False
+        assert "src/cov_subject.py" in result.summary

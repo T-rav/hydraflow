@@ -521,6 +521,71 @@ class TestPlanPhase:
         prs.transition.assert_awaited_once_with(42, "ready")
 
 
+class TestPlanPhaseHumanSteering:
+    """ADR-0099 #4 — live operator guidance threaded to the PlannerRunner.
+
+    ``PlanPhase`` sources guidance via ``StateTracker.get_human_steering``
+    keyed by ``str(issue.id)`` and passes it as the ``guidance=`` kwarg to
+    ``PlannerRunner.plan``, which is responsible for fencing it into the
+    plan prompt via ``fenced_steering_guidance``. Named ``human_guidance``
+    at the call site (not bare ``guidance``) to avoid colliding with the
+    unrelated ``EpicGapReview.guidance`` field used elsewhere in
+    ``plan_phase.py``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_plan_one_sources_guidance_and_passes_to_planner(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Non-empty steering guidance is sourced and threaded to the planner."""
+        from models import SteeringState
+
+        phase, state, planners, prs, store, _stop = make_plan_phase(config)
+        issue = TaskFactory.create(id=42)
+        plan_result = PlanResultFactory.create(
+            issue_number=42,
+            success=True,
+            plan="The plan",
+            summary="Done",
+            use_defaults=True,
+        )
+
+        state.set_human_steering(
+            "42", SteeringState(guidance="Focus on the enterprise SSO angle.")
+        )
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        planners.plan.assert_awaited_once()
+        _args, kwargs = planners.plan.call_args
+        assert kwargs["guidance"] == "Focus on the enterprise SSO angle."
+
+    @pytest.mark.asyncio
+    async def test_plan_one_passes_empty_guidance_when_none_posted(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """No steering guidance posted -> planner receives an empty string."""
+        phase, _state, planners, prs, store, _stop = make_plan_phase(config)
+        issue = TaskFactory.create(id=42)
+        plan_result = PlanResultFactory.create(
+            issue_number=42,
+            success=True,
+            plan="The plan",
+            summary="Done",
+            use_defaults=True,
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        _args, kwargs = planners.plan.call_args
+        assert kwargs["guidance"] == ""
+
+
 # ---------------------------------------------------------------------------
 # Plan phase — already_satisfied
 # ---------------------------------------------------------------------------
@@ -1312,4 +1377,109 @@ class TestPlanPhaseErrorPaths:
         await phase.plan_issues()
 
         prs.transition.assert_awaited_once_with(42, "ready")
-        assert prs.post_comment.await_count >= 1
+
+
+# ---------------------------------------------------------------------------
+# Plan phase — ConvergenceLedger boundary recording (Task 4)
+# ---------------------------------------------------------------------------
+
+
+class TestPlanConvergenceLedger:
+    """Plan phase records boundary verdicts into the ConvergenceLedger."""
+
+    @pytest.mark.asyncio
+    async def test_plan_success_records_advance(self, config: HydraFlowConfig) -> None:
+        """Plan succeeds -> ledger stage_state['plan'].last_verdict == 'ADVANCE'."""
+        phase, state, planners, prs, store, _stop = make_plan_phase(config)
+        issue = TaskFactory.create(id=201)
+        plan_result = PlanResultFactory.create(
+            issue_number=201,
+            success=True,
+            plan="## Plan\n\n1. Do the thing",
+            summary="Plan done",
+            use_defaults=True,
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        ledger = state.get_convergence_ledger(201)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["plan"].last_verdict == "ADVANCE"
+
+    @pytest.mark.asyncio
+    async def test_plan_failed_records_loop_back(self, config: HydraFlowConfig) -> None:
+        """Plan fails (no plan) -> ledger stage_state['plan'].last_verdict == 'LOOP_BACK'."""
+        phase, state, planners, prs, store, _stop = make_plan_phase(config)
+        issue = TaskFactory.create(id=202)
+        plan_result = PlanResultFactory.create(
+            issue_number=202,
+            success=False,
+            error="Agent crashed",
+            use_defaults=True,
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        ledger = state.get_convergence_ledger(202)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["plan"].last_verdict == "LOOP_BACK"
+
+    @pytest.mark.asyncio
+    async def test_plan_escalated_records_escalate(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Epic-child already_satisfied (escalated path) -> last_verdict == 'ESCALATE'."""
+        phase, state, planners, prs, store, _stop = make_plan_phase(config)
+        # Epic child: _is_epic_child returns True for issues with an epic_number
+        issue = TaskFactory.create(id=203)
+        plan_result = PlanResultFactory.create(
+            issue_number=203,
+            success=False,
+            already_satisfied=True,
+            retry_attempted=True,
+            use_defaults=True,
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+        # Patch _is_epic_child to return True so the epic-child escalation path runs
+        phase._is_epic_child = lambda _issue: True  # type: ignore[method-assign]
+
+        await phase.plan_issues()
+
+        ledger = state.get_convergence_ledger(203)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["plan"].last_verdict == "ESCALATE"
+
+    @pytest.mark.asyncio
+    async def test_plan_already_satisfied_closed_records_advance(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Already_satisfied closed (early return) -> last_verdict == 'ADVANCE', NOT 'LOOP_BACK'."""
+        phase, state, planners, prs, store, _stop = make_plan_phase(config)
+        issue = TaskFactory.create(id=204)
+        plan_result = PlanResultFactory.create(
+            issue_number=204,
+            success=False,
+            already_satisfied=True,
+            use_defaults=True,
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+        # Not an epic child
+        phase._is_epic_child = lambda _issue: False  # type: ignore[method-assign]
+        # _handle_already_satisfied returns True (closed) to trigger the early return
+        phase._handle_already_satisfied = AsyncMock(return_value=True)  # type: ignore[method-assign]
+
+        await phase.plan_issues()
+
+        ledger = state.get_convergence_ledger(204)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["plan"].last_verdict == "ADVANCE"

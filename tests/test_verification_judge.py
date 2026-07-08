@@ -1148,6 +1148,7 @@ class TestReviewPhaseWiring:
         mock_prs.add_labels = AsyncMock()
         mock_prs.post_pr_comment = AsyncMock()
         mock_prs.submit_review = AsyncMock()
+        mock_prs.fetch_code_scanning_alerts = AsyncMock(return_value=None)
 
         mock_judge = AsyncMock()
         mock_judge.judge = AsyncMock(return_value=JudgeVerdict(issue_number=42))
@@ -1238,6 +1239,7 @@ class TestReviewPhaseWiring:
         mock_prs.add_labels = AsyncMock()
         mock_prs.post_pr_comment = AsyncMock()
         mock_prs.submit_review = AsyncMock()
+        mock_prs.fetch_code_scanning_alerts = AsyncMock(return_value=None)
 
         wt_path = config.workspace_path_for_issue(42)
         wt_path.mkdir(parents=True, exist_ok=True)

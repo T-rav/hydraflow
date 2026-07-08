@@ -580,3 +580,43 @@ def test_record_github_mutation_gh_invoked_with_text_capture(tmp_path: Path) -> 
         assert kw.get("capture_output") is True
         assert kw.get("text") is True
         assert kw.get("check", False) is False
+
+
+# ---------------------------------------------------------------------------
+# _record_create_issue: sandbox cleanup
+# ---------------------------------------------------------------------------
+
+
+def test_record_create_issue_closes_sandbox_issue_after_cassette_written(
+    tmp_path: Path,
+) -> None:
+    """_record_create_issue must close the sandbox issue it created after
+    writing the cassette so no durable open issues leak across refresh ticks."""
+    from contract_recording import _record_create_issue
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        if "issue" in argv and "create" in argv:
+            return _completed(argv=argv, stdout=_ISSUE_URL)
+        if "issue" in argv and "close" in argv:
+            return _completed(argv=argv, stdout="")
+        return _completed(argv=argv, stdout="abc1234\n")
+
+    with patch("contract_recording.subprocess.run", side_effect=fake_run):
+        result = _record_create_issue(sandbox_repo=_SANDBOX, tmp_dir=tmp_path)
+
+    assert result is not None, "cassette path must be returned"
+    assert (tmp_path / "create_issue.yaml").exists()
+
+    close_calls = [c for c in calls if "gh" in c and "issue" in c and "close" in c]
+    assert len(close_calls) == 1, (
+        f"expected exactly one 'gh issue close' call to clean up the sandbox issue, "
+        f"got {len(close_calls)}: {close_calls}"
+    )
+    assert "42" in close_calls[0], (
+        f"gh issue close must use issue number 42 parsed from the create URL, "
+        f"got argv: {close_calls[0]}"
+    )
+    assert _SANDBOX in close_calls[0], "gh issue close must target the sandbox repo"

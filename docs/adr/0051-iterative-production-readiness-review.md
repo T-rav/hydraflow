@@ -5,7 +5,8 @@
 - **Supersedes:** none
 - **Superseded by:** none
 - **Related:** [ADR-0044](0044-hydraflow-principles.md) (TDD as default workflow), [ADR-0049](0049-trust-loop-kill-switch-convention.md) (kill-switch convention), [ADR-0050](0050-auto-agent-hitl-preflight.md) (auto-agent HITL pre-flight). See also `docs/wiki/dark-factory.md` (lessons inventory).
-- **Enforced by:** `superpowers:subagent-driven-development` workflow (per-task reviews), this ADR (process documentation), `superpowers:requesting-code-review` (which dispatches the `code-reviewer` agent) skill (the fresh-eyes reviewer).
+- **Enforcement:** manual
+- **Enforced by:** `superpowers:subagent-driven-development` workflow (per-task reviews), this ADR (process documentation), `superpowers:requesting-code-review` (which dispatches the `code-reviewer` agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.
 
 ## Context
 

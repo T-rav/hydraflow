@@ -86,6 +86,7 @@ nav:
     - Module Graph: arch/generated/modules.md
     - Event Bus: arch/generated/events.md
     - ADR Cross-Reference: arch/generated/adr_xref.md
+    - ADR Conformance Map: arch/generated/adr-conformance.md
     - MockWorld Map: arch/generated/mockworld.md
     - Coverage Matrix: arch/generated/coverage_matrix.md
   - Decisions:

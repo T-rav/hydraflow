@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 7648
 source_phase: review
 created_at: 2026-05-07T13:39:00.063893+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0008
 ---
 
 # Review failed: Agent CLI authentication failed — check the provider's… (#7648)

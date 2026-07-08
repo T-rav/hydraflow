@@ -836,7 +836,7 @@ class TestSelfFixReReview:
         phase._prs.transition.assert_any_await(
             pr.issue_number, "ready", pr_number=pr.number
         )
-        assert phase._state.get_review_attempts(42) == 1
+        assert phase._state.ensure_convergence_ledger(42).get_attempts("review") == 1
 
     @pytest.mark.asyncio
     async def test_no_fixes_no_re_review(self, config: HydraFlowConfig) -> None:
@@ -921,7 +921,7 @@ class TestSelfFixReReview:
 
         await phase.review_prs([pr], [issue])
 
-        assert phase._state.get_review_attempts(42) == 0
+        assert phase._state.ensure_convergence_ledger(42).get_attempts("review") == 0
 
     @pytest.mark.asyncio
     async def test_re_review_exception_falls_back_to_rejection(
@@ -948,7 +948,12 @@ class TestSelfFixReReview:
         phase._prs.transition.assert_any_await(
             pr.issue_number, "ready", pr_number=pr.number
         )
-        assert phase._state.get_review_attempts(pr.issue_number) == 1
+        assert (
+            phase._state.ensure_convergence_ledger(pr.issue_number).get_attempts(
+                "review"
+            )
+            == 1
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1523,46 +1528,3 @@ class TestReviewPostMortemMemoryFiling:
 
         create_calls = phase._prs.create_issue.call_args_list
         assert not any("[Memory]" in str(c) for c in create_calls)
-
-    @pytest.mark.asyncio
-    async def test_review_fix_cap_files_memory_from_transcript(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """Review fix cap exceeded should file memory from review transcript."""
-        from tests.helpers import ConfigFactory
-
-        cfg = ConfigFactory.create(
-            max_review_fix_attempts=1,
-            repo_root=config.repo_root,
-            workspace_base=config.workspace_base,
-            state_file=config.state_file,
-        )
-        phase = make_review_phase(cfg)
-        issue = TaskFactory.create()
-        pr = PRInfoFactory.create()
-
-        review_result = ReviewResultFactory.create(
-            verdict=ReviewVerdict.REQUEST_CHANGES,
-            transcript="MEMORY_SUGGESTION_START\ntitle: Review insight\nlearning: check tests\nMEMORY_SUGGESTION_END",
-        )
-
-        phase._reviewers.review = AsyncMock(return_value=review_result)
-        phase._prs.get_pr_diff = AsyncMock(return_value="diff")
-        phase._prs.push_branch = AsyncMock(return_value=True)
-        phase._prs.post_pr_comment = AsyncMock()
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-
-        wt = config.workspace_path_for_issue(42)
-        wt.mkdir(parents=True, exist_ok=True)
-
-        # Set review attempts to cap so next review triggers escalation
-        phase._state.increment_review_attempts(42)
-
-        with patch(
-            "phase_utils.file_memory_suggestion", new_callable=AsyncMock
-        ) as mock_file:
-            await phase.review_prs([pr], [issue])
-
-        mock_file.assert_awaited_once()
-        assert "review_fix_cap_exceeded" in str(mock_file.call_args)

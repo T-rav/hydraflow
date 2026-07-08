@@ -7,6 +7,7 @@ success result is returned.
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -122,6 +123,8 @@ class _FakePlannerRunner(_ScriptedRunner):
         **_unused: Any,
     ) -> Any:
         _ = (worker_id, research_context)
+        if self._parent.plan_hold_seconds:
+            await asyncio.sleep(self._parent.plan_hold_seconds)
         issue_number = getattr(task, "id", getattr(task, "number", 0))
         if not self._parent._consume_budget(issue_number):
             return PlanResultFactory.create(
@@ -385,6 +388,12 @@ class FakeLLM:
         self._advisor = _FakeAdvisorRunner()
         # ADR-0063 phase-level scripted outcomes (W3a/W3b/W4/W5).
         self._phase_scripts = _FakePhaseScripts()
+        # Artificial real-time delay (seconds) _FakePlannerRunner.plan()
+        # awaits before returning. Defaults to 0.0 (no-op) — set via
+        # MockWorldSeed.plan_hold_seconds by sandbox_main.py for scenarios
+        # that need a sustained, real wall-clock "active" window (see
+        # MockWorldSeed.plan_hold_seconds docstring for why).
+        self.plan_hold_seconds: float = 0.0
 
     def script_triage(self, issue_number: int, results: list[Any]) -> None:
         self.triage_runner.add_script(

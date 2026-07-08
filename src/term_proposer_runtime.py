@@ -6,8 +6,9 @@ configured agent CLI tool (`claude`/`codex`/`gemini`) via the project's
 `wiki_compiler.WikiCompiler._call_model`.
 
 `OpenAutoPRBotPRPort` implements the `BotPRPort` Protocol by writing draft
-files to disk and delegating to `auto_pr.open_automated_pr_async` for the
-worktree → commit → push → `gh pr create` flow.
+files INTO an ephemeral worktree and delegating to
+`auto_pr.generate_and_open_pr_async` for the worktree → commit → push →
+`gh pr create` flow. ``repo_root`` is never mutated (#9539).
 
 Wired into `service_registry.build_services` (replaces the chunk-2
 placeholder clients that raised NotImplementedError on first tick).
@@ -108,8 +109,9 @@ def regenerate_ubiquitous_language_artifacts(repo_root: Path) -> list[Path]:
     those term files. Committing the term change without refreshing the views
     leaves ``make arch-check`` (run by the pre-push hook) detecting drift, which
     rejects the push and the proposer PR never lands. Regenerating here — after
-    the new term files are written under ``repo_root`` — keeps the views in sync
-    so the same commit passes the drift guard.
+    the new term files are written under ``repo_root`` (an ephemeral worktree
+    root in the bot-PR path, #9539) — keeps the views in sync so the same commit
+    passes the drift guard.
 
     Returns the absolute paths of the regenerated artifacts (for staging). When
     no terms directory exists, returns an empty list (nothing to regenerate).
@@ -147,12 +149,13 @@ def regenerate_ubiquitous_language_artifacts(repo_root: Path) -> list[Path]:
 
 
 class OpenAutoPRBotPRPort:
-    """BotPRPort adapter wrapping auto_pr.open_automated_pr_async.
+    """BotPRPort adapter wrapping auto_pr.generate_and_open_pr_async.
 
-    Writes each draft term file under repo_root, then delegates the full
-    worktree-copy → commit → push → `gh pr create` flow to the existing
-    helper. Sets `auto_merge=False` — DependabotMergeLoop handles auto-merge
-    once the PR carries `hydraflow-ul-proposed`.
+    Writes each draft term file INTO an ephemeral worktree (branched off the
+    base), then delegates the full commit → push → `gh pr create` flow to the
+    generate-in-worktree helper — ``repo_root`` is never mutated (#9539). Sets
+    `auto_merge=False` — DependabotMergeLoop handles auto-merge once the PR
+    carries `hydraflow-ul-proposed`.
     """
 
     def __init__(
@@ -175,31 +178,35 @@ class OpenAutoPRBotPRPort:
         labels: list[str],
         files: dict[str, str],
     ) -> int:
-        """Write files to disk and open a PR. Returns the PR number."""
-        from auto_pr import open_automated_pr_async  # noqa: PLC0415
+        """Generate files in a worktree and open a PR. Returns the PR number."""
+        from auto_pr import generate_and_open_pr_async  # noqa: PLC0415
 
-        written_paths: list[Path] = []
-        wrote_term_file = False
-        for rel_path, content in files.items():
-            abs_path = self._repo_root / rel_path
-            abs_path.parent.mkdir(parents=True, exist_ok=True)
-            abs_path.write_text(content, encoding="utf-8")
-            written_paths.append(abs_path)
-            if Path(rel_path).is_relative_to(_TERMS_REL_DIR):
-                wrote_term_file = True
-
+        path_specs = list(files.keys())
+        wrote_term_file = any(
+            Path(rel_path).is_relative_to(_TERMS_REL_DIR) for rel_path in files
+        )
         # Term changes make the generated ubiquitous-language views stale; the
         # pre-push arch-check drift guard rejects the push unless the refreshed
-        # views ride along in the SAME commit. Regenerate + stage them here.
+        # views ride along in the SAME commit. Stage them alongside the terms.
         if wrote_term_file:
-            written_paths.extend(
-                regenerate_ubiquitous_language_artifacts(self._repo_root)
-            )
+            path_specs.extend((_UL_GLOSSARY_REL, _UL_CONTEXT_MAP_REL))
 
-        result = await open_automated_pr_async(
+        async def _generate(worktree: Path) -> None:
+            # Write every draft file INTO the worktree (never repo_root, #9539).
+            for rel_path, content in files.items():
+                abs_path = worktree / rel_path
+                abs_path.parent.mkdir(parents=True, exist_ok=True)
+                abs_path.write_text(content, encoding="utf-8")
+            # Regenerate the term-derived ubiquitous-language views from the
+            # worktree's term files so the same commit passes the drift guard.
+            if wrote_term_file:
+                regenerate_ubiquitous_language_artifacts(worktree)
+
+        result = await generate_and_open_pr_async(
             repo_root=self._repo_root,
             branch=branch,
-            files=written_paths,
+            generate=_generate,
+            path_specs=path_specs,
             pr_title=title,
             pr_body=body,
             base=self._base,
@@ -211,7 +218,7 @@ class OpenAutoPRBotPRPort:
 
         if result.status != "opened" or result.pr_url is None:
             raise RuntimeError(
-                f"open_automated_pr_async returned status={result.status!r} "
+                f"generate_and_open_pr_async returned status={result.status!r} "
                 f"error={result.error!r}"
             )
         return self._extract_pr_number(result.pr_url)

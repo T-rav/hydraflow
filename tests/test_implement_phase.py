@@ -988,10 +988,14 @@ class TestWorkerResultMetaPersistence:
         await phase.run_batch()
 
         meta = phase._state.get_worker_result_meta(42)
-        assert meta["quality_fix_attempts"] == 2
+        assert "quality_fix_attempts" not in meta
         assert meta["pre_quality_review_attempts"] == 3
         assert meta["duration_seconds"] == 150.5
         assert meta["error"] is None
+        # quality_fix count lives in the ledger now
+        led = phase._state.get_convergence_ledger(42)
+        assert led is not None
+        assert led.stage_state["quality_fix"].attempts == 2
 
     @pytest.mark.asyncio
     async def test_worker_result_meta_includes_error(
@@ -1024,6 +1028,65 @@ class TestWorkerResultMetaPersistence:
 
         meta = phase._state.get_worker_result_meta(42)
         assert meta["error"] == "make quality failed"
+
+    @pytest.mark.asyncio
+    async def test_quality_fix_count_recorded_in_ledger(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """quality_fix_attempts should be stored in the convergence ledger."""
+        issue = TaskFactory.create(id=42)
+
+        async def agent_with_qf(
+            issue: Task,
+            wt_path: Path,
+            branch: str,
+            worker_id: int = 0,
+            review_feedback: str = "",
+            prior_failure: str = "",
+        ) -> WorkerResult:
+            return WorkerResultFactory.create(
+                issue_number=issue.id,
+                branch=branch,
+                success=True,
+                workspace_path=str(wt_path),
+                quality_fix_attempts=2,
+            )
+
+        phase, _, _ = make_implement_phase(config, [issue], agent_run=agent_with_qf)
+        await phase.run_batch()
+
+        led = phase._state.get_convergence_ledger(42)
+        assert led is not None
+        assert led.stage_state["quality_fix"].attempts == 2
+
+    @pytest.mark.asyncio
+    async def test_worker_result_meta_no_longer_has_quality_fix_attempts(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """WorkerResultMeta should NOT contain quality_fix_attempts after migration."""
+        issue = TaskFactory.create(id=42)
+
+        async def agent_with_qf(
+            issue: Task,
+            wt_path: Path,
+            branch: str,
+            worker_id: int = 0,
+            review_feedback: str = "",
+            prior_failure: str = "",
+        ) -> WorkerResult:
+            return WorkerResultFactory.create(
+                issue_number=issue.id,
+                branch=branch,
+                success=True,
+                workspace_path=str(wt_path),
+                quality_fix_attempts=2,
+            )
+
+        phase, _, _ = make_implement_phase(config, [issue], agent_run=agent_with_qf)
+        await phase.run_batch()
+
+        meta = phase._state.get_worker_result_meta(42)
+        assert "quality_fix_attempts" not in meta
 
 
 # ---------------------------------------------------------------------------
@@ -1457,8 +1520,12 @@ class TestCommitsPersistedInMeta:
 
         meta = phase._state.get_worker_result_meta(42)
         assert meta["commits"] == 3
-        assert meta["quality_fix_attempts"] == 1
+        assert "quality_fix_attempts" not in meta
         assert meta["duration_seconds"] == 90.0
+        # quality_fix count lives in the ledger now
+        led = phase._state.get_convergence_ledger(42)
+        assert led is not None
+        assert led.stage_state["quality_fix"].attempts == 1
 
 
 # ---------------------------------------------------------------------------

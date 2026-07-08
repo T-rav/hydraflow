@@ -9,8 +9,10 @@ Tick behavior:
   3. Diff against src/assets/model_pricing.json. Bounds-guard rejects
      suspicious price moves.
   4. If no changes: log "no drift", return {drift: False}.
-  5. Else: write proposed file, open/update PR via auto_pr.open_automated_pr_async
-     on fixed branch `pricing-refresh-auto`.
+  5. Else: open/update PR via auto_pr.generate_and_open_pr_async on fixed
+     branch `pricing-refresh-auto`. The proposed pricing file is written
+     INTO the ephemeral worktree by the generate callback — repo_root is
+     never mutated (#9539).
   6. Bounds violations / parse errors / schema errors → open one
      `[pricing-refresh] ...` hydraflow-find issue (deduped by title prefix).
   7. Network errors → log + retry next tick (no issue spam).
@@ -124,26 +126,15 @@ class PricingRefreshLoop(BaseBackgroundLoop):
         if not diff.updated and not diff.added:
             return {"drift": False}
 
-        # Atomic write+PR: capture original bytes so we can revert if the
-        # PR-opening step fails. Without this, a successful file write
-        # followed by an auto_pr failure would leave the worktree mutated
-        # but no PR open — next tick reads the mutation as "local", sees
-        # no diff vs upstream, and never proposes the change again.
-        pricing_path = self._repo_root / "src" / "assets" / "model_pricing.json"
-        original_bytes = pricing_path.read_bytes()
-        self._apply_diff_to_pricing_file(diff)
-
-        try:
-            pr_url = await self._open_or_update_refresh_pr(diff)
-        except Exception:
-            pricing_path.write_bytes(original_bytes)
-            raise
+        # Generate-in-worktree (#9539): the proposed pricing file is written
+        # INTO the ephemeral worktree by the generate callback inside
+        # _open_or_update_refresh_pr — repo_root is never mutated, so there is
+        # nothing to capture-and-revert here.
+        pr_url = await self._open_or_update_refresh_pr(diff)
 
         if pr_url is None:
             # auto_pr returned a non-success status (logged inside
-            # _open_or_update_refresh_pr). Revert so the file is consistent
-            # with what landed on the remote.
-            pricing_path.write_bytes(original_bytes)
+            # _open_or_update_refresh_pr). repo_root was untouched.
             return {
                 "drift": True,
                 "updated": len(diff.updated),
@@ -185,9 +176,15 @@ class PricingRefreshLoop(BaseBackgroundLoop):
             return {}
         return models
 
-    def _apply_diff_to_pricing_file(self, diff: PricingDiff) -> None:
-        """Merge diff into the on-disk pricing file. Bumps updated_at."""
-        path = self._repo_root / "src" / "assets" / "model_pricing.json"
+    def _apply_diff_to_pricing_file(self, diff: PricingDiff, root: Path) -> None:
+        """Merge diff into the pricing file under ``root``. Bumps updated_at.
+
+        ``root`` is the directory the file is written under — for the
+        generate-in-worktree flow (#9539) this is the ephemeral worktree, so
+        ``repo_root`` is never mutated. ``_read_local_models`` still reads the
+        baseline from ``self._repo_root`` for the diff computation.
+        """
+        path = root / "src" / "assets" / "model_pricing.json"
         data = json.loads(path.read_text(encoding="utf-8"))
         models = data.setdefault("models", {})
 
@@ -206,18 +203,23 @@ class PricingRefreshLoop(BaseBackgroundLoop):
 
     async def _open_or_update_refresh_pr(self, diff: PricingDiff) -> str | None:
         # Lazy import to avoid a top-level dependency cycle.
-        from auto_pr import open_automated_pr_async  # noqa: PLC0415
+        from auto_pr import generate_and_open_pr_async  # noqa: PLC0415
 
         today = datetime.now(UTC).strftime("%Y-%m-%d")
         pr_title = f"{_PR_TITLE_PREFIX} — {today}"
         pr_body = self._build_pr_body(diff)
 
-        files_to_commit = [self._repo_root / "src" / "assets" / "model_pricing.json"]
+        async def _generate(worktree: Path) -> None:
+            # Write the proposed pricing file INTO the worktree (off the base
+            # branch) — never repo_root (#9539). _apply_diff_to_pricing_file is
+            # sync JSON IO, so run it in a thread.
+            await asyncio.to_thread(self._apply_diff_to_pricing_file, diff, worktree)
 
-        result = await open_automated_pr_async(
+        result = await generate_and_open_pr_async(
             repo_root=self._repo_root,
             branch=_REGEN_BRANCH,
-            files=files_to_commit,
+            generate=_generate,
+            path_specs=["src/assets/model_pricing.json"],
             pr_title=pr_title,
             pr_body=pr_body,
             # Target the active integration branch (staging when ADR-0042 is

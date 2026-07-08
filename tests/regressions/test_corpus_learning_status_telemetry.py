@@ -121,7 +121,6 @@ def test_do_work_returns_ok_status_when_cases_are_filed(
         readme="Repro.",
     )
     loop._validate_case = lambda c: ValidationResult(ok=True)  # type: ignore[method-assign]
-    loop._materialize_case_on_disk = lambda c, r: []  # type: ignore[method-assign]
 
     async def fake_open(**kwargs: object) -> object:  # noqa: ARG001
         return _AutoPrResultStub(
@@ -129,9 +128,9 @@ def test_do_work_returns_ok_status_when_cases_are_filed(
             pr_url="https://github.com/hydra/hydraflow/pull/999",
         )
 
-    import corpus_learning_loop as mod
+    import auto_pr
 
-    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)  # type: ignore[attr-defined]
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_open)
 
     result = asyncio.run(loop._do_work())
 

@@ -395,6 +395,12 @@ class ConfigFactory:
         # actually run must pass `sandbox_failure_fixer_enabled=True` to
         # `_make_loop`/`make_bg_loop_deps`.
         sandbox_failure_fixer_enabled: bool = False,
+        disturbance_dampener_interval_seconds: int = 3600,
+        # Mirrors config.py's dark-by-default static config. Scenarios that
+        # exercise the burn-down path must pass
+        # `disturbance_dampener_enabled=True` explicitly.
+        disturbance_dampener_enabled: bool = False,
+        disturbance_dampener_max_prs_per_tick: int = 1,
         auto_agent_preflight_interval: int = 120,
         auto_agent_daily_budget_usd: float | None = None,
         auto_agent_cost_cap_usd: float | None = None,
@@ -407,6 +413,9 @@ class ConfigFactory:
         ),
         auto_agent_preflight_enabled: bool = True,
         implement_two_stage_review_enabled: bool = True,
+        fitness_scorecard_interval: int = 86400,
+        fitness_window_days: int = 30,
+        fitness_min_samples: int = 20,
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -636,6 +645,9 @@ class ConfigFactory:
                 security_patch_severity_threshold=security_patch_severity_threshold,
                 sandbox_failure_fixer_interval=sandbox_failure_fixer_interval,
                 sandbox_failure_fixer_enabled=sandbox_failure_fixer_enabled,
+                disturbance_dampener_interval_seconds=disturbance_dampener_interval_seconds,
+                disturbance_dampener_enabled=disturbance_dampener_enabled,
+                disturbance_dampener_max_prs_per_tick=disturbance_dampener_max_prs_per_tick,
                 auto_agent_preflight_interval=auto_agent_preflight_interval,
                 auto_agent_daily_budget_usd=auto_agent_daily_budget_usd,
                 auto_agent_cost_cap_usd=auto_agent_cost_cap_usd,
@@ -647,6 +659,9 @@ class ConfigFactory:
                 auto_agent_persona=auto_agent_persona,
                 auto_agent_preflight_enabled=auto_agent_preflight_enabled,
                 implement_two_stage_review_enabled=implement_two_stage_review_enabled,
+                fitness_scorecard_interval=fitness_scorecard_interval,
+                fitness_window_days=fitness_window_days,
+                fitness_min_samples=fitness_min_samples,
             )
 
 
@@ -1719,6 +1734,13 @@ def make_review_phase(
 
     _no_fix = _RR(pr_number=0, issue_number=0, fixes_made=False)
     phase._reviewers.fix_review_findings = AsyncMock(return_value=_no_fix)
+
+    # The convergence gate runs on every APPROVE; the deterministic check
+    # blocks on truthy code-scanning alert objects from an unset AsyncMock.
+    # Explicitly return None (no alerts) so the gate's approve-det is GREEN.
+    # This applies regardless of default_mocks — every test that reaches
+    # an APPROVE verdict needs the gate's det check to pass.
+    phase._prs.fetch_code_scanning_alerts = AsyncMock(return_value=None)
 
     if default_mocks:
         from tests.conftest import ReviewResultFactory

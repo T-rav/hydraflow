@@ -44,7 +44,7 @@ class TestPRReviewPreFlightSkippedTrivial:
         # the call_count assertion below will catch the leak.
         world._llm.script_advisor(
             30,
-            "post_verify",
+            "post_verify:correctness",
             [
                 json.dumps(
                     {
@@ -64,4 +64,4 @@ class TestPRReviewPreFlightSkippedTrivial:
         # adapter is never called → call counter stays at 0.
         assert world._llm.advisor_call_count_for("pre_flight") == 0
         # Post-verify still runs exactly once on the APPROVE verdict.
-        assert world._llm.advisor_call_count_for("post_verify") == 1
+        assert world._llm.advisor_call_count_for("post_verify:correctness") == 1

@@ -3,7 +3,7 @@
 Structural assertions:
 - At least 41 loop rows (baseline was 41; new loops added after the audit
   will push the count higher as the generator tracks live source).
-- Exactly 9 port rows (stable set of Port Protocols).
+- Exactly 10 port rows (stable set of Port Protocols).
 - Every non-header, non-separator table cell follows the ✅/⚠️/❌/N/A vocabulary.
 - Counts reconcile between the generator and the live extractors.
 - Section 3 is emitted as a cross-reference note (not regenerable prose).
@@ -89,12 +89,12 @@ def test_loop_row_count_matches_extractor(
     )
 
 
-def test_port_row_count_is_nine(matrix_md: str) -> None:
-    """Generator emits exactly 9 port rows."""
+def test_port_row_count_is_ten(matrix_md: str) -> None:
+    """Generator emits exactly 10 port rows."""
     port_rows = [
         line for line in matrix_md.splitlines() if re.match(r"^\| `\w+Port`", line)
     ]
-    assert len(port_rows) == 9, f"Expected 9 port rows, got {len(port_rows)}"
+    assert len(port_rows) == 10, f"Expected 10 port rows, got {len(port_rows)}"
 
 
 def test_port_row_count_matches_extractor(

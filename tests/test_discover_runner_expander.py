@@ -97,7 +97,9 @@ def _make_runner(
 
     runner._execute = AsyncMock(side_effect=_fake_execute)  # type: ignore[assignment]
     runner._build_command = lambda _w=None: ["claude"]  # type: ignore[assignment]
-    runner._build_prompt = lambda t: f"BASE PROMPT for #{t.id}"  # type: ignore[assignment]
+    runner._build_prompt = (  # type: ignore[assignment]
+        lambda t, **kw: f"BASE PROMPT for #{t.id}"
+    )
     runner._save_transcript = lambda *a, **k: None  # type: ignore[assignment]
     runner._inject_memory = AsyncMock(return_value="")  # type: ignore[assignment]
     runner._extract_result = lambda tx, n: DiscoverResult(  # type: ignore[assignment]

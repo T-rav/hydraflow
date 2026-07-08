@@ -73,6 +73,7 @@ def test_emit_writes_all_artifacts(populated_repo: Path):
         "coverage_matrix.md",
         "ubiquitous-language.md",
         "ubiquitous-language-context-map.md",
+        "adr-conformance.md",
     }
     assert {p.name for p in out.iterdir() if p.suffix == ".md"} == expected
     assert (out.parent / ".meta.json").exists()
