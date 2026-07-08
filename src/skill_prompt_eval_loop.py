@@ -22,10 +22,12 @@ import logging
 import math
 import os
 import random
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
+from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
 
@@ -40,12 +42,26 @@ logger = logging.getLogger("hydraflow.skill_prompt_eval_loop")
 _MAX_ATTEMPTS = 3
 _WEAK_SAMPLE_RATE = 0.10
 
-# Hard caps on subprocess reads. A wedged child must not hang the loop cycle
+# Marker label on the HITL escalation issue. Single-sourced so the filing
+# path (`_file_escalation`) and the reconciler can never drift apart — no
+# config knob exists for this label (unlike e.g. fake_coverage_stuck_label).
+_STUCK_LABEL = "skill-prompt-stuck"
+
+# Parses ``_file_escalation`` titles back to the ``case_id`` subject.
+_ESCALATION_TITLE_RE = re.compile(r"^HITL: skill prompt drift (\S+) unresolved after ")
+
+
+def _escalation_subject(title: str) -> str | None:
+    m = _ESCALATION_TITLE_RE.match(title)
+    return m.group(1) if m else None
+
+
+# Hard cap on the subprocess read. A wedged child must not hang the loop cycle
 # forever and freeze its heartbeat — the #9410 silent-stall failure class
 # (#9454 / #9508). ``make trust-adversarial`` drives an LLM eval harness so it
-# gets a generous bound; the ``gh`` reconcile read gets the standard one.
+# gets a generous bound. (The former ``gh`` reconcile read now goes through
+# the PRPort via the shared ``EscalationReconciler``.)
 _ADVERSARIAL_TIMEOUT_SECONDS = 3600
-_GH_TIMEOUT_SECONDS = 120
 
 
 async def _communicate_bounded(
@@ -87,6 +103,14 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         self._state = state
         self._pr = pr_manager
         self._dedup = dedup
+        self._escalations = EscalationReconciler(
+            prs=pr_manager,
+            dedup=dedup,
+            key_prefix="skill_prompt_eval",
+            stuck_label=_STUCK_LABEL,
+            clear_attempts=state.clear_skill_prompt_attempts,
+            subject_from_title=_escalation_subject,
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.skill_prompt_eval_interval
@@ -199,58 +223,18 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             f"_Spec §3.2: closing this issue clears the dedup key._"
         )
         return await self._pr.create_issue(
-            title, body, ["hitl-escalation", "skill-prompt-stuck"]
+            title, body, ["hitl-escalation", _STUCK_LABEL]
         )
 
     async def _reconcile_closed_escalations(self) -> None:
-        """Clear dedup keys for closed `skill-prompt-stuck` escalations."""
-        cmd = [
-            "gh",
-            "issue",
-            "list",
-            "--repo",
-            self._config.repo,
-            "--state",
-            "closed",
-            "--label",
-            "hitl-escalation",
-            "--label",
-            "skill-prompt-stuck",
-            "--author",
-            "@me",
-            "--limit",
-            "100",
-            "--json",
-            "title",
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, _ = await _communicate_bounded(proc, timeout=_GH_TIMEOUT_SECONDS)
-        except TimeoutError:
-            return
-        if proc.returncode != 0:
-            return
-        try:
-            closed = json.loads(stdout.decode() or "[]")
-        except json.JSONDecodeError:
-            return
-        current = self._dedup.get()
-        keep = set(current)
-        for issue in closed:
-            title = issue.get("title", "")
-            for key in list(keep):
-                if (
-                    key.startswith("skill_prompt_eval:")
-                    and key.split(":", 1)[1] in title
-                ):
-                    keep.discard(key)
-                    self._state.clear_skill_prompt_attempts(key.split(":", 1)[1])
-        if keep != current:
-            self._dedup.set_all(keep)
+        """Clear dedup keys for closed `skill-prompt-stuck` escalations.
+
+        Delegates to the shared :class:`EscalationReconciler` (PRPort-based;
+        replaced the raw ``gh issue list`` subprocess). Subjects are parsed
+        from the escalation title shape
+        ``"HITL: skill prompt drift <case_id> unresolved after N"``.
+        """
+        await self._escalations.reconcile_closed()
 
     def _sample_learning_cases(
         self, cases: list[dict[str, Any]], seed: int = 0
@@ -283,7 +267,8 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         # harness ran more cases than configured. Sample deterministically
         # using the per-tick seed.
         cap = self._config.skill_prompt_eval_max_corpus_cases
-        if len(cases) > cap:
+        capped = len(cases) > cap
+        if capped:
             logger.warning(
                 "skill-prompt-eval: corpus has %d cases, capping to %d",
                 len(cases),
@@ -356,12 +341,27 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                 dedup.add(key)
                 self._dedup.set_all(dedup)
 
+        # Open-escalation re-verify: drift fixed by a later PR — or a case
+        # retired from the corpus — auto-closes its stuck escalation instead
+        # of waiting for a human (#9618 class). Runs only on a COMPLETED
+        # full-corpus run: a failed `make trust-adversarial` yields no cases
+        # and early-returns above, and a capped tick only *sampled* the
+        # corpus (an escalated case absent from the sample must not read as
+        # "recovered") — pass None so the pass is skipped.
+        active_subjects = (
+            None
+            if capped
+            else {case_id for case_id, status in current.items() if status != "PASS"}
+        )
+        autoclosed = await self._escalations.reconcile_open(active_subjects)
+
         self._emit_trace(t0, cases_seen=len(cases))
         return {
             "status": "ok",
             "filed": filed,
             "escalated": escalated,
             "resolved": resolved,
+            "autoclosed": autoclosed,
             "weak_cases_flagged": weak_flagged,
             "cases_seen": len(cases),
         }

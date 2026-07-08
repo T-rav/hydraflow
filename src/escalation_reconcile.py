@@ -15,15 +15,22 @@ per-subject attempt counter. Two lifecycle paths need reconciling:
   key + attempt counter are cleared so a genuine re-occurrence escalates
   fresh.
 
+Subjects are parsed FROM ISSUE TITLES via the loop-supplied
+``subject_from_title`` — never discovered from dedup keys. Recovery paths
+(e.g. fake_coverage's ``_clear_rollup_state``) erase the dedup key on the
+very tick the gap disappears; key-driven discovery would orphan the open
+escalation forever.
+
 Safety properties:
 
 - ``reconcile_open`` requires the tick's detection to have COMPLETED —
   callers pass ``active_subjects=None`` on failed/partial scans, which
   skips the pass entirely. Closing on incomplete data would kill real
   escalations and reset their attempt budgets (escalation churn).
-- Close-then-clear: state is only cleared when an open escalation was
-  actually closed. Some loops share the dedup store with first-pass rollup
-  dedup; clearing without a close could re-file those.
+- Close-then-clear: dedup/attempt state resets only after an actual
+  successful close; a failed close leaves everything for the next tick.
+- Unparseable titles (operator-created issues carrying the label) are
+  left untouched.
 - Port errors are swallowed (skip, retry next tick) — reconciliation is
   hygiene, never worth crashing a work cycle.
 """
@@ -43,12 +50,11 @@ logger = logging.getLogger("hydraflow.escalation_reconcile")
 
 
 class EscalationReconciler:
-    """Closed + open escalation reconciliation against a loop's dedup state.
+    """Closed + open escalation reconciliation for one trust loop.
 
-    ``subject`` is everything after the first ``:`` in a dedup key —
-    matched against escalation titles by substring, mirroring the historic
-    per-loop implementations. Loops whose subjects can prefix-collide
-    should pass a stricter ``subject_in_title``.
+    ``subject_from_title`` parses the loop's escalation-title format back
+    to the subject (the part after ``{key_prefix}:`` in dedup keys);
+    returning ``None`` marks a title as not-ours (skipped).
     """
 
     def __init__(
@@ -59,24 +65,17 @@ class EscalationReconciler:
         key_prefix: str,
         stuck_label: str,
         clear_attempts: Callable[[str], None],
-        subject_in_title: Callable[[str, str], bool] | None = None,
+        subject_from_title: Callable[[str], str | None],
     ) -> None:
         self._prs = prs
         self._dedup = dedup
-        self._key_prefix = f"{key_prefix}:"
+        self._key_prefix = key_prefix
         self._stuck_label = stuck_label
         self._clear_attempts = clear_attempts
-        self._subject_in_title = subject_in_title or (
-            lambda subject, title: subject in title
-        )
+        self._subject_from_title = subject_from_title
 
-    def _subjects(self) -> dict[str, str]:
-        """Map subject → full dedup key for keys owned by this loop."""
-        return {
-            key.split(":", 1)[1]: key
-            for key in self._dedup.get()
-            if key.startswith(self._key_prefix)
-        }
+    def _key(self, subject: str) -> str:
+        return f"{self._key_prefix}:{subject}"
 
     async def reconcile_closed(self) -> None:
         """Drop dedup keys + counters for human-closed escalations."""
@@ -91,17 +90,16 @@ class EscalationReconciler:
                 exc_info=True,
             )
             return
-        subjects = self._subjects()
-        if not subjects:
-            return
         keys = self._dedup.get()
         keep = set(keys)
         for issue in closed:
-            title = issue.get("title", "")
-            for subject, key in subjects.items():
-                if key in keep and self._subject_in_title(subject, title):
-                    keep.discard(key)
-                    self._clear_attempts(subject)
+            subject = self._subject_from_title(issue.get("title", ""))
+            if subject is None:
+                continue
+            key = self._key(subject)
+            if key in keep:
+                keep.discard(key)
+                self._clear_attempts(subject)
         if keep != keys:
             self._dedup.set_all(keep)
 
@@ -114,10 +112,6 @@ class EscalationReconciler:
         """
         if active_subjects is None:
             return 0
-        subjects = self._subjects()
-        stale = {s: k for s, k in subjects.items() if s not in active_subjects}
-        if not stale:
-            return 0
         try:
             open_escalations = await self._prs.list_issues_by_label(self._stuck_label)
         except Exception:  # noqa: BLE001
@@ -129,47 +123,39 @@ class EscalationReconciler:
             return 0
         closed_count = 0
         keys = self._dedup.get()
-        for subject, key in stale.items():
-            matching = [
-                issue
-                for issue in open_escalations
-                if self._subject_in_title(subject, issue.get("title", ""))
-            ]
-            if not matching:
+        for issue in open_escalations:
+            title = issue.get("title", "")
+            number = issue.get("number")
+            subject = self._subject_from_title(title)
+            if subject is None or not number:
                 continue
-            subject_closed = 0
-            for issue in matching:
-                number = issue.get("number")
-                if not number:
-                    continue
-                try:
-                    await self._prs.post_comment(
-                        number,
-                        f"`{subject}` is no longer detected at HEAD — the gap "
-                        f"was fixed by a later change or was a false "
-                        f"positive. Auto-closing; the detector re-escalates "
-                        f"fresh if it recurs.",
-                    )
-                    await self._prs.close_issue(number)
-                except Exception:  # noqa: BLE001
-                    logger.warning(
-                        "reconcile_open: failed to close escalation #%s",
-                        number,
-                        exc_info=True,
-                    )
-                    continue
-                subject_closed += 1
-                logger.info(
-                    "Auto-closed stale escalation #%s (%s no longer detected)",
+            if subject in active_subjects:
+                continue
+            try:
+                await self._prs.post_comment(
                     number,
-                    subject,
+                    f"`{subject}` is no longer detected at HEAD — the gap "
+                    f"was fixed by a later change or was a false positive. "
+                    f"Auto-closing; the detector re-escalates fresh if it "
+                    f"recurs.",
                 )
-            if subject_closed:
-                # Close-then-clear: state resets only after an actual close;
-                # a failed close leaves key + counter for the next tick.
-                closed_count += subject_closed
-                keys = keys - {key}
-                self._clear_attempts(subject)
+                await self._prs.close_issue(number)
+            except Exception:  # noqa: BLE001
+                # Close-then-clear: leave key + counter for the next tick.
+                logger.warning(
+                    "reconcile_open: failed to close escalation #%s",
+                    number,
+                    exc_info=True,
+                )
+                continue
+            closed_count += 1
+            keys = keys - {self._key(subject)}
+            self._clear_attempts(subject)
+            logger.info(
+                "Auto-closed stale escalation #%s (%s no longer detected)",
+                number,
+                subject,
+            )
         if closed_count:
             self._dedup.set_all(keys)
         return closed_count
