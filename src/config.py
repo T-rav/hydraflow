@@ -261,6 +261,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_SANDBOX_FAILURE_FIXER_INTERVAL",
         3600,
     ),
+    ("detector_calibration_interval", "HYDRAFLOW_DETECTOR_CALIBRATION_INTERVAL", 3600),
     ("auto_agent_preflight_interval", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_INTERVAL", 120),
     ("auto_agent_max_attempts", "HYDRAFLOW_AUTO_AGENT_MAX_ATTEMPTS", 3),
     ("flake_tracker_interval", "HYDRAFLOW_FLAKE_TRACKER_INTERVAL", 14400),
@@ -458,6 +459,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_SANDBOX_FAILURE_FIXER_ENABLED",
         False,
     ),
+    ("detector_calibration_enabled", "HYDRAFLOW_DETECTOR_CALIBRATION_ENABLED", True),
     ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
     (
         "implement_two_stage_review_enabled",
@@ -2877,6 +2879,16 @@ class HydraFlowConfig(BaseModel):
         ge=60,
         le=86400,
         description="Seconds between SandboxFailureFixerLoop cycles (default 1h).",
+    )
+    detector_calibration_enabled: bool = Field(
+        default=True,
+        description="UI kill-switch for DetectorCalibrationLoop (ADR-0049).",
+    )
+    detector_calibration_interval: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+        description="Seconds between DetectorCalibrationLoop cycles (default 1h).",
     )
     auto_agent_preflight_enabled: bool = Field(
         default=True,

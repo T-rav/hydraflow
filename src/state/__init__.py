@@ -30,6 +30,7 @@ from ._contract_refresh import ContractRefreshStateMixin
 from ._convergence import ConvergenceStateMixin
 from ._corpus_learning import CorpusLearningStateMixin
 from ._dependabot_merge import DependabotMergeStateMixin
+from ._detector_calibration import DetectorCalibrationStateMixin
 from ._diagnostic import DiagnosticStateMixin
 from ._disturbance import DisturbanceStateMixin
 from ._driver import DriverStateMixin
@@ -107,6 +108,7 @@ class StateTracker(
     TrustFleetSanityStateMixin,
     ContractRefreshStateMixin,
     AutoAgentStateMixin,
+    DetectorCalibrationStateMixin,
     SandboxFailureFixerStateMixin,
     AdrAuditStateMixin,
     AdversarialStateMixin,

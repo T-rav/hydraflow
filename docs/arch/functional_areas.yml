@@ -165,6 +165,7 @@ areas:
       before escalating to the same HITL queue Auto-Agent consumes.
     loops:
       - AutoAgentPreflightLoop
+      - DetectorCalibrationLoop
       - DisturbanceDampenerLoop
       - HumanSteeringLoop
       - SandboxFailureFixerLoop

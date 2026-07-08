@@ -158,6 +158,12 @@ _bg_worker_defs = [
         "Scans per-repo wikis for citations whose source code has moved or vanished.",
     ),
     (
+        "detector_calibration",
+        "Detector Calibration",
+        "Mines closed escalations for repeat-offender subjects — churn means "
+        "the detector is miscalibrated, not the code.",
+    ),
+    (
         "trust_fleet_sanity",
         "Trust Fleet Sanity",
         "Meta-observer — watches the 9 trust loops for stalls, escalation spam, dedup growth, errors, cost spikes.",
