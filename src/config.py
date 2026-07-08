@@ -4026,8 +4026,15 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
             )
             raise ValueError(msg)
         object.__setattr__(config, tool_field, tool)
+        # Register as explicitly-set: object.__setattr__ bypasses Pydantic's
+        # fields-set tracking, so without this the group cascade in
+        # _apply_profile_overrides treats the field as untouched and — when
+        # the env value equals the field default — silently overwrites the
+        # operator's per-role choice (#9717).
+        config.__pydantic_fields_set__.add(tool_field)
         if model:  # empty model only for "inherit"
             object.__setattr__(config, model_field, model)
+            config.__pydantic_fields_set__.add(model_field)
 
     # Data-driven env var overrides (Literal-typed fields)
     for field, env_key in _ENV_LITERAL_OVERRIDES:
