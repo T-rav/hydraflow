@@ -169,8 +169,13 @@ Run through this checklist before your final commit:
         prior_failure: str = "",
         bead_mapping: dict[str, str] | None = None,
         human_guidance: str = "",
+        attempt_number: int = 0,
     ) -> WorkerResult:
         """Run the implementation agent for *task*.
+
+        ``attempt_number`` is the 1-based issue attempt this run represents
+        (0 = unknown); on cycling retries it feeds the diverse-retry
+        directive in the prior-failure prompt section.
 
         Returns a :class:`WorkerResult` with success/failure info.
         """
@@ -202,6 +207,7 @@ Run through this checklist before your final commit:
                 prior_failure=prior_failure,
                 bead_mapping=bead_mapping,
                 human_guidance=human_guidance,
+                attempt_number=attempt_number,
             )
             transcript = await self._execute(
                 cmd,
@@ -579,6 +585,7 @@ Run through this checklist before your final commit:
         prior_failure: str = "",
         bead_mapping: dict[str, str] | None = None,
         human_guidance: str = "",
+        attempt_number: int = 0,
     ) -> tuple[str, dict[str, object]]:
         """Build the implementation prompt and pruning stats."""
         builder = PromptBuilder()
@@ -644,11 +651,27 @@ Run through this checklist before your final commit:
                 label="Prior failure",
             )
             builder.record_history("Prior failure", raw_prior_failure, prior_failure)
+            # Diverse-retry: the attempt budget is 3 near-identical tries
+            # against the same wall unless the retry is told to pivot. The
+            # directive rides the prior-failure section only — review-feedback
+            # retries (which suppress prior_failure) keep their own framing.
+            attempt_line = (
+                f"This is attempt {attempt_number} of "
+                f"{self._config.max_issue_attempts}; the budget exhausts "
+                f"after that and a human is paged. "
+                if attempt_number >= 1
+                else ""
+            )
             prior_failure_section = (
                 f"\n\n## Prior Attempt Failure\n\n"
                 f"Your previous implementation attempt failed with the following error. "
                 f"Avoid repeating the same mistake:\n\n"
-                f"```\n{prior_failure}\n```"
+                f"```\n{prior_failure}\n```\n\n"
+                f"{attempt_line}"
+                f"Do NOT retry the same approach: first diagnose why the "
+                f"previous attempt failed, then take a materially different "
+                f"strategy — a different design, different files, or a "
+                f"different diagnosis of the root cause."
             )
 
         comments_section = ""
