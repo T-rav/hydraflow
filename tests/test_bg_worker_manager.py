@@ -266,6 +266,74 @@ class TestRestoreMethods:
         assert manager._known_worker_state_names() == {"x", "y"}
 
 
+class TestRestart:
+    @pytest.mark.asyncio
+    async def test_restart_without_cb_returns_false(
+        self, manager: BGWorkerManager
+    ) -> None:
+        assert await manager.restart("workspace_gc") is False
+
+    @pytest.mark.asyncio
+    async def test_restart_delegates_to_cb(self, manager: BGWorkerManager) -> None:
+        calls: list[str] = []
+
+        async def cb(name: str) -> bool:
+            calls.append(name)
+            return True
+
+        manager.set_restart_cb(cb)
+        assert await manager.restart("workspace_gc") is True
+        assert calls == ["workspace_gc"]
+
+    @pytest.mark.asyncio
+    async def test_restart_propagates_cb_false(self, manager: BGWorkerManager) -> None:
+        async def cb(name: str) -> bool:  # noqa: ARG001
+            return False
+
+        manager.set_restart_cb(cb)
+        assert await manager.restart("unknown_loop") is False
+
+
+class TestRegisteredLoopNames:
+    def test_returns_registry_keys(self, config: HydraFlowConfig, state: Any) -> None:
+        mgr = BGWorkerManager(config, state, {"a": MagicMock(), "b": MagicMock()})
+        assert mgr.registered_loop_names() == {"a", "b"}
+
+    def test_empty_registry(self, manager: BGWorkerManager) -> None:
+        assert manager.registered_loop_names() == set()
+
+
+class TestRunStartedAt:
+    def test_delegates_to_registered_loop(
+        self, config: HydraFlowConfig, state: Any
+    ) -> None:
+        from datetime import UTC, datetime
+
+        stamp = datetime(2026, 7, 7, 12, 0, 0, tzinfo=UTC)
+        fake_loop = MagicMock()
+        fake_loop._run_started_at = stamp
+        mgr = BGWorkerManager(config, state, {"myloop": fake_loop})
+        assert mgr.run_started_at("myloop") == stamp
+
+    def test_unknown_name_returns_none(self, manager: BGWorkerManager) -> None:
+        assert manager.run_started_at("nope") is None
+
+
+class TestCycleTimeout:
+    def test_delegates_to_registered_loop(
+        self, config: HydraFlowConfig, state: Any
+    ) -> None:
+        fake_loop = MagicMock()
+        fake_loop._cycle_timeout_seconds.return_value = 1234
+        mgr = BGWorkerManager(config, state, {"myloop": fake_loop})
+        assert mgr.cycle_timeout("myloop") == 1234
+
+    def test_unknown_name_uses_watchdog_default(
+        self, manager: BGWorkerManager, config: HydraFlowConfig
+    ) -> None:
+        assert manager.cycle_timeout("nope") == config.loop_watchdog_default_seconds
+
+
 class TestClearInterval:
     def test_removes_override_and_persists(self, manager: BGWorkerManager) -> None:
         manager.set_interval("memory_sync", 99)

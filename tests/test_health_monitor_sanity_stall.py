@@ -27,6 +27,10 @@ def hm_env(tmp_path: Path):
     state.get_worker_heartbeats.return_value = {}
     bg_workers = MagicMock()
     bg_workers.worker_enabled = {"trust_fleet_sanity": True}
+    bg_workers.run_started_at.return_value = None
+    # Default: restart verb unavailable (unwired cb) — the dead-man-switch
+    # falls through to filing immediately, preserving pre-restart behavior.
+    bg_workers.restart = AsyncMock(return_value=False)
     prs = AsyncMock()
     prs.create_issue = AsyncMock(return_value=17)
     prs.list_issues_by_label = AsyncMock(return_value=[])
@@ -223,3 +227,173 @@ async def test_recovery_closes_open_stall_issue(hm_env) -> None:
     )
     await hm._check_sanity_loop_staleness()
     prs.close_issue.assert_awaited_once_with(91)
+
+
+@pytest.mark.asyncio
+async def test_stall_restart_first_defers_issue(hm_env) -> None:
+    """Restart-first: when the restart verb succeeds, the first stall tick
+    restarts the loop instead of paging a human."""
+    hm, state, bg_workers, prs = hm_env
+    bg_workers.restart = AsyncMock(return_value=True)
+    stale = (datetime.now(UTC) - timedelta(seconds=2400)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {"status": "ok", "last_run": stale, "details": {}},
+    }
+    await hm._check_sanity_loop_staleness()
+    bg_workers.restart.assert_awaited_once_with("trust_fleet_sanity")
+    prs.create_issue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_still_stale_after_restart_files_issue_once(hm_env) -> None:
+    """A stall that survives its restart escalates — one issue, one restart."""
+    hm, state, bg_workers, prs = hm_env
+    bg_workers.restart = AsyncMock(return_value=True)
+    stale = (datetime.now(UTC) - timedelta(seconds=2400)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {"status": "ok", "last_run": stale, "details": {}},
+    }
+    await hm._check_sanity_loop_staleness()  # restart tick
+    await hm._check_sanity_loop_staleness()  # still stale — file
+    await hm._check_sanity_loop_staleness()  # dedup — no refile
+    assert bg_workers.restart.await_count == 1
+    assert prs.create_issue.await_count == 1
+    body = prs.create_issue.await_args.args[1]
+    assert "Auto-restart attempted" in body
+
+
+@pytest.mark.asyncio
+async def test_recovery_clears_restart_marker(hm_env) -> None:
+    """Recovery clears the restart marker so a future stall restarts again."""
+    hm, state, bg_workers, prs = hm_env
+    bg_workers.restart = AsyncMock(return_value=True)
+    stale = (datetime.now(UTC) - timedelta(seconds=2400)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {"status": "ok", "last_run": stale, "details": {}},
+    }
+    await hm._check_sanity_loop_staleness()
+    assert bg_workers.restart.await_count == 1
+    # Recovery — fresh heartbeat with real work.
+    recent = (datetime.now(UTC) - timedelta(seconds=60)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {
+            "status": "ok",
+            "last_run": recent,
+            "details": {"workers_scanned": 5},
+        },
+    }
+    await hm._check_sanity_loop_staleness()
+    prs.create_issue.assert_not_awaited()
+    # New stall — restart fires again instead of escalating.
+    stale2 = (datetime.now(UTC) - timedelta(seconds=3000)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {"status": "ok", "last_run": stale2, "details": {}},
+    }
+    await hm._check_sanity_loop_staleness()
+    assert bg_workers.restart.await_count == 2
+    prs.create_issue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_restart_unavailable_files_immediately(hm_env) -> None:
+    """When the restart verb is unwired (False), behavior matches the
+    pre-restart contract: file on the first stall tick."""
+    hm, state, bg_workers, prs = hm_env
+    stale = (datetime.now(UTC) - timedelta(seconds=2400)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {"status": "ok", "last_run": stale, "details": {}},
+    }
+    await hm._check_sanity_loop_staleness()
+    bg_workers.restart.assert_awaited_once_with("trust_fleet_sanity")
+    prs.create_issue.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_young_sanity_task_with_stale_heartbeat_not_flagged(hm_env) -> None:
+    """Post credit-pause: a just-recreated sanity task with a pre-pause
+    heartbeat must not be restarted or escalated mid-first-cycle."""
+    hm, state, bg_workers, prs = hm_env
+    bg_workers.restart = AsyncMock(return_value=True)
+    bg_workers.run_started_at.return_value = datetime.now(UTC) - timedelta(seconds=30)
+    stale = (datetime.now(UTC) - timedelta(seconds=99_999)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {"status": "ok", "last_run": stale, "details": {}},
+    }
+    await hm._check_sanity_loop_staleness()
+    bg_workers.restart.assert_not_awaited()
+    prs.create_issue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sanity_restart_once_contract_survives_young_task_window(
+    hm_env,
+) -> None:
+    """The young-task window after a sanity restart must not clear
+    _SANITY_RESTART_KEY — that would restart a broken sanity loop every
+    threshold window forever instead of escalating once."""
+    hm, state, bg_workers, prs = hm_env
+    bg_workers.restart = AsyncMock(return_value=True)
+    stale = (datetime.now(UTC) - timedelta(seconds=99_999)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {"status": "ok", "last_run": stale, "details": {}},
+    }
+    await hm._check_sanity_loop_staleness()  # restart tick
+    assert bg_workers.restart.await_count == 1
+    # Recreated task's first cycle in flight — heartbeat still stale.
+    bg_workers.run_started_at.return_value = datetime.now(UTC) - timedelta(seconds=30)
+    await hm._check_sanity_loop_staleness()
+    prs.create_issue.assert_not_awaited()
+    # Task aged past threshold without heartbeating — escalate, not restart.
+    bg_workers.run_started_at.return_value = datetime.now(UTC) - timedelta(
+        seconds=5_000
+    )
+    await hm._check_sanity_loop_staleness()
+    assert bg_workers.restart.await_count == 1
+    prs.create_issue.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_noop_restart_marker_survives_streak_rebuild(hm_env) -> None:
+    """After a noop-tripped restart, streak-rebuild ticks (workers_scanned=0,
+    streak 1-2) must NOT clear the restart marker — the loop is no-oping,
+    not recovered. Clearing there restarts a persistent no-op every 3 ticks
+    forever with escalation permanently bypassed."""
+    hm, state, bg_workers, prs = hm_env
+    bg_workers.restart = AsyncMock(return_value=True)
+    recent = (datetime.now(UTC) - timedelta(seconds=120)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {
+            "status": "ok",
+            "last_run": recent,
+            "details": {"workers_scanned": 0},
+        },
+    }
+    for _ in range(3):
+        await hm._check_sanity_loop_staleness()
+    assert bg_workers.restart.await_count == 1  # noop restart fired
+    prs.create_issue.assert_not_awaited()
+    # Streak rebuilds (ticks 4-6); marker must survive so tick 6 escalates.
+    for _ in range(3):
+        await hm._check_sanity_loop_staleness()
+    assert bg_workers.restart.await_count == 1  # no restart-thrash
+    prs.create_issue.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_noop_streak_also_restarts_first(hm_env) -> None:
+    """The G5 no-op-streak stall variant gets the same restart-first path."""
+    hm, state, bg_workers, prs = hm_env
+    bg_workers.restart = AsyncMock(return_value=True)
+    recent = (datetime.now(UTC) - timedelta(seconds=120)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {
+            "status": "ok",
+            "last_run": recent,
+            "details": {"workers_scanned": 0},
+        },
+    }
+    await hm._check_sanity_loop_staleness()
+    await hm._check_sanity_loop_staleness()
+    await hm._check_sanity_loop_staleness()  # streak hits 3 — restart, no issue
+    bg_workers.restart.assert_awaited_once_with("trust_fleet_sanity")
+    prs.create_issue.assert_not_awaited()

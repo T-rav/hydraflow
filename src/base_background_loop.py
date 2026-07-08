@@ -124,6 +124,14 @@ class BaseBackgroundLoop(abc.ABC):
         self._timeout_cb = deps.timeout_cb
         self._run_on_startup = run_on_startup
         self._trigger_event = asyncio.Event()
+        # When the current run() task started. Heartbeats only refresh at
+        # cycle COMPLETION, so after a credit-pause resume / orchestrator
+        # restart a freshly created task carries a stale persisted heartbeat;
+        # the stall sweep uses max(heartbeat, run_started_at) so it never
+        # false-restarts a healthy in-flight first cycle. Every task-creation
+        # path (startup, crash restart, credit resume, restart verb) funnels
+        # through run(), making this the single stamp point.
+        self._run_started_at: datetime | None = None
 
     @property
     def name(self) -> str:
@@ -363,6 +371,7 @@ class BaseBackgroundLoop(abc.ABC):
 
     async def run(self) -> None:
         """Run the background worker loop until the stop event is set."""
+        self._run_started_at = datetime.now(UTC)
         # Run immediately if configured, or if cycles were missed during downtime
         if self._run_on_startup or self._should_run_catchup():
             try:
