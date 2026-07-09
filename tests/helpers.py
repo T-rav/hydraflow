@@ -349,6 +349,11 @@ class ConfigFactory:
         artifact_retention_days: int = 30,
         artifact_max_size_mb: int = 500,
         runs_gc_interval: int = 3600,
+        audit_retention_days_preflight: int | None = None,
+        audit_retention_days_health_decisions: int | None = None,
+        audit_retention_days_inference_telemetry: int | None = None,
+        audit_retention_days_approval_records: int | None = None,
+        approval_records_enabled: bool = True,
         release_version_source: Literal[
             "epic_title", "milestone", "manual"
         ] = "epic_title",
@@ -587,6 +592,17 @@ class ConfigFactory:
                 artifact_retention_days=artifact_retention_days,
                 artifact_max_size_mb=artifact_max_size_mb,
                 runs_gc_interval=runs_gc_interval,
+                audit_retention_days_preflight=audit_retention_days_preflight,
+                audit_retention_days_health_decisions=(
+                    audit_retention_days_health_decisions
+                ),
+                audit_retention_days_inference_telemetry=(
+                    audit_retention_days_inference_telemetry
+                ),
+                audit_retention_days_approval_records=(
+                    audit_retention_days_approval_records
+                ),
+                approval_records_enabled=approval_records_enabled,
                 release_version_source=release_version_source,
                 release_tag_prefix=release_tag_prefix,
                 baseline_snapshot_patterns=baseline_snapshot_patterns

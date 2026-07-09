@@ -404,6 +404,32 @@ _ENV_OPT_FLOAT_OVERRIDES: list[tuple[str, str, float | None]] = [
     ("issue_cost_alert_usd", "HYDRAFLOW_ISSUE_COST_ALERT_USD", None),
 ]
 
+# Optional ints — `None` when env var is missing/empty/invalid. Mirrors
+# _ENV_OPT_FLOAT_OVERRIDES; ge=1 is enforced by the pydantic constraint on
+# the field, with out-of-range env values rejected here (warn + default).
+_ENV_OPT_INT_OVERRIDES: list[tuple[str, str, int | None]] = [
+    (
+        "audit_retention_days_preflight",
+        "HYDRAFLOW_AUDIT_RETENTION_DAYS_PREFLIGHT",
+        None,
+    ),
+    (
+        "audit_retention_days_health_decisions",
+        "HYDRAFLOW_AUDIT_RETENTION_DAYS_HEALTH_DECISIONS",
+        None,
+    ),
+    (
+        "audit_retention_days_inference_telemetry",
+        "HYDRAFLOW_AUDIT_RETENTION_DAYS_INFERENCE_TELEMETRY",
+        None,
+    ),
+    (
+        "audit_retention_days_approval_records",
+        "HYDRAFLOW_AUDIT_RETENTION_DAYS_APPROVAL_RECORDS",
+        None,
+    ),
+]
+
 # Float overrides with tight [0, 1] bounds — handled separately from the
 # parametrized table because the generic test adds ``default + 1.0`` which
 # exceeds their upper bound.
@@ -416,6 +442,7 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
 
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
+    ("approval_records_enabled", "HYDRAFLOW_APPROVAL_RECORDS_ENABLED", True),
     ("sensor_enrichment_enabled", "HYDRAFLOW_SENSOR_ENRICHMENT_ENABLED", True),
     ("gh_circuit_breaker_enabled", "HYDRAFLOW_GH_CIRCUIT_BREAKER_ENABLED", True),
     ("issue_cache_enabled", "HYDRAFLOW_ISSUE_CACHE_ENABLED", True),
@@ -1176,6 +1203,56 @@ class HydraFlowConfig(BaseModel):
         ge=300,
         le=86400,
         description="Runs GC loop interval in seconds (default 1 hour)",
+    )
+
+    # Hash-chained audit stream retention (CH-1, #9729). None = keep forever.
+    # A set value is a retention FLOOR: RunsGCLoop may prune records strictly
+    # older than the floor and can never delete inside it. Regulated
+    # deployments should set explicit values (e.g. 2555 days ~ 7y for
+    # change-control evidence).
+    audit_retention_days_preflight: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Days to retain preflight audit records (auto_agent/audit.jsonl). "
+            "None = keep forever."
+        ),
+    )
+    audit_retention_days_health_decisions: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Days to retain health-monitor decision records "
+            "(memory/decisions.jsonl). None = keep forever."
+        ),
+    )
+    audit_retention_days_inference_telemetry: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Days to retain inference telemetry records "
+            "(metrics/prompt/inferences.jsonl). None = keep forever."
+        ),
+    )
+    audit_retention_days_approval_records: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Days to retain merge approval records (CH-2, #9730; "
+            "audit/approval_records.jsonl). None = keep forever — the "
+            "recommended setting for change-control evidence."
+        ),
+    )
+
+    # CH-2 (#9730): kill-switch for the approval-record reconciler capability
+    # hosted by MergeStateWatcherLoop. Not a loop gate — the loop keeps
+    # unsticking conflicts when this is off; only evidence capture stops.
+    approval_records_enabled: bool = Field(
+        default=True,
+        description=(
+            "Capture structured merge-approval records (CH-2) on the "
+            "MergeStateWatcherLoop tick."
+        ),
     )
 
     epic_stale_days: int = Field(
@@ -3420,6 +3497,15 @@ class HydraFlowConfig(BaseModel):
         """Repo-scoped per-PR telemetry aggregates (ADR-0021 D2)."""
         return self.repo_data_root / "metrics" / "prompt" / "pr_stats.json"
 
+    @property
+    def approval_records_path(self) -> Path:
+        """Repo-scoped hash-chained merge-approval evidence stream (CH-2, #9730).
+
+        PR numbers are repo-scoped, so the stream lives under
+        ``repo_data_root`` — one chain per managed repo.
+        """
+        return self.repo_data_root / "audit" / "approval_records.jsonl"
+
     def base_branch(self) -> str:
         """Return the branch agent PRs should target.
 
@@ -3980,6 +4066,34 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
             object.__setattr__(config, field, default)
             continue
         object.__setattr__(config, field, parsed)
+
+    # Optional int overrides — applied only when the field is still at its
+    # default (explicit constructor values win, matching the int/str tables).
+    # Empty string or unset leaves the default; parse failures and values
+    # below the ge=1 field constraint log a warning and are ignored.
+    for field, env_key, default in _ENV_OPT_INT_OVERRIDES:
+        if getattr(config, field) != default:
+            continue
+        env_val = _get_env(env_key)
+        if env_val is None or env_val == "":
+            continue
+        try:
+            parsed_int = int(env_val)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid %s=%r — treating as unset",
+                env_key,
+                env_val,
+            )
+            continue
+        if parsed_int < 1:
+            logger.warning(
+                "%s=%s is below minimum 1; ignoring env override",
+                env_key,
+                parsed_int,
+            )
+            continue
+        object.__setattr__(config, field, parsed_int)
 
     # Ratio float overrides ([0, 1] bounds) — parse failures are silently ignored
     # but out-of-bounds values emit a warning so operators know their config was rejected.

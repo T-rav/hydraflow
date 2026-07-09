@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -325,3 +326,190 @@ class TestArtifactConfigFields:
         assert config.artifact_retention_days == 7
         assert config.artifact_max_size_mb == 100
         assert config.runs_gc_interval == 1800
+
+
+# ===========================================================================
+# Audit-chain verification + retention (CH-1, #9729)
+# ===========================================================================
+
+
+def _make_audit_loop(tmp_path: Path, **config_overrides):
+    """Build a RunsGCLoop plus the bus, for audit-chain caretaker tests."""
+    deps = make_bg_loop_deps(tmp_path, **config_overrides)
+    recorder = RunRecorder(deps.config)
+    loop = RunsGCLoop(
+        config=deps.config,
+        run_recorder=recorder,
+        deps=deps.loop_deps,
+    )
+    return loop, deps
+
+
+def _seed_stream(config, name: str, timestamps: list[str]):
+    from audit_chain import AuditChain, audit_streams
+
+    spec = next(s for s in audit_streams(config) if s.name == name)
+    spec.path.parent.mkdir(parents=True, exist_ok=True)
+    chain = AuditChain(spec.path)
+    for ts in timestamps:
+        chain.append({spec.timestamp_key: ts, "n": ts})
+    return spec, chain
+
+
+class TestAuditChainCaretaker:
+    @pytest.mark.asyncio
+    async def test_reports_ok_and_empty_stream_statuses(self, tmp_path: Path) -> None:
+        loop, deps = _make_audit_loop(tmp_path)
+        _seed_stream(deps.config, "preflight", ["2026-07-01T00:00:00Z"])
+
+        result = await loop._do_work()
+        assert result is not None
+        assert result["audit_chain_status"]["preflight"] == "ok"
+        assert result["audit_chain_status"]["health_decisions"] == "empty"
+        assert result["audit_chain_status"]["inference_telemetry"] == "empty"
+        assert result["audit_chain_status"]["approval_records"] == "empty"
+
+    @pytest.mark.asyncio
+    async def test_approval_records_stream_is_tended(self, tmp_path: Path) -> None:
+        """CH-2 (#9730): the approval stream rides the existing verify tick."""
+        loop, deps = _make_audit_loop(tmp_path)
+        _seed_stream(deps.config, "approval_records", ["2026-07-08T00:00:00+00:00"])
+
+        result = await loop._do_work()
+        assert result is not None
+        assert result["audit_chain_status"]["approval_records"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_chain_break_fails_loudly_and_skips_pruning(
+        self, tmp_path: Path
+    ) -> None:
+        from events import EventType
+
+        loop, deps = _make_audit_loop(tmp_path, audit_retention_days_preflight=30)
+        spec, _chain = _seed_stream(
+            deps.config,
+            "preflight",
+            ["2020-01-01T00:00:00Z", "2020-01-02T00:00:00Z"],
+        )
+        # Tamper: flip a payload field without re-chaining.
+        lines = spec.path.read_text().splitlines()
+        tampered = json.loads(lines[0])
+        tampered["n"] = "evil"
+        lines[0] = json.dumps(tampered, sort_keys=True)
+        spec.path.write_text("\n".join(lines) + "\n")
+
+        result = await loop._do_work()
+        assert result is not None
+        assert result["audit_chain_status"]["preflight"] == "break"
+        # Both stale records survive: GC must not destroy tamper evidence.
+        assert len(spec.path.read_text().splitlines()) == 2
+        alerts = [
+            e
+            for e in deps.bus.get_history()
+            if e.type == EventType.SYSTEM_ALERT
+            and e.data.get("kind") == "audit_chain_break"
+        ]
+        assert alerts
+        assert alerts[0].data["stream"] == "preflight"
+
+    @pytest.mark.asyncio
+    async def test_retention_floor_prunes_only_older_records(
+        self, tmp_path: Path
+    ) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        loop, deps = _make_audit_loop(tmp_path, audit_retention_days_preflight=30)
+        fresh = datetime.now(UTC).isoformat()
+        stale = (datetime.now(UTC) - timedelta(days=90)).isoformat()
+        spec, chain = _seed_stream(deps.config, "preflight", [stale, fresh])
+
+        result = await loop._do_work()
+        assert result is not None
+        assert result["audit_pruned"]["preflight"] == 1
+        rows = [json.loads(line) for line in spec.path.read_text().splitlines()]
+        assert [r["ts"] for r in rows] == [fresh]
+        assert chain.verify().ok
+
+    @pytest.mark.asyncio
+    async def test_default_retention_none_keeps_everything(
+        self, tmp_path: Path
+    ) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        loop, deps = _make_audit_loop(tmp_path)
+        ancient = (datetime.now(UTC) - timedelta(days=3650)).isoformat()
+        spec, _chain = _seed_stream(deps.config, "preflight", [ancient])
+
+        result = await loop._do_work()
+        assert result is not None
+        assert result["audit_pruned"] == {}
+        assert len(spec.path.read_text().splitlines()) == 1
+
+
+class TestChainBreakAlertDedup:
+    async def test_persistent_break_alerts_once(self, tmp_path: Path) -> None:
+        """A break that persists across cycles must not re-alert every hour —
+        24 alerts/day/stream drowns the signal (cost_budget_alerts dedup
+        precedent)."""
+        from events import EventType
+
+        loop, deps = _make_audit_loop(tmp_path, audit_retention_days_preflight=30)
+        spec, _chain = _seed_stream(
+            deps.config,
+            "preflight",
+            ["2020-01-01T00:00:00Z", "2020-01-02T00:00:00Z"],
+        )
+        lines = spec.path.read_text().splitlines()
+        tampered = json.loads(lines[0])
+        tampered["n"] = "evil"
+        lines[0] = json.dumps(tampered, sort_keys=True)
+        spec.path.write_text("\n".join(lines) + "\n")
+
+        await loop._do_work()
+        await loop._do_work()
+        await loop._do_work()
+
+        alerts = [
+            e
+            for e in deps.bus.get_history()
+            if e.type == EventType.SYSTEM_ALERT
+            and e.data.get("kind") == "audit_chain_break"
+        ]
+        assert len(alerts) == 1
+
+    async def test_recovery_rearms_the_alert(self, tmp_path: Path) -> None:
+        """Operator repairs the stream → dedup clears → a NEW break alerts."""
+        from events import EventType
+
+        loop, deps = _make_audit_loop(tmp_path, audit_retention_days_preflight=None)
+        spec, chain = _seed_stream(
+            deps.config,
+            "preflight",
+            ["2026-07-01T00:00:00Z"],
+        )
+        good = spec.path.read_text()
+        good_head = spec.path.with_name(spec.path.name + ".chainhead.json").read_text()
+        lines = spec.path.read_text().splitlines()
+        tampered = json.loads(lines[0])
+        tampered["n"] = "evil"
+        spec.path.write_text(json.dumps(tampered, sort_keys=True) + "\n")
+
+        await loop._do_work()  # break → alert 1
+        # Operator repairs (restores the pristine stream + head).
+        spec.path.write_text(good)
+        spec.path.with_name(spec.path.name + ".chainhead.json").write_text(good_head)
+        await loop._do_work()  # ok → dedup clears
+        # A fresh break must alert again.
+        lines = spec.path.read_text().splitlines()
+        tampered = json.loads(lines[0])
+        tampered["n"] = "evil-again"
+        spec.path.write_text(json.dumps(tampered, sort_keys=True) + "\n")
+        await loop._do_work()
+
+        alerts = [
+            e
+            for e in deps.bus.get_history()
+            if e.type == EventType.SYSTEM_ALERT
+            and e.data.get("kind") == "audit_chain_break"
+        ]
+        assert len(alerts) == 2

@@ -116,6 +116,7 @@ def _get_all_override_fields() -> list[tuple[str, str]]:
         "_ENV_STR_OVERRIDES",
         "_ENV_FLOAT_OVERRIDES",
         "_ENV_FLOAT_RATIO_OVERRIDES",
+        "_ENV_OPT_INT_OVERRIDES",
     ]:
         pairs.extend(_parse_override_table(text, table))
     return pairs

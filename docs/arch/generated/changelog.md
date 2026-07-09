@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
+- `1a70088` — refactor(arch): regenerate architecture artifacts after CH-5 review fixes (#9733) (#9733) *(2026-07-08)*
 - `0c55f8a` — feat(disturbance): sync traceability baseline on regen; exempt matrix from arch drift check (CH-5, #9733) *(2026-07-08)*
 - `da430f1` — refactor(arch): correct TraceCommitInfo docstring to the line-anchored contract (CH-5, #9733) *(2026-07-08)*
 - `d7a8e0c` — test(arch): line-anchor commit-message requirement scanning (CH-5, #9733) *(2026-07-08)*

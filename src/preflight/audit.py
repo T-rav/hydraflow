@@ -1,4 +1,10 @@
-"""Append-only JSONL audit store for AutoAgentPreflightLoop (spec §3.5)."""
+"""Append-only JSONL audit store for AutoAgentPreflightLoop (spec §3.5).
+
+Appends are hash-chained (CH-1, #9729): every stored row carries
+``prev_hash``/``record_hash`` fields via :class:`audit_chain.AuditChain`.
+Readers drop the chain fields (unknown-key filtering below), so the entry
+schema seen downstream is unchanged.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +13,7 @@ from dataclasses import asdict, dataclass, fields
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from file_util import append_jsonl, file_lock
+from audit_chain import AuditChain
 
 
 @dataclass(frozen=True)
@@ -48,10 +54,12 @@ class PreflightAuditStore:
     def __init__(self, data_root: Path) -> None:
         self._path = data_root / "auto_agent" / "audit.jsonl"
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._chain = AuditChain(self._path)
 
     def append(self, entry: PreflightAuditEntry) -> None:
-        with file_lock(Path(str(self._path) + ".lock")):
-            append_jsonl(self._path, json.dumps(asdict(entry)))
+        # AuditChain serializes appends under its own per-stream lock and
+        # stamps prev_hash/record_hash (CH-1, #9729).
+        self._chain.append(asdict(entry))
 
     def _read_all(self) -> list[PreflightAuditEntry]:
         if not self._path.exists():
