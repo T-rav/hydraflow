@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Literal
 
 from repro_manifest import append_manifest
+from traceability import append_req_trailer
 
 logger = logging.getLogger(__name__)
 
@@ -556,6 +557,7 @@ async def open_automated_pr_async(  # noqa: PLR0911 — linear step-by-step guar
     commit_author_name: str = BOT_NAME,
     commit_author_email: str = BOT_EMAIL,
     labels: list[str] | None = None,
+    req_id: str | None = None,
 ) -> AutoPrResult:
     """Async variant that routes subprocess calls through `run_subprocess`.
 
@@ -596,6 +598,10 @@ async def open_automated_pr_async(  # noqa: PLR0911 — linear step-by-step guar
             the ambient worktree/global config instead.
         commit_author_email: Email for ``git -c user.email``. See above
             regarding empty-string fallback.
+        req_id: Optional requirement ID (CH-5 traceability). When set, a
+            ``Req-ID: <id>`` trailer is appended to both the commit message
+            and the PR body so the traceability matrix can recover the
+            requirement from git history and the PR alike.
 
     Returns:
         ``AutoPrResult`` describing the outcome.
@@ -611,7 +617,10 @@ async def open_automated_pr_async(  # noqa: PLR0911 — linear step-by-step guar
     wt_parent = (worktree_parent or repo_root.parent).resolve()
     wt_parent.mkdir(parents=True, exist_ok=True)
     worktree_path = wt_parent / wt_name
-    msg = commit_message if commit_message is not None else pr_title
+    msg = append_req_trailer(
+        commit_message if commit_message is not None else pr_title, req_id
+    )
+    pr_body = append_req_trailer(pr_body, req_id)
 
     def _fail(err: str) -> AutoPrResult:
         if raise_on_failure:
@@ -723,6 +732,7 @@ async def generate_and_open_pr_async(
     commit_author_name: str = BOT_NAME,
     commit_author_email: str = BOT_EMAIL,
     labels: list[str] | None = None,
+    req_id: str | None = None,
 ) -> AutoPrResult:
     """Open a PR for content GENERATED inside the worktree — never touching repo_root.
 
@@ -748,6 +758,9 @@ async def generate_and_open_pr_async(
             the generator produced (counts, changed files) can read state the
             callback populated. Resolution happens before the no-diff check, so
             the callable must not assume a PR will actually be opened.
+        req_id: Optional requirement ID (CH-5 traceability); appends a
+            ``Req-ID: <id>`` trailer to the commit message and the resolved
+            PR body.
 
     All other args mirror :func:`open_automated_pr_async`.
     """
@@ -760,7 +773,9 @@ async def generate_and_open_pr_async(
     wt_parent = (worktree_parent or repo_root.parent).resolve()
     wt_parent.mkdir(parents=True, exist_ok=True)
     worktree_path = wt_parent / wt_name
-    msg = commit_message if commit_message is not None else pr_title
+    msg = append_req_trailer(
+        commit_message if commit_message is not None else pr_title, req_id
+    )
 
     def _fail(err: str) -> AutoPrResult:
         if raise_on_failure:
@@ -819,7 +834,9 @@ async def generate_and_open_pr_async(
 
         # Resolve a lazy body now — after generate + staging — so summaries can
         # reflect what the generator produced.
-        resolved_body = pr_body() if callable(pr_body) else pr_body
+        resolved_body = append_req_trailer(
+            pr_body() if callable(pr_body) else pr_body, req_id
+        )
 
         return await _finalize_pr_from_worktree(
             worktree_path=worktree_path,
