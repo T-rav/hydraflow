@@ -19,6 +19,11 @@ from typing import TYPE_CHECKING, Any
 import ci_sentinels
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from merge_policy import (
+    ROLE_ORCHESTRATOR_REVIEWER,
+    MergeApproval,
+    enforce_merge_policy,
+)
 from rollup_issue_manager import RollupIssueManager
 
 if TYPE_CHECKING:
@@ -89,6 +94,40 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             stop_event=self._stop_event,
         )
         if passed:
+            # CH-3 (#9731): consult the factory-autonomy policy before the
+            # autonomous promotion merge. This lane's standing evidence is
+            # the ADR-0042 two-tier grant: main only advances via CI-green
+            # rc/* PRs whose commits each cleared the policy-gated
+            # staging-side merges. A deny leaves the RC PR open for the
+            # operator (approve, override, or fix the policy).
+            policy_verdict = await enforce_merge_policy(
+                config=self._config,
+                prs=self._prs,
+                pr_number=pr_number,
+                actor="hydraflow:staging_promotion_loop",
+                approvals=[
+                    MergeApproval(
+                        actor="staging_promotion_loop",
+                        role=ROLE_ORCHESTRATOR_REVIEWER,
+                        source="adr0042_rc_promotion_ci_green",
+                    )
+                ],
+                lane="staging_promotion_loop",
+            )
+            if not policy_verdict.allowed:
+                logger.warning(
+                    "RC promotion PR #%d blocked by merge policy: %s",
+                    pr_number,
+                    policy_verdict.reason,
+                )
+                await self._prs.post_comment(
+                    pr_number,
+                    f"Blocked by merge policy: {policy_verdict.reason}\n\n"
+                    "Approve the PR (or add a `policy-override:<reason-slug>` "
+                    "label for an audited break-glass merge). "
+                    "See docs/standards/factory_autonomy/policy.yaml.",
+                )
+                return {"status": "policy_denied", "pr": pr_number}
             merged = await self._prs.merge_promotion_pr(pr_number, auto_rebase=True)
             if merged:
                 logger.info("Promoted RC PR #%d to main", pr_number)

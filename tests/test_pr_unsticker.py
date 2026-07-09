@@ -1949,3 +1949,68 @@ class TestNarrowedExceptionHandling:
             await h.unsticker._resolve_ci_timeout(
                 42, issue, tmp_path / "h.wt", "branch", "url"
             )
+
+
+class TestMergePolicyGate:
+    """CH-3 (#9731) — the policy gate at the unsticker's merge seam."""
+
+    def _fake_labels(self, monkeypatch, labels: list[str]) -> None:
+        import json
+
+        import subprocess_util
+
+        async def _run(*cmd, **_kwargs):
+            assert cmd[:3] == ("gh", "pr", "view")
+            return json.dumps({"labels": [{"name": name} for name in labels]})
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+
+    def _merge_ready_harness(self, tmp_path: Path) -> UnstickerHarness:
+        issue = IssueFactory.create(
+            title="Test issue", body="body", labels=["hydraflow-hitl"]
+        )
+        h = _make_unsticker(tmp_path, unstick_auto_merge=True)
+        h.state.set_hitl_cause(42, "Merge conflict")
+        h.state.set_hitl_origin(42, "hydraflow-review")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.prs.push_branch = AsyncMock(return_value=True)
+        h.prs.wait_for_ci = AsyncMock(return_value=(True, "All checks passed"))
+        h.prs.merge_pr = AsyncMock(return_value=True)
+        h.prs.pull_main = AsyncMock(return_value=True)
+        h.prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        h.resolver.resolve_merge_conflicts = AsyncMock(
+            return_value=ConflictResolutionResult(success=True, used_rebuild=False)
+        )
+        wt_dir = h.unsticker._config.workspace_path_for_issue(42)
+        wt_dir.mkdir(parents=True)
+        return h
+
+    @pytest.mark.asyncio
+    async def test_policy_deny_releases_back_to_hitl_without_merging(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from tests.helpers import install_repo_merge_policy
+
+        h = self._merge_ready_harness(tmp_path)
+        install_repo_merge_policy(h.unsticker._config)
+        self._fake_labels(monkeypatch, [])
+
+        stats = await h.unsticker.unstick([_make_hitl_item(42, pr=100)])
+
+        assert stats["merged"] == 0
+        h.prs.merge_pr.assert_not_awaited()
+        comments = [c.args[1] for c in h.prs.post_comment.await_args_list]
+        assert any("Blocked by merge policy" in c for c in comments)
+
+    @pytest.mark.asyncio
+    async def test_standing_config_grant_satisfies_default_policy(
+        self, tmp_path: Path
+    ) -> None:
+        """The packaged policy accepts the unstick_auto_merge operator grant."""
+        h = self._merge_ready_harness(tmp_path)
+
+        stats = await h.unsticker.unstick([_make_hitl_item(42, pr=100)])
+
+        assert stats["merged"] == 1
+        h.prs.merge_pr.assert_awaited_once_with(100, auto_rebase=True)

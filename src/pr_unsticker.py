@@ -8,7 +8,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from approval_records import FACTORY_AUTONOMY_CLAUSE
 from exception_classify import reraise_on_credit_or_bug
+from merge_policy import ROLE_OPERATOR, MergeApproval, enforce_merge_policy
 from models import ConflictResolutionResult, HITLUpdatePayload, PRInfo
 from phase_utils import MemorySuggester
 from prompt_stats import build_prompt_stats, truncate_with_notice
@@ -1044,6 +1046,37 @@ TROUBLESHOOTING_PATTERN_END
             await self._release_back_to_hitl(
                 issue_number,
                 f"CI failed after fix: {summary}",
+                pr_number=pr_number,
+            )
+            return False
+
+        # CH-3 (#9731): consult the factory-autonomy policy before the
+        # autonomous merge. This lane's standing approval evidence is the
+        # operator-enabled ``unstick_auto_merge`` config grant (we only get
+        # here when it is on) — recorded as an operator-role approval with
+        # the autonomy clause as its basis. GitHub review approvals are not
+        # read here; tightening this lane is a policy.yaml edit.
+        policy_verdict = await enforce_merge_policy(
+            config=self._config,
+            prs=self._prs,
+            pr_number=pr_number,
+            actor="hydraflow:pr_unsticker",
+            approvals=[
+                MergeApproval(
+                    actor="operator-config:unstick_auto_merge",
+                    role=ROLE_OPERATOR,
+                    source="standing_config_grant",
+                    basis=FACTORY_AUTONOMY_CLAUSE,
+                )
+            ],
+            lane="pr_unsticker",
+        )
+        if not policy_verdict.allowed:
+            await self._release_back_to_hitl(
+                issue_number,
+                f"Blocked by merge policy: {policy_verdict.reason} "
+                "(approve the PR or add a `policy-override:<reason-slug>` "
+                "label for an audited break-glass merge)",
                 pr_number=pr_number,
             )
             return False

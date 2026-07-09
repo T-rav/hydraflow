@@ -14,6 +14,11 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from issue_fetcher import IssueFetcher
+from merge_policy import (
+    ROLE_ORCHESTRATOR_REVIEWER,
+    MergeApproval,
+    enforce_merge_policy,
+)
 from models import (
     CIStatus,
     EpicChildInfo,
@@ -1316,6 +1321,32 @@ class EpicManager:
                     # Halt on missing PR — bundle guarantee requires all PRs to merge
                     results.append({"issue": child_num, "status": "no_pr"})
                     halt_msg = f"no PR found for child #{child_num}; bundle halted"
+                elif not (
+                    policy_verdict := await enforce_merge_policy(
+                        config=self._config,
+                        prs=self._prs,
+                        pr_number=pr_number,
+                        actor="hydraflow:epic_release",
+                        approvals=[
+                            MergeApproval(
+                                actor=f"epic-{epic_number}",
+                                role=ROLE_ORCHESTRATOR_REVIEWER,
+                                source="epic_children_approved",
+                            )
+                        ],
+                        lane="epic_release",
+                    )
+                ).allowed:
+                    # CH-3 (#9731): the bundle only releases when every child
+                    # passed review (ready_to_merge) — that approval is this
+                    # lane's evidence. A policy deny halts the bundle.
+                    results.append(
+                        {"issue": child_num, "pr": pr_number, "status": "policy_denied"}
+                    )
+                    halt_msg = (
+                        f"merge policy denied child #{child_num} "
+                        f"(PR #{pr_number}): {policy_verdict.reason}; bundle halted"
+                    )
                 else:
                     merged = await self._prs.merge_pr(pr_number)
                     if merged:
