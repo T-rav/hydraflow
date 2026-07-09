@@ -839,6 +839,134 @@ async def test_refresh_real_conflict_aborts_no_push(
 
 
 # ---------------------------------------------------------------------------
+# req_id threading (CH-5, #9733)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_req_id_trails_commit_message_and_pr_body(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """req_id lands as a Req-ID: trailer on BOTH the commit message and the PR
+    body, so the traceability matrix can recover it from git history and the
+    PR alike (CH-5)."""
+    from auto_pr import open_automated_pr_async
+
+    commit_msgs: list[str] = []
+    pr_bodies: list[str] = []
+
+    def on_cmd(cmd: tuple[str, ...]) -> None:
+        if "commit" in cmd and "-m" in cmd:
+            commit_msgs.append(cmd[cmd.index("-m") + 1])
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        if cmd[2] == "create":
+            pr_bodies.append(cmd[cmd.index("--body") + 1])
+            return "https://github.com/x/y/pull/7\n"
+        return ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler, on_cmd=on_cmd),
+    )
+
+    target = local_repo / "traced.txt"
+    target.write_text("traced\n")
+
+    await open_automated_pr_async(
+        repo_root=local_repo,
+        branch="feature/traced",
+        files=[target],
+        pr_title="feat: traced change",
+        pr_body="body",
+        req_id="REQ-042",
+        auto_merge=False,
+    )
+
+    assert commit_msgs[0].rstrip().endswith("Req-ID: REQ-042")
+    assert pr_bodies[0].rstrip().endswith("Req-ID: REQ-042")
+
+
+@pytest.mark.asyncio
+async def test_async_no_req_id_adds_no_trailer(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zero friction: without req_id nothing about the messages changes."""
+    from auto_pr import open_automated_pr_async
+
+    commit_msgs: list[str] = []
+    pr_bodies: list[str] = []
+
+    def on_cmd(cmd: tuple[str, ...]) -> None:
+        if "commit" in cmd and "-m" in cmd:
+            commit_msgs.append(cmd[cmd.index("-m") + 1])
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        if cmd[2] == "create":
+            pr_bodies.append(cmd[cmd.index("--body") + 1])
+            return "https://github.com/x/y/pull/7\n"
+        return ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler, on_cmd=on_cmd),
+    )
+
+    target = local_repo / "plain.txt"
+    target.write_text("plain\n")
+
+    await open_automated_pr_async(
+        repo_root=local_repo,
+        branch="feature/plain",
+        files=[target],
+        pr_title="feat: plain change",
+        pr_body="body",
+        auto_merge=False,
+    )
+
+    assert "Req-ID" not in commit_msgs[0]
+    assert "Req-ID" not in pr_bodies[0]
+
+
+@pytest.mark.asyncio
+async def test_generate_and_open_req_id_trails_lazy_body(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The trailer is applied AFTER a callable pr_body resolves."""
+    from auto_pr import generate_and_open_pr_async
+
+    pr_bodies: list[str] = []
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        if cmd[2] == "create":
+            pr_bodies.append(cmd[cmd.index("--body") + 1])
+            return "https://github.com/x/y/pull/7\n"
+        return ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler),
+    )
+
+    async def generate(worktree: Path) -> None:
+        (worktree / "gen.txt").write_text("generated\n")
+
+    await generate_and_open_pr_async(
+        repo_root=local_repo,
+        branch="feature/lazy-traced",
+        generate=generate,
+        path_specs=["gen.txt"],
+        pr_title="feat: lazy traced",
+        pr_body=lambda: "lazy body",
+        req_id="SYS-9",
+        auto_merge=False,
+    )
+
+    assert pr_bodies[0].rstrip().endswith("Req-ID: SYS-9")
+    assert pr_bodies[0].startswith("lazy body")
+
+
+# ---------------------------------------------------------------------------
 # generate_and_open_pr_async — generate-in-worktree (#9539)
 # ---------------------------------------------------------------------------
 
