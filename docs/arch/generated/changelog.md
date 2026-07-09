@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
+- `da430f1` — refactor(arch): correct TraceCommitInfo docstring to the line-anchored contract (CH-5, #9733) *(2026-07-08)*
+- `d7a8e0c` — test(arch): line-anchor commit-message requirement scanning (CH-5, #9733) *(2026-07-08)*
 - `9e1bc74` — feat(disturbance): traceability untraced-fraction ratchet dimension (CH-5, #9733) *(2026-07-08)*
 - `0114c7a` — feat(arch): requirements traceability matrix generator wired into arch-regen (CH-5, #9733) *(2026-07-08)*
 - `2009f17` — feat(loops): DetectorCalibrationLoop — the factory watches its own sensors (Fix F) (#9728) (#9728) *(2026-07-08)*

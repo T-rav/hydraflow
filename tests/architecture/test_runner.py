@@ -130,6 +130,55 @@ def test_check_no_conflict_after_two_emits_same_repo(populated_repo: Path):
     assert check(repo_root=populated_repo, generated_dir=out) == 0
 
 
+def test_drift_exempt_pins_git_log_window_artifacts():
+    # Both artifacts derive from a moving `git log` window: in CI the check
+    # runs from the PR *merge commit*, so any squash-merge landing on the
+    # base between author regen and CI shifts the window and would fail
+    # unrelated PRs. Their staleness is governed elsewhere (changelog: none
+    # needed; traceability_matrix: the disturbance ratchet baseline).
+    from arch.runner import _DRIFT_EXEMPT
+
+    assert {"changelog.md", "traceability_matrix.md"} == _DRIFT_EXEMPT
+
+
+def test_check_ignores_traceability_matrix_drift(populated_repo: Path):
+    from arch.runner import check, emit
+
+    out = populated_repo / "docs/arch/generated"
+    emit(repo_root=populated_repo, out_dir=out)
+    # Simulate the merge-commit window shift: committed matrix differs from
+    # what a fresh emit at HEAD would produce.
+    (out / "traceability_matrix.md").write_text(
+        "# Requirements Traceability Matrix\n\n<!-- untraced-pct: 73 -->\n"
+    )
+    assert check(repo_root=populated_repo, generated_dir=out) == 0
+
+
+def test_main_emit_syncs_traceability_baseline(populated_repo: Path, monkeypatch):
+    # `make arch-regen` / `arch-regen-stage` route through `_main --emit`;
+    # the emitted matrix and the ratchet baseline must move together or the
+    # gate's `resolved` assertion fails on the next unrelated PR.
+    import sys
+
+    from arch.runner import _main
+    from disturbance.baseline import load_baseline
+
+    baseline = populated_repo / "disturbance/baselines/traceability.yaml"
+    baseline.parent.mkdir(parents=True, exist_ok=True)
+    baseline.write_text(
+        "comment: c\nentries:\n"
+        "  docs/arch/generated/traceability_matrix.md::untraced-pct: 100\n"
+    )
+    monkeypatch.setattr(
+        sys, "argv", ["arch.runner", "--emit", "--repo-root", str(populated_repo)]
+    )
+
+    assert _main() == 0
+    # populated_repo has no PR-merge commits → fresh matrix reports pct 0,
+    # so the grandfathered entry is pruned.
+    assert load_baseline(baseline) == {}
+
+
 def test_artifact_files_covers_ubiquitous_language():
     from arch.runner import _ARTIFACT_FILES
 

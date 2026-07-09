@@ -10,16 +10,32 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from disturbance.detectors.traceability import TraceabilityDetector
+from disturbance.baseline import load_baseline
+from disturbance.detectors.traceability import (
+    TraceabilityDetector,
+    sync_traceability_baseline,
+)
 from disturbance.registry import DIMENSIONS
 
 _ARTIFACT_REL = "docs/arch/generated/traceability_matrix.md"
+_BASELINE_REL = "disturbance/baselines/traceability.yaml"
+_SIGNATURE = f"{_ARTIFACT_REL}::untraced-pct"
 
 
 def _write_artifact(repo_root: Path, content: str) -> None:
     path = repo_root / _ARTIFACT_REL
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _write_baseline(repo_root: Path, count: int) -> Path:
+    path = repo_root / _BASELINE_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"comment: traceability baseline\nentries:\n  {_SIGNATURE}: {count}\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 class TestTraceabilityDetector:
@@ -52,6 +68,72 @@ class TestTraceabilityDetector:
         _write_artifact(tmp_path, "<!-- untraced-pct: 42 -->\n")
         findings = TraceabilityDetector().detect(tmp_path)
         assert "42%" in findings[0].message
+
+
+class TestSyncTraceabilityBaseline:
+    def test_lower_marker_rewrites_baseline_count(self, tmp_path: Path) -> None:
+        # Regen PRs (make arch-regen, DiagramLoop) must ship the pruned
+        # baseline alongside the lower matrix pct, or the ratchet's
+        # `resolved` assertion fails on the NEXT unrelated PR.
+        _write_artifact(tmp_path, "<!-- untraced-pct: 87 -->\n")
+        baseline_path = _write_baseline(tmp_path, 100)
+
+        assert sync_traceability_baseline(tmp_path) is True
+        assert load_baseline(baseline_path) == {_SIGNATURE: 87}
+
+    def test_sync_preserves_baseline_comment(self, tmp_path: Path) -> None:
+        _write_artifact(tmp_path, "<!-- untraced-pct: 87 -->\n")
+        baseline_path = _write_baseline(tmp_path, 100)
+
+        sync_traceability_baseline(tmp_path)
+
+        assert "traceability baseline" in baseline_path.read_text(encoding="utf-8")
+
+    def test_equal_marker_is_a_noop(self, tmp_path: Path) -> None:
+        _write_artifact(tmp_path, "<!-- untraced-pct: 100 -->\n")
+        baseline_path = _write_baseline(tmp_path, 100)
+        before = baseline_path.read_text(encoding="utf-8")
+
+        assert sync_traceability_baseline(tmp_path) is False
+        assert baseline_path.read_text(encoding="utf-8") == before
+
+    def test_higher_marker_never_raises_the_baseline(self, tmp_path: Path) -> None:
+        # The ratchet only shrinks: growth must fail the gate as `new`,
+        # not be silently legitimized by an auto-raised baseline.
+        _write_artifact(tmp_path, "<!-- untraced-pct: 60 -->\n")
+        baseline_path = _write_baseline(tmp_path, 40)
+
+        assert sync_traceability_baseline(tmp_path) is False
+        assert load_baseline(baseline_path) == {_SIGNATURE: 40}
+
+    def test_zero_marker_prunes_the_entry(self, tmp_path: Path) -> None:
+        _write_artifact(tmp_path, "<!-- untraced-pct: 0 -->\n")
+        baseline_path = _write_baseline(tmp_path, 12)
+
+        assert sync_traceability_baseline(tmp_path) is True
+        assert load_baseline(baseline_path) == {}
+
+    def test_missing_artifact_is_inert(self, tmp_path: Path) -> None:
+        baseline_path = _write_baseline(tmp_path, 100)
+        before = baseline_path.read_text(encoding="utf-8")
+
+        assert sync_traceability_baseline(tmp_path) is False
+        assert baseline_path.read_text(encoding="utf-8") == before
+
+    def test_missing_baseline_is_inert(self, tmp_path: Path) -> None:
+        # Repos without the dimension adopted must not grow a baseline file.
+        _write_artifact(tmp_path, "<!-- untraced-pct: 5 -->\n")
+
+        assert sync_traceability_baseline(tmp_path) is False
+        assert not (tmp_path / _BASELINE_REL).exists()
+
+    def test_marker_clamped_to_100(self, tmp_path: Path) -> None:
+        _write_artifact(tmp_path, "<!-- untraced-pct: 250 -->\n")
+        baseline_path = _write_baseline(tmp_path, 100)
+        before = baseline_path.read_text(encoding="utf-8")
+
+        assert sync_traceability_baseline(tmp_path) is False
+        assert baseline_path.read_text(encoding="utf-8") == before
 
 
 class TestRegistryEntry:

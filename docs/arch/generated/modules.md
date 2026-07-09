@@ -30,12 +30,13 @@ graph LR
     src -- "14" --> src_auto_tighten
     src -- "26" --> src_contracts
     src -- "4" --> src_dashboard_routes
-    src -- "4" --> src_disturbance
+    src -- "5" --> src_disturbance
     src -- "1" --> src_observability
     src -- "12" --> src_preflight
     src -- "1" --> src_review_phase
     src -- "53" --> src_state
     src -- "7" --> src_telemetry
+    src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "12" --> src_arch
     src_dashboard_routes -- "3" --> src_onboarding
