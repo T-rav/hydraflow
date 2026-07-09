@@ -46,8 +46,7 @@ from arch.generators.mockworld_map import render_mockworld_map
 from arch.generators.module_graph import render_module_graph
 from arch.generators.port_map import render_port_map
 from arch.generators.traceability_matrix import (
-    TRACE_WINDOW,
-    parse_trace_commits,
+    collect_trace_commits,
     render_traceability_matrix,
 )
 from disturbance.detectors.traceability import sync_traceability_baseline
@@ -126,19 +125,17 @@ def _git_log_changelog(repo_root: Path) -> list[CommitInfo]:
 def _git_log_traceability(repo_root: Path) -> list[TraceCommitInfo]:
     """Collect the traceability population: recent PR-squash-merge commits.
 
-    Fetches a bounded raw slice (the window plus headroom for non-PR
-    commits interleaved in history) and lets ``parse_trace_commits`` filter
-    to ``(#NNNN)``-suffixed commits and cap at ``TRACE_WINDOW``. Branch
-    work-in-progress commits never match the suffix, so regenerating on a
-    PR branch yields the same population as its base — keeping the drift
-    check stable while a PR is open.
+    Delegates to ``collect_trace_commits`` so the generator, the ratchet
+    baseline sync, and the ``TraceabilityDetector``'s marker verification
+    all compute the fraction through ONE code path (CH-5 convergence review
+    finding 3). Branch work-in-progress commits never match the ``(#NNNN)``
+    suffix, so regenerating on a PR branch yields the same population as
+    its base — keeping the drift check stable while a PR is open.
+    Unavailable history renders as an empty population (matching the
+    previous stdout-swallowing behavior); the detector-side regression
+    check is what turns that into a loud signal.
     """
-    fmt = "%H%x1f%s%x1f%B%x1e"
-    raw = _run(
-        ["git", "log", f"-n{TRACE_WINDOW * 6}", f"--pretty=format:{fmt}"],
-        repo_root,
-    )
-    return parse_trace_commits(raw)
+    return collect_trace_commits(repo_root) or []
 
 
 def _compute_artifacts(repo_root: Path) -> dict[str, str]:
@@ -272,10 +269,12 @@ def _strip_footer(text: str) -> str:
 #   commit*, so any squash-merge landing on the base branch between the
 #   author's regen and the CI run shifts the commit window — once the
 #   untraced percentage is below 100 that is a deterministic drift failure
-#   on unrelated PRs. The load-bearing staleness invariant is enforced by
-#   the traceability disturbance ratchet instead
-#   (disturbance/baselines/traceability.yaml), which only moves when a
-#   regenerated matrix is committed.
+#   on unrelated PRs. The load-bearing staleness/forgery invariant is
+#   enforced by the traceability disturbance ratchet instead: the baseline
+#   (disturbance/baselines/traceability.yaml) only lowers from a fraction
+#   RECOMPUTED from git history, and the TraceabilityDetector flags a
+#   committed marker that deviates from that recompute (the marker itself
+#   is display-only — CH-5 convergence review finding 3).
 _DRIFT_EXEMPT = {"changelog.md", "traceability_matrix.md"}
 
 

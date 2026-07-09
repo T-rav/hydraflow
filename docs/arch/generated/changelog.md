@@ -6,12 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
-- `14ad81d` — feat(staging-promotion): compile the release evidence pack after RC promotion *(2026-07-09)*
-- `5b93ad3` — Merge remote-tracking branch 'origin/staging' into worktree-ch3-policy-gates *(2026-07-09)*
+- `b732f28` — feat(evidence-pack): per-RC release evidence-pack compiler — the binder (CH-4, #9732) (#9742) (#9742) *(2026-07-09)*
+- `a16597c` — feat(merge-policy): policy-as-code merge gates from the factory-autonomy table (CH-3, #9731) (#9741) (#9741) *(2026-07-09)*
 - `f009569` — feat(prompt-gate): LLM data-governance gates at every spawn seam (CH-6, #9734) (#9739) (#9739) *(2026-07-09)*
-- `6a0abe5` — refactor(merge-policy): loud RC-promotion denies + runtime kill-switch (review findings) *(2026-07-09)*
 - `1d2d8db` — feat(manifest): per-PR reproducibility manifest + AI system inventory (CH-7, #9735) (#9738) (#9738) *(2026-07-09)*
-- `d44b9d4` — feat(merge-policy): enforce the policy at the factory's five autonomous merge seams (CH-3, #9731) *(2026-07-09)*
 - `9f62794` — feat(traceability): requirement-ID threading + traceability matrix ratchet (CH-5, #9733) (#9737) (#9737) *(2026-07-09)*
 - `cee31ec` — feat(approval-records): named-human approval evidence + role separation on the CH-1 chain (CH-2, #9730) (#9740) (#9740) *(2026-07-08)*
 - `9c63956` — feat(audit-chain): tamper-evident audit streams — hash-chained JSONL + retention (CH-1) (#9736) (#9736) *(2026-07-08)*
