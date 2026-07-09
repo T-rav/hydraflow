@@ -929,13 +929,19 @@ async def test_async_no_req_id_adds_no_trailer(
 
 
 @pytest.mark.asyncio
-async def test_generate_and_open_req_id_trails_lazy_body(
+async def test_generate_and_open_req_id_trails_commit_and_lazy_body(
     local_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The trailer is applied AFTER a callable pr_body resolves."""
+    """On the generate-in-worktree path the trailer lands on the commit
+    message too, and on the PR body only AFTER a callable pr_body resolves."""
     from auto_pr import generate_and_open_pr_async
 
+    commit_msgs: list[str] = []
     pr_bodies: list[str] = []
+
+    def on_cmd(cmd: tuple[str, ...]) -> None:
+        if "commit" in cmd and "-m" in cmd:
+            commit_msgs.append(cmd[cmd.index("-m") + 1])
 
     def gh_handler(cmd: tuple[str, ...]) -> str:
         if cmd[2] == "create":
@@ -945,7 +951,7 @@ async def test_generate_and_open_req_id_trails_lazy_body(
 
     monkeypatch.setattr(
         "subprocess_util.run_subprocess",
-        _real_run_subprocess_stub(gh_handler=gh_handler),
+        _real_run_subprocess_stub(gh_handler=gh_handler, on_cmd=on_cmd),
     )
 
     async def generate(worktree: Path) -> None:
@@ -962,8 +968,52 @@ async def test_generate_and_open_req_id_trails_lazy_body(
         auto_merge=False,
     )
 
+    assert commit_msgs[0].rstrip().endswith("Req-ID: SYS-9")
     assert pr_bodies[0].rstrip().endswith("Req-ID: SYS-9")
     assert pr_bodies[0].startswith("lazy body")
+
+
+@pytest.mark.asyncio
+async def test_generate_and_open_no_req_id_adds_no_trailer(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zero friction on the generate-in-worktree path too: without req_id
+    neither the commit message nor the PR body mentions Req-ID."""
+    from auto_pr import generate_and_open_pr_async
+
+    commit_msgs: list[str] = []
+    pr_bodies: list[str] = []
+
+    def on_cmd(cmd: tuple[str, ...]) -> None:
+        if "commit" in cmd and "-m" in cmd:
+            commit_msgs.append(cmd[cmd.index("-m") + 1])
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        if cmd[2] == "create":
+            pr_bodies.append(cmd[cmd.index("--body") + 1])
+            return "https://github.com/x/y/pull/7\n"
+        return ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler, on_cmd=on_cmd),
+    )
+
+    async def generate(worktree: Path) -> None:
+        (worktree / "gen.txt").write_text("generated\n")
+
+    await generate_and_open_pr_async(
+        repo_root=local_repo,
+        branch="feature/plain-gen",
+        generate=generate,
+        path_specs=["gen.txt"],
+        pr_title="feat: plain generated change",
+        pr_body="body",
+        auto_merge=False,
+    )
+
+    assert "Req-ID" not in commit_msgs[0]
+    assert "Req-ID" not in pr_bodies[0]
 
 
 # ---------------------------------------------------------------------------
