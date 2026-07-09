@@ -344,6 +344,25 @@ class TestDedupAndIdempotency:
         assert second["recorded"] == 0
         assert len(_read_records(config)) == 1
 
+    async def test_duplicate_list_entries_record_once(
+        self, config, monkeypatch
+    ) -> None:
+        """A duplicated number inside ONE list payload must not double-append
+        (read-back dedup only covers previous ticks)."""
+        fake = FakeGh(
+            merged=[
+                {"number": 11, "mergedAt": "2026-07-08T12:00:00Z"},
+                {"number": 11, "mergedAt": "2026-07-08T12:00:00Z"},
+            ],
+            details={11: _detail(11)},
+        )
+        _install(monkeypatch, fake)
+
+        result = await ApprovalRecordReconciler(config).reconcile()
+
+        assert result["recorded"] == 1
+        assert [r["pr_number"] for r in _read_records(config)] == [11]
+
     async def test_steady_state_makes_single_gh_call(self, config, monkeypatch) -> None:
         """No new merges → one list call, no identity/detail calls."""
         fake = FakeGh(merged=[])

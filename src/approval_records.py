@@ -131,10 +131,14 @@ class ApprovalRecordReconciler:
 
         merged = await self._list_recently_merged()
         recorded = self._recorded_pr_numbers()
+        # Set-dedup guards against a duplicate number inside ONE list payload
+        # (read-back only covers records appended on PREVIOUS ticks).
         todo = sorted(
-            number
-            for number in (entry.get("number") for entry in merged)
-            if isinstance(number, int) and number not in recorded
+            {
+                number
+                for number in (entry.get("number") for entry in merged)
+                if isinstance(number, int) and number not in recorded
+            }
         )
         if not todo:
             return {"merged_seen": len(merged), "recorded": 0}
