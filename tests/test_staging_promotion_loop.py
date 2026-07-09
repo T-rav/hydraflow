@@ -12,13 +12,24 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import evidence_pack
 from base_background_loop import LoopDeps
 from ci_sentinels import ci_timeout
 from config import HydraFlowConfig
-from events import EventBus
+from events import EventBus, EventType
 from models import PRInfo
 from staging_promotion_loop import StagingPromotionLoop
 from state import StateTracker
+from subprocess_util import CreditExhaustedError
+
+
+@pytest.fixture(autouse=True)
+def _fake_evidence_compiler(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Keep the CH-4 compiler off the network for every promoted-path test;
+    TestEvidencePackTrigger installs its own instrumented fake on top."""
+    fake = AsyncMock(return_value=MagicMock(gap_count=0))
+    monkeypatch.setattr(evidence_pack, "compile_evidence_pack", fake)
+    return fake
 
 
 def _make_cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> HydraFlowConfig:
@@ -621,6 +632,160 @@ class TestRollingFailureIssue:
         assert r2["status"] == "promoted"
         prs.close_issue.assert_any_await(7001)
         assert state.get_rollup_issue("staging_promotion:rc_ci") is None
+
+
+class TestEvidencePackTrigger:
+    """CH-4 (#9732): the release evidence pack compiles after a successful
+    promotion — compile-only, report-only, fail-open."""
+
+    RC_BRANCH = "rc/2026-07-08-1200"
+
+    def _promoted_loop(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        merge_result: bool = True,
+        ci_result: tuple[bool, str] = (True, "ok"),
+    ) -> tuple[StagingPromotionLoop, MagicMock]:
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(99, branch=self.RC_BRANCH),
+            ci_result=ci_result,
+            merge_result=merge_result,
+        )
+        prs.get_pr_head_sha = AsyncMock(return_value="headsha")
+        return loop, prs
+
+    def _install_compiler(
+        self, monkeypatch: pytest.MonkeyPatch, error: Exception | None = None
+    ) -> list[tuple]:
+        calls: list[tuple] = []
+
+        async def _fake(config, rc_branch, pr_number, *, disabled_workers=None):
+            calls.append((rc_branch, pr_number, disabled_workers))
+            if error is not None:
+                raise error
+            return MagicMock(gap_count=0)
+
+        monkeypatch.setattr(evidence_pack, "compile_evidence_pack", _fake)
+        return calls
+
+    def _alerts(self, queue) -> list:
+        alerts = []
+        while not queue.empty():
+            event = queue.get_nowait()
+            if event.type is EventType.SYSTEM_ALERT:
+                alerts.append(event)
+        return alerts
+
+    @pytest.mark.asyncio
+    async def test_compiles_pack_after_successful_promotion(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = self._install_compiler(monkeypatch)
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch)
+
+        result = await loop._do_work()
+
+        assert result == {"status": "promoted", "pr": 99}
+        assert calls == [(self.RC_BRANCH, 99, None)]  # stateless → gap, not guess
+
+    @pytest.mark.asyncio
+    async def test_passes_disabled_workers_from_state(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = self._install_compiler(monkeypatch)
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch)
+        state = StateTracker(state_file=tmp_path / "s.json")
+        state.set_disabled_workers({"sentry"})
+        loop._state = state  # type: ignore[attr-defined]
+
+        await loop._do_work()
+
+        assert calls == [(self.RC_BRANCH, 99, {"sentry"})]
+
+    @pytest.mark.asyncio
+    async def test_not_compiled_when_merge_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = self._install_compiler(monkeypatch)
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch, merge_result=False)
+
+        result = await loop._do_work()
+
+        assert result == {"status": "merge_failed", "pr": 99}
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_not_compiled_on_ci_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = self._install_compiler(monkeypatch)
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch, ci_result=(False, "boom"))
+
+        result = await loop._do_work()
+
+        assert result["status"] == "ci_failed"
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_disables_compilation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_EVIDENCE_PACK_ENABLED", "false")
+        calls = self._install_compiler(monkeypatch)
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch)
+
+        result = await loop._do_work()
+
+        assert result == {"status": "promoted", "pr": 99}
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_compiler_failure_is_fail_open_and_alerts(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        self._install_compiler(monkeypatch, error=RuntimeError("disk full"))
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch)
+        queue = loop._bus.subscribe()
+
+        with caplog.at_level("WARNING", logger="hydraflow.staging_promotion_loop"):
+            result = await loop._do_work()
+
+        assert result == {"status": "promoted", "pr": 99}  # NEVER blocks promotion
+        assert any("vidence" in r.getMessage() for r in caplog.records)
+        alerts = self._alerts(queue)
+        assert len(alerts) == 1
+        assert alerts[0].data["source"] == "evidence_pack"
+        assert "#99" in alerts[0].data["message"]
+
+    @pytest.mark.asyncio
+    async def test_failure_alert_is_deduped_per_rc(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._install_compiler(monkeypatch, error=RuntimeError("still broken"))
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch)
+        queue = loop._bus.subscribe()
+
+        await loop._do_work()
+        await loop._do_work()  # same RC promoted-tick shape again
+
+        assert len(self._alerts(queue)) == 1
+
+    @pytest.mark.asyncio
+    async def test_credit_exhaustion_propagates_not_swallowed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._install_compiler(monkeypatch, error=CreditExhaustedError("billing cap"))
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch)
+
+        with pytest.raises(CreditExhaustedError):
+            await loop._do_work()
 
 
 class TestMergePolicyGateOnPromotion:

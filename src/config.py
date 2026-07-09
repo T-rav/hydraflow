@@ -429,6 +429,11 @@ _ENV_OPT_INT_OVERRIDES: list[tuple[str, str, int | None]] = [
         "HYDRAFLOW_AUDIT_RETENTION_DAYS_APPROVAL_RECORDS",
         None,
     ),
+    (
+        "audit_retention_days_evidence_packs",
+        "HYDRAFLOW_AUDIT_RETENTION_DAYS_EVIDENCE_PACKS",
+        None,
+    ),
 ]
 
 # Float overrides with tight [0, 1] bounds — handled separately from the
@@ -444,6 +449,7 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
     ("approval_records_enabled", "HYDRAFLOW_APPROVAL_RECORDS_ENABLED", True),
+    ("evidence_pack_enabled", "HYDRAFLOW_EVIDENCE_PACK_ENABLED", True),
     ("merge_policy_enabled", "HYDRAFLOW_MERGE_POLICY_ENABLED", True),
     ("sensor_enrichment_enabled", "HYDRAFLOW_SENSOR_ENRICHMENT_ENABLED", True),
     ("gh_circuit_breaker_enabled", "HYDRAFLOW_GH_CIRCUIT_BREAKER_ENABLED", True),
@@ -1245,6 +1251,15 @@ class HydraFlowConfig(BaseModel):
             "recommended setting for change-control evidence."
         ),
     )
+    audit_retention_days_evidence_packs: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Days to retain evidence-pack summary records (CH-4, #9732; "
+            "audit/evidence_packs.jsonl). None = keep forever — the "
+            "recommended setting for release evidence."
+        ),
+    )
 
     # CH-2 (#9730): kill-switch for the approval-record reconciler capability
     # hosted by MergeStateWatcherLoop. Not a loop gate — the loop keeps
@@ -1254,6 +1269,16 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Capture structured merge-approval records (CH-2) on the "
             "MergeStateWatcherLoop tick."
+        ),
+    )
+
+    # CH-4 (#9732): kill-switch for the release evidence-pack compiler
+    # invoked by StagingPromotionLoop after a successful RC promotion.
+    # Compile-only, report-only — never gates the promotion itself.
+    evidence_pack_enabled: bool = Field(
+        default=True,
+        description=(
+            "Compile a release evidence pack (CH-4) after each successful RC promotion."
         ),
     )
 
@@ -3558,6 +3583,20 @@ class HydraFlowConfig(BaseModel):
         ``repo_data_root`` — one chain per managed repo.
         """
         return self.repo_data_root / "audit" / "approval_records.jsonl"
+
+    @property
+    def evidence_packs_path(self) -> Path:
+        """Repo-scoped hash-chained evidence-pack summary stream (CH-4, #9732).
+
+        One ``record_type="evidence_pack"`` record per compiled RC pack;
+        the pack directories themselves live under :attr:`evidence_dir`.
+        """
+        return self.repo_data_root / "audit" / "evidence_packs.jsonl"
+
+    @property
+    def evidence_dir(self) -> Path:
+        """Root of the per-RC release evidence packs (CH-4, #9732)."""
+        return self.repo_data_root / "evidence"
 
     @property
     def merge_policy_path(self) -> Path:

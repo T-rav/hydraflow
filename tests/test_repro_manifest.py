@@ -25,6 +25,7 @@ from repro_manifest import (
     PROMPT_HASH_SPEC,
     append_manifest,
     build_manifest,
+    extract_manifest_block,
     render_manifest_block,
 )
 
@@ -267,3 +268,52 @@ def test_append_manifest_skips_when_body_near_github_limit(config, factory_root)
     body = "x" * 65_000
     out = append_manifest(body, config=config, factory_root=factory_root)
     assert out == body
+
+
+# ---------------------------------------------------------------------------
+# extract_manifest_block (CH-4 reads back what CH-7 wrote)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_round_trips_render(config, factory_root):
+    """The evidence-pack compiler must read back exactly what was attached."""
+    manifest = build_manifest(config, factory_root=factory_root)
+    body = append_manifest("## Summary\n\nCloses #1.", config=config)
+
+    assert extract_manifest_block(body) is not None
+    # Round-trip through the real attach path with the same factory root.
+    body2 = f"prose\n\n{render_manifest_block(manifest)}"
+    assert extract_manifest_block(body2) == manifest
+
+
+def test_extract_returns_none_without_heading():
+    assert extract_manifest_block("## Summary\n\n```json\n{}\n```") is None
+
+
+def test_extract_returns_none_on_empty_or_none_body():
+    assert extract_manifest_block("") is None
+
+
+def test_extract_returns_none_on_malformed_json():
+    body = f"{MANIFEST_HEADING}\n\n```json\nnot json at all\n```\n"
+    assert extract_manifest_block(body) is None
+
+
+def test_extract_returns_none_when_fence_missing():
+    body = f"{MANIFEST_HEADING}\n\nno fenced block here\n"
+    assert extract_manifest_block(body) is None
+
+
+def test_extract_returns_none_on_non_dict_payload():
+    body = f'{MANIFEST_HEADING}\n\n```json\n["a", "list"]\n```\n'
+    assert extract_manifest_block(body) is None
+
+
+def test_extract_finds_block_amid_other_fences():
+    manifest = {"schema": MANIFEST_SCHEMA, "hydraflow_sha": "abc"}
+    body = (
+        '## Test Plan\n\n```json\n{"other": true}\n```\n\n'
+        + render_manifest_block(manifest)
+        + "\ntrailing prose\n"
+    )
+    assert extract_manifest_block(body) == manifest

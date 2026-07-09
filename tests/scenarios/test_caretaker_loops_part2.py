@@ -22,11 +22,14 @@ expensive to reconstruct in the scenario harness.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import subprocess_util
+from audit_chain import AuditChain
 from tests.scenarios.fakes.mock_world import MockWorld
 from tests.scenarios.helpers.loop_port_seeding import seed_ports as _seed_ports
 
@@ -470,6 +473,71 @@ class TestL22StagingPromotionLoop:
         assert "rc_branch" in result
         prs.create_rc_branch.assert_awaited_once()
         prs.create_promotion_pr.assert_awaited_once()
+
+    async def test_promotion_merge_compiles_evidence_pack(self, tmp_path, monkeypatch):
+        """CH-4 (#9732): a green promotion merge runs the REAL evidence-pack
+        compiler (only the gh boundary is faked) — the pack lands on disk
+        with named gaps and one chained evidence_pack record."""
+        loop, prs, config = self._make_staging_loop(tmp_path, staging_enabled=True)
+        rc_branch = "rc/2026-07-08-0400"
+        prs.find_open_promotion_pr = AsyncMock(
+            return_value=MagicMock(number=77, branch=rc_branch)
+        )
+        prs.merge_promotion_pr = AsyncMock(return_value=True)
+        prs.get_pr_head_sha = AsyncMock(return_value="rcsha123")
+
+        async def _fake_gh(*cmd, **_kw):
+            assert cmd[:3] == ("gh", "pr", "view"), cmd
+            if int(cmd[3]) == 77:
+                return json.dumps(
+                    {
+                        "number": 77,
+                        "title": f"Promote {rc_branch} → main",
+                        "url": "https://github.com/test-org/test-repo/pull/77",
+                        "body": "Automated RC promotion (no repro manifest).",
+                        "author": {"login": "hydra-ops-bot"},
+                        "baseRefName": "main",
+                        "headRefName": rc_branch,
+                        "headRefOid": "a" * 40,
+                        "mergeCommit": {"oid": "b" * 40},
+                        "mergedAt": "2026-07-08T04:10:00Z",
+                        "commits": [
+                            {
+                                "oid": "c" * 40,
+                                "messageHeadline": "feat(z): one change (#9001)",
+                                "authors": [{"login": "agent-z"}],
+                            }
+                        ],
+                    }
+                )
+            return json.dumps(
+                {
+                    "number": int(cmd[3]),
+                    "title": f"PR {cmd[3]}",
+                    "body": "Closes #1.",
+                    "author": {"login": "agent-z"},
+                }
+            )
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _fake_gh)
+
+        result = await loop._do_work()
+
+        assert result is not None
+        assert result["status"] == "promoted"
+        pack_dir = config.evidence_dir / "rc-2026-07-08-0400"
+        for name in ("manifest.json", "audit.json", "ops.json", "index.md"):
+            assert (pack_dir / name).is_file(), name
+        manifest = json.loads((pack_dir / "manifest.json").read_text())
+        assert [e["number"] for e in manifest["included_prs"]] == [9001]
+        # Named gaps, never silence: no approval stream / repro manifest /
+        # audit report / state tracker exist in this world.
+        gap_kinds = {g["kind"] for g in manifest["gaps"]}
+        assert "approval_record_missing" in gap_kinds
+        assert "repro_manifest_missing" in gap_kinds
+        verified = AuditChain(config.evidence_packs_path).verify()
+        assert verified.ok
+        assert verified.chained_records == 1
 
 
 # ---------------------------------------------------------------------------

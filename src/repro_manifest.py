@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,14 @@ logger = logging.getLogger(__name__)
 
 MANIFEST_SCHEMA = "hydraflow.repro-manifest/v1"
 MANIFEST_HEADING = "## Reproducibility Manifest"
+
+# The first fenced ```json block after the manifest heading — the exact shape
+# :func:`render_manifest_block` writes. DOTALL because the payload is
+# multi-line; non-greedy so a later unrelated fence can't be swallowed.
+_MANIFEST_BLOCK_RE = re.compile(
+    re.escape(MANIFEST_HEADING) + r"\s*```json\n(?P<payload>.*?)\n```",
+    re.DOTALL,
+)
 
 # GitHub rejects PR bodies over 65_536 chars; leave headroom for the block.
 _GITHUB_BODY_LIMIT = 65_536
@@ -175,6 +184,27 @@ def render_manifest_block(manifest: dict[str, Any]) -> str:
     """Render the manifest as the markdown comment block appended to PR bodies."""
     payload = json.dumps(manifest, indent=2, sort_keys=True)
     return f"{MANIFEST_HEADING}\n\n```json\n{payload}\n```\n"
+
+
+def extract_manifest_block(body: str) -> dict[str, Any] | None:
+    """Parse the manifest back out of a PR *body* — best-effort, never raises.
+
+    Inverse of :func:`render_manifest_block` for the evidence-pack compiler
+    (CH-4, #9732): it bundles the RC PR's own manifest into the release
+    evidence pack. Returns ``None`` when the heading, the fenced JSON block,
+    or a JSON object payload is absent — the caller records a named gap.
+    """
+    match = _MANIFEST_BLOCK_RE.search(body or "")
+    if match is None:
+        return None
+    try:
+        parsed = json.loads(match.group("payload"))
+    except json.JSONDecodeError:
+        logger.warning("Unparseable reproducibility-manifest block in PR body")
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return parsed
 
 
 def append_manifest(

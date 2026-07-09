@@ -353,7 +353,9 @@ class ConfigFactory:
         audit_retention_days_health_decisions: int | None = None,
         audit_retention_days_inference_telemetry: int | None = None,
         audit_retention_days_approval_records: int | None = None,
+        audit_retention_days_evidence_packs: int | None = None,
         approval_records_enabled: bool = True,
+        evidence_pack_enabled: bool = True,
         merge_policy_enabled: bool = True,
         release_version_source: Literal[
             "epic_title", "milestone", "manual"
@@ -603,7 +605,11 @@ class ConfigFactory:
                 audit_retention_days_approval_records=(
                     audit_retention_days_approval_records
                 ),
+                audit_retention_days_evidence_packs=(
+                    audit_retention_days_evidence_packs
+                ),
                 approval_records_enabled=approval_records_enabled,
+                evidence_pack_enabled=evidence_pack_enabled,
                 merge_policy_enabled=merge_policy_enabled,
                 release_version_source=release_version_source,
                 release_tag_prefix=release_tag_prefix,
