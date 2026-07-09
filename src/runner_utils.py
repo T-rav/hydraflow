@@ -8,7 +8,7 @@ import logging
 import os
 import signal
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -482,6 +482,7 @@ async def stream_claude_with_telemetry(
     stream_config: StreamConfig = StreamConfig(),
     issue_number: int | None = None,
     pr_number: int | None = None,
+    issue_labels: Sequence[str] = (),
 ) -> str:
     """Stream an agent subprocess AND record prompt/inference telemetry.
 
@@ -495,6 +496,11 @@ async def stream_claude_with_telemetry(
     Direct ``stream_claude_process`` callers that are NOT one of the central
     runners (``BaseRunner``/``BaseSubprocessRunner``) MUST use this wrapper so
     no LLM inference is invisible to telemetry.
+
+    *issue_labels* feeds the CH-6 gate's upward-only ``data-class:`` label
+    elevation. Callers with an issue in scope MUST pass its labels
+    (``issue.labels`` / ``issue.tags``); without them only the repo-declared
+    class is enforced.
     """
     # CH-6 data-governance gate (#9734): redact/block BEFORE spawn. A
     # regulated-class block raises pre-spawn — nothing was sent, no telemetry
@@ -510,6 +516,7 @@ async def stream_claude_with_telemetry(
             if issue_number is not None
             else _as_opt_int(event_data.get("issue"))
         ),
+        issue_labels=issue_labels,
     )
     prompt = gated.prompt
 

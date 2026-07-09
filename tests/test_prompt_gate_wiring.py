@@ -243,6 +243,66 @@ class TestStreamClaudeWithTelemetryGate:
             )
         assert "[REDACTED:ssn_like]" in mock.call_args[1]["prompt"]
 
+    @pytest.mark.asyncio
+    async def test_issue_labels_elevate_and_redact_on_internal_repo(
+        self, tmp_path: Path
+    ) -> None:
+        """A data-class label on the issue elevates this seam's gate too."""
+        import runner_utils
+        from runner_utils import stream_claude_with_telemetry
+
+        config = _config(
+            tmp_path, data_class_allowed_backends={"regulated-phi": ["claude"]}
+        )
+        with patch.object(
+            runner_utils, "stream_claude_process", new_callable=AsyncMock
+        ) as mock:
+            mock.return_value = "out"
+            await stream_claude_with_telemetry(
+                config=config,
+                cmd=["claude", "-p"],
+                prompt=_SENSITIVE,
+                cwd=tmp_path,
+                active_procs=set(),
+                event_bus=_event_bus(),
+                event_data={"issue": 3, "source": "ac_generator"},
+                logger=logging.getLogger("test"),
+                issue_labels=["data-class:regulated-phi"],
+            )
+        assert "[REDACTED:ssn_like]" in mock.call_args[1]["prompt"]
+
+    @pytest.mark.asyncio
+    async def test_issue_labels_elevate_and_block_on_disallowed_backend(
+        self, tmp_path: Path
+    ) -> None:
+        """Elevation to a class with no allowed backend blocks before spawn."""
+        import runner_utils
+        from runner_utils import stream_claude_with_telemetry
+
+        config = _config(tmp_path, data_class_allowed_backends={})
+        with (
+            patch.object(
+                runner_utils, "stream_claude_process", new_callable=AsyncMock
+            ) as mock,
+            pytest.raises(PromptGateBlockedError),
+        ):
+            await stream_claude_with_telemetry(
+                config=config,
+                cmd=["claude", "-p"],
+                prompt=_SENSITIVE,
+                cwd=tmp_path,
+                active_procs=set(),
+                event_bus=_event_bus(),
+                event_data={"issue": 3, "source": "ac_generator"},
+                logger=logging.getLogger("test"),
+                issue_labels=["data-class:regulated-phi"],
+            )
+        mock.assert_not_awaited()
+        records = _read_audit(config)
+        assert len(records) == 1
+        assert records[0]["action"] == "block"
+        assert records[0]["data_class"] == "regulated-phi"
+
 
 @dataclass(frozen=True)
 class _SpawnResult:
