@@ -11,6 +11,7 @@ from pathlib import Path
 
 from config import HydraFlowConfig, build_credentials
 from log import setup_logging
+from prompt_gate import most_restrictive_data_class
 from runtime_config import DEFAULT_LOG_FILE, load_runtime_config
 
 logger = logging.getLogger("hydraflow.server")
@@ -194,11 +195,23 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
                 overrides={
                     "repo_root": str(repo_path),
                     **({"repo": record.repo} if record.repo else {}),
-                    # CH-6 (#9734): the registry's data-class declaration
-                    # rides the per-repo config so prompt_gate enforces it.
-                    "repo_data_class": record.data_class,
                 }
             )
+            # CH-6 (#9734): the registry's data-class declaration rides the
+            # per-repo config so prompt_gate enforces it. Merge upward-only —
+            # a defaulted record must never downgrade a class the repo's own
+            # config file declares (that would be fail-open).
+            effective_class = most_restrictive_data_class(
+                repo_cfg.repo_data_class, record.data_class
+            )
+            if repo_cfg.repo_data_class != effective_class:
+                repo_cfg = load_runtime_config(
+                    overrides={
+                        "repo_root": str(repo_path),
+                        **({"repo": record.repo} if record.repo else {}),
+                        "repo_data_class": effective_class,
+                    }
+                )
             await registry.register(repo_cfg)
             logger.info("Restored registered repo %r from store", record.slug)
         except Exception:
@@ -243,14 +256,16 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
         # Use the GitHub slug (owner/repo) for the record, not the
         # filesystem-safe repo_slug (owner-repo).
         github_slug = slug or repo_cfg.repo
-        # CH-6 (#9734): a declared data class sticks; when the caller omits
-        # it, an already-registered repo keeps its stored declaration and a
-        # new repo gets the zero-regression default ("internal"). Reload the
+        # CH-6 (#9734): merge the API declaration, any stored declaration,
+        # and the repo's own config-derived class — upward-only, so nothing
+        # can downgrade a stricter declaration (fail closed). Reload the
         # config with the effective class so the RUNNING runtime enforces it
         # immediately — a record/config mismatch would be fail-open.
         existing = repo_store.get(github_slug)
-        effective_class = data_class or (
-            existing.data_class if existing else "internal"
+        effective_class = most_restrictive_data_class(
+            repo_cfg.repo_data_class,
+            existing.data_class if existing else None,
+            data_class,
         )
         if repo_cfg.repo_data_class != effective_class:
             repo_cfg = load_runtime_config(

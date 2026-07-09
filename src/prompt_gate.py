@@ -146,6 +146,33 @@ def effective_data_class(repo_class: str, issue_labels: Sequence[str] = ()) -> s
     return FAIL_CLOSED_DATA_CLASS
 
 
+def most_restrictive_data_class(*candidates: str | None) -> str:
+    """Merge multiple data-class declarations, moving only UP in restriction.
+
+    Used where a repo's class is declared in more than one place (runtime
+    registry record, per-repo config file, ``/api/repos/add`` payload): the
+    most restrictive declaration wins, so a stale/defaulted declaration can
+    never downgrade a stricter one (fail closed). Empty/None candidates are
+    skipped; no candidates → the zero-regression default ``internal``.
+    Distinct regulated candidates are classification uncertainty →
+    :data:`FAIL_CLOSED_DATA_CLASS`.
+    """
+    normalized = {
+        normalize_data_class(c) for c in candidates if c is not None and c.strip()
+    }
+    if not normalized:
+        return DATA_CLASS_INTERNAL
+    top_rank = max(restriction_rank(c) for c in normalized)
+    at_top = {c for c in normalized if restriction_rank(c) == top_rank}
+    if len(at_top) == 1:
+        return next(iter(at_top))
+    logger.warning(
+        "prompt gate: conflicting data-class declarations %s — failing closed",
+        sorted(at_top),
+    )
+    return FAIL_CLOSED_DATA_CLASS
+
+
 @dataclass(frozen=True)
 class GateDecision:
     """One gate decision — audit-record shape (pattern names/counts, no content)."""
@@ -358,6 +385,7 @@ __all__ = [
     "gate_prompt",
     "is_regulated",
     "is_valid_data_class",
+    "most_restrictive_data_class",
     "normalize_data_class",
     "restriction_rank",
 ]

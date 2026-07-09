@@ -21,6 +21,7 @@ from prompt_gate import (
     gate_context_fields,
     gate_prompt,
     is_regulated,
+    most_restrictive_data_class,
     normalize_data_class,
     restriction_rank,
 )
@@ -115,6 +116,52 @@ class TestClassificationModel:
     def test_unrelated_labels_are_ignored(self):
         cls = effective_data_class("internal", ["hydraflow-ready", "bug"])
         assert cls == "internal"
+
+
+class TestMostRestrictiveDataClass:
+    """Merging multiple declarations (registry record, config file, API) may
+    only ever move UP in restriction — never downgrade."""
+
+    def test_empty_candidates_default_to_internal(self):
+        assert most_restrictive_data_class() == "internal"
+        assert most_restrictive_data_class("", None) == "internal"
+
+    def test_single_candidate_wins(self):
+        assert most_restrictive_data_class("public-code") == "public-code"
+        assert most_restrictive_data_class("regulated-phi") == "regulated-phi"
+
+    def test_higher_restriction_wins_regardless_of_order(self):
+        assert (
+            most_restrictive_data_class("internal", "regulated-phi") == "regulated-phi"
+        )
+        assert (
+            most_restrictive_data_class("regulated-phi", "internal") == "regulated-phi"
+        )
+        assert most_restrictive_data_class("internal", "public-code") == "internal"
+
+    def test_record_default_cannot_downgrade_config_declaration(self):
+        """The fail-open bug: an 'internal' registry record must not lower a
+        config-file-declared regulated class."""
+        assert (
+            most_restrictive_data_class("regulated-phi", "internal") == "regulated-phi"
+        )
+
+    def test_distinct_regulated_candidates_fail_closed(self):
+        assert (
+            most_restrictive_data_class("regulated-phi", "regulated-mnpi")
+            == FAIL_CLOSED_DATA_CLASS
+        )
+
+    def test_same_regulated_candidate_is_not_a_conflict(self):
+        assert (
+            most_restrictive_data_class("regulated-phi", "regulated-phi")
+            == "regulated-phi"
+        )
+
+    def test_invalid_candidate_fails_closed(self):
+        assert most_restrictive_data_class("internal", "bogus") == (
+            FAIL_CLOSED_DATA_CLASS
+        )
 
 
 class TestZeroRegressionNoOp:
