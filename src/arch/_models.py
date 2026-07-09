@@ -111,8 +111,9 @@ class TraceCommitInfo(BaseModel):
 
     Population unit for the traceability matrix: commits whose subject
     carries the ``(#NNNN)`` squash-merge suffix. ``req_ids`` come from
-    ``Req-ID:`` lines anywhere in the message (GitHub squash merges mangle
-    strict trailer blocks into bullet lists, so position is not trusted).
+    line-initial ``Req-ID:`` lines in the message body — bullet prefixes
+    from GitHub squash mangling are tolerated, mid-sentence prose mentions
+    are not (they would mint bogus requirement IDs).
     """
 
     sha: str
