@@ -37,9 +37,15 @@ to the CH-2 approval-records audit chain (same hash-chained stream as
 works even when the policy file itself is corrupt: the override is the
 documented recovery path for a broken policy.
 
-Named follow-up (out of scope here): generating GitHub branch-protection
-rulesets from policy.yaml so the platform-side rules and this file cannot
-drift (see docs/standards/branch_protection/).
+Named follow-ups (out of scope here):
+
+* generating GitHub branch-protection rulesets from policy.yaml so the
+  platform-side rules and this file cannot drift (see
+  docs/standards/branch_protection/);
+* gating ``auto_pr``'s best-effort ``gh pr merge --auto`` enablement — that
+  lane delegates the merge to GitHub's auto-merge queue (platform-side,
+  disabled on this repo), so it belongs with the ruleset follow-up rather
+  than an in-process gate.
 """
 
 from __future__ import annotations
