@@ -63,6 +63,8 @@ from typing import TYPE_CHECKING, Any
 
 import subprocess_util
 from audit_chain import AuditChain
+from exception_classify import exc_detail
+from subprocess_util import AuthenticationError, CreditExhaustedError
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -173,19 +175,51 @@ class ApprovalRecordReconciler:
                 "merged_seen": len(merged),
                 "recorded": 0,
                 "capture_gap_risk": False,
+                "record_failures": 0,
             }
 
         factory_login = await self._fetch_factory_login()
         count = 0
+        failures = 0
+        last_error: Exception | None = None
         for number in todo:
-            detail = await self._fetch_pr_detail(number)
-            self._chain.append(self._build_record(detail, factory_login))
-            count += 1
-        logger.info("Approval records: recorded %d merged PR(s): %s", count, todo[:10])
+            # Per-PR isolation: one poisoned PR (deleted head repo 404,
+            # malformed payload) sits first in the sorted todo forever and
+            # would otherwise fail the whole cycle every tick — starving
+            # every PR behind it of its evidence record (a silent gap the
+            # zero-overlap heuristic cannot see, since overlap still exists).
+            try:
+                detail = await self._fetch_pr_detail(number)
+                self._chain.append(self._build_record(detail, factory_login))
+                count += 1
+            except (AuthenticationError, CreditExhaustedError):
+                # Fatal infrastructure signals (RuntimeError subclasses) must
+                # never be burned as per-PR failures — propagate immediately
+                # so the hosting loop's cycle handler sees them.
+                raise
+            except (RuntimeError, ValueError) as exc:
+                failures += 1
+                last_error = exc
+                logger.warning(
+                    "Approval records: recording PR #%d failed (%s) — "
+                    "continuing with the remaining %d PR(s).",
+                    number,
+                    exc_detail(exc),
+                    len(todo) - count - failures,
+                )
+        if failures and count == 0 and last_error is not None:
+            # Every todo PR failed: this is a gh outage, not per-PR poison.
+            # Propagate so the cycle handler applies its outage semantics.
+            raise last_error
+        if count:
+            logger.info(
+                "Approval records: recorded %d merged PR(s): %s", count, todo[:10]
+            )
         return {
             "merged_seen": len(merged),
             "recorded": count,
             "capture_gap_risk": gap_risk,
+            "record_failures": failures,
         }
 
     # -- gh boundary (raw gh via the shared subprocess helper; no new PRPort

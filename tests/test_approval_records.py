@@ -24,6 +24,7 @@ from approval_records import (
     ApprovalRecordReconciler,
 )
 from audit_chain import AuditChain
+from subprocess_util import AuthenticationError, CreditExhaustedError
 from tests.helpers import ConfigFactory
 
 FACTORY_LOGIN = "hydra-ops-bot"
@@ -154,7 +155,12 @@ class TestRecordShape:
 
         result = await ApprovalRecordReconciler(config).reconcile()
 
-        assert result == {"merged_seen": 1, "recorded": 1, "capture_gap_risk": False}
+        assert result == {
+            "merged_seen": 1,
+            "recorded": 1,
+            "capture_gap_risk": False,
+            "record_failures": 0,
+        }
         records = _read_records(config)
         assert len(records) == 1
         rec = records[0]
@@ -354,7 +360,12 @@ class TestDedupAndIdempotency:
 
         result = await ApprovalRecordReconciler(config).reconcile()
 
-        assert result == {"merged_seen": 1, "recorded": 0, "capture_gap_risk": False}
+        assert result == {
+            "merged_seen": 1,
+            "recorded": 0,
+            "capture_gap_risk": False,
+            "record_failures": 0,
+        }
         assert fake.calls_starting("gh", "pr", "view") == []
         assert fake.calls_starting("gh", "api", "user") == []
 
@@ -426,7 +437,12 @@ class TestDedupAndIdempotency:
 
         result = await ApprovalRecordReconciler(config).reconcile()
 
-        assert result == {"merged_seen": 0, "recorded": 0, "capture_gap_risk": False}
+        assert result == {
+            "merged_seen": 0,
+            "recorded": 0,
+            "capture_gap_risk": False,
+            "record_failures": 0,
+        }
         assert len(fake.calls) == 1
         assert fake.calls[0][:3] == ("gh", "pr", "list")
 
@@ -454,7 +470,12 @@ class TestCaptureGapDetection:
         fake.details = {70: _detail(70)}
         result = await reconciler.reconcile()
 
-        assert result == {"merged_seen": 1, "recorded": 1, "capture_gap_risk": True}
+        assert result == {
+            "merged_seen": 1,
+            "recorded": 1,
+            "capture_gap_risk": True,
+            "record_failures": 0,
+        }
         markers = [
             r for r in _read_records(config) if r.get("record_type") == "capture_gap"
         ]
@@ -482,7 +503,12 @@ class TestCaptureGapDetection:
         fake.details = {10: _detail(10), 11: _detail(11)}
         result = await reconciler.reconcile()
 
-        assert result == {"merged_seen": 2, "recorded": 1, "capture_gap_risk": False}
+        assert result == {
+            "merged_seen": 2,
+            "recorded": 1,
+            "capture_gap_risk": False,
+            "record_failures": 0,
+        }
         assert [
             r for r in _read_records(config) if r.get("record_type") == "capture_gap"
         ] == []
@@ -500,10 +526,115 @@ class TestCaptureGapDetection:
 
         result = await ApprovalRecordReconciler(config).reconcile()
 
-        assert result == {"merged_seen": 1, "recorded": 1, "capture_gap_risk": False}
+        assert result == {
+            "merged_seen": 1,
+            "recorded": 1,
+            "capture_gap_risk": False,
+            "record_failures": 0,
+        }
         assert [
             r for r in _read_records(config) if r.get("record_type") == "capture_gap"
         ] == []
+
+
+class TestPerPRErrorIsolation:
+    """One poisoned PR (deleted head repo 404, malformed payload) sits first
+    in the sorted todo list forever — without isolation it fails the whole
+    cycle every tick and every PR behind it silently loses its evidence
+    record (a gap the zero-overlap heuristic cannot see)."""
+
+    _MERGED = [
+        {"number": 1, "mergedAt": "2026-07-08T10:00:00Z"},
+        {"number": 2, "mergedAt": "2026-07-08T11:00:00Z"},
+        {"number": 3, "mergedAt": "2026-07-08T12:00:00Z"},
+    ]
+
+    async def test_poisoned_first_pr_does_not_starve_later_prs(
+        self, config, monkeypatch
+    ) -> None:
+        fake = FakeGh(
+            merged=self._MERGED,
+            details={
+                1: RuntimeError("gh: HTTP 404 head repository was deleted"),
+                2: _detail(2),
+                3: _detail(3),
+            },
+        )
+        _install(monkeypatch, fake)
+
+        result = await ApprovalRecordReconciler(config).reconcile()
+
+        assert result == {
+            "merged_seen": 3,
+            "recorded": 2,
+            "capture_gap_risk": False,
+            "record_failures": 1,
+        }
+        assert [r["pr_number"] for r in _read_records(config)] == [2, 3]
+        assert AuditChain(config.approval_records_path).verify().ok
+
+    async def test_malformed_payload_value_error_is_isolated(
+        self, config, monkeypatch
+    ) -> None:
+        """A non-dict gh payload raises ValueError — same isolation."""
+        fake = FakeGh(
+            merged=self._MERGED,
+            details={1: ["not", "a", "dict"], 2: _detail(2), 3: _detail(3)},
+        )
+        _install(monkeypatch, fake)
+
+        result = await ApprovalRecordReconciler(config).reconcile()
+
+        assert result["recorded"] == 2
+        assert result["record_failures"] == 1
+        assert [r["pr_number"] for r in _read_records(config)] == [2, 3]
+
+    async def test_every_todo_pr_failing_raises_the_last_error(
+        self, config, monkeypatch
+    ) -> None:
+        """A true gh outage (everything failing) must still propagate to the
+        hosting loop's cycle handler."""
+        fake = FakeGh(
+            merged=self._MERGED,
+            details={
+                1: RuntimeError("gh: HTTP 502 (a)"),
+                2: RuntimeError("gh: HTTP 502 (b)"),
+                3: RuntimeError("gh: HTTP 502 (c)"),
+            },
+        )
+        _install(monkeypatch, fake)
+
+        with pytest.raises(RuntimeError, match=r"502 \(c\)"):
+            await ApprovalRecordReconciler(config).reconcile()
+        assert _read_records(config) == []
+
+    async def test_credit_exhaustion_propagates_immediately(
+        self, config, monkeypatch
+    ) -> None:
+        """CreditExhaustedError is a RuntimeError subclass but must NOT be
+        swallowed as a per-PR failure — burning the rest of the todo list
+        against an exhausted billing signal is the #9432 shape."""
+        fake = FakeGh(
+            merged=self._MERGED,
+            details={1: CreditExhaustedError("credits exhausted"), 2: _detail(2)},
+        )
+        _install(monkeypatch, fake)
+
+        with pytest.raises(CreditExhaustedError):
+            await ApprovalRecordReconciler(config).reconcile()
+        # Stopped immediately: nothing after the fatal signal was fetched.
+        assert _read_records(config) == []
+
+    async def test_auth_error_propagates_immediately(self, config, monkeypatch) -> None:
+        fake = FakeGh(
+            merged=self._MERGED,
+            details={1: AuthenticationError("gh: HTTP 401"), 2: _detail(2)},
+        )
+        _install(monkeypatch, fake)
+
+        with pytest.raises(AuthenticationError):
+            await ApprovalRecordReconciler(config).reconcile()
+        assert _read_records(config) == []
 
 
 class TestOutagesAndGates:
@@ -524,8 +655,8 @@ class TestOutagesAndGates:
     async def test_partial_failure_preserves_progress_and_self_heals(
         self, config, monkeypatch
     ) -> None:
-        """PR 1 records, PR 2's fetch fails → error propagates, PR 1 kept;
-        the next tick records PR 2 without duplicating PR 1."""
+        """PR 1 records, PR 2's fetch fails → cycle completes with the
+        failure counted; the next tick records PR 2 without duplicating PR 1."""
         merged = [
             {"number": 1, "mergedAt": "2026-07-08T10:00:00Z"},
             {"number": 2, "mergedAt": "2026-07-08T11:00:00Z"},
@@ -537,15 +668,26 @@ class TestOutagesAndGates:
         _install(monkeypatch, failing)
         reconciler = ApprovalRecordReconciler(config)
 
-        with pytest.raises(RuntimeError, match="503"):
-            await reconciler.reconcile()
+        first = await reconciler.reconcile()
+
+        assert first == {
+            "merged_seen": 2,
+            "recorded": 1,
+            "capture_gap_risk": False,
+            "record_failures": 1,
+        }
         assert [r["pr_number"] for r in _read_records(config)] == [1]
 
         recovered = FakeGh(merged=merged, details={1: _detail(1), 2: _detail(2)})
         _install(monkeypatch, recovered)
         result = await reconciler.reconcile()
 
-        assert result == {"merged_seen": 2, "recorded": 1, "capture_gap_risk": False}
+        assert result == {
+            "merged_seen": 2,
+            "recorded": 1,
+            "capture_gap_risk": False,
+            "record_failures": 0,
+        }
         assert [r["pr_number"] for r in _read_records(config)] == [1, 2]
         assert AuditChain(config.approval_records_path).verify().ok
 
