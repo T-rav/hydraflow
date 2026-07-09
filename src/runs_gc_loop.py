@@ -132,7 +132,15 @@ class RunsGCLoop(BaseBackgroundLoop):
                     )
                 )
                 continue
-            status[spec.name] = "ok" if result.chained_records else "empty"
+            # Crash-window warnings (torn_tail / sidecar_lag) are healthy:
+            # they self-heal on the stream's next append and MUST NOT raise
+            # the tamper alert or block retention pruning below.
+            if any(w.startswith("torn_tail") for w in result.warnings):
+                status[spec.name] = "torn_tail"
+            elif any(w.startswith("sidecar_lag") for w in result.warnings):
+                status[spec.name] = "sidecar_lag"
+            else:
+                status[spec.name] = "ok" if result.chained_records else "empty"
             recovered_key = f"audit_chain_break:{spec.name}"
             keys = self._chain_alert_dedup.get()
             if recovered_key in keys:

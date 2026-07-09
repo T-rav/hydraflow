@@ -63,6 +63,21 @@ Named limitations
   the sidecar, an HMAC key held elsewhere, or periodic head escrow) —
   follow-up hardening, not claimed here. Truncating a stream to zero
   chained records is additionally indistinguishable from a clean rotation.
+
+Crash-window self-healing
+-------------------------
+Two torn states are deterministic artifacts of the two-step append (file
+append, then sidecar store) and are healed rather than reported as breaks:
+an unterminated unparseable FINAL line (``torn_tail`` — interrupted flush;
+truncated on the next mutation) and a sidecar exactly one append behind the
+stream (``sidecar_lag`` — fast-forwarded on the next append). Both are
+``ChainVerifyResult.warnings``, never breaks. Named tolerance this adds: an
+out-of-band writer who appends ONE validly-chained record (correct
+``prev_hash``/``record_hash``) without touching the sidecar now looks like
+sidecar lag instead of a break — such a writer already had everything needed
+to update the sidecar too, so no detection power is lost in practice.
+Mid-file damage, newline-terminated garbage (the #9474 shape), and clean
+tail-record deletion all remain hard breaks.
 """
 
 from __future__ import annotations
@@ -70,7 +85,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -127,13 +143,19 @@ class ChainBreak:
 
 @dataclass(frozen=True)
 class ChainVerifyResult:
-    """Outcome of walking one stream file's hash chain."""
+    """Outcome of walking one stream file's hash chain.
+
+    ``warnings`` carries non-tamper anomalies (the two deterministic crash
+    windows: ``torn_tail`` and ``sidecar_lag``) that self-heal on the next
+    append; they do not affect ``ok``.
+    """
 
     path: Path
     total_records: int
     chained_records: int
     breaks: tuple[ChainBreak, ...]
     head: str | None
+    warnings: tuple[str, ...] = field(default=())
 
     @property
     def ok(self) -> bool:
@@ -225,10 +247,15 @@ def _parse_timestamp(value: object) -> datetime | None:
 
 
 def _iter_records(path: Path) -> list[tuple[int, str, dict[str, Any] | None]]:
-    """Return ``(record_no, raw_line, parsed-or-None)`` for each non-blank line."""
+    """Return ``(record_no, raw_line, parsed-or-None)`` for each non-blank line.
+
+    Undecodable bytes (a torn multibyte character from an interrupted append,
+    or external corruption) are replaced rather than raising — the affected
+    line simply fails to parse and is classified by the caller.
+    """
     out: list[tuple[int, str, dict[str, Any] | None]] = []
     record_no = 0
-    with path.open("r", encoding="utf-8") as fh:
+    with path.open("r", encoding="utf-8", errors="replace") as fh:
         for raw in fh:
             stripped = raw.strip()
             if not stripped:
@@ -244,6 +271,37 @@ def _iter_records(path: Path) -> list[tuple[int, str, dict[str, Any] | None]]:
     return out
 
 
+def _unterminated_tail_bytes(path: Path) -> bytes:
+    """Return the bytes after the final newline (``b""`` when the file is
+    absent, empty, or newline-terminated)."""
+    try:
+        with path.open("rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            pos = fh.tell()
+            buf = b""
+            chunk = 65536
+            while pos > 0:
+                step = min(chunk, pos)
+                pos -= step
+                fh.seek(pos)
+                buf = fh.read(step) + buf
+                newline = buf.rfind(b"\n")
+                if newline != -1:
+                    return buf[newline + 1 :]
+            return buf
+    except FileNotFoundError:
+        return b""
+
+
+def _parse_tail(tail: bytes) -> dict[str, Any] | None:
+    """Parse an unterminated tail; ``None`` when it is torn (unparseable)."""
+    try:
+        parsed = json.loads(tail.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def verify_file(path: Path, expected_head: str | None = None) -> ChainVerifyResult:
     """Walk one stream file and validate its hash chain.
 
@@ -254,18 +312,41 @@ def verify_file(path: Path, expected_head: str | None = None) -> ChainVerifyResu
     as-is (genesis or rotation carry-forward). When *expected_head* is given
     and the file contains chained records, the final ``record_hash`` must
     match it (tail-truncation detection).
+
+    Two deterministic crash windows are classified as ``warnings`` (healthy,
+    self-healing on the next append) instead of breaks:
+
+    * ``torn_tail`` — an unterminated, unparseable FINAL line. The chain
+      writer is the sole writer and appends ``line + "\\n"`` in one call, so
+      an interrupted flush leaves a strict prefix with no terminator; a
+      newline-terminated garbage line (the #9474 shape) stays a break.
+    * ``sidecar_lag`` — *expected_head* matches the final chained record's
+      ``prev_hash`` (crash between the file append and the sidecar store).
     """
     if not path.exists():
         return ChainVerifyResult(
             path=path, total_records=0, chained_records=0, breaks=(), head=None
         )
 
+    warnings: list[str] = []
+    entries = _iter_records(path)
+    tail = _unterminated_tail_bytes(path)
+    if tail and _parse_tail(tail) is None:
+        # Torn tail: a crash artifact, not a record. Exclude it from the walk.
+        if entries and entries[-1][2] is None:
+            entries = entries[:-1]
+        warnings.append(
+            f"torn_tail: unterminated unparseable final line ({len(tail)} "
+            "byte(s)) from an interrupted append — self-heals on next append"
+        )
+
     breaks: list[ChainBreak] = []
     total = 0
     chained = 0
     head: str | None = None
+    last_prev: str | None = None
 
-    for record_no, _raw, record in _iter_records(path):
+    for record_no, _raw, record in entries:
         total = record_no
         if record is None:
             breaks.append(ChainBreak(record_no, "invalid JSON line"))
@@ -300,6 +381,7 @@ def verify_file(path: Path, expected_head: str | None = None) -> ChainVerifyResu
                 )
             )
             head = record_hash
+            last_prev = prev_hash
             chained += 1
             continue
         if recomputed != record_hash:
@@ -307,16 +389,24 @@ def verify_file(path: Path, expected_head: str | None = None) -> ChainVerifyResu
                 ChainBreak(record_no, "record_hash mismatch (record content altered)")
             )
         head = record_hash
+        last_prev = prev_hash
         chained += 1
 
     if expected_head is not None and chained and head != expected_head:
-        breaks.append(
-            ChainBreak(
-                total,
-                "chain head mismatch against sidecar (tail truncated or "
-                "appended out-of-band)",
+        if expected_head == last_prev:
+            warnings.append(
+                "sidecar_lag: chain-head sidecar is exactly one append behind "
+                "the stream (crash between append and head store) — "
+                "self-heals on next append"
             )
-        )
+        else:
+            breaks.append(
+                ChainBreak(
+                    total,
+                    "chain head mismatch against sidecar (tail truncated or "
+                    "appended out-of-band)",
+                )
+            )
 
     return ChainVerifyResult(
         path=path,
@@ -324,6 +414,7 @@ def verify_file(path: Path, expected_head: str | None = None) -> ChainVerifyResu
         chained_records=chained,
         breaks=tuple(breaks),
         head=head,
+        warnings=tuple(warnings),
     )
 
 
@@ -346,23 +437,64 @@ class AuditChain:
 
     # -- head state ---------------------------------------------------------
 
-    def _load_head(self) -> str:
-        """Return the current chain head: sidecar, else last chained record,
-        else genesis (adoption / empty stream)."""
-        head = self._load_sidecar_head()
-        if head is not None:
-            return head
-        if self._path.exists():
-            # One-time self-heal (first post-adoption append, or a sidecar
-            # lost to data migration): recover the head from the last record.
-            entries = _iter_records(self._path)
-            if entries:
-                _no, _raw, record = entries[-1]
-                if record is not None and _is_chained(record):
-                    record_hash = record.get("record_hash")
-                    if isinstance(record_hash, str):
-                        return record_hash
-        return GENESIS_PREV_HASH
+    def _last_chained_record(self) -> tuple[str, str] | None:
+        """Return ``(record_hash, prev_hash)`` of the last parseable chained
+        record in the stream file, or ``None``."""
+        if not self._path.exists():
+            return None
+        for _no, _raw, record in reversed(_iter_records(self._path)):
+            if record is None:
+                continue
+            if not _is_chained(record):
+                return None  # adoption boundary: unchained tail
+            record_hash = record.get("record_hash")
+            prev_hash = record.get("prev_hash")
+            if isinstance(record_hash, str) and isinstance(prev_hash, str):
+                return record_hash, prev_hash
+            return None
+        return None
+
+    def _reconciled_head(self, *, truncated_bytes: int) -> str:
+        """Return the ``prev_hash`` for the next append, healing the
+        deterministic crash windows between the sidecar and the stream.
+
+        * sidecar exactly one behind the last record (crash between file
+          append and sidecar store) → fast-forward the sidecar (INFO);
+        * sidecar ahead of the last parseable record because this append
+          just truncated a torn tail → reset it (WARNING);
+        * any other mismatch is left in place — ``verify()`` reports it as
+          a hard break.
+        """
+        sidecar = self._load_sidecar_head()
+        last = self._last_chained_record()
+        if sidecar is None:
+            # First post-adoption append, or a sidecar lost to migration:
+            # recover the head from the last chained record.
+            return last[0] if last is not None else GENESIS_PREV_HASH
+        if last is None:
+            # Empty / rotated-away / unchained-prefix-only stream: the
+            # sidecar carries the head forward (rotation safety).
+            return sidecar
+        record_hash, prev_hash = last
+        if sidecar == record_hash:
+            return sidecar
+        if sidecar == prev_hash:
+            logger.info(
+                "Chain-head sidecar for %s is one append behind the stream "
+                "(crash between append and head store) — fast-forwarding.",
+                self._path,
+            )
+            self._store_head(record_hash)
+            return record_hash
+        if truncated_bytes:
+            logger.warning(
+                "Chain-head sidecar for %s pointed past the truncated torn "
+                "tail — resetting to the last parseable record.",
+                self._path,
+            )
+            self._store_head(record_hash)
+            return record_hash
+        return sidecar
 
     def _load_sidecar_head(self) -> str | None:
         if not self._head_path.exists():
@@ -384,18 +516,54 @@ class AuditChain:
             ),
         )
 
+    # -- crash-window healing -------------------------------------------------
+
+    def _heal_torn_tail(self) -> int:
+        """Repair an unterminated final line before mutating the stream.
+
+        Must be called under the stream lock. A torn (unparseable) tail is
+        truncated — it can only be the flush prefix of an interrupted append,
+        never a record. An unterminated but *complete* record (crash after
+        the content flushed, before its newline) is terminated in place so no
+        evidence is lost. Returns the number of bytes truncated.
+        """
+        tail = _unterminated_tail_bytes(self._path)
+        if not tail:
+            return 0
+        if _parse_tail(tail) is not None:
+            with self._path.open("ab") as fh:
+                fh.write(b"\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            logger.info(
+                "Terminated unterminated-but-complete final record in %s "
+                "(interrupted append).",
+                self._path,
+            )
+            return 0
+        size = self._path.stat().st_size
+        os.truncate(self._path, size - len(tail))
+        logger.warning(
+            "Truncated torn tail of %s: %d unparseable trailing byte(s) from "
+            "an interrupted append (crash artifact, not tampering).",
+            self._path,
+            len(tail),
+        )
+        return len(tail)
+
     # -- mutations ----------------------------------------------------------
 
     def append(self, record: Mapping[str, Any]) -> dict[str, Any]:
         """Append *record* to the stream with chain hashes; return the full row."""
-        for field in _HASH_FIELDS:
-            if field in record:
+        for field_name in _HASH_FIELDS:
+            if field_name in record:
                 raise ValueError(
-                    f"payload must not contain reserved chain field {field!r}"
+                    f"payload must not contain reserved chain field {field_name!r}"
                 )
         payload = _scrub_payload(record)
         with file_lock(self._lock_path):
-            prev_hash = self._load_head()
+            truncated = self._heal_torn_tail()
+            prev_hash = self._reconciled_head(truncated_bytes=truncated)
             record_hash = compute_record_hash(payload, prev_hash)
             full = {**payload, "prev_hash": prev_hash, "record_hash": record_hash}
             append_jsonl(self._path, json.dumps(full, sort_keys=True))
@@ -454,6 +622,9 @@ class AuditChain:
         if not self._path.exists():
             return 0
         with file_lock(self._lock_path):
+            # A torn tail (interrupted append) must not block retention
+            # forever; heal it exactly as append() would.
+            self._heal_torn_tail()
             entries = _iter_records(self._path)
             cut = 0
             for _no, _raw, record in entries:
