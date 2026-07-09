@@ -22,11 +22,14 @@ expensive to reconstruct in the scenario harness.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import subprocess_util
+from audit_chain import AuditChain
 from tests.scenarios.fakes.mock_world import MockWorld
 from tests.scenarios.helpers.loop_port_seeding import seed_ports as _seed_ports
 
@@ -475,11 +478,6 @@ class TestL22StagingPromotionLoop:
         """CH-4 (#9732): a green promotion merge runs the REAL evidence-pack
         compiler (only the gh boundary is faked) — the pack lands on disk
         with named gaps and one chained evidence_pack record."""
-        import json  # noqa: PLC0415
-
-        import subprocess_util  # noqa: PLC0415
-        from audit_chain import AuditChain  # noqa: PLC0415
-
         loop, prs, config = self._make_staging_loop(tmp_path, staging_enabled=True)
         rc_branch = "rc/2026-07-08-0400"
         prs.find_open_promotion_pr = AsyncMock(
