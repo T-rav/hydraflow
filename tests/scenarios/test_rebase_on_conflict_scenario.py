@@ -35,6 +35,19 @@ from tests.helpers import ConfigFactory, make_pr_manager
 
 pytestmark = pytest.mark.scenario_loops
 
+RC_BRANCH = "rc/2026-01-01-0000"
+
+
+@pytest.fixture(autouse=True)
+def _fake_evidence_compiler(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """This scenario's subject is merge recovery, not CH-4 — keep the
+    evidence-pack compiler (which the promoted path now triggers) off gh."""
+    import evidence_pack
+
+    fake = AsyncMock(return_value=MagicMock(gap_count=0))
+    monkeypatch.setattr(evidence_pack, "compile_evidence_pack", fake)
+    return fake
+
 
 def _make_staging_loop(tmp_path: Any, config_overrides: dict[str, Any]) -> Any:
     """Build a real PRManager + a StagingPromotionLoop pointing at it."""
@@ -108,7 +121,7 @@ async def test_promotion_recovers_via_auto_rebase_end_to_end(
     # provide a stable SHA so the loop's last-green-rc-sha record path doesn't crash.
     prs.get_pr_head_sha = AsyncMock(return_value="abc123def456")  # type: ignore[method-assign]
 
-    result = await loop._handle_open_promotion(42)
+    result = await loop._handle_open_promotion(42, RC_BRANCH)
 
     assert result == {"status": "promoted", "pr": 42}
     assert merge_attempts == 2, (
@@ -144,7 +157,7 @@ async def test_promotion_real_conflict_falls_through_to_failure_path(
 
     monkeypatch.setattr(prs, "_run_gh", _failing_run_gh)
 
-    result = await loop._handle_open_promotion(99)
+    result = await loop._handle_open_promotion(99, RC_BRANCH)
 
     # Loop returns "merge_failed" — the existing failure-handling code in
     # _handle_open_promotion now logs a warning. Importantly, the PR is
@@ -179,7 +192,7 @@ async def test_promotion_first_attempt_succeeds_no_recovery_needed(
     monkeypatch.setattr("pr_manager.run_subprocess", _ok_subprocess)
     monkeypatch.setattr(prs, "_run_gh", _scripted_run_gh)
 
-    result = await loop._handle_open_promotion(7)
+    result = await loop._handle_open_promotion(7, RC_BRANCH)
 
     assert result == {"status": "promoted", "pr": 7}
     assert update_calls == 0, (

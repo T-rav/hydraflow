@@ -17,9 +17,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import ci_sentinels
+import evidence_pack
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from dedup_store import DedupStore
 from events import EventType, HydraFlowEvent
+from exception_classify import exc_detail, reraise_on_credit_or_bug
 from merge_policy import (
     ROLE_ORCHESTRATOR_REVIEWER,
     MergeApproval,
@@ -49,6 +52,12 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         super().__init__(worker_name="staging_promotion", config=config, deps=deps)
         self._prs = prs
         self._state = state
+        # CH-4 (#9732): one SYSTEM_ALERT per RC whose evidence pack failed to
+        # compile — re-fires for the next RC, never per retry of the same one.
+        self._evidence_alert_dedup = DedupStore(
+            "evidence_pack_alerts",
+            config.data_root / "dedup" / "evidence_pack_alerts.json",
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.staging_promotion_interval
@@ -78,7 +87,7 @@ class StagingPromotionLoop(BaseBackgroundLoop):
 
         existing = await self._prs.find_open_promotion_pr()
         if existing is not None:
-            result = await self._handle_open_promotion(existing.number)
+            result = await self._handle_open_promotion(existing.number, existing.branch)
         elif not self._cadence_elapsed():
             result = {"status": "cadence_not_elapsed"}
         else:
@@ -88,7 +97,9 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             result = {**result, "swept": swept}
         return result
 
-    async def _handle_open_promotion(self, pr_number: int) -> dict[str, Any]:
+    async def _handle_open_promotion(
+        self, pr_number: int, rc_branch: str
+    ) -> dict[str, Any]:
         passed, summary = await self._prs.wait_for_ci(
             pr_number,
             timeout=60,
@@ -177,6 +188,10 @@ class StagingPromotionLoop(BaseBackgroundLoop):
                                 "succeeded — auto-closing."
                             ),
                         )
+                # CH-4 (#9732): the promotion succeeded — compile its release
+                # evidence pack. LAST, after all promotion bookkeeping: the
+                # pack is report-only and must never affect the result.
+                await self._compile_evidence_pack(pr_number, rc_branch)
                 return {"status": "promoted", "pr": pr_number}
             logger.warning("Promotion merge failed for PR #%d", pr_number)
             return {"status": "merge_failed", "pr": pr_number}
@@ -229,6 +244,54 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             "pr": pr_number,
             "find_issue": issue_number,
         }
+
+    async def _compile_evidence_pack(self, pr_number: int, rc_branch: str) -> None:
+        """CH-4 (#9732): compile the release evidence pack for a promoted RC.
+
+        Compile-only, report-only, fail-open: the promotion already happened,
+        so a compiler failure logs a warning and publishes ONE SYSTEM_ALERT
+        per RC (DedupStore'd on the rc branch) — it never affects the
+        promotion result, and pack completeness never gates anything (gaps
+        are named in the pack itself; tightening is a later decision).
+        """
+        if not self._config.evidence_pack_enabled or self._config.dry_run:
+            return
+        try:
+            disabled = (
+                self._state.get_disabled_workers() if self._state is not None else None
+            )
+            await evidence_pack.compile_evidence_pack(
+                self._config, rc_branch, pr_number, disabled_workers=disabled
+            )
+        except Exception as exc:
+            # Credit-exhaustion / likely-bug signals must propagate, not be
+            # swallowed by the fail-open guard (dark-factory §2.2).
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "Evidence-pack compilation failed for promoted RC PR #%d (%s): %s",
+                pr_number,
+                rc_branch,
+                exc_detail(exc),
+                exc_info=True,
+            )
+            dedup_key = f"evidence_pack_failed:{rc_branch}"
+            if dedup_key in self._evidence_alert_dedup.get():
+                return
+            self._evidence_alert_dedup.add(dedup_key)
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    data=SystemAlertPayload(
+                        message=(
+                            f"Evidence-pack compilation failed for promoted RC "
+                            f"PR #{pr_number} ({rc_branch}): {exc_detail(exc)} — "
+                            "the promotion itself succeeded, but this RC has no "
+                            "release evidence binder."
+                        ),
+                        source="evidence_pack",
+                    ),
+                )
+            )
 
     async def _file_failure_issue(self, pr_number: int, summary: str) -> int:
         # STABLE title (no PR number) so a single rolling issue tracks "promotion
