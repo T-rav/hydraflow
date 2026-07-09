@@ -51,7 +51,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **SentryLoop** | `src.sentry_loop` | 600 | — | — | — |
 | **SkillPromptEvalLoop** | `src.skill_prompt_eval_loop` | 604800 | — | — | — |
 | **StagingBisectLoop** | `src.staging_bisect_loop` | 600 | — | — | ADR-0042 |
-| **StagingPromotionLoop** | `src.staging_promotion_loop` | 300 | — | — | ADR-0042 |
+| **StagingPromotionLoop** | `src.staging_promotion_loop` | 300 | — | SYSTEM_ALERT | ADR-0042 |
 | **StaleIssueGCLoop** | `src.stale_issue_gc_loop` | 3600 | — | — | — |
 | **StaleIssueLoop** | `src.stale_issue_loop` | 86400 | — | — | — |
 | **TermProposerLoop** | `src.term_proposer_loop` | 14400 | — | — | ADR-0054 |

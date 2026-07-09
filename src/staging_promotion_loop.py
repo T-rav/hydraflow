@@ -19,11 +19,13 @@ from typing import TYPE_CHECKING, Any
 import ci_sentinels
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from events import EventType, HydraFlowEvent
 from merge_policy import (
     ROLE_ORCHESTRATOR_REVIEWER,
     MergeApproval,
     enforce_merge_policy,
 )
+from models import SystemAlertPayload
 from rollup_issue_manager import RollupIssueManager
 
 if TYPE_CHECKING:
@@ -119,6 +121,23 @@ class StagingPromotionLoop(BaseBackgroundLoop):
                     "RC promotion PR #%d blocked by merge policy: %s",
                     pr_number,
                     policy_verdict.reason,
+                )
+                # LOUD by design (review finding): promotion runs on a
+                # cadence, so a silent deny is an invisible outage of the
+                # staging->main lane until someone reads PR comments.
+                await self._bus.publish(
+                    HydraFlowEvent(
+                        type=EventType.SYSTEM_ALERT,
+                        data=SystemAlertPayload(
+                            message=(
+                                f"Merge policy denied RC promotion PR "
+                                f"#{pr_number}: {policy_verdict.reason} — "
+                                "staging->main promotion is blocked until "
+                                "approved, overridden, or the policy is fixed."
+                            ),
+                            source="merge_policy",
+                        ),
+                    )
                 )
                 await self._prs.post_comment(
                     pr_number,

@@ -404,6 +404,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
     # Mutable fields that can be changed at runtime via PATCH
     _MUTABLE_FIELDS = {
         "gh_circuit_breaker_enabled",
+        "merge_policy_enabled",
         "max_triagers",
         "max_workers",
         "max_planners",
@@ -625,6 +626,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             pr_unstick_batch_size=cfg.pr_unstick_batch_size,
             workspace_base=str(cfg.workspace_base),
             test_adequacy_coverage_timeout_secs=cfg.test_adequacy_coverage_timeout_secs,
+            merge_policy_enabled=cfg.merge_policy_enabled,
         )
 
     def _runtime_status(orch: object | None) -> tuple[ControlStatus, str | None, bool]:

@@ -2560,6 +2560,9 @@ class ControlStatusConfig(BaseModel):
     pr_unstick_batch_size: int = 10
     workspace_base: str = ""
     test_adequacy_coverage_timeout_secs: int = 300
+    # CH-3 (#9731): the merge-policy gate kill-switch is an operational
+    # lever — runtime-visible and runtime-toggleable, no restart.
+    merge_policy_enabled: bool = True
 
 
 class ControlStatusResponse(BaseModel):
