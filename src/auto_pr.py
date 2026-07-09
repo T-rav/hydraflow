@@ -449,6 +449,7 @@ async def _finalize_pr_from_worktree(
     commit_author_name: str,
     commit_author_email: str,
     fail: Callable[[str], AutoPrResult],
+    req_id: str | None = None,
 ) -> AutoPrResult:
     """Commit already-staged worktree changes, push, open the PR, auto-merge.
 
@@ -492,8 +493,10 @@ async def _finalize_pr_from_worktree(
     )
 
     # CH-7 (#9735): attach the reproducibility manifest (fail-open) — shared
-    # tail, so both async entry points get the evidence block.
+    # tail, so both async entry points get the evidence block. The CH-5
+    # Req-ID trailer is applied AFTER it so the trailer stays terminal.
     pr_body = append_manifest(pr_body)
+    pr_body = append_req_trailer(pr_body, req_id)
 
     create_args: list[str] = [
         "gh",
@@ -620,7 +623,6 @@ async def open_automated_pr_async(  # noqa: PLR0911 — linear step-by-step guar
     msg = append_req_trailer(
         commit_message if commit_message is not None else pr_title, req_id
     )
-    pr_body = append_req_trailer(pr_body, req_id)
 
     def _fail(err: str) -> AutoPrResult:
         if raise_on_failure:
@@ -697,6 +699,7 @@ async def open_automated_pr_async(  # noqa: PLR0911 — linear step-by-step guar
             return _fail(f"failed to stage files for {branch!r}: {exc}")
 
         return await _finalize_pr_from_worktree(
+            req_id=req_id,
             worktree_path=worktree_path,
             branch=branch,
             pr_title=pr_title,
@@ -833,12 +836,12 @@ async def generate_and_open_pr_async(
             return _fail(f"failed to stage generated paths for {branch!r}: {exc}")
 
         # Resolve a lazy body now — after generate + staging — so summaries can
-        # reflect what the generator produced.
-        resolved_body = append_req_trailer(
-            pr_body() if callable(pr_body) else pr_body, req_id
-        )
+        # reflect what the generator produced. The Req-ID trailer is applied
+        # in the finalize tail, after the manifest.
+        resolved_body = pr_body() if callable(pr_body) else pr_body
 
         return await _finalize_pr_from_worktree(
+            req_id=req_id,
             worktree_path=worktree_path,
             branch=branch,
             pr_title=pr_title,
