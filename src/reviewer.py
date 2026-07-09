@@ -230,6 +230,7 @@ class ReviewRunner(BaseRunner):
                 worktree_path,
                 {"pr": pr.number, "issue": issue.id, "source": "reviewer"},
                 telemetry_stats=prompt_stats,
+                issue_labels=issue.tags,
             )
             result.transcript = transcript
 
@@ -334,6 +335,7 @@ class ReviewRunner(BaseRunner):
                 worktree_path,
                 {"pr": pr.number, "issue": issue.id, "source": "reviewer"},
                 telemetry_stats=prompt_stats,
+                issue_labels=issue.tags,
             )
             result.transcript = transcript
             result.verdict = self._parse_verdict(transcript)
@@ -446,6 +448,7 @@ class ReviewRunner(BaseRunner):
                 prompt,
                 worktree_path,
                 {"pr": pr.number, "issue": issue.id, "source": "review_fixer"},
+                issue_labels=issue.tags,
             )
             result.transcript = transcript
             result.verdict = self._parse_verdict(transcript)
@@ -1046,6 +1049,7 @@ Diff snippet:
                 worktree_path,
                 {"pr": pr.number, "issue": issue.id, "source": "reviewer"},
                 telemetry_stats=precheck_builder.build_stats(),
+                issue_labels=issue.tags,
             )
 
         return await run_precheck_context(

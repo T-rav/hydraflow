@@ -160,9 +160,14 @@ class BaseRunner:
         failures (OAuth token refresh blips) with exponential backoff.
 
         *issue_labels* feeds the CH-6 data-governance gate's upward-only
-        ``data-class:`` label override; callers with a :class:`~models.Task`
-        in scope pass ``task.tags``. The repo-declared class is enforced
-        either way.
+        ``data-class:`` label override. The contract is NOT optional: every
+        runner call site passes it (``task.tags`` / ``issue.tags`` /
+        ``issue.labels``, or labels threaded in by the caller) — enforced by
+        ``tests/test_prompt_gate_completeness.py::``
+        ``test_every_runner_execute_call_passes_issue_labels``, which fails
+        on any ``self._execute(...)`` call in a runner module that omits the
+        kwarg. Omitting it silently disables label-based elevation for that
+        spawn; the repo-declared class is enforced either way.
         """
         # CH-6 data-governance gate (#9734): redact/block BEFORE any content
         # reaches the vendor subprocess. Regulated-class blocks raise

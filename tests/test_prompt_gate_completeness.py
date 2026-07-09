@@ -20,7 +20,9 @@ NOT grow.
 
 from __future__ import annotations
 
-from tests._spawn_audit import iter_module_facts
+import ast
+
+from tests._spawn_audit import SRC, iter_module_facts
 
 # Raw LLM-spawn primitives (kept in sync with the telemetry ratchet via
 # test_gate_seams_cover_all_telemetry_spawn_seams below).
@@ -94,6 +96,57 @@ def test_no_spawner_bypasses_the_gated_seams() -> None:
     assert not stale, (
         f"_NAMED_GAPS has stale entries that no longer spawn around the gate: "
         f"{stale}. Remove them — the ratchet is already satisfied there."
+    )
+
+
+# Runner modules whose ``self._execute(...)`` call sites all have a task/issue
+# (or threaded label context) in scope. Every call MUST pass ``issue_labels=``
+# so the CH-6 upward-only ``data-class:`` label elevation reaches the gate —
+# omitting it silently disables label-based elevation for that spawn.
+_RUNNER_EXECUTE_MODULES = (
+    "agent.py",
+    "planner.py",
+    "research_runner.py",
+    "reviewer.py",
+    "hitl_runner.py",
+)
+
+
+def test_every_runner_execute_call_passes_issue_labels() -> None:
+    """Each ``self._execute(...)`` in a runner module passes ``issue_labels=``.
+
+    ``BaseRunner._execute`` feeds *issue_labels* into ``gate_prompt``'s
+    upward-only data-class elevation. A call site that omits the kwarg makes
+    the gate see only the repo-declared class, so a ``data-class:regulated-*``
+    issue label on an internal repo would NOT redact/block that spawn. This
+    pin makes the omission structurally impossible to reintroduce (#9734
+    review finding 1).
+    """
+    offenders: list[str] = []
+    for rel in _RUNNER_EXECUTE_MODULES:
+        path = SRC / rel
+        assert path.exists(), f"runner module {rel} not found in src/"
+        tree = ast.parse(path.read_text(), filename=rel)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            is_self_execute = (
+                isinstance(func, ast.Attribute)
+                and func.attr == "_execute"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "self"
+            )
+            if not is_self_execute:
+                continue
+            if not any(kw.arg == "issue_labels" for kw in node.keywords):
+                offenders.append(f"{rel}:{node.lineno}")
+    assert not offenders, (
+        f"These self._execute(...) call sites omit issue_labels=: {offenders}. "
+        "Without it the CH-6 gate cannot apply the upward-only "
+        "data-class:<class> label elevation for that spawn — pass "
+        "issue_labels=task.tags / issue.tags / issue.labels (or thread the "
+        "labels into the enclosing method) at every call."
     )
 
 

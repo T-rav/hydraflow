@@ -38,7 +38,7 @@ from task_graph import extract_phases, has_task_graph, topological_sort
 from untrusted_text import UNTRUSTED_DATA_PREAMBLE, fence_untrusted
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
     from config import Credentials, HydraFlowConfig
     from execution import SubprocessRunner
@@ -1498,8 +1498,13 @@ SUMMARY: <one-line summary>
         *,
         on_output: Callable[[str], bool] | None = None,
         telemetry_stats: Mapping[str, object] | None = None,
+        issue_labels: Sequence[str] | None = None,
     ) -> str:
-        """Public AgentPort entry point — delegates to ``_execute``."""
+        """Public AgentPort entry point — delegates to ``_execute``.
+
+        Infrastructure callers with issue/PR label context MUST pass
+        *issue_labels* so the CH-6 gate's data-class label elevation applies.
+        """
         return await self._execute(
             cmd,
             prompt,
@@ -1507,6 +1512,7 @@ SUMMARY: <one-line summary>
             event_data,
             on_output=on_output,
             telemetry_stats=telemetry_stats,
+            issue_labels=issue_labels,
         )
 
     async def verify_result(self, worktree_path: Path, branch: str) -> LoopResult:
