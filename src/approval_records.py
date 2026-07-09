@@ -58,7 +58,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import subprocess_util
@@ -125,6 +125,19 @@ def _login(actor: Any) -> str:
     return ""
 
 
+def _parse_merged_at(value: Any) -> datetime | None:
+    """Parse gh's ISO-8601 ``mergedAt`` (``...Z``); ``None`` if unparseable."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
 class ApprovalRecordReconciler:
     """Idempotent post-hoc reconciler: merged PR → chained approval record.
 
@@ -155,7 +168,15 @@ class ApprovalRecordReconciler:
             for number in (entry.get("number") for entry in merged)
             if isinstance(number, int)
         }
-        todo = sorted(scanned - recorded)
+        # Retention interplay (CH-1): pruning deletes old approval records,
+        # but old PRs re-enter the sort:updated-desc window whenever they are
+        # labeled/commented. Evidence the operator chose to expire must not
+        # be re-minted with a fresh timestamp, so retention-expired merges
+        # never enter todo. The continuity check below still uses the FULL
+        # scanned set: an expired-but-not-yet-pruned recorded PR remains a
+        # valid continuity anchor.
+        fresh = self._filter_retention_expired(merged)
+        todo = sorted(fresh - recorded)
         # Continuity check: with every scanned PR unrecorded and a non-empty
         # stream, merges may have passed the window horizon unrecorded. The
         # gap becomes chained evidence — silence would let ``verify()`` pass
@@ -275,6 +296,42 @@ class ApprovalRecordReconciler:
         return raw.strip()
 
     # -- record building -----------------------------------------------------
+
+    def _filter_retention_expired(self, merged: list[dict[str, Any]]) -> set[int]:
+        """Scanned PR numbers eligible for recording under the retention floor.
+
+        When ``audit_retention_days_approval_records`` is configured, merges
+        older than the floor are excluded — RunsGC would prune (or already
+        pruned) their evidence, and re-recording would re-date sign-off
+        evidence the operator chose to expire. Fail-safe: a merge whose age
+        cannot be established is kept, never silently expired.
+        """
+        numbers = {
+            number
+            for number in (entry.get("number") for entry in merged)
+            if isinstance(number, int)
+        }
+        retention_days = self._config.audit_retention_days_approval_records
+        if retention_days is None:
+            return numbers
+        cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+        expired: set[int] = set()
+        for entry in merged:
+            number = entry.get("number")
+            if not isinstance(number, int):
+                continue
+            merged_at = _parse_merged_at(entry.get("mergedAt"))
+            if merged_at is not None and merged_at < cutoff:
+                expired.add(number)
+        if expired:
+            logger.info(
+                "Approval records: %d scanned merge(s) older than the %d-day "
+                "retention floor skipped (evidence expired, not re-minted): %s",
+                len(expired),
+                retention_days,
+                sorted(expired)[:10],
+            )
+        return numbers - expired
 
     def _recorded_pr_numbers(self) -> set[int]:
         """Read back every approval ``pr_number`` already in the stream.

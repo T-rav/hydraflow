@@ -537,6 +537,128 @@ class TestCaptureGapDetection:
         ] == []
 
 
+class TestRetentionWindow:
+    """CH-1 retention pruning deletes old approval records, but old PRs
+    re-enter the sort:updated-desc scan window whenever labeled/commented.
+    Evidence the operator chose to expire must not be re-minted with a fresh
+    timestamp — and its absence is not a capture gap."""
+
+    @staticmethod
+    def _iso_days_ago(days: int) -> str:
+        from datetime import UTC, datetime, timedelta
+
+        return (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    @staticmethod
+    def _seed_recorded(config, pr_number: int, *, days_ago: int) -> None:
+        AuditChain(config.approval_records_path).append(
+            {
+                "record_type": "approval",
+                "pr_number": pr_number,
+                "timestamp": TestRetentionWindow._iso_days_ago(days_ago),
+            }
+        )
+
+    async def test_retention_expired_pr_is_not_re_recorded_nor_a_gap(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A pruned PR re-entering the window: no re-minted record, no
+        capture_gap marker for its absence, no detail fetch at all."""
+        config = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            audit_retention_days_approval_records=30,
+        )
+        self._seed_recorded(config, 500, days_ago=1)
+        fake = FakeGh(
+            merged=[{"number": 42, "mergedAt": self._iso_days_ago(60)}],
+            details={},
+        )
+        _install(monkeypatch, fake)
+
+        result = await ApprovalRecordReconciler(config).reconcile()
+
+        assert result == {
+            "merged_seen": 1,
+            "recorded": 0,
+            "capture_gap_risk": False,
+            "record_failures": 0,
+        }
+        records = _read_records(config)
+        assert [r.get("pr_number") for r in records] == [500]
+        assert [r for r in records if r.get("record_type") == "capture_gap"] == []
+        assert fake.calls_starting("gh", "pr", "view") == []
+
+    async def test_expired_but_still_recorded_pr_anchors_continuity(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The zero-overlap detector must keep seeing an expired-but-not-yet-
+        pruned recorded PR as the continuity anchor: fresh merges alongside
+        it are recorded without a spurious gap marker."""
+        config = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            audit_retention_days_approval_records=30,
+        )
+        self._seed_recorded(config, 42, days_ago=60)
+        fake = FakeGh(
+            merged=[
+                {"number": 42, "mergedAt": self._iso_days_ago(60)},
+                {"number": 43, "mergedAt": self._iso_days_ago(1)},
+            ],
+            details={43: _detail(43, merged_at=self._iso_days_ago(1))},
+        )
+        _install(monkeypatch, fake)
+
+        result = await ApprovalRecordReconciler(config).reconcile()
+
+        assert result == {
+            "merged_seen": 2,
+            "recorded": 1,
+            "capture_gap_risk": False,
+            "record_failures": 0,
+        }
+        approvals = [
+            r for r in _read_records(config) if r.get("record_type") == "approval"
+        ]
+        assert [r["pr_number"] for r in approvals] == [42, 43]
+
+    async def test_no_retention_configured_records_old_merges(
+        self, config, monkeypatch
+    ) -> None:
+        """retention=None (keep forever, the default) leaves the window
+        unfiltered — old merges are still backfilled."""
+        old = self._iso_days_ago(60)
+        fake = FakeGh(
+            merged=[{"number": 42, "mergedAt": old}],
+            details={42: _detail(42, merged_at=old)},
+        )
+        _install(monkeypatch, fake)
+
+        result = await ApprovalRecordReconciler(config).reconcile()
+
+        assert result["recorded"] == 1
+        assert [r["pr_number"] for r in _read_records(config)] == [42]
+
+    async def test_unparseable_merged_at_is_not_filtered(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Fail-safe: a PR whose age cannot be established is recorded, never
+        silently expired."""
+        config = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            audit_retention_days_approval_records=30,
+        )
+        fake = FakeGh(
+            merged=[{"number": 42, "mergedAt": "not-a-date"}],
+            details={42: _detail(42)},
+        )
+        _install(monkeypatch, fake)
+
+        result = await ApprovalRecordReconciler(config).reconcile()
+
+        assert result["recorded"] == 1
+        assert [r["pr_number"] for r in _read_records(config)] == [42]
+
+
 class TestPerPRErrorIsolation:
     """One poisoned PR (deleted head repo 404, malformed payload) sits first
     in the sorted todo list forever — without isolation it fails the whole
