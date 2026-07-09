@@ -56,6 +56,7 @@ from typing import TYPE_CHECKING, Any
 
 import subprocess_util
 import traceability
+from approval_records import RECORD_TYPE_APPROVAL
 from audit_chain import AuditChain, audit_streams
 from repro_manifest import CONFIG_SNAPSHOT_ALLOWLIST, extract_manifest_block
 
@@ -332,7 +333,7 @@ def _approvals_by_pr_number(
             continue
         if not isinstance(record, dict):
             continue
-        if record.get("record_type", "approval") != "approval":
+        if record.get("record_type", RECORD_TYPE_APPROVAL) != RECORD_TYPE_APPROVAL:
             continue
         number = record.get("pr_number")
         if isinstance(number, int):
