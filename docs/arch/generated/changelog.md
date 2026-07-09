@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
+- `6a0abe5` — refactor(merge-policy): loud RC-promotion denies + runtime kill-switch (review findings) *(2026-07-09)*
 - `d44b9d4` — feat(merge-policy): enforce the policy at the factory's five autonomous merge seams (CH-3, #9731) *(2026-07-09)*
 - `cee31ec` — feat(approval-records): named-human approval evidence + role separation on the CH-1 chain (CH-2, #9730) (#9740) (#9740) *(2026-07-08)*
 - `9c63956` — feat(audit-chain): tamper-evident audit streams — hash-chained JSONL + retention (CH-1) (#9736) (#9736) *(2026-07-08)*

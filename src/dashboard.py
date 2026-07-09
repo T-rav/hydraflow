@@ -52,7 +52,8 @@ class HydraFlowDashboard:
         registry: RepoRuntimeRegistry | None = None,
         repo_store: RepoStore | None = None,
         register_repo_cb: Callable[
-            [Path, str | None], Awaitable[tuple[RepoRecord, HydraFlowConfig]]
+            [Path, str | None, str | None],
+            Awaitable[tuple[RepoRecord, HydraFlowConfig]],
         ]
         | None = None,
         remove_repo_cb: Callable[[str], Awaitable[bool]] | None = None,

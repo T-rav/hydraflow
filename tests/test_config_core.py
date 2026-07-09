@@ -941,3 +941,31 @@ class TestCredentialsSeparation:
         creds = Credentials(gh_token="tok")
         with pytest.raises((ValidationError, TypeError)):
             creds.gh_token = "other"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# regulated_labels (CH-5 requirement traceability)
+# ---------------------------------------------------------------------------
+
+
+class TestRegulatedLabels:
+    def _config(self, tmp_path: Path, **kwargs: object) -> HydraFlowConfig:
+        return HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+            **kwargs,
+        )
+
+    def test_defaults_to_empty_class(self, tmp_path: Path) -> None:
+        cfg = self._config(tmp_path)
+        assert cfg.regulated_labels == ""
+        assert cfg.regulated_label_set() == frozenset()
+
+    def test_csv_parses_to_label_set(self, tmp_path: Path) -> None:
+        cfg = self._config(tmp_path, regulated_labels="safety-critical, medical")
+        assert cfg.regulated_label_set() == frozenset({"safety-critical", "medical"})
+
+    def test_blank_csv_entries_dropped(self, tmp_path: Path) -> None:
+        cfg = self._config(tmp_path, regulated_labels=" ,safety-critical,, ")
+        assert cfg.regulated_label_set() == frozenset({"safety-critical"})

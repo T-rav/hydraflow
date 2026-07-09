@@ -714,6 +714,7 @@ class PostMergeHandler:
                     issue_number=pr.issue_number,
                     pr_number=pr.number,
                     diff=diff,
+                    issue_labels=issue.tags,
                 ),
                 pr.issue_number,
             )

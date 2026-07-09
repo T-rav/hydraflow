@@ -140,6 +140,64 @@ async def test_opens_one_pr_for_backlog_file_and_dedupes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_non_burn_down_dimension_dispatches_no_pr() -> None:
+    """A dimension opted out of burn-down (burn_down=False) contributes no
+    units even when its findings sit squarely in the baseline backlog."""
+    finding = Finding(
+        dimension="traceability",
+        path="docs/arch/generated/traceability_matrix.md",
+        signature="docs/arch/generated/traceability_matrix.md::untraced-pct",
+        message="m",
+    )
+    spec = DimensionSpec(
+        name="traceability",
+        detector=_FakeDetector("traceability", [finding] * 100),
+        baseline_path=Path("disturbance/baselines/traceability.yaml"),
+        fix_prompt="thread req ids",
+        burn_down=False,
+    )
+    calls: list[dict[str, Any]] = []
+
+    async def _fake_pr_opener(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return type(
+            "R",
+            (),
+            {
+                "status": "opened",
+                "pr_url": "u",
+                "branch": kwargs["branch"],
+                "error": None,
+            },
+        )()
+
+    async def _fake_runner_run(
+        *, prompt: str, worktree_path: str, issue_number: int
+    ) -> Any:
+        return type("O", (), {"crashed": False, "output_text": "ok"})()
+
+    runner = type("Runner", (), {"run": staticmethod(_fake_runner_run)})()
+
+    loop = DisturbanceDampenerLoop(
+        config=_Cfg(),
+        state=_FakeState(),
+        prs=object(),
+        dedup=_FakeDedup(),
+        deps=_deps(),
+        runner=runner,
+        dimensions=[spec],
+        baseline_loader=lambda p: {
+            "docs/arch/generated/traceability_matrix.md::untraced-pct": 100
+        },
+        pr_opener=_fake_pr_opener,
+    )
+    result = await loop._do_work()
+
+    assert result["opened"] == 0
+    assert calls == []
+
+
+@pytest.mark.asyncio
 async def test_kill_switch_short_circuits() -> None:
     deps = _deps(enabled=False)
     loop = DisturbanceDampenerLoop(

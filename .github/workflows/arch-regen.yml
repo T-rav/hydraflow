@@ -30,7 +30,10 @@ jobs:
         run: |
           BASE="${{ github.base_ref }}"
           CHANGED=$(git diff --name-only "origin/${BASE}...HEAD" 2>/dev/null || true)
-          NON_GENERATED=$(echo "$CHANGED" | grep -v '^docs/arch/generated/' | grep -v '^docs/arch/\.meta\.json$' | grep -v '^$' || true)
+          # disturbance/baselines/traceability.yaml is auto-synced from the
+          # regenerated matrix (sync_traceability_baseline), so it rides
+          # along in pure-regen PRs cut by DiagramLoop.
+          NON_GENERATED=$(echo "$CHANGED" | grep -v '^docs/arch/generated/' | grep -v '^docs/arch/\.meta\.json$' | grep -v '^disturbance/baselines/traceability\.yaml$' | grep -v '^$' || true)
           if [ -z "$NON_GENERATED" ]; then
             echo "pure_regen=true" >> "$GITHUB_OUTPUT"
             echo "Pure regen PR — source unchanged. Drift check skipped."

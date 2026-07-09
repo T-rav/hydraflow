@@ -878,6 +878,98 @@ async def test_create_pr_includes_required_flags(config, event_bus, issue):
 
 
 @pytest.mark.asyncio
+async def test_create_pr_body_includes_reproducibility_manifest(
+    config, event_bus, issue
+):
+    """CH-7 (#9735): the implement-path PR body carries the evidence block."""
+    from repro_manifest import MANIFEST_HEADING, MANIFEST_SCHEMA
+
+    manager = make_pr_manager(config, event_bus)
+    pr_url = "https://github.com/test-org/test-repo/pull/55"
+    run_mock = AsyncMock(return_value=pr_url)
+
+    with patch.object(manager, "_run_with_body_file", run_mock):
+        await manager.create_pr(issue, "agent/issue-42")
+
+    body = run_mock.call_args.kwargs["body"]
+    assert body.startswith("## Summary")
+    assert MANIFEST_HEADING in body
+    payload = body.split("```json\n", 1)[1].rsplit("\n```", 1)[0]
+    manifest = json.loads(payload)
+    assert manifest["schema"] == MANIFEST_SCHEMA
+    assert manifest["models"]["implementation"]["model"] == config.model
+
+
+@pytest.mark.asyncio
+async def test_create_pr_manifest_failure_does_not_block_pr(config, event_bus, issue):
+    """append_manifest is fail-open: PR creation proceeds with a plain body."""
+    manager = make_pr_manager(config, event_bus)
+    pr_url = "https://github.com/test-org/test-repo/pull/56"
+    run_mock = AsyncMock(return_value=pr_url)
+
+    with (
+        patch("repro_manifest.build_manifest", side_effect=RuntimeError("boom")),
+        patch.object(manager, "_run_with_body_file", run_mock),
+    ):
+        pr_info = await manager.create_pr(issue, "agent/issue-42")
+
+    assert pr_info.number == 56
+    body = run_mock.call_args.kwargs["body"]
+    assert "Reproducibility Manifest" not in body
+
+
+async def test_create_pr_body_carries_req_id_trailer(config, event_bus):
+    """An issue-declared requirement ID lands as a trailer in the PR body
+    (CH-5): re-derived from the issue itself so it survives every label
+    state-machine round trip. (Kept out of this docstring by name: the matrix
+    generator reads docstring requirement references as test evidence.)"""
+    from tests.conftest import IssueFactory
+
+    manager = make_pr_manager(config, event_bus)
+    tagged = IssueFactory.create(labels=["ready", "req:REQ-042"])
+    run_body_file = AsyncMock(
+        return_value="https://github.com/test-org/test-repo/pull/55"
+    )
+
+    with patch.object(manager, "_run_with_body_file", run_body_file):
+        await manager.create_pr(tagged, "agent/issue-42")
+
+    body = run_body_file.call_args.kwargs["body"]
+    assert body.rstrip().endswith("Req-ID: REQ-042")
+
+
+@pytest.mark.asyncio
+async def test_create_pr_body_carries_body_field_req_id(config, event_bus):
+    from tests.conftest import IssueFactory
+
+    manager = make_pr_manager(config, event_bus)
+    tagged = IssueFactory.create(body="Broken.\n\nReq-ID: SYS-9")
+    run_body_file = AsyncMock(
+        return_value="https://github.com/test-org/test-repo/pull/55"
+    )
+
+    with patch.object(manager, "_run_with_body_file", run_body_file):
+        await manager.create_pr(tagged, "agent/issue-42")
+
+    body = run_body_file.call_args.kwargs["body"]
+    assert body.rstrip().endswith("Req-ID: SYS-9")
+
+
+@pytest.mark.asyncio
+async def test_create_pr_body_has_no_trailer_without_req_id(config, event_bus, issue):
+    manager = make_pr_manager(config, event_bus)
+    run_body_file = AsyncMock(
+        return_value="https://github.com/test-org/test-repo/pull/55"
+    )
+
+    with patch.object(manager, "_run_with_body_file", run_body_file):
+        await manager.create_pr(issue, "agent/issue-42")
+
+    body = run_body_file.call_args.kwargs["body"]
+    assert "Req-ID" not in body
+
+
+@pytest.mark.asyncio
 async def test_create_pr_parses_pr_number_from_url(config, event_bus, issue):
     manager = make_pr_manager(config, event_bus)
     pr_url = "https://github.com/test-org/test-repo/pull/123"

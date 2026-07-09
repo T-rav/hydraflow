@@ -6,6 +6,7 @@ import logging
 import re
 import shutil
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import ClassVar
 
@@ -115,6 +116,7 @@ class PlannerRunner(BaseRunner):
                 {"issue": task.id, "source": "planner"},
                 on_output=_check_plan_complete,
                 telemetry_stats=prompt_stats,
+                issue_labels=task.tags,
             )
             result.transcript = transcript
 
@@ -181,6 +183,7 @@ class PlannerRunner(BaseRunner):
                         {"issue": task.id, "source": "planner"},
                         on_output=_check_plan_complete,
                         telemetry_stats=retry_stats,
+                        issue_labels=task.tags,
                     )
                     result.transcript += "\n\n--- RETRY ---\n\n" + retry_transcript
 
@@ -1005,10 +1008,17 @@ SUMMARY: <brief one-line description of the plan>
         epic_number: int,
         child_plans: dict[int, str],
         child_titles: dict[int, str],
+        *,
+        issue_labels: Sequence[str] = (),
     ) -> str:
         """Run a gap/conflict review across epic children's plans.
 
         Returns the raw transcript for the caller to parse.
+
+        *issue_labels* is the union of the reviewed children's labels: the
+        prompt embeds every child's plan, so the CH-6 gate must see any
+        ``data-class:<class>`` elevation label carried by ANY child (the
+        upward-only merge in ``effective_data_class`` handles conflicts).
         """
         plans_section = "\n\n".join(
             f"### Issue #{num}: {child_titles.get(num, 'Untitled')}\n\n{plan}"
@@ -1045,5 +1055,6 @@ SUMMARY: <brief one-line description of the plan>
             self._config.repo_root,
             {"epic": epic_number, "source": "planner-gap-review"},
             on_output=_check_complete,
+            issue_labels=issue_labels,
         )
         return transcript

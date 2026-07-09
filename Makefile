@@ -608,6 +608,7 @@ audit-prompts: ## Render all prompt fixtures, score against the rubric, regenera
 .PHONY: arch-regen arch-check arch-serve arch-validate arch-regen-stage rebase-onto
 
 ## arch-regen — regenerate docs/arch/generated/ from source
+## (--emit also prunes disturbance/baselines/traceability.yaml to the fresh matrix pct)
 arch-regen:
 	@echo "$(BLUE)Regenerating architecture knowledge artifacts...$(RESET)"
 	@$(UV) python -m arch.runner --emit --repo-root $(HYDRAFLOW_DIR)
@@ -617,7 +618,7 @@ arch-regen:
 arch-regen-stage:
 	@echo "$(BLUE)Regenerating and staging architecture artifacts...$(RESET)"
 	@$(UV) python -m arch.runner --emit --repo-root $(HYDRAFLOW_DIR)
-	@git -C $(HYDRAFLOW_DIR) add docs/arch/generated docs/arch/.meta.json
+	@git -C $(HYDRAFLOW_DIR) add docs/arch/generated docs/arch/.meta.json disturbance/baselines/traceability.yaml
 	@echo "$(GREEN)docs/arch/ refreshed and staged$(RESET)"
 
 ## rebase-onto — rebase current branch onto origin/<base> past PARENT_TIP

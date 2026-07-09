@@ -147,6 +147,7 @@ class HITLRunner(BaseRunner):
                 worktree_path,
                 {"issue": issue.number, "source": "hitl"},
                 telemetry_stats=prompt_stats,
+                issue_labels=issue.labels,
             )
             result.transcript = transcript
 

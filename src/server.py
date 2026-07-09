@@ -11,6 +11,7 @@ from pathlib import Path
 
 from config import HydraFlowConfig, build_credentials
 from log import setup_logging
+from prompt_gate import most_restrictive_data_class
 from runtime_config import DEFAULT_LOG_FILE, load_runtime_config
 
 logger = logging.getLogger("hydraflow.server")
@@ -196,6 +197,21 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
                     **({"repo": record.repo} if record.repo else {}),
                 }
             )
+            # CH-6 (#9734): the registry's data-class declaration rides the
+            # per-repo config so prompt_gate enforces it. Merge upward-only —
+            # a defaulted record must never downgrade a class the repo's own
+            # config file declares (that would be fail-open).
+            effective_class = most_restrictive_data_class(
+                repo_cfg.repo_data_class, record.data_class
+            )
+            if repo_cfg.repo_data_class != effective_class:
+                repo_cfg = load_runtime_config(
+                    overrides={
+                        "repo_root": str(repo_path),
+                        **({"repo": record.repo} if record.repo else {}),
+                        "repo_data_class": effective_class,
+                    }
+                )
             await registry.register(repo_cfg)
             logger.info("Restored registered repo %r from store", record.slug)
         except Exception:
@@ -227,7 +243,7 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
             logger.debug("Submodule auto-registration failed", exc_info=True)
 
     async def _register_repo(
-        repo_path: Path, slug: str | None
+        repo_path: Path, slug: str | None, data_class: str | None = None
     ) -> tuple[RepoRecord, HydraFlowConfig]:
         from runtime_config import load_runtime_config  # noqa: PLC0415
 
@@ -240,11 +256,31 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
         # Use the GitHub slug (owner/repo) for the record, not the
         # filesystem-safe repo_slug (owner-repo).
         github_slug = slug or repo_cfg.repo
+        # CH-6 (#9734): merge the API declaration, any stored declaration,
+        # and the repo's own config-derived class — upward-only, so nothing
+        # can downgrade a stricter declaration (fail closed). Reload the
+        # config with the effective class so the RUNNING runtime enforces it
+        # immediately — a record/config mismatch would be fail-open.
+        existing = repo_store.get(github_slug)
+        effective_class = most_restrictive_data_class(
+            repo_cfg.repo_data_class,
+            existing.data_class if existing else None,
+            data_class,
+        )
+        if repo_cfg.repo_data_class != effective_class:
+            repo_cfg = load_runtime_config(
+                overrides={
+                    "repo_root": str(repo_path),
+                    **({"repo": slug} if slug else {}),
+                    "repo_data_class": effective_class,
+                }
+            )
         record = repo_store.upsert(
             RepoRecord(
                 slug=github_slug,
                 repo=github_slug,
                 path=str(repo_path),
+                data_class=effective_class,
             )
         )
         if record.slug not in registry:
