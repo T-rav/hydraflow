@@ -68,6 +68,14 @@ FAIL_CLOSED_DATA_CLASS = "regulated-unclassified"
 #: declared class upward (never downward, never sideways).
 DATA_CLASS_LABEL_PREFIX = "data-class:"
 
+#: Machine-readable marker prefixing every :class:`PromptGateBlockedError`
+#: message. Seams that collapse the exception into a soft-failure result
+#: (``run_lightweight_agent`` → ``SimpleResult(stderr=str(exc), rc=-1)``)
+#: keep this marker in ``stderr`` so callers can DISTINGUISH a persistent
+#: policy block from a transient failure and escalate instead of soft-warn
+#: forever (see ``prompt_gate_alerts``; #9734 review finding 3).
+PROMPT_GATE_BLOCKED_MARKER = "prompt gate blocked"
+
 _VALID_CLASS_RE = re.compile(r"^(?:public-code|internal|regulated-[a-z0-9][a-z0-9-]*)$")
 
 #: v1 built-in redaction pattern set (spec #9734: SSN-like, credit-card-like,
@@ -312,7 +320,7 @@ def gate_prompt(
         )
         _emit_audit(config, decision)
         raise PromptGateBlockedError(
-            f"prompt gate blocked: {reason}", decision=decision
+            f"{PROMPT_GATE_BLOCKED_MARKER}: {reason}", decision=decision
         )
 
     decision = GateDecision(

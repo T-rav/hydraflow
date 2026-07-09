@@ -296,6 +296,21 @@ class TestBackendPolicy:
         result = gate_prompt("body", config=config, source="implementer", tool="claude")
         assert result.decision.action == "allow"
 
+    def test_blocked_error_str_carries_the_machine_readable_marker(self, tmp_path):
+        """Block-path consumers key on PROMPT_GATE_BLOCKED_MARKER in str(exc).
+
+        ``run_lightweight_agent`` collapses the exception to
+        ``SimpleResult(stderr=str(exc), returncode=-1)``; background loops
+        distinguish a gate block from transient rc=-1 failures by this
+        marker (#9734 review finding 3).
+        """
+        from prompt_gate import PROMPT_GATE_BLOCKED_MARKER
+
+        config = _regulated_config(tmp_path, backends={})
+        with pytest.raises(PromptGateBlockedError) as excinfo:
+            gate_prompt("body", config=config, source="wiki_compilation", tool="claude")
+        assert PROMPT_GATE_BLOCKED_MARKER in str(excinfo.value)
+
     def test_fail_closed_class_blocks_even_with_other_allowlists(self, tmp_path):
         config = _config(
             tmp_path,

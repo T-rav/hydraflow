@@ -397,3 +397,89 @@ async def test_generalize_pair_llm_failure_returns_empty(
     )
     result = await compiler.generalize_pair(entry_a=e, entry_b=e, topic="patterns")
     assert result.same_principle is False
+
+
+# ---------------------------------------------------------------------------
+# Prompt-gate block escalation (#9734 review finding 3)
+# ---------------------------------------------------------------------------
+
+
+class TestGateBlockEscalation:
+    """A gate-blocked _call_model must escalate loudly, once per condition."""
+
+    @staticmethod
+    def _configs(tmp_path: Path):
+        from tests.helpers import ConfigFactory
+
+        base = ConfigFactory.create(repo_root=tmp_path / "repo")
+        blocked = base.model_copy(
+            update={
+                "repo_data_class": "regulated-phi",
+                "data_class_allowed_backends": {},
+            }
+        )
+        allowed = base.model_copy(
+            update={
+                "repo_data_class": "regulated-phi",
+                "data_class_allowed_backends": {"regulated-phi": ["claude"]},
+            }
+        )
+        return blocked, allowed
+
+    @staticmethod
+    def _make(config):
+        bus = MagicMock()
+        bus.publish = AsyncMock()
+        runner = MagicMock()
+        runner.run_simple = AsyncMock()
+        creds = MagicMock()
+        creds.gh_token = ""
+        compiler = WikiCompiler(
+            config=config, runner=runner, credentials=creds, event_bus=bus
+        )
+        return compiler, bus, runner
+
+    @pytest.mark.asyncio
+    async def test_block_logs_error_and_alerts_once_across_two_ticks(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from events import EventType
+
+        blocked, _ = self._configs(tmp_path)
+        compiler, bus, runner = self._make(blocked)
+
+        with caplog.at_level(logging.ERROR, logger="hydraflow.prompt_gate_alerts"):
+            assert await compiler._call_model("prompt one") is None
+            assert await compiler._call_model("prompt two") is None
+
+        runner.run_simple.assert_not_awaited()  # blocked BEFORE any spawn
+        errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert len(errors) == 2  # loud on every blocked tick
+        assert bus.publish.await_count == 1  # SYSTEM_ALERT deduped
+        event = bus.publish.await_args_list[0].args[0]
+        assert event.type == EventType.SYSTEM_ALERT
+        assert event.data["kind"] == "prompt_gate_blocked"
+        assert event.data["source"] == "wiki_compilation"
+        assert event.data["repo"] == blocked.repo
+
+    @pytest.mark.asyncio
+    async def test_dedup_cleared_on_success_then_realerts(self, tmp_path: Path) -> None:
+        from execution import SimpleResult
+
+        blocked, allowed = self._configs(tmp_path)
+        compiler, bus, runner = self._make(blocked)
+
+        assert await compiler._call_model("p") is None  # block -> alert #1
+        assert bus.publish.await_count == 1
+
+        compiler._config = allowed
+        runner.run_simple = AsyncMock(
+            return_value=SimpleResult(returncode=0, stdout="ok")
+        )
+        assert await compiler._call_model("p") == "ok"  # success clears dedup
+
+        compiler._config = blocked
+        assert await compiler._call_model("p") is None  # new block -> alert #2
+        assert bus.publish.await_count == 2

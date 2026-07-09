@@ -696,6 +696,7 @@ def build_services(
         config=config,
         runner=subprocess_runner,
         credentials=credentials,
+        event_bus=event_bus,
     )
     agents = AgentRunner(
         config,

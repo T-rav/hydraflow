@@ -195,6 +195,37 @@ class TestRunLightweightAgentGate:
         runner.run_simple.assert_not_awaited()
         assert _read_audit(config)[0]["action"] == "block"
 
+    @pytest.mark.asyncio
+    async def test_block_stderr_carries_machine_readable_marker(
+        self, tmp_path: Path
+    ) -> None:
+        """The soft-failure stderr is DISTINGUISHABLE from transient rc=-1.
+
+        Background loops (wiki_compiler, adr_reviewer) key on the marker to
+        escalate a permanent policy block instead of soft-warning forever
+        (#9734 review finding 3).
+        """
+        from prompt_gate import PROMPT_GATE_BLOCKED_MARKER
+        from prompt_gate_alerts import is_prompt_gate_blocked
+        from runner_utils import run_lightweight_agent
+
+        config = _regulated_config(tmp_path, backends={})
+        runner = MagicMock()
+        runner.run_simple = AsyncMock()
+        result = await run_lightweight_agent(
+            runner=runner,
+            config=config,
+            tool="claude",
+            model="haiku",
+            prompt=_SENSITIVE,
+            source="wiki_compilation",
+            timeout=10,
+        )
+        assert result.returncode == -1
+        assert PROMPT_GATE_BLOCKED_MARKER in result.stderr
+        assert is_prompt_gate_blocked(result.stderr)
+        assert not is_prompt_gate_blocked("timed out after 30s")
+
 
 class TestStreamClaudeWithTelemetryGate:
     @pytest.mark.asyncio
