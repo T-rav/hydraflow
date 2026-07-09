@@ -50,8 +50,18 @@ _PREAMBLE = (
 _FOOTER = "\n{{ARCH_FOOTER}}\n"
 
 _PR_SUFFIX_RE = re.compile(r"\(#(?P<pr>\d+)\)\s*$")
+# Inline form — docstrings reference requirements mid-sentence by design
+# ("Verifies Req-ID: X end-to-end").
 _REQ_ID_REF_RE = re.compile(
     r"Req-ID:[ \t]*(?P<req_id>[A-Za-z0-9][A-Za-z0-9._/-]{0,63})"
+)
+# Line-anchored form for commit messages: real trailers are line-initial
+# (GitHub squash-mangling at worst prefixes a `* ` bullet), whereas prose
+# ABOUT the threading feature mentions the key mid-sentence and must not
+# mint a requirement ID.
+_REQ_ID_TRAILER_RE = re.compile(
+    r"^\s*\*?\s*Req-ID:[ \t]*(?P<req_id>[A-Za-z0-9][A-Za-z0-9._/-]{0,63})",
+    re.MULTILINE,
 )
 _ISSUE_REF_RE = re.compile(
     r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(?P<issue>\d+)", re.IGNORECASE
@@ -83,7 +93,7 @@ def parse_trace_commits(
         if not match or not sha:
             continue
         req_ids: list[str] = []
-        for m in _REQ_ID_REF_RE.finditer(body):
+        for m in _REQ_ID_TRAILER_RE.finditer(body):
             req_id = normalize_req_id(m.group("req_id"))
             if req_id is not None and req_id not in req_ids:
                 req_ids.append(req_id)

@@ -58,6 +58,18 @@ class TestParseTraceCommits:
         commits = parse_trace_commits(raw)
         assert commits[0].req_ids == []
 
+    def test_mid_line_prose_mention_is_not_a_requirement(self) -> None:
+        # Trailers are line-initial; a prose sentence that happens to contain
+        # the key mid-line (e.g. commit messages ABOUT the threading feature)
+        # must not mint a requirement ID.
+        raw = _record(
+            "9" * 40,
+            "feat(docs): explain threading (#9005)",
+            "Optional req:<id> label / Req-ID: body-field parsing improved.",
+        )
+        commits = parse_trace_commits(raw)
+        assert commits[0].req_ids == []
+
     def test_approval_trailers_collected(self) -> None:
         raw = _record(
             "e" * 40,

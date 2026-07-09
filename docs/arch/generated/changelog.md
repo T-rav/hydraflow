@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
+- `9e1bc74` — feat(disturbance): traceability untraced-fraction ratchet dimension (CH-5, #9733) *(2026-07-08)*
 - `0114c7a` — feat(arch): requirements traceability matrix generator wired into arch-regen (CH-5, #9733) *(2026-07-08)*
 - `2009f17` — feat(loops): DetectorCalibrationLoop — the factory watches its own sensors (Fix F) (#9728) (#9728) *(2026-07-08)*
 - `0fd20bf` — feat(scaffold): bring scaffold_loop up to the current ratchets (13 wiring sites) (#9726) (#9726) *(2026-07-08)*
