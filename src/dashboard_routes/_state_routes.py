@@ -21,6 +21,7 @@ from dashboard_routes._routes import (
     _pick_folder_with_dialog,
 )
 from models import RepoRuntimeInfo
+from prompt_gate import is_valid_data_class
 
 logger = logging.getLogger("hydraflow.dashboard")
 
@@ -361,6 +362,24 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                         return JSONResponse(
                             {"error": "path must be a string"}, status_code=400
                         )
+        # CH-6 (#9734): optional data-governance class declaration. Validated
+        # at the API boundary so a typo'd class is rejected loudly instead of
+        # silently failing closed on every prompt after registration.
+        data_class: str | None = None
+        if isinstance(req, dict):
+            raw_class = req.get("data_class")
+            if raw_class is not None:
+                if not isinstance(raw_class, str) or not is_valid_data_class(raw_class):
+                    return JSONResponse(
+                        {
+                            "error": (
+                                "data_class must be 'public-code', 'internal', "
+                                "or 'regulated-<name>'"
+                            )
+                        },
+                        status_code=400,
+                    )
+                data_class = raw_class.strip()
         raw_path = _extract_repo_path(req, req_query, path, repo_path_query)
         if not raw_path:
             return JSONResponse({"error": "path required"}, status_code=400)
@@ -396,7 +415,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         slug = await _detect_repo_slug_from_path(repo_path)
         if register_repo_cb is not None:
             try:
-                record, repo_cfg = await register_repo_cb(repo_path, slug)
+                record, repo_cfg = await register_repo_cb(repo_path, slug, data_class)
             except ValueError as exc:
                 return JSONResponse({"error": str(exc)}, status_code=400)
             except Exception as exc:  # noqa: BLE001

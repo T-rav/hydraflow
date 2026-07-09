@@ -194,6 +194,9 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
                 overrides={
                     "repo_root": str(repo_path),
                     **({"repo": record.repo} if record.repo else {}),
+                    # CH-6 (#9734): the registry's data-class declaration
+                    # rides the per-repo config so prompt_gate enforces it.
+                    "repo_data_class": record.data_class,
                 }
             )
             await registry.register(repo_cfg)
@@ -227,7 +230,7 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
             logger.debug("Submodule auto-registration failed", exc_info=True)
 
     async def _register_repo(
-        repo_path: Path, slug: str | None
+        repo_path: Path, slug: str | None, data_class: str | None = None
     ) -> tuple[RepoRecord, HydraFlowConfig]:
         from runtime_config import load_runtime_config  # noqa: PLC0415
 
@@ -240,11 +243,29 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
         # Use the GitHub slug (owner/repo) for the record, not the
         # filesystem-safe repo_slug (owner-repo).
         github_slug = slug or repo_cfg.repo
+        # CH-6 (#9734): a declared data class sticks; when the caller omits
+        # it, an already-registered repo keeps its stored declaration and a
+        # new repo gets the zero-regression default ("internal"). Reload the
+        # config with the effective class so the RUNNING runtime enforces it
+        # immediately — a record/config mismatch would be fail-open.
+        existing = repo_store.get(github_slug)
+        effective_class = data_class or (
+            existing.data_class if existing else "internal"
+        )
+        if repo_cfg.repo_data_class != effective_class:
+            repo_cfg = load_runtime_config(
+                overrides={
+                    "repo_root": str(repo_path),
+                    **({"repo": slug} if slug else {}),
+                    "repo_data_class": effective_class,
+                }
+            )
         record = repo_store.upsert(
             RepoRecord(
                 slug=github_slug,
                 repo=github_slug,
                 path=str(repo_path),
+                data_class=effective_class,
             )
         )
         if record.slug not in registry:

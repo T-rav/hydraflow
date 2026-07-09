@@ -558,6 +558,100 @@ class TestAddRepoByPath:
         register_cb.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_data_class_is_threaded_to_register_cb(
+        self,
+        config,
+        event_bus: EventBus,
+        state,
+        tmp_path: Path,
+    ) -> None:
+        """CH-6 (#9734): a declared data_class reaches register_repo_cb."""
+        repo_dir = tmp_path / "regulated-repo"
+        repo_dir.mkdir()
+
+        returned_record = RepoRecord(
+            slug="org/regulated",
+            repo="org/regulated",
+            path=str(repo_dir.resolve()),
+            data_class="regulated-phi",
+        )
+        register_cb = AsyncMock(return_value=(returned_record, config))
+
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, register_repo_cb=register_cb
+        )
+        endpoint = find_endpoint(router, "/api/repos/add", "POST")
+        with (
+            self._mock_git_validation(
+                repo_dir, remote_url="https://github.com/org/regulated.git"
+            ),
+            patch("prep.ensure_labels", new_callable=AsyncMock),
+        ):
+            resp = await endpoint(
+                {"path": str(repo_dir), "data_class": "regulated-phi"}
+            )
+
+        assert resp.status_code == 200
+        register_cb.assert_awaited_once()
+        assert register_cb.call_args[0][2] == "regulated-phi"
+
+    @pytest.mark.asyncio
+    async def test_omitted_data_class_passes_none_to_register_cb(
+        self,
+        config,
+        event_bus: EventBus,
+        state,
+        tmp_path: Path,
+    ) -> None:
+        repo_dir = tmp_path / "plain-repo"
+        repo_dir.mkdir()
+
+        returned_record = RepoRecord(
+            slug="org/plain", repo="org/plain", path=str(repo_dir.resolve())
+        )
+        register_cb = AsyncMock(return_value=(returned_record, config))
+
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, register_repo_cb=register_cb
+        )
+        endpoint = find_endpoint(router, "/api/repos/add", "POST")
+        with (
+            self._mock_git_validation(
+                repo_dir, remote_url="https://github.com/org/plain.git"
+            ),
+            patch("prep.ensure_labels", new_callable=AsyncMock),
+        ):
+            resp = await endpoint({"path": str(repo_dir)})
+
+        assert resp.status_code == 200
+        assert register_cb.call_args[0][2] is None
+
+    @pytest.mark.asyncio
+    async def test_invalid_data_class_is_rejected_with_400(
+        self,
+        config,
+        event_bus: EventBus,
+        state,
+        tmp_path: Path,
+    ) -> None:
+        """A typo'd class is rejected at the API boundary, not stored."""
+        import json as json_mod
+
+        repo_dir = tmp_path / "typo-repo"
+        repo_dir.mkdir()
+        register_cb = AsyncMock()
+
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, register_repo_cb=register_cb
+        )
+        endpoint = find_endpoint(router, "/api/repos/add", "POST")
+        resp = await endpoint({"path": str(repo_dir), "data_class": "Regulated-PHI"})
+
+        assert resp.status_code == 400
+        assert "data_class" in json_mod.loads(resp.body)["error"]
+        register_cb.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_req_query_plain_path_is_accepted(
         self,
         config,
@@ -889,11 +983,14 @@ class TestRepoStoreRuntimeIntegration:
             state_file=tmp_path / "state.json",
         )
 
-        async def _register_repo_cb(repo_path, slug):
+        async def _register_repo_cb(repo_path, slug, data_class=None):
             repo_label = (slug or repo_path.name or "repo").strip()
             safe_slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", repo_label).strip("-") or "repo"
             record = RepoRecord(
-                slug=safe_slug, repo=slug or safe_slug, path=str(repo_path)
+                slug=safe_slug,
+                repo=slug or safe_slug,
+                path=str(repo_path),
+                data_class=data_class or "internal",
             )
             record = repo_store.upsert(record)
             cfg = base_config.model_copy(update={"repo": record.repo})
