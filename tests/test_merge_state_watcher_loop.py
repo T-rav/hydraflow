@@ -16,7 +16,7 @@ import pytest
 from approval_records import ApprovalRecordReconciler
 from base_background_loop import LoopDeps
 from config import HydraFlowConfig
-from events import EventBus
+from events import EventBus, EventType
 from merge_state_watcher_loop import MergeStateWatcherLoop
 
 
@@ -44,13 +44,18 @@ def _make_loop(
     rebase_result: bool = True,
     mergeable: bool = True,
     reconciler: MagicMock | None = None,
+    bus: EventBus | None = None,
+    data_root=None,
 ) -> MergeStateWatcherLoop:
     """Factory: return a MergeStateWatcherLoop with stubbed dependencies."""
-    cfg = HydraFlowConfig(repo="acme/widgets")
+    if data_root is not None:
+        cfg = HydraFlowConfig(repo="acme/widgets", data_root=data_root)
+    else:
+        cfg = HydraFlowConfig(repo="acme/widgets")
     stop = asyncio.Event()
     stop.set()
     deps = LoopDeps(
-        event_bus=EventBus(),
+        event_bus=bus if bus is not None else EventBus(),
         stop_event=stop,
         status_cb=lambda *a, **k: None,
         enabled_cb=lambda name: enabled or name != "merge_state_watcher",
@@ -178,3 +183,59 @@ class TestApprovalReconcilerIntegration:
         )
         loop = MergeStateWatcherLoop(config=cfg, prs=AsyncMock(), deps=deps)
         assert isinstance(loop._approvals, ApprovalRecordReconciler)
+
+
+def _drain_alerts(queue) -> list:
+    """Drain a subscriber queue, keeping only SYSTEM_ALERT events."""
+    alerts = []
+    while not queue.empty():
+        event = queue.get_nowait()
+        if event.type is EventType.SYSTEM_ALERT:
+            alerts.append(event)
+    return alerts
+
+
+class TestCaptureGapAlert:
+    """A capture-gap tick surfaces loudly (review finding): one DedupStore'd
+    SYSTEM_ALERT per gap event, re-armed by a clean tick."""
+
+    async def test_capture_gap_publishes_one_deduped_system_alert(
+        self, tmp_path
+    ) -> None:
+        bus = EventBus()
+        queue = bus.subscribe()
+        loop = _make_loop(
+            tmp_path,
+            reconciler=_stub_reconciler(
+                {"merged_seen": 3, "recorded": 3, "capture_gap_risk": True}
+            ),
+            bus=bus,
+            data_root=tmp_path / "data",
+        )
+
+        await loop._do_work()
+        await loop._do_work()  # same ongoing gap event — deduped
+
+        alerts = _drain_alerts(queue)
+        assert len(alerts) == 1
+        assert alerts[0].data["kind"] == "approval_records_capture_gap"
+
+    async def test_capture_gap_alert_rearms_after_clean_tick(self, tmp_path) -> None:
+        bus = EventBus()
+        queue = bus.subscribe()
+        reconciler = MagicMock()
+        reconciler.reconcile = AsyncMock(
+            side_effect=[
+                {"merged_seen": 1, "recorded": 1, "capture_gap_risk": True},
+                {"merged_seen": 1, "recorded": 0, "capture_gap_risk": False},
+                {"merged_seen": 1, "recorded": 1, "capture_gap_risk": True},
+            ]
+        )
+        loop = _make_loop(
+            tmp_path, reconciler=reconciler, bus=bus, data_root=tmp_path / "data"
+        )
+
+        for _ in range(3):
+            await loop._do_work()
+
+        assert len(_drain_alerts(queue)) == 2

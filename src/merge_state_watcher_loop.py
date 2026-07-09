@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 from approval_records import ApprovalRecordReconciler
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from dedup_store import DedupStore
+from events import EventType, HydraFlowEvent
 from merge_state_watcher import MergeStateWatcher
 
 if TYPE_CHECKING:
@@ -22,6 +24,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hydraflow.merge_state_watcher_loop")
 
 _DEFAULT_INTERVAL_SECONDS = 600  # 10 minutes
+
+# One SYSTEM_ALERT per capture-gap event (not per tick); a clean tick
+# re-arms it so a future distinct gap alerts again.
+_GAP_DEDUP_KEY = "approval_records_capture_gap"
 
 
 class MergeStateWatcherLoop(BaseBackgroundLoop):
@@ -52,6 +58,10 @@ class MergeStateWatcherLoop(BaseBackgroundLoop):
             if approval_reconciler is not None
             else ApprovalRecordReconciler(config)
         )
+        self._gap_dedup = DedupStore(
+            "approval_capture_gap",
+            config.data_root / "dedup" / "approval_capture_gap.json",
+        )
 
     def _get_default_interval(self) -> int:
         return _DEFAULT_INTERVAL_SECONDS
@@ -65,4 +75,34 @@ class MergeStateWatcherLoop(BaseBackgroundLoop):
         # After unsticking (order matters: a reconciler gh outage propagates
         # to the cycle handler and must not starve conflict handling).
         approvals = await self._approvals.reconcile()
+        await self._alert_on_capture_gap(approvals)
         return {**stats, "approvals": approvals}
+
+    async def _alert_on_capture_gap(self, approvals: dict[str, Any]) -> None:
+        """Surface a capture-gap tick loudly (one alert per gap event).
+
+        The reconciler already chained the ``capture_gap`` marker — this is
+        the operator-facing signal. Dedup keeps it to one SYSTEM_ALERT per
+        gap event; a clean tick re-arms it.
+        """
+        if approvals.get("capture_gap_risk"):
+            if _GAP_DEDUP_KEY in self._gap_dedup.get():
+                return
+            self._gap_dedup.add(_GAP_DEDUP_KEY)
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    data={
+                        "kind": "approval_records_capture_gap",
+                        "worker": self._worker_name,
+                        "message": (
+                            "Approval-record scan window has no overlap with "
+                            "the recorded stream — merges may have passed the "
+                            "horizon unrecorded; a capture_gap marker was "
+                            "chained to the evidence stream."
+                        ),
+                    },
+                )
+            )
+        elif _GAP_DEDUP_KEY in self._gap_dedup.get():
+            self._gap_dedup.set_all(self._gap_dedup.get() - {_GAP_DEDUP_KEY})

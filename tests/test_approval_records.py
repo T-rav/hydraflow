@@ -153,11 +153,12 @@ class TestRecordShape:
 
         result = await ApprovalRecordReconciler(config).reconcile()
 
-        assert result == {"merged_seen": 1, "recorded": 1}
+        assert result == {"merged_seen": 1, "recorded": 1, "capture_gap_risk": False}
         records = _read_records(config)
         assert len(records) == 1
         rec = records[0]
         assert rec["schema"] == APPROVAL_RECORD_SCHEMA_VERSION
+        assert rec["record_type"] == "approval"
         assert rec["repo"] == config.repo
         assert rec["pr_number"] == 101
         assert rec["base_branch"] == "staging"
@@ -266,6 +267,33 @@ class TestRoleClassification:
         assert rec["role"] == ROLE_ORCHESTRATOR
         assert rec["delegation_basis"] is None
 
+    async def test_human_merge_of_rc_promotion_is_operator(
+        self, config, monkeypatch
+    ) -> None:
+        """Branch shape alone must not grant ``orchestrator`` (review finding).
+
+        A human force-merging an rc/* promotion (blocked StagingPromotionLoop,
+        terminal ``gh pr merge``) is recorded as the operator intervention it
+        was — CH-3 consumers reading ``role`` must never mistake it for an
+        automated promotion. ``head_branch`` still carries the rc/* origin.
+        """
+        head = f"{config.rc_branch_prefix}2026-07-08-0800"
+        fake = FakeGh(
+            merged=[{"number": 5, "mergedAt": "2026-07-08T12:00:00Z"}],
+            details={
+                5: _detail(5, approver=HUMAN_LOGIN, base=config.main_branch, head=head)
+            },
+        )
+        _install(monkeypatch, fake)
+
+        await ApprovalRecordReconciler(config).reconcile()
+
+        rec = _read_records(config)[0]
+        assert rec["role"] == ROLE_OPERATOR
+        assert rec["delegation_basis"] is None
+        assert rec["approver_identity"] == HUMAN_LOGIN
+        assert rec["head_branch"] == head
+
     async def test_factory_identity_merge_is_delegated_bot_with_clause(
         self, config, monkeypatch
     ) -> None:
@@ -325,7 +353,7 @@ class TestDedupAndIdempotency:
 
         result = await ApprovalRecordReconciler(config).reconcile()
 
-        assert result == {"merged_seen": 1, "recorded": 0}
+        assert result == {"merged_seen": 1, "recorded": 0, "capture_gap_risk": False}
         assert fake.calls_starting("gh", "pr", "view") == []
         assert fake.calls_starting("gh", "api", "user") == []
 
@@ -370,9 +398,84 @@ class TestDedupAndIdempotency:
 
         result = await ApprovalRecordReconciler(config).reconcile()
 
-        assert result == {"merged_seen": 0, "recorded": 0}
+        assert result == {"merged_seen": 0, "recorded": 0, "capture_gap_risk": False}
         assert len(fake.calls) == 1
         assert fake.calls[0][:3] == ("gh", "pr", "list")
+
+
+class TestCaptureGapDetection:
+    """Continuity evidence (review finding): a fixed scan window cannot prove
+    completeness after downtime. Zero overlap between the window and the
+    recorded stream means merges may have passed the horizon unrecorded —
+    the gap itself must become chained evidence, never silence."""
+
+    async def test_no_overlap_with_recorded_stream_chains_gap_marker(
+        self, config, monkeypatch
+    ) -> None:
+        fake = FakeGh(
+            merged=[{"number": 10, "mergedAt": "2026-07-08T10:00:00Z"}],
+            details={10: _detail(10)},
+        )
+        _install(monkeypatch, fake)
+        reconciler = ApprovalRecordReconciler(config)
+        await reconciler.reconcile()
+
+        # The next tick's window holds only newer merges — PR 10 fell past
+        # the horizon, so continuity with the recorded stream is unprovable.
+        fake.merged = [{"number": 70, "mergedAt": "2026-07-08T18:00:00Z"}]
+        fake.details = {70: _detail(70)}
+        result = await reconciler.reconcile()
+
+        assert result == {"merged_seen": 1, "recorded": 1, "capture_gap_risk": True}
+        markers = [
+            r for r in _read_records(config) if r.get("record_type") == "capture_gap"
+        ]
+        assert len(markers) == 1
+        assert markers[0]["scanned"] == 1
+        assert markers[0]["new_unrecorded"] == 1
+        assert AuditChain(config.approval_records_path).verify().ok
+
+    async def test_overlap_with_recorded_stream_is_continuity(
+        self, config, monkeypatch
+    ) -> None:
+        """One already-recorded PR in the window anchors continuity."""
+        fake = FakeGh(
+            merged=[{"number": 10, "mergedAt": "2026-07-08T10:00:00Z"}],
+            details={10: _detail(10)},
+        )
+        _install(monkeypatch, fake)
+        reconciler = ApprovalRecordReconciler(config)
+        await reconciler.reconcile()
+
+        fake.merged = [
+            {"number": 10, "mergedAt": "2026-07-08T10:00:00Z"},
+            {"number": 11, "mergedAt": "2026-07-08T11:00:00Z"},
+        ]
+        fake.details = {10: _detail(10), 11: _detail(11)}
+        result = await reconciler.reconcile()
+
+        assert result == {"merged_seen": 2, "recorded": 1, "capture_gap_risk": False}
+        assert [
+            r for r in _read_records(config) if r.get("record_type") == "capture_gap"
+        ] == []
+
+    async def test_adoption_tick_on_empty_stream_is_baseline_not_gap(
+        self, config, monkeypatch
+    ) -> None:
+        """The first-ever tick has nothing to be continuous WITH — that is
+        the documented adoption baseline, not a capture gap."""
+        fake = FakeGh(
+            merged=[{"number": 10, "mergedAt": "2026-07-08T10:00:00Z"}],
+            details={10: _detail(10)},
+        )
+        _install(monkeypatch, fake)
+
+        result = await ApprovalRecordReconciler(config).reconcile()
+
+        assert result == {"merged_seen": 1, "recorded": 1, "capture_gap_risk": False}
+        assert [
+            r for r in _read_records(config) if r.get("record_type") == "capture_gap"
+        ] == []
 
 
 class TestOutagesAndGates:
@@ -414,7 +517,7 @@ class TestOutagesAndGates:
         _install(monkeypatch, recovered)
         result = await reconciler.reconcile()
 
-        assert result == {"merged_seen": 2, "recorded": 1}
+        assert result == {"merged_seen": 2, "recorded": 1, "capture_gap_risk": False}
         assert [r["pr_number"] for r in _read_records(config)] == [1, 2]
         assert AuditChain(config.approval_records_path).verify().ok
 

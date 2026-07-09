@@ -176,7 +176,11 @@ class TestApprovalRecordScenario:
 
         first = await loop._do_work()
         assert first is not None, first
-        assert first["approvals"] == {"merged_seen": 1, "recorded": 1}
+        assert first["approvals"] == {
+            "merged_seen": 1,
+            "recorded": 1,
+            "capture_gap_risk": False,
+        }
 
         records = [
             json.loads(line)
@@ -192,5 +196,9 @@ class TestApprovalRecordScenario:
 
         second = await loop._do_work()
         assert second is not None, second
-        assert second["approvals"] == {"merged_seen": 1, "recorded": 0}
+        assert second["approvals"] == {
+            "merged_seen": 1,
+            "recorded": 0,
+            "capture_gap_risk": False,
+        }
         assert len(config.approval_records_path.read_text().splitlines()) == 1

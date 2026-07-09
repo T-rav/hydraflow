@@ -33,8 +33,9 @@ the factory's login for role classification, never as the approver.
 
 Role classification
 -------------------
-* ``orchestrator`` — the PR is an RC promotion (head ``rc/*`` onto the main
-  branch): the StagingPromotionLoop's own promotion merge (ADR-0042).
+* ``orchestrator`` — an RC promotion (head ``rc/*`` onto the main branch)
+  merged by the factory itself (ADR-0042). A human force-merging an RC PR
+  records ``operator`` — branch shape alone never grants the role.
 * ``delegated-bot`` — merged by the factory's own token identity or by a
   GitHub App actor (``mergedBy.is_bot``): the bot lane operating under the
   delegated authority of :data:`FACTORY_AUTONOMY_CLAUSE`.
@@ -88,7 +89,17 @@ _GH_TIMEOUT_SECONDS = 30.0
 # How many recently-merged PRs one tick scans (updated-desc). Bounds the
 # backlog the reconciler can self-heal after downtime; merges older than the
 # newest N are not backfilled (same adoption-baseline principle as CH-1).
+# Continuity is checked per tick: zero overlap between the window and the
+# recorded stream chains a ``capture_gap`` marker (see :meth:`reconcile`).
+# Residual risk: ``sort:updated-desc`` can displace a fresh merge out of the
+# window when old recorded PRs get updated — a cursor-based scan keyed on
+# the last recorded ``merged_at`` is the named v2 follow-up.
 _MERGED_PR_SCAN_LIMIT = 50
+
+#: ``record_type`` discriminators on the chained stream: normal approval
+#: evidence vs the capture-gap marker (continuity unprovable this tick).
+RECORD_TYPE_APPROVAL = "approval"
+RECORD_TYPE_CAPTURE_GAP = "capture_gap"
 
 # Cap on CI check refs stored per record — evidence refs, not a CI mirror.
 _MAX_CI_CHECK_REFS = 50
@@ -133,15 +144,32 @@ class ApprovalRecordReconciler:
         recorded = self._recorded_pr_numbers()
         # Set-dedup guards against a duplicate number inside ONE list payload
         # (read-back only covers records appended on PREVIOUS ticks).
-        todo = sorted(
-            {
-                number
-                for number in (entry.get("number") for entry in merged)
-                if isinstance(number, int) and number not in recorded
-            }
-        )
+        scanned = {
+            number
+            for number in (entry.get("number") for entry in merged)
+            if isinstance(number, int)
+        }
+        todo = sorted(scanned - recorded)
+        # Continuity check: with every scanned PR unrecorded and a non-empty
+        # stream, merges may have passed the window horizon unrecorded. The
+        # gap becomes chained evidence — silence would let ``verify()`` pass
+        # on a materially incomplete record set. (An empty stream is the
+        # documented adoption baseline, not a gap.)
+        gap_risk = bool(todo) and bool(recorded) and not (scanned & recorded)
+        if gap_risk:
+            self._chain.append(self._gap_marker(len(scanned), len(todo)))
+            logger.warning(
+                "Approval records: scan window (limit %d) has no overlap with "
+                "the recorded stream — merges may be unrecorded; capture_gap "
+                "marker chained.",
+                _MERGED_PR_SCAN_LIMIT,
+            )
         if not todo:
-            return {"merged_seen": len(merged), "recorded": 0}
+            return {
+                "merged_seen": len(merged),
+                "recorded": 0,
+                "capture_gap_risk": False,
+            }
 
         factory_login = await self._fetch_factory_login()
         count = 0
@@ -150,7 +178,11 @@ class ApprovalRecordReconciler:
             self._chain.append(self._build_record(detail, factory_login))
             count += 1
         logger.info("Approval records: recorded %d merged PR(s): %s", count, todo[:10])
-        return {"merged_seen": len(merged), "recorded": count}
+        return {
+            "merged_seen": len(merged),
+            "recorded": count,
+            "capture_gap_risk": gap_risk,
+        }
 
     # -- gh boundary (raw gh via the shared subprocess helper; no new PRPort
     # method — nothing on PRPort/FakeGitHub exposes mergedBy, and the atomic
@@ -235,14 +267,23 @@ class ApprovalRecordReconciler:
         approver_is_bot: bool,
         factory_login: str,
     ) -> tuple[str, str | None]:
-        """Return ``(role, delegation_basis)`` for one merge event."""
-        if head_ref.startswith(self._config.rc_branch_prefix) and (
-            base_ref == self._config.main_branch
+        """Return ``(role, delegation_basis)`` for one merge event.
+
+        Branch shape alone never grants ``orchestrator``: the promotion lane
+        is only the orchestrator's when the merge actor IS the factory. A
+        named human force-merging an rc/* PR is an operator intervention and
+        must be recorded as one (``head_branch`` keeps the rc/* origin).
+        """
+        is_factory_actor = bool(approver) and (
+            approver_is_bot or (factory_login and approver == factory_login)
+        )
+        if (
+            head_ref.startswith(self._config.rc_branch_prefix)
+            and base_ref == self._config.main_branch
+            and is_factory_actor
         ):
             return ROLE_ORCHESTRATOR, None
-        if approver and (
-            approver_is_bot or (factory_login and approver == factory_login)
-        ):
+        if is_factory_actor:
             return ROLE_DELEGATED_BOT, FACTORY_AUTONOMY_CLAUSE
         return ROLE_OPERATOR, None
 
@@ -268,6 +309,7 @@ class ApprovalRecordReconciler:
         )
         return {
             "schema": APPROVAL_RECORD_SCHEMA_VERSION,
+            "record_type": RECORD_TYPE_APPROVAL,
             "repo": self._config.repo,
             "pr_number": detail["number"],
             "pr_url": detail.get("url") or "",
@@ -288,6 +330,27 @@ class ApprovalRecordReconciler:
                 "reviews": self._review_refs(detail.get("reviews")),
                 "ci_checks": self._ci_check_refs(detail.get("statusCheckRollup")),
             },
+        }
+
+    def _gap_marker(self, scanned: int, unrecorded: int) -> dict[str, Any]:
+        """Chained evidence that capture continuity is unprovable this tick.
+
+        Excluded from dedup by construction (no ``pr_number``); auditors and
+        the evidence-pack compiler (CH-4) read it as an honest boundary
+        rather than discovering an unexplained hole.
+        """
+        return {
+            "schema": APPROVAL_RECORD_SCHEMA_VERSION,
+            "record_type": RECORD_TYPE_CAPTURE_GAP,
+            "repo": self._config.repo,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "scanned": scanned,
+            "new_unrecorded": unrecorded,
+            "reason": (
+                "scan window has no overlap with the recorded stream — "
+                "merges older than the window horizon may be unrecorded "
+                f"(scan limit {_MERGED_PR_SCAN_LIMIT}, sort:updated-desc)"
+            ),
         }
 
     @staticmethod

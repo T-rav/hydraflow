@@ -37,7 +37,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **LiveCorpusReplayLoop** | `src.live_corpus_replay_loop` | 900 | — | — | — |
 | **LogIngestLoop** | `src.log_ingest_loop` | 14400 | — | — | — |
 | **MemoryBacklogLoop** | `src.memory_backlog_loop` | 86400 | — | — | — |
-| **MergeStateWatcherLoop** | `src.merge_state_watcher_loop` | 600 | — | — | — |
+| **MergeStateWatcherLoop** | `src.merge_state_watcher_loop` | 600 | — | SYSTEM_ALERT | — |
 | **PRUnstickerLoop** | `src.pr_unsticker_loop` | 3600 | — | — | — |
 | **PricingRefreshLoop** | `src.pricing_refresh_loop` | 86400 | `HYDRAFLOW_DISABLE_PRICING_REFRESH` | — | — |
 | **PrinciplesAuditLoop** | `src.principles_audit_loop` | 604800 | — | — | ADR-0044 |
