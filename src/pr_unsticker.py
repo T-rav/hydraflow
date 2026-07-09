@@ -484,6 +484,7 @@ class PRUnsticker:
                 prompt,
                 wt_path,
                 {"issue": issue_number, "source": "pr_unsticker"},
+                issue_labels=issue.labels,
                 telemetry_stats=prompt_stats,
             )
             if self._resolver is not None:
@@ -658,6 +659,7 @@ diff — you may catch things `make quality` won't.
                     prompt,
                     wt_path,
                     {"issue": issue_number, "source": "pr_unsticker"},
+                    issue_labels=issue.labels,
                     telemetry_stats=prompt_stats,
                 )
                 if self._resolver is not None:

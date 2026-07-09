@@ -150,6 +150,55 @@ def test_every_runner_execute_call_passes_issue_labels() -> None:
     )
 
 
+_AGENTPORT_CALLER_MODULES = (
+    "merge_conflict_resolver.py",
+    "pr_unsticker.py",
+)
+
+# implement_spec_reviewer.py also calls self._agents.execute but its run()
+# interface carries no issue context at all — threading labels there is an
+# interface change tracked as a named follow-up, not silently exempted.
+_AGENTPORT_CALLER_FOLLOWUPS = ("implement_spec_reviewer.py",)
+
+
+def test_every_agentport_execute_call_passes_issue_labels() -> None:
+    """Each ``self._agents.execute(...)`` protocol call passes ``issue_labels=``.
+
+    The runner-module pin above walks ``self._execute`` (the BaseRunner
+    internal); infrastructure modules invoke the SAME gate through the
+    AgentPort protocol as ``self._agents.execute`` — the convergence review
+    found four such call sites (conflict resolution, PR unsticking) where a
+    regulated issue label silently lost its elevation. This pin closes that
+    structural blind spot.
+    """
+    offenders: list[str] = []
+    for rel in _AGENTPORT_CALLER_MODULES:
+        path = SRC / rel
+        assert path.exists(), f"module {rel} not found in src/"
+        tree = ast.parse(path.read_text(), filename=rel)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            is_agents_execute = (
+                isinstance(func, ast.Attribute)
+                and func.attr == "execute"
+                and isinstance(func.value, ast.Attribute)
+                and func.value.attr == "_agents"
+                and isinstance(func.value.value, ast.Name)
+                and func.value.value.id == "self"
+            )
+            if not is_agents_execute:
+                continue
+            if not any(kw.arg == "issue_labels" for kw in node.keywords):
+                offenders.append(f"{rel}:{node.lineno}")
+    assert not offenders, (
+        f"These self._agents.execute(...) call sites omit issue_labels=: "
+        f"{offenders}. Pass issue_labels=issue.tags / issue.labels so the "
+        "CH-6 gate can apply per-issue data-class elevation."
+    )
+
+
 def test_gate_seams_cover_all_telemetry_spawn_seams() -> None:
     """Stay in lockstep with the WS-2.2 telemetry containment ratchet.
 

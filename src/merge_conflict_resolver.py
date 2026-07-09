@@ -194,6 +194,7 @@ class MergeConflictResolver:
                     prompt,
                     wt_path,
                     {"issue": issue.id, "source": source},
+                    issue_labels=issue.tags,
                     telemetry_stats=prompt_stats,
                 )
 
@@ -323,6 +324,7 @@ class MergeConflictResolver:
                 prompt,
                 new_wt,
                 {"issue": issue.id, "source": source},
+                issue_labels=issue.tags,
                 telemetry_stats=prompt_stats,
             )
 
