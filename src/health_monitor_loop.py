@@ -139,9 +139,11 @@ def _write_decision(decisions_dir: Path, record: dict[str, Any]) -> None:
         # Hash-chained append (CH-1, #9729): stamps prev_hash/record_hash so
         # out-of-band edits to the decision trail are detectable.
         AuditChain(decisions_dir / "decisions.jsonl").append(record)
-    except OSError:
-        # Disk full, permission, or other I/O error — the health monitor loop
-        # must not abort over a single failed decision write.
+    except (OSError, ValueError):
+        # Disk full, permission, or other I/O error — plus ValueError from
+        # the chain's serialization paths (incl. json.JSONDecodeError from
+        # secret scrubbing). The health monitor loop must not abort its tick
+        # over a single failed decision write.
         logger.warning(
             "Failed to persist health decision to %s", decisions_dir, exc_info=True
         )

@@ -251,6 +251,55 @@ class TestVerify:
 
 
 # ---------------------------------------------------------------------------
+# Non-finite float coercion (evidence-grade streams must not drop records)
+# ---------------------------------------------------------------------------
+
+
+class TestNonFiniteSanitization:
+    """``canonical_json`` rejects NaN/Infinity (byte-stability pin), so the
+    append path must coerce non-finite floats to string sentinels — the
+    record lands WITH the odd value instead of being dropped."""
+
+    def test_append_coerces_non_finite_floats_to_sentinels(
+        self, tmp_path: Path
+    ) -> None:
+        chain = _stream(tmp_path)
+        chain.append(
+            {
+                "nan": float("nan"),
+                "pos": float("inf"),
+                "neg": float("-inf"),
+                "fine": 1.5,
+            }
+        )
+        (row,) = _read_lines(chain.path)
+        assert row["nan"] == "NaN"
+        assert row["pos"] == "Infinity"
+        assert row["neg"] == "-Infinity"
+        assert row["fine"] == 1.5
+        assert chain.verify().ok
+
+    def test_append_coerces_nested_non_finite_floats(self, tmp_path: Path) -> None:
+        chain = _stream(tmp_path)
+        chain.append({"usage": [{"payload": {"tokens": float("nan")}}]})
+        (row,) = _read_lines(chain.path)
+        assert row["usage"][0]["payload"]["tokens"] == "NaN"
+        assert chain.verify().ok
+
+    def test_rewrite_coerces_non_finite_floats(self, tmp_path: Path) -> None:
+        """Legacy lines may carry bare NaN literals (old json.dumps default
+        allowed them); the sanctioned amendment path must not crash on them."""
+        chain = _stream(tmp_path)
+        chain.append({"n": 1, "outcome": None})
+        records = _read_lines(chain.path)
+        records[0]["outcome"] = float("nan")
+        chain.rewrite(records)
+        (row,) = _read_lines(chain.path)
+        assert row["outcome"] == "NaN"
+        assert chain.verify().ok
+
+
+# ---------------------------------------------------------------------------
 # Crash-window self-healing (torn tail + sidecar lag)
 # ---------------------------------------------------------------------------
 

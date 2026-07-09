@@ -85,6 +85,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -211,6 +212,26 @@ def audit_streams(config: HydraFlowConfig) -> tuple[AuditStreamSpec, ...]:
             retention_days=config.audit_retention_days_evidence_packs,
         ),
     )
+
+
+def _coerce_non_finite(value: Any) -> Any:
+    """Recursively replace non-finite floats with string sentinels.
+
+    ``canonical_json`` rejects NaN/Infinity (``allow_nan=False`` is part of
+    the byte-stability pin), but evidence-grade streams must record the
+    event WITH the odd value rather than drop it — so the append path
+    coerces ``nan``/``inf``/``-inf`` to ``"NaN"``/``"Infinity"``/
+    ``"-Infinity"`` before hashing.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        if math.isnan(value):
+            return "NaN"
+        return "Infinity" if value > 0 else "-Infinity"
+    if isinstance(value, dict):
+        return {k: _coerce_non_finite(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_coerce_non_finite(v) for v in value]
+    return value
 
 
 def _scrub_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -560,7 +581,7 @@ class AuditChain:
                 raise ValueError(
                     f"payload must not contain reserved chain field {field_name!r}"
                 )
-        payload = _scrub_payload(record)
+        payload = _scrub_payload(_coerce_non_finite(dict(record)))
         with file_lock(self._lock_path):
             truncated = self._heal_torn_tail()
             prev_hash = self._reconciled_head(truncated_bytes=truncated)
@@ -583,7 +604,12 @@ class AuditChain:
             prev_hash: str | None = None
             for record in records:
                 if prev_hash is None and not _is_chained(record):
-                    lines.append(json.dumps(_scrub_payload(record), sort_keys=True))
+                    lines.append(
+                        json.dumps(
+                            _scrub_payload(_coerce_non_finite(dict(record))),
+                            sort_keys=True,
+                        )
+                    )
                     continue
                 if prev_hash is None:
                     baseline = record.get("prev_hash")
@@ -591,7 +617,9 @@ class AuditChain:
                         baseline if isinstance(baseline, str) else GENESIS_PREV_HASH
                     )
                 payload = _scrub_payload(
-                    {k: v for k, v in record.items() if k not in _HASH_FIELDS}
+                    _coerce_non_finite(
+                        {k: v for k, v in record.items() if k not in _HASH_FIELDS}
+                    )
                 )
                 record_hash = compute_record_hash(payload, prev_hash)
                 lines.append(
