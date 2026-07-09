@@ -17,6 +17,7 @@ import subprocess_util
 from approval_records import (
     APPROVAL_RECORD_SCHEMA_VERSION,
     FACTORY_AUTONOMY_CLAUSE,
+    RECORD_TYPE_BREAK_GLASS,
     ROLE_DELEGATED_BOT,
     ROLE_OPERATOR,
     ROLE_ORCHESTRATOR,
@@ -390,6 +391,33 @@ class TestDedupAndIdempotency:
 
         assert result["recorded"] == 1
         assert [r["pr_number"] for r in _read_records(config)] == [11]
+
+    async def test_break_glass_record_does_not_poison_dedup(
+        self, config, monkeypatch
+    ) -> None:
+        """A CH-3 break-glass record for PR #13 must not suppress the later
+        approval record for the same merge — dedup counts approvals only."""
+        chain = AuditChain(config.approval_records_path)
+        chain.append(
+            {
+                "record_type": RECORD_TYPE_BREAK_GLASS,
+                "pr_number": 13,
+                "timestamp": "2026-07-08T00:00:00Z",
+            }
+        )
+        fake = FakeGh(
+            merged=[{"number": 13, "mergedAt": "2026-07-08T12:00:00Z"}],
+            details={13: _detail(13)},
+        )
+        _install(monkeypatch, fake)
+
+        result = await ApprovalRecordReconciler(config).reconcile()
+
+        assert result["recorded"] == 1
+        approvals = [
+            r for r in _read_records(config) if r.get("record_type") == "approval"
+        ]
+        assert [r["pr_number"] for r in approvals] == [13]
 
     async def test_steady_state_makes_single_gh_call(self, config, monkeypatch) -> None:
         """No new merges → one list call, no identity/detail calls."""

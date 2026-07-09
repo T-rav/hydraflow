@@ -17,7 +17,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **ConvergenceOscillationLoop** | `src.convergence_oscillation_loop` | 3600 | — | — | ADR-0029, ADR-0049 |
 | **CorpusLearningLoop** | `src.corpus_learning_loop` | 3600 | — | — | — |
 | **CostBudgetWatcherLoop** | `src.cost_budget_watcher_loop` | 300 | `HYDRAFLOW_DISABLE_COST_BUDGET_WATCHER` | — | — |
-| **DependabotMergeLoop** | `src.dependabot_merge_loop` | 3600 | — | — | — |
+| **DependabotMergeLoop** | `src.dependabot_merge_loop` | 3600 | — | SYSTEM_ALERT | — |
 | **DetectorCalibrationLoop** | `src.detector_calibration_loop` | 3600 | — | — | — |
 | **DiagnosticLoop** | `src.diagnostic_loop` | 30 | — | DIAGNOSTIC_UPDATE | — |
 | **DiagramLoop** | `src.diagram_loop` | 14400 | `HYDRAFLOW_DISABLE_DIAGRAM_LOOP` | — | ADR-0029, ADR-0049 |
@@ -51,7 +51,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **SentryLoop** | `src.sentry_loop` | 600 | — | — | — |
 | **SkillPromptEvalLoop** | `src.skill_prompt_eval_loop` | 604800 | — | — | — |
 | **StagingBisectLoop** | `src.staging_bisect_loop` | 600 | — | — | ADR-0042 |
-| **StagingPromotionLoop** | `src.staging_promotion_loop` | 300 | — | — | ADR-0042 |
+| **StagingPromotionLoop** | `src.staging_promotion_loop` | 300 | — | SYSTEM_ALERT | ADR-0042 |
 | **StaleIssueGCLoop** | `src.stale_issue_gc_loop` | 3600 | — | — | — |
 | **StaleIssueLoop** | `src.stale_issue_loop` | 86400 | — | — | — |
 | **TermProposerLoop** | `src.term_proposer_loop` | 14400 | — | — | ADR-0054 |

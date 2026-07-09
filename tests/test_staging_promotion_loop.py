@@ -621,3 +621,94 @@ class TestRollingFailureIssue:
         assert r2["status"] == "promoted"
         prs.close_issue.assert_any_await(7001)
         assert state.get_rollup_issue("staging_promotion:rc_ci") is None
+
+
+class TestMergePolicyGateOnPromotion:
+    """CH-3 (#9731) — the policy gate at the RC promotion seam."""
+
+    @pytest.mark.asyncio
+    async def test_policy_deny_leaves_promotion_pr_open(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import json
+
+        import subprocess_util
+        from tests.helpers import install_repo_merge_policy
+
+        async def _run(*cmd, **_kwargs):
+            assert cmd[:3] == ("gh", "pr", "view")
+            return json.dumps({"labels": []})
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(99),
+            ci_result=(True, "ok"),
+        )
+        install_repo_merge_policy(loop._config)
+        prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+
+        result = await loop._do_work()
+
+        assert result == {"status": "policy_denied", "pr": 99}
+        prs.merge_promotion_pr.assert_not_called()
+        comment = prs.post_comment.await_args.args[1]
+        assert "Blocked by merge policy" in comment
+        assert "policy-override:" in comment
+
+    async def test_policy_deny_emits_system_alert(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A blocked RC promotion must be LOUD (review finding): every
+        cadence tick silently blocking is an operator-invisible outage —
+        the deny publishes a SYSTEM_ALERT like the other policy seams."""
+        import json
+
+        import subprocess_util
+        from events import EventType
+        from tests.helpers import install_repo_merge_policy
+
+        async def _run(*cmd, **_kwargs):
+            assert cmd[:3] == ("gh", "pr", "view")
+            return json.dumps({"labels": []})
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(99),
+            ci_result=(True, "ok"),
+        )
+        install_repo_merge_policy(loop._config)
+        prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        queue = loop._bus.subscribe()
+
+        result = await loop._do_work()
+
+        assert result == {"status": "policy_denied", "pr": 99}
+        alerts = []
+        while not queue.empty():
+            event = queue.get_nowait()
+            if event.type is EventType.SYSTEM_ALERT:
+                alerts.append(event)
+        assert len(alerts) == 1
+        assert alerts[0].data["source"] == "merge_policy"
+        assert "#99" in alerts[0].data["message"]
+
+    @pytest.mark.asyncio
+    async def test_default_policy_allows_rc_promotion(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The packaged policy accepts the ADR-0042 promotion-lane grant."""
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(99),
+            ci_result=(True, "ok"),
+        )
+        result = await loop._do_work()
+        assert result == {"status": "promoted", "pr": 99}
+        prs.merge_promotion_pr.assert_called_once_with(99, auto_rebase=True)

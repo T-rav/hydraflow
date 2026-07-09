@@ -444,6 +444,7 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
     ("approval_records_enabled", "HYDRAFLOW_APPROVAL_RECORDS_ENABLED", True),
+    ("merge_policy_enabled", "HYDRAFLOW_MERGE_POLICY_ENABLED", True),
     ("sensor_enrichment_enabled", "HYDRAFLOW_SENSOR_ENRICHMENT_ENABLED", True),
     ("gh_circuit_breaker_enabled", "HYDRAFLOW_GH_CIRCUIT_BREAKER_ENABLED", True),
     ("issue_cache_enabled", "HYDRAFLOW_ISSUE_CACHE_ENABLED", True),
@@ -1253,6 +1254,19 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Capture structured merge-approval records (CH-2) on the "
             "MergeStateWatcherLoop tick."
+        ),
+    )
+
+    # CH-3 (#9731): kill-switch for the policy-as-code merge gate consulted
+    # at the factory's own autonomous merge seams (merge_policy.py). When on,
+    # a missing/unparseable policy.yaml fails CLOSED (merges deny+escalate);
+    # this switch and the policy-override:<reason-slug> break-glass label
+    # are the escape hatches.
+    merge_policy_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enforce docs/standards/factory_autonomy/policy.yaml before "
+            "autonomous merges (CH-3)."
         ),
     )
 
@@ -3544,6 +3558,29 @@ class HydraFlowConfig(BaseModel):
         ``repo_data_root`` — one chain per managed repo.
         """
         return self.repo_data_root / "audit" / "approval_records.jsonl"
+
+    @property
+    def merge_policy_path(self) -> Path:
+        """Resolve the factory-autonomy merge policy file (CH-3, #9731).
+
+        A managed repo's own ``docs/standards/factory_autonomy/policy.yaml``
+        when present; otherwise the packaged policy shipped with this
+        HydraFlow checkout (the standard applies to every HydraFlow-format
+        project). ``merge_policy.enforce_merge_policy`` fails CLOSED when
+        the resolved file is missing or invalid.
+        """
+        repo_local = (
+            self.repo_root / "docs" / "standards" / "factory_autonomy" / "policy.yaml"
+        )
+        if repo_local.exists():
+            return repo_local
+        return (
+            Path(__file__).resolve().parent.parent
+            / "docs"
+            / "standards"
+            / "factory_autonomy"
+            / "policy.yaml"
+        )
 
     def base_branch(self) -> str:
         """Return the branch agent PRs should target.

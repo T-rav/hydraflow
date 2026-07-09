@@ -1637,3 +1637,138 @@ class TestRunCiGate:
 # ---------------------------------------------------------------------------
 # Extracted private method tests — _run_visual_gate
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# CH-3 (#9731) — merge-policy gate at the post-review merge seam
+# ---------------------------------------------------------------------------
+
+
+def _fake_pr_label_transport(monkeypatch, labels: list[str]) -> list[tuple]:
+    """Fake the gh transport the gate uses for fresh PR-label reads."""
+    import json
+
+    import subprocess_util
+
+    calls: list[tuple] = []
+
+    async def _run(*cmd, **_kwargs):
+        calls.append(cmd)
+        assert cmd[:3] == ("gh", "pr", "view")
+        return json.dumps({"labels": [{"name": name} for name in labels]})
+
+    monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+    return calls
+
+
+class TestMergePolicyGate:
+    @pytest.mark.asyncio
+    async def test_policy_deny_blocks_merge_and_escalates(
+        self, config: HydraFlowConfig, monkeypatch
+    ) -> None:
+        """A tightened policy denies the merge: no merge_pr, HITL escalation."""
+        from tests.helpers import install_repo_merge_policy
+
+        install_repo_merge_policy(config)
+        _fake_pr_label_transport(monkeypatch, [])
+        s = _setup_approved(config)
+        s.handler._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+
+        await s.call()
+
+        s.handler._prs.merge_pr.assert_not_awaited()
+        s.escalate_fn.assert_awaited_once()
+        escalation = s.escalate_fn.await_args.args[0]
+        assert escalation.cause.startswith("Blocked by merge policy")
+        assert escalation.pr_number == s.pr.number
+        assert "policy-override:" in escalation.comment
+        s.publish_fn.assert_any_await(s.pr, 0, "escalating")
+
+    @pytest.mark.asyncio
+    async def test_policy_deny_publishes_system_alert(
+        self, config: HydraFlowConfig, monkeypatch
+    ) -> None:
+        from events import EventType
+        from tests.helpers import install_repo_merge_policy
+
+        install_repo_merge_policy(config)
+        _fake_pr_label_transport(monkeypatch, [])
+        s = _setup_approved(config)
+        s.handler._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+
+        await s.call()
+
+        alerts = [
+            e for e in s.handler._bus.get_history() if e.type == EventType.SYSTEM_ALERT
+        ]
+        assert len(alerts) == 1
+        assert alerts[0].data["source"] == "merge_policy"
+        assert "policy" in alerts[0].data["message"]
+
+    @pytest.mark.asyncio
+    async def test_break_glass_label_merges_and_chains_record(
+        self, config: HydraFlowConfig, monkeypatch
+    ) -> None:
+        """policy-override:<slug> lets the merge through + chains break_glass."""
+        import json
+
+        from approval_records import RECORD_TYPE_BREAK_GLASS
+        from audit_chain import AuditChain
+        from tests.helpers import install_repo_merge_policy
+
+        install_repo_merge_policy(config)
+        _fake_pr_label_transport(monkeypatch, ["policy-override:hotfix-outage"])
+        s = _setup_approved(config)
+        s.handler._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+
+        await s.call()
+
+        s.handler._prs.merge_pr.assert_awaited_once()
+        s.escalate_fn.assert_not_awaited()
+        records = [
+            json.loads(line)
+            for line in config.approval_records_path.read_text().splitlines()
+        ]
+        break_glass = [
+            r for r in records if r.get("record_type") == RECORD_TYPE_BREAK_GLASS
+        ]
+        assert len(break_glass) == 1
+        assert break_glass[0]["pr_number"] == s.pr.number
+        assert break_glass[0]["lane"] == "post_merge_handler"
+        assert break_glass[0]["reason_slug"] == "hotfix-outage"
+        assert AuditChain(config.approval_records_path).verify().ok
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_bypasses_gate(
+        self, config: HydraFlowConfig, tmp_path, monkeypatch
+    ) -> None:
+        """merge_policy_enabled=False merges even under a strict policy."""
+        from tests.helpers import ConfigFactory as CF
+        from tests.helpers import install_repo_merge_policy
+
+        cfg = CF.create(
+            repo_root=config.repo_root,
+            workspace_base=config.workspace_base,
+            state_file=config.state_file,
+            merge_policy_enabled=False,
+        )
+        install_repo_merge_policy(cfg)
+        s = _setup_approved(cfg)
+
+        await s.call()
+
+        s.handler._prs.merge_pr.assert_awaited_once()
+        s.escalate_fn.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_default_packaged_policy_allows_pipeline_approved_merge(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """No repo-local policy: the packaged table allows the reviewed merge
+        with zero extra port/gh calls (no matchers in v1)."""
+        s = _setup_approved(config)
+
+        await s.call()
+
+        s.handler._prs.merge_pr.assert_awaited_once()
+        s.handler._prs.get_pr_diff_names.assert_not_awaited()

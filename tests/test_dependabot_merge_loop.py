@@ -574,3 +574,54 @@ class TestDependabotArchSelfHeal:
         )
         state.bump_dependabot_arch_refresh_attempts.assert_called_once_with(9427)
         assert result["skipped"] == 1
+
+
+class TestMergePolicyGate:
+    """CH-3 (#9731) — the policy gate at the bot-PR auto-merge seam."""
+
+    def _fake_labels(self, monkeypatch, labels: list[str]) -> None:
+        import json
+
+        import subprocess_util
+
+        async def _run(*cmd, **_kwargs):
+            assert cmd[:3] == ("gh", "pr", "view")
+            return json.dumps({"labels": [{"name": name} for name in labels]})
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+
+    @pytest.mark.asyncio
+    async def test_policy_deny_skips_approve_and_merge(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from events import EventType
+        from tests.helpers import install_repo_merge_policy
+
+        loop, _, _, prs, state = _make_loop(tmp_path, open_prs=[_make_pr(10)])
+        install_repo_merge_policy(loop._config)
+        prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        self._fake_labels(monkeypatch, [])
+
+        result = await loop._do_work()
+
+        assert result == {"merged": 0, "skipped": 0, "failed": 1}
+        prs.submit_review.assert_not_awaited()
+        prs.merge_pr.assert_not_awaited()
+        state.add_dependabot_merge_processed.assert_not_called()
+        alerts = [
+            e for e in loop._bus.get_history() if e.type == EventType.SYSTEM_ALERT
+        ]
+        assert len(alerts) == 1
+        assert alerts[0].data["source"] == "merge_policy"
+
+    @pytest.mark.asyncio
+    async def test_default_policy_allows_ci_green_bot_merge(
+        self, tmp_path: Path
+    ) -> None:
+        """The packaged policy accepts the loop's CI-green auto-approval."""
+        loop, _, _, prs, state = _make_loop(tmp_path, open_prs=[_make_pr(10)])
+
+        result = await loop._do_work()
+
+        assert result["merged"] == 1
+        prs.merge_pr.assert_awaited_once_with(10, auto_rebase=True)

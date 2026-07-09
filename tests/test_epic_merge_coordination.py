@@ -1062,3 +1062,51 @@ class TestEpicReadyEventType:
     def test_epic_ready_exists(self) -> None:
         assert hasattr(EventType, "EPIC_READY")
         assert EventType.EPIC_READY == "epic_ready"
+
+
+class TestMergePolicyGateOnRelease:
+    """CH-3 (#9731) — the policy gate at the epic bundle-release seam."""
+
+    @pytest.mark.asyncio
+    async def test_policy_deny_halts_bundle_without_merging(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        import json
+
+        import subprocess_util
+        from tests.helpers import install_repo_merge_policy
+
+        async def _run(*cmd, **_kwargs):
+            assert cmd[:3] == ("gh", "pr", "view")
+            return json.dumps({"labels": []})
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+
+        mgr, _, _, prs, _ = _make_manager(tmp_path, epic_merge_strategy="bundled_hitl")
+        install_repo_merge_policy(mgr._config)
+        await mgr.register_epic(100, "Epic", [1])
+        await mgr.on_child_approved(100, 1)
+        prs.find_pr_for_issue = AsyncMock(return_value=10)
+        prs.merge_pr = AsyncMock(return_value=True)
+        prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+
+        result = await mgr.release_epic(100)
+
+        assert result["merges"][0]["status"] == "policy_denied"
+        assert "error" in result
+        prs.merge_pr.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_default_policy_allows_approved_bundle_release(
+        self, tmp_path: Path
+    ) -> None:
+        mgr, _, _, prs, _ = _make_manager(tmp_path, epic_merge_strategy="bundled_hitl")
+        await mgr.register_epic(100, "Epic", [1])
+        await mgr.on_child_approved(100, 1)
+        prs.find_pr_for_issue = AsyncMock(return_value=10)
+        prs.merge_pr = AsyncMock(return_value=True)
+
+        result = await mgr.release_epic(100)
+
+        assert result["merges"][0]["status"] == "merged"
+        prs.merge_pr.assert_awaited_once_with(10)

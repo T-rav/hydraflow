@@ -354,6 +354,7 @@ class ConfigFactory:
         audit_retention_days_inference_telemetry: int | None = None,
         audit_retention_days_approval_records: int | None = None,
         approval_records_enabled: bool = True,
+        merge_policy_enabled: bool = True,
         release_version_source: Literal[
             "epic_title", "milestone", "manual"
         ] = "epic_title",
@@ -603,6 +604,7 @@ class ConfigFactory:
                     audit_retention_days_approval_records
                 ),
                 approval_records_enabled=approval_records_enabled,
+                merge_policy_enabled=merge_policy_enabled,
                 release_version_source=release_version_source,
                 release_tag_prefix=release_tag_prefix,
                 baseline_snapshot_patterns=baseline_snapshot_patterns
@@ -683,6 +685,52 @@ class ConfigFactory:
                 fitness_window_days=fitness_window_days,
                 fitness_min_samples=fitness_min_samples,
             )
+
+
+#: A tightened CH-3 merge policy for deny-path seam tests: an extra ask
+#: entry matching every path requires TWO operator approvals, which no
+#: autonomous lane's standing evidence can satisfy.
+STRICT_MERGE_POLICY = """\
+schema_version: 1
+merge_gate:
+  unapproved_merge_class: high-blast-radius
+  break_glass_label_prefix: "policy-override:"
+  escalation: hitl
+classes:
+  - id: tractable-reversible
+    readme_row: "Tractable + reversible"
+    autonomy: act
+    default: true
+  - id: high-blast-radius
+    readme_row: "High blast radius"
+    autonomy: ask
+    actions: [merge-unapproved-pr]
+    required_approvals:
+      count: 1
+      roles: [operator, orchestrator-reviewer]
+    escalation: hitl
+  - id: operator-strict
+    readme_row: "Operator strict"
+    autonomy: ask
+    paths: ["**"]
+    required_approvals:
+      count: 2
+      roles: [operator]
+    escalation: hitl
+"""
+
+
+def install_repo_merge_policy(config: Any, text: str = STRICT_MERGE_POLICY) -> Path:
+    """Write *text* as the repo-local factory-autonomy policy for *config*.
+
+    ``HydraFlowConfig.merge_policy_path`` prefers the managed repo's own
+    ``docs/standards/factory_autonomy/policy.yaml`` over the packaged one,
+    so this is how seam tests tighten (or corrupt) the merge policy.
+    """
+    path = config.repo_root / "docs" / "standards" / "factory_autonomy" / "policy.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
 
 
 class CredentialsFactory:

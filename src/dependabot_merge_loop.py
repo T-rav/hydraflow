@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
-from models import ReviewVerdict
+from events import EventType, HydraFlowEvent
+from merge_policy import (
+    ROLE_ORCHESTRATOR_REVIEWER,
+    MergeApproval,
+    enforce_merge_policy,
+)
+from models import ReviewVerdict, SystemAlertPayload
 
 if TYPE_CHECKING:
     from github_cache_loop import GitHubDataCache
@@ -119,6 +125,46 @@ class DependabotMergeLoop(BaseBackgroundLoop):
                 break
 
             if passed:
+                # CH-3 (#9731): consult the factory-autonomy policy before
+                # approving+merging. This lane's approval evidence is its own
+                # CI-green auto-approval (the submit_review below); a deny
+                # skips both, alerts, and leaves the PR unprocessed so a
+                # later approval or policy-override:* label can land it.
+                policy_verdict = await enforce_merge_policy(
+                    config=self._config,
+                    prs=self._prs,
+                    pr_number=pr.pr,
+                    actor="hydraflow:dependabot_merge_loop",
+                    approvals=[
+                        MergeApproval(
+                            actor="dependabot_merge_loop",
+                            role=ROLE_ORCHESTRATOR_REVIEWER,
+                            source="ci_green_bot_pr_auto_approval",
+                        )
+                    ],
+                    lane="dependabot_merge_loop",
+                )
+                if not policy_verdict.allowed:
+                    failed += 1
+                    logger.warning(
+                        "Bot PR #%d merge blocked by policy: %s",
+                        pr.pr,
+                        policy_verdict.reason,
+                    )
+                    await self._bus.publish(
+                        HydraFlowEvent(
+                            type=EventType.SYSTEM_ALERT,
+                            data=SystemAlertPayload(
+                                message=(
+                                    f"Merge policy denied auto-merge of bot PR "
+                                    f"#{pr.pr}: {policy_verdict.reason}"
+                                ),
+                                source="merge_policy",
+                            ),
+                        )
+                    )
+                    continue
+
                 # CI green — approve and merge
                 await self._prs.submit_review(
                     pr.pr, ReviewVerdict.APPROVE, "CI passed — auto-merging bot PR."
