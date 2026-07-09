@@ -97,9 +97,13 @@ _GH_TIMEOUT_SECONDS = 30.0
 _MERGED_PR_SCAN_LIMIT = 50
 
 #: ``record_type`` discriminators on the chained stream: normal approval
-#: evidence vs the capture-gap marker (continuity unprovable this tick).
+#: evidence, the capture-gap marker (continuity unprovable this tick), and
+#: CH-3 (#9731) break-glass overrides (a ``policy-override:<reason-slug>``
+#: label authorizing a merge the policy would deny — written by
+#: :func:`merge_policy.enforce_merge_policy`, same stream, no fork).
 RECORD_TYPE_APPROVAL = "approval"
 RECORD_TYPE_CAPTURE_GAP = "capture_gap"
+RECORD_TYPE_BREAK_GLASS = "break_glass"
 
 # Cap on CI check refs stored per record — evidence refs, not a CI mirror.
 _MAX_CI_CHECK_REFS = 50
@@ -239,7 +243,14 @@ class ApprovalRecordReconciler:
     # -- record building -----------------------------------------------------
 
     def _recorded_pr_numbers(self) -> set[int]:
-        """Read back every ``pr_number`` already in the stream (dedup set)."""
+        """Read back every approval ``pr_number`` already in the stream.
+
+        Only ``record_type == "approval"`` rows count toward dedup (a missing
+        ``record_type`` is tolerated as an approval for forward-compat): a
+        CH-3 ``break_glass`` record carries the same ``pr_number`` as the
+        merge it authorized and must not suppress that merge's later
+        approval record.
+        """
         path = self._config.approval_records_path
         if not path.exists():
             return set()
@@ -254,7 +265,11 @@ class ApprovalRecordReconciler:
                 # A corrupt line is a chain break — RunsGCLoop alerts on it;
                 # dedup keeps working from the parseable records.
                 continue
-            if isinstance(record, dict) and isinstance(record.get("pr_number"), int):
+            if not isinstance(record, dict):
+                continue
+            if record.get("record_type", RECORD_TYPE_APPROVAL) != RECORD_TYPE_APPROVAL:
+                continue
+            if isinstance(record.get("pr_number"), int):
                 numbers.add(record["pr_number"])
         return numbers
 

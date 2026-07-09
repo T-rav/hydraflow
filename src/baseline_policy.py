@@ -19,12 +19,14 @@ from state import StateTracker
 logger = logging.getLogger("hydraflow.baseline_policy")
 
 
-def _glob_match(path: str, pattern: str) -> bool:
+def glob_match(path: str, pattern: str) -> bool:
     """Match *path* against a glob *pattern* with proper ``**`` support.
 
     ``fnmatch.fnmatch`` treats ``*`` as matching everything (including ``/``)
     but ``**`` in glob semantics should also match *zero* path segments.
     This helper strips leading ``**/`` and trailing ``/**`` to cover that case.
+
+    Public: also used by :mod:`merge_policy` (CH-3) for change-class globs.
     """
     if fnmatch.fnmatch(path, pattern):
         return True
@@ -69,7 +71,7 @@ class BaselinePolicy:
         matched: list[str] = []
         for path in changed_files:
             for pattern in patterns:
-                if _glob_match(path, pattern):
+                if glob_match(path, pattern):
                     matched.append(path)
                     break
         return matched
