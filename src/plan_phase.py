@@ -48,6 +48,7 @@ from src.spec_ac_generator import SpecACGenerator
 from src.spec_judge import JudgeResult, SpecJudge
 from state import StateTracker
 from task_source import TaskTransitioner
+from traceability import extract_req_id, missing_required_req_id
 from transcript_summarizer import TranscriptSummarizer
 
 if TYPE_CHECKING:
@@ -548,8 +549,32 @@ class PlanPhase:
         if diagram_attachments:
             diagram_section = f"\n\n## Architecture Diagrams\n\n{diagram_attachments}\n"
 
+        # CH-5 traceability: carry the requirement ID (req:<id> label or
+        # Req-ID: body line) into the plan comment immediately AFTER the
+        # "## Implementation Plan" heading, ABOVE the plan body. The
+        # implementer prompt extracts the plan from the heading up to the
+        # FIRST ^---$ line (AgentRunner._strip_plan_noise, agent.py) — a
+        # bare horizontal rule inside the plan body would sever anything
+        # placed below it, so the Req-ID must lead.
+        req_id = extract_req_id(labels=issue.tags, body=issue.body)
+        req_line = f"**Req-ID:** `{req_id}`\n\n" if req_id else ""
+        req_warning = ""
+        if missing_required_req_id(
+            labels=issue.tags,
+            body=issue.body,
+            regulated_labels=self._config.regulated_label_set(),
+        ):
+            req_warning = (
+                "> ⚠️ **Req-ID required:** this issue is in the regulated "
+                "change class but declares no requirement ID. Add a "
+                "`req:<id>` label or a `Req-ID:` line to the issue body so "
+                "the change is traceable in the requirements matrix.\n\n"
+            )
+
         comment_body = (
             f"## Implementation Plan\n\n"
+            f"{req_line}"
+            f"{req_warning}"
             f"{result.plan}\n\n"
             f"{diagram_section}"
             f"**Branch:** `{branch}`\n\n"

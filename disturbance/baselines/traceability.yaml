@@ -1,0 +1,8 @@
+comment: 'traceability disturbance baseline (CH-5, #9733). One entry: the untraced
+  percentage of recent PR-merge commits (window <=500) as reported by the
+  <!-- untraced-pct: NN --> marker in docs/arch/generated/traceability_matrix.md.
+  MUST NOT grow (gate fails on increase); MAY shrink (prune when requirement IDs
+  are threaded and the regenerated matrix reports a lower percentage). Landed
+  grandfathered at 100: no Req-ID adoption yet, regulated class empty.'
+entries:
+  docs/arch/generated/traceability_matrix.md::untraced-pct: 100

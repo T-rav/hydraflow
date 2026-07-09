@@ -25,7 +25,7 @@ from pathlib import Path
 
 from adr_index import scan_adr_directory
 from arch._functional_areas_schema import load_functional_areas
-from arch._models import CommitInfo
+from arch._models import CommitInfo, TraceCommitInfo
 from arch.extractors.adr_xref import extract_adr_refs
 from arch.extractors.events import extract_event_topology
 from arch.extractors.labels import extract_labels
@@ -44,6 +44,12 @@ from arch.generators.loop_registry import render_loop_registry
 from arch.generators.mockworld_map import render_mockworld_map
 from arch.generators.module_graph import render_module_graph
 from arch.generators.port_map import render_port_map
+from arch.generators.traceability_matrix import (
+    TRACE_WINDOW,
+    parse_trace_commits,
+    render_traceability_matrix,
+)
+from disturbance.detectors.traceability import sync_traceability_baseline
 
 _ARTIFACT_FILES = [
     "loops.md",
@@ -59,6 +65,7 @@ _ARTIFACT_FILES = [
     "ubiquitous-language.md",
     "ubiquitous-language-context-map.md",
     "adr-conformance.md",
+    "traceability_matrix.md",
 ]
 
 
@@ -114,6 +121,24 @@ def _git_log_changelog(repo_root: Path) -> list[CommitInfo]:
     return out
 
 
+def _git_log_traceability(repo_root: Path) -> list[TraceCommitInfo]:
+    """Collect the traceability population: recent PR-squash-merge commits.
+
+    Fetches a bounded raw slice (the window plus headroom for non-PR
+    commits interleaved in history) and lets ``parse_trace_commits`` filter
+    to ``(#NNNN)``-suffixed commits and cap at ``TRACE_WINDOW``. Branch
+    work-in-progress commits never match the suffix, so regenerating on a
+    PR branch yields the same population as its base — keeping the drift
+    check stable while a PR is open.
+    """
+    fmt = "%H%x1f%s%x1f%B%x1e"
+    raw = _run(
+        ["git", "log", f"-n{TRACE_WINDOW * 6}", f"--pretty=format:{fmt}"],
+        repo_root,
+    )
+    return parse_trace_commits(raw)
+
+
 def _compute_artifacts(repo_root: Path) -> dict[str, str]:
     """Run all extractors and generators; return {filename: markdown}."""
     src_dir = repo_root / "src"
@@ -139,6 +164,9 @@ def _compute_artifacts(repo_root: Path) -> dict[str, str]:
         "changelog.md": render_changelog(_git_log_changelog(repo_root)),
         "coverage_matrix.md": render_coverage_matrix(loops, ports, repo_root=repo_root),
         "adr-conformance.md": render_adr_conformance(adrs),
+        "traceability_matrix.md": render_traceability_matrix(
+            _git_log_traceability(repo_root), repo_root=repo_root
+        ),
     }
     if fa_path.exists():
         fa = load_functional_areas(fa_path)
@@ -234,15 +262,25 @@ def _strip_footer(text: str) -> str:
 # Artifacts inherently time-varying; not subject to drift detection.
 # They still emit fresh content every run.
 # - changelog.md: derives from `git log` output; changes with every commit.
-_DRIFT_EXEMPT = {"changelog.md"}
+# - traceability_matrix.md: same moving `git log` window instability as
+#   changelog.md. In CI the drift check regenerates from the PR *merge
+#   commit*, so any squash-merge landing on the base branch between the
+#   author's regen and the CI run shifts the commit window — once the
+#   untraced percentage is below 100 that is a deterministic drift failure
+#   on unrelated PRs. The load-bearing staleness invariant is enforced by
+#   the traceability disturbance ratchet instead
+#   (disturbance/baselines/traceability.yaml), which only moves when a
+#   regenerated matrix is committed.
+_DRIFT_EXEMPT = {"changelog.md", "traceability_matrix.md"}
 
 
 def check(*, repo_root: Path, generated_dir: Path) -> int:
     """Regenerate to a tmpdir, diff against `generated_dir`, return rc 0/1.
 
-    `changelog.md` is exempt from drift detection: it derives from
-    `git log` and changes with every commit, so structural drift detection
-    is meaningless for it.
+    `changelog.md` and `traceability_matrix.md` are exempt from drift
+    detection (see `_DRIFT_EXEMPT`): both derive from a moving `git log`
+    window, so regenerating from CI's merge commit legitimately differs
+    from the committed artifact.
     """
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td) / "generated"
@@ -322,6 +360,11 @@ def _main() -> int:
     generated = repo_root / "docs/arch/generated"
     if args.emit:
         emit(repo_root=repo_root, out_dir=generated)
+        # Keep the traceability ratchet baseline in lockstep with the fresh
+        # matrix (prune-only). Lives here rather than in emit() so check()'s
+        # tmpdir regeneration stays a pure read of the repo.
+        if sync_traceability_baseline(repo_root):
+            print("[arch-regen] pruned disturbance/baselines/traceability.yaml")
         return 0
     if args.check:
         return check(repo_root=repo_root, generated_dir=generated)

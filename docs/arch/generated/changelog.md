@@ -6,8 +6,12 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
-- `cb8eee3` — chore(arch): regen generated artifacts (changelog picks up CH-1 entry) *(2026-07-08)*
-- `9c63956` — feat(audit-chain): tamper-evident audit streams — hash-chained JSONL + retention (CH-1) (#9736) (#9736) *(2026-07-08)*
+- `1a70088` — refactor(arch): regenerate architecture artifacts after CH-5 review fixes (#9733) (#9733) *(2026-07-08)*
+- `0c55f8a` — feat(disturbance): sync traceability baseline on regen; exempt matrix from arch drift check (CH-5, #9733) *(2026-07-08)*
+- `da430f1` — refactor(arch): correct TraceCommitInfo docstring to the line-anchored contract (CH-5, #9733) *(2026-07-08)*
+- `d7a8e0c` — test(arch): line-anchor commit-message requirement scanning (CH-5, #9733) *(2026-07-08)*
+- `9e1bc74` — feat(disturbance): traceability untraced-fraction ratchet dimension (CH-5, #9733) *(2026-07-08)*
+- `0114c7a` — feat(arch): requirements traceability matrix generator wired into arch-regen (CH-5, #9733) *(2026-07-08)*
 - `2009f17` — feat(loops): DetectorCalibrationLoop — the factory watches its own sensors (Fix F) (#9728) (#9728) *(2026-07-08)*
 - `0fd20bf` — feat(scaffold): bring scaffold_loop up to the current ratchets (13 wiring sites) (#9726) (#9726) *(2026-07-08)*
 - `b269794` — feat(cost): soft-throttle band before the hard-cap kill (Fix I) (#9725) (#9725) *(2026-07-08)*
