@@ -93,6 +93,7 @@ _PR_REF_RE = re.compile(r"\(#(\d+)\)")
 # -- named gap kinds ----------------------------------------------------------
 GAP_RC_PR_DETAIL = "rc_pr_detail_unavailable"
 GAP_NO_INCLUDED_PRS = "no_included_prs_detected"
+GAP_COMMITS_WITHOUT_REF = "commits_without_pr_ref"
 GAP_INCLUDED_PR_DETAIL = "included_pr_detail_unavailable"
 GAP_APPROVAL_STREAM = "approval_stream_missing"
 GAP_APPROVAL_RECORD = "approval_record_missing"
@@ -292,6 +293,7 @@ def _included_pr_numbers(
     if detail is None:
         return []
     numbers: set[int] = set()
+    unattributed = 0
     commits = detail.get("commits")
     for commit in commits if isinstance(commits, list) else []:
         if not isinstance(commit, dict):
@@ -299,7 +301,18 @@ def _included_pr_numbers(
         refs = _PR_REF_RE.findall(commit.get("messageHeadline") or "")
         if refs:
             numbers.add(int(refs[-1]))
+        else:
+            unattributed += 1
     numbers.discard(rc_pr_number)
+    if unattributed:
+        # Partial attribution must not read as complete: without this gap
+        # the binder claims a full included-PR set while silently omitting
+        # whatever landed on staging outside a squash-headline (#N) ref.
+        gaps.add(
+            GAP_COMMITS_WITHOUT_REF,
+            f"{unattributed} commit(s) in RC PR #{rc_pr_number} carry no "
+            "(#N) headline ref and could not be attributed to a PR",
+        )
     if not numbers:
         gaps.add(
             GAP_NO_INCLUDED_PRS,

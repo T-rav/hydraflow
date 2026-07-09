@@ -278,6 +278,70 @@ class TestManifestJson:
 
 class TestNamedGaps:
     @pytest.mark.asyncio
+    async def test_unattributed_commits_are_a_named_gap(
+        self, config, monkeypatch
+    ) -> None:
+        """Partial attribution must not read as complete (review finding):
+        a commit with no (#N) headline ref beside attributable ones would
+        silently shrink included_prs — the binder would claim a complete PR
+        set while omitting work. The omission itself becomes evidence."""
+        views = _default_views()
+        views[RC_PR] = _rc_detail(
+            commits=[
+                {
+                    "oid": "1" * 40,
+                    "messageHeadline": "feat(x): first change (#101)",
+                    "authors": [{"login": "agent-a"}],
+                },
+                {
+                    "oid": "3" * 40,
+                    "messageHeadline": "hotfix pushed straight to staging",
+                    "authors": [{"login": "operator"}],
+                },
+            ]
+        )
+        _install(monkeypatch, views)
+        _seed_approvals(config, 101)
+        _write_audit_report(config)
+
+        result = await _compile(config)
+        manifest = _pack_file(result, "manifest.json")
+
+        assert [e["number"] for e in manifest["included_prs"]] == [101]
+        kinds = [g["kind"] for g in manifest["gaps"]]
+        assert "commits_without_pr_ref" in kinds
+        gap = next(g for g in manifest["gaps"] if g["kind"] == "commits_without_pr_ref")
+        assert "1 commit" in gap["detail"]
+        assert "commits_without_pr_ref" in _pack_file(result, "index.md")
+
+    @pytest.mark.asyncio
+    async def test_zero_attributed_commits_is_a_named_gap(
+        self, config, monkeypatch
+    ) -> None:
+        """An RC whose commits carry no refs at all is the total-absence
+        shape of the same hole."""
+        views = _default_views()
+        views[RC_PR] = _rc_detail(
+            commits=[
+                {
+                    "oid": "3" * 40,
+                    "messageHeadline": "hotfix pushed straight to staging",
+                    "authors": [{"login": "operator"}],
+                },
+            ]
+        )
+        _install(monkeypatch, views)
+        _write_audit_report(config)
+
+        result = await _compile(config)
+        manifest = _pack_file(result, "manifest.json")
+
+        assert manifest["included_prs"] == []
+        kinds = [g["kind"] for g in manifest["gaps"]]
+        assert "no_included_prs_detected" in kinds
+        assert "commits_without_pr_ref" in kinds
+
+    @pytest.mark.asyncio
     async def test_missing_approval_record_is_a_named_gap(
         self, config, monkeypatch
     ) -> None:
