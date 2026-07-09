@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -40,6 +41,27 @@ def _write_lines(path: Path, rows: list[dict[str, object]]) -> None:
         "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows),
         encoding="utf-8",
     )
+
+
+def _sidecar(path: Path) -> Path:
+    return path.with_name(path.name + ".chainhead.json")
+
+
+def _set_sidecar_head(path: Path, head: str) -> None:
+    _sidecar(path).write_text(json.dumps({"head": head}), encoding="utf-8")
+
+
+def _tear_tail(path: Path, torn_bytes: bytes) -> None:
+    """Simulate a crash mid-append: unterminated garbage after the last record."""
+    with path.open("ab") as fh:
+        fh.write(torn_bytes)
+
+
+def _strip_final_newline(path: Path) -> None:
+    """Simulate a crash that flushed a full record but not its terminator."""
+    data = path.read_bytes()
+    assert data.endswith(b"\n")
+    path.write_bytes(data[:-1])
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +248,282 @@ class TestVerify:
         assert result.ok
         assert result.total_records == 2
         assert result.chained_records == 1
+
+
+# ---------------------------------------------------------------------------
+# Non-finite float coercion (evidence-grade streams must not drop records)
+# ---------------------------------------------------------------------------
+
+
+class TestNonFiniteSanitization:
+    """``canonical_json`` rejects NaN/Infinity (byte-stability pin), so the
+    append path must coerce non-finite floats to string sentinels — the
+    record lands WITH the odd value instead of being dropped."""
+
+    def test_append_coerces_non_finite_floats_to_sentinels(
+        self, tmp_path: Path
+    ) -> None:
+        chain = _stream(tmp_path)
+        chain.append(
+            {
+                "nan": float("nan"),
+                "pos": float("inf"),
+                "neg": float("-inf"),
+                "fine": 1.5,
+            }
+        )
+        (row,) = _read_lines(chain.path)
+        assert row["nan"] == "NaN"
+        assert row["pos"] == "Infinity"
+        assert row["neg"] == "-Infinity"
+        assert row["fine"] == 1.5
+        assert chain.verify().ok
+
+    def test_append_coerces_nested_non_finite_floats(self, tmp_path: Path) -> None:
+        chain = _stream(tmp_path)
+        chain.append({"usage": [{"payload": {"tokens": float("nan")}}]})
+        (row,) = _read_lines(chain.path)
+        assert row["usage"][0]["payload"]["tokens"] == "NaN"
+        assert chain.verify().ok
+
+    def test_rewrite_coerces_non_finite_floats(self, tmp_path: Path) -> None:
+        """Legacy lines may carry bare NaN literals (old json.dumps default
+        allowed them); the sanctioned amendment path must not crash on them."""
+        chain = _stream(tmp_path)
+        chain.append({"n": 1, "outcome": None})
+        records = _read_lines(chain.path)
+        records[0]["outcome"] = float("nan")
+        chain.rewrite(records)
+        (row,) = _read_lines(chain.path)
+        assert row["outcome"] == "NaN"
+        assert chain.verify().ok
+
+
+# ---------------------------------------------------------------------------
+# Crash-window self-healing (torn tail + sidecar lag)
+# ---------------------------------------------------------------------------
+
+
+class TestTornTailVerify:
+    """verify() classifies the deterministic crash windows as non-tamper.
+
+    A torn FINAL line (unterminated, unparseable) can only be a crash
+    artifact — the chain writer is the sole writer and ``append_jsonl``
+    writes ``line + "\\n"`` in one call, so an interrupted flush leaves a
+    strict prefix with no terminator. Mid-file breaks between fully
+    parseable records remain tamper verdicts.
+    """
+
+    def test_unterminated_unparseable_final_line_is_torn_tail_not_break(
+        self, tmp_path: Path
+    ) -> None:
+        chain = _stream(tmp_path)
+        chain.append({"n": 1})
+        _tear_tail(chain.path, b'{"n": 2, "prev_hash": "ab')
+
+        result = chain.verify()
+        assert result.ok
+        assert any(w.startswith("torn_tail") for w in result.warnings)
+        assert result.chained_records == 1
+
+    def test_torn_tail_with_invalid_utf8_is_torn_tail_not_crash(
+        self, tmp_path: Path
+    ) -> None:
+        """A flush interrupted mid-multibyte-char must not crash the verifier."""
+        chain = _stream(tmp_path)
+        chain.append({"n": 1})
+        _tear_tail(chain.path, b'{"msg": "caf\xc3')  # é cut mid-sequence
+
+        result = chain.verify()
+        assert result.ok
+        assert any(w.startswith("torn_tail") for w in result.warnings)
+
+    def test_sidecar_one_behind_is_lag_warning_not_break(self, tmp_path: Path) -> None:
+        """Crash between file append and sidecar store: the last record is
+        intact but the sidecar still holds its prev_hash."""
+        chain = _stream(tmp_path)
+        first = chain.append({"n": 1})
+        chain.append({"n": 2})
+        _set_sidecar_head(chain.path, first["record_hash"])
+
+        result = chain.verify()
+        assert result.ok
+        assert any(w.startswith("sidecar_lag") for w in result.warnings)
+
+    def test_terminated_garbage_final_line_remains_a_break(
+        self, tmp_path: Path
+    ) -> None:
+        """A newline-terminated garbage line cannot be a torn append (a torn
+        flush never includes the terminator) — the #9474 shape stays tamper."""
+        chain = _stream(tmp_path)
+        chain.append({"n": 1})
+        with chain.path.open("a", encoding="utf-8") as fh:
+            fh.write("<<<<<<< Updated upstream\n")
+        result = chain.verify()
+        assert not result.ok
+        assert not result.warnings
+
+    def test_midfile_garbage_before_parseable_record_remains_a_break(
+        self, tmp_path: Path
+    ) -> None:
+        chain = _stream(tmp_path)
+        chain.append({"n": 1})
+        with chain.path.open("a", encoding="utf-8") as fh:
+            fh.write("NOT JSON\n")
+        chain.append({"n": 2})
+        result = chain.verify()
+        assert not result.ok
+
+    def test_tail_deletion_of_parseable_record_remains_a_break(
+        self, tmp_path: Path
+    ) -> None:
+        """Cleanly truncating a whole record (sidecar untouched) is tamper —
+        the sidecar points past the tail, not one behind it."""
+        chain = _stream(tmp_path)
+        for n in range(3):
+            chain.append({"n": n})
+        rows = _read_lines(chain.path)
+        _write_lines(chain.path, rows[:-1])
+        result = chain.verify()
+        assert not result.ok
+        assert not result.warnings
+
+    def test_clean_stream_has_no_warnings(self, tmp_path: Path) -> None:
+        chain = _stream(tmp_path)
+        chain.append({"n": 1})
+        result = chain.verify()
+        assert result.ok
+        assert result.warnings == ()
+
+
+class TestCrashWindowSelfHealingAppend:
+    """append() repairs both deterministic crash windows before writing."""
+
+    def test_append_truncates_torn_tail_and_chains_off_last_parseable(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        chain = _stream(tmp_path)
+        first = chain.append({"n": 1})
+        torn = b'{"n": 2, "prev_hash": "ab'
+        _tear_tail(chain.path, torn)
+
+        with caplog.at_level(logging.WARNING, logger="hydraflow.audit_chain"):
+            written = chain.append({"n": 3})
+
+        assert written["prev_hash"] == first["record_hash"]
+        rows = _read_lines(chain.path)
+        assert [r["n"] for r in rows] == [1, 3]
+        result = chain.verify()
+        assert result.ok
+        assert result.warnings == ()
+        truncation_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert truncation_logs
+        assert str(len(torn)) in truncation_logs[0].getMessage()
+
+    def test_append_terminates_missing_newline_and_fast_forwards_sidecar(
+        self, tmp_path: Path
+    ) -> None:
+        """Crash after the record's content flushed but before its newline and
+        sidecar store: the record survives, nothing is lost."""
+        chain = _stream(tmp_path)
+        first = chain.append({"n": 1})
+        second = chain.append({"n": 2})
+        _strip_final_newline(chain.path)
+        _set_sidecar_head(chain.path, first["record_hash"])
+
+        written = chain.append({"n": 3})
+
+        assert written["prev_hash"] == second["record_hash"]
+        rows = _read_lines(chain.path)
+        assert [r["n"] for r in rows] == [1, 2, 3]
+        result = chain.verify()
+        assert result.ok
+        assert result.warnings == ()
+
+    def test_append_fast_forwards_sidecar_exactly_one_behind(
+        self, tmp_path: Path
+    ) -> None:
+        chain = _stream(tmp_path)
+        first = chain.append({"n": 1})
+        second = chain.append({"n": 2})
+        _set_sidecar_head(chain.path, first["record_hash"])
+
+        written = chain.append({"n": 3})
+
+        assert written["prev_hash"] == second["record_hash"]
+        result = chain.verify()
+        assert result.ok
+        assert result.warnings == ()
+        assert result.chained_records == 3
+
+    def test_append_resets_sidecar_ahead_of_truncated_torn_tail(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The torn line took the record the sidecar pinned: reset to the
+        last parseable record and continue."""
+        chain = _stream(tmp_path)
+        chain.append({"n": 1})
+        second = chain.append({"n": 2})
+        third = chain.append({"n": 3})
+        # Tear record 3's line mid-write; sidecar still pins its hash.
+        data = chain.path.read_bytes()
+        cut = data.rstrip(b"\n").rfind(b"\n") + 1
+        chain.path.write_bytes(data[: cut + 10])
+        _set_sidecar_head(chain.path, third["record_hash"])
+
+        with caplog.at_level(logging.WARNING, logger="hydraflow.audit_chain"):
+            written = chain.append({"n": 4})
+
+        assert written["prev_hash"] == second["record_hash"]
+        rows = _read_lines(chain.path)
+        assert [r["n"] for r in rows] == [1, 2, 4]
+        result = chain.verify()
+        assert result.ok
+        assert result.warnings == ()
+
+    def test_append_leaves_other_sidecar_mismatch_as_hard_break(
+        self, tmp_path: Path
+    ) -> None:
+        """A sidecar that matches neither the last record nor its prev is not
+        a known crash shape — the break must stay detectable."""
+        chain = _stream(tmp_path)
+        chain.append({"n": 1})
+        chain.append({"n": 2})
+        _set_sidecar_head(chain.path, "f" * 64)
+
+        chain.append({"n": 3})
+
+        assert not chain.verify().ok
+
+    def test_append_on_torn_only_file_starts_from_genesis(self, tmp_path: Path) -> None:
+        """A crash during the very first append leaves only torn bytes."""
+        path = tmp_path / "stream.jsonl"
+        path.write_bytes(b'{"n": 1, "prev')
+        chain = AuditChain(path)
+
+        written = chain.append({"n": 2})
+
+        assert written["prev_hash"] == GENESIS_PREV_HASH
+        assert [r["n"] for r in _read_lines(path)] == [2]
+        assert chain.verify().ok
+
+
+class TestTornTailPrune:
+    def test_prune_heals_torn_tail_and_prunes_prefix(self, tmp_path: Path) -> None:
+        """Retention must not be blocked forever by a crash artifact."""
+        chain = _stream(tmp_path)
+        chain.append({"ts": "2026-01-01T00:00:00Z"})
+        chain.append({"ts": "2026-07-01T00:00:00Z"})
+        _tear_tail(chain.path, b'{"ts": "2026-07-0')
+
+        removed = chain.prune_before(datetime(2026, 5, 1, tzinfo=UTC), "ts")
+
+        assert removed == 1
+        rows = _read_lines(chain.path)
+        assert [r["ts"] for r in rows] == ["2026-07-01T00:00:00Z"]
+        result = chain.verify()
+        assert result.ok
+        assert result.warnings == ()
 
 
 # ---------------------------------------------------------------------------

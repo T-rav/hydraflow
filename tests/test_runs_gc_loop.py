@@ -413,6 +413,69 @@ class TestAuditChainCaretaker:
         assert alerts[0].data["stream"] == "preflight"
 
     @pytest.mark.asyncio
+    async def test_torn_tail_is_not_tampering_and_retention_still_prunes(
+        self, tmp_path: Path
+    ) -> None:
+        """A crash artifact (unterminated final line) must not raise the
+        tamper SYSTEM_ALERT, must not poison the stream forever, and must
+        not block retention pruning (unbounded growth)."""
+        from datetime import UTC, datetime, timedelta
+
+        from events import EventType
+
+        loop, deps = _make_audit_loop(tmp_path, audit_retention_days_preflight=30)
+        fresh = datetime.now(UTC).isoformat()
+        stale = (datetime.now(UTC) - timedelta(days=90)).isoformat()
+        spec, chain = _seed_stream(deps.config, "preflight", [stale, fresh])
+        with spec.path.open("ab") as fh:
+            fh.write(b'{"ts": "2026-07-0')  # interrupted append, no newline
+
+        result = await loop._do_work()
+
+        assert result is not None
+        assert result["audit_chain_status"]["preflight"] == "torn_tail"
+        assert result["audit_pruned"]["preflight"] == 1
+        rows = [json.loads(line) for line in spec.path.read_text().splitlines()]
+        assert [r["ts"] for r in rows] == [fresh]
+        verify = chain.verify()
+        assert verify.ok
+        assert verify.warnings == ()
+        alerts = [
+            e
+            for e in deps.bus.get_history()
+            if e.type == EventType.SYSTEM_ALERT
+            and e.data.get("kind") == "audit_chain_break"
+        ]
+        assert alerts == []
+
+    @pytest.mark.asyncio
+    async def test_sidecar_lag_is_not_tampering(self, tmp_path: Path) -> None:
+        """Crash between append and sidecar store: no tamper alert."""
+        from events import EventType
+
+        loop, deps = _make_audit_loop(tmp_path)
+        spec, _chain = _seed_stream(
+            deps.config,
+            "preflight",
+            ["2026-07-01T00:00:00Z", "2026-07-02T00:00:00Z"],
+        )
+        rows = [json.loads(line) for line in spec.path.read_text().splitlines()]
+        sidecar = spec.path.with_name(spec.path.name + ".chainhead.json")
+        sidecar.write_text(json.dumps({"head": rows[0]["record_hash"]}))
+
+        result = await loop._do_work()
+
+        assert result is not None
+        assert result["audit_chain_status"]["preflight"] == "sidecar_lag"
+        alerts = [
+            e
+            for e in deps.bus.get_history()
+            if e.type == EventType.SYSTEM_ALERT
+            and e.data.get("kind") == "audit_chain_break"
+        ]
+        assert alerts == []
+
+    @pytest.mark.asyncio
     async def test_retention_floor_prunes_only_older_records(
         self, tmp_path: Path
     ) -> None:

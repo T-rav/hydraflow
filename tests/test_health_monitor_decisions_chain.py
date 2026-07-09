@@ -120,3 +120,36 @@ def test_update_decision_aborts_on_broken_chain(tmp_path: Path) -> None:
     assert decisions.read_text() == before
     # ...and the verifier still sees the break.
     assert not AuditChain(decisions).verify().ok
+
+
+def test_write_decision_with_non_finite_metric_still_lands(tmp_path: Path) -> None:
+    """A NaN trend metric must not crash the tick NOR drop the decision —
+    the record lands with the odd value coerced to a string sentinel."""
+    from health_monitor_loop import _write_decision
+
+    record = _record("adj-nan")
+    record["evidence_summary"] = {"first_pass_rate": float("nan")}
+    _write_decision(tmp_path, record)
+
+    (row,) = _read_rows(tmp_path)
+    assert row["evidence_summary"]["first_pass_rate"] == "NaN"
+    assert AuditChain(tmp_path / "decisions.jsonl").verify().ok
+
+
+def test_write_decision_swallows_value_error_from_chain(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
+    """Decision recording must never take down the health-monitor tick:
+    ValueError (incl. scrub-path JSONDecodeError) is logged, not raised."""
+    import health_monitor_loop
+    from health_monitor_loop import _write_decision
+
+    def _boom(self, _record):
+        raise ValueError("uncanonicalizable payload")
+
+    monkeypatch.setattr(health_monitor_loop.AuditChain, "append", _boom)
+
+    with caplog.at_level("WARNING", logger="hydraflow.health_monitor_loop"):
+        _write_decision(tmp_path, _record("adj-boom"))  # must not raise
+
+    assert any("decision" in r.getMessage().lower() for r in caplog.records)

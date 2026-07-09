@@ -249,7 +249,11 @@ class PromptTelemetry:
             with file_lock(self._lock_file):
                 self._chain.append(record)
                 self._update_pr_stats(record)
-        except OSError:
+        except (OSError, ValueError):
+            # ValueError covers AuditChain serialization failures (incl.
+            # json.JSONDecodeError from scrub paths). record() runs unguarded
+            # in BaseRunner._execute's ``finally`` — telemetry must never
+            # convert a successful agent run into a hard failure.
             logger.warning(
                 "Could not write prompt telemetry to %s",
                 self._inferences_file,

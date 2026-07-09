@@ -58,11 +58,13 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import subprocess_util
 from audit_chain import AuditChain
+from exception_classify import exc_detail
+from subprocess_util import AuthenticationError, CreditExhaustedError
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -123,6 +125,19 @@ def _login(actor: Any) -> str:
     return ""
 
 
+def _parse_merged_at(value: Any) -> datetime | None:
+    """Parse gh's ISO-8601 ``mergedAt`` (``...Z``); ``None`` if unparseable."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
 class ApprovalRecordReconciler:
     """Idempotent post-hoc reconciler: merged PR → chained approval record.
 
@@ -153,7 +168,15 @@ class ApprovalRecordReconciler:
             for number in (entry.get("number") for entry in merged)
             if isinstance(number, int)
         }
-        todo = sorted(scanned - recorded)
+        # Retention interplay (CH-1): pruning deletes old approval records,
+        # but old PRs re-enter the sort:updated-desc window whenever they are
+        # labeled/commented. Evidence the operator chose to expire must not
+        # be re-minted with a fresh timestamp, so retention-expired merges
+        # never enter todo. The continuity check below still uses the FULL
+        # scanned set: an expired-but-not-yet-pruned recorded PR remains a
+        # valid continuity anchor.
+        fresh = self._filter_retention_expired(merged)
+        todo = sorted(fresh - recorded)
         # Continuity check: with every scanned PR unrecorded and a non-empty
         # stream, merges may have passed the window horizon unrecorded. The
         # gap becomes chained evidence — silence would let ``verify()`` pass
@@ -173,19 +196,51 @@ class ApprovalRecordReconciler:
                 "merged_seen": len(merged),
                 "recorded": 0,
                 "capture_gap_risk": False,
+                "record_failures": 0,
             }
 
         factory_login = await self._fetch_factory_login()
         count = 0
+        failures = 0
+        last_error: Exception | None = None
         for number in todo:
-            detail = await self._fetch_pr_detail(number)
-            self._chain.append(self._build_record(detail, factory_login))
-            count += 1
-        logger.info("Approval records: recorded %d merged PR(s): %s", count, todo[:10])
+            # Per-PR isolation: one poisoned PR (deleted head repo 404,
+            # malformed payload) sits first in the sorted todo forever and
+            # would otherwise fail the whole cycle every tick — starving
+            # every PR behind it of its evidence record (a silent gap the
+            # zero-overlap heuristic cannot see, since overlap still exists).
+            try:
+                detail = await self._fetch_pr_detail(number)
+                self._chain.append(self._build_record(detail, factory_login))
+                count += 1
+            except (AuthenticationError, CreditExhaustedError):
+                # Fatal infrastructure signals (RuntimeError subclasses) must
+                # never be burned as per-PR failures — propagate immediately
+                # so the hosting loop's cycle handler sees them.
+                raise
+            except (RuntimeError, ValueError) as exc:
+                failures += 1
+                last_error = exc
+                logger.warning(
+                    "Approval records: recording PR #%d failed (%s) — "
+                    "continuing with the remaining %d PR(s).",
+                    number,
+                    exc_detail(exc),
+                    len(todo) - count - failures,
+                )
+        if failures and count == 0 and last_error is not None:
+            # Every todo PR failed: this is a gh outage, not per-PR poison.
+            # Propagate so the cycle handler applies its outage semantics.
+            raise last_error
+        if count:
+            logger.info(
+                "Approval records: recorded %d merged PR(s): %s", count, todo[:10]
+            )
         return {
             "merged_seen": len(merged),
             "recorded": count,
             "capture_gap_risk": gap_risk,
+            "record_failures": failures,
         }
 
     # -- gh boundary (raw gh via the shared subprocess helper; no new PRPort
@@ -241,6 +296,42 @@ class ApprovalRecordReconciler:
         return raw.strip()
 
     # -- record building -----------------------------------------------------
+
+    def _filter_retention_expired(self, merged: list[dict[str, Any]]) -> set[int]:
+        """Scanned PR numbers eligible for recording under the retention floor.
+
+        When ``audit_retention_days_approval_records`` is configured, merges
+        older than the floor are excluded — RunsGC would prune (or already
+        pruned) their evidence, and re-recording would re-date sign-off
+        evidence the operator chose to expire. Fail-safe: a merge whose age
+        cannot be established is kept, never silently expired.
+        """
+        numbers = {
+            number
+            for number in (entry.get("number") for entry in merged)
+            if isinstance(number, int)
+        }
+        retention_days = self._config.audit_retention_days_approval_records
+        if retention_days is None:
+            return numbers
+        cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+        expired: set[int] = set()
+        for entry in merged:
+            number = entry.get("number")
+            if not isinstance(number, int):
+                continue
+            merged_at = _parse_merged_at(entry.get("mergedAt"))
+            if merged_at is not None and merged_at < cutoff:
+                expired.add(number)
+        if expired:
+            logger.info(
+                "Approval records: %d scanned merge(s) older than the %d-day "
+                "retention floor skipped (evidence expired, not re-minted): %s",
+                len(expired),
+                retention_days,
+                sorted(expired)[:10],
+            )
+        return numbers - expired
 
     def _recorded_pr_numbers(self) -> set[int]:
         """Read back every approval ``pr_number`` already in the stream.

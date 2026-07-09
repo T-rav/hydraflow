@@ -180,6 +180,7 @@ class TestApprovalRecordScenario:
             "merged_seen": 1,
             "recorded": 1,
             "capture_gap_risk": False,
+            "record_failures": 0,
         }
 
         records = [
@@ -200,5 +201,6 @@ class TestApprovalRecordScenario:
             "merged_seen": 1,
             "recorded": 0,
             "capture_gap_risk": False,
+            "record_failures": 0,
         }
         assert len(config.approval_records_path.read_text().splitlines()) == 1
