@@ -38,7 +38,7 @@ graph LR
     src -- "7" --> src_telemetry
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
-    src_arch_generators -- "12" --> src_arch
+    src_arch_generators -- "14" --> src_arch
     src_dashboard_routes -- "3" --> src_onboarding
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "2" --> src_state

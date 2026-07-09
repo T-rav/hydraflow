@@ -74,6 +74,7 @@ def test_emit_writes_all_artifacts(populated_repo: Path):
         "ubiquitous-language.md",
         "ubiquitous-language-context-map.md",
         "adr-conformance.md",
+        "ai_system_inventory.md",
         "traceability_matrix.md",
     }
     assert {p.name for p in out.iterdir() if p.suffix == ".md"} == expected
