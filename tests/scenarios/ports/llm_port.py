@@ -6,6 +6,7 @@ When production runner signatures drift, update this port.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, runtime_checkable
 
@@ -33,6 +34,8 @@ class PlannerRunnerPort(Protocol):
         epic_number: int,
         child_plans: dict[Any, Any],
         child_titles: dict[Any, Any],
+        *,
+        issue_labels: Sequence[str] = (),
     ) -> str: ...
 
 

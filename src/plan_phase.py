@@ -1497,6 +1497,12 @@ class PlanPhase:
             return results
 
         # Phase 2: gap review loop
+        # The gap-review prompt embeds every reviewed child's plan, so the
+        # CH-6 prompt gate must see the union of those children's labels
+        # (any data-class:<class> elevation on ANY child applies).
+        gap_review_labels = sorted(
+            {tag for c in children if c.id in plan_map for tag in c.tags}
+        )
         for iteration in range(1, max_iterations + 1):
             if self._stop_event.is_set():
                 break
@@ -1508,7 +1514,7 @@ class PlanPhase:
                 max_iterations,
             )
             transcript = await self._planners.run_gap_review(
-                epic_number, plan_map, title_map
+                epic_number, plan_map, title_map, issue_labels=gap_review_labels
             )
             review = self._parse_gap_review(transcript, epic_number)
 

@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from models import EscalationContext
 from preflight.audit import PreflightAuditEntry
+from prompt_gate import gate_context_fields
 from sentry.reverse_lookup import SentryEvent
 
 logger = logging.getLogger("hydraflow.preflight.context")
@@ -68,8 +70,18 @@ async def gather_context(
     repo_slug: str,
     sentry_lookup: Any | None = None,  # callable(text) -> Awaitable[list[SentryEvent]]
     git_log_fn: Any | None = None,  # callable(files, since_days) -> list[CommitRef]
+    config: Any | None = None,  # HydraFlowConfig (avoid circular import)
+    issue_labels: Sequence[str] = (),
 ) -> PreflightContext:
-    """Gather everything PreflightAgent needs to act."""
+    """Gather everything PreflightAgent needs to act.
+
+    When *config* is provided, the gathered free-text fields (issue body,
+    comments, wiki excerpts) pass through the CH-6 data-governance gate
+    (:func:`prompt_gate.gate_context_fields`): a no-op for
+    ``public-code``/``internal`` repos, redaction for ``regulated-*`` classes
+    before any of this context enters a prompt. *issue_labels* feeds the
+    upward-only ``data-class:`` label override.
+    """
     # Comments — degrade gracefully
     try:
         raw_comments = await pr_port.list_issue_comments(issue_number)
@@ -129,6 +141,32 @@ async def gather_context(
     except Exception as exc:
         logger.warning("Audit read failed for #%d: %s", issue_number, exc)
         prior_attempts = []
+
+    # CH-6 assembly-time gate: redact gathered free text for regulated
+    # classes (structured no-op otherwise). Deliberately NOT wrapped in the
+    # graceful-degradation pattern above — a redaction failure on a regulated
+    # repo must not silently pass unredacted content through (fail closed).
+    if config is not None:
+        field_map = {"issue_body": issue_body, "wiki_excerpts": wiki_excerpts}
+        for i, comment in enumerate(comments):
+            field_map[f"comment_{i}"] = comment.body
+        redacted, _decision = gate_context_fields(
+            field_map,
+            config=config,
+            source="preflight_context",
+            issue_number=issue_number,
+            issue_labels=issue_labels,
+        )
+        issue_body = redacted["issue_body"]
+        wiki_excerpts = redacted["wiki_excerpts"]
+        comments = [
+            IssueComment(
+                author=comment.author,
+                body=redacted[f"comment_{i}"],
+                created_at=comment.created_at,
+            )
+            for i, comment in enumerate(comments)
+        ]
 
     return PreflightContext(
         issue_number=issue_number,

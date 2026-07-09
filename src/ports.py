@@ -40,7 +40,7 @@ it via ``inspect.signature`` comparison.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, runtime_checkable
 
@@ -649,8 +649,13 @@ class AgentPort(Protocol):
         *,
         on_output: Callable[[str], bool] | None = None,
         telemetry_stats: Mapping[str, object] | None = None,
+        issue_labels: Sequence[str] | None = None,
     ) -> str:
-        """Run the agent subprocess and return the transcript."""
+        """Run the agent subprocess and return the transcript.
+
+        *issue_labels* feeds the CH-6 gate's upward-only ``data-class:``
+        label elevation; callers with issue/PR label context must pass it.
+        """
         ...
 
     async def verify_result(self, worktree_path: Path, branch: str) -> LoopResult:

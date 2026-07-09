@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -142,6 +142,8 @@ class _FakePlannerRunner(_ScriptedRunner):
         _epic_number: int,
         _child_plans: dict[Any, Any],
         _child_titles: dict[Any, Any],
+        *,
+        issue_labels: Sequence[str] = (),
     ) -> str:
         return ""
 

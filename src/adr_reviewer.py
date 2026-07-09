@@ -12,8 +12,14 @@ from typing import TYPE_CHECKING
 
 from adr_pre_validator import ADRPreValidator, ADRValidationResult
 from adr_utils import ADR_FILE_RE
+from dedup_store import DedupStore
 from file_util import append_jsonl
 from models import ADRCouncilResult, CouncilVerdict, CouncilVote
+from prompt_gate_alerts import (
+    alert_prompt_gate_block,
+    clear_prompt_gate_block,
+    is_prompt_gate_blocked,
+)
 from subprocess_util import (
     AuthenticationError,
     CreditExhaustedError,
@@ -116,6 +122,7 @@ class ADRCouncilReviewer:
         pr_manager: PRManager,
         runner: SubprocessRunner,
         credentials: Credentials | None = None,
+        gate_block_dedup: DedupStore | None = None,
     ) -> None:
         from config import Credentials
 
@@ -124,6 +131,11 @@ class ADRCouncilReviewer:
         self._bus = event_bus
         self._runner = runner
         self._pre_validator = ADRPreValidator()
+        # Prompt-gate block escalation (#9734 finding 3).
+        self._gate_block_dedup = gate_block_dedup or DedupStore(
+            "prompt_gate_blocked",
+            config.data_root / "dedup" / "prompt_gate_blocked.json",
+        )
 
     async def review_proposed_adrs(self) -> dict[str, int]:
         """Scan for proposed ADRs and run council reviews.
@@ -538,12 +550,26 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
             logger.warning("ADR council orchestrator unavailable: %s", exc)
             return None
         if result.returncode != 0:
+            if is_prompt_gate_blocked(result.stderr):
+                # A gate block is a persistent policy misconfiguration, not a
+                # transient failure: every tick re-blocks, so a soft warn
+                # would be a PERMANENT silent no-op (#9734 review finding 3).
+                # Escalate: ERROR log + one deduped SYSTEM_ALERT.
+                await alert_prompt_gate_block(
+                    dedup=self._gate_block_dedup,
+                    event_bus=self._bus,
+                    source="adr_reviewer",
+                    repo=self._config.repo or "",
+                    detail=result.stderr[:200],
+                )
+                return None
             logger.warning(
                 "ADR council orchestrator failed (rc=%d): %s",
                 result.returncode,
                 result.stderr[:200],
             )
             return None
+        clear_prompt_gate_block(self._gate_block_dedup, "adr_reviewer")
         return result.stdout if result.stdout else None
 
     async def _route_pre_validation_failure(

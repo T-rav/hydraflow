@@ -32,6 +32,20 @@ class TestDedupStoreFileBacked:
         store.add("alpha")  # duplicate
         assert store.get() == {"alpha", "beta"}
 
+    def test_discard_removes_value(self, tmp_path: Path) -> None:
+        fp = tmp_path / "dedup.json"
+        store = DedupStore("test_set", fp)
+        store.add("alpha")
+        store.add("beta")
+        store.discard("alpha")
+        assert store.get() == {"beta"}
+
+    def test_discard_missing_value_is_noop(self, tmp_path: Path) -> None:
+        fp = tmp_path / "dedup.json"
+        store = DedupStore("test_set", fp)
+        store.discard("ghost")
+        assert not fp.exists()  # no gratuitous write when nothing to drop
+
     def test_set_all_overwrites(self, tmp_path: Path) -> None:
         fp = tmp_path / "dedup.json"
         store = DedupStore("test_set", fp)

@@ -6,7 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
-- `f2eee45` — feat(arch): AI system inventory generator wired into arch-regen (CH-7, #9735) *(2026-07-08)*
+- `5a5e521` — refactor(prompt-gate): escalate rc=-1 gate blocks in background loops (#9734) (#9734) *(2026-07-08)*
 - `2009f17` — feat(loops): DetectorCalibrationLoop — the factory watches its own sensors (Fix F) (#9728) (#9728) *(2026-07-08)*
 - `0fd20bf` — feat(scaffold): bring scaffold_loop up to the current ratchets (13 wiring sites) (#9726) (#9726) *(2026-07-08)*
 - `b269794` — feat(cost): soft-throttle band before the hard-cap kill (Fix I) (#9725) (#9725) *(2026-07-08)*

@@ -32,6 +32,7 @@ from config import HydraFlowConfig
 from events import EventBus
 from exception_classify import reraise_on_credit_or_bug
 from model_pricing import load_pricing
+from prompt_gate import PromptGateBlockedError, gate_prompt
 from prompt_telemetry import PromptTelemetry
 from runner_utils import AuthenticationRetryError, StreamConfig, stream_claude_process
 
@@ -154,6 +155,32 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
         to crashed=True in the SpawnOutcome the subclass converts.
         """
         from preflight.agent import hash_prompt  # noqa: PLC0415
+
+        # CH-6 data-governance gate (#9734): redact/block BEFORE spawn. The
+        # gated tool mirrors this seam's telemetry attribution
+        # (config.implementation_tool). A regulated-class block collapses to
+        # this seam's never-raises contract as a crashed outcome — the prompt
+        # was never sent (fail closed) and the gate wrote the audit record.
+        try:
+            gated = gate_prompt(
+                prompt,
+                config=self._config,
+                source=self._telemetry_source(),
+                tool=self._config.implementation_tool,
+                issue_number=issue_number,
+            )
+        except PromptGateBlockedError as exc:
+            return self._make_result(
+                SpawnOutcome(
+                    transcript=str(exc),
+                    usage_stats={},
+                    wall_clock_s=0.0,
+                    crashed=True,
+                    prompt_hash=hash_prompt(prompt),
+                    cost_usd=0.0,
+                )
+            )
+        prompt = gated.prompt
 
         self._pre_spawn_hook(prompt)
         cmd = self._build_command(prompt, Path(worktree_path))

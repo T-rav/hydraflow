@@ -366,6 +366,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
         ),
     ),
     ("log_ingest_log_files", "HYDRAFLOW_LOG_INGEST_LOG_FILES", "logs/hydraflow.log"),
+    ("repo_data_class", "HYDRAFLOW_REPO_DATA_CLASS", "internal"),
     ("regulated_labels", "HYDRAFLOW_REGULATED_LABELS", ""),
     ("dashboard_url", "HYDRAFLOW_DASHBOARD_URL", "http://localhost:5555"),
     ("otel_endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT", "https://api.honeycomb.io"),
@@ -2964,6 +2965,35 @@ class HydraFlowConfig(BaseModel):
         ),
     )
 
+    # Data-governance prompt gate (CH-6, issue #9734)
+    repo_data_class: str = Field(
+        default="internal",
+        description=(
+            "Data-governance class for THIS repo's content: 'public-code' | "
+            "'internal' | 'regulated-<name>'. Regulated classes get prompt "
+            "redaction + a backend allowlist at every LLM spawn seam "
+            "(prompt_gate.gate_prompt); unknown values fail CLOSED. Populated "
+            "from the runtime repo registry (repos.json) for registered repos."
+        ),
+    )
+    data_class_allowed_backends: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-data-class allowed LLM CLI backends, e.g. "
+            "{'regulated-phi': ['claude']}. Consulted by prompt_gate for "
+            "regulated classes only; a regulated class with no entry allows "
+            "NOTHING (fail closed). Unregulated classes are never checked."
+        ),
+    )
+    data_class_redaction_patterns: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Extra named regex redaction patterns merged over "
+            "prompt_gate.BUILTIN_REDACTION_PATTERNS for regulated-class "
+            "prompts. Names appear in gate audit records; content never does."
+        ),
+    )
+
     # Auto-agent pre-flight loop (ADR-0049, spec §5.1)
     sandbox_failure_fixer_enabled: bool = Field(
         default=False,
@@ -3496,6 +3526,15 @@ class HydraFlowConfig(BaseModel):
     def pr_stats_path(self) -> Path:
         """Repo-scoped per-PR telemetry aggregates (ADR-0021 D2)."""
         return self.repo_data_root / "metrics" / "prompt" / "pr_stats.json"
+
+    @property
+    def prompt_gate_audit_path(self) -> Path:
+        """Repo-scoped data-governance gate audit trail (CH-6, issue #9734).
+
+        JSONL records of gate decisions for regulated data classes: class,
+        action, pattern-hit NAMES and counts — never prompt content.
+        """
+        return self.repo_data_root / "metrics" / "prompt_gate" / "gate_audit.jsonl"
 
     @property
     def approval_records_path(self) -> Path:
