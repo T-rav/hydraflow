@@ -89,6 +89,7 @@ nav:
     - ADR Conformance Map: arch/generated/adr-conformance.md
     - MockWorld Map: arch/generated/mockworld.md
     - Coverage Matrix: arch/generated/coverage_matrix.md
+    - AI System Inventory: arch/generated/ai_system_inventory.md
   - Decisions:
     - Index: adr/README.md
   - Wiki:

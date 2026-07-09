@@ -35,6 +35,7 @@ from arch.extractors.modules import extract_module_graph
 from arch.extractors.ports import extract_ports
 from arch.generators.adr_conformance import render_adr_conformance
 from arch.generators.adr_cross_reference import render_adr_cross_reference
+from arch.generators.ai_system_inventory import render_ai_system_inventory
 from arch.generators.changelog import render_changelog
 from arch.generators.coverage_matrix import render_coverage_matrix
 from arch.generators.event_bus import render_event_bus
@@ -59,6 +60,7 @@ _ARTIFACT_FILES = [
     "ubiquitous-language.md",
     "ubiquitous-language-context-map.md",
     "adr-conformance.md",
+    "ai_system_inventory.md",
 ]
 
 
@@ -139,6 +141,9 @@ def _compute_artifacts(repo_root: Path) -> dict[str, str]:
         "changelog.md": render_changelog(_git_log_changelog(repo_root)),
         "coverage_matrix.md": render_coverage_matrix(loops, ports, repo_root=repo_root),
         "adr-conformance.md": render_adr_conformance(adrs),
+        "ai_system_inventory.md": render_ai_system_inventory(
+            loops, repo_root=repo_root
+        ),
     }
     if fa_path.exists():
         fa = load_functional_areas(fa_path)
