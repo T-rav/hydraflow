@@ -9,12 +9,30 @@ and that ``_do_work`` delegates to and propagates the watcher's stats.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from base_background_loop import LoopDeps
 from config import HydraFlowConfig
 from events import EventBus
 from merge_state_watcher_loop import MergeStateWatcherLoop
+
+
+def _stub_reconciler(
+    result: dict | None = None, error: Exception | None = None
+) -> MagicMock:
+    """Approval-record reconciler stub (keeps unit tests off the gh boundary)."""
+    reconciler = MagicMock()
+    if error is not None:
+        reconciler.reconcile = AsyncMock(side_effect=error)
+    else:
+        reconciler.reconcile = AsyncMock(
+            return_value=result
+            if result is not None
+            else {"merged_seen": 0, "recorded": 0}
+        )
+    return reconciler
 
 
 def _make_loop(
@@ -24,6 +42,7 @@ def _make_loop(
     conflicting_prs: list | None = None,
     rebase_result: bool = True,
     mergeable: bool = True,
+    reconciler: MagicMock | None = None,
 ) -> MergeStateWatcherLoop:
     """Factory: return a MergeStateWatcherLoop with stubbed dependencies."""
     cfg = HydraFlowConfig(repo="acme/widgets")
@@ -40,7 +59,14 @@ def _make_loop(
     prs.update_pr_branch = AsyncMock(return_value=rebase_result)
     prs.get_pr_mergeable = AsyncMock(return_value=mergeable)
     prs.add_pr_labels = AsyncMock()
-    return MergeStateWatcherLoop(config=cfg, prs=prs, deps=deps)
+    return MergeStateWatcherLoop(
+        config=cfg,
+        prs=prs,
+        deps=deps,
+        approval_reconciler=reconciler
+        if reconciler is not None
+        else _stub_reconciler(),
+    )
 
 
 class TestMergeStateWatcherLoopShell:
@@ -106,3 +132,50 @@ class TestMergeStateWatcherLoopShell:
         assert result is not None
         assert result["escalated"] == 1
         assert result["rebased"] == 0
+
+
+class TestApprovalReconcilerIntegration:
+    """CH-2 (#9730): the loop hosts the approval-record reconciler tick."""
+
+    async def test_do_work_includes_approval_counters(self, tmp_path) -> None:
+        """Reconciler counters ride the loop's status dict under 'approvals'."""
+        reconciler = _stub_reconciler({"merged_seen": 3, "recorded": 2})
+        loop = _make_loop(tmp_path, reconciler=reconciler)
+        result = await loop._do_work()
+        assert result is not None
+        assert result["approvals"] == {"merged_seen": 3, "recorded": 2}
+        reconciler.reconcile.assert_awaited_once()
+
+    async def test_kill_switch_skips_reconciler(self, tmp_path) -> None:
+        """The loop-level kill-switch also gates approval reconciliation."""
+        reconciler = _stub_reconciler()
+        loop = _make_loop(tmp_path, enabled=False, reconciler=reconciler)
+        result = await loop._do_work()
+        assert result == {"status": "disabled"}
+        reconciler.reconcile.assert_not_awaited()
+
+    async def test_reconciler_error_propagates_after_unstick(self, tmp_path) -> None:
+        """gh outage in the reconciler propagates to the loop cycle handler
+        (no broad except); conflict unsticking has already run."""
+        reconciler = _stub_reconciler(error=RuntimeError("gh: HTTP 502"))
+        loop = _make_loop(tmp_path, reconciler=reconciler)
+        with pytest.raises(RuntimeError, match="502"):
+            await loop._do_work()
+        loop._watcher._prs.list_conflicting_prs.assert_awaited_once()
+
+    async def test_default_constructs_real_reconciler(self, tmp_path) -> None:
+        """Without injection the loop builds an ApprovalRecordReconciler
+        from its config (production wiring in service_registry)."""
+        from approval_records import ApprovalRecordReconciler  # noqa: PLC0415
+
+        cfg = HydraFlowConfig(repo="acme/widgets")
+        stop = asyncio.Event()
+        stop.set()
+        deps = LoopDeps(
+            event_bus=EventBus(),
+            stop_event=stop,
+            status_cb=lambda *a, **k: None,
+            enabled_cb=lambda _name: True,
+        )
+        loop = MergeStateWatcherLoop(config=cfg, prs=AsyncMock(), deps=deps)
+        assert isinstance(loop._approvals, ApprovalRecordReconciler)

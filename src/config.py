@@ -422,6 +422,11 @@ _ENV_OPT_INT_OVERRIDES: list[tuple[str, str, int | None]] = [
         "HYDRAFLOW_AUDIT_RETENTION_DAYS_INFERENCE_TELEMETRY",
         None,
     ),
+    (
+        "audit_retention_days_approval_records",
+        "HYDRAFLOW_AUDIT_RETENTION_DAYS_APPROVAL_RECORDS",
+        None,
+    ),
 ]
 
 # Float overrides with tight [0, 1] bounds — handled separately from the
@@ -436,6 +441,7 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
 
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
+    ("approval_records_enabled", "HYDRAFLOW_APPROVAL_RECORDS_ENABLED", True),
     ("sensor_enrichment_enabled", "HYDRAFLOW_SENSOR_ENRICHMENT_ENABLED", True),
     ("gh_circuit_breaker_enabled", "HYDRAFLOW_GH_CIRCUIT_BREAKER_ENABLED", True),
     ("issue_cache_enabled", "HYDRAFLOW_ISSUE_CACHE_ENABLED", True),
@@ -1225,6 +1231,26 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Days to retain inference telemetry records "
             "(metrics/prompt/inferences.jsonl). None = keep forever."
+        ),
+    )
+    audit_retention_days_approval_records: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Days to retain merge approval records (CH-2, #9730; "
+            "audit/approval_records.jsonl). None = keep forever — the "
+            "recommended setting for change-control evidence."
+        ),
+    )
+
+    # CH-2 (#9730): kill-switch for the approval-record reconciler capability
+    # hosted by MergeStateWatcherLoop. Not a loop gate — the loop keeps
+    # unsticking conflicts when this is off; only evidence capture stops.
+    approval_records_enabled: bool = Field(
+        default=True,
+        description=(
+            "Capture structured merge-approval records (CH-2) on the "
+            "MergeStateWatcherLoop tick."
         ),
     )
 
@@ -3460,6 +3486,15 @@ class HydraFlowConfig(BaseModel):
     def pr_stats_path(self) -> Path:
         """Repo-scoped per-PR telemetry aggregates (ADR-0021 D2)."""
         return self.repo_data_root / "metrics" / "prompt" / "pr_stats.json"
+
+    @property
+    def approval_records_path(self) -> Path:
+        """Repo-scoped hash-chained merge-approval evidence stream (CH-2, #9730).
+
+        PR numbers are repo-scoped, so the stream lives under
+        ``repo_data_root`` — one chain per managed repo.
+        """
+        return self.repo_data_root / "audit" / "approval_records.jsonl"
 
     def base_branch(self) -> str:
         """Return the branch agent PRs should target.
