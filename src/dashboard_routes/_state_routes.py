@@ -539,6 +539,22 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 {"error": "slug required in owner/repo format"},
                 status_code=400,
             )
+        # CH-6 (#9734): optional data-governance class declaration, mirroring
+        # /api/repos/add. Validated at the API boundary.
+        data_class: str | None = None
+        raw_class = req.get("data_class")
+        if raw_class is not None:
+            if not isinstance(raw_class, str) or not is_valid_data_class(raw_class):
+                return JSONResponse(
+                    {
+                        "error": (
+                            "data_class must be 'public-code', 'internal', "
+                            "or 'regulated-<name>'"
+                        )
+                    },
+                    status_code=400,
+                )
+            data_class = raw_class.strip()
         raw_owner, raw_repo = slug.split("/", 1)
         if not raw_owner or not raw_repo:
             return JSONResponse(
@@ -609,7 +625,9 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 )
         if register_repo_cb is not None:
             try:
-                record, repo_cfg = await register_repo_cb(clone_target, slug)
+                record, repo_cfg = await register_repo_cb(
+                    clone_target, slug, data_class
+                )
             except ValueError as exc:
                 logger.warning("register_repo validation error: %s", exc)
                 return JSONResponse(

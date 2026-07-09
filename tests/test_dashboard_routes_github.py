@@ -272,6 +272,20 @@ class TestGitHubRepoEndpoints:
         assert response.status_code == 400
 
     @pytest.mark.asyncio
+    async def test_clone_github_repo_invalid_data_class_rejected(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """CH-6 (#9734): the clone route validates data_class like /api/repos/add."""
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(router, "/api/github/clone", "POST")
+
+        response = await endpoint(
+            req={"slug": "alice/myrepo", "data_class": "Confidential"}
+        )
+        assert response.status_code == 400
+        assert "data_class" in json.loads(response.body)["error"]
+
+    @pytest.mark.asyncio
     async def test_clone_github_repo_gh_not_found(
         self, config, event_bus, state, tmp_path
     ) -> None:
