@@ -118,3 +118,42 @@ def test_query_7d(tmp_path: Path) -> None:
     store.append(_entry(ts=eight_days))  # outside 7d window
     stats = store.query_7d()
     assert stats.attempts == 1
+
+
+# ---------------------------------------------------------------------------
+# Hash chaining (CH-1, #9729)
+# ---------------------------------------------------------------------------
+
+
+def test_append_writes_hash_chained_records(tmp_path: Path) -> None:
+    import json
+
+    from audit_chain import GENESIS_PREV_HASH
+
+    store = PreflightAuditStore(tmp_path)
+    store.append(_entry(issue=1))
+    store.append(_entry(issue=2))
+
+    path = tmp_path / "auto_agent" / "audit.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    assert rows[0]["prev_hash"] == GENESIS_PREV_HASH
+    assert rows[1]["prev_hash"] == rows[0]["record_hash"]
+
+
+def test_appended_chain_verifies(tmp_path: Path) -> None:
+    from audit_chain import AuditChain
+
+    store = PreflightAuditStore(tmp_path)
+    store.append(_entry(issue=1))
+    store.append(_entry(issue=2))
+    result = AuditChain(tmp_path / "auto_agent" / "audit.jsonl").verify()
+    assert result.ok
+    assert result.chained_records == 2
+
+
+def test_read_all_schema_is_unchanged_by_chaining(tmp_path: Path) -> None:
+    """Downstream readers must see the exact record schema they saw before."""
+    store = PreflightAuditStore(tmp_path)
+    entry = _entry(issue=7)
+    store.append(entry)
+    assert store.entries_for_issue(7) == [entry]
