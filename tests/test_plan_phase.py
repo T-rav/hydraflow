@@ -118,6 +118,33 @@ class TestPlanPhase:
         assert "Req-ID" not in comment
 
     @pytest.mark.asyncio
+    async def test_req_id_survives_strip_when_plan_contains_bare_hr(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A horizontal rule inside the plan body must not sever the Req-ID:
+        AgentRunner._strip_plan_noise cuts at the FIRST ^---$ line, so the
+        Req-ID line has to sit above the plan body to reach the implementer."""
+        from agent import AgentRunner
+
+        phase, _state, planners, prs, store, _stop = make_plan_phase(config)
+        issue = TaskFactory.create(id=42, tags=["req:REQ-042"])
+        plan_result = PlanResultFactory.create(
+            issue_number=42,
+            success=True,
+            plan="Part one.\n\n---\n\nPart two.",
+            use_defaults=True,
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        comment = prs.post_comment.call_args_list[0].args[1]
+        extracted = AgentRunner._strip_plan_noise(comment)
+        assert "**Req-ID:** `REQ-042`" in extracted
+
+    @pytest.mark.asyncio
     async def test_plan_comment_warns_when_regulated_issue_lacks_req_id(
         self, config: HydraFlowConfig
     ) -> None:
