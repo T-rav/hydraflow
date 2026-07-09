@@ -96,3 +96,27 @@ def test_update_decision_on_unchained_legacy_rows(tmp_path: Path) -> None:
     assert rows[0]["outcome_verified"] == "neutral"
     assert "record_hash" not in rows[0]
     assert AuditChain(path).verify().ok
+
+
+def test_update_decision_aborts_on_broken_chain(tmp_path: Path) -> None:
+    """The sanctioned amendment path must NOT launder corruption: a corrupt
+    line present when _update_decision fires would otherwise be silently
+    dropped by _load_decisions and re-chained away before RunsGC's verifier
+    ever sees it — permanently erasing the tamper evidence."""
+    from audit_chain import AuditChain
+    from health_monitor_loop import _update_decision, _write_decision
+
+    _write_decision(tmp_path, {"decision_id": "adj-1", "status": "pending"})
+    _write_decision(tmp_path, {"decision_id": "adj-2", "status": "pending"})
+    decisions = tmp_path / "decisions.jsonl"
+    # Corruption/tampering lands between amendments.
+    with decisions.open("a", encoding="utf-8") as fh:
+        fh.write("NOT JSON — tampered or corrupted\n")
+    before = decisions.read_text()
+
+    _update_decision(tmp_path, "adj-1", {"status": "verified"})
+
+    # Amendment aborted: evidence preserved byte-for-byte...
+    assert decisions.read_text() == before
+    # ...and the verifier still sees the break.
+    assert not AuditChain(decisions).verify().ok

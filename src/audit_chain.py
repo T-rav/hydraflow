@@ -47,9 +47,17 @@ Named limitations
   (``_update_decision`` marking ``outcome_verified``); it re-chains via
   :meth:`AuditChain.rewrite`, so helper-mediated amendments remain verifiable
   while out-of-band edits still break the chain.
-* Truncating a stream to zero chained records is indistinguishable from a
-  clean rotation (both leave the sidecar head with no in-file tail); every
-  partial truncation, edit, insertion, or deletion is detected.
+* THREAT MODEL / DETECTION PRECONDITION: detection assumes the sidecar
+  head file is not tampered in coordination with the stream. Single-file
+  tampering (any edit, insertion, deletion, or partial truncation of the
+  JSONL with the sidecar untouched) is detected. A writer who can modify
+  BOTH the stream and its ``.chainhead.json`` sidecar consistently — they
+  live in the same directory under the same OS permissions — can truncate
+  the tail or, with full re-chaining, rewrite history undetected. Raising
+  that bar needs an out-of-band trust anchor (OS permission separation for
+  the sidecar, an HMAC key held elsewhere, or periodic head escrow) —
+  follow-up hardening, not claimed here. Truncating a stream to zero
+  chained records is additionally indistinguishable from a clean rotation.
 """
 
 from __future__ import annotations

@@ -16,6 +16,7 @@ from typing import Any
 from audit_chain import AuditChain, audit_streams
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from dedup_store import DedupStore
 from events import EventType, HydraFlowEvent
 from run_recorder import RunRecorder
 
@@ -43,6 +44,14 @@ class RunsGCLoop(BaseBackgroundLoop):
     ) -> None:
         super().__init__(worker_name="runs_gc", config=config, deps=deps)
         self._recorder = run_recorder
+        # One SYSTEM_ALERT per break EVENT, not per hourly cycle — a
+        # persistent break would otherwise emit 24 alerts/day/stream and
+        # drown the signal (cost_budget_alerts dedup precedent). Cleared
+        # when the stream verifies clean again, so a fresh break re-alerts.
+        self._chain_alert_dedup = DedupStore(
+            "runs_gc_chain_alerts",
+            config.data_root / "dedup" / "runs_gc_chain_alerts.json",
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.runs_gc_interval
@@ -93,6 +102,13 @@ class RunsGCLoop(BaseBackgroundLoop):
             result = chain.verify()
             if not result.ok:
                 status[spec.name] = "break"
+                alert_key = f"audit_chain_break:{spec.name}"
+                already_alerted = alert_key in self._chain_alert_dedup.get()
+                if already_alerted:
+                    continue
+                self._chain_alert_dedup.set_all(
+                    self._chain_alert_dedup.get() | {alert_key}
+                )
                 logger.error(
                     "Audit chain break in stream %r (%s): %s",
                     spec.name,
@@ -117,6 +133,10 @@ class RunsGCLoop(BaseBackgroundLoop):
                 )
                 continue
             status[spec.name] = "ok" if result.chained_records else "empty"
+            recovered_key = f"audit_chain_break:{spec.name}"
+            keys = self._chain_alert_dedup.get()
+            if recovered_key in keys:
+                self._chain_alert_dedup.set_all(keys - {recovered_key})
             if spec.retention_days is None:
                 continue
             cutoff = datetime.now(UTC) - timedelta(days=spec.retention_days)

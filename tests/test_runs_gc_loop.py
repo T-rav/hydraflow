@@ -433,3 +433,72 @@ class TestAuditChainCaretaker:
         assert result is not None
         assert result["audit_pruned"] == {}
         assert len(spec.path.read_text().splitlines()) == 1
+
+
+class TestChainBreakAlertDedup:
+    async def test_persistent_break_alerts_once(self, tmp_path: Path) -> None:
+        """A break that persists across cycles must not re-alert every hour —
+        24 alerts/day/stream drowns the signal (cost_budget_alerts dedup
+        precedent)."""
+        from events import EventType
+
+        loop, deps = _make_audit_loop(tmp_path, audit_retention_days_preflight=30)
+        spec, _chain = _seed_stream(
+            deps.config,
+            "preflight",
+            ["2020-01-01T00:00:00Z", "2020-01-02T00:00:00Z"],
+        )
+        lines = spec.path.read_text().splitlines()
+        tampered = json.loads(lines[0])
+        tampered["n"] = "evil"
+        lines[0] = json.dumps(tampered, sort_keys=True)
+        spec.path.write_text("\n".join(lines) + "\n")
+
+        await loop._do_work()
+        await loop._do_work()
+        await loop._do_work()
+
+        alerts = [
+            e
+            for e in deps.bus.get_history()
+            if e.type == EventType.SYSTEM_ALERT
+            and e.data.get("kind") == "audit_chain_break"
+        ]
+        assert len(alerts) == 1
+
+    async def test_recovery_rearms_the_alert(self, tmp_path: Path) -> None:
+        """Operator repairs the stream → dedup clears → a NEW break alerts."""
+        from events import EventType
+
+        loop, deps = _make_audit_loop(tmp_path, audit_retention_days_preflight=None)
+        spec, chain = _seed_stream(
+            deps.config,
+            "preflight",
+            ["2026-07-01T00:00:00Z"],
+        )
+        good = spec.path.read_text()
+        good_head = spec.path.with_name(spec.path.name + ".chainhead.json").read_text()
+        lines = spec.path.read_text().splitlines()
+        tampered = json.loads(lines[0])
+        tampered["n"] = "evil"
+        spec.path.write_text(json.dumps(tampered, sort_keys=True) + "\n")
+
+        await loop._do_work()  # break → alert 1
+        # Operator repairs (restores the pristine stream + head).
+        spec.path.write_text(good)
+        spec.path.with_name(spec.path.name + ".chainhead.json").write_text(good_head)
+        await loop._do_work()  # ok → dedup clears
+        # A fresh break must alert again.
+        lines = spec.path.read_text().splitlines()
+        tampered = json.loads(lines[0])
+        tampered["n"] = "evil-again"
+        spec.path.write_text(json.dumps(tampered, sort_keys=True) + "\n")
+        await loop._do_work()
+
+        alerts = [
+            e
+            for e in deps.bus.get_history()
+            if e.type == EventType.SYSTEM_ALERT
+            and e.data.get("kind") == "audit_chain_break"
+        ]
+        assert len(alerts) == 2

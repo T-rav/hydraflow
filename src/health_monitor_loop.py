@@ -176,6 +176,18 @@ def _update_decision(
     forward, so the trail stays verifiable while out-of-band edits still
     break the chain (CH-1, #9729).
     """
+    # Anti-laundering guard: _load_decisions silently drops unparseable
+    # lines, so rewriting a BROKEN stream would erase tamper evidence
+    # before the RunsGC verifier ever sees it. Amendments only proceed on
+    # a clean chain; a broken one is left byte-for-byte for detection.
+    decisions_file = decisions_dir / "decisions.jsonl"
+    if decisions_file.exists() and not AuditChain(decisions_file).verify().ok:
+        logger.error(
+            "decisions.jsonl chain is broken — amendment for %s aborted "
+            "to preserve tamper evidence (RunsGC will alert)",
+            decision_id,
+        )
+        return
     records = _load_decisions(decisions_dir)
     updated = False
     for record in records:
