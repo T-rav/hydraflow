@@ -352,6 +352,8 @@ class ConfigFactory:
         audit_retention_days_preflight: int | None = None,
         audit_retention_days_health_decisions: int | None = None,
         audit_retention_days_inference_telemetry: int | None = None,
+        audit_retention_days_approval_records: int | None = None,
+        approval_records_enabled: bool = True,
         release_version_source: Literal[
             "epic_title", "milestone", "manual"
         ] = "epic_title",
@@ -597,6 +599,10 @@ class ConfigFactory:
                 audit_retention_days_inference_telemetry=(
                     audit_retention_days_inference_telemetry
                 ),
+                audit_retention_days_approval_records=(
+                    audit_retention_days_approval_records
+                ),
+                approval_records_enabled=approval_records_enabled,
                 release_version_source=release_version_source,
                 release_tag_prefix=release_tag_prefix,
                 baseline_snapshot_patterns=baseline_snapshot_patterns

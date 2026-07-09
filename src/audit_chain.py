@@ -19,6 +19,8 @@ Chained streams (see :func:`audit_streams`):
 * health_decisions — ``<memory_dir>/decisions.jsonl`` (``health_monitor_loop``)
 * inference_telemetry — ``<repo_data_root>/metrics/prompt/inferences.jsonl``
   (``prompt_telemetry``)
+* approval_records — ``<repo_data_root>/audit/approval_records.jsonl``
+  (``approval_records``, CH-2 #9730: structured merge sign-off evidence)
 
 Adoption baseline
 -----------------
@@ -170,6 +172,12 @@ def audit_streams(config: HydraFlowConfig) -> tuple[AuditStreamSpec, ...]:
             path=config.cost_inferences_path,
             timestamp_key="timestamp",
             retention_days=config.audit_retention_days_inference_telemetry,
+        ),
+        AuditStreamSpec(
+            name="approval_records",
+            path=config.approval_records_path,
+            timestamp_key="timestamp",
+            retention_days=config.audit_retention_days_approval_records,
         ),
     )
 

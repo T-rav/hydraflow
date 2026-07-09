@@ -69,10 +69,18 @@ def _build_dependabot_merge(ports: dict[str, Any], config: Any, deps: Any) -> An
 def _build_merge_state_watcher(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from merge_state_watcher_loop import MergeStateWatcherLoop  # noqa: PLC0415
 
+    # CH-2 (#9730): the approval-record reconciler talks to gh at the raw
+    # subprocess boundary; stub it here so MockWorld ticks stay hermetic.
+    reconciler = ports.get("approval_reconciler")
+    if reconciler is None:
+        reconciler = MagicMock()
+        reconciler.reconcile = AsyncMock(return_value={"merged_seen": 0, "recorded": 0})
+        ports["approval_reconciler"] = reconciler
     return MergeStateWatcherLoop(
         config=config,
         prs=ports["github"],
         deps=deps,
+        approval_reconciler=reconciler,
     )
 
 

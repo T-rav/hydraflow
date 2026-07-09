@@ -367,6 +367,17 @@ class TestAuditChainCaretaker:
         assert result["audit_chain_status"]["preflight"] == "ok"
         assert result["audit_chain_status"]["health_decisions"] == "empty"
         assert result["audit_chain_status"]["inference_telemetry"] == "empty"
+        assert result["audit_chain_status"]["approval_records"] == "empty"
+
+    @pytest.mark.asyncio
+    async def test_approval_records_stream_is_tended(self, tmp_path: Path) -> None:
+        """CH-2 (#9730): the approval stream rides the existing verify tick."""
+        loop, deps = _make_audit_loop(tmp_path)
+        _seed_stream(deps.config, "approval_records", ["2026-07-08T00:00:00+00:00"])
+
+        result = await loop._do_work()
+        assert result is not None
+        assert result["audit_chain_status"]["approval_records"] == "ok"
 
     @pytest.mark.asyncio
     async def test_chain_break_fails_loudly_and_skips_pruning(
