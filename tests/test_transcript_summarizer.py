@@ -424,3 +424,152 @@ class TestSummarizeAndComment:
 # (2026-04-07). Transcript-summary auto-filing was removed because the bullets
 # routinely produced implementation-detail noise below the tribal-knowledge bar.
 # Use the explicit tribal_recorder tool to deliberately preserve hard-won facts.
+
+
+# --- CH-6 issue-label threading (#9734 convergence review finding 1) ---
+
+
+class TestIssueLabelThreading:
+    """summarize_and_comment threads issue labels down to the prompt gate."""
+
+    @staticmethod
+    def _make(config):
+        prs = MagicMock()
+        prs.post_comment = AsyncMock()
+        bus = MagicMock()
+        bus.publish = AsyncMock()
+        state = MagicMock()
+        runner = _make_mock_runner(stdout="Summary")
+        return TranscriptSummarizer(config, prs, bus, state, runner=runner), runner
+
+    @pytest.mark.asyncio
+    async def test_elevating_label_blocks_spawn_on_internal_repo(
+        self, tmp_path: Path
+    ) -> None:
+        """A data-class label elevates the gate: no backend allowed → no spawn."""
+        config = ConfigFactory.create(repo_root=tmp_path).model_copy(
+            update={"data_class_allowed_backends": {}}
+        )
+        summarizer, runner = self._make(config)
+
+        result = await summarizer.summarize_and_comment(
+            transcript="x" * 1000,
+            issue_number=42,
+            phase="implement",
+            issue_labels=["data-class:regulated-phi"],
+        )
+
+        assert result is False
+        runner.run_simple.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_labels_spawns_normally_on_internal_repo(
+        self, tmp_path: Path
+    ) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path).model_copy(
+            update={"data_class_allowed_backends": {}}
+        )
+        summarizer, runner = self._make(config)
+
+        result = await summarizer.summarize_and_comment(
+            transcript="x" * 1000, issue_number=42, phase="implement"
+        )
+
+        assert result is True
+        runner.run_simple.assert_awaited_once()
+
+
+# --- Prompt-gate block escalation (#9734 review finding 3 adoption) ---
+
+
+class TestGateBlockEscalation:
+    """A gate-blocked _call_model must escalate loudly, once per condition."""
+
+    @staticmethod
+    def _configs(tmp_path: Path):
+        base = ConfigFactory.create(repo_root=tmp_path / "repo")
+        blocked = base.model_copy(
+            update={
+                "repo_data_class": "regulated-phi",
+                "data_class_allowed_backends": {},
+            }
+        )
+        allowed = base.model_copy(
+            update={
+                "repo_data_class": "regulated-phi",
+                "data_class_allowed_backends": {"regulated-phi": ["claude"]},
+            }
+        )
+        return blocked, allowed
+
+    @staticmethod
+    def _make(config):
+        prs = MagicMock()
+        prs.post_comment = AsyncMock()
+        bus = MagicMock()
+        bus.publish = AsyncMock()
+        state = MagicMock()
+        runner = MagicMock()
+        runner.run_simple = AsyncMock()
+        summarizer = TranscriptSummarizer(config, prs, bus, state, runner=runner)
+        return summarizer, bus, runner
+
+    @pytest.mark.asyncio
+    async def test_block_logs_error_and_alerts_once_across_two_ticks(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        blocked, _ = self._configs(tmp_path)
+        summarizer, bus, runner = self._make(blocked)
+
+        with caplog.at_level(logging.ERROR, logger="hydraflow.prompt_gate_alerts"):
+            assert await summarizer._call_model("prompt one") is None
+            assert await summarizer._call_model("prompt two") is None
+
+        runner.run_simple.assert_not_awaited()  # blocked BEFORE any spawn
+        errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert len(errors) == 2  # loud on every blocked tick
+        assert bus.publish.await_count == 1  # SYSTEM_ALERT deduped
+        event = bus.publish.await_args_list[0].args[0]
+        assert event.type == EventType.SYSTEM_ALERT
+        assert event.data["kind"] == "prompt_gate_blocked"
+        assert event.data["source"] == "transcript_summary"
+        assert event.data["repo"] == blocked.repo
+
+    @pytest.mark.asyncio
+    async def test_dedup_cleared_on_success_then_realerts(self, tmp_path: Path) -> None:
+        blocked, allowed = self._configs(tmp_path)
+        summarizer, bus, runner = self._make(blocked)
+
+        assert await summarizer._call_model("p") is None  # block -> alert #1
+        assert bus.publish.await_count == 1
+
+        summarizer._config = allowed
+        runner.run_simple = AsyncMock(
+            return_value=SimpleResult(returncode=0, stdout="ok")
+        )
+        assert await summarizer._call_model("p") == "ok"  # success clears dedup
+
+        summarizer._config = blocked
+        assert await summarizer._call_model("p") is None  # new block -> alert #2
+        assert bus.publish.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_generic_failure_still_soft_warns_without_alert(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A transient rc!=0 keeps the old soft-failure path: no SYSTEM_ALERT."""
+        import logging
+
+        config = ConfigFactory.create(repo_root=tmp_path / "repo")
+        summarizer, bus, runner = self._make(config)
+        runner.run_simple = AsyncMock(
+            return_value=SimpleResult(returncode=1, stderr="boom")
+        )
+
+        with caplog.at_level(logging.WARNING, logger="hydraflow.transcript_summarizer"):
+            assert await summarizer._call_model("p") is None
+
+        bus.publish.assert_not_awaited()
+        assert any("rc=1" in r.getMessage() for r in caplog.records)

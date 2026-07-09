@@ -9,13 +9,21 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from approval_records import FACTORY_AUTONOMY_CLAUSE
+from dedup_store import DedupStore
 from exception_classify import reraise_on_credit_or_bug
 from merge_policy import ROLE_OPERATOR, MergeApproval, enforce_merge_policy
 from models import ConflictResolutionResult, HITLUpdatePayload, PRInfo
 from phase_utils import MemorySuggester
+from prompt_gate_alerts import (
+    alert_prompt_gate_block,
+    clear_prompt_gate_block,
+    is_prompt_gate_blocked,
+)
 from prompt_stats import build_prompt_stats, truncate_with_notice
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from agent import AgentRunner
     from config import Credentials, HydraFlowConfig
     from events import EventBus
@@ -115,6 +123,7 @@ class PRUnsticker:
         troubleshooting_store: TroubleshootingPatternStore | None = None,
         store: IssueStore | None = None,
         credentials: Credentials | None = None,
+        gate_block_dedup: DedupStore | None = None,
     ) -> None:
         from config import Credentials as _Credentials  # noqa: PLC0415
 
@@ -133,6 +142,11 @@ class PRUnsticker:
         self._credentials = credentials or _Credentials()
         self._suggest_memory = MemorySuggester(
             config,
+        )
+        # Prompt-gate block escalation (#9734 review finding 3).
+        self._gate_block_dedup = gate_block_dedup or DedupStore(
+            "prompt_gate_blocked",
+            config.data_root / "dedup" / "prompt_gate_blocked.json",
         )
 
     async def unstick(self, hitl_items: list[HITLItem]) -> UnstickResult:
@@ -681,7 +695,10 @@ diff — you may catch things `make quality` won't.
                 if verify.passed:
                     # Write path: persist pattern from transcript
                     await self._persist_troubleshooting_pattern(
-                        transcript, issue_number, language
+                        transcript,
+                        issue_number,
+                        language,
+                        issue_labels=issue.labels,
                     )
                     return True
 
@@ -722,7 +739,12 @@ diff — you may catch things `make quality` won't.
             return "general"
 
     async def _persist_troubleshooting_pattern(
-        self, transcript: str, issue_number: int, language: str
+        self,
+        transcript: str,
+        issue_number: int,
+        language: str,
+        *,
+        issue_labels: Sequence[str] = (),
     ) -> None:
         """Extract and persist a troubleshooting pattern from a successful fix.
 
@@ -730,6 +752,9 @@ diff — you may catch things `make quality` won't.
         1. Check for an explicit ``TROUBLESHOOTING_PATTERN`` block (free, instant).
         2. If none found, run a cheap model reflection to extract the insight
            and check novelty against the existing store.
+
+        *issue_labels* carries the fixed issue's labels into the reflection
+        spawn's CH-6 gate (upward-only ``data-class:`` elevation).
         """
         if self._troubleshooting_store is None:
             return
@@ -750,7 +775,9 @@ diff — you may catch things `make quality` won't.
                 return
 
             # Stage 2: self-reflection via cheap model
-            pattern = await self._reflect_on_fix(transcript, issue_number, language)
+            pattern = await self._reflect_on_fix(
+                transcript, issue_number, language, issue_labels=issue_labels
+            )
             if pattern is not None:
                 self._troubleshooting_store.append_pattern(pattern)
                 logger.info(
@@ -776,6 +803,8 @@ diff — you may catch things `make quality` won't.
         transcript: str,
         issue_number: int,
         language: str,
+        *,
+        issue_labels: Sequence[str] = (),
     ) -> TroubleshootingPattern | None:
         """Run a cheap model to extract a troubleshooting pattern from the transcript.
 
@@ -850,13 +879,28 @@ If nothing novel, output exactly: NO_NEW_PATTERN"""
                 timeout=60.0,
                 gh_token=self._credentials.gh_token,
                 issue_number=issue_number,
+                issue_labels=issue_labels,
             )
             if result.returncode != 0:
+                if is_prompt_gate_blocked(result.stderr):
+                    # A gate block is a persistent policy misconfiguration,
+                    # not a transient failure: every reflection re-blocks, so
+                    # a debug log would be a PERMANENT silent no-op (#9734
+                    # review finding 3). Escalate: ERROR + one SYSTEM_ALERT.
+                    await alert_prompt_gate_block(
+                        dedup=self._gate_block_dedup,
+                        event_bus=self._bus,
+                        source="pr_unsticker",
+                        repo=self._config.repo or "",
+                        detail=result.stderr[:200],
+                    )
+                    return None
                 logger.debug(
                     "Troubleshooting reflection model failed (rc=%d)",
                     result.returncode,
                 )
                 return None
+            clear_prompt_gate_block(self._gate_block_dedup, "pr_unsticker")
 
             output = result.stdout or ""
             if "NO_NEW_PATTERN" in output:
