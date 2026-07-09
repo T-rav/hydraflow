@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -20,6 +20,7 @@ from config import Credentials, HydraFlowConfig
 from events import EventBus
 from execution import get_default_runner
 from models import LoopResult, TranscriptEventData
+from prompt_gate import gate_prompt
 from prompt_telemetry import PromptTelemetry, parse_command_tool_model
 from runner_utils import (
     AuthenticationRetryError,
@@ -151,12 +152,34 @@ class BaseRunner:
         *,
         on_output: Callable[[str], bool] | None = None,
         telemetry_stats: Mapping[str, object] | None = None,
+        issue_labels: Sequence[str] | None = None,
     ) -> str:
         """Run a claude subprocess and stream its output.
 
         Retries up to ``_AUTH_RETRY_MAX`` times on transient authentication
         failures (OAuth token refresh blips) with exponential backoff.
+
+        *issue_labels* feeds the CH-6 data-governance gate's upward-only
+        ``data-class:`` label override; callers with a :class:`~models.Task`
+        in scope pass ``task.tags``. The repo-declared class is enforced
+        either way.
         """
+        # CH-6 data-governance gate (#9734): redact/block BEFORE any content
+        # reaches the vendor subprocess. Regulated-class blocks raise
+        # PromptGateBlockedError — a pre-spawn hard failure the phase
+        # escalation machinery routes to HITL. No-op for internal/public-code.
+        gate_tool, _gate_model = parse_command_tool_model(cmd)
+        raw_issue = event_data.get("issue")
+        gated = gate_prompt(
+            prompt,
+            config=self._config,
+            source=str(event_data.get("source", "unknown")),
+            tool=gate_tool,
+            issue_number=raw_issue if isinstance(raw_issue, int) else None,
+            issue_labels=issue_labels or (),
+        )
+        prompt = gated.prompt
+
         start = time.monotonic()
         transcript = ""
         succeeded = False

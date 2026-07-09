@@ -215,6 +215,7 @@ Run through this checklist before your final commit:
                 worktree_path,
                 {"issue": task.id, "source": "implementer"},
                 telemetry_stats=prompt_stats,
+                issue_labels=task.tags,
             )
             result.transcript = transcript
 
@@ -1069,6 +1070,7 @@ SUMMARY: <one-line summary>
                 review_prompt,
                 worktree_path,
                 {"issue": issue.id, "source": "implementer"},
+                issue_labels=issue.tags,
             )
             await self._force_commit_uncommitted(issue, worktree_path)
             review_result = self._parse_skill_result(
@@ -1082,6 +1084,7 @@ SUMMARY: <one-line summary>
                 run_tool_prompt,
                 worktree_path,
                 {"issue": issue.id, "source": "implementer"},
+                issue_labels=issue.tags,
             )
             await self._force_commit_uncommitted(issue, worktree_path)
             run_tool_result = self._parse_skill_result(
@@ -1179,6 +1182,7 @@ SUMMARY: <one-line summary>
                 prompt,
                 worktree_path,
                 {"issue": issue.id, "source": "implementer"},
+                issue_labels=issue.tags,
             )
             passed, summary, findings = skill.result_parser(transcript)
             if passed:
@@ -1375,6 +1379,7 @@ SUMMARY: <one-line summary>
                 prompt,
                 worktree_path,
                 {"issue": issue.id, "source": "implementer"},
+                issue_labels=issue.tags,
             )
             await self._force_commit_uncommitted(issue, worktree_path)
 

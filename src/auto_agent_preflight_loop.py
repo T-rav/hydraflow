@@ -182,7 +182,9 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             )
             return {"status": "skipped_exhausted"}
 
-        # Gather context.
+        # Gather context. config + issue_labels feed the CH-6 data-governance
+        # gate: regulated-class repos get their gathered free text redacted
+        # before it enters any prompt (structured no-op otherwise).
         ctx = await gather_context(
             issue_number=issue_number,
             issue_body=issue_body,
@@ -192,6 +194,8 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             state=self._state,
             audit_store=self._audit_store,
             repo_slug="",
+            config=self._config,
+            issue_labels=sorted(labels),
         )
 
         # Bump attempts atomically before spawning.

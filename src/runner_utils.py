@@ -17,6 +17,8 @@ from activity_parser import ActivityParser, get_activity_parser
 from events import EventBus, EventType, HydraFlowEvent
 from execution import SubprocessRunner, get_default_runner
 from models import TranscriptEventData, TranscriptLinePayload
+from prompt_gate import PromptGateBlockedError, gate_prompt
+from prompt_telemetry import parse_command_tool_model
 from stream_parser import StreamParser
 from subprocess_util import (
     CreditExhaustedError,
@@ -444,10 +446,7 @@ def _record_inference(
     Never raises — a telemetry write failure must not crash the spawn that
     produced it (matches the central runners' best-effort recording).
     """
-    from prompt_telemetry import (  # noqa: PLC0415
-        PromptTelemetry,
-        parse_command_tool_model,
-    )
+    from prompt_telemetry import PromptTelemetry  # noqa: PLC0415
 
     try:
         tool, model = parse_command_tool_model(cmd)
@@ -497,6 +496,23 @@ async def stream_claude_with_telemetry(
     runners (``BaseRunner``/``BaseSubprocessRunner``) MUST use this wrapper so
     no LLM inference is invisible to telemetry.
     """
+    # CH-6 data-governance gate (#9734): redact/block BEFORE spawn. A
+    # regulated-class block raises pre-spawn — nothing was sent, no telemetry
+    # row — and propagates to the caller's failure path (fail closed).
+    gate_tool, _gate_model = parse_command_tool_model(cmd)
+    gated = gate_prompt(
+        prompt,
+        config=config,
+        source=str(event_data.get("source", "unknown")),
+        tool=gate_tool,
+        issue_number=(
+            issue_number
+            if issue_number is not None
+            else _as_opt_int(event_data.get("issue"))
+        ),
+    )
+    prompt = gated.prompt
+
     # Capture usage stats even when the caller passed no collector, so
     # token-accurate cost lands in telemetry when the stream reports it.
     stats = stream_config.usage_stats
@@ -593,6 +609,22 @@ async def run_lightweight_agent(
         reraise_on_credit_or_bug,
     )
     from execution import SimpleResult  # noqa: PLC0415
+
+    # CH-6 data-governance gate (#9734): redact/block BEFORE spawn. A block
+    # collapses to this seam's soft-failure contract (rc=-1) — the prompt was
+    # never sent (fail closed), the gate already wrote the audit record, and
+    # no telemetry row is recorded because no inference happened.
+    try:
+        gated = gate_prompt(
+            prompt,
+            config=config,
+            source=source,
+            tool=tool,
+            issue_number=issue_number,
+        )
+    except PromptGateBlockedError as exc:
+        return SimpleResult(stderr=str(exc), returncode=-1)
+    prompt = gated.prompt
 
     cmd, cmd_input = build_lightweight_command(
         tool=tool,
