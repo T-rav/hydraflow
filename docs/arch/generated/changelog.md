@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
+- `14ad81d` — feat(staging-promotion): compile the release evidence pack after RC promotion *(2026-07-09)*
 - `5b93ad3` — Merge remote-tracking branch 'origin/staging' into worktree-ch3-policy-gates *(2026-07-09)*
 - `f009569` — feat(prompt-gate): LLM data-governance gates at every spawn seam (CH-6, #9734) (#9739) (#9739) *(2026-07-09)*
 - `6a0abe5` — refactor(merge-policy): loud RC-promotion denies + runtime kill-switch (review findings) *(2026-07-09)*
