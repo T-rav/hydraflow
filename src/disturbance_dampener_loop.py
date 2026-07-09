@@ -80,6 +80,8 @@ class DisturbanceDampenerLoop(BaseBackgroundLoop):
         repo_root = Path(self._config.repo_root)
         per_dim: list[tuple[str, str, list, dict[str, int]]] = []
         for spec in self._dimensions:
+            if not spec.burn_down:
+                continue  # adoption ratchet — nothing an agent can fix in place
             findings = spec.detector.detect(repo_root)
             baseline_path = (
                 spec.baseline_path
