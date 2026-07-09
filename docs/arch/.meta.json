@@ -1,45 +1,51 @@
 {
-  "regenerated_at": "2026-07-09T04:03:16.295180+00:00",
-  "commit_sha": "f118474f539b08d9d5305f51d802f86b22cdcf6c",
+  "regenerated_at": "2026-07-09T06:53:50.784233+00:00",
+  "commit_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5",
   "artifacts": {
     "loops.md": {
-      "source_sha": "f118474f539b08d9d5305f51d802f86b22cdcf6c"
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
     },
     "ports.md": {
-      "source_sha": "f118474f539b08d9d5305f51d802f86b22cdcf6c"
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
     },
     "labels.md": {
-      "source_sha": "f118474f539b08d9d5305f51d802f86b22cdcf6c"
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
     },
     "modules.md": {
-      "source_sha": "f118474f539b08d9d5305f51d802f86b22cdcf6c"
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
     },
     "events.md": {
-      "source_sha": "f118474f539b08d9d5305f51d802f86b22cdcf6c"
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
     },
     "adr_xref.md": {
-      "source_sha": "f118474f539b08d9d5305f51d802f86b22cdcf6c"
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
     },
     "mockworld.md": {
-      "source_sha": "f118474f539b08d9d5305f51d802f86b22cdcf6c"
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
     },
     "changelog.md": {
-      "source_sha": "f118474f539b08d9d5305f51d802f86b22cdcf6c"
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
     },
     "coverage_matrix.md": {
-      "source_sha": "f118474f539b08d9d5305f51d802f86b22cdcf6c"
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
     },
     "adr-conformance.md": {
-      "source_sha": "f118474f539b08d9d5305f51d802f86b22cdcf6c"
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
+    },
+    "ai_system_inventory.md": {
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
+    },
+    "traceability_matrix.md": {
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
     },
     "functional_areas.md": {
-      "source_sha": "f118474f539b08d9d5305f51d802f86b22cdcf6c"
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
     },
     "ubiquitous-language.md": {
-      "source_sha": "f118474f539b08d9d5305f51d802f86b22cdcf6c"
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
     },
     "ubiquitous-language-context-map.md": {
-      "source_sha": "f118474f539b08d9d5305f51d802f86b22cdcf6c"
+      "source_sha": "d84c5ed64f086600d027203cb6f52588a24cffe5"
     }
   }
 }

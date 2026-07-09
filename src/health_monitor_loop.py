@@ -10,13 +10,12 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import os
-import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from audit_chain import AuditChain
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from dedup_store import DedupStore
@@ -137,9 +136,9 @@ def _next_decision_id(_decisions_dir: Path) -> str:
 def _write_decision(decisions_dir: Path, record: dict[str, Any]) -> None:
     try:
         decisions_dir.mkdir(parents=True, exist_ok=True)
-        decisions_file = decisions_dir / "decisions.jsonl"
-        with decisions_file.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        # Hash-chained append (CH-1, #9729): stamps prev_hash/record_hash so
+        # out-of-band edits to the decision trail are detectable.
+        AuditChain(decisions_dir / "decisions.jsonl").append(record)
     except OSError:
         # Disk full, permission, or other I/O error — the health monitor loop
         # must not abort over a single failed decision write.
@@ -169,7 +168,26 @@ def _load_decisions(decisions_dir: Path) -> list[dict[str, Any]]:
 def _update_decision(
     decisions_dir: Path, decision_id: str, updates: dict[str, Any]
 ) -> None:
-    """Atomically rewrite decisions.jsonl updating the record matching decision_id."""
+    """Atomically rewrite decisions.jsonl updating the record matching decision_id.
+
+    This is the sanctioned amendment path for the decision audit trail
+    (verification outcomes are back-filled after the observation window).
+    ``AuditChain.rewrite`` re-chains the hash fields from the amended record
+    forward, so the trail stays verifiable while out-of-band edits still
+    break the chain (CH-1, #9729).
+    """
+    # Anti-laundering guard: _load_decisions silently drops unparseable
+    # lines, so rewriting a BROKEN stream would erase tamper evidence
+    # before the RunsGC verifier ever sees it. Amendments only proceed on
+    # a clean chain; a broken one is left byte-for-byte for detection.
+    decisions_file = decisions_dir / "decisions.jsonl"
+    if decisions_file.exists() and not AuditChain(decisions_file).verify().ok:
+        logger.error(
+            "decisions.jsonl chain is broken — amendment for %s aborted "
+            "to preserve tamper evidence (RunsGC will alert)",
+            decision_id,
+        )
+        return
     records = _load_decisions(decisions_dir)
     updated = False
     for record in records:
@@ -180,18 +198,7 @@ def _update_decision(
     if not updated:
         return
     decisions_dir.mkdir(parents=True, exist_ok=True)
-    decisions_file = decisions_dir / "decisions.jsonl"
-    # Write to a temp file first, then atomically rename to avoid data loss on crash
-    fd, tmp_path = tempfile.mkstemp(dir=str(decisions_dir), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            for record in records:
-                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-        os.replace(tmp_path, str(decisions_file))
-    except Exception:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp_path)
-        raise
+    AuditChain(decisions_dir / "decisions.jsonl").rewrite(records)
 
 
 # ---------------------------------------------------------------------------

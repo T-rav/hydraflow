@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from events import EventType
+from tests.conftest import IssueFactory
 from tests.helpers import ConfigFactory, make_pr_manager
 
 
@@ -43,9 +44,9 @@ class TestCreatePrBaseBranch:
             return "https://github.com/owner/repo/pull/1"
 
         monkeypatch.setattr(pm, "_run_with_body_file", fake_run)
-        issue = MagicMock()
-        issue.number = 42
-        issue.title = "t"
+        # Real model, not a bare MagicMock: create_pr reads issue.labels and
+        # issue.body for the Req-ID trailer (CH-5), which every GitHubIssue has.
+        issue = IssueFactory.create(number=42, title="t")
         await pm.create_pr(issue=issue, branch="feat/x")
         cmd = captured["cmd"]
         assert cmd[cmd.index("--base") + 1] == "main"
@@ -61,9 +62,7 @@ class TestCreatePrBaseBranch:
             return "https://github.com/owner/repo/pull/1"
 
         monkeypatch.setattr(pm, "_run_with_body_file", fake_run)
-        issue = MagicMock()
-        issue.number = 42
-        issue.title = "t"
+        issue = IssueFactory.create(number=42, title="t")
         await pm.create_pr(issue=issue, branch="feat/x")
         cmd = captured["cmd"]
         assert cmd[cmd.index("--base") + 1] == "staging"
