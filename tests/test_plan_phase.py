@@ -59,6 +59,106 @@ class TestPlanPhase:
         assert "Actionability score:** 87/100 (high)" in plan_call.args[1]
 
     @pytest.mark.asyncio
+    async def test_plan_comment_carries_req_id_before_separator(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A req:<id> label rides into the plan comment above the --- separator
+        so the implementer prompt (which reads up to the separator) sees it."""
+        phase, _state, planners, prs, store, _stop = make_plan_phase(config)
+        issue = TaskFactory.create(id=42, tags=["req:REQ-042"])
+        plan_result = PlanResultFactory.create(
+            issue_number=42, success=True, plan="The plan", use_defaults=True
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        comment = prs.post_comment.call_args_list[0].args[1]
+        assert "**Req-ID:** `REQ-042`" in comment
+        assert comment.index("**Req-ID:** `REQ-042`") < comment.index("\n---\n")
+
+    @pytest.mark.asyncio
+    async def test_plan_comment_carries_body_field_req_id(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A Req-ID: body line is an equivalent declaration to the label."""
+        phase, _state, planners, prs, store, _stop = make_plan_phase(config)
+        issue = TaskFactory.create(id=42, body="Intro.\n\nReq-ID: SYS-9\n")
+        plan_result = PlanResultFactory.create(
+            issue_number=42, success=True, plan="The plan", use_defaults=True
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        comment = prs.post_comment.call_args_list[0].args[1]
+        assert "**Req-ID:** `SYS-9`" in comment
+
+    @pytest.mark.asyncio
+    async def test_plan_comment_omits_req_id_when_undeclared(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Zero friction outside the regulated class: no Req-ID mention at all."""
+        phase, _state, planners, prs, store, _stop = make_plan_phase(config)
+        issue = TaskFactory.create(id=42)
+        plan_result = PlanResultFactory.create(
+            issue_number=42, success=True, plan="The plan", use_defaults=True
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        comment = prs.post_comment.call_args_list[0].args[1]
+        assert "Req-ID" not in comment
+
+    @pytest.mark.asyncio
+    async def test_plan_comment_warns_when_regulated_issue_lacks_req_id(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Regulated issues without a requirement ID get a visible warning."""
+        config.regulated_labels = "safety-critical"
+        phase, _state, planners, prs, store, _stop = make_plan_phase(config)
+        issue = TaskFactory.create(id=42, tags=["safety-critical"])
+        plan_result = PlanResultFactory.create(
+            issue_number=42, success=True, plan="The plan", use_defaults=True
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        comment = prs.post_comment.call_args_list[0].args[1]
+        assert "Req-ID required" in comment
+        assert "regulated" in comment
+
+    @pytest.mark.asyncio
+    async def test_plan_comment_no_warning_when_regulated_issue_has_req_id(
+        self, config: HydraFlowConfig
+    ) -> None:
+        config.regulated_labels = "safety-critical"
+        phase, _state, planners, prs, store, _stop = make_plan_phase(config)
+        issue = TaskFactory.create(id=42, tags=["safety-critical", "req:REQ-7"])
+        plan_result = PlanResultFactory.create(
+            issue_number=42, success=True, plan="The plan", use_defaults=True
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        comment = prs.post_comment.call_args_list[0].args[1]
+        assert "**Req-ID:** `REQ-7`" in comment
+        assert "Req-ID required" not in comment
+
+    @pytest.mark.asyncio
     async def test_plan_issues_swaps_labels_on_success(
         self, config: HydraFlowConfig
     ) -> None:
