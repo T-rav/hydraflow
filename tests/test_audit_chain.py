@@ -366,7 +366,7 @@ class TestPruneBefore:
 
 
 class TestAuditStreams:
-    def test_registry_lists_the_four_chained_streams(self, tmp_path: Path) -> None:
+    def test_registry_lists_the_five_chained_streams(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(repo_root=tmp_path / "repo")
         specs = {s.name: s for s in audit_streams(config)}
         assert set(specs) == {
@@ -374,6 +374,7 @@ class TestAuditStreams:
             "health_decisions",
             "inference_telemetry",
             "approval_records",
+            "evidence_packs",
         }
         assert (
             specs["preflight"].path == config.data_root / "auto_agent" / "audit.jsonl"
@@ -385,6 +386,12 @@ class TestAuditStreams:
         assert specs["inference_telemetry"].timestamp_key == "timestamp"
         assert specs["approval_records"].path == config.approval_records_path
         assert specs["approval_records"].timestamp_key == "timestamp"
+        assert specs["evidence_packs"].path == config.evidence_packs_path
+        assert (
+            specs["evidence_packs"].path
+            == config.repo_data_root / "audit" / "evidence_packs.jsonl"
+        )
+        assert specs["evidence_packs"].timestamp_key == "timestamp"
 
     def test_retention_defaults_to_none_meaning_keep_forever(
         self, tmp_path: Path
@@ -400,9 +407,11 @@ class TestAuditStreams:
             audit_retention_days_health_decisions=90,
             audit_retention_days_inference_telemetry=30,
             audit_retention_days_approval_records=2555,
+            audit_retention_days_evidence_packs=2555,
         )
         specs = {s.name: s for s in audit_streams(config)}
         assert specs["preflight"].retention_days == 2555
         assert specs["health_decisions"].retention_days == 90
         assert specs["inference_telemetry"].retention_days == 30
         assert specs["approval_records"].retention_days == 2555
+        assert specs["evidence_packs"].retention_days == 2555

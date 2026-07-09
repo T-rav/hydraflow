@@ -21,6 +21,9 @@ Chained streams (see :func:`audit_streams`):
   (``prompt_telemetry``)
 * approval_records — ``<repo_data_root>/audit/approval_records.jsonl``
   (``approval_records``, CH-2 #9730: structured merge sign-off evidence)
+* evidence_packs — ``<repo_data_root>/audit/evidence_packs.jsonl``
+  (``evidence_pack``, CH-4 #9732: one summary record per compiled release
+  evidence pack, pinning the pack's per-file sha256 digests)
 
 Adoption baseline
 -----------------
@@ -178,6 +181,12 @@ def audit_streams(config: HydraFlowConfig) -> tuple[AuditStreamSpec, ...]:
             path=config.approval_records_path,
             timestamp_key="timestamp",
             retention_days=config.audit_retention_days_approval_records,
+        ),
+        AuditStreamSpec(
+            name="evidence_packs",
+            path=config.evidence_packs_path,
+            timestamp_key="timestamp",
+            retention_days=config.audit_retention_days_evidence_packs,
         ),
     )
 
