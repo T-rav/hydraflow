@@ -29,6 +29,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from repro_manifest import append_manifest
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -319,6 +321,10 @@ def open_automated_pr(
                 f"git push failed for branch {branch!r}: {exc.stderr}"
             ) from exc
 
+        # CH-7 (#9735): attach the reproducibility manifest (fail-open) —
+        # evidence of the models/prompts/config in effect at authoring time.
+        body = append_manifest(body)
+
         create_cmd = [
             "gh",
             "pr",
@@ -483,6 +489,10 @@ async def _finalize_pr_from_worktree(
         if labels
         else []
     )
+
+    # CH-7 (#9735): attach the reproducibility manifest (fail-open) — shared
+    # tail, so both async entry points get the evidence block.
+    pr_body = append_manifest(pr_body)
 
     create_args: list[str] = [
         "gh",
