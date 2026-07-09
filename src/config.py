@@ -366,6 +366,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
         ),
     ),
     ("log_ingest_log_files", "HYDRAFLOW_LOG_INGEST_LOG_FILES", "logs/hydraflow.log"),
+    ("regulated_labels", "HYDRAFLOW_REGULATED_LABELS", ""),
     ("dashboard_url", "HYDRAFLOW_DASHBOARD_URL", "http://localhost:5555"),
     ("otel_endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT", "https://api.honeycomb.io"),
     ("otel_service_name", "OTEL_SERVICE_NAME", "hydraflow"),
@@ -1210,6 +1211,15 @@ class HydraFlowConfig(BaseModel):
     shape_label: list[str] = Field(
         default=["hydraflow-shape"],
         description="Labels for issues needing product direction shaping (OR logic)",
+    )
+    regulated_labels: str = Field(
+        default="",
+        description=(
+            "Comma-separated label names forming the regulated change class "
+            "(CH-5 traceability). Issues carrying any of these labels must "
+            "declare a requirement ID (`req:<id>` label or `Req-ID:` body "
+            "line). Empty (the default) means no change class is regulated."
+        ),
     )
     clarity_threshold: int = Field(
         default=7,
@@ -3423,6 +3433,16 @@ class HydraFlowConfig(BaseModel):
     def branch_for_issue(self, issue_number: int) -> str:
         """Return the canonical branch name for a given issue number."""
         return f"agent/issue-{issue_number}"
+
+    def regulated_label_set(self) -> frozenset[str]:
+        """Parse ``regulated_labels`` CSV into a label set (CH-5).
+
+        Blank entries are dropped; an empty result means no change class
+        is regulated, so requirement IDs stay optional everywhere.
+        """
+        return frozenset(
+            label.strip() for label in self.regulated_labels.split(",") if label.strip()
+        )
 
     def workspace_path_for_issue(self, issue_number: int) -> Path:
         """Return the repo-scoped workspace directory path for a given issue number."""
