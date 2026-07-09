@@ -390,6 +390,18 @@ class TestL22StagingPromotionLoop:
     doesn't expose.  We pass the config directly to HydraFlowConfig.
     """
 
+    @pytest.fixture(autouse=True)
+    def _fake_gh_boundary(self, monkeypatch):
+        """Keep the CH-4 reconcile sweep's gh listing off the network for
+        every L22 test; tests that exercise gh install their own
+        ``run_subprocess`` fake on top."""
+
+        async def _empty_list(*cmd, **_kwargs):
+            assert cmd[:3] == ("gh", "pr", "list"), cmd
+            return "[]"
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _empty_list)
+
     def _make_staging_loop(self, tmp_path, *, staging_enabled: bool, **extra):
         """Build a StagingPromotionLoop with controlled config and mock prs."""
         from base_background_loop import LoopDeps  # noqa: PLC0415
@@ -473,6 +485,12 @@ class TestL22StagingPromotionLoop:
         assert "rc_branch" in result
         prs.create_rc_branch.assert_awaited_once()
         prs.create_promotion_pr.assert_awaited_once()
+        # CH-7 (#9735): the promotion PR body carries the reproducibility
+        # manifest — the exact block CH-4's compiler reads back.
+        from repro_manifest import extract_manifest_block
+
+        body = prs.create_promotion_pr.call_args.kwargs["body"]
+        assert extract_manifest_block(body) is not None
 
     async def test_promotion_merge_compiles_evidence_pack(self, tmp_path, monkeypatch):
         """CH-4 (#9732): a green promotion merge runs the REAL evidence-pack
@@ -487,6 +505,8 @@ class TestL22StagingPromotionLoop:
         prs.get_pr_head_sha = AsyncMock(return_value="rcsha123")
 
         async def _fake_gh(*cmd, **_kw):
+            if cmd[:3] == ("gh", "pr", "list"):
+                return "[]"  # CH-4 reconcile sweep: nothing else merged
             assert cmd[:3] == ("gh", "pr", "view"), cmd
             if int(cmd[3]) == 77:
                 return json.dumps(
@@ -538,6 +558,104 @@ class TestL22StagingPromotionLoop:
         verified = AuditChain(config.evidence_packs_path).verify()
         assert verified.ok
         assert verified.chained_records == 1
+
+    async def test_operator_merged_rc_reconciles_missing_evidence_pack(
+        self, tmp_path, monkeypatch
+    ):
+        """CH-4 hardening: an RC merged by an operator (not this loop's own
+        merge call) is picked up by the reconcile sweep — the REAL compiler
+        runs and the binder + chained record appear even though the tick
+        itself did no promotion work. A second tick is idempotent."""
+        loop, prs, config = self._make_staging_loop(tmp_path, staging_enabled=True)
+        rc_branch = "rc/2026-07-08-0600"
+        # No open promotion, cadence NOT elapsed → the tick is otherwise idle.
+        cadence_path = config.data_root / "memory" / ".staging_promotion_last_rc"
+        cadence_path.parent.mkdir(parents=True, exist_ok=True)
+        cadence_path.write_text(datetime.now(UTC).isoformat())
+
+        async def _fake_gh(*cmd, **_kw):
+            if cmd[:3] == ("gh", "pr", "list"):
+                return json.dumps(
+                    [
+                        {"number": 88, "headRefName": rc_branch},
+                        {"number": 87, "headRefName": "worktree-not-an-rc"},
+                    ]
+                )
+            assert cmd[:3] == ("gh", "pr", "view"), cmd
+            assert int(cmd[3]) == 88, cmd
+            return json.dumps(
+                {
+                    "number": 88,
+                    "title": f"Promote {rc_branch} → main",
+                    "url": "https://github.com/test-org/test-repo/pull/88",
+                    "body": "Operator force-merged RC (no repro manifest).",
+                    "author": {"login": "hydra-ops-bot"},
+                    "baseRefName": "main",
+                    "headRefName": rc_branch,
+                    "headRefOid": "a" * 40,
+                    "mergeCommit": {"oid": "b" * 40},
+                    "mergedAt": "2026-07-08T06:10:00Z",
+                    "commits": [],
+                }
+            )
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _fake_gh)
+
+        result = await loop._do_work()
+
+        assert result is not None
+        assert result["status"] == "cadence_not_elapsed"
+        assert result["packs_reconciled"] == 1
+        pack_dir = config.evidence_dir / "rc-2026-07-08-0600"
+        assert (pack_dir / "manifest.json").is_file()
+        verified = AuditChain(config.evidence_packs_path).verify()
+        assert verified.ok
+        assert verified.chained_records == 1
+
+        # Second tick: already packed — no duplicate chain record.
+        result2 = await loop._do_work()
+        assert result2 is not None
+        assert "packs_reconciled" not in result2
+        assert AuditChain(config.evidence_packs_path).verify().chained_records == 1
+
+    async def test_policy_deny_comments_and_alerts_once_across_ticks(
+        self, tmp_path, monkeypatch
+    ):
+        """CH-3 hardening: a standing policy deny (here the strict test
+        policy) posts ONE comment + ONE alert per (PR, reason-class), not
+        one per 300s tick."""
+        from events import EventType
+        from tests.helpers import install_repo_merge_policy
+
+        loop, prs, config = self._make_staging_loop(tmp_path, staging_enabled=True)
+        prs.find_open_promotion_pr = AsyncMock(
+            return_value=MagicMock(number=91, branch="rc/2026-07-08-0400")
+        )
+        prs.post_comment = AsyncMock()
+        prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        install_repo_merge_policy(config)
+
+        async def _fake_gh(*cmd, **_kw):
+            if cmd[:3] == ("gh", "pr", "list"):
+                return "[]"
+            assert cmd[:3] == ("gh", "pr", "view"), cmd
+            return json.dumps({"labels": []})
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _fake_gh)
+        queue = loop._bus.subscribe()
+
+        r1 = await loop._do_work()
+        r2 = await loop._do_work()
+
+        assert r1 is not None and r1["status"] == "policy_denied"
+        assert r2 is not None and r2["status"] == "policy_denied"
+        assert prs.post_comment.await_count == 1
+        alerts = []
+        while not queue.empty():
+            event = queue.get_nowait()
+            if event.type is EventType.SYSTEM_ALERT:
+                alerts.append(event)
+        assert len(alerts) == 1
 
 
 # ---------------------------------------------------------------------------

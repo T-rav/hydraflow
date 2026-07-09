@@ -25,6 +25,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+import subprocess_util
 from base_background_loop import LoopDeps
 from config import HydraFlowConfig
 from events import EventBus
@@ -40,6 +41,14 @@ def _make_loop(
 ) -> tuple[StagingPromotionLoop, MagicMock]:
     monkeypatch.setenv("HYDRAFLOW_STAGING_ENABLED", "true")
     monkeypatch.setenv("HYDRAFLOW_STAGING_PROMOTION_INTERVAL", "300")
+
+    # Keep the CH-4 reconcile sweep's gh listing off the network: an empty
+    # merged-PR list makes the end-of-tick sweep a no-op.
+    async def _no_merged_prs(*cmd: str, **_kwargs: object) -> str:
+        assert cmd[:3] == ("gh", "pr", "list"), cmd
+        return "[]"
+
+    monkeypatch.setattr(subprocess_util, "run_subprocess", _no_merged_prs)
     cfg = HydraFlowConfig(
         repo_root=tmp_path,
         workspace_base=tmp_path / "wt",
