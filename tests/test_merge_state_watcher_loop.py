@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from approval_records import ApprovalRecordReconciler
 from base_background_loop import LoopDeps
 from config import HydraFlowConfig
 from events import EventBus
@@ -166,8 +167,6 @@ class TestApprovalReconcilerIntegration:
     async def test_default_constructs_real_reconciler(self, tmp_path) -> None:
         """Without injection the loop builds an ApprovalRecordReconciler
         from its config (production wiring in service_registry)."""
-        from approval_records import ApprovalRecordReconciler  # noqa: PLC0415
-
         cfg = HydraFlowConfig(repo="acme/widgets")
         stop = asyncio.Event()
         stop.set()
