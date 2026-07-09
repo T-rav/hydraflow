@@ -14,6 +14,7 @@ from config import (
     _ENV_FLOAT_OVERRIDES,
     _ENV_INT_OVERRIDES,
     _ENV_LITERAL_OVERRIDES,
+    _ENV_OPT_INT_OVERRIDES,
     _ENV_STR_OVERRIDES,
     HydraFlowConfig,
 )
@@ -616,3 +617,83 @@ class TestDotenvLoading:
 
             main()
             fake_dotenv.load_dotenv.assert_called_once()
+
+
+class TestEnvOptIntOverrideTable:
+    """Optional-int overrides (CH-1, #9729): audit-stream retention floors."""
+
+    @pytest.mark.parametrize(
+        ("field", "env_key", "default"),
+        _ENV_OPT_INT_OVERRIDES,
+        ids=[entry[0] for entry in _ENV_OPT_INT_OVERRIDES],
+    )
+    def test_env_opt_int_override_applies_when_at_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        field: str,
+        env_key: str,
+        default: int | None,
+    ) -> None:
+        monkeypatch.setenv(env_key, "2555")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert getattr(cfg, field) == 2555
+
+    @pytest.mark.parametrize(
+        ("field", "env_key", "default"),
+        _ENV_OPT_INT_OVERRIDES,
+        ids=[entry[0] for entry in _ENV_OPT_INT_OVERRIDES],
+    )
+    def test_env_opt_int_override_ignored_when_explicit_value_set(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        field: str,
+        env_key: str,
+        default: int | None,
+    ) -> None:
+        monkeypatch.setenv(env_key, "365")
+        cfg = HydraFlowConfig(
+            **{field: 30},  # type: ignore[arg-type]
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert getattr(cfg, field) == 30
+
+    @pytest.mark.parametrize(
+        ("field", "env_key", "default"),
+        _ENV_OPT_INT_OVERRIDES,
+        ids=[entry[0] for entry in _ENV_OPT_INT_OVERRIDES],
+    )
+    @pytest.mark.parametrize("bad_value", ["not-a-number", "", "0", "-7"])
+    def test_env_opt_int_override_invalid_or_out_of_range_ignored(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        field: str,
+        env_key: str,
+        default: int | None,
+        bad_value: str,
+    ) -> None:
+        monkeypatch.setenv(env_key, bad_value)
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert getattr(cfg, field) == default
+
+    def test_opt_int_table_defaults_match_field_defaults(self) -> None:
+        model_fields = HydraFlowConfig.model_fields
+        for field, _env_key, table_default in _ENV_OPT_INT_OVERRIDES:
+            pydantic_default = model_fields[field].default
+            assert pydantic_default == table_default, (
+                f"_ENV_OPT_INT_OVERRIDES entry for '{field}' has "
+                f"default={table_default}, but HydraFlowConfig.{field} "
+                f"default is {pydantic_default}"
+            )

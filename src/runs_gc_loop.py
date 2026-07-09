@@ -1,12 +1,22 @@
-"""Background worker loop — garbage-collect expired run artifacts."""
+"""Background worker loop — garbage-collect expired run artifacts.
+
+Also the caretaker tick for the hash-chained audit streams (CH-1, #9729):
+each cycle verifies every chain and enforces the per-stream retention floor.
+The check lives here (not in a repo-CI pytest) because the streams live in
+the runtime data root, which a CI checkout never has — an in-repo check would
+trivially pass; this loop already owns artifact lifecycle and runs hourly.
+"""
 
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from audit_chain import AuditChain, audit_streams
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from events import EventType, HydraFlowEvent
 from run_recorder import RunRecorder
 
 logger = logging.getLogger("hydraflow.runs_gc_loop")
@@ -17,7 +27,12 @@ class RunsGCLoop(BaseBackgroundLoop):
 
     Enforces the configured retention TTL (``artifact_retention_days``)
     and size cap (``artifact_max_size_mb``) by delegating to
-    :class:`RunRecorder` purge methods.
+    :class:`RunRecorder` purge methods. Additionally walks every hash-chained
+    audit stream: a chain break raises a ``SYSTEM_ALERT`` (tampering or
+    corruption becomes a detected event), and streams with a configured
+    retention floor are prefix-pruned — records younger than the floor can
+    never be deleted, and broken streams are never pruned (tamper evidence
+    is preserved).
     """
 
     def __init__(
@@ -52,10 +67,67 @@ class RunsGCLoop(BaseBackgroundLoop):
                 stats["total_mb"],
             )
 
+        audit_chain_status, audit_pruned = await self._tend_audit_chains()
+
         return {
             "expired_purged": expired,
             "oversized_purged": oversized,
             "total_runs": stats["total_runs"],
             "total_mb": stats["total_mb"],
             "issues": stats["issues"],
+            "audit_chain_status": audit_chain_status,
+            "audit_pruned": audit_pruned,
         }
+
+    async def _tend_audit_chains(self) -> tuple[dict[str, str], dict[str, int]]:
+        """Verify every chained audit stream, then enforce retention floors.
+
+        Verification runs FIRST: a broken stream is alerted and never pruned,
+        so GC cannot destroy tamper evidence. Retention (``None`` = keep
+        forever) is a floor — only records strictly older are prefix-pruned.
+        """
+        status: dict[str, str] = {}
+        pruned: dict[str, int] = {}
+        for spec in audit_streams(self._config):
+            chain = AuditChain(spec.path)
+            result = chain.verify()
+            if not result.ok:
+                status[spec.name] = "break"
+                logger.error(
+                    "Audit chain break in stream %r (%s): %s",
+                    spec.name,
+                    spec.path,
+                    "; ".join(
+                        f"record {b.record_no}: {b.reason}" for b in result.breaks[:5]
+                    ),
+                )
+                await self._bus.publish(
+                    HydraFlowEvent(
+                        type=EventType.SYSTEM_ALERT,
+                        data={
+                            "kind": "audit_chain_break",
+                            "stream": spec.name,
+                            "path": str(spec.path),
+                            "breaks": [
+                                f"record {b.record_no}: {b.reason}"
+                                for b in result.breaks[:5]
+                            ],
+                        },
+                    )
+                )
+                continue
+            status[spec.name] = "ok" if result.chained_records else "empty"
+            if spec.retention_days is None:
+                continue
+            cutoff = datetime.now(UTC) - timedelta(days=spec.retention_days)
+            removed = chain.prune_before(cutoff, spec.timestamp_key)
+            pruned[spec.name] = removed
+            if removed:
+                logger.info(
+                    "Audit retention: pruned %d record(s) older than %d days "
+                    "from stream %r",
+                    removed,
+                    spec.retention_days,
+                    spec.name,
+                )
+        return status, pruned
