@@ -847,9 +847,9 @@ async def test_refresh_real_conflict_aborts_no_push(
 async def test_async_req_id_trails_commit_message_and_pr_body(
     local_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """req_id lands as a Req-ID: trailer on BOTH the commit message and the PR
-    body, so the traceability matrix can recover it from git history and the
-    PR alike (CH-5)."""
+    """req_id lands as a trailer on BOTH the commit message and the PR body,
+    so the traceability matrix can recover it from git history and the PR
+    alike (CH-5)."""
     from auto_pr import open_automated_pr_async
 
     commit_msgs: list[str] = []

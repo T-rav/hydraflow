@@ -83,7 +83,7 @@ class TestPlanPhase:
     async def test_plan_comment_carries_body_field_req_id(
         self, config: HydraFlowConfig
     ) -> None:
-        """A Req-ID: body line is an equivalent declaration to the label."""
+        """A requirement-ID body-field line declares equivalently to the label."""
         phase, _state, planners, prs, store, _stop = make_plan_phase(config)
         issue = TaskFactory.create(id=42, body="Intro.\n\nReq-ID: SYS-9\n")
         plan_result = PlanResultFactory.create(

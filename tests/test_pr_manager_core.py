@@ -879,9 +879,10 @@ async def test_create_pr_includes_required_flags(config, event_bus, issue):
 
 @pytest.mark.asyncio
 async def test_create_pr_body_carries_req_id_trailer(config, event_bus):
-    """An issue-declared requirement ID lands as a Req-ID: trailer in the PR
-    body (CH-5): re-derived from the issue itself so it survives every label
-    state-machine round trip."""
+    """An issue-declared requirement ID lands as a trailer in the PR body
+    (CH-5): re-derived from the issue itself so it survives every label
+    state-machine round trip. (Kept out of this docstring by name: the matrix
+    generator reads docstring requirement references as test evidence.)"""
     from tests.conftest import IssueFactory
 
     manager = make_pr_manager(config, event_bus)
