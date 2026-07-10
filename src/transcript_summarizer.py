@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from config import Credentials, HydraFlowConfig
+from dedup_store import DedupStore
 from events import EventBus, EventType, HydraFlowEvent
 from execution import SubprocessRunner, get_default_runner
 from models import TranscriptSummaryPayload
 from pr_manager import PRManager
+from prompt_gate_alerts import (
+    alert_prompt_gate_block,
+    clear_prompt_gate_block,
+    is_prompt_gate_blocked,
+)
 from state import StateTracker
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = logging.getLogger("hydraflow.transcript_summarizer")
 
@@ -124,6 +134,7 @@ class TranscriptSummarizer:
         state: StateTracker,
         runner: SubprocessRunner | None = None,
         credentials: Credentials | None = None,
+        gate_block_dedup: DedupStore | None = None,
     ) -> None:
         self._config = config
         self._prs = pr_manager
@@ -131,10 +142,17 @@ class TranscriptSummarizer:
         self._state = state
         self._runner = runner or get_default_runner()
         self._credentials = credentials or Credentials()
+        # Prompt-gate block escalation (#9734 review finding 3).
+        self._gate_block_dedup = gate_block_dedup or DedupStore(
+            "prompt_gate_blocked",
+            config.data_root / "dedup" / "prompt_gate_blocked.json",
+        )
 
     # --- Shared summary generation ---
 
-    async def _generate_summary(self, transcript: str) -> str | None:
+    async def _generate_summary(
+        self, transcript: str, *, issue_labels: Sequence[str] = ()
+    ) -> str | None:
         """Generate a structured summary from a transcript.
 
         Returns the summary content string, or ``None`` if the transcript
@@ -153,7 +171,7 @@ class TranscriptSummarizer:
             transcript, self._config.max_transcript_summary_chars
         )
         prompt = _SUMMARIZATION_PROMPT.format(transcript=truncated)
-        return await self._call_model(prompt)
+        return await self._call_model(prompt, issue_labels=issue_labels)
 
     async def summarize_hitl_context(self, context: str) -> str | None:
         """Generate a compact operator summary for HITL context."""
@@ -177,11 +195,16 @@ class TranscriptSummarizer:
         issue_title: str = "",
         duration_seconds: float = 0.0,
         log_file: str = "",
+        issue_labels: Sequence[str] = (),
     ) -> bool:
         """Summarize a transcript and post as a comment on the original issue.
 
         Returns ``True`` on success, ``False`` if skipped or failed.
         Never raises — all errors are logged and swallowed.
+
+        *issue_labels* feeds the CH-6 gate's upward-only ``data-class:``
+        label elevation for the summarization spawn — callers with the issue
+        (or its ``Task``) in scope must pass ``issue.labels`` / ``task.tags``.
         """
         try:
             return await self._summarize_and_comment_inner(
@@ -192,6 +215,7 @@ class TranscriptSummarizer:
                 issue_title=issue_title,
                 duration_seconds=duration_seconds,
                 log_file=log_file,
+                issue_labels=issue_labels,
             )
         except Exception:
             logger.exception(
@@ -211,9 +235,12 @@ class TranscriptSummarizer:
         issue_title: str,
         duration_seconds: float,
         log_file: str,
+        issue_labels: Sequence[str] = (),
     ) -> bool:
         """Inner implementation for comment-based summaries — may raise."""
-        summary_content = await self._generate_summary(transcript)
+        summary_content = await self._generate_summary(
+            transcript, issue_labels=issue_labels
+        )
         if not summary_content:
             return False
 
@@ -253,7 +280,9 @@ class TranscriptSummarizer:
 
     # --- Issue-based summaries (legacy, configurable) ---
 
-    async def _call_model(self, prompt: str) -> str | None:
+    async def _call_model(
+        self, prompt: str, *, issue_labels: Sequence[str] = ()
+    ) -> str | None:
         """Call the configured CLI backend to summarize.
 
         Returns the model output, or ``None`` on failure.
@@ -272,14 +301,29 @@ class TranscriptSummarizer:
                 source="transcript_summary",
                 timeout=self._config.transcript_summary_timeout,
                 gh_token=self._credentials.gh_token,
+                issue_labels=issue_labels,
             )
             if result.returncode != 0:
+                if is_prompt_gate_blocked(result.stderr):
+                    # A gate block is a persistent policy misconfiguration,
+                    # not a transient failure: every call re-blocks, so a
+                    # soft warn would be a PERMANENT silent no-op (#9734
+                    # review finding 3). Escalate: ERROR + one SYSTEM_ALERT.
+                    await alert_prompt_gate_block(
+                        dedup=self._gate_block_dedup,
+                        event_bus=self._bus,
+                        source="transcript_summary",
+                        repo=self._config.repo or "",
+                        detail=result.stderr[:200],
+                    )
+                    return None
                 logger.warning(
                     "Transcript summary model failed (rc=%d): %s",
                     result.returncode,
                     result.stderr[:200],
                 )
                 return None
+            clear_prompt_gate_block(self._gate_block_dedup, "transcript_summary")
             return result.stdout if result.stdout else None
         except TimeoutError:
             logger.warning("Transcript summary model timed out")

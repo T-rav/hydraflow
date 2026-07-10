@@ -486,6 +486,7 @@ class PlanPhase:
                     issue_title=issue.title,
                     duration_seconds=result.duration_seconds,
                     log_file=self._plan_log_reference(issue.id),
+                    issue_labels=issue.tags,
                 )
             except (RuntimeError, OSError):
                 logger.exception(
@@ -1078,6 +1079,7 @@ class PlanPhase:
                     issue_title=issue.title,
                     duration_seconds=result.duration_seconds,
                     log_file=self._plan_log_reference(issue.id),
+                    issue_labels=issue.tags,
                 )
             except (RuntimeError, OSError):
                 logger.exception(

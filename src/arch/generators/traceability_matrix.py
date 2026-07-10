@@ -24,13 +24,11 @@ from __future__ import annotations
 import ast
 import math
 import re
-from typing import TYPE_CHECKING
+import subprocess
+from pathlib import Path
 
 from arch._models import TraceCommitInfo
 from traceability import normalize_req_id
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 #: How many PR-squash-merge commits form the adoption-measurement window.
 TRACE_WINDOW = 500
@@ -118,6 +116,75 @@ def parse_trace_commits(
     return commits
 
 
+#: Timeout for the git subprocess calls below — same rationale as
+#: ``arch.runner._run`` (thread-pool exhaustion guard, PR #8454 class).
+_GIT_TIMEOUT_S = 60
+
+
+def _run_git(repo_root: Path, *args: str) -> str | None:
+    """Run one git command; ``None`` on any failure (rc != 0, timeout, no git)."""
+    try:
+        res = subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_GIT_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
+        return None
+    if res.returncode != 0:
+        return None
+    return res.stdout
+
+
+def _history_is_recomputable(repo_root: Path) -> bool:
+    """True when *repo_root* has trustworthy git history for a recompute.
+
+    False for: git missing/failed, *repo_root* not the top level of a git
+    work tree, or a shallow clone (CI test checkouts default to
+    fetch-depth 1 — a truncated window would misreport the fraction).
+    """
+    probe = _run_git(
+        repo_root, "rev-parse", "--show-toplevel", "--is-shallow-repository"
+    )
+    if probe is None:
+        return False
+    lines = probe.strip().splitlines()
+    if len(lines) != 2 or lines[1].strip() == "true":
+        return False
+    try:
+        return Path(lines[0]).resolve() == Path(repo_root).resolve()
+    except OSError:
+        return False
+
+
+def collect_trace_commits(repo_root: Path) -> list[TraceCommitInfo] | None:
+    """Collect the traceability population from *repo_root*'s git history.
+
+    Shared by the generator (``arch.runner``), the ratchet-baseline sync
+    (``sync_traceability_baseline``) and the ``TraceabilityDetector``'s
+    marker verification, so all three compute the untraced fraction through
+    ONE code path — the committed ``<!-- untraced-pct: NN -->`` marker is
+    display-only and must be independently recomputable (CH-5 convergence
+    review finding 3).
+
+    Returns ``None`` when history is unavailable or untrustworthy for a
+    recompute (see :func:`_history_is_recomputable`). Returns ``[]`` when
+    history IS available but parses to zero PR-squash-merge commits —
+    callers must treat that as a generation regression when the ratchet
+    baseline is nonzero, never as 0% untraced.
+    """
+    if not _history_is_recomputable(repo_root):
+        return None
+    fmt = "%H%x1f%s%x1f%B%x1e"
+    raw = _run_git(repo_root, "log", f"-n{TRACE_WINDOW * 6}", f"--pretty=format:{fmt}")
+    if raw is None:
+        return None
+    return parse_trace_commits(raw)
+
+
 def _docstring_req_ids(tree: ast.AST) -> list[str]:
     """Collect Req-ID references from module/class/function docstrings."""
     refs: list[str] = []
@@ -159,12 +226,15 @@ def _scan_test_evidence(repo_root: Path) -> dict[str, list[str]]:
     return {req_id: sorted(paths) for req_id, paths in evidence.items()}
 
 
-def _untraced_pct(commits: list[TraceCommitInfo]) -> int:
+def untraced_pct(commits: list[TraceCommitInfo]) -> int:
     """Ceiled integer % of window commits with no Req-ID (0 for empty window).
 
     ``ceil`` keeps the metric conservative: it stays at 100 until adoption
     is substantial enough to genuinely move a percentage point, so a lone
     traced commit aging out of the window cannot flap the ratchet.
+
+    Public because the marker-verification recompute (baseline sync +
+    ``TraceabilityDetector``) must share the generator's exact rounding.
     """
     if not commits:
         return 0
@@ -213,7 +283,7 @@ def render_traceability_matrix(
     """Return the traceability matrix as deterministic markdown."""
     evidence = _scan_test_evidence(repo_root)
     rows = _requirement_rows(commits, evidence)
-    pct = _untraced_pct(commits)
+    pct = untraced_pct(commits)
 
     chunks: list[str] = ["## Section 1: Requirements\n"]
     if rows:

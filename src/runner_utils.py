@@ -581,6 +581,7 @@ async def run_lightweight_agent(
     pr_number: int | None = None,
     session_id: str | None = None,
     isolate_user_settings: bool = True,
+    issue_labels: Sequence[str] = (),
 ) -> SimpleResult:
     """One-shot lightweight LLM CLI call with credit detection + telemetry.
 
@@ -609,6 +610,12 @@ async def run_lightweight_agent(
     ``project`` settings to keep a host user-level ``SessionStart`` hook from
     leaking skill-invocation guidance into the reply. Pass ``False`` for a
     lightweight spawn that legitimately needs host plugins/skills.
+
+    *issue_labels* feeds the CH-6 gate's upward-only ``data-class:`` label
+    elevation, mirroring :func:`stream_claude_with_telemetry`. Callers with
+    an issue in scope MUST pass its labels (``issue.labels`` /
+    ``issue.tags``); without them only the repo-declared class is enforced
+    (``tests/test_prompt_gate_completeness.py`` pins every call site).
     """
     from agent_cli import build_lightweight_command  # noqa: PLC0415
     from exception_classify import (  # noqa: PLC0415
@@ -628,6 +635,7 @@ async def run_lightweight_agent(
             source=source,
             tool=tool,
             issue_number=issue_number,
+            issue_labels=issue_labels,
         )
     except PromptGateBlockedError as exc:
         return SimpleResult(stderr=str(exc), returncode=-1)

@@ -226,6 +226,63 @@ class TestRunLightweightAgentGate:
         assert is_prompt_gate_blocked(result.stderr)
         assert not is_prompt_gate_blocked("timed out after 30s")
 
+    @pytest.mark.asyncio
+    async def test_issue_labels_elevate_and_redact_on_internal_repo(
+        self, tmp_path: Path
+    ) -> None:
+        """A data-class label on the issue elevates this seam's gate too."""
+        from execution import SimpleResult
+        from runner_utils import run_lightweight_agent
+
+        config = _config(
+            tmp_path, data_class_allowed_backends={"regulated-phi": ["claude"]}
+        )
+        runner = MagicMock()
+        runner.run_simple = AsyncMock(return_value=SimpleResult(returncode=0))
+        await run_lightweight_agent(
+            runner=runner,
+            config=config,
+            tool="claude",
+            model="haiku",
+            prompt=_SENSITIVE,
+            source="transcript_summary",
+            timeout=10,
+            issue_labels=["data-class:regulated-phi"],
+        )
+        cmd = runner.run_simple.call_args[0][0]
+        cmd_input = runner.run_simple.call_args[1].get("input")
+        blob = " ".join(cmd) + (cmd_input or b"").decode("utf-8", "ignore")
+        assert "123-45-6789" not in blob
+        assert "[REDACTED:ssn_like]" in blob
+
+    @pytest.mark.asyncio
+    async def test_issue_labels_elevate_and_block_on_disallowed_backend(
+        self, tmp_path: Path
+    ) -> None:
+        """Elevation to a class with no allowed backend blocks before spawn."""
+        from runner_utils import run_lightweight_agent
+
+        config = _config(tmp_path, data_class_allowed_backends={})
+        runner = MagicMock()
+        runner.run_simple = AsyncMock()
+        result = await run_lightweight_agent(
+            runner=runner,
+            config=config,
+            tool="claude",
+            model="haiku",
+            prompt=_SENSITIVE,
+            source="transcript_summary",
+            timeout=10,
+            issue_labels=["data-class:regulated-phi"],
+        )
+        assert result.returncode == -1
+        assert "prompt gate blocked" in result.stderr
+        runner.run_simple.assert_not_awaited()
+        records = _read_audit(config)
+        assert len(records) == 1
+        assert records[0]["action"] == "block"
+        assert records[0]["data_class"] == "regulated-phi"
+
 
 class TestStreamClaudeWithTelemetryGate:
     @pytest.mark.asyncio

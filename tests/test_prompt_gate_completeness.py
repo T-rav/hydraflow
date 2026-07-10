@@ -199,6 +199,84 @@ def test_every_agentport_execute_call_passes_issue_labels() -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# run_lightweight_agent callers (CH-6 convergence review finding 1)
+# ---------------------------------------------------------------------------
+
+# ``run_lightweight_agent`` callers VERIFIED label-free: no issue object (and
+# therefore no labels) exists anywhere in the enclosing call chain, so there
+# is no per-issue ``data-class:<class>`` elevation to thread. The
+# repo-registry data class still gates these spawns. Each entry documents WHY
+# it is exempt — an undocumented module must thread ``issue_labels=``.
+_LIGHTWEIGHT_LABEL_FREE_CALLERS = frozenset(
+    {
+        # Council-reviews ADR *files*: review_proposed_adrs() walks
+        # docs/adr/*.md in the repo checkout. No GitHub issue appears
+        # anywhere in the chain (the prompt is built from ADR file content),
+        # so only the repo-declared class applies.
+        "adr_reviewer.py",
+    }
+)
+
+# Callers whose chain carries a bare ``issue_number`` int but no issue
+# object/labels: threading requires an interface change through the phase
+# facades (``synthesize_ingest`` and six sibling ``_call_model`` flows).
+# Named follow-up, not a silent exemption — mirrors
+# ``_AGENTPORT_CALLER_FOLLOWUPS`` above.
+_LIGHTWEIGHT_LABEL_FOLLOWUPS = frozenset({"wiki_compiler.py"})
+
+
+def test_every_run_lightweight_agent_call_passes_issue_labels() -> None:
+    """Each ``run_lightweight_agent(...)`` call site passes ``issue_labels=``.
+
+    ``run_lightweight_agent`` feeds *issue_labels* into ``gate_prompt``'s
+    upward-only data-class elevation, exactly like the sibling seams
+    (``BaseRunner._execute``, ``stream_claude_with_telemetry``). A call site
+    that omits the kwarg makes the gate see only the repo-declared class, so
+    a ``data-class:regulated-*`` label on an issue would NOT redact/block
+    that spawn (#9734 convergence review finding 1). Callers verified
+    label-free are allowlisted above with the reason.
+    """
+    offenders: list[str] = []
+    exempt = _LIGHTWEIGHT_LABEL_FREE_CALLERS | _LIGHTWEIGHT_LABEL_FOLLOWUPS
+    callers: set[str] = set()
+    for path in sorted(SRC.rglob("*.py")):
+        rel = path.relative_to(SRC).as_posix()
+        if rel == "runner_utils.py":
+            continue  # the seam definition itself
+        tree = ast.parse(path.read_text(), filename=rel)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Attribute):
+                name = func.attr
+            else:
+                continue
+            if name != "run_lightweight_agent":
+                continue
+            callers.add(rel)
+            if rel in exempt:
+                continue
+            if not any(kw.arg == "issue_labels" for kw in node.keywords):
+                offenders.append(f"{rel}:{node.lineno}")
+    assert not offenders, (
+        f"These run_lightweight_agent(...) call sites omit issue_labels=: "
+        f"{offenders}. Without it the CH-6 gate cannot apply the upward-only "
+        "data-class:<class> label elevation for that spawn — thread the "
+        "enclosing issue's labels (issue.labels / issue.tags / task.tags) "
+        "down to the call, or, if the chain verifiably has no issue in "
+        "scope, add a documented allowlist entry explaining why."
+    )
+    stale = sorted(exempt - callers)
+    assert not stale, (
+        f"Label-free allowlist has stale entries that no longer call "
+        f"run_lightweight_agent: {stale}. Remove them."
+    )
+
+
 def test_gate_seams_cover_all_telemetry_spawn_seams() -> None:
     """Stay in lockstep with the WS-2.2 telemetry containment ratchet.
 

@@ -155,6 +155,16 @@ def test_check_ignores_traceability_matrix_drift(populated_repo: Path):
     assert check(repo_root=populated_repo, generated_dir=out) == 0
 
 
+def _write_traceability_baseline(repo: Path) -> Path:
+    baseline = repo / "disturbance/baselines/traceability.yaml"
+    baseline.parent.mkdir(parents=True, exist_ok=True)
+    baseline.write_text(
+        "comment: c\nentries:\n"
+        "  docs/arch/generated/traceability_matrix.md::untraced-pct: 100\n"
+    )
+    return baseline
+
+
 def test_main_emit_syncs_traceability_baseline(populated_repo: Path, monkeypatch):
     # `make arch-regen` / `arch-regen-stage` route through `_main --emit`;
     # the emitted matrix and the ratchet baseline must move together or the
@@ -164,20 +174,55 @@ def test_main_emit_syncs_traceability_baseline(populated_repo: Path, monkeypatch
     from arch.runner import _main
     from disturbance.baseline import load_baseline
 
-    baseline = populated_repo / "disturbance/baselines/traceability.yaml"
-    baseline.parent.mkdir(parents=True, exist_ok=True)
-    baseline.write_text(
-        "comment: c\nentries:\n"
-        "  docs/arch/generated/traceability_matrix.md::untraced-pct: 100\n"
+    baseline = _write_traceability_baseline(populated_repo)
+    # A real PR-squash-merge population, fully traced → recomputed pct 0.
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "feat: traced work (#1)\n\nReq-ID: REQ-1",
+        ],
+        cwd=populated_repo,
+        check=True,
+        capture_output=True,
     )
     monkeypatch.setattr(
         sys, "argv", ["arch.runner", "--emit", "--repo-root", str(populated_repo)]
     )
 
     assert _main() == 0
-    # populated_repo has no PR-merge commits → fresh matrix reports pct 0,
-    # so the grandfathered entry is pruned.
+    # Fully traced population → fresh matrix reports pct 0, so the
+    # grandfathered entry is pruned (from the RECOMPUTED value).
     assert load_baseline(baseline) == {}
+
+
+def test_main_emit_never_prunes_baseline_from_an_empty_parse(
+    populated_repo: Path, monkeypatch
+):
+    # populated_repo's history has NO PR-merge commits: the matrix renders
+    # pct 0 from an empty population, which is the generation-regression
+    # shape, not 0%-untraced success — the sync must leave the baseline
+    # alone (CH-5 convergence review finding 3).
+    import sys
+
+    from arch.runner import _main
+    from disturbance.baseline import load_baseline
+
+    baseline = _write_traceability_baseline(populated_repo)
+    monkeypatch.setattr(
+        sys, "argv", ["arch.runner", "--emit", "--repo-root", str(populated_repo)]
+    )
+
+    assert _main() == 0
+    assert load_baseline(baseline) == {
+        "docs/arch/generated/traceability_matrix.md::untraced-pct": 100
+    }
 
 
 def test_artifact_files_covers_ubiquitous_language():
