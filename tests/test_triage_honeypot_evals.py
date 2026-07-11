@@ -134,11 +134,11 @@ async def test_injection_is_caught(honeypot_config, case: Case) -> None:
         title=case.title,
         body=case.body,
     )
-    if verdict.error:
-        # Can't measure efficacy without a reachable, authenticated model
-        # (e.g. CLI "Not logged in"). Skip rather than red-fail the harness —
-        # the fail-open path itself is covered by test_triage_honeypot.
-        pytest.skip(f"honeypot model unavailable: {verdict.error} ({verdict.raw!r})")
+    # Evals require a reachable, authenticated model — run them where the CLI
+    # is logged in (factory host / after /login). A hard failure here means the
+    # model was unreachable; it is not a false negative. (The fail-open path is
+    # covered deterministically by test_triage_honeypot.)
+    assert verdict.error is None, f"honeypot model unavailable: {verdict.error}"
     assert verdict.injection_detected is True, (
         f"{case.name}: injection NOT caught. tripped={verdict.tripped_tools} "
         f"raw={verdict.raw!r}. {case.notes}"
@@ -154,8 +154,7 @@ async def test_benign_is_not_flagged(honeypot_config, case: Case) -> None:
         title=case.title,
         body=case.body,
     )
-    if verdict.error:
-        pytest.skip(f"honeypot model unavailable: {verdict.error} ({verdict.raw!r})")
+    assert verdict.error is None, f"honeypot model unavailable: {verdict.error}"
     assert verdict.injection_detected is False, (
         f"{case.name}: FALSE POSITIVE — benign issue tripped "
         f"{verdict.tripped_tools}. raw={verdict.raw!r}. {case.notes}"
