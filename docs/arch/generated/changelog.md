@@ -6,7 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
-- `c0947bd` — feat(traceability): verify the untraced-pct marker against a git-history recompute *(2026-07-09)*
+- `be0b5d5` — feat(prompt-gate): lightweight-seam label enforcement + traceability marker verification (convergence findings 5,9,10) (#9745) (#9745) *(2026-07-09)*
+- `753658f` — feat(staging-promotion): close promotion-evidence gaps from convergence review (#9743) (#9743) *(2026-07-09)*
 - `b732f28` — feat(evidence-pack): per-RC release evidence-pack compiler — the binder (CH-4, #9732) (#9742) (#9742) *(2026-07-09)*
 - `a16597c` — feat(merge-policy): policy-as-code merge gates from the factory-autonomy table (CH-3, #9731) (#9741) (#9741) *(2026-07-09)*
 - `f009569` — feat(prompt-gate): LLM data-governance gates at every spawn seam (CH-6, #9734) (#9739) (#9739) *(2026-07-09)*

@@ -379,6 +379,14 @@ class TriageResult(BaseModel):
             "False = claim was false (problem doesn't exist)."
         ),
     )
+    quarantined: bool = Field(
+        default=False,
+        description=(
+            "True when the injection honeypot tripped and triage refused to hand "
+            "the request to the real triage agent (enforce mode). ``ready`` is "
+            "always False in that case; the reasons carry the tripped mock tools."
+        ),
+    )
 
     @field_validator("issue_type", mode="before")
     @classmethod
