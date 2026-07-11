@@ -1,10 +1,35 @@
 # Proposal: stop the maintenance loops from leaving `repo_root` dirty
 
-**Status:** Draft / for review (do not merge as-is — this is the design, not the change)
+**Status:** ✅ Implemented (2026-06-21). Kept as the design record — the "why the
+obvious fixes are wrong" analysis below is the load-bearing part.
 **Context:** Part 3 of 3 on factory working-tree hygiene. Parts 1 & 2 (untrack
-runtime caches #9537; `make factory` isolated workspace #9538) already remove the
+runtime caches #9537; `make factory` isolated workspace #9538) already removed the
 operator pain. This documents the *source-level* fix and why the obvious versions
-are wrong, so we implement the right one deliberately.
+are wrong, so we implemented the right one deliberately.
+
+## Outcome (what shipped)
+
+The "generate-in-worktree" refactor landed one TDD'd PR per loop, `repo_wiki_loop`
+last (it was the hardest — heal-in-place across lint/compile/drift/generalization
+plus a coalescing PR state machine):
+
+- **Foundation + DiagramLoop** — #9614. Extracted
+  `auto_pr.generate_and_open_pr_async` + `_finalize_pr_from_worktree` from
+  `open_automated_pr_async`; the caller now supplies a `generate(worktree)`
+  callback and `path_specs=[…]`, empty staged diff → `no-diff` (no PR).
+- **pricing / term / corpus / contract / adr** — #9628–#9632.
+- **repo_wiki_loop** — #9666. `pr_body` also became `str | Callable[[], str]`
+  (lazy, resolved after generate) so the maintenance-PR summary can reflect what
+  the heal produced.
+
+Each migrated loop carries a regression test asserting `git status --porcelain`
+in `repo_root` is empty after a full generate→PR cycle; `repo_wiki_loop` adds a
+real-git integration test proving the healed content lands on the pushed branch
+while `repo_root` stays byte-clean.
+
+Note on the loop count: the original list below said "eight" and included
+`service_registry`'s wiki bootstrap. That bootstrap is a one-time seeding step,
+not a per-tick dirtier, so the per-tick migration covered the seven loops above.
 
 ## Root cause
 
@@ -67,7 +92,8 @@ never written.
    (`staging`) so the factory runs the branch it PRs to — then a post-merge
    `git pull` in the workspace converges cleanly (option 2 becomes viable there).
 3. **Follow-up refactor (this proposal):** implement "generate-in-worktree",
-   `repo_wiki_loop` first, then the other seven callers. Scoped, TDD'd, one PR
-   per loop.
+   one TDD'd PR per loop. ✅ Done — see the Outcome section above (#9614,
+   #9628–#9632, #9666).
 
-Until the refactor lands, #9537 + #9538 are the supported answer.
+With the refactor landed, `repo_root` is never written during a maintenance
+cycle; #9537 + #9538 remain the operator-facing hygiene layers.
