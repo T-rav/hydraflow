@@ -190,3 +190,43 @@ class TestNoOrchStateInSettings:
         ):
             assert f"orch.state.get_{name}_settings" not in source
             assert f"orch.state.set_{name}_settings" not in source
+
+
+class TestSettingsSchemaEndpoint:
+    """GET /api/control/settings-schema derives rows from the registry + model."""
+
+    @pytest.mark.asyncio
+    async def test_returns_registry_derived_rows(self, _router_no_orch):
+        router, _state = _router_no_orch
+        handler = find_endpoint(router, "/api/control/settings-schema", method="GET")
+        assert handler is not None
+        response = await handler()
+        rows = json.loads(response.body)["settings"]
+        by_name = {r["name"]: r for r in rows}
+
+        assert "max_workers" in by_name and "staging_enabled" in by_name
+
+        mw = by_name["max_workers"]
+        assert mw["type"] == "int"
+        assert mw["group"] == "Concurrency"
+        assert mw["live"] is True
+        assert mw["min"] == 1
+        assert mw["description"]
+
+        # Branching structural field is bool + restart-required.
+        se = by_name["staging_enabled"]
+        assert se["type"] == "bool"
+        assert se["live"] is False
+
+    @pytest.mark.asyncio
+    async def test_every_row_is_patchable(self, _router_no_orch):
+        """Every field the schema exposes is in the PATCH allowlist — the screen
+        can never render a field it can't save."""
+        from settings_registry import mutable_field_names
+
+        router, _state = _router_no_orch
+        handler = find_endpoint(router, "/api/control/settings-schema", method="GET")
+        assert handler is not None
+        rows = json.loads((await handler()).body)["settings"]
+        exposed = {r["name"] for r in rows}
+        assert exposed <= mutable_field_names()

@@ -39,6 +39,7 @@ from route_types import (
     ControlStatusResponse,
     RepoSlugParam,
 )
+from settings_registry import build_settings_schema, mutable_field_names
 from update_check import load_cached_update_result
 
 if TYPE_CHECKING:
@@ -402,38 +403,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
     """Register control-related routes on *router*."""
 
     # Mutable fields that can be changed at runtime via PATCH
-    _MUTABLE_FIELDS = {
-        "gh_circuit_breaker_enabled",
-        "merge_policy_enabled",
-        "max_triagers",
-        "max_workers",
-        "max_planners",
-        "max_reviewers",
-        "max_hitl_workers",
-        "model",
-        "review_model",
-        "planner_model",
-        "batch_size",
-        "max_ci_fix_attempts",
-        "max_quality_fix_attempts",
-        "max_review_fix_attempts",
-        "min_review_findings",
-        "max_merge_conflict_fix_attempts",
-        "ci_check_timeout",
-        "ci_poll_interval",
-        "poll_interval",
-        "pr_unstick_interval",
-        "pr_unstick_batch_size",
-        "unstick_auto_merge",
-        "unstick_all_causes",
-        "memory_auto_approve",
-        "workspace_base",
-        "staging_enabled",
-        "staging_branch",
-        "main_branch",
-        "rc_cadence_hours",
-        "test_adequacy_coverage_timeout_secs",
-    }
+    # The editable-field allowlist is the schema-derived settings registry —
+    # add a field to ``settings_registry.SETTINGS`` to expose it (that is the
+    # only step; type/description/bounds/choices are derived from the Field).
+    _MUTABLE_FIELDS = mutable_field_names()
 
     def _build_system_worker_inference_stats(
         cfg: HydraFlowConfig | None = None,
@@ -797,6 +770,19 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         repo: str | None = Query(default=None, description="Repo slug to target"),
     ) -> JSONResponse:
         return await ctx.execute_admin_task("compact", run_compact, repo)
+
+    @router.get("/api/control/settings-schema")
+    async def get_settings_schema(repo: RepoSlugParam = None) -> JSONResponse:
+        """Schema for the runtime settings screen.
+
+        One row per :data:`settings_registry.SETTINGS` entry, with input type,
+        description, default, min/max, enum choices, current value and the
+        live/restart flag — everything but group/live derived from the Pydantic
+        ``Field``. The screen renders generically from this; ``PATCH
+        /api/control/config`` applies edits.
+        """
+        _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
+        return JSONResponse({"settings": build_settings_schema(_cfg)})
 
     @router.patch("/api/control/config")
     async def patch_config(
