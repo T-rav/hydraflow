@@ -448,6 +448,8 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
 
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
+    ("triage_honeypot_enabled", "HYDRAFLOW_TRIAGE_HONEYPOT_ENABLED", True),
+    ("triage_honeypot_enforce", "HYDRAFLOW_TRIAGE_HONEYPOT_ENFORCE", False),
     ("approval_records_enabled", "HYDRAFLOW_APPROVAL_RECORDS_ENABLED", True),
     ("evidence_pack_enabled", "HYDRAFLOW_EVIDENCE_PACK_ENABLED", True),
     ("merge_policy_enabled", "HYDRAFLOW_MERGE_POLICY_ENABLED", True),
@@ -1394,6 +1396,41 @@ class HydraFlowConfig(BaseModel):
             "Max LLM turns for triage evaluation. Increase from 1 to allow "
             "Read/Grep tool calls to verify currency and falsifiable claims."
         ),
+    )
+    triage_honeypot_enabled: bool = Field(
+        default=True,
+        description=(
+            "Run the prompt-injection honeypot over each issue before the real "
+            "triage agent handles it. A cheap agent is shown the untrusted body "
+            "with a MOCK tool-belt (nothing executes); any mock-tool call means "
+            "the body tried to hijack the agent — i.e. an injection attempt. "
+            "See src/triage_honeypot.py."
+        ),
+    )
+    triage_honeypot_enforce: bool = Field(
+        default=False,
+        description=(
+            "When False (default), the honeypot runs in SHADOW mode: a trip "
+            "emits a SYSTEM_ALERT + telemetry but the issue still proceeds to "
+            "triage — so efficacy (false-positive vs catch rate) can be evaluated "
+            "from telemetry before it gates real work. When True, a trip "
+            "QUARANTINES the issue (ready=False) and the real triage agent is "
+            "never handed the request. Flip to True once shadow telemetry looks "
+            "good."
+        ),
+    )
+    triage_honeypot_model: str = Field(
+        default="haiku",
+        description=(
+            "Model for the triage injection honeypot. A cheap classifier — the "
+            "signal is behavioural (did it call a mock tool), not deep reasoning."
+        ),
+    )
+    triage_honeypot_timeout: float = Field(
+        default=60.0,
+        ge=5.0,
+        le=600.0,
+        description="Timeout (seconds) for the triage honeypot pre-check.",
     )
     auditor_finding_max_age_days: int = Field(
         default=14,

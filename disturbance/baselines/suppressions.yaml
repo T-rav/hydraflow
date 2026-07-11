@@ -1,6 +1,9 @@
-comment: 'suppressions disturbance baseline. MUST NOT grow (gate fails on increase);
-  MAY shrink (prune when fixed). re-snapshot 2026-07: +human_steering BLE001 degradation
-  handler (intentional, sanctioned broad-except pattern for per-issue tick resilience).'
+comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increase);\
+  \ MAY shrink (prune when fixed). re-snapshot 2026-07: +human_steering BLE001 degradation\
+  \ handler (intentional, sanctioned broad-except pattern for per-issue tick resilience).\
+  \ re-snapshot 2026-07: +triage injection honeypot (triage_honeypot.py PLC0415 lazy\
+  \ run_lightweight_agent import + BLE001 fail-open; triage.py BLE001 fail-open +\
+  \ alert-never-crash) \u2014 sanctioned per honeypot fail-open/defence-in-depth design."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -298,6 +301,10 @@ entries:
   src/trace_rollup.py::noqa:PLC0415: 2
   "src/trace_rollup.py::noqa:PLR0911\u2014early-returnguardsformissing/malformedtracefiles": 1
   src/transcript_summarizer.py::noqa:PLC0415: 1
+  "src/triage.py::noqa:BLE001\u2014alertingmustnotcrashtriage": 1
+  "src/triage.py::noqa:BLE001\u2014classify,elsefailopen": 1
+  "src/triage_honeypot.py::noqa:BLE001\u2014classifythenfailopen": 1
+  src/triage_honeypot.py::noqa:PLC0415: 1
   src/triage_phase.py::noqa:BLE001: 1
   src/triage_phase.py::noqa:PLC0415: 3
   src/triage_retry_loop.py::noqa:BLE001: 4

@@ -426,6 +426,10 @@ class ConfigFactory:
         fitness_scorecard_interval: int = 86400,
         fitness_window_days: int = 30,
         fitness_min_samples: int = 20,
+        # Off by default in tests: the injection honeypot spawns a lightweight
+        # agent before triage's LLM eval, which most triage tests neither mock
+        # nor want. Its own tests opt in. Production default is True.
+        triage_honeypot_enabled: bool = False,
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -438,6 +442,7 @@ class ConfigFactory:
                 )
             return HydraFlowConfig(
                 config_file=config_file,
+                triage_honeypot_enabled=triage_honeypot_enabled,
                 ready_label=ready_label if ready_label is not None else ["test-label"],
                 batch_size=batch_size,
                 max_workers=max_workers,
