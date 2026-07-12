@@ -410,6 +410,15 @@ class EpicDecompResult(BaseModel):
     epic_body: str = ""
     children: list[NewIssueSpec] = Field(default_factory=list)
     reasoning: str = ""
+    confidence: str = Field(
+        default="",
+        description=(
+            "Self-reported confidence ('high'/'medium'/'low') from the "
+            "decomposition council's decision. Empty for callers that don't "
+            "produce a confidence signal (e.g. the legacy single-shot "
+            "intake-triage path)."
+        ),
+    )
 
 
 # --- Product Discovery & Shaping ---
