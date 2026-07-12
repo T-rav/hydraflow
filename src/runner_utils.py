@@ -630,6 +630,7 @@ async def _openrouter_complete(
     prompt: str,
     timeout: float,
     response_schema: dict[str, object] | None = None,
+    usage_out: dict[str, object] | None = None,
 ) -> SimpleResult:
     """Direct OpenAI-compatible completion (OpenRouter et al.). One HTTP POST;
     no tools, no agent loop. ``response_schema`` switches on native strict-JSON
@@ -692,6 +693,14 @@ async def _openrouter_complete(
         return SimpleResult(
             stderr=f"openrouter: malformed response ({exc})", returncode=-1
         )
+    # Surface the API's real token usage so telemetry records actual cost
+    # (token_source="actual") instead of the CLI path's char estimate.
+    if usage_out is not None:
+        u = data.get("usage") or {}
+        usage_out["input_tokens"] = int(u.get("prompt_tokens", 0) or 0)
+        usage_out["output_tokens"] = int(u.get("completion_tokens", 0) or 0)
+        usage_out["total_tokens"] = int(u.get("total_tokens", 0) or 0)
+        usage_out["usage_available"] = bool(u.get("total_tokens"))
     return SimpleResult(stdout=content, returncode=0)
 
 
@@ -788,9 +797,13 @@ async def run_lightweight_agent(
     success = False
     record_row = False
     result = SimpleResult(returncode=-1)
+    # Real token usage from the OpenRouter API (None on the CLI path, which has
+    # no usage stats and falls back to a char estimate).
+    usage_stats: dict[str, object] | None = None
     try:
         try:
             if provider == _OPENROUTER:
+                usage_stats = {}
                 result = await _openrouter_complete(
                     base_url=config.openrouter_base_url,
                     api_key=_openrouter_api_key(),
@@ -798,6 +811,7 @@ async def run_lightweight_agent(
                     prompt=prompt,
                     timeout=timeout,
                     response_schema=response_schema,
+                    usage_out=usage_stats,
                 )
             else:
                 result = await _claude_cli_complete(
@@ -849,5 +863,5 @@ async def run_lightweight_agent(
                 issue_number=issue_number,
                 pr_number=pr_number,
                 session_id=session_id,
-                stats=None,
+                stats=usage_stats,
             )

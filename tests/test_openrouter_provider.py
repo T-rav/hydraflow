@@ -174,6 +174,48 @@ class TestOpenRouterComplete:
         assert result.returncode == 500
         assert "openrouter http 500" in result.stderr
 
+    async def test_captures_real_token_usage(self, monkeypatch):
+        usage: dict = {}
+        _patch_httpx(
+            monkeypatch,
+            _ok(
+                "hi",
+                usage={
+                    "prompt_tokens": 120,
+                    "completion_tokens": 30,
+                    "total_tokens": 150,
+                },
+            ),
+        )
+        await _openrouter_complete(
+            base_url="https://x",
+            api_key="k",
+            model="m",
+            prompt="p",
+            timeout=5.0,
+            usage_out=usage,
+        )
+        assert usage == {
+            "input_tokens": 120,
+            "output_tokens": 30,
+            "total_tokens": 150,
+            "usage_available": True,
+        }
+
+    async def test_usage_available_false_when_api_omits_usage(self, monkeypatch):
+        usage: dict = {}
+        _patch_httpx(monkeypatch, _ok("hi", usage={}))
+        await _openrouter_complete(
+            base_url="https://x",
+            api_key="k",
+            model="m",
+            prompt="p",
+            timeout=5.0,
+            usage_out=usage,
+        )
+        assert usage["usage_available"] is False
+        assert usage["total_tokens"] == 0
+
     async def test_malformed_response_soft_fails(self, monkeypatch):
         result = await self._run(monkeypatch, _FakeResp(json_data={"nope": 1}))
         assert result.returncode == -1
@@ -218,6 +260,47 @@ class TestRunLightweightAgentDispatch:
         assert result.stdout == "OR-RESULT"
         assert calls["n"] == 1
         assert calls["kwargs"]["model"] == "deepseek/deepseek-chat"
+
+    async def test_openrouter_real_usage_flows_to_telemetry(self, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        from execution import SimpleResult
+        from runner_utils import run_lightweight_agent
+        from tests.helpers import ConfigFactory
+
+        async def _fake_or(*, usage_out=None, **_kw):
+            if usage_out is not None:
+                usage_out.update(
+                    {
+                        "input_tokens": 100,
+                        "output_tokens": 20,
+                        "total_tokens": 120,
+                        "usage_available": True,
+                    }
+                )
+            return SimpleResult(stdout="ok", returncode=0)
+
+        recorded: dict = {}
+
+        def _fake_record(_config, **kw):
+            recorded.update(kw)
+
+        monkeypatch.setattr("runner_utils._openrouter_complete", _fake_or)
+        monkeypatch.setattr("runner_utils._record_inference", _fake_record)
+
+        await run_lightweight_agent(
+            runner=AsyncMock(),
+            config=ConfigFactory.create(),
+            tool="claude",
+            model="deepseek/deepseek-chat",
+            prompt="p",
+            source="unit_test",
+            timeout=10.0,
+            provider="openrouter",
+        )
+        # Real API usage reached the telemetry record → token_source="actual".
+        assert recorded["stats"]["total_tokens"] == 120
+        assert recorded["stats"]["usage_available"] is True
 
     async def test_default_provider_stays_claude_cli(self, monkeypatch):
         from unittest.mock import AsyncMock
