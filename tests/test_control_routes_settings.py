@@ -230,3 +230,25 @@ class TestSettingsSchemaEndpoint:
         rows = json.loads((await handler()).body)["settings"]
         exposed = {r["name"] for r in rows}
         assert exposed <= mutable_field_names()
+
+    @pytest.mark.asyncio
+    async def test_reports_provider_key_presence_booleans_only(
+        self, _router_no_orch, monkeypatch
+    ):
+        """The response carries per-provider API-key presence so the UI can
+        badge wiring — booleans ONLY; the secret value never appears."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-present")
+        for env in ("ZAI_API_KEY", "HYDRAFLOW_ZAI_API_KEY"):
+            monkeypatch.delenv(env, raising=False)
+
+        router, _state = _router_no_orch
+        handler = find_endpoint(router, "/api/control/settings-schema", method="GET")
+        assert handler is not None
+        body = json.loads((await handler()).body)
+        keys = body["provider_keys"]
+
+        assert keys["openrouter"] is True
+        assert keys["zai"] is False
+        assert all(isinstance(v, bool) for v in keys.values())
+        # The secret value must never be serialized into the response.
+        assert "sk-or-present" not in json.dumps(body)

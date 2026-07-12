@@ -1396,22 +1396,31 @@ class HydraFlowConfig(BaseModel):
             "(a secret — never stored on config or shown in the UI)."
         ),
     )
+    zai_base_url: str = Field(
+        default="https://api.z.ai/api/paas/v4",
+        description=(
+            "OpenAI-compatible base URL for the 'zai' one-shot LLM provider "
+            "(z.ai / GLM). The API key is read from the ZAI_API_KEY env var "
+            "(a secret — never stored on config or shown in the UI)."
+        ),
+    )
     # Per-role backend dials for the one-shot (no-tools) loops. "claude" keeps
-    # the CLI harness; "openrouter" calls a cheap direct model. Pair each with
-    # the role's *_model (e.g. a DeepSeek/Flash id when set to openrouter).
-    wiki_compilation_provider: Literal["claude", "openrouter"] = Field(
+    # the CLI harness; "openrouter" and "zai" call a cheap direct model over an
+    # OpenAI-compatible endpoint. Pair each with the role's *_model (e.g. a
+    # DeepSeek id for openrouter, "glm-4.6" for zai).
+    wiki_compilation_provider: Literal["claude", "openrouter", "zai"] = Field(
         default="claude", description="Backend for wiki topic compilation."
     )
-    adr_review_provider: Literal["claude", "openrouter"] = Field(
+    adr_review_provider: Literal["claude", "openrouter", "zai"] = Field(
         default="claude", description="Backend for the ADR reviewer."
     )
-    transcript_summary_provider: Literal["claude", "openrouter"] = Field(
+    transcript_summary_provider: Literal["claude", "openrouter", "zai"] = Field(
         default="claude", description="Backend for transcript summarization."
     )
-    triage_honeypot_provider: Literal["claude", "openrouter"] = Field(
+    triage_honeypot_provider: Literal["claude", "openrouter", "zai"] = Field(
         default="claude", description="Backend for the triage injection honeypot."
     )
-    pr_unstick_provider: Literal["claude", "openrouter"] = Field(
+    pr_unstick_provider: Literal["claude", "openrouter", "zai"] = Field(
         default="claude", description="Backend for the PR-unsticker cause analysis."
     )
     triage_max_turns: int = Field(

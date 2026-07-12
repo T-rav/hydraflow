@@ -691,6 +691,7 @@ class TestMakeDockerEnv:
             {
                 "OPENAI_API_KEY": "sk-openai",
                 "OPENROUTER_API_KEY": "sk-openrouter",
+                "ZAI_API_KEY": "sk-zai",
                 "PI_CODING_AGENT_DIR": "/Users/dev/.pi/agent",
                 "CODEX_HOME": "/Users/dev/.codex",
             },
@@ -699,6 +700,7 @@ class TestMakeDockerEnv:
             env = make_docker_env()
         assert env["OPENAI_API_KEY"] == "sk-openai"
         assert env["OPENROUTER_API_KEY"] == "sk-openrouter"
+        assert env["ZAI_API_KEY"] == "sk-zai"
         assert env["PI_CODING_AGENT_DIR"] == "/Users/dev/.pi/agent"
         assert env["CODEX_HOME"] == "/Users/dev/.codex"
 

@@ -7,7 +7,7 @@ vi.mock('../../context/HydraFlowContext', () => ({
   useHydraFlow: (...args) => mockUseHydraFlow(...args),
 }))
 
-const { RuntimeSettingsPanel, humanize } = await import('../RuntimeSettingsPanel')
+const { RuntimeSettingsPanel, humanize, providerKeyStatus } = await import('../RuntimeSettingsPanel')
 
 const SCHEMA = {
   settings: [
@@ -27,6 +27,22 @@ const SCHEMA = {
       min: null, max: null, choices: ['ci_only', 'llm_review'],
     },
   ],
+}
+
+const ROUTING_SCHEMA = {
+  settings: [
+    {
+      name: 'openrouter_base_url', group: 'Model Routing', live: true, type: 'str',
+      description: 'OpenRouter base URL', default: '', value: 'https://openrouter.ai/api/v1',
+      min: null, max: null, choices: null,
+    },
+    {
+      name: 'zai_base_url', group: 'Model Routing', live: true, type: 'str',
+      description: 'z.ai base URL', default: '', value: 'https://api.z.ai/api/paas/v4',
+      min: null, max: null, choices: null,
+    },
+  ],
+  provider_keys: { openrouter: true, zai: false },
 }
 
 function makeFetch({ schema = SCHEMA, patchOk = true } = {}) {
@@ -56,6 +72,24 @@ beforeEach(() => {
 describe('humanize', () => {
   it('title-cases snake_case field names', () => {
     expect(humanize('max_workers')).toBe('Max Workers')
+  })
+})
+
+describe('providerKeyStatus', () => {
+  const keys = { openrouter: true, zai: false }
+
+  it('maps a <provider>_base_url field to its key presence', () => {
+    expect(providerKeyStatus('openrouter_base_url', keys)).toBe(true)
+    expect(providerKeyStatus('zai_base_url', keys)).toBe(false)
+  })
+
+  it('returns null for a non-base_url field (no badge)', () => {
+    expect(providerKeyStatus('max_workers', keys)).toBeNull()
+  })
+
+  it('returns null when the provider has no key entry', () => {
+    expect(providerKeyStatus('mistral_base_url', keys)).toBeNull()
+    expect(providerKeyStatus('zai_base_url', {})).toBeNull()
   })
 })
 
@@ -149,5 +183,23 @@ describe('RuntimeSettingsPanel', () => {
     render(<RuntimeSettingsPanel />)
     await waitFor(() => expect(screen.getByTestId('settings-aggregate-note')).toBeInTheDocument())
     expect(screen.getByTestId('input-max_workers')).toBeDisabled()
+  })
+
+  it('badges API-key presence on provider base-URL fields', async () => {
+    mockContext({ fetchWithRepo: makeFetch({ schema: ROUTING_SCHEMA }) })
+    render(<RuntimeSettingsPanel />)
+    await waitFor(() =>
+      expect(screen.getByTestId('setting-openrouter_base_url')).toBeInTheDocument(),
+    )
+    // openrouter key present → "detected"; zai key absent → "not set".
+    expect(screen.getByTestId('keystatus-openrouter_base_url').textContent).toContain('detected')
+    expect(screen.getByTestId('keystatus-zai_base_url').textContent).toContain('not set')
+  })
+
+  it('never renders a key badge on a non-provider field', async () => {
+    mockContext()
+    render(<RuntimeSettingsPanel />)
+    await waitFor(() => expect(screen.getByTestId('setting-max_workers')).toBeInTheDocument())
+    expect(screen.queryByTestId('keystatus-max_workers')).not.toBeInTheDocument()
   })
 })
