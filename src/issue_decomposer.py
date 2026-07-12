@@ -36,6 +36,33 @@ class IssueDecomposer:
         self._state = state
         self._config = config
 
+    def _find_root_epic_number(self, task_id: int) -> int | None:
+        """Walk the epic tree to find the root epic that owns *task_id*.
+
+        Epics are not currently nested as children of other epics — a
+        decomposed child's replacement epic has no persisted link back to
+        the epic it was carved out of — so this resolves in a single hop
+        today. The loop is defensive against future nesting (e.g. if an
+        epic number is ever recorded as another epic's child) without
+        requiring a new persisted parent-epic field for this task.
+        """
+        all_states = self._state.get_all_epic_states()
+        current = task_id
+        seen: set[int] = set()
+        root: int | None = None
+        while True:
+            found: int | None = None
+            for epic in all_states.values():
+                if current in epic.child_issues:
+                    found = epic.epic_number
+                    break
+            if found is None or found in seen:
+                break
+            root = found
+            seen.add(found)
+            current = found
+        return root
+
     async def create_epic_from_result(
         self,
         *,
@@ -47,18 +74,54 @@ class IssueDecomposer:
         """Create an epic + children from *result*, register it, close *source_task*.
 
         Returns the new epic issue number, or ``None`` when
-        ``result.should_decompose`` is False or the epic issue failed to
-        create. When *stall_context* is set, it is embedded into every child
-        body (used by the auto-agent decompose-on-stall path to carry
-        forward why the parent stalled). *depth* is recorded on the new
-        epic's ``EpicState.decomposition_depth``.
+        ``result.should_decompose`` is False, *depth* has hit
+        ``config.max_decomposition_depth`` (the "depth-cap"), creating these
+        children would push the decomposition's root epic to or past
+        ``config.max_total_decomposition_children`` (the "fanout-cap"), or
+        the epic issue failed to create. When *stall_context* is set, it is
+        embedded into every child body (used by the auto-agent
+        decompose-on-stall path to carry forward why the parent stalled).
+        *depth* is recorded on the new epic's ``EpicState.decomposition_depth``.
         """
         if not result.should_decompose:
+            return None
+
+        if depth >= self._config.max_decomposition_depth:
+            logger.info(
+                "Issue #%d decomposition blocked (depth-cap): depth=%d >= "
+                "max_decomposition_depth=%d",
+                source_task.id,
+                depth,
+                self._config.max_decomposition_depth,
+            )
+            return None
+
+        root_epic_number = self._find_root_epic_number(source_task.id)
+        existing_total = 0
+        if root_epic_number is not None:
+            root_state = self._state.get_epic_state(root_epic_number)
+            if root_state is not None:
+                existing_total = root_state.total_children
+        new_child_count = len(result.children)
+        if (
+            existing_total + new_child_count
+            >= self._config.max_total_decomposition_children
+        ):
+            logger.info(
+                "Issue #%d decomposition blocked (fanout-cap): root #%s "
+                "existing=%d + new=%d >= max_total_decomposition_children=%d",
+                source_task.id,
+                root_epic_number,
+                existing_total,
+                new_child_count,
+                self._config.max_total_decomposition_children,
+            )
             return None
 
         epic_label = self._config.epic_label[0]
         epic_child_label = self._config.epic_child_label[0]
         find_label = self._config.find_label[0]
+        auto_child_label = self._config.auto_decomposed_child_label[0]
 
         # Create the epic issue
         epic_number = await self._prs.create_issue(
@@ -82,7 +145,7 @@ class IssueDecomposer:
             child_num = await self._prs.create_issue(
                 child_spec.title,
                 child_body,
-                [epic_child_label, find_label],
+                [epic_child_label, find_label, auto_child_label],
             )
             if child_num > 0:
                 child_numbers.append(child_num)

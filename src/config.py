@@ -1104,6 +1104,16 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-epic-child"],
         description="Labels for child issues linked to epics (OR logic)",
     )
+    auto_decomposed_child_label: list[str] = Field(
+        default=["auto-decomposed-child"],
+        description=(
+            "Label stamped on every child issue created by decompose-to-converge "
+            "(ADR-0105), on top of epic_child_label/find_label. Triage's intake "
+            "complexity path (_maybe_decompose) skips re-decomposing an issue "
+            "carrying this label so the depth counter can't be bypassed by "
+            "re-entering through the intake vector uncounted."
+        ),
+    )
     epic_group_planning: bool = Field(
         default=True,
         description="Group epic children for cohort planning with gap review",
@@ -3518,6 +3528,7 @@ class HydraFlowConfig(BaseModel):
         "dup_label",
         "epic_label",
         "epic_child_label",
+        "auto_decomposed_child_label",
         "find_label",
         "discover_label",
         "shape_label",

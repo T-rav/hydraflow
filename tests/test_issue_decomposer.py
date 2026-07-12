@@ -79,10 +79,18 @@ class TestCreateEpicFromResult:
         child_1 = prs.issue(epic_number + 1)
         child_2 = prs.issue(epic_number + 2)
         assert child_1.title == "Child 1"
-        assert child_1.labels == [config.epic_child_label[0], config.find_label[0]]
+        assert child_1.labels == [
+            config.epic_child_label[0],
+            config.find_label[0],
+            config.auto_decomposed_child_label[0],
+        ]
         assert f"Parent Epic #{epic_number}" in child_1.body
         assert child_2.title == "Child 2"
-        assert child_2.labels == [config.epic_child_label[0], config.find_label[0]]
+        assert child_2.labels == [
+            config.epic_child_label[0],
+            config.find_label[0],
+            config.auto_decomposed_child_label[0],
+        ]
         assert f"Parent Epic #{epic_number}" in child_2.body
 
         epic_manager.register_epic.assert_called_once_with(
@@ -170,14 +178,18 @@ class TestCreateEpicFromResult:
 
         epic_manager.register_epic.side_effect = _register_epic
 
+        # depth=1 (not 2): the default max_decomposition_depth is 2, and the
+        # depth-cap (task 5) blocks any call where depth >= that cap — so a
+        # depth at the cap itself is exercised separately in
+        # tests/test_decomposition_depth_cap.py, not here.
         epic_number = await decomposer.create_epic_from_result(
-            source_task=source_task, result=result, depth=2
+            source_task=source_task, result=result, depth=1
         )
 
         assert epic_number is not None
         epic_state = state.get_epic_state(epic_number)
         assert epic_state is not None
-        assert epic_state.decomposition_depth == 2
+        assert epic_state.decomposition_depth == 1
 
     @pytest.mark.asyncio
     async def test_depth_zero_is_default_and_does_not_touch_epic_state(

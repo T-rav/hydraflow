@@ -545,6 +545,27 @@ class TriagePhase:
         ):
             return False
 
+        # Intake-vector guard (ADR-0105 §4): an issue stamped
+        # auto-decomposed-child was itself created by a prior decomposition
+        # (depth-cap-bound via create_epic_from_result). If intake's own
+        # complexity-gated path were allowed to decompose it again, the
+        # split would bypass the depth counter entirely — an uncounted
+        # re-split. Chosen fix (simpler-correct option per the task brief):
+        # skip intake decomposition outright for a stamped auto-child rather
+        # than plumbing its ancestor depth through this path. Further
+        # splitting of an auto-child, if ever needed, only happens through
+        # the stall-path call to create_epic_from_result(depth=...), which
+        # the depth-cap already bounds.
+        auto_child_label = self._config.auto_decomposed_child_label[0]
+        if auto_child_label in issue.tags:
+            logger.info(
+                "Issue #%d carries %r — skipping intake auto-decomposition "
+                "to avoid an uncounted re-split of an already-decomposed child",
+                issue.id,
+                auto_child_label,
+            )
+            return False
+
         logger.info(
             "Issue #%d scored %d complexity — attempting auto-decomposition",
             issue.id,
