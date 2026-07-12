@@ -32,7 +32,7 @@ graph LR
     src -- "4" --> src_dashboard_routes
     src -- "5" --> src_disturbance
     src -- "1" --> src_observability
-    src -- "12" --> src_preflight
+    src -- "13" --> src_preflight
     src -- "1" --> src_review_phase
     src -- "54" --> src_state
     src -- "7" --> src_telemetry

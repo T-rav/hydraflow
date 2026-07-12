@@ -61,7 +61,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `adr_conformance` | `AdrConformanceLoop` | Trust Fleet | — | — | HITL escalation | Evaluates every Accepted ADR's `Enforced by:` checks and files/updates remediation issues on drift. See ADR-0100. |
 | `adr_reviewer` | `ADRReviewerLoop` | Caretaking | `adr_review_model` | — | — | Reviews proposed ADRs via a 3-judge council and routes to accept, reject, or escalate. |
 | `adr_touchpoint_auditor` | `AdrTouchpointAuditorLoop` | Trust Fleet | — | — | HITL escalation | Scans recently-merged PRs for ADR drift — cited src/ modules changed without the ADR being updated. Replaces the synchronous touchpoint gate. See ADR-0056. |
-| `auto_agent_preflight` | `AutoAgentPreflightLoop` | Auto-Agent (HITL Pre-Flight) | `model` | — | HITL escalation | Intercepts hitl-escalation issues; runs an emulated-engineer subprocess to attempt autonomous resolution before the issue surfaces to a human (spec §1–§11; ADR-0050). |
+| `auto_agent_preflight` | `AutoAgentPreflightLoop` | Auto-Agent (HITL Pre-Flight) | `adr_review_model`, `model` | — | HITL escalation | Intercepts hitl-escalation issues; runs an emulated-engineer subprocess to attempt autonomous resolution before the issue surfaces to a human (spec §1–§11; ADR-0050). |
 | `auto_tighten` | `AutoTightenLoop` | Trust Fleet | — | — | — | Locks in coverage-floor gains |
 | `branch_protection_auditor` | `BranchProtectionAuditorLoop` | Quality Gates | — | — | — | Audits live GitHub branch protection against the canonical rulesets generated from gates.toml; files an issue on drift. See ADR-0082. |
 | `ci_monitor` | `CIMonitorLoop` | Quality Gates | — | — | — | Detects failing CI on main and files/auto-closes issues. |

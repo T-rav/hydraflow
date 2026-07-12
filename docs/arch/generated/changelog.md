@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
+- `84c9197` — refactor(triage): extract IssueDecomposer from _maybe_decompose (behavior-preserving) *(2026-07-12)*
 - `7f48338` — docs(adr): ADR-0105 fresh-eyes review pass — 7 refinements *(2026-07-12)*
 - `5942aa8` — docs(adr): ADR-0105 revise — HITL floor + doc-informed decomposition council *(2026-07-12)*
 - `4334c9c` — docs(adr): ADR-0105 + spec — autonomous convergence via decomposition *(2026-07-12)*

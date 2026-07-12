@@ -308,6 +308,17 @@ class PRPort(Protocol):
         """Close GitHub issue *issue_number*."""
         ...
 
+    async def close_pr(self, pr_number: int) -> None:
+        """Close GitHub pull request *pr_number* without merging.
+
+        Distinct from :meth:`close_issue`: a PR and an issue share the
+        repo's number space but are different GraphQL/REST node types, so
+        ``gh issue close`` does not reliably close a PR number. Used by the
+        decompose-to-converge terminal (ADR-0105) to retire a stalled
+        issue's superseded PR once its work has been split into an epic.
+        """
+        ...
+
     async def find_existing_issue(self, title: str) -> int:
         """Search for an open issue with matching title. Returns issue number or 0."""
         ...

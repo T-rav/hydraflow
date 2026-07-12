@@ -84,6 +84,7 @@ class FakePR:
     issue_number: int
     branch: str
     merged: bool = False
+    closed: bool = False
     ci_status: str = "pass"
     draft: bool = False
     url: str = ""
@@ -451,6 +452,12 @@ class FakeGitHub:
         if issue_number in self._issues:
             self._issues[issue_number].state = "closed"
 
+    async def close_pr(self, pr_number: int) -> None:
+        self._maybe_rate_limit()
+        pr = self._prs.get(pr_number)
+        if pr is not None:
+            pr.closed = True
+
     async def find_existing_issue(self, title: str) -> int:
         self._maybe_rate_limit()
         for issue in self._issues.values():
@@ -502,7 +509,7 @@ class FakeGitHub:
     ) -> Any:
         self._maybe_rate_limit()
         for p in self._prs.values():
-            if p.branch == branch and not p.merged:
+            if p.branch == branch and not p.merged and not p.closed:
                 return PRInfoFactory.create(
                     number=p.number,
                     issue_number=p.issue_number,
