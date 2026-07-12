@@ -1,0 +1,6 @@
+{
+  "name": "review-requests-changes",
+  "transcript": "Reviewing PR #503: adds a retry wrapper around the GitHub API calls.\nChecked out the diff. Two problems:\n1. The retry loop in src/gh_client.py catches a bare Exception, which would swallow CreditExhaustedError and burn the attempt budget against an exhausted billing signal.\n2. The backoff timeout is hardcoded to 5 seconds instead of reading ci_poll_interval from config.\nThe happy path and the test coverage look good otherwise.\nPosted a review requesting changes with both findings.",
+  "must_include": ["503", "retry", "CreditExhaustedError", "timeout", "requesting changes"],
+  "notes": "Summary must capture the PR, the subject (retry wrapper), both concrete findings (swallowed credit error + hardcoded timeout), and the outcome (changes requested)."
+}
