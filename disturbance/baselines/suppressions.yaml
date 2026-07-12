@@ -3,7 +3,10 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ handler (intentional, sanctioned broad-except pattern for per-issue tick resilience).\
   \ re-snapshot 2026-07: +triage injection honeypot (triage_honeypot.py PLC0415 lazy\
   \ run_lightweight_agent import + BLE001 fail-open; triage.py BLE001 fail-open +\
-  \ alert-never-crash) \u2014 sanctioned per honeypot fail-open/defence-in-depth design."
+  \ alert-never-crash) \u2014 sanctioned per honeypot fail-open/defence-in-depth design.\
+  \ re-snapshot 2026-07-11: +runner_utils PLC0415 lazy imports for the inlined one-shot\
+  \ LLM provider backends (agent_cli/httpx/execution/subprocess \u2014 circular-safe\
+  \ + import-cost pattern, matches the file's existing lazy-import convention)."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -245,7 +248,7 @@ entries:
   src/review_phase/_phase.py::type-ignore[arg-type]: 2
   src/reviewer.py::noqa:PLC0415: 3
   src/route_back.py::noqa:BLE001: 6
-  src/runner_utils.py::noqa:PLC0415: 4
+  src/runner_utils.py::noqa:PLC0415: 7
   src/runners/base_subprocess_runner.py::noqa:PLC0415: 1
   src/runners/base_subprocess_runner.py::type-ignore[arg-type]: 1
   src/runtime_config.py::noqa:BLE001: 1

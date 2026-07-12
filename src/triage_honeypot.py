@@ -163,6 +163,7 @@ async def screen_issue(
             config=config,
             tool=config.triage_tool,
             model=config.triage_honeypot_model,
+            provider=config.triage_honeypot_provider,
             prompt=prompt,
             source=source,
             timeout=config.triage_honeypot_timeout,

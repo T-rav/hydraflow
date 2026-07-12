@@ -1388,6 +1388,32 @@ class HydraFlowConfig(BaseModel):
         default="sonnet",
         description="Model for triage evaluation (fast/cheap)",
     )
+    openrouter_base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        description=(
+            "OpenAI-compatible base URL for the 'openrouter' one-shot LLM "
+            "provider. The API key is read from the OPENROUTER_API_KEY env var "
+            "(a secret — never stored on config or shown in the UI)."
+        ),
+    )
+    # Per-role backend dials for the one-shot (no-tools) loops. "claude" keeps
+    # the CLI harness; "openrouter" calls a cheap direct model. Pair each with
+    # the role's *_model (e.g. a DeepSeek/Flash id when set to openrouter).
+    wiki_compilation_provider: Literal["claude", "openrouter"] = Field(
+        default="claude", description="Backend for wiki topic compilation."
+    )
+    adr_review_provider: Literal["claude", "openrouter"] = Field(
+        default="claude", description="Backend for the ADR reviewer."
+    )
+    transcript_summary_provider: Literal["claude", "openrouter"] = Field(
+        default="claude", description="Backend for transcript summarization."
+    )
+    triage_honeypot_provider: Literal["claude", "openrouter"] = Field(
+        default="claude", description="Backend for the triage injection honeypot."
+    )
+    pr_unstick_provider: Literal["claude", "openrouter"] = Field(
+        default="claude", description="Backend for the PR-unsticker cause analysis."
+    )
     triage_max_turns: int = Field(
         default=3,
         ge=1,

@@ -86,6 +86,16 @@ SETTINGS: dict[str, SettingSpec] = {
     # --- Paths -----------------------------------------------------------
     # A workspace path is read when workspaces are created at startup.
     "workspace_base": SettingSpec("Paths", live=False, order=0),
+    # --- Model Routing (one-shot loop backends) --------------------------
+    # Each dial picks claude (harness) vs openrouter (cheap direct model) for a
+    # one-shot loop. Live: the next spawn re-reads the value. The OpenRouter API
+    # key is a secret and is intentionally NOT here — it stays in .env.
+    "openrouter_base_url": SettingSpec("Model Routing", live=True, order=0),
+    "wiki_compilation_provider": SettingSpec("Model Routing", live=True, order=1),
+    "adr_review_provider": SettingSpec("Model Routing", live=True, order=2),
+    "transcript_summary_provider": SettingSpec("Model Routing", live=True, order=3),
+    "triage_honeypot_provider": SettingSpec("Model Routing", live=True, order=4),
+    "pr_unstick_provider": SettingSpec("Model Routing", live=True, order=5),
 }
 
 

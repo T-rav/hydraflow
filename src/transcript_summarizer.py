@@ -297,6 +297,7 @@ class TranscriptSummarizer:
                 config=self._config,
                 tool=self._config.transcript_summary_tool,
                 model=self._config.transcript_summary_model,
+                provider=self._config.transcript_summary_provider,
                 prompt=prompt,
                 source="transcript_summary",
                 timeout=self._config.transcript_summary_timeout,

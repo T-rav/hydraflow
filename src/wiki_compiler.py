@@ -907,6 +907,7 @@ class WikiCompiler:
                 config=self._config,
                 tool=self._config.wiki_compilation_tool,
                 model=self._config.wiki_compilation_model,
+                provider=self._config.wiki_compilation_provider,
                 prompt=prompt,
                 source="wiki_compilation",
                 timeout=self._config.wiki_compilation_timeout,

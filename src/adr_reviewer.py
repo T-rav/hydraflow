@@ -536,6 +536,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
                 config=self._config,
                 tool=self._config.adr_review_tool,
                 model=self._config.adr_review_model,
+                provider=self._config.adr_review_provider,
                 prompt=prompt,
                 source="adr_reviewer",
                 timeout=self._config.agent_timeout,
