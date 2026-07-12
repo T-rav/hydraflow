@@ -576,23 +576,57 @@ async def stream_claude_with_telemetry(
 # Claude harness — Anthropic doesn't support routing it to non-Claude models.
 
 _OPENROUTER = "openrouter"
+_ZAI = "zai"
+
+
+@dataclass(frozen=True)
+class _OpenAICompatBackend:
+    """A named OpenAI-compatible endpoint. Records where its (non-secret,
+    UI-editable) base URL lives on the config, and which environment variables
+    hold its (secret, environment-only) API key. Adding a backend is one entry
+    in the registry below + a ``*_base_url`` field on the config + the provider
+    name in the ``*_provider`` Literals (config.py)."""
+
+    base_url_field: str
+    api_key_envs: tuple[str, ...]
+
+    def base_url(self, config: HydraFlowConfig) -> str:
+        return getattr(config, self.base_url_field)
+
+    def api_key(self) -> str:
+        """The key, read straight from the environment. It is a secret, so it
+        never lives on ``HydraFlowConfig`` (which can persist to config_file)
+        and never appears in the settings UI — it stays in ``.env`` only."""
+        for env in self.api_key_envs:
+            value = os.environ.get(env, "")
+            if value:
+                return value
+        return ""
+
+
+# OpenAI-compatible one-shot backends: a direct HTTP POST to a
+# ``{base_url}/chat/completions`` endpoint — no CLI, no tools, no agent loop.
+# Both OpenRouter and z.ai speak this shape, so a role's dial can point at
+# whichever the operator has credits for.
+_OPENAI_COMPAT_BACKENDS: dict[str, _OpenAICompatBackend] = {
+    _OPENROUTER: _OpenAICompatBackend(
+        base_url_field="openrouter_base_url",
+        api_key_envs=("OPENROUTER_API_KEY", "HYDRAFLOW_OPENROUTER_API_KEY"),
+    ),
+    _ZAI: _OpenAICompatBackend(
+        base_url_field="zai_base_url",
+        api_key_envs=("ZAI_API_KEY", "HYDRAFLOW_ZAI_API_KEY"),
+    ),
+}
 
 
 def _telemetry_cmd(provider: str, tool: str, model: str) -> list[str]:
     """The ``cmd``-shaped descriptor ``_record_inference`` parses into
-    ``(tool, model)``. For OpenRouter the 'tool' is the provider name so the
-    cost dashboard attributes it distinctly from the CLI tools."""
-    head = _OPENROUTER if provider == _OPENROUTER else tool
+    ``(tool, model)``. For an OpenAI-compatible backend the 'tool' is the
+    provider name (``openrouter`` / ``zai``) so the cost dashboard attributes
+    each backend distinctly from the CLI tools."""
+    head = provider if provider in _OPENAI_COMPAT_BACKENDS else tool
     return [head, "--model", model]
-
-
-def _openrouter_api_key() -> str:
-    """The OpenRouter key, read straight from the environment. It is a secret,
-    so it never lives on ``HydraFlowConfig`` (which can persist to config_file)
-    and never appears in the settings UI — it stays in ``.env`` only."""
-    return os.environ.get("OPENROUTER_API_KEY", "") or os.environ.get(
-        "HYDRAFLOW_OPENROUTER_API_KEY", ""
-    )
 
 
 async def _claude_cli_complete(
@@ -622,8 +656,9 @@ async def _claude_cli_complete(
     return result
 
 
-async def _openrouter_complete(
+async def _openai_compatible_complete(
     *,
+    provider: str,
     base_url: str,
     api_key: str,
     model: str,
@@ -632,11 +667,11 @@ async def _openrouter_complete(
     response_schema: dict[str, object] | None = None,
     usage_out: dict[str, object] | None = None,
 ) -> SimpleResult:
-    """Direct OpenAI-compatible completion (OpenRouter et al.). One HTTP POST;
+    """Direct OpenAI-compatible completion (OpenRouter, z.ai, …). One HTTP POST;
     no tools, no agent loop. ``response_schema`` switches on native strict-JSON
     output (more reliable than parsing JSON out of prose). HTTP 429/402 and
     quota/credit error bodies raise :class:`CreditExhaustedError` so the
-    orchestrator's pause/refund fires."""
+    orchestrator's pause/refund fires. ``provider`` only labels errors."""
 
     import httpx  # noqa: PLC0415
 
@@ -647,7 +682,7 @@ async def _openrouter_complete(
     )
 
     if not api_key:
-        return SimpleResult(stderr="OPENROUTER_API_KEY is not set", returncode=-1)
+        return SimpleResult(stderr=f"{provider}: API key is not set", returncode=-1)
 
     payload: dict[str, object] = {
         "model": model,
@@ -677,13 +712,13 @@ async def _openrouter_complete(
         raise TimeoutError(str(exc)) from exc
 
     if resp.status_code in (402, 429):
-        raise CreditExhaustedError(f"openrouter {resp.status_code}: {resp.text[:200]}")
+        raise CreditExhaustedError(f"{provider} {resp.status_code}: {resp.text[:200]}")
     if resp.status_code >= 400:
         body = resp.text or ""
         if is_credit_exhaustion(body):
-            raise CreditExhaustedError(f"openrouter: {body[:200]}")
+            raise CreditExhaustedError(f"{provider}: {body[:200]}")
         return SimpleResult(
-            stderr=f"openrouter http {resp.status_code}: {body[:300]}",
+            stderr=f"{provider} http {resp.status_code}: {body[:300]}",
             returncode=resp.status_code,
         )
     try:
@@ -691,7 +726,7 @@ async def _openrouter_complete(
         content = data["choices"][0]["message"]["content"] or ""
     except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
         return SimpleResult(
-            stderr=f"openrouter: malformed response ({exc})", returncode=-1
+            stderr=f"{provider}: malformed response ({exc})", returncode=-1
         )
     # Surface the API's real token usage so telemetry records actual cost
     # (token_source="actual") instead of the CLI path's char estimate.
@@ -724,13 +759,14 @@ async def run_lightweight_agent(
 ) -> SimpleResult:
     """One-shot lightweight LLM call with credit detection + telemetry.
 
-    *provider* selects the backend: ``"claude"`` (the CLI harness, default) or
-    ``"openrouter"`` (a direct OpenAI-compatible HTTP call — for the one-shot,
-    no-tools loops that don't need the harness). Both return the same
+    *provider* selects the backend: ``"claude"`` (the CLI harness, default) or a
+    direct OpenAI-compatible HTTP call — ``"openrouter"`` or ``"zai"`` — for the
+    one-shot, no-tools loops that don't need the harness. Point a role's dial at
+    whichever backend the operator has credits for. All return the same
     ``SimpleResult`` and own their own credit-exhaustion detection, so the
     credit + telemetry contract below holds regardless of backend.
     *response_schema*, when given, drives native strict-JSON output on the
-    OpenRouter path (the CLI path uses prompt-based JSON).
+    OpenAI-compatible path (the CLI path uses prompt-based JSON).
 
     Centralizes the credit + telemetry contract for the non-streaming
     ``run_simple`` spawn path so callers don't reinvent it:
@@ -800,13 +836,15 @@ async def run_lightweight_agent(
     # Real token usage from the OpenRouter API (None on the CLI path, which has
     # no usage stats and falls back to a char estimate).
     usage_stats: dict[str, object] | None = None
+    backend = _OPENAI_COMPAT_BACKENDS.get(provider)
     try:
         try:
-            if provider == _OPENROUTER:
+            if backend is not None:
                 usage_stats = {}
-                result = await _openrouter_complete(
-                    base_url=config.openrouter_base_url,
-                    api_key=_openrouter_api_key(),
+                result = await _openai_compatible_complete(
+                    provider=provider,
+                    base_url=backend.base_url(config),
+                    api_key=backend.api_key(),
                     model=model,
                     prompt=prompt,
                     timeout=timeout,
