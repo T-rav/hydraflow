@@ -86,6 +86,24 @@ SETTINGS: dict[str, SettingSpec] = {
     # --- Paths -----------------------------------------------------------
     # A workspace path is read when workspaces are created at startup.
     "workspace_base": SettingSpec("Paths", live=False, order=0),
+    # --- Model Routing (one-shot loop backends) --------------------------
+    # Each one-shot loop gets a provider dial (claude harness vs openrouter cheap
+    # direct model) paired with its model id — both editable here, no config file.
+    # Live: the next spawn re-reads them. The OpenRouter API key is a secret and
+    # is intentionally NOT here — it stays in .env.
+    "openrouter_base_url": SettingSpec("Model Routing", live=True, order=0),
+    "wiki_compilation_provider": SettingSpec("Model Routing", live=True, order=10),
+    "wiki_compilation_model": SettingSpec("Model Routing", live=True, order=11),
+    "adr_review_provider": SettingSpec("Model Routing", live=True, order=20),
+    "adr_review_model": SettingSpec("Model Routing", live=True, order=21),
+    "transcript_summary_provider": SettingSpec("Model Routing", live=True, order=30),
+    "transcript_summary_model": SettingSpec("Model Routing", live=True, order=31),
+    "triage_honeypot_provider": SettingSpec("Model Routing", live=True, order=40),
+    "triage_honeypot_model": SettingSpec("Model Routing", live=True, order=41),
+    # pr-unsticker shares the general background_model (below), so only its
+    # provider dial lives here.
+    "pr_unstick_provider": SettingSpec("Model Routing", live=True, order=50),
+    "background_model": SettingSpec("Models", live=True, order=3),
 }
 
 

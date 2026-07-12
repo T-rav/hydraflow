@@ -874,6 +874,7 @@ If nothing novel, output exactly: NO_NEW_PATTERN"""
                 config=self._config,
                 tool=tool,
                 model=model,
+                provider=self._config.pr_unstick_provider,
                 prompt=prompt,
                 source="pr_unsticker",
                 timeout=60.0,

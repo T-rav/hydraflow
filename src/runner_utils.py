@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import signal
@@ -11,7 +12,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from activity_parser import ActivityParser, get_activity_parser
 from events import EventBus, EventType, HydraFlowEvent
@@ -567,6 +568,142 @@ async def stream_claude_with_telemetry(
         )
 
 
+# --- Pluggable one-shot LLM backends -----------------------------------------
+# These live in THIS module (the gate + telemetry seam) on purpose: the raw
+# spawns (CLI ``build_lightweight_command`` / OpenRouter ``httpx``) must sit
+# inside the seam so ``run_lightweight_agent`` always gates the prompt first and
+# records telemetry after. The agentic path (tools/multi-turn) stays on the
+# Claude harness — Anthropic doesn't support routing it to non-Claude models.
+
+_OPENROUTER = "openrouter"
+
+
+def _telemetry_cmd(provider: str, tool: str, model: str) -> list[str]:
+    """The ``cmd``-shaped descriptor ``_record_inference`` parses into
+    ``(tool, model)``. For OpenRouter the 'tool' is the provider name so the
+    cost dashboard attributes it distinctly from the CLI tools."""
+    head = _OPENROUTER if provider == _OPENROUTER else tool
+    return [head, "--model", model]
+
+
+def _openrouter_api_key() -> str:
+    """The OpenRouter key, read straight from the environment. It is a secret,
+    so it never lives on ``HydraFlowConfig`` (which can persist to config_file)
+    and never appears in the settings UI — it stays in ``.env`` only."""
+    return os.environ.get("OPENROUTER_API_KEY", "") or os.environ.get(
+        "HYDRAFLOW_OPENROUTER_API_KEY", ""
+    )
+
+
+async def _claude_cli_complete(
+    *,
+    runner: SubprocessRunner,
+    tool: str,
+    model: str,
+    prompt: str,
+    timeout: float,
+    gh_token: str,
+    isolate_user_settings: bool,
+) -> SimpleResult:
+    """The Claude CLI backend (today's behaviour). Credit-out surfaces as
+    ``rc != 0`` output text, so it is detected and raised here."""
+
+    from agent_cli import AgentTool, build_lightweight_command  # noqa: PLC0415
+
+    cmd, cmd_input = build_lightweight_command(
+        tool=cast(AgentTool, tool),
+        model=model,
+        prompt=prompt,
+        isolate_user_settings=isolate_user_settings,
+    )
+    env = make_clean_env(gh_token)
+    result = await runner.run_simple(cmd, env=env, input=cmd_input, timeout=timeout)
+    raise_if_credit_exhausted(result.stdout, result.stderr, tool)
+    return result
+
+
+async def _openrouter_complete(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    prompt: str,
+    timeout: float,
+    response_schema: dict[str, object] | None = None,
+    usage_out: dict[str, object] | None = None,
+) -> SimpleResult:
+    """Direct OpenAI-compatible completion (OpenRouter et al.). One HTTP POST;
+    no tools, no agent loop. ``response_schema`` switches on native strict-JSON
+    output (more reliable than parsing JSON out of prose). HTTP 429/402 and
+    quota/credit error bodies raise :class:`CreditExhaustedError` so the
+    orchestrator's pause/refund fires."""
+
+    import httpx  # noqa: PLC0415
+
+    from execution import SimpleResult  # noqa: PLC0415
+    from subprocess_util import (  # noqa: PLC0415
+        CreditExhaustedError,
+        is_credit_exhaustion,
+    )
+
+    if not api_key:
+        return SimpleResult(stderr="OPENROUTER_API_KEY is not set", returncode=-1)
+
+    payload: dict[str, object] = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if response_schema is not None:
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "response",
+                "strict": True,
+                "schema": response_schema,
+            },
+        }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+    except httpx.TimeoutException as exc:
+        raise TimeoutError(str(exc)) from exc
+
+    if resp.status_code in (402, 429):
+        raise CreditExhaustedError(f"openrouter {resp.status_code}: {resp.text[:200]}")
+    if resp.status_code >= 400:
+        body = resp.text or ""
+        if is_credit_exhaustion(body):
+            raise CreditExhaustedError(f"openrouter: {body[:200]}")
+        return SimpleResult(
+            stderr=f"openrouter http {resp.status_code}: {body[:300]}",
+            returncode=resp.status_code,
+        )
+    try:
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"] or ""
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
+        return SimpleResult(
+            stderr=f"openrouter: malformed response ({exc})", returncode=-1
+        )
+    # Surface the API's real token usage so telemetry records actual cost
+    # (token_source="actual") instead of the CLI path's char estimate.
+    if usage_out is not None:
+        u = data.get("usage") or {}
+        usage_out["input_tokens"] = int(u.get("prompt_tokens", 0) or 0)
+        usage_out["output_tokens"] = int(u.get("completion_tokens", 0) or 0)
+        usage_out["total_tokens"] = int(u.get("total_tokens", 0) or 0)
+        usage_out["usage_available"] = bool(u.get("total_tokens"))
+    return SimpleResult(stdout=content, returncode=0)
+
+
 async def run_lightweight_agent(
     *,
     runner: SubprocessRunner,
@@ -582,8 +719,18 @@ async def run_lightweight_agent(
     session_id: str | None = None,
     isolate_user_settings: bool = True,
     issue_labels: Sequence[str] = (),
+    provider: str = "claude",
+    response_schema: dict[str, object] | None = None,
 ) -> SimpleResult:
-    """One-shot lightweight LLM CLI call with credit detection + telemetry.
+    """One-shot lightweight LLM call with credit detection + telemetry.
+
+    *provider* selects the backend: ``"claude"`` (the CLI harness, default) or
+    ``"openrouter"`` (a direct OpenAI-compatible HTTP call — for the one-shot,
+    no-tools loops that don't need the harness). Both return the same
+    ``SimpleResult`` and own their own credit-exhaustion detection, so the
+    credit + telemetry contract below holds regardless of backend.
+    *response_schema*, when given, drives native strict-JSON output on the
+    OpenRouter path (the CLI path uses prompt-based JSON).
 
     Centralizes the credit + telemetry contract for the non-streaming
     ``run_simple`` spawn path so callers don't reinvent it:
@@ -617,7 +764,6 @@ async def run_lightweight_agent(
     ``issue.tags``); without them only the repo-declared class is enforced
     (``tests/test_prompt_gate_completeness.py`` pins every call site).
     """
-    from agent_cli import build_lightweight_command  # noqa: PLC0415
     from exception_classify import (  # noqa: PLC0415
         exc_detail,
         reraise_on_credit_or_bug,
@@ -641,22 +787,42 @@ async def run_lightweight_agent(
         return SimpleResult(stderr=str(exc), returncode=-1)
     prompt = gated.prompt
 
-    cmd, cmd_input = build_lightweight_command(
-        tool=tool,
-        model=model,
-        prompt=prompt,
-        isolate_user_settings=isolate_user_settings,
-    )
-    env = make_clean_env(gh_token)
+    # Backend selection (pluggable one-shot provider). The chosen backend owns
+    # its own credit-exhaustion detection (CLI: output text; OpenRouter: HTTP
+    # 429/402). Both spawns live in THIS seam module so the CH-6 gate (above)
+    # and the telemetry record (below) always wrap them. ``cmd`` is only a
+    # telemetry descriptor parsed into (tool, model).
+    cmd = _telemetry_cmd(provider, tool, model)
     start = time.monotonic()
     success = False
     record_row = False
     result = SimpleResult(returncode=-1)
+    # Real token usage from the OpenRouter API (None on the CLI path, which has
+    # no usage stats and falls back to a char estimate).
+    usage_stats: dict[str, object] | None = None
     try:
         try:
-            result = await runner.run_simple(
-                cmd, env=env, input=cmd_input, timeout=timeout
-            )
+            if provider == _OPENROUTER:
+                usage_stats = {}
+                result = await _openrouter_complete(
+                    base_url=config.openrouter_base_url,
+                    api_key=_openrouter_api_key(),
+                    model=model,
+                    prompt=prompt,
+                    timeout=timeout,
+                    response_schema=response_schema,
+                    usage_out=usage_stats,
+                )
+            else:
+                result = await _claude_cli_complete(
+                    runner=runner,
+                    tool=tool,
+                    model=model,
+                    prompt=prompt,
+                    timeout=timeout,
+                    gh_token=gh_token,
+                    isolate_user_settings=isolate_user_settings,
+                )
         except TimeoutError:
             # ``asyncio.wait_for`` raises a *bare* TimeoutError whose ``str()``
             # is "", which would collapse to an undiagnosable "rc=-1: " at the
@@ -681,8 +847,6 @@ async def run_lightweight_agent(
             result = SimpleResult(stderr=exc_detail(exc), returncode=-1)
             record_row = True
             return result
-        # Credit-out via output text propagates without recording, same as above.
-        raise_if_credit_exhausted(result.stdout, result.stderr, tool)
         success = result.returncode == 0
         record_row = True
         return result
@@ -699,5 +863,5 @@ async def run_lightweight_agent(
                 issue_number=issue_number,
                 pr_number=pr_number,
                 session_id=session_id,
-                stats=None,
+                stats=usage_stats,
             )
