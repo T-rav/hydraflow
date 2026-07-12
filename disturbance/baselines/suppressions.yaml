@@ -12,7 +12,9 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ convention). re-snapshot 2026-07-11: -1 term_proposer_runtime PLC0415 \u2014 ClaudeCLIClient\
   \ now routes the drafter through run_lightweight_agent (one seam import replaces\
   \ build_lightweight_command+raise_if_credit_exhausted), making it dial-able + gated\
-  \ + telemetried (dropped from both CH-6 grandfather lists)."
+  \ + telemetried (dropped from both CH-6 grandfather lists). re-snapshot 2026-07-12:\
+  \ +decompose-to-converge PLC0415 lazy imports (decomposition_council/issue_decomposer/decompose_terminal/decomposition_docs\
+  \ deferred run_lightweight_agent + models imports \u2014 circular-safe convention)."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -34,6 +36,7 @@ entries:
   src/arch/generators/coverage_matrix.py::noqa:BLE001: 1
   src/arch/generators/coverage_matrix.py::type-ignore[import-untyped]: 1
   src/arch/runner.py::noqa:PLC0415: 1
+  src/auto_agent_preflight_loop.py::noqa:PLC0415: 2
   "src/auto_pr.py::noqa:BLE001\u2014classifythenconverttoaresult": 1
   src/auto_pr.py::noqa:PLC0415: 3
   "src/auto_pr.py::noqa:PLR0911\u2014linearstep-by-stepguards,eachwithitsownfail/outcomepath": 1
@@ -97,6 +100,7 @@ entries:
   src/dashboard_routes/_wiki_routes.py::noqa:BLE001: 2
   src/dashboard_routes/_wiki_routes.py::noqa:PLC0415: 2
   "src/dashboard_routes/_wiki_routes.py::noqa:SLF001\u2014read-onlydiagnostics": 1
+  src/decomposition_council.py::noqa:PLC0415: 1
   src/diagnostic_loop.py::noqa:PLC0415: 1
   src/diagnostic_loop.py::noqa:PLR0911: 1
   src/diagnostic_loop.py::noqa:UP007: 1
@@ -215,6 +219,7 @@ entries:
   "src/preflight/__init__.py::noqa:PLR0911\u2014lineargatechecks,eachwithitsownreturnpath": 1
   src/preflight/__init__.py::noqa:S603: 1
   src/preflight/__init__.py::noqa:S603,S607: 1
+  src/preflight/decision.py::noqa:PLC0415: 1
   src/prep.py::type-ignore[arg-type]: 1
   src/pricing_refresh_loop.py::noqa:PLC0415: 1
   "src/pricing_refresh_loop.py::noqa:PLR0911\u2014lineargatechecks,eachwithitsownreturnpath": 1

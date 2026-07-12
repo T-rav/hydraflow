@@ -178,10 +178,11 @@ class TestCreateEpicFromResult:
 
         epic_manager.register_epic.side_effect = _register_epic
 
-        # depth=1 (not 2): the default max_decomposition_depth is 2, and the
-        # depth-cap (task 5) blocks any call where depth >= that cap — so a
-        # depth at the cap itself is exercised separately in
-        # tests/test_decomposition_depth_cap.py, not here.
+        # P1 default max_decomposition_depth is 1, which would cap a depth=1
+        # call — but this test exercises the depth>=1 "record depth on
+        # EpicState" code path, so explicitly raise the cap to 2 here (the
+        # depth-cap itself is exercised in tests/test_decomposition_depth_cap.py).
+        object.__setattr__(_config, "max_decomposition_depth", 2)
         epic_number = await decomposer.create_epic_from_result(
             source_task=source_task, result=result, depth=1
         )

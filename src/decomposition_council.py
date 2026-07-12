@@ -402,6 +402,12 @@ or
                 prompt=prompt,
                 source="decomposition_council",
                 timeout=self._config.agent_timeout,
+                # A stalled change being decomposed has no single issue in
+                # scope (the council reasons over the change, not a labelled
+                # issue), so only the repo-declared data class gates it — same
+                # as adr_reviewer. The CH-6 completeness guard requires the
+                # kwarg be present.
+                issue_labels=(),
             )
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
