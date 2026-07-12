@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
+- `7f48338` — docs(adr): ADR-0105 fresh-eyes review pass — 7 refinements *(2026-07-12)*
+- `5942aa8` — docs(adr): ADR-0105 revise — HITL floor + doc-informed decomposition council *(2026-07-12)*
+- `4334c9c` — docs(adr): ADR-0105 + spec — autonomous convergence via decomposition *(2026-07-12)*
 - `79acd3a` — feat(llm): make the term-proposer / entry-evidence drafters dial-able (#9752) (#9752) *(2026-07-11)*
 - `c34e61a` — feat(triage): prompt-injection honeypot — validate the request before handling (#9747) (#9747) *(2026-07-11)*
 - `be0b5d5` — feat(prompt-gate): lightweight-seam label enforcement + traceability marker verification (convergence findings 5,9,10) (#9745) (#9745) *(2026-07-09)*
