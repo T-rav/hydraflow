@@ -21,11 +21,18 @@ Four cases (per ``.superpowers/sdd/task-8-brief.md``):
     the issue DOES reach ``human-required`` (the genuine dead end still
     escalates to a human).
 (c) Nested: a child from (a) itself later stalls and decomposes a SECOND
-    time (depth 1, under the default ``max_decomposition_depth=2`` cap) ->
+    time (depth 1, exercised here via an explicit
+    ``HYDRAFLOW_MAX_DECOMPOSITION_DEPTH=2`` override -- P1 ships with a
+    default of 1, i.e. this nested path is OFF by default; a stalled child
+    goes to HITL instead of re-decomposing, see ADR-0105's Consequences) ->
     the grandchild epic closes once its own children close, and the ROOT
     epic closes only once its own children (the superseded-but-tracked
     stalled child + its still-open sibling) are all closed. Proven at three
-    sweep checkpoints so the root is never observed to close early.
+    sweep checkpoints so the root is never observed to close early. The
+    premature-root-close gap this test documents (no epic-to-epic lineage
+    in ``EpicState``) is why nesting is capped off by default; a follow-up
+    tracked in ADR-0105 adds the lineage link so the default can safely
+    rise back to 2.
 (d) The Task-5 intake-vector skip guard: an issue already labelled
     ``auto-decomposed-child`` does NOT get re-split via the *intake* triage
     path, even when triage's complexity gate and the decomposition seam are
@@ -360,6 +367,15 @@ class TestNestedDecompositionCascadesToRoot:
     async def test_second_hop_decompose_then_cascading_closure(
         self, tmp_path, monkeypatch
     ) -> None:
+        # P1 default is 1 (parent -> children only; a stalled child goes to
+        # HITL, not re-decomposition -- see ADR-0105's Consequences). This
+        # test explicitly exercises the depth>=2 code path (a still-real,
+        # still-supported code path, just off by default) via an env
+        # override, since `world.run_with_loops` builds a fresh
+        # HydraFlowConfig per call (mutating `world.harness.config` in
+        # place would not reach it).
+        monkeypatch.setenv("HYDRAFLOW_MAX_DECOMPOSITION_DEPTH", "2")
+
         world = MockWorld(tmp_path)
         cfg = world.harness.config
         root_number = 701
@@ -424,8 +440,9 @@ class TestNestedDecompositionCascadesToRoot:
         assert second["auto_agent_preflight"]["result_status"] == "skipped_decomposed"
 
         # C1 is now superseded + closed; a SECOND epic (E2) exists, one
-        # depth level deeper (1 < max_decomposition_depth=2 -- the cap did
-        # not block this second hop).
+        # depth level deeper (1 < max_decomposition_depth=2 via this test's
+        # env override -- the cap did not block this second hop; at the P1
+        # default of 1 it would have).
         epic_numbers_after_hop2 = _find_epic_numbers(world, cfg.epic_label[0])
         assert len(epic_numbers_after_hop2) == 2
         e2 = next(n for n in epic_numbers_after_hop2 if n != e1)

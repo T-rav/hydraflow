@@ -189,8 +189,12 @@ class TestFanoutCap:
         source_task = TaskFactory.create(id=10)
         result = _two_child_result()
 
+        # depth=0 (parent-level decomposition): P1 default max_decomposition_depth
+        # is 1, so depth=1 would now hit the depth-cap before this test's
+        # fanout-cap logic ever runs. This class targets the fanout cap only,
+        # so stay under the depth cap at depth=0 rather than overriding config.
         epic_number = await decomposer.create_epic_from_result(
-            source_task=source_task, result=result, depth=1
+            source_task=source_task, result=result, depth=0
         )
 
         assert epic_number is not None
@@ -226,6 +230,11 @@ class TestAutoChildStamp:
             )
 
         epic_manager.register_epic.side_effect = _register_epic
+
+        # P1 default is 1; this test explicitly exercises the depth>=1 code
+        # path (proving decomposition_depth=1 lands on EpicState), which the
+        # new default would otherwise block via the depth-cap.
+        object.__setattr__(config, "max_decomposition_depth", 2)
 
         epic_number = await decomposer.create_epic_from_result(
             source_task=source_task, result=result, depth=1
