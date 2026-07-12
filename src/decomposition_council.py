@@ -209,9 +209,11 @@ class DecompositionCouncil:
         """Construct the direction-pass prompt: propose ONE candidate split.
 
         *stall_context* carries forward why the parent task stalled (from the
-        auto-agent preflight loop); *doc_context* is an opaque string a later
-        task fills with relevant repo docs/ADR excerpts -- this council only
-        needs to inject it, not interpret it.
+        auto-agent preflight loop) -- callers that have a diff-so-far pack a
+        summary of it into this same string, so direction sees whatever work
+        already exists without a dedicated parameter; *doc_context* is an
+        opaque string a later task fills with relevant repo docs/ADR excerpts
+        -- this council only needs to inject it, not interpret it.
         """
         body = (task.body or "")[:5000]
         max_depth = self._config.max_decomposition_depth
@@ -232,6 +234,9 @@ will be accepted; just produce your strongest candidate.
 ## Why the task stalled
 
 {stall_context}
+
+If the section above includes a diff or summary of work already attempted, \
+treat it as evidence of what exists today -- not just narrative.
 
 ## Supporting documentation context
 
@@ -254,6 +259,18 @@ one. Propose at least 2 independently implementable children -- each must be \
 able to land as its own reviewable PR, and must NOT be a near-duplicate of \
 another child.
 
+## Salvage: land the working slice first
+
+If the "why the task stalled" evidence above shows that PART of the prior \
+attempt is already sound (e.g. a diff-so-far where some files/changes work \
+and only a specific piece caused the stall), you MAY additionally scope ONE \
+of your children as a "salvage" child: a slice that does nothing but land \
+the already-working part, with no risky new work folded in. Mark that child \
+by putting the string "salvage" in its "labels" array. Do this only when \
+there is genuinely sound, landable work to preserve -- do not invent one. \
+Salvage children are always created before the other children, so the safe \
+slice ships first.
+
 ## Required Output
 
 Return ONLY a JSON object in this exact format (no other text):
@@ -263,8 +280,8 @@ Return ONLY a JSON object in this exact format (no other text):
   "epic_title": "Epic: ...",
   "epic_body": "## Sub-issues\\n\\n- [ ] Child title 1\\n- [ ] Child title 2",
   "children": [
-    {{"title": "Child issue title", "body": "Detailed description..."}},
-    {{"title": "Another child", "body": "More details..."}}
+    {{"title": "Child issue title", "body": "Detailed description...", "labels": []}},
+    {{"title": "Land the working slice", "body": "...", "labels": ["salvage"]}}
   ],
   "rationale": "Which lens(es) you considered and why this candidate is strongest"
 }}
@@ -419,10 +436,17 @@ or
         if isinstance(children_raw, list):
             for item in children_raw:
                 if isinstance(item, dict) and "title" in item:
+                    labels_raw = item.get("labels", [])
+                    labels = (
+                        [str(lbl) for lbl in labels_raw]
+                        if isinstance(labels_raw, list)
+                        else []
+                    )
                     children.append(
                         NewIssueSpec(
                             title=str(item["title"]),
                             body=str(item.get("body", "")),
+                            labels=labels,
                         )
                     )
 

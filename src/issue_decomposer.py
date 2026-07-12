@@ -14,11 +14,27 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from config import HydraFlowConfig
     from epic import EpicManager
-    from models import EpicDecompResult, Task
+    from models import EpicDecompResult, NewIssueSpec, Task
     from ports import PRPort
     from state import StateTracker
 
 logger = logging.getLogger("hydraflow.issue_decomposer")
+
+# Marker the DecompositionCouncil's direction pass uses to scope one child as
+# "land the already-working slice" (see decomposition_council.py's direction
+# prompt). Either a "salvage" label or a "[salvage]" title prefix counts --
+# the council emits the former via NewIssueSpec.labels, but the title-prefix
+# form is accepted too so a differently-shaped LLM reply still orders
+# correctly instead of silently losing the safe-slice-first guarantee.
+_SALVAGE_LABEL = "salvage"
+_SALVAGE_TITLE_PREFIX = "[salvage]"
+
+
+def _is_salvage_child(spec: NewIssueSpec) -> bool:
+    """True if *spec* is marked as the "land the working slice" child."""
+    if any(label.strip().lower() == _SALVAGE_LABEL for label in spec.labels):
+        return True
+    return spec.title.strip().lower().startswith(_SALVAGE_TITLE_PREFIX)
 
 
 class IssueDecomposer:
@@ -80,7 +96,12 @@ class IssueDecomposer:
         ``config.max_total_decomposition_children`` (the "fanout-cap"), or
         the epic issue failed to create. When *stall_context* is set, it is
         embedded into every child body (used by the auto-agent
-        decompose-on-stall path to carry forward why the parent stalled).
+        decompose-on-stall path to carry forward why the parent stalled, and
+        to tell each child explicitly not to repeat that failure). Any child
+        marked "salvage" (see :func:`_is_salvage_child`) -- a slice scoped to
+        land the part of the parent's work that already works -- is created
+        FIRST, ahead of the riskier children, so the safe slice ships before
+        anything that might re-stall.
         *depth* is recorded on the new epic's ``EpicState.decomposition_depth``.
         """
         if not result.should_decompose:
@@ -136,12 +157,22 @@ class IssueDecomposer:
             )
             return None
 
-        # Create child issues
+        # Create child issues. Salvage-marked children (the "land the
+        # already-working slice" child a council may scope, see
+        # DecompositionCouncil's direction prompt) go first so the safe
+        # slice ships before the riskier follow-on children -- a stable
+        # sort preserves relative order within each group.
         child_numbers: list[int] = []
-        for child_spec in result.children:
+        ordered_children = sorted(
+            result.children, key=lambda spec: not _is_salvage_child(spec)
+        )
+        for child_spec in ordered_children:
             child_body = child_spec.body + f"\n\nParent Epic #{epic_number}"
             if stall_context:
-                child_body += f"\n\n{stall_context}"
+                child_body += (
+                    f"\n\nParent #{source_task.id} stalled on: {stall_context}. "
+                    "This slice must not repeat that failure."
+                )
             child_num = await self._prs.create_issue(
                 child_spec.title,
                 child_body,
