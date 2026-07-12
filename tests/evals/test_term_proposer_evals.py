@@ -241,9 +241,16 @@ ALL_CASES = HAPPY_CASES + SAD_CASES + EDGE_CASES
 def llm() -> TermProposerLLM:
     from config import HydraFlowConfig
     from execution import get_default_runner
+    from tests.evals._provider_override import apply_provider_override
 
-    # Real config so the eval honors the term_proposer_provider/model dials.
+    # Real config so the eval honors the term_proposer dials. The override lets
+    # you A/B a candidate backend via HYDRAFLOW_EVAL_PROVIDER / _MODEL.
     config = HydraFlowConfig()
+    apply_provider_override(
+        config,
+        provider_field="term_proposer_provider",
+        model_field="term_proposer_model",
+    )
     runner = get_default_runner()
     return TermProposerLLM(
         client=ClaudeCLIClient(
