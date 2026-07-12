@@ -13,6 +13,17 @@ export function humanize(name) {
   return name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+// A `<provider>_base_url` field is annotated with whether that provider's secret
+// API key is present. Returns true/false for such a field, or null for any other
+// field (no badge). `providerKeys` maps provider name -> key-present boolean.
+export function providerKeyStatus(fieldName, providerKeys) {
+  const m = /^(.+)_base_url$/.exec(fieldName)
+  if (!m) return null
+  const provider = m[1]
+  if (!providerKeys || !(provider in providerKeys)) return null
+  return !!providerKeys[provider]
+}
+
 export function RuntimeSettingsPanel() {
   const { selectedRepoSlug, fetchWithRepo } = useHydraFlow()
   const isAggregate = selectedRepoSlug === REPO_ALL
@@ -21,6 +32,10 @@ export function RuntimeSettingsPanel() {
   const [drafts, setDrafts] = useState({})
   const [saved, setSaved] = useState({})
   const [error, setError] = useState(null)
+  // provider name -> whether its (secret) API key is present in the env.
+  // Booleans only; the key value never reaches the UI. Powers the badge on
+  // each `<provider>_base_url` field so wiring is verifiable without .env.
+  const [providerKeys, setProviderKeys] = useState({})
 
   const load = useCallback(async () => {
     try {
@@ -28,6 +43,7 @@ export function RuntimeSettingsPanel() {
       if (!resp.ok) { setError('Failed to load settings'); return }
       const data = await resp.json()
       setRows(data.settings || [])
+      setProviderKeys(data.provider_keys || {})
     } catch {
       setError('Failed to load settings')
     }
@@ -111,6 +127,7 @@ export function RuntimeSettingsPanel() {
               dirty={row.name in drafts}
               savedState={saved[row.name]}
               disabled={isAggregate}
+              keyStatus={providerKeyStatus(row.name, providerKeys)}
               onChange={(v) => setDraft(row.name, v)}
               onSave={() => save(row)}
             />
@@ -126,7 +143,7 @@ export function RuntimeSettingsPanel() {
   )
 }
 
-function SettingRow({ row, value, dirty, savedState, disabled, onChange, onSave }) {
+function SettingRow({ row, value, dirty, savedState, disabled, keyStatus, onChange, onSave }) {
   const [fieldError, setFieldError] = useState(null)
 
   const handle = useCallback((raw) => {
@@ -155,6 +172,19 @@ function SettingRow({ row, value, dirty, savedState, disabled, onChange, onSave 
           >
             {row.live ? '⟳ live' : '⚠ restart'}
           </span>
+          {keyStatus != null && (
+            <span
+              style={keyStatus ? styles.badgeKeyOk : styles.badgeKeyMissing}
+              data-testid={`keystatus-${row.name}`}
+              title={
+                keyStatus
+                  ? 'API key detected in the environment'
+                  : 'API key not set — add it to .env to use this provider'
+              }
+            >
+              {keyStatus ? '🔑 key detected' : '🔑 key not set'}
+            </span>
+          )}
         </div>
         {row.description && <div style={styles.rowDesc}>{row.description}</div>}
       </div>
@@ -298,4 +328,6 @@ const styles = {
   fieldError: { color: theme.red, fontSize: 11 },
   badgeLive: { ...badgeBase, background: theme.greenSubtle, color: theme.green },
   badgeRestart: { ...badgeBase, background: theme.orangeSubtle, color: theme.orange },
+  badgeKeyOk: { ...badgeBase, background: theme.greenSubtle, color: theme.green },
+  badgeKeyMissing: { ...badgeBase, background: theme.red, color: theme.white },
 }

@@ -22,6 +22,7 @@ from runner_utils import (
     _OPENAI_COMPAT_BACKENDS,
     _openai_compatible_complete,
     _telemetry_cmd,
+    provider_key_presence,
 )
 from subprocess_util import CreditExhaustedError
 
@@ -148,6 +149,37 @@ class TestBackendRegistry:
             == config.openrouter_base_url
         )
         assert _OPENAI_COMPAT_BACKENDS["zai"].base_url(config) == config.zai_base_url
+
+
+class TestProviderKeyPresence:
+    """The UI badge source: which backends have their secret key set — booleans
+    only, keyed by provider name, never the value."""
+
+    def _clear(self, monkeypatch):
+        for env in (
+            "OPENROUTER_API_KEY",
+            "HYDRAFLOW_OPENROUTER_API_KEY",
+            "ZAI_API_KEY",
+            "HYDRAFLOW_ZAI_API_KEY",
+        ):
+            monkeypatch.delenv(env, raising=False)
+
+    def test_reports_a_bool_per_backend(self, monkeypatch):
+        self._clear(monkeypatch)
+        presence = provider_key_presence()
+        assert set(presence) == set(_OPENAI_COMPAT_BACKENDS)
+        assert all(isinstance(v, bool) for v in presence.values())
+
+    def test_true_only_for_the_backend_whose_key_is_set(self, monkeypatch):
+        self._clear(monkeypatch)
+        monkeypatch.setenv("ZAI_API_KEY", "sk-zai")
+        presence = provider_key_presence()
+        assert presence["zai"] is True
+        assert presence["openrouter"] is False
+
+    def test_all_false_when_unset(self, monkeypatch):
+        self._clear(monkeypatch)
+        assert provider_key_presence() == {"openrouter": False, "zai": False}
 
 
 @pytest.mark.asyncio

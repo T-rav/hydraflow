@@ -620,6 +620,19 @@ _OPENAI_COMPAT_BACKENDS: dict[str, _OpenAICompatBackend] = {
 }
 
 
+def provider_key_presence() -> dict[str, bool]:
+    """Which OpenAI-compatible providers have their (secret) API key set in the
+    environment — booleans ONLY, never the key value. Powers the settings UI's
+    'key detected' badge so an operator can verify a backend is wired without
+    opening ``.env`` or the secret ever leaving the process. Reuses each
+    backend's own ``api_key()`` resolution, so the badge can never disagree with
+    what a real spawn would actually find."""
+    return {
+        name: bool(backend.api_key())
+        for name, backend in _OPENAI_COMPAT_BACKENDS.items()
+    }
+
+
 def _telemetry_cmd(provider: str, tool: str, model: str) -> list[str]:
     """The ``cmd``-shaped descriptor ``_record_inference`` parses into
     ``(tool, model)``. For an OpenAI-compatible backend the 'tool' is the

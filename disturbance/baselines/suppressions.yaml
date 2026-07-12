@@ -6,7 +6,10 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ alert-never-crash) \u2014 sanctioned per honeypot fail-open/defence-in-depth design.\
   \ re-snapshot 2026-07-11: +runner_utils PLC0415 lazy imports for the inlined one-shot\
   \ LLM provider backends (agent_cli/httpx/execution/subprocess \u2014 circular-safe\
-  \ + import-cost pattern, matches the file's existing lazy-import convention)."
+  \ + import-cost pattern, matches the file's existing lazy-import convention). re-snapshot\
+  \ 2026-07-11: +_control_routes PLC0415 lazy import of provider_key_presence for\
+  \ the settings-schema key-status badge (matches the route module's existing deferred-import\
+  \ convention)."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -68,7 +71,7 @@ entries:
   "src/dashboard_routes/_atlas_routes.py::noqa:BLE001\u2014diagnosticsendpoint,neverfail": 1
   src/dashboard_routes/_common.py::noqa:F401(re-exportedforhandlers): 1
   src/dashboard_routes/_control_routes.py::noqa:BLE001: 2
-  src/dashboard_routes/_control_routes.py::noqa:PLC0415: 5
+  src/dashboard_routes/_control_routes.py::noqa:PLC0415: 6
   src/dashboard_routes/_control_routes.py::noqa:PLR0914: 1
   src/dashboard_routes/_control_routes.py::noqa:PLR0915: 1
   src/dashboard_routes/_diagnostics_routes.py::noqa:BLE001: 1

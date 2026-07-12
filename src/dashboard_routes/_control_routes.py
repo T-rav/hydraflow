@@ -780,9 +780,22 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         live/restart flag — everything but group/live derived from the Pydantic
         ``Field``. The screen renders generically from this; ``PATCH
         /api/control/config`` applies edits.
+
+        ``provider_keys`` reports, per OpenAI-compatible backend, whether its
+        secret API key is present in the environment (booleans only — the key
+        value never leaves the process). The UI shows a 'key detected / not set'
+        badge so an operator can confirm a backend is wired without opening the
+        ``.env`` file.
         """
+        from runner_utils import provider_key_presence  # noqa: PLC0415
+
         _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
-        return JSONResponse({"settings": build_settings_schema(_cfg)})
+        return JSONResponse(
+            {
+                "settings": build_settings_schema(_cfg),
+                "provider_keys": provider_key_presence(),
+            }
+        )
 
     @router.patch("/api/control/config")
     async def patch_config(
