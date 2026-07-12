@@ -136,6 +136,12 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         10,
     ),
     ("max_issue_attempts", "HYDRAFLOW_MAX_ISSUE_ATTEMPTS", 3),
+    ("max_decomposition_depth", "HYDRAFLOW_MAX_DECOMPOSITION_DEPTH", 2),
+    (
+        "max_total_decomposition_children",
+        "HYDRAFLOW_MAX_TOTAL_DECOMPOSITION_CHILDREN",
+        8,
+    ),
     ("memory_sync_interval", "HYDRAFLOW_MEMORY_SYNC_INTERVAL", 3600),
     ("max_merge_conflict_fix_attempts", "HYDRAFLOW_MAX_MERGE_CONFLICT_FIX_ATTEMPTS", 3),
     ("max_ci_timeout_fix_attempts", "HYDRAFLOW_MAX_CI_TIMEOUT_FIX_ATTEMPTS", 2),
@@ -951,6 +957,18 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=10,
         description="Max total implementation attempts per issue before HITL escalation",
+    )
+    max_decomposition_depth: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description="Max recursive decomposition depth for decompose-to-converge (0 = disabled)",
+    )
+    max_total_decomposition_children: int = Field(
+        default=8,
+        ge=1,
+        le=50,
+        description="Max total child issues fanned out across a decomposition tree",
     )
     gh_max_retries: int = Field(
         default=3,

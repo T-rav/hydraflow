@@ -1667,6 +1667,7 @@ class EpicState(BaseModel):
     closed: bool = False
     released: bool = False
     auto_decomposed: bool = False
+    decomposition_depth: int = 0
 
     @property
     def total_children(self) -> int:
