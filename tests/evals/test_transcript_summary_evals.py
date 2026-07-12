@@ -24,7 +24,10 @@ from pathlib import Path
 import pytest
 
 CORPUS_ROOT = Path(__file__).parent / "corpus" / "transcript_summary"
-pytestmark = pytest.mark.evals
+# NB: the `evals` marker is applied per-test (on the model-calling quality test)
+# rather than module-level — the default suite runs `-m "not evals"`, so a
+# module-level mark would deselect the CI-safe corpus-shape test too, silently
+# disabling the guard it exists to be.
 
 # Aggregate recall bar: a faithful summary keeps most of the key facts. Set to
 # catch a backend that drops material detail, not to demand verbatim coverage.
@@ -101,6 +104,7 @@ def eval_config():
     return config
 
 
+@pytest.mark.evals
 @pytest.mark.asyncio
 async def test_summary_key_fact_recall(eval_config) -> None:
     """Aggregate key-fact recall across the corpus must clear the bar."""

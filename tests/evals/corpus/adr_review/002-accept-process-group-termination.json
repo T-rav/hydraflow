@@ -1,0 +1,10 @@
+{
+  "name": "accept-process-group-termination",
+  "adr_number": 72,
+  "adr_title": "Terminate subprocess groups on agent timeout",
+  "adr_content": "# ADR-0072: Terminate subprocess groups on agent timeout\n\n**Status:** Proposed\n\n## Context\n\nLightweight agent runners spawn a CLI subprocess that itself forks grandchild processes (the model CLI plus its helpers). When a cycle times out we call `proc.kill()`, which reaps only the direct child. The grandchildren are re-parented to init and keep running, holding file handles and burning tokens against an already-abandoned cycle.\n\n## Decision\n\nSpawn agent subprocesses with `start_new_session=True` so the child becomes a process-group leader (pid == pgid), and on timeout call `os.killpg(pgid, SIGTERM)` followed by `SIGKILL` after a short grace period. The reaping helper is best-effort: it swallows `ProcessLookupError`/`OSError`, falls back to `proc.kill()`, and never masks the original timeout.\n\n## Consequences\n\n- Timed-out cycles no longer leak grandchild processes or waste tokens on abandoned work.\n- Requires a real-subprocess regression test, since mocks cannot prove the group was reaped; the MockWorld scenario layer does not apply here.\n- Runners must catch `CancelledError` and `TimeoutError` together and reap in both, or the watchdog-cancellation path skips the kill.\n",
+  "index_context": "Existing ADRs (number: title [status]):\n- 0001: Five concurrent async loops [Accepted]\n- 0002: Labels as a state machine [Accepted]\n- 0003: Git worktrees for isolation [Accepted]\n- 0021: Persistence architecture and data layout [Accepted]\n- 0029: Caretaker loop pattern [Accepted]\n- 0042: Two-tier branch release promotion [Accepted]\n- 0045: Trust architecture hardening [Accepted]",
+  "duplicate_context": "No duplicate warnings.",
+  "expected_decision": "ACCEPT",
+  "notes": "Significant (fixes a real process/token leak on timeout) and complete: clear Context, a Decision naming the exact mechanism (process-group leader + killpg), and Consequences that call out the testing implication and the CancelledError trap. Not a duplicate. The council should ACCEPT."
+}

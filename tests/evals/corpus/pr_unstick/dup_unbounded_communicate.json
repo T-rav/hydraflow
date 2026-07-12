@@ -1,0 +1,18 @@
+{
+  "name": "dup_unbounded_communicate",
+  "language": "python",
+  "transcript": "assistant: `tests/test_diagram_loop.py::test_regen_runs_make` hangs in CI. The loop shells out with `stdout, _ = await proc.communicate()` to run `make arch-regen`, but on this branch the target waits on an interactive prompt, so `communicate()` awaits output that never comes and the whole cycle blocks past the job timeout.\nassistant: Fix: wrap the call in `asyncio.wait_for(proc.communicate(), timeout=120.0)` and `proc.kill()` on `TimeoutError`, matching the heavy-make subprocess tier. Test now fails fast with a clear timeout instead of hanging.\ntool_result: pytest tests/test_diagram_loop.py::test_regen_runs_make -q -> 1 passed in 2.10s\nassistant: This is the same unbounded-communicate hang we've bounded before — an `await proc.communicate()` with no timeout on a subprocess that never closes stdout. Fix is the standard wait_for + kill wrapper.",
+  "known_patterns": [
+    {
+      "pattern_name": "unbounded_communicate",
+      "description": "An unbounded `await proc.communicate()` on a subprocess that never closes stdout blocks the async cycle until the job timeout; wrap it in asyncio.wait_for and kill the child on expiry."
+    },
+    {
+      "pattern_name": "truthy_asyncmock",
+      "description": "A bare AsyncMock is always truthy, so an `if mock:` guard never breaks its loop and the cycle spins forever."
+    }
+  ],
+  "expect_novel": false,
+  "must_mention": [],
+  "notes": "Root cause = unbounded proc.communicate() with no timeout — already captured by the known `unbounded_communicate` pattern, so the model should emit NO_NEW_PATTERN and _reflect_on_fix returns None."
+}

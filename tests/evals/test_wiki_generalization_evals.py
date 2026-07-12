@@ -17,7 +17,10 @@ from pathlib import Path
 import pytest
 
 CORPUS_ROOT = Path(__file__).parent / "corpus" / "generalization"
-pytestmark = pytest.mark.evals
+# NB: the `evals` marker is applied per-test (on the model-calling quality test)
+# rather than module-level — the default suite runs `-m "not evals"`, so a
+# module-level mark would deselect the CI-safe corpus-shape test too, silently
+# disabling the guard it exists to be.
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,7 @@ def wiki_entry_cls():
     return WikiEntry
 
 
+@pytest.mark.evals
 @pytest.mark.asyncio
 async def test_generalization_accuracy(wiki_compiler, wiki_entry_cls) -> None:
     """Aggregate accuracy on the full corpus. Reports per-case outcomes.

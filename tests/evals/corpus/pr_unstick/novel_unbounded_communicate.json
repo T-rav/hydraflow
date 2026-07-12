@@ -1,0 +1,18 @@
+{
+  "name": "novel_unbounded_communicate",
+  "language": "python",
+  "transcript": "assistant: The CI job hung on `tests/test_log_ingest_loop.py::test_tail_follows_rotation`. I reproduced it locally and the hang is in `LogIngestLoop._read_journal`, which does `stdout, _ = await proc.communicate()` on a `journalctl -f` follow subprocess. `-f` never exits, so `communicate()` awaits an EOF that never arrives and the loop cycle blocks forever — the watchdog eventually fires but the test itself never returns.\nassistant: Fix: bound the read with `asyncio.wait_for(proc.communicate(), timeout=5.0)` and, on `TimeoutError`, `proc.kill()` the follow subprocess before re-raising a cycle timeout. Verified: the test now completes in 5.1s instead of hanging.\ntool_result: pytest tests/test_log_ingest_loop.py -q -> 1 passed in 5.30s\nassistant: Root cause confirmed — an unbounded `await proc.communicate()` on a long-lived follow subprocess deadlocks the async cycle. The general fix is to always wrap `communicate()` in `wait_for` with a subprocess timeout and kill the child on expiry.",
+  "known_patterns": [
+    {
+      "pattern_name": "truthy_asyncmock",
+      "description": "A bare AsyncMock is always truthy, so an `if mock:` guard never breaks its loop and the cycle spins forever."
+    },
+    {
+      "pattern_name": "xdist_shared_lock_deadlock",
+      "description": "Parallel pytest-xdist workers deadlock contending for one shared file lock held across the whole session."
+    }
+  ],
+  "expect_novel": true,
+  "must_mention": ["communicate", "timeout"],
+  "notes": "Root cause = unbounded subprocess communicate() on a follow process; neither known pattern covers subprocess I/O, so a novel pattern is expected. A faithful pattern names communicate()/subprocess and the wait_for timeout fix."
+}

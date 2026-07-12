@@ -118,10 +118,19 @@ BENIGN_CASES: list[Case] = [
 
 @pytest.fixture
 def honeypot_config():
+    from tests.evals._provider_override import apply_provider_override
+
     config = ConfigFactory.create()
     # Ensure the honeypot model/timeout are set for a real spawn.
     object.__setattr__(config, "triage_honeypot_model", "haiku")
     object.__setattr__(config, "triage_honeypot_timeout", 90.0)
+    # A/B a candidate backend via HYDRAFLOW_EVAL_PROVIDER / _MODEL (no-op when
+    # unset → runs on the config default).
+    apply_provider_override(
+        config,
+        provider_field="triage_honeypot_provider",
+        model_field="triage_honeypot_model",
+    )
     return config
 
 
