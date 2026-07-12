@@ -45,7 +45,8 @@ _APPROVED = frozenset(
 # follow-up. MUST shrink toward empty and MUST NOT grow.
 _GRANDFATHERED = frozenset(
     {
-        "term_proposer_runtime.py",  # ClaudeCLIClient has no config field
+        # term_proposer_runtime.py graduated: ClaudeCLIClient now takes a
+        # HydraFlowConfig and routes through run_lightweight_agent (telemetried).
         "adversarial_agent_runner.py",  # SubprocessAgentRunner @dataclass, no config
     }
 )

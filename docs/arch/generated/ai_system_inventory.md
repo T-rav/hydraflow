@@ -52,6 +52,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_SENTRY` | `sentry_tool` | `sentry_model` |
 | `HYDRAFLOW_ADR_REVIEW` | `adr_review_tool` | `adr_review_model` |
 | `HYDRAFLOW_REPORT_ISSUE` | `report_issue_tool` | `report_issue_model` |
+| `HYDRAFLOW_TERM_PROPOSER` | `term_proposer_tool` | `term_proposer_model` |
 
 ## Background loops (54)
 

@@ -185,8 +185,12 @@ async def main() -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
 
+    from config import HydraFlowConfig
+
     runner = get_default_runner()
-    llm: LLMClient = ClaudeCLIClient(runner=runner, model=args.model)
+    llm: LLMClient = ClaudeCLIClient(
+        runner=runner, config=HydraFlowConfig(), model=args.model
+    )
 
     stats = await run_migration(repo_root=REPO_ROOT, llm=llm, dry_run=args.dry_run)
     print("\n=== summary ===")

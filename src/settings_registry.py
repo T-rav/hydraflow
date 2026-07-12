@@ -105,6 +105,8 @@ SETTINGS: dict[str, SettingSpec] = {
     # pr-unsticker shares the general background_model (below), so only its
     # provider dial lives here.
     "pr_unstick_provider": SettingSpec("Model Routing", live=True, order=50),
+    "term_proposer_provider": SettingSpec("Model Routing", live=True, order=60),
+    "term_proposer_model": SettingSpec("Model Routing", live=True, order=61),
     "background_model": SettingSpec("Models", live=True, order=3),
 }
 

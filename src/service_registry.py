@@ -1735,7 +1735,14 @@ def build_services(
         deps=loop_deps,
     )
 
-    term_proposer_claude_client = ClaudeCLIClient(runner=subprocess_runner)
+    term_proposer_claude_client = ClaudeCLIClient(
+        runner=subprocess_runner,
+        config=config,
+        tool=config.term_proposer_tool,
+        model=config.term_proposer_model,
+        timeout=config.term_proposer_timeout,
+        provider=config.term_proposer_provider,
+    )
     term_proposer_llm = TermProposerLLM(client=term_proposer_claude_client)
     term_proposer_pr_port = OpenAutoPRBotPRPort(
         repo_root=config.repo_root,

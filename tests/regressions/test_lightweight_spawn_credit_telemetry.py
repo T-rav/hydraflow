@@ -197,11 +197,15 @@ class TestRaiseIfCreditExhausted:
 
 class TestTermProposerCreditDetection:
     @pytest.mark.asyncio
-    async def test_complete_structured_raises_credit_exhausted(self) -> None:
-        # Regression: term_proposer's config-less CLI path previously raised a
-        # generic RuntimeError on credit-out; it must now raise CreditExhaustedError.
+    async def test_complete_structured_raises_credit_exhausted(self, tmp_path) -> None:
+        # Regression: term_proposer must surface credit-out as
+        # CreditExhaustedError, not a generic RuntimeError. Now that the drafter
+        # routes through run_lightweight_agent, the seam's _claude_cli_complete
+        # does the raise_if_credit_exhausted scan — this pins that it still fires.
         runner = _FakeRunner(stdout=_CREDIT_TEXT, returncode=1)
-        client = ClaudeCLIClient(runner=runner)
+        client = ClaudeCLIClient(
+            runner=runner, config=ConfigFactory.create(repo_root=tmp_path / "repo")
+        )
 
         with pytest.raises(CreditExhaustedError):
             await client.complete_structured(prompt="propose terms", schema={})
