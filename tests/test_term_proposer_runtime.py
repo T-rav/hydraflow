@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -31,51 +30,78 @@ def _term_file_str(name: str) -> str:
     return _render_term_file_str(term)
 
 
-class FakeRunner:
-    def __init__(self, *, returncode: int, stdout: str, stderr: str = "") -> None:
-        self._result = subprocess.CompletedProcess(
-            args=["fake"], returncode=returncode, stdout=stdout, stderr=stderr
-        )
-        self.calls: list[dict] = []
-
-    async def run_simple(
-        self, cmd, *, input=None, timeout=None, **_
-    ) -> subprocess.CompletedProcess[str]:
-        self.calls.append({"cmd": cmd, "input": input, "timeout": timeout})
-        return self._result
-
-
 class TestClaudeCLIClient:
+    """ClaudeCLIClient is a thin adapter over ``run_lightweight_agent`` (the
+    gated + telemetried seam). It threads the term-proposer dials and parses
+    JSON out of the reply; the seam's credit/gate/telemetry behavior is covered
+    by test_llm_provider.py, so here we mock the seam and assert the wiring."""
+
+    def _client(self, monkeypatch, *, stdout="", returncode=0, provider="claude"):
+        """Construct a client whose seam call returns a canned SimpleResult and
+        records the kwargs it was invoked with."""
+        from unittest.mock import AsyncMock
+
+        from execution import SimpleResult
+        from tests.helpers import ConfigFactory
+
+        captured: dict = {}
+
+        async def _fake_seam(**kwargs):
+            captured.update(kwargs)
+            return SimpleResult(stdout=stdout, stderr="boom", returncode=returncode)
+
+        monkeypatch.setattr("runner_utils.run_lightweight_agent", _fake_seam)
+        client = ClaudeCLIClient(
+            runner=AsyncMock(),
+            config=ConfigFactory.create(),
+            tool="claude",
+            model="glm-4.6" if provider != "claude" else "claude-sonnet-4-6",
+            provider=provider,
+            timeout=90,
+        )
+        return client, captured
+
     @pytest.mark.asyncio
-    async def test_returns_parsed_json(self) -> None:
-        runner = FakeRunner(returncode=0, stdout='{"foo": "bar", "n": 1}')
-        client = ClaudeCLIClient(runner=runner)
+    async def test_returns_parsed_json(self, monkeypatch) -> None:
+        client, _ = self._client(monkeypatch, stdout='{"foo": "bar", "n": 1}')
         out = await client.complete_structured(prompt="hi", schema={})
         assert out == {"foo": "bar", "n": 1}
 
     @pytest.mark.asyncio
-    async def test_extracts_json_from_markdown_fence(self) -> None:
-        runner = FakeRunner(
-            returncode=0,
+    async def test_extracts_json_from_markdown_fence(self, monkeypatch) -> None:
+        client, _ = self._client(
+            monkeypatch,
             stdout='Here is the result:\n```json\n{"k": "v"}\n```\nDone.',
         )
-        client = ClaudeCLIClient(runner=runner)
         out = await client.complete_structured(prompt="hi", schema={})
         assert out == {"k": "v"}
 
     @pytest.mark.asyncio
-    async def test_raises_on_nonzero_returncode(self) -> None:
-        runner = FakeRunner(returncode=1, stdout="", stderr="boom")
-        client = ClaudeCLIClient(runner=runner)
-        with pytest.raises(RuntimeError, match="claude CLI failed"):
+    async def test_raises_on_nonzero_returncode(self, monkeypatch) -> None:
+        client, _ = self._client(monkeypatch, returncode=1)
+        with pytest.raises(RuntimeError, match="draft failed"):
             await client.complete_structured(prompt="hi", schema={})
 
     @pytest.mark.asyncio
-    async def test_raises_when_no_json_in_output(self) -> None:
-        runner = FakeRunner(returncode=0, stdout="just prose, no json here")
-        client = ClaudeCLIClient(runner=runner)
+    async def test_raises_when_no_json_in_output(self, monkeypatch) -> None:
+        client, _ = self._client(monkeypatch, stdout="just prose, no json here")
         with pytest.raises(RuntimeError, match="no JSON object"):
             await client.complete_structured(prompt="hi", schema={})
+
+    @pytest.mark.asyncio
+    async def test_threads_dial_and_schema_to_the_seam(self, monkeypatch) -> None:
+        # The provider/model/tool dials + the JSON schema reach the seam, so
+        # flipping term_proposer_provider to zai actually routes the draft there.
+        client, captured = self._client(
+            monkeypatch, stdout='{"ok": true}', provider="zai"
+        )
+        schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
+        await client.complete_structured(prompt="draft this", schema=schema)
+        assert captured["provider"] == "zai"
+        assert captured["model"] == "glm-4.6"
+        assert captured["tool"] == "claude"
+        assert captured["response_schema"] == schema
+        assert captured["source"] == "term_proposer"
 
 
 class TestOpenAutoPRBotPRPort:

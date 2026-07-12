@@ -53,7 +53,8 @@ _ASSEMBLY_SEAMS = frozenset(
 # grandfathering). Ratchet: MUST shrink toward empty, MUST NOT grow.
 _NAMED_GAPS = frozenset(
     {
-        "term_proposer_runtime.py",  # ClaudeCLIClient has no config field
+        # term_proposer_runtime.py graduated: ClaudeCLIClient now takes a
+        # HydraFlowConfig and routes through run_lightweight_agent (gated).
         "adversarial_agent_runner.py",  # SubprocessAgentRunner @dataclass, no config
     }
 )

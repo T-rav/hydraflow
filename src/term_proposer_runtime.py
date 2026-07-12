@@ -25,61 +25,73 @@ from typing import TYPE_CHECKING, Any
 from agent_cli import AgentTool
 
 if TYPE_CHECKING:
+    from config import HydraFlowConfig
     from execution import SubprocessRunner
 
 logger = logging.getLogger("hydraflow.term_proposer_runtime")
 
 
 class ClaudeCLIClient:
-    """Subprocess-CLI adapter for the LLMClient Protocol.
+    """Subprocess adapter for the LLMClient Protocol.
 
-    Invokes `claude -p` (or another agent tool) one-shot via SubprocessRunner;
-    parses JSON out of stdout. Tolerant of markdown fences around the JSON
-    payload (model output sometimes wraps in ```json ... ```).
+    Routes one-shot draft calls through ``runner_utils.run_lightweight_agent``
+    (the shared no-tools seam) so the spawn is gated (CH-6), telemetried (spend
+    hits the cost cap), and credit-exhaustion aware — and so the backend follows
+    the ``term_proposer_provider`` dial (``claude`` CLI, or ``openrouter``/``zai``
+    over an OpenAI-compatible endpoint). Parses JSON out of the reply, tolerant
+    of markdown fences (``` ```json ... ``` ```).
     """
 
     def __init__(
         self,
         runner: SubprocessRunner,
+        config: HydraFlowConfig,
         *,
         tool: AgentTool = "claude",
         model: str = "claude-sonnet-4-6",
         timeout: int = 180,
+        provider: str = "claude",
+        source: str = "term_proposer",
     ) -> None:
         self._runner = runner
+        self._config = config
         self._tool: AgentTool = tool
         self._model = model
         self._timeout = timeout
+        self._provider = provider
+        self._source = source
 
     async def complete_structured(
         self, *, prompt: str, schema: dict[str, Any]
     ) -> dict[str, Any]:
-        """Send prompt to the CLI tool and return the parsed JSON object.
+        """Send prompt through the one-shot seam and return the parsed JSON.
 
-        `schema` is unused by the CLI path (the prompt itself instructs the
-        model on output shape); kept in the signature to satisfy the Protocol.
+        ``schema`` drives native strict-JSON output on the OpenAI-compatible
+        providers (openrouter/zai); the ``claude`` CLI path relies on the prompt
+        instructing output shape, so ``_extract_json`` handles both.
         """
-        del schema
-        from agent_cli import build_lightweight_command  # noqa: PLC0415
-        from runner_utils import raise_if_credit_exhausted  # noqa: PLC0415
+        from runner_utils import run_lightweight_agent  # noqa: PLC0415
 
-        cmd, cmd_input = build_lightweight_command(
+        # A term/entry-evidence drafter reads wiki-term + source files; no
+        # GitHub issue is in scope, so issue_labels=() and the CH-6 gate applies
+        # only the repo-declared data class. Credit-exhaustion is raised inside
+        # the seam (CreditExhaustedError), so no manual scan is needed here.
+        result = await run_lightweight_agent(
+            runner=self._runner,
+            config=self._config,
             tool=self._tool,
             model=self._model,
             prompt=prompt,
-            isolate_user_settings=True,
+            source=self._source,
+            timeout=self._timeout,
+            provider=self._provider,
+            response_schema=schema,
+            issue_labels=(),
         )
-        result = await self._runner.run_simple(
-            cmd, input=cmd_input, timeout=self._timeout
-        )
-        # run_simple surfaces credit-out as rc!=0 text (it never raises), so
-        # scan and convert to CreditExhaustedError — otherwise the billing
-        # signal is misclassified as a generic CLI failure and burns budget.
-        raise_if_credit_exhausted(result.stdout, result.stderr, self._tool)
         if result.returncode != 0:
             raise RuntimeError(
-                f"{self._tool} CLI failed (rc={result.returncode}): "
-                f"{result.stderr[:200]}"
+                f"{self._provider}/{self._tool} draft failed "
+                f"(rc={result.returncode}): {result.stderr[:200]}"
             )
         return self._extract_json(result.stdout)
 

@@ -9,7 +9,10 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ + import-cost pattern, matches the file's existing lazy-import convention). re-snapshot\
   \ 2026-07-11: +_control_routes PLC0415 lazy import of provider_key_presence for\
   \ the settings-schema key-status badge (matches the route module's existing deferred-import\
-  \ convention)."
+  \ convention). re-snapshot 2026-07-11: -1 term_proposer_runtime PLC0415 \u2014 ClaudeCLIClient\
+  \ now routes the drafter through run_lightweight_agent (one seam import replaces\
+  \ build_lightweight_command+raise_if_credit_exhausted), making it dial-able + gated\
+  \ + telemetried (dropped from both CH-6 grandfather lists)."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -299,7 +302,7 @@ entries:
   src/telemetry/otel.py::noqa:PLW0603: 3
   src/telemetry/spans.py::type-ignore[return-value]: 3
   src/term_proposer_loop.py::noqa:PLC0415: 1
-  src/term_proposer_runtime.py::noqa:PLC0415: 4
+  src/term_proposer_runtime.py::noqa:PLC0415: 3
   src/test_scaffold.py::noqa:BLE001: 1
   src/trace_collector.py::noqa:E402: 2
   "src/trace_collector.py::noqa:E402\u2014intentionallynearhelperstosurviveruffunused-importsweeps": 1

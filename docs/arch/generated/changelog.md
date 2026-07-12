@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
+- `c34e61a` — feat(triage): prompt-injection honeypot — validate the request before handling (#9747) (#9747) *(2026-07-11)*
 - `be0b5d5` — feat(prompt-gate): lightweight-seam label enforcement + traceability marker verification (convergence findings 5,9,10) (#9745) (#9745) *(2026-07-09)*
 - `753658f` — feat(staging-promotion): close promotion-evidence gaps from convergence review (#9743) (#9743) *(2026-07-09)*
 - `b732f28` — feat(evidence-pack): per-RC release evidence-pack compiler — the binder (CH-4, #9732) (#9742) (#9742) *(2026-07-09)*

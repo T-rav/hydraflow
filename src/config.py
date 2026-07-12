@@ -291,6 +291,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ),
     ("term_proposer_interval", "HYDRAFLOW_TERM_PROPOSER_INTERVAL", 14400),
     ("term_proposer_max_per_tick", "HYDRAFLOW_TERM_PROPOSER_MAX_PER_TICK", 10),
+    ("term_proposer_timeout", "HYDRAFLOW_TERM_PROPOSER_TIMEOUT", 180),
     (
         "term_proposer_cooldown_seconds",
         "HYDRAFLOW_TERM_PROPOSER_COOLDOWN_SECONDS",
@@ -695,6 +696,7 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
     ("HYDRAFLOW_SENTRY", "sentry_tool", "sentry_model"),
     ("HYDRAFLOW_ADR_REVIEW", "adr_review_tool", "adr_review_model"),
     ("HYDRAFLOW_REPORT_ISSUE", "report_issue_tool", "report_issue_model"),
+    ("HYDRAFLOW_TERM_PROPOSER", "term_proposer_tool", "term_proposer_model"),
 ]
 
 
@@ -1422,6 +1424,10 @@ class HydraFlowConfig(BaseModel):
     )
     pr_unstick_provider: Literal["claude", "openrouter", "zai"] = Field(
         default="claude", description="Backend for the PR-unsticker cause analysis."
+    )
+    term_proposer_provider: Literal["claude", "openrouter", "zai"] = Field(
+        default="claude",
+        description="Backend for the term-proposer / entry-evidence drafters.",
     )
     triage_max_turns: int = Field(
         default=3,
@@ -2792,6 +2798,20 @@ class HydraFlowConfig(BaseModel):
         le=604800,
         description="Cooldown before retrying a candidate that previously failed validation or LLM draft.",
     )
+    term_proposer_model: str = Field(
+        default="claude-sonnet-4-6",
+        description="Model for the term-proposer / entry-evidence drafters.",
+    )
+    term_proposer_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+        default="claude",
+        description="CLI backend for the term-proposer drafters (claude path only).",
+    )
+    term_proposer_timeout: int = Field(
+        default=180,
+        ge=30,
+        le=1800,
+        description="Per-call timeout (seconds) for the term-proposer drafters.",
+    )
 
     # Trust fleet — TermPrunerLoop (ADR-0057)
     term_pruner_enabled: bool = Field(
@@ -3918,6 +3938,7 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
         ("report_issue", config.report_issue_tool, config.report_issue_model),
         ("sentry", config.sentry_tool, config.sentry_model),
         ("adr_review", config.adr_review_tool, config.adr_review_model),
+        ("term_proposer", config.term_proposer_tool, config.term_proposer_model),
     ]
 
     for stage, tool, model in stage_pairs:

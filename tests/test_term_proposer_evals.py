@@ -239,10 +239,21 @@ ALL_CASES = HAPPY_CASES + SAD_CASES + EDGE_CASES
 
 @pytest.fixture(scope="module")
 def llm() -> TermProposerLLM:
+    from config import HydraFlowConfig
     from execution import get_default_runner
 
+    # Real config so the eval honors the term_proposer_provider/model dials.
+    config = HydraFlowConfig()
     runner = get_default_runner()
-    return TermProposerLLM(client=ClaudeCLIClient(runner=runner))
+    return TermProposerLLM(
+        client=ClaudeCLIClient(
+            runner=runner,
+            config=config,
+            tool=config.term_proposer_tool,
+            model=config.term_proposer_model,
+            provider=config.term_proposer_provider,
+        )
+    )
 
 
 @pytest.fixture(scope="module")
