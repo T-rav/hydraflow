@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W28
 
+- `79acd3a` — feat(llm): make the term-proposer / entry-evidence drafters dial-able (#9752) (#9752) *(2026-07-11)*
 - `c34e61a` — feat(triage): prompt-injection honeypot — validate the request before handling (#9747) (#9747) *(2026-07-11)*
 - `be0b5d5` — feat(prompt-gate): lightweight-seam label enforcement + traceability marker verification (convergence findings 5,9,10) (#9745) (#9745) *(2026-07-09)*
 - `753658f` — feat(staging-promotion): close promotion-evidence gaps from convergence review (#9743) (#9743) *(2026-07-09)*
