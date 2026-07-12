@@ -57,9 +57,18 @@ def wiki_compiler():
     """
     from config import Credentials, HydraFlowConfig
     from execution import get_default_runner
+    from tests.evals._provider_override import apply_provider_override
     from wiki_compiler import WikiCompiler
 
     config = HydraFlowConfig()
+    # Lets you A/B a candidate backend via HYDRAFLOW_EVAL_PROVIDER / _MODEL
+    # (no-op → runs on the config default). WikiCompiler routes its one-shot
+    # calls through wiki_compilation_provider/model.
+    apply_provider_override(
+        config,
+        provider_field="wiki_compilation_provider",
+        model_field="wiki_compilation_model",
+    )
     return WikiCompiler(
         config=config,
         runner=get_default_runner(),
@@ -130,7 +139,12 @@ async def test_generalization_accuracy(wiki_compiler, wiki_entry_cls) -> None:
     precision = same_tp / (same_tp + same_fp) if (same_tp + same_fp) else 1.0
     recall = same_tp / (same_tp + same_fn) if (same_tp + same_fn) else 1.0
 
-    report = ["", "=== WikiCompiler generalization eval ==="]
+    from tests.evals._provider_override import backend_label
+
+    report = [
+        "",
+        f"=== WikiCompiler generalization eval [backend: {backend_label()}] ===",
+    ]
     for path, expected, actual, conf in per_case:
         mark = "OK" if expected == actual else "XX"
         report.append(
