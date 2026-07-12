@@ -376,9 +376,9 @@ jobs:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
       - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
-      - name: Run fast subset (s01, s06)
+      - name: Run fast subset (s01, s06, s53)
         run: |
-          for s in s01_happy_single_issue s06_kill_switch_via_ui; do
+          for s in s01_happy_single_issue s06_kill_switch_via_ui s53_model_routing_settings_ui; do
             python scripts/sandbox_scenario.py run $s || exit 1
           done
       - if: failure()
