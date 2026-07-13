@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 logger = logging.getLogger("hydraflow.preflight.decision")
 
@@ -114,9 +114,21 @@ async def apply_decision(
             add.append("auto-agent-exhausted")
 
     decomposed = False
-    if "human-required" in add and None not in (decomposer, council, config, ctx):
-        from preflight.decompose_terminal import decompose_or_escalate  # noqa: PLC0415
+    if (
+        "human-required" in add
+        and decomposer is not None
+        and council is not None
+        and config is not None
+        and ctx is not None
+    ):
+        from preflight.decompose_terminal import _PRPort as _DecomposePRPort
+        from preflight.decompose_terminal import decompose_or_escalate
 
+        # decision._PRPort and decompose_terminal._PRPort are distinct minimal
+        # Protocols (different method subsets); the concrete runtime object is a
+        # full PRManager/FakeGitHub that satisfies both, so cast across. Use a
+        # non-string cast so ruff counts the import as used (a cast("...") string
+        # would get the alias stripped as "unused").
         outcome = await decompose_or_escalate(
             issue_number=issue_number,
             ctx=ctx,
@@ -124,7 +136,7 @@ async def apply_decision(
             decomposer=decomposer,
             council=council,
             state=state,
-            prs=pr_port,
+            prs=cast(_DecomposePRPort, pr_port),
         )
         decomposed = outcome == "decomposed"
 
