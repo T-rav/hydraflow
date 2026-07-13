@@ -405,8 +405,13 @@ class FakeLLM:
     def script_decomposition(self, issue_number: int, replies: list[str]) -> None:
         """Script the raw transcript strings the DecompositionCouncil's seam
         returns, in call order: [direction, validation, (retry: direction,
-        validation), ...]."""
-        self.decomposition[issue_number] = deque(replies)
+        validation), ...].
+
+        Accumulates (like every other ``script_*`` method): repeated calls for
+        the same issue append, so the two application paths agree — sandbox_main
+        passes the whole list in one call, while ``MockWorld.apply_seed`` replays
+        ``seed.scripts`` one reply at a time. Both build the same FIFO."""
+        self.decomposition.setdefault(issue_number, deque()).extend(replies)
 
     def next_decomposition_reply(self, issue_number: int) -> str | None:
         """Pop the next scripted council transcript for *issue_number*, or
