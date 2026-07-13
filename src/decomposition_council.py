@@ -159,7 +159,7 @@ class DecompositionCouncil:
         prompt = self._build_direction_prompt(
             task, stall_context=stall_context, doc_context=doc_context, depth=depth
         )
-        transcript = await self._execute_council(prompt)
+        transcript = await self._execute_council(prompt, issue_number=task.id)
         if transcript is None:
             logger.warning(
                 "Decomposition council: direction pass produced no output for #%d",
@@ -185,7 +185,7 @@ class DecompositionCouncil:
             doc_context=doc_context,
             depth=depth,
         )
-        transcript = await self._execute_council(prompt)
+        transcript = await self._execute_council(prompt, issue_number=task.id)
         if transcript is None:
             logger.warning(
                 "Decomposition council: validation pass produced no output for #%d",
@@ -379,7 +379,7 @@ or
 }}
 ```"""
 
-    async def _execute_council(self, prompt: str) -> str | None:
+    async def _execute_council(self, prompt: str, *, issue_number: int) -> str | None:
         """Call the configured LLM backend for one council pass (direction
         or validation).
 
@@ -389,7 +389,16 @@ or
         credit-exhaustion/auth signal or a likely-bug exception, which
         ``reraise_on_credit_or_bug`` re-raises so it reaches the loop's
         dedicated handler instead of silently burning attempt budget.
+
+        MockWorld bypass: when a ``_mockworld_fake_llm`` sentinel is attached
+        (by sandbox_main), the pass is short-circuited to the next scripted
+        transcript for *issue_number* — no subprocess — so a sandbox scenario
+        can drive the council deterministically. Mirrors ``expert_council``.
         """
+        fake_llm = getattr(self, "_mockworld_fake_llm", None)
+        if fake_llm is not None and getattr(fake_llm, "_is_fake_adapter", False):
+            return fake_llm.next_decomposition_reply(issue_number)
+
         from runner_utils import run_lightweight_agent  # noqa: PLC0415
 
         try:

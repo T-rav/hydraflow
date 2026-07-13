@@ -396,6 +396,26 @@ class FakeLLM:
         # that need a sustained, real wall-clock "active" window (see
         # MockWorldSeed.plan_hold_seconds docstring for why).
         self.plan_hold_seconds: float = 0.0
+        # DecompositionCouncil replies, keyed by issue → FIFO of raw transcript
+        # strings. The council makes two seam calls per attempt (direction then
+        # validation), so a scenario scripts them in that order (and doubles the
+        # list for a retry). Popped in call order by ``next_decomposition_reply``.
+        self.decomposition: dict[int, deque[str]] = {}
+
+    def script_decomposition(self, issue_number: int, replies: list[str]) -> None:
+        """Script the raw transcript strings the DecompositionCouncil's seam
+        returns, in call order: [direction, validation, (retry: direction,
+        validation), ...]."""
+        self.decomposition[issue_number] = deque(replies)
+
+    def next_decomposition_reply(self, issue_number: int) -> str | None:
+        """Pop the next scripted council transcript for *issue_number*, or
+        ``None`` when the queue is empty (the council treats ``None`` as a
+        garbled/retryable pass)."""
+        queue = self.decomposition.get(issue_number)
+        if not queue:
+            return None
+        return queue.popleft()
 
     def script_triage(self, issue_number: int, results: list[Any]) -> None:
         self.triage_runner.add_script(
