@@ -220,6 +220,14 @@ async def main() -> None:
         for issue_number, payload in by_issue.items():
             _load_phase_script(fake_llm, phase_name, int(issue_number), payload)
 
+    # Pre-seed the auto-agent attempt counter (decompose-to-converge, ADR-0105).
+    # Lets s54 start an issue already at `auto_agent_max_attempts` so the
+    # decompose-or-escalate terminal fires on the first tick, instead of burning
+    # real auto-agent attempts to reach the cap. Empty for other scenarios.
+    for issue_number, count in seed.auto_agent_attempts.items():
+        for _ in range(count):
+            state.bump_auto_agent_attempts(int(issue_number))
+
     # Every async-touched ``subprocess.run`` site in production code now
     # specifies ``timeout=`` (PRs #8454, #8456, #8468 — enforced by
     # ``tests/regressions/test_async_subprocess_timeouts.py``), so caretaker
@@ -298,6 +306,13 @@ async def main() -> None:
     diagnostic_runner = getattr(svc.diagnostic_loop, "_runner", None)
     if diagnostic_runner is not None:
         diagnostic_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    # DecompositionCouncil (decompose-to-converge, ADR-0105): route its two
+    # seam calls (direction + validation) to scripted transcripts so a scenario
+    # (s54) can drive the decompose terminal deterministically. The council
+    # lives on the auto-agent loop when epic_manager/runner were wired.
+    decompose_council = getattr(svc.auto_agent_preflight_loop, "_council", None)
+    if decompose_council is not None:
+        decompose_council._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
 
     orch = HydraFlowOrchestrator(
         config,
