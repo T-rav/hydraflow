@@ -10,7 +10,7 @@
 
 ## Context
 
-[ADR-0084](0084-auto-agent-universal-root-cause-gate.md) made the Auto-Agent a universal gate that intercepts `hitl-escalation` issues, attempts an autonomous fix, and pages a human only for genuinely novel failures. Its terminal, when the auto-agent's own budget (`auto_agent_max_attempts`, default 3) is spent, is to stamp **`human-required`** (`auto_agent_preflight_loop.py:180`, `preflight/decision.py:96`) — a human-owned state.
+[ADR-0084](0084-auto-agent-universal-root-cause-gate.md) made the Auto-Agent a universal gate that intercepts `hitl-escalation` issues, attempts an autonomous fix, and pages a human only for genuinely novel failures. Its terminal, when the auto-agent's own budget (`auto_agent_max_attempts`, default 3) is spent, is to stamp **`human-required`** (`auto_agent_preflight_loop.py:_process_one`, `preflight/decision.py:apply_decision`) — a human-owned state.
 
 In practice the gate escalates **too often**: a change that is merely *too broad or ambiguous* to converge as one unit hits an attempt cap and pages a human, when it should have been broken into tractable pieces the factory can finish itself. That is routine toil, not a real request for help.
 
