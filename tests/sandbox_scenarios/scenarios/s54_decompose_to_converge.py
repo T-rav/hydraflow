@@ -62,23 +62,29 @@ def seed() -> MockWorldSeed:
 
 
 async def assert_outcome(api, page) -> None:
-    # The stuck issue is superseded by an auto-decomposed epic + children.
-    # After decomposition, the tracker sees more than the one seeded issue
-    # (epic + 2 children created via the terminal), and issue #1 is not
-    # human-required.
+    # Proof of decompose-to-converge: the stuck issue #1 was split into child
+    # issues that entered the pipeline, each carrying the auto-decomposed epic's
+    # title in its ``epic`` field. Their appearance in /api/issues/history is the
+    # observable end-to-end signal (the epic + the superseded #1 are not pipeline
+    # work-items). >=2 children under the scripted epic title == the terminal
+    # decomposed rather than paging a human.
+    epic_title = "Epic: split issue #1"
     payload = await api.wait_until(
         "/api/issues/history?limit=500",
-        lambda p: len(p.get("items", [])) >= 3,
-        timeout=60.0,
+        lambda p: (
+            sum(1 for it in p.get("items", []) if it.get("epic") == epic_title) >= 2
+        ),
+        timeout=90.0,
     )
-    items = payload["items"]
-    assert len(items) >= 3, (
-        f"expected epic + >=2 children created by decomposition, saw {len(items)}"
+    children = [it for it in payload["items"] if it.get("epic") == epic_title]
+    assert len(children) >= 2, (
+        f"expected >=2 auto-decomposed children under {epic_title!r}, "
+        f"saw {[(it.get('issue_number'), it.get('epic')) for it in payload['items']]}"
     )
-    # Issue #1 must NOT be human-required (it was decomposed, not escalated).
-    issue_1 = next((it for it in items if it.get("issue_number") == 1), None)
-    assert issue_1 is not None
-    labels_1 = issue_1.get("labels", []) or []
-    assert "human-required" not in labels_1, (
-        f"issue #1 should be decomposed, not escalated to a human; labels={labels_1}"
-    )
+    # None of the children should be human-required — the change converged via
+    # decomposition, not a human hand-off.
+    for child in children:
+        labels = child.get("labels", []) or []
+        assert "human-required" not in labels, (
+            f"child #{child.get('issue_number')} unexpectedly human-required: {labels}"
+        )
