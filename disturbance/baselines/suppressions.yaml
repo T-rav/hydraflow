@@ -12,7 +12,10 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ convention). re-snapshot 2026-07-11: -1 term_proposer_runtime PLC0415 \u2014 ClaudeCLIClient\
   \ now routes the drafter through run_lightweight_agent (one seam import replaces\
   \ build_lightweight_command+raise_if_credit_exhausted), making it dial-able + gated\
-  \ + telemetried (dropped from both CH-6 grandfather lists)."
+  \ + telemetried (dropped from both CH-6 grandfather lists). re-snapshot 2026-07-13:\
+  \ +1 sandbox_main type-ignore[misc] (3->4) — _apply_sandbox_config_overrides sets\
+  \ config.merge_policy_enabled=False for the air-gap (#9754), same frozen-field\
+  \ assignment idiom as the 3 sibling overrides it now sits beside."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -176,7 +179,7 @@ entries:
   src/mockworld/fakes/fake_wiki_compiler.py::noqa:PLC0415: 1
   src/mockworld/sandbox_main.py::noqa:PLC0415: 1
   src/mockworld/sandbox_main.py::type-ignore[attr-defined]: 6
-  src/mockworld/sandbox_main.py::type-ignore[misc]: 3
+  src/mockworld/sandbox_main.py::type-ignore[misc]: 4
   "src/models.py::noqa:F401\u2014usedinField(validation_alias=...)": 1
   "src/models.py::noqa:UP035\u2014neededatruntimeforPydantictoexcludefromfields": 1
   src/models.py::type-ignore[assignment]: 2
