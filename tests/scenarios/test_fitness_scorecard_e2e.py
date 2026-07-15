@@ -12,7 +12,7 @@ at tmp_path), and a fake issue_fetcher.  No docker / live services required.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -76,7 +76,11 @@ async def test_fitness_scorecard_e2e(tmp_path) -> None:
                 labels=["x-proposal"],
                 is_pr=True,
                 merged=(n % 2 == 0),
-                created_at=datetime(2026, 6, 15, tzinfo=UTC),
+                # Relative to now so the record always lands inside the window
+                # (window_start = now - fitness_window_days); a hardcoded date
+                # silently ages out and makes the score None (time-bombed on
+                # 2026-07-15 when a prior fixed 2026-06-15 aged out of 30 days).
+                created_at=datetime.now(UTC) - timedelta(days=1),
             )
             for n in range(4)
         ]
