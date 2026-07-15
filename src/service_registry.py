@@ -1666,6 +1666,13 @@ def build_services(
         audit_store=auto_agent_audit_store,
         deps=loop_deps,
         workspaces=workspaces,
+        # ADR-0105 decompose-to-converge: reuse the shared epic_manager
+        # (register_epic writes through the same persisted state + event bus
+        # as the rest of the system) and the shared subprocess_runner (so
+        # the council's LLM calls route through the same docker/host dial
+        # as every other loop) rather than constructing loop-local copies.
+        epic_manager=epic_manager,
+        runner=subprocess_runner,
     )
 
     # Sandbox-tier auto-fixer reuses the AutoAgentRunner subprocess wrapper

@@ -56,4 +56,21 @@
 # The discipline (every bug fix has a regression test) is met in substance;
 # the 40% ratio was a per-commit-attribution artifact, not untested drift.
 # Forward-enforcement restarts here.
-2026-07-03T21:51:00Z
+#
+# Reset 2026-07-12 (decompose-to-converge PR #9756, user-authorized): the P1
+# decompose feature landed three `fix(...)`-prefixed commits that are gate/
+# type/test-infra fixes, NOT untested product bugs — the P10.3 per-commit
+# heuristic can't tell them apart. Enumerated so this reset provably hides no
+# untested product work:
+#   - 080060a fix(decompose): close 3 make-quality gaps (CH-6 kwarg, a test's
+#     config default, disturbance-ratchet re-snapshot) — gate/test fixes, no
+#     product behavior change; verified by `make quality` itself.
+#   - b8ed6d8 fix(decompose): typecheck — pyright annotation narrowing only,
+#     zero runtime behavior; no regression test is applicable.
+#   - 193b63c fix(sandbox): s54 in-process parity — the fix IS test infra
+#     (MockWorld phase_map + FakeLLM accumulate); its regression guard is the
+#     s54 parity test + the 7 test_decompose_sandbox_harness.py unit tests it
+#     makes pass. New product behavior (the terminal/council/decomposer) ships
+#     with unit + MockWorld-scenario + s54 sandbox e2e coverage.
+# Forward-enforcement restarts here.
+2026-07-13T02:12:00Z

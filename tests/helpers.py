@@ -239,6 +239,7 @@ class ConfigFactory:
         dup_label: list[str] | None = None,
         epic_label: list[str] | None = None,
         epic_child_label: list[str] | None = None,
+        auto_decomposed_child_label: list[str] | None = None,
         verify_label: list[str] | None = None,
         find_label: list[str] | None = None,
         planner_label: list[str] | None = None,
@@ -483,6 +484,11 @@ class ConfigFactory:
                     epic_child_label
                     if epic_child_label is not None
                     else ["hydraflow-epic-child"]
+                ),
+                auto_decomposed_child_label=(
+                    auto_decomposed_child_label
+                    if auto_decomposed_child_label is not None
+                    else ["auto-decomposed-child"]
                 ),
                 verify_label=(
                     verify_label if verify_label is not None else ["hydraflow-verify"]

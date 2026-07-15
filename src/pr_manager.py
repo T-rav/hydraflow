@@ -1635,6 +1635,31 @@ class PRManager:
                 exc,
             )
 
+    async def close_pr(self, pr_number: int) -> None:
+        """Close a GitHub pull request without merging it.
+
+        ``gh pr close`` (not ``gh issue close`` — the latter resolves only
+        the ``Issue`` GraphQL type and does not reliably close a PR number).
+        """
+        self._assert_repo()
+        if self._config.dry_run:
+            return
+        try:
+            await self._run_gh(
+                "gh",
+                "pr",
+                "close",
+                str(pr_number),
+                "--repo",
+                self._repo,
+            )
+        except RuntimeError as exc:
+            logger.warning(
+                "Could not close PR #%d: %s",
+                pr_number,
+                exc,
+            )
+
     async def update_issue_body(self, issue_number: int, body: str) -> None:
         """Update the body of a GitHub issue using ``--body-file``."""
         self._assert_repo()

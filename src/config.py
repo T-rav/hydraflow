@@ -136,6 +136,12 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         10,
     ),
     ("max_issue_attempts", "HYDRAFLOW_MAX_ISSUE_ATTEMPTS", 3),
+    ("max_decomposition_depth", "HYDRAFLOW_MAX_DECOMPOSITION_DEPTH", 1),
+    (
+        "max_total_decomposition_children",
+        "HYDRAFLOW_MAX_TOTAL_DECOMPOSITION_CHILDREN",
+        8,
+    ),
     ("memory_sync_interval", "HYDRAFLOW_MEMORY_SYNC_INTERVAL", 3600),
     ("max_merge_conflict_fix_attempts", "HYDRAFLOW_MAX_MERGE_CONFLICT_FIX_ATTEMPTS", 3),
     ("max_ci_timeout_fix_attempts", "HYDRAFLOW_MAX_CI_TIMEOUT_FIX_ATTEMPTS", 2),
@@ -952,6 +958,25 @@ class HydraFlowConfig(BaseModel):
         le=10,
         description="Max total implementation attempts per issue before HITL escalation",
     )
+    max_decomposition_depth: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description=(
+            "Max recursive decomposition depth for decompose-to-converge (0 = "
+            "disabled). P1 default is 1: a parent decomposes into children, but a "
+            "stalled child goes to HITL rather than re-decomposing. Nested "
+            "decomposition (depth >= 2) is deferred until the epic-to-epic "
+            "lineage fix lands (else a re-decomposed child can close the root "
+            "epic before its grandchildren finish — see ADR-0105 follow-up)."
+        ),
+    )
+    max_total_decomposition_children: int = Field(
+        default=8,
+        ge=1,
+        le=50,
+        description="Max total child issues fanned out across a decomposition tree",
+    )
     gh_max_retries: int = Field(
         default=3,
         ge=0,
@@ -1085,6 +1110,16 @@ class HydraFlowConfig(BaseModel):
     epic_child_label: list[str] = Field(
         default=["hydraflow-epic-child"],
         description="Labels for child issues linked to epics (OR logic)",
+    )
+    auto_decomposed_child_label: list[str] = Field(
+        default=["auto-decomposed-child"],
+        description=(
+            "Label stamped on every child issue created by decompose-to-converge "
+            "(ADR-0105), on top of epic_child_label/find_label. Triage's intake "
+            "complexity path (_maybe_decompose) skips re-decomposing an issue "
+            "carrying this label so the depth counter can't be bypassed by "
+            "re-entering through the intake vector uncounted."
+        ),
     )
     epic_group_planning: bool = Field(
         default=True,
@@ -3500,6 +3535,7 @@ class HydraFlowConfig(BaseModel):
         "dup_label",
         "epic_label",
         "epic_child_label",
+        "auto_decomposed_child_label",
         "find_label",
         "discover_label",
         "shape_label",

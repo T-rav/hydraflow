@@ -34,6 +34,8 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         audit_store: Any,
         deps: LoopDeps,
         workspaces: Any | None = None,
+        epic_manager: Any | None = None,
+        runner: Any | None = None,
     ) -> None:
         super().__init__(
             worker_name="auto_agent_preflight",
@@ -46,6 +48,21 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         self._wiki_store = wiki_store
         self._audit_store = audit_store
         self._workspaces = workspaces
+
+        # ADR-0105 decompose-to-converge: both are optional so the loop keeps
+        # working (falling straight through to today's human-required
+        # terminal) for callers that haven't threaded epic_manager/runner
+        # through yet — e.g. existing test fixtures predating this feature.
+        self._decomposer: Any | None = None
+        self._council: Any | None = None
+        if epic_manager is not None:
+            from issue_decomposer import IssueDecomposer  # noqa: PLC0415
+
+            self._decomposer = IssueDecomposer(pr_manager, epic_manager, state, config)
+        if runner is not None:
+            from decomposition_council import DecompositionCouncil  # noqa: PLC0415
+
+            self._council = DecompositionCouncil(runner, config)
 
     def _get_default_interval(self) -> int:
         return self._config.auto_agent_preflight_interval
@@ -137,6 +154,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         from preflight.audit import PreflightAuditEntry
         from preflight.context import gather_context
         from preflight.decision import apply_decision
+        from preflight.decompose_terminal import decompose_or_escalate
 
         issue_number = int(issue.get("number", 0))
         issue_body = str(issue.get("body", "") or "")
@@ -174,13 +192,42 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             )
             return {"status": "skipped_deny_list"}
 
-        # Attempt-cap check.
+        # Attempt-cap check. ADR-0105: before paging a human, try decomposing
+        # the issue — a change that's merely too big/ambiguous to converge as
+        # one unit shouldn't escalate, it should split. Only wired when both
+        # epic_manager and runner were injected at construction; otherwise
+        # this falls straight through to today's behavior.
         attempts = self._state.get_auto_agent_attempts(issue_number)
         if attempts >= self._config.auto_agent_max_attempts:
-            await self._prs.add_labels(
-                issue_number, ["human-required", "auto-agent-exhausted"]
-            )
-            return {"status": "skipped_exhausted"}
+            outcome = "human-required"
+            if self._decomposer is not None and self._council is not None:
+                ctx = await gather_context(
+                    issue_number=issue_number,
+                    issue_body=issue_body,
+                    sub_label=sub_label,
+                    pr_port=self._prs,
+                    wiki_store=self._wiki_store,
+                    state=self._state,
+                    audit_store=self._audit_store,
+                    repo_slug="",
+                    config=self._config,
+                    issue_labels=sorted(labels),
+                )
+                outcome = await decompose_or_escalate(
+                    issue_number=issue_number,
+                    ctx=ctx,
+                    config=self._config,
+                    decomposer=self._decomposer,
+                    council=self._council,
+                    state=self._state,
+                    prs=self._prs,
+                )
+            if outcome == "human-required":
+                await self._prs.add_labels(
+                    issue_number, ["human-required", "auto-agent-exhausted"]
+                )
+                return {"status": "skipped_exhausted"}
+            return {"status": "skipped_decomposed"}
 
         # Gather context. config + issue_labels feed the CH-6 data-governance
         # gate: regulated-class repos get their gathered free text redacted
@@ -227,7 +274,9 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             self._state.refund_auto_agent_attempt(issue_number)
             raise
 
-        # Apply decision.
+        # Apply decision. ADR-0105: decomposer/council may be None (not
+        # wired for this caller) — apply_decision degrades to today's
+        # behavior in that case.
         await apply_decision(
             issue_number=issue_number,
             sub_label=sub_label,
@@ -235,6 +284,10 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             pr_port=self._prs,
             state=self._state,
             max_attempts=self._config.auto_agent_max_attempts,
+            decomposer=self._decomposer,
+            council=self._council,
+            config=self._config,
+            ctx=ctx,
         )
 
         # A *resolved* diagnose-failed issue (routed here from the diagnostic

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 logger = logging.getLogger("hydraflow.preflight.decision")
 
@@ -73,8 +73,22 @@ async def apply_decision(
     pr_port: _PRPort,
     state: Any,
     max_attempts: int,
+    decomposer: Any | None = None,
+    council: Any | None = None,
+    config: Any | None = None,
+    ctx: Any | None = None,
 ) -> dict[str, Any]:
-    """Apply labels + comment for a single attempt's result."""
+    """Apply labels + comment for a single attempt's result.
+
+    ADR-0105: when this attempt's label set is about to add `human-required`
+    (the needs_human/fatal/pr_failed/cost_exceeded/timeout rows, or the
+    exhaustion top-up below), *decomposer*/*council*/*config*/*ctx* — when all
+    four are wired — first try `decompose_terminal.decompose_or_escalate`.
+    A successful decompose supersedes the whole label/comment step (the
+    issue is already closed + `mark_issue("decomposed")` by
+    `IssueDecomposer.create_epic_from_result`); a decline or missing wiring
+    falls through to today's behavior unchanged.
+    """
     # Race-detection: re-read attempts to ensure no concurrent bumper.
     current_attempts = state.get_auto_agent_attempts(issue_number)
 
@@ -99,6 +113,48 @@ async def apply_decision(
         if "auto-agent-exhausted" not in add:
             add.append("auto-agent-exhausted")
 
+    decomposed = False
+    if (
+        "human-required" in add
+        and decomposer is not None
+        and council is not None
+        and config is not None
+        and ctx is not None
+    ):
+        from preflight.decompose_terminal import _PRPort as _DecomposePRPort
+        from preflight.decompose_terminal import decompose_or_escalate
+
+        # decision._PRPort and decompose_terminal._PRPort are distinct minimal
+        # Protocols (different method subsets); the concrete runtime object is a
+        # full PRManager/FakeGitHub that satisfies both, so cast across. Use a
+        # non-string cast so ruff counts the import as used (a cast("...") string
+        # would get the alias stripped as "unused").
+        outcome = await decompose_or_escalate(
+            issue_number=issue_number,
+            ctx=ctx,
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=cast(_DecomposePRPort, pr_port),
+        )
+        decomposed = outcome == "decomposed"
+
+    if decomposed:
+        # The issue was superseded by an epic — decompose_or_escalate /
+        # create_epic_from_result already closed it and posted its own
+        # comment. Applying human-required-family labels or the normal
+        # attempt comment to an already-closed, already-decomposed issue
+        # would be stale noise.
+        return {
+            "issue": issue_number,
+            "status": result.status,
+            "exhausted": exhausted,
+            "added": [],
+            "removed": [],
+            "decomposed": True,
+        }
+
     if add:
         await pr_port.add_labels(issue_number, add)
     for label in remove:
@@ -116,6 +172,7 @@ async def apply_decision(
         "exhausted": exhausted,
         "added": add,
         "removed": remove,
+        "decomposed": False,
     }
 
 

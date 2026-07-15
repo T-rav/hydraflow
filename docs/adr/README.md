@@ -142,6 +142,7 @@ cadence and files remediation issues on drift.
 | [0102](0102-convergence-gate-general-availability.md) | Convergence gate general availability (flag removed) | Accepted |
 | [0103](0103-continuous-human-steering-channel.md) | Continuous Human-on-the-Loop Steering Channel | Accepted |
 | [0104](0104-auto-tightening-ratchet.md) | Auto-tightening ratchet | Accepted |
+| [0105](0105-autonomous-convergence-via-decomposition.md) | Autonomous Convergence via Decomposition | Proposed |
 
 ## Adding a new ADR
 

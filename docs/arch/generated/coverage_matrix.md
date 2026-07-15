@@ -29,7 +29,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `EdgeProposerLoop` | ✅ [0058, 0060, 0062] | ✅ [edge-proposer-loop.md, entry-evidence-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_edge_proposer_loop.py` | ✅ in catalog | ✅ `s28_edge_proposer_no_proposals.py` |
 | `EntryEvidenceLoop` | ✅ [0062, 0078] | ✅ [edge-proposer-loop.md, entry-evidence-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_entry_evidence_loop.py` | ✅ in catalog | ✅ `s24_entry_evidence_no_terms.py` |
 | `EpicMonitorLoop` | ✅ [0080, 0081, 0091] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_monitor_loop.py` | ✅ in catalog | ✅ `s27_epic_monitor_no_epics.py` |
-| `EpicSweeperLoop` | ✅ [0080, 0081] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_sweeper_loop.py` | ✅ in catalog | ✅ `s23_epic_sweeper_no_epics.py` |
+| `EpicSweeperLoop` | ✅ [0080, 0081, 0105] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_sweeper_loop.py` | ✅ in catalog | ✅ `s23_epic_sweeper_no_epics.py` |
 | `FakeCoverageAuditorLoop` | ✅ [0045, 0047, 0056, 0089] | ✅ [fake-coverage-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_fake_coverage_auditor_loop.py` | ✅ in catalog | ✅ `s29_fake_coverage_auditor_clean.py` |
 | `FitnessScorecardLoop` | ✅ [0093, 0100, 0104] | ✅ [fitness-scorecard.md, loop-fitness.md] | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_fitness_scorecard_loop.py` | ✅ in catalog | ❌ |
 | `FlakeTrackerLoop` | ✅ [0045, 0056, 0065, 0089, 0099] | ✅ [flake-tracker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_flake_tracker_loop.py` | ✅ in catalog | ❌ |

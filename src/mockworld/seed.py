@@ -76,6 +76,13 @@ class MockWorldSeed:
     # with every pre-W3a/W3b/W4/W5 scenario.
     phase_scripts: dict[str, dict[int, Any]] = field(default_factory=dict)
 
+    # Pre-seed the auto-agent attempt counter per issue → count. Lets a
+    # scenario start an issue at `auto_agent_max_attempts` (exhausted) so the
+    # decompose-or-escalate terminal fires on the first tick, rather than
+    # burning real auto-agent attempts to reach the cap. Applied to state by
+    # sandbox_main. Empty = no pre-seeded counters (default; unaffected).
+    auto_agent_attempts: dict[int, int] = field(default_factory=dict)
+
     # How many ticks each enabled loop fires before assertions run.
     cycles_to_run: int = 4
 
