@@ -16,7 +16,7 @@ import signal
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from dashboard import HydraFlowDashboard
 from events import EventBus
@@ -38,6 +38,38 @@ from service_registry import (
     build_services,
     build_state_tracker,
 )
+
+if TYPE_CHECKING:
+    from config import HydraFlowConfig
+
+
+def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
+    """Turn off production code paths that reach services unreachable on the
+    air-gapped sandbox network (``internal: true`` in docker-compose.sandbox.yml).
+
+    The four primary LLM-backed runners (triage/plan/agent/review) are already
+    replaced with FakeLLM; these flags turn off the remaining external reachers,
+    which otherwise either hang for the full subprocess timeout or hard-fail:
+
+    - ``transcript_summarization``/``research``: secondary ``claude`` callers
+      (TranscriptSummarizer after each agent phase; ResearchRunner before each
+      plan phase) that hang ~30s on api_retry backoff before failing.
+    - ``contract_refresh_external``: ContractRefreshLoop's github/claude/docker
+      recorders reach the contracts-sandbox repo / api.anthropic.com / alpine
+      pull, each blocking up to the 120s subprocess timeout (s30).
+    - ``merge_policy`` (#9754): CH-3 ``enforce_merge_policy`` fetches PR labels
+      via a RAW ``gh pr view --json labels`` subprocess
+      (``merge_policy._fetch_pr_labels`` — deliberately not routed through
+      PRPort, so FakeGitHub never sees it). On the air-gapped network that gh
+      call runs against an empty ``config.repo``, falls back to git, and fails
+      with "not a git repository", so EVERY approved PR's merge raises and no
+      issue reaches the "merged" outcome (s01's happy path). The compliance
+      gate has its own unit tests; the sandbox exercises the pipeline.
+    """
+    config.transcript_summarization_enabled = False  # type: ignore[misc]
+    config.research_enabled = False  # type: ignore[misc]
+    config.contract_refresh_external_enabled = False  # type: ignore[misc]
+    config.merge_policy_enabled = False  # type: ignore[misc]
 
 
 def _load_seed() -> MockWorldSeed:
@@ -141,31 +173,9 @@ def _build_caretaker_enabled_cb(
 
 async def main() -> None:
     config = load_runtime_config()
-    # Sandbox-specific config overrides — disable downstream code paths
-    # that spawn real `claude` subprocesses. The sandbox is `internal: true`
-    # per docker-compose.sandbox.yml, so these subprocesses hang for ~30s
-    # of api_retry exponential backoff before failing with "unknown"
-    # network errors. With multiple parallel issues (s02_batch_three_issues)
-    # the cumulative hang exceeds the per-scenario 60s test timeout.
-    #
-    # The four primary LLM-backed runners (triage/plan/agent/review) are
-    # already overridden via `runners=fake_llm` below; these flags turn
-    # off the remaining secondary `claude` callers:
-    #
-    # - TranscriptSummarizer: spawns `claude` via subprocess_util.run_simple
-    #   after each agent phase to summarize the transcript.
-    # - ResearchRunner: spawns `claude` via _execute before each plan phase
-    #   to gather codebase context. PlanPhase._should_research() honors
-    #   this flag (see src/plan_phase.py).
-    config.transcript_summarization_enabled = False  # type: ignore[misc]
-    config.research_enabled = False  # type: ignore[misc]
-    # ContractRefreshLoop's github/claude/docker recorders reach external
-    # services (contracts-sandbox repo, api.anthropic.com, alpine pull) that
-    # are unreachable on the internal sandbox network; each blocks up to the
-    # 120s subprocess timeout, so the loop never emits its worker-status event
-    # within a scenario's window (s30). Skip them — only the local git
-    # recorder runs.
-    config.contract_refresh_external_enabled = False  # type: ignore[misc]
+    # Disable production code paths that reach services unreachable on the
+    # air-gapped sandbox network (see the helper for the per-flag rationale).
+    _apply_sandbox_config_overrides(config)
     seed = _load_seed()
     event_bus = EventBus()
     state = build_state_tracker(config)

@@ -18,7 +18,10 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ re-snapshot 2026-07-12: +1 sandbox_main type-ignore[attr-defined] (6\u21927) for\
   \ the s54 DecompositionCouncil fake-LLM sentinel attach \u2014 same dynamic-attach idiom\
   \ as the 6 existing sentinel wirings; -1 decision.py PLC0415 (the deferred\
-  \ decompose_terminal imports no longer need the noqa after the b8ed6d8f cast fix)."
+  \ decompose_terminal imports no longer need the noqa after the b8ed6d8f cast fix).\
+  \ re-snapshot 2026-07-13: +1 sandbox_main type-ignore[misc] (3->4) — _apply_sandbox_config_overrides\
+  \ sets config.merge_policy_enabled=False for the air-gap (#9754), same frozen-field\
+  \ assignment idiom as the 3 sibling overrides it now sits beside."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -184,7 +187,7 @@ entries:
   src/mockworld/fakes/fake_wiki_compiler.py::noqa:PLC0415: 1
   src/mockworld/sandbox_main.py::noqa:PLC0415: 1
   src/mockworld/sandbox_main.py::type-ignore[attr-defined]: 7
-  src/mockworld/sandbox_main.py::type-ignore[misc]: 3
+  src/mockworld/sandbox_main.py::type-ignore[misc]: 4
   "src/models.py::noqa:F401\u2014usedinField(validation_alias=...)": 1
   "src/models.py::noqa:UP035\u2014neededatruntimeforPydantictoexcludefromfields": 1
   src/models.py::type-ignore[assignment]: 2
