@@ -4,12 +4,13 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W29
+
+- `c5b6de2` — docs(adr): ADR-0105 — nested lineage landed, default depth 2 (#9757) (#9757) *(2026-07-16)*
+- `d721487` — feat: decompose-to-converge P1 — narrow HITL to genuine dead-ends (ADR-0105) (#9756) (#9756) *(2026-07-15)*
+
 ## 2026-W28
 
-- `84c9197` — refactor(triage): extract IssueDecomposer from _maybe_decompose (behavior-preserving) *(2026-07-12)*
-- `7f48338` — docs(adr): ADR-0105 fresh-eyes review pass — 7 refinements *(2026-07-12)*
-- `5942aa8` — docs(adr): ADR-0105 revise — HITL floor + doc-informed decomposition council *(2026-07-12)*
-- `4334c9c` — docs(adr): ADR-0105 + spec — autonomous convergence via decomposition *(2026-07-12)*
 - `79acd3a` — feat(llm): make the term-proposer / entry-evidence drafters dial-able (#9752) (#9752) *(2026-07-11)*
 - `c34e61a` — feat(triage): prompt-injection honeypot — validate the request before handling (#9747) (#9747) *(2026-07-11)*
 - `be0b5d5` — feat(prompt-gate): lightweight-seam label enforcement + traceability marker verification (convergence findings 5,9,10) (#9745) (#9745) *(2026-07-09)*
