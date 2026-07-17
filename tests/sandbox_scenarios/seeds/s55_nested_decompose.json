@@ -153,6 +153,7 @@
     "1": 3,
     "3": 3
   },
+  "sandbox_loop_interval": 6,
   "cycles_to_run": 30,
   "loops_enabled": [
     "diagnostic",

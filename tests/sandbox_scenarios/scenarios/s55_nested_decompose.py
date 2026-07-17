@@ -120,6 +120,11 @@ def seed() -> MockWorldSeed:
             },
         },
         cycles_to_run=30,
+        # This flow is long (two full pipeline runs + two decompose hops); at the
+        # default 60s caretaker cadence it can't finish within CI's slower
+        # runners. Tick every 6s so the many stages advance fast enough. Only
+        # affects this scenario (other seeds keep the 60s default).
+        sandbox_loop_interval=6,
     )
 
 

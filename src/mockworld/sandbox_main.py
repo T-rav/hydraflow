@@ -247,10 +247,15 @@ async def main() -> None:
     # gates caretaker-loop ``enabled_cb`` only; phase orchestrators consult
     # ``BGWorkerManager.is_enabled`` and are unaffected. See
     # ``_build_caretaker_enabled_cb`` docstring for full semantics.
+    # Caretaker-loop tick interval — default 60s (historical cadence); a long
+    # multi-hop scenario (s55) lowers it via the seed so its many pipeline stages
+    # advance fast enough for CI's slower runners. Bind the value now (loop late
+    # binding would otherwise capture the name, not the value).
+    _loop_interval = seed.sandbox_loop_interval
     callbacks = WorkerRegistryCallbacks(
         update_status=lambda *_a, **_kw: None,
         is_enabled=_build_caretaker_enabled_cb(seed.loops_enabled),
-        get_interval=lambda *_a, **_kw: 60,
+        get_interval=lambda *_a, _iv=_loop_interval, **_kw: _iv,
     )
 
     # FakeSubprocessRunner short-circuits every remaining shell-out to
