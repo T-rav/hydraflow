@@ -579,6 +579,21 @@ class FakeGitHub:
         self._maybe_rate_limit()
         return ["octocat"]
 
+    async def get_pr_checks(self, pr_number: int) -> list[dict[str, str]]:
+        """No CI checks in the air-gapped sandbox. Empty is falsy, so epic
+        detail rendering (EpicManager._enrich_pr_status) derives no CI status
+        rather than AttributeError-ing — which previously dropped any epic with
+        a PR'd child from /api/epics."""
+        self._maybe_rate_limit()
+        return []
+
+    async def get_pr_reviews(self, pr_number: int) -> list[dict[str, str]]:
+        """No GitHub reviews in the air-gapped sandbox. Empty → epic detail
+        rendering derives no review status rather than AttributeError-ing (same
+        /api/epics rendering path as get_pr_checks)."""
+        self._maybe_rate_limit()
+        return []
+
     async def fetch_code_scanning_alerts(self, branch: str, **_kw: Any) -> list:
         self._maybe_rate_limit()
         return list(self._alerts.get(branch, []))

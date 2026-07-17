@@ -83,6 +83,13 @@ class MockWorldSeed:
     # sandbox_main. Empty = no pre-seeded counters (default; unaffected).
     auto_agent_attempts: dict[int, int] = field(default_factory=dict)
 
+    # Caretaker-loop tick interval (seconds) in the sandbox. Default 60 matches
+    # the historical hard-coded cadence; a long multi-hop scenario (e.g. s55's
+    # depth-2 nested decompose) lowers it so its many pipeline stages advance
+    # fast enough to finish within CI's slower runners. Applied by sandbox_main
+    # via WorkerRegistryCallbacks.get_interval.
+    sandbox_loop_interval: int = 60
+
     # How many ticks each enabled loop fires before assertions run.
     cycles_to_run: int = 4
 

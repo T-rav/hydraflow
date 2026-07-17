@@ -367,16 +367,12 @@ class TestNestedDecompositionCascadesToRoot:
     async def test_second_hop_decompose_then_cascading_closure(
         self, tmp_path, monkeypatch
     ) -> None:
-        # P1 default is 1 (parent -> children only; a stalled child goes to
-        # HITL, not re-decomposition -- see ADR-0105's Consequences). This
-        # test explicitly exercises the depth>=2 code path (a still-real,
-        # still-supported code path, just off by default) via an env
-        # override, since `world.run_with_loops` builds a fresh
-        # HydraFlowConfig per call (mutating `world.harness.config` in
-        # place would not reach it).
-        monkeypatch.setenv("HYDRAFLOW_MAX_DECOMPOSITION_DEPTH", "2")
-
+        # Default max_decomposition_depth is 2 (#9757), so a stalled depth-1
+        # child re-decomposes rather than going to HITL — no env override
+        # needed. This is also the default-depth-2 regression: the second hop
+        # below only happens because the default now permits depth 2.
         world = MockWorld(tmp_path)
+        assert world.harness.config.max_decomposition_depth == 2
         cfg = world.harness.config
         root_number = 701
         world.add_issue(
@@ -479,6 +475,77 @@ class TestNestedDecompositionCascadesToRoot:
         await world.github.close_issue(c2)
         cp3 = await world.run_with_loops(["epic_sweeper"], cycles=1)
         assert cp3["epic_sweeper"]["swept"] == 1
+        assert world.github.issue(e1).state == "closed"
+
+    async def test_root_held_open_when_sibling_closes_before_grandchildren(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The premature-close bug (#9757): if the root's OTHER child closes
+        before the re-decomposed child's grandchildren, the root must stay open
+        until the grandchildren's replacement epic closes. Without the sweeper
+        gate the root would see both its children closed and auto-close while
+        grandchild work is still live under E2. This is the adverse ordering the
+        original cascade test deliberately avoided.
+        """
+        world = MockWorld(tmp_path)
+        cfg = world.harness.config
+        root_number = 801
+        world.add_issue(
+            root_number,
+            "Root issue: sprawling migration",
+            "Touches three subsystems at once; the auto-agent cannot converge.",
+            labels=["hitl-escalation", "flaky-test-stuck"],
+        )
+        _exhaust_attempts(world, root_number)
+        epic_manager = _make_epic_manager(world)
+        _wire_decompose(world, epic_manager)
+        _wire_epic_sweeper(world)
+        _script_council(
+            monkeypatch,
+            [
+                _direction_reply(),
+                _validation_reply(decision="approve", confidence="high"),
+                _direction_reply(
+                    epic_title="Epic: split the grandchild work",
+                    epic_body=(
+                        "## Sub-issues\n\n- [ ] Grandchild slice A\n- [ ] Grandchild slice B"
+                    ),
+                    children=[
+                        {"title": "Grandchild slice A", "body": "Narrower slice A."},
+                        {"title": "Grandchild slice B", "body": "Narrower slice B."},
+                    ],
+                    rationale="The stalled child itself needed one more split.",
+                ),
+                _validation_reply(decision="approve", confidence="high"),
+            ],
+        )
+
+        # Hop 1: root -> E1 [C1, C2].
+        await world.run_with_loops(["auto_agent_preflight"], cycles=1)
+        e1 = _find_epic_numbers(world, cfg.epic_label[0])[0]
+        c1, c2 = world.harness.state.get_epic_state(e1).child_issues
+
+        # C1 stalls -> E2 [G1, G2].
+        await world.github.add_labels(c1, ["hitl-escalation"])
+        _exhaust_attempts(world, c1)
+        await world.run_with_loops(["auto_agent_preflight"], cycles=1)
+        e2 = next(n for n in _find_epic_numbers(world, cfg.epic_label[0]) if n != e1)
+        g1, g2 = world.harness.state.get_epic_state(e2).child_issues
+
+        # ADVERSE ORDERING: the sibling C2 finishes FIRST, while the
+        # grandchildren are still open. The root must NOT close.
+        await world.github.close_issue(c2)
+        await world.run_with_loops(["epic_sweeper"], cycles=1)
+        assert world.github.issue(e1).state == "open", (
+            "root epic closed prematurely — C1's replacement epic E2 is still "
+            "open (grandchildren live), so C1 is not resolved yet"
+        )
+
+        # Grandchildren finish -> E2 closes -> the root now converges.
+        await world.github.close_issue(g1)
+        await world.github.close_issue(g2)
+        await world.run_with_loops(["epic_sweeper"], cycles=2)
+        assert world.github.issue(e2).state == "closed"
         assert world.github.issue(e1).state == "closed"
 
 

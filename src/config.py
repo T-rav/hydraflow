@@ -136,7 +136,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         10,
     ),
     ("max_issue_attempts", "HYDRAFLOW_MAX_ISSUE_ATTEMPTS", 3),
-    ("max_decomposition_depth", "HYDRAFLOW_MAX_DECOMPOSITION_DEPTH", 1),
+    ("max_decomposition_depth", "HYDRAFLOW_MAX_DECOMPOSITION_DEPTH", 2),
     (
         "max_total_decomposition_children",
         "HYDRAFLOW_MAX_TOTAL_DECOMPOSITION_CHILDREN",
@@ -959,16 +959,18 @@ class HydraFlowConfig(BaseModel):
         description="Max total implementation attempts per issue before HITL escalation",
     )
     max_decomposition_depth: int = Field(
-        default=1,
+        default=2,
         ge=0,
         le=5,
         description=(
             "Max recursive decomposition depth for decompose-to-converge (0 = "
-            "disabled). P1 default is 1: a parent decomposes into children, but a "
-            "stalled child goes to HITL rather than re-decomposing. Nested "
-            "decomposition (depth >= 2) is deferred until the epic-to-epic "
-            "lineage fix lands (else a re-decomposed child can close the root "
-            "epic before its grandchildren finish — see ADR-0105 follow-up)."
+            "disabled). Default 2: a parent decomposes into children, and a "
+            "stalled child may re-decompose once more. Nested convergence is "
+            "correct because EpicState carries parent_epic/superseded_issue "
+            "lineage — the sweeper gate + EpicManager propagation ensure a root "
+            "epic only closes after all transitive grandchild work finishes "
+            "(#9757). le=5 bounds the chain; max_total_decomposition_children "
+            "bounds fan-out."
         ),
     )
     max_total_decomposition_children: int = Field(

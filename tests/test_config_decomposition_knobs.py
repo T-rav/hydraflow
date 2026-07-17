@@ -7,7 +7,9 @@ from config import HydraFlowConfig
 
 def test_decomposition_knob_defaults() -> None:
     c = HydraFlowConfig()
-    assert c.max_decomposition_depth == 1
+    # Default raised 1 -> 2 once epic-to-epic lineage made nested convergence
+    # correct (#9757). le=5 still bounds the chain.
+    assert c.max_decomposition_depth == 2
     assert c.max_total_decomposition_children == 8
 
 

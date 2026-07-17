@@ -382,7 +382,7 @@ jobs:
           # first red, or a broken leading scenario (e.g. s01, #9754) silently
           # hides the status of the ones after it. Report which failed.
           rc=0
-          for s in s01_happy_single_issue s06_kill_switch_via_ui s53_model_routing_settings_ui s54_decompose_to_converge; do
+          for s in s01_happy_single_issue s06_kill_switch_via_ui s53_model_routing_settings_ui s54_decompose_to_converge s55_nested_decompose; do
             if python scripts/sandbox_scenario.py run "$s"; then
               echo "::notice::sandbox $s PASSED"
             else
