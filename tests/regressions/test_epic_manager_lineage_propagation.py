@@ -75,3 +75,26 @@ async def test_cascade_recurses_three_levels(tmp_path: Path):
     assert state.get_epic_state(8).closed is True
     assert state.get_epic_state(5).closed is True
     assert state.get_epic_state(2).closed is True
+
+
+@pytest.mark.asyncio
+async def test_propagation_fires_from_checker_success_close_path(tmp_path: Path):
+    """`_propagate_epic_close` is hooked into BOTH of `_try_auto_close`'s close
+    paths. The other tests exercise the direct-close path (checker returns None);
+    this one forces the checker-SUCCESS path (close_specific_epic → True) so that
+    site is covered too."""
+    manager, state = _manager(tmp_path)
+    # Force the checker-success branch: close_specific_epic returns True.
+    manager._checker.close_specific_epic = AsyncMock(return_value=True)
+    state.upsert_epic_state(
+        EpicState(epic_number=2, child_issues=[3, 4], completed_children=[4])
+    )
+    state.upsert_epic_state(
+        EpicState(epic_number=5, child_issues=[6, 7], parent_epic=2, superseded_issue=3)
+    )
+
+    await manager.on_child_completed(5, 6)
+    await manager.on_child_completed(5, 7)  # E2 closes via checker-success → cascades
+
+    assert state.get_epic_state(5).closed is True
+    assert state.get_epic_state(2).closed is True

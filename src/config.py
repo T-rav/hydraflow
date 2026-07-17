@@ -965,7 +965,7 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Max recursive decomposition depth for decompose-to-converge (0 = "
             "disabled). Default 2: a parent decomposes into children, and a "
-            "stalled child may re-decomposed once more. Nested convergence is "
+            "stalled child may re-decompose once more. Nested convergence is "
             "correct because EpicState carries parent_epic/superseded_issue "
             "lineage — the sweeper gate + EpicManager propagation ensure a root "
             "epic only closes after all transitive grandchild work finishes "

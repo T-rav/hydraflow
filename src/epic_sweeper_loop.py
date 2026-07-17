@@ -116,6 +116,10 @@ class EpicSweeperLoop(BaseBackgroundLoop):
                 rep_issue = await self._fetcher.fetch_issue_by_number(
                     replacement.epic_number
                 )
+                # A missing replacement issue (fetch → None) is deliberately NOT
+                # treated as blocking: err toward not-hanging the parent (same
+                # posture as an unfetchable ordinary sub-issue). We hold the
+                # parent open only when the replacement is known-open.
                 if rep_issue is not None and rep_issue.state != "closed":
                     return False
 

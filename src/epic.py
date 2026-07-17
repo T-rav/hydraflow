@@ -239,6 +239,25 @@ class EpicCompletionChecker:
                 continue
 
             if issue.state == GitHubIssueState.CLOSED:
+                # #9757 defense-in-depth: a decomposed child is closed the moment
+                # its replacement epic is created, but its work lives on there.
+                # Don't treat it as resolved until that replacement epic's GitHub
+                # issue closes — the same gate EpicSweeperLoop applies. This path
+                # (checker) is dormant when EpicManager is wired, but gating it
+                # keeps the nested-convergence invariant for any future caller.
+                replacement = (
+                    self._state.get_replacement_epic(issue_number)
+                    if self._state is not None
+                    else None
+                )
+                if replacement is not None:
+                    rep_issue = await self._fetcher.fetch_issue_by_number(
+                        replacement.epic_number
+                    )
+                    if rep_issue is not None and rep_issue.state != (
+                        GitHubIssueState.CLOSED
+                    ):
+                        return False
                 excluded_issues.append(issue_number)
                 logger.info(
                     "Sub-issue #%d closed without fixed label — treating as excluded "
