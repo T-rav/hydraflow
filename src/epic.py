@@ -1405,6 +1405,17 @@ class EpicManager:
                 parents.append(epic.epic_number)
         return parents
 
+    async def _propagate_epic_close(self, epic_number: int) -> None:
+        """When *epic_number* (a decompose replacement) closes, record its
+        superseded child completed in the parent epic and re-run the parent's
+        auto-close. on_child_completed → _try_auto_close → (if it closes the
+        parent) this helper again → recursion up the parent_epic chain until the
+        root (parent_epic None). Inert for every ordinary epic (#9757)."""
+        epic = self._state.get_epic_state(epic_number)
+        if epic is None or epic.parent_epic is None or epic.superseded_issue is None:
+            return
+        await self.on_child_completed(epic.parent_epic, epic.superseded_issue)
+
     async def _try_auto_close(self, epic_number: int) -> None:
         """Attempt to auto-close an epic if all children are resolved."""
         epic = self._state.get_epic_state(epic_number)
@@ -1423,6 +1434,7 @@ class EpicManager:
             self._state.close_epic(epic_number)
             await self._publish_update(epic_number, "closed")
             logger.info("Epic #%d auto-closed — all children resolved", epic_number)
+            await self._propagate_epic_close(epic_number)
             return
 
         if result is False:
@@ -1452,6 +1464,7 @@ class EpicManager:
         self._state.close_epic(epic_number)
         await self._publish_update(epic_number, "closed")
         logger.info("Epic #%d auto-closed — all children resolved", epic_number)
+        await self._propagate_epic_close(epic_number)
 
     def _is_stale(self, epic: EpicState) -> bool:
         """Return True if the epic has had no activity within the stale threshold."""
