@@ -79,6 +79,17 @@ class IssueDecomposer:
             current = found
         return root
 
+    def _find_parent_epic(self, issue_number: int) -> int | None:
+        """The epic that directly lists *issue_number* in its child_issues, or None.
+
+        The direct parent (first hop), used to stamp epic-to-epic lineage on a
+        replacement epic so nested rollup converges (#9757).
+        """
+        for epic in self._state.get_all_epic_states().values():
+            if issue_number in epic.child_issues:
+                return epic.epic_number
+        return None
+
     async def create_epic_from_result(
         self,
         *,
@@ -207,10 +218,19 @@ class IssueDecomposer:
             auto_decomposed=True,
         )
 
-        if depth:
+        # Record decomposition_depth and, when the source is itself a child of an
+        # existing epic, the epic-to-epic lineage (#9757) so nested rollup can
+        # converge: the parent epic only counts this superseded child as resolved
+        # once THIS replacement epic closes.
+        parent = self._find_parent_epic(source_task.id)
+        if depth or parent is not None:
             epic_state = self._state.get_epic_state(epic_number)
             if epic_state is not None:
-                epic_state.decomposition_depth = depth
+                if depth:
+                    epic_state.decomposition_depth = depth
+                if parent is not None:
+                    epic_state.parent_epic = parent
+                    epic_state.superseded_issue = source_task.id
                 self._state.upsert_epic_state(epic_state)
 
         # Mark the source decomposed BEFORE the fallible GitHub comment/close.

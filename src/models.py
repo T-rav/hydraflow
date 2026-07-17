@@ -1677,6 +1677,22 @@ class EpicState(BaseModel):
     released: bool = False
     auto_decomposed: bool = False
     decomposition_depth: int = 0
+    parent_epic: int | None = Field(
+        default=None,
+        description=(
+            "For a replacement epic created by decompose-to-converge (ADR-0105 / "
+            "#9757): the epic whose child this epic superseded. None for top-level "
+            "epics. Drives nested rollup — the parent only converges once this "
+            "epic closes."
+        ),
+    )
+    superseded_issue: int | None = Field(
+        default=None,
+        description=(
+            "For a replacement epic: the child issue it was carved from (that "
+            "issue is closed but its work lives here). None for top-level epics."
+        ),
+    )
 
     @property
     def total_children(self) -> int:

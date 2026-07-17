@@ -35,6 +35,18 @@ class EpicStateMixin:
         )
         self.save()
 
+    def get_replacement_epic(self, issue_number: int) -> EpicState | None:
+        """The epic (if any) that superseded *issue_number* via decomposition.
+
+        Bounded linear scan — the decomposition tree is capped by
+        max_total_decomposition_children, so no reverse index is warranted
+        (#9757).
+        """
+        for epic in self.get_all_epic_states().values():
+            if epic.superseded_issue == issue_number:
+                return epic
+        return None
+
     def mark_epic_child_complete(self, epic_number: int, child_number: int) -> None:
         """Move *child_number* to completed_children for *epic_number*."""
         epic = self._data.epic_states.get(self._key(epic_number))
