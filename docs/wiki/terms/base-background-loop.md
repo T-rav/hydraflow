@@ -5,13 +5,13 @@ kind: "loop"
 bounded_context: "shared-kernel"
 code_anchor: "src/base_background_loop.py:BaseBackgroundLoop"
 aliases: ["base background loop", "loop base class"]
-related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01JZ9FK3C0M03HYR42BF33W0C3"}, {"kind": "depends_on", "target": "01JZ9FK3C0M01HYR42BF11W0A1"}]
 evidence: ["01KQNYZRM4B7DX9MWDQFHF488H", "01KQP0HK6TCK1CTRYANSJ8NRSM", "01KQP0R43781VJFJ9HZRWQCZPQ", "01KQP0V9KK99G77287P414NFRC", "01KQP0V9KK99G77287P414NFRE", "01KQP0V9KK99G77287P414NFRF", "01KQP0V9KK99G77287P414NFRP", "01KQP0V9KK99G77287P414NFRQ", "01KQP0V9KK99G77287P414NFRR", "01KQP0XFBGMB32VFGNPV8GZ268", "01KQP0XFBGMB32VFGNPV8GZ26F", "01KQP0XFBGMB32VFGNPV8GZ26P"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668776+00:00"
-updated_at: "2026-07-18T03:15:16.509128+00:00"
+updated_at: "2026-07-18T18:03:47.549355+00:00"
 ---
 
 ## Definition
