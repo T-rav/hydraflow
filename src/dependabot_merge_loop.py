@@ -31,6 +31,24 @@ logger = logging.getLogger("hydraflow.dependabot_merge_loop")
 # (``agent/issue-N``), so matching on it is safe.
 _AUTO_AGENT_BRANCH_PREFIX = "agent/auto-agent-"
 
+# Factory-owned branch prefixes for the UL + pricing maintenance loops. Like the
+# auto-agent PRs above, these are opened under the ambient factory token
+# (``HydraOps-T-rav`` for the UL loops, ``T-rav`` for pricing) — NOT a configured
+# bot author — and they carry workflow labels (``hydraflow-ul-*`` /
+# ``pricing-refresh``) rather than ``agent/issue-N``. So author-based selection
+# misses them AND the review→merge pipeline ignores them, and they pile up
+# unmerged (#9843). Matching on these exact factory-owned prefixes is safe: no
+# human or normal-pipeline branch uses them. Once selected, the CI-green merge
+# and the stale-arch self-heal path below handle the rest.
+_FACTORY_MAINTENANCE_BRANCH_PREFIXES = (
+    "ul-proposer/",  # term_proposer_loop
+    "ul-evidence/",  # entry_evidence_loop
+    "ul-edges/",  # edge_proposer_loop
+    "ul-pruner/",  # term_pruner_loop
+    "pricing-refresh-auto",  # pricing_refresh_loop (_REGEN_BRANCH)
+    "hydraflow/wiki-maint-",  # repo_wiki_loop
+)
+
 # Markers in ``wait_for_ci``'s ``summary`` that identify an arch-staleness CI
 # failure. ``wait_for_ci`` returns ``"Failed checks: <name>, ..."`` where each
 # ``<name>`` is the GitHub check (job) name (see ``PRManager._evaluate_ci_checks``
@@ -65,6 +83,23 @@ def _is_arch_staleness_failure(summary: str) -> bool:
     return any(marker in lowered for marker in _ARCH_STALENESS_MARKERS)
 
 
+def _normalize_author(login: str) -> str:
+    """Normalize a PR-author login for bot matching.
+
+    ``gh pr list --json author`` renders a GitHub App author as ``app/dependabot``
+    (the GraphQL form) while the configured / REST form is ``dependabot[bot]``.
+    Strip the ``app/`` prefix and the ``[bot]`` suffix so the two compare equal —
+    otherwise even real Dependabot PRs never match ``settings.authors`` and the
+    loop merges nothing. Pure + case-insensitive for unit-testing in isolation.
+    """
+    normalized = login.strip().lower()
+    if normalized.startswith("app/"):
+        normalized = normalized[len("app/") :]
+    if normalized.endswith("[bot]"):
+        normalized = normalized[: -len("[bot]")]
+    return normalized
+
+
 class DependabotMergeLoop(BaseBackgroundLoop):
     """Polls open PRs and auto-merges configured bot PRs + Auto-Agent PRs after CI passes."""
 
@@ -92,7 +127,7 @@ class DependabotMergeLoop(BaseBackgroundLoop):
             return {"status": "config_disabled"}
         settings = self._state.get_dependabot_merge_settings()
         processed = self._state.get_dependabot_merge_processed()
-        bot_authors = {a.lower() for a in settings.authors}
+        bot_authors = {_normalize_author(a) for a in settings.authors}
 
         # Read the label-agnostic snapshot: bot PRs carry only GitHub-native
         # labels (e.g. ``dependencies``) and are absent from the workflow-label
@@ -103,9 +138,19 @@ class DependabotMergeLoop(BaseBackgroundLoop):
             pr
             for pr in open_prs
             if pr.pr not in processed
+            and not pr.draft  # never auto-merge a draft, even a bot's
             and (
-                pr.author.lower() in bot_authors
+                # GitHub's own bot flag — catches Dependabot/Renovate/any App
+                # generically, the same way the UI tags them, without linking to
+                # specific account logins (#9843).
+                pr.is_bot
+                # Explicit author allowlist (normalized so ``app/dependabot`` and
+                # ``dependabot[bot]`` compare equal) — for configured non-App bots.
+                or _normalize_author(pr.author) in bot_authors
+                # Factory PRs opened under a *user* token (is_bot=False):
+                # auto-agent preflight + the UL/pricing/wiki maintenance loops.
                 or pr.branch.startswith(_AUTO_AGENT_BRANCH_PREFIX)
+                or pr.branch.startswith(_FACTORY_MAINTENANCE_BRANCH_PREFIXES)
             )
         ]
 

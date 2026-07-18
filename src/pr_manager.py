@@ -3019,6 +3019,7 @@ class PRManager:
                     draft=bool(item.get("isDraft", False)),
                     title=str(item.get("title", "")),
                     author=str((item.get("author") or {}).get("login", "")),
+                    is_bot=bool((item.get("author") or {}).get("is_bot", False)),
                 )
             )
         return prs

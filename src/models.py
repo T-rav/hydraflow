@@ -2544,6 +2544,12 @@ class PRListItem(BaseModel):
     title: str = ""
     merged: bool = False
     author: str = ""
+    # GitHub's own bot flag (``author.is_bot``) — true for GitHub Apps like
+    # Dependabot/Renovate. Lets consumers detect bot PRs the same way the UI
+    # does, without linking to specific account logins. Populated by
+    # ``PRManager.list_all_open_prs``; defaults False for label-filtered/legacy
+    # snapshots that don't project it.
+    is_bot: bool = False
 
 
 class HITLItem(BaseModel):

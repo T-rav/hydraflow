@@ -22,6 +22,7 @@ def _make_pr(
     author: str = "dependabot[bot]",
     title: str = "Bump foo",
     branch: str = "",
+    is_bot: bool = False,
 ) -> PRListItem:
     """Build a minimal PRListItem for testing."""
     return PRListItem(
@@ -29,6 +30,7 @@ def _make_pr(
         author=author,
         title=title,
         branch=branch,
+        is_bot=is_bot,
         url=f"https://github.com/o/r/pull/{pr}",
     )
 
@@ -574,6 +576,193 @@ class TestDependabotArchSelfHeal:
         )
         state.bump_dependabot_arch_refresh_attempts.assert_called_once_with(9427)
         assert result["skipped"] == 1
+
+
+class TestDependabotMergeLoopFactoryMaintenanceBranches:
+    """UL proposer/evidence/edge + pricing-refresh PRs are opened under the
+    ambient factory token (``HydraOps-T-rav`` for UL, ``T-rav`` for pricing) —
+    NOT a configured bot author — and they carry workflow labels
+    (``hydraflow-ul-*`` / ``pricing-refresh``) rather than ``agent/issue-N``, so
+    both author-based selection and the review->merge pipeline miss them and
+    they pile up. The loop merges them by their factory-owned branch prefix
+    (#9843), mirroring the auto-agent prefix fix.
+    """
+
+    @pytest.mark.parametrize(
+        "branch",
+        [
+            "ul-proposer/4e3d7b2b",
+            "ul-evidence/5ebff585",
+            "ul-edges/0afc892d",
+            "ul-pruner/9f1c2d3e",
+            "pricing-refresh-auto",
+            "hydraflow/wiki-maint-20260718-1200",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_merges_factory_maintenance_pr_despite_non_bot_author(
+        self, tmp_path: Path, branch: str
+    ) -> None:
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(50, author="HydraOps-T-rav", branch=branch)],
+            ci_result=(True, "All checks passed"),
+        )
+
+        result = await loop._do_work()
+
+        assert result["merged"] == 1
+        prs.merge_pr.assert_awaited_once_with(50, auto_rebase=True)
+        state.add_dependabot_merge_processed.assert_called_once_with(50)
+
+    @pytest.mark.asyncio
+    async def test_stale_arch_factory_pr_selected_and_self_heals(
+        self, tmp_path: Path
+    ) -> None:
+        """A UL PR red purely on stale arch is now *selected* (by branch prefix)
+        and rides the existing arch self-heal path — the #9838 case that
+        previously never even entered the loop."""
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[
+                _make_pr(9838, author="HydraOps-T-rav", branch="ul-proposer/4e3d7b2b")
+            ],
+            ci_result=(False, "Failed checks: arch-check"),
+            failure_strategy="skip",
+        )
+
+        result = await loop._do_work()
+
+        prs.refresh_pr_branch_with_arch_regen.assert_awaited_once_with(
+            9838, "ul-proposer/4e3d7b2b"
+        )
+        state.bump_dependabot_arch_refresh_attempts.assert_called_once_with(9838)
+        assert result["skipped"] == 1
+
+    @pytest.mark.asyncio
+    async def test_ul_lookalike_branch_not_merged(self, tmp_path: Path) -> None:
+        """Prefixes are exact: a human branch that merely starts with ``ul-``
+        (e.g. ``ul-cleanup-notes``) must not auto-merge."""
+        loop, _, _, prs, _ = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(60, author="human-dev", branch="ul-cleanup-notes")],
+        )
+
+        result = await loop._do_work()
+
+        assert result == {"merged": 0, "skipped": 0, "failed": 0}
+        prs.wait_for_ci.assert_not_awaited()
+
+
+class TestIsBotDetection:
+    """GitHub's ``author.is_bot`` flag (the same signal the UI uses to tag a PR
+    as a bot) is the primary auto-merge selector, so Dependabot/Renovate/any App
+    is picked up generically — without linking to specific account logins (#9843).
+    """
+
+    @pytest.mark.asyncio
+    async def test_is_bot_pr_merges_without_author_allowlist(
+        self, tmp_path: Path
+    ) -> None:
+        """An is_bot PR merges even when ``settings.authors`` is empty — the bot
+        flag alone qualifies it (the operator's ask: don't tie detection to
+        account names)."""
+        loop, _, _, prs, _ = _make_loop(
+            tmp_path,
+            open_prs=[
+                _make_pr(
+                    1,
+                    author="app/dependabot",
+                    branch="dependabot/uv/foo",
+                    is_bot=True,
+                )
+            ],
+            authors=[],
+            ci_result=(True, "All checks passed"),
+        )
+
+        result = await loop._do_work()
+
+        assert result["merged"] == 1
+        prs.merge_pr.assert_awaited_once_with(1, auto_rebase=True)
+
+    @pytest.mark.asyncio
+    async def test_non_bot_human_pr_not_merged(self, tmp_path: Path) -> None:
+        """is_bot=False on an arbitrary branch stays ignored (no over-merge)."""
+        loop, _, _, prs, _ = _make_loop(
+            tmp_path,
+            open_prs=[
+                _make_pr(1, author="some-human", branch="feature/x", is_bot=False)
+            ],
+            authors=[],
+        )
+
+        result = await loop._do_work()
+
+        assert result == {"merged": 0, "skipped": 0, "failed": 0}
+        prs.wait_for_ci.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_draft_bot_pr_not_merged(self, tmp_path: Path) -> None:
+        """A draft is never auto-merged, even from a bot author."""
+        loop, _, _, prs, _ = _make_loop(
+            tmp_path,
+            open_prs=[
+                _make_pr(1, author="app/dependabot", branch="dependabot/x", is_bot=True)
+            ],
+        )
+        # Mark the seeded PR draft (the helper builds non-draft by default).
+        loop._cache.get_all_open_prs.return_value[0].draft = True
+
+        result = await loop._do_work()
+
+        assert result == {"merged": 0, "skipped": 0, "failed": 0}
+        prs.wait_for_ci.assert_not_awaited()
+
+
+class TestAuthorNormalization:
+    """gh's ``--json author`` renders a GitHub App as ``app/dependabot`` while
+    ``settings.authors`` holds the ``dependabot[bot]`` form. Without normalizing
+    both sides even real Dependabot PRs never match and the loop merges nothing
+    (#9843)."""
+
+    @pytest.mark.parametrize(
+        "pr_author",
+        ["app/dependabot", "dependabot[bot]", "Dependabot[bot]", "app/Dependabot"],
+    )
+    @pytest.mark.asyncio
+    async def test_dependabot_app_login_matches_config(
+        self, tmp_path: Path, pr_author: str
+    ) -> None:
+        loop, _, _, prs, _ = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(1, author=pr_author, branch="dependabot/uv/foo")],
+            authors=["dependabot[bot]"],
+            ci_result=(True, "All checks passed"),
+        )
+
+        result = await loop._do_work()
+
+        assert result["merged"] == 1
+        prs.merge_pr.assert_awaited_once_with(1, auto_rebase=True)
+
+    @pytest.mark.parametrize(
+        ("login", "expected"),
+        [
+            ("app/dependabot", "dependabot"),
+            ("dependabot[bot]", "dependabot"),
+            ("Dependabot[bot]", "dependabot"),
+            ("app/renovate", "renovate"),
+            ("renovate[bot]", "renovate"),
+            ("T-rav", "t-rav"),
+            ("HydraOps-T-rav", "hydraops-t-rav"),
+            ("", ""),
+        ],
+    )
+    def test_normalize_author(self, login: str, expected: str) -> None:
+        from dependabot_merge_loop import _normalize_author
+
+        assert _normalize_author(login) == expected
 
 
 class TestMergePolicyGate:

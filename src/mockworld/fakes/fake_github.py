@@ -98,6 +98,10 @@ class FakePR:
     # PR author login (e.g. "dependabot[bot]"). Drives DependabotMergeLoop's
     # bot-PR eligibility (it matches pr.author against the configured bots).
     author: str = "fake-author"
+    # GitHub's ``author.is_bot`` flag — true for GitHub Apps (Dependabot,
+    # Renovate). DependabotMergeLoop's primary bot-detection signal, mirroring
+    # the UI. Lets scenarios seed a bot PR without an author allowlist.
+    is_bot: bool = False
     # Commit count used by ``find_label_drift`` (ADR-0088) to distinguish
     # zero-commit PRs from real ones. Defaults to 1 so seeded PRs look
     # "real" without explicit setup.
@@ -171,6 +175,7 @@ class FakeGitHub:
                 ci_status=pr_dict.get("ci_status", "pass"),
                 merged=pr_dict.get("merged", False),
                 author=pr_dict.get("author", "fake-author"),
+                is_bot=pr_dict.get("is_bot", False),
             )
             for label in pr_dict.get("labels", []):
                 gh.add_pr_label(pr_dict["number"], label)
@@ -226,6 +231,7 @@ class FakeGitHub:
         ci_status: str = "pass",
         merged: bool = False,
         author: str = "fake-author",
+        is_bot: bool = False,
     ) -> None:
         """Directly insert a PR record (sync helper for test seeding).
 
@@ -240,6 +246,7 @@ class FakeGitHub:
             merged=merged,
             ci_status=ci_status,
             author=author,
+            is_bot=is_bot,
         )
 
     def add_pr_label(self, pr_number: int, label: str) -> None:
@@ -1044,6 +1051,7 @@ class FakeGitHub:
                     title="",
                     merged=pr.merged,
                     author=pr.author,
+                    is_bot=pr.is_bot,
                 )
             )
         return out
@@ -1070,6 +1078,7 @@ class FakeGitHub:
                 title="",
                 merged=pr.merged,
                 author=pr.author,
+                is_bot=pr.is_bot,
             )
             for pr in self._prs.values()
             if not pr.merged
