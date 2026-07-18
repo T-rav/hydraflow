@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/ports.py:PRPort"
 aliases: ["pr port", "pull request port", "github pr port"]
 related: [{"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}]
-evidence: ["01JRC_MOCKWORLD_FAKE_PORT_ASSERTIONS", "01KQNYZRM4B7DX9MWDQFHF488F", "01KRBX2N4QP7VW8FGH3J5YD0M2", "01KRBX2N4QP7VW8FGH3J5YD0M3", "01KRBX2N4QP7VW8FGH3J5YD0M5", "01KRBX2N4QP7VW8FGH3J5YD0M7", "implement-phase-half-state-on-skill-failure"]
+evidence: ["01JRC_MOCKWORLD_FAKE_PORT_ASSERTIONS", "01KQNYZRM4B7DX9MWDQFHF488F", "01KRBX2N4QP7VW8FGH3J5YD0M2", "01KRBX2N4QP7VW8FGH3J5YD0M3", "01KRBX2N4QP7VW8FGH3J5YD0M5", "01KRBX2N4QP7VW8FGH3J5YD0M7", "01KXV82K5P3A5RCRB8SHD3C400", "implement-phase-half-state-on-skill-failure"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668784+00:00"
-updated_at: "2026-07-18T18:15:15.823785+00:00"
+updated_at: "2026-07-18T18:52:56.217215+00:00"
 ---
 
 ## Definition
