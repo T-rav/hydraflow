@@ -1095,8 +1095,19 @@ class HydraFlowOrchestrator:
         tasks: dict[str, asyncio.Task[None]],
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
     ) -> None:
-        """Delegate to _pause_for_credits."""
-        await self._pause_for_credits(exc, loop_name, tasks, loop_factories)
+        """Pause on a corroborated credit signal; otherwise restart the loop.
+
+        A probe-refuted (false-positive) signal must not leave the crashed
+        loop's completed-with-exception task orphaned in ``_supervise_loops``'s
+        task map: the supervisor would re-observe the same dead task every
+        iteration and hot-loop the credit handler (alert storm), and the phase
+        would stay permanently dead. Recreating the task via ``_restart_loop``
+        — the same path used for any other loop crash — kills the hot loop and
+        self-heals the phase. See #9924.
+        """
+        paused = await self._pause_for_credits(exc, loop_name, tasks, loop_factories)
+        if not paused:
+            await self._restart_loop(loop_name, exc, tasks, loop_factories)
 
     async def _restart_loop(
         self,
@@ -1736,11 +1747,16 @@ class HydraFlowOrchestrator:
         source: str,
         tasks: dict[str, asyncio.Task[None]],
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
-    ) -> None:
+    ) -> bool:
         """Pause all loops until API credits reset, then restart them.
 
         Uses ``asyncio.Lock`` to prevent multiple loops from racing into
         the pause logic simultaneously.
+
+        Returns ``True`` when a pause is committed (or one is already active) —
+        the crashed task will be recreated by the resume path — and ``False``
+        when the probe refutes the signal as a false positive and no pause
+        happens, so the caller must restart the crashed loop itself (#9924).
         """
         async with self._credit_pause_lock:
             # If another loop already triggered a pause, skip
@@ -1748,7 +1764,7 @@ class HydraFlowOrchestrator:
                 self._credits_paused_until is not None
                 and self._credits_paused_until > datetime.now(UTC)
             ):
-                return
+                return True
 
             # Corroborate the text-detected signal with a live API probe before
             # committing a GLOBAL pause. ``is_credit_exhaustion`` matches
@@ -1786,7 +1802,7 @@ class HydraFlowOrchestrator:
                         },
                     )
                 )
-                return
+                return False
 
             resume_at = self._compute_resume_time(exc)
             self._credits_paused_until = resume_at
@@ -1819,9 +1835,10 @@ class HydraFlowOrchestrator:
         if self._stop_event.is_set():
             self._credits_paused_until = None
             self._credit_resume_event.clear()
-            return
+            return True
 
         await self._resume_loops_after_credit_pause(tasks, loop_factories, source)
+        return True
 
     async def _resume_loops_after_credit_pause(
         self,
