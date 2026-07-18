@@ -2536,7 +2536,8 @@ class PRManager:
                 "--json",
                 "mergeable,mergeStateStatus",
             )
-        except Exception:  # noqa: BLE001 — fail-closed: any probe error keeps the failure verdict
+        # Fail-closed: any probe error keeps the failure verdict.
+        except Exception:
             logger.debug(
                 "Could not fetch merge-state for PR #%d (advisory-check gate)",
                 pr_number,
