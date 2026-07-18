@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/base_background_loop.py:LoopDeps"
 aliases: []
 related: []
-evidence: ["01KQP10AJV73YGEATZKR6QXCAN", "01KXV82D65E5SW8ZJSH3XQ9FDT"]
+evidence: ["01KXV82D65E5SW8ZJSH3XQ9FDT"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-01T02:34:42.393501+00:00"
-updated_at: "2026-07-18T19:39:52.060621+00:00"
+updated_at: "2026-07-18T20:20:27.418353+00:00"
 ---
 
 ## Definition
