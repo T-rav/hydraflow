@@ -5,13 +5,13 @@ kind: "control_role"
 bounded_context: "shared-kernel"
 code_anchor: "src/base_background_loop.py:LoopDeps"
 aliases: []
-related: []
-evidence: ["01KQP10AJV73YGEATZKR6QXCAN", "01KXV82D65E5SW8ZJSH3XQ9FDT"]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01JZ9FK3C0M03HYR42BF33W0C3"}, {"kind": "depends_on", "target": "01JZ9FK3C0M01HYR42BF11W0A1"}]
+evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-01T02:34:42.393501+00:00"
-updated_at: "2026-07-18T18:52:56.217215+00:00"
+updated_at: "2026-07-18T19:31:17.682213+00:00"
 ---
 
 ## Definition
