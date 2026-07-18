@@ -6,7 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W29
 
-- `c5b6de2` — docs(adr): ADR-0105 — nested lineage landed, default depth 2 (#9757) (#9757) *(2026-07-16)*
+- `901c807` — Merge remote-tracking branch 'origin/staging' into archheal-ul-proposer-5170ed13-20260718181352 *(2026-07-18)*
+- `5ed366d` — feat(ul): entry-evidence — 13 new entry links across 10 terms (#9868) (#9868) *(2026-07-18)*
+- `0280272` — feat(ul): term-proposer batch — 1 drafts *(2026-07-18)*
+- `dfa0ca8` — feat(ul): entry-evidence — 13 new entry links across 10 terms (#9790) (#9790) *(2026-07-18)*
+- `120e2eb` — feat: epic-to-epic lineage — nested decompose-to-converge (depth 2) (#9757) (#9761) (#9761) *(2026-07-17)*
 - `d721487` — feat: decompose-to-converge P1 — narrow HITL to genuine dead-ends (ADR-0105) (#9756) (#9756) *(2026-07-15)*
 
 ## 2026-W28
@@ -490,10 +494,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `57157c8` — feat(audit): prompt audit report + scoring engine (sub-project 1 of 4) (#8376) (#8376) *(2026-04-21)*
 - `046f5fa` — refactor(agent-cli): scan /opt/plugins dynamically instead of hardcoding (#8375) (#8375) *(2026-04-21)*
 - `6b45f82` — feat(skills): boot-time install + prompt alignment + per-phase whitelist (#8374) (#8374) *(2026-04-21)*
-
-## 2026-W16
-
-- `03cb313` — Phase 0: regression tests + CI prep for staging/RC workflow (#7518) (#7518) *(2026-04-18)*
 
 
 <!-- arch:generated -->

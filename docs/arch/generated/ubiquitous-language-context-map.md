@@ -69,6 +69,7 @@ graph LR
     StateTracker["StateTracker<br/><i>service</i>"]
     SteeringChannel["SteeringChannel<br/><i>control_role</i>"]
     SteeringState["SteeringState<br/><i>control_role</i>"]
+    TribalWikiStore["TribalWikiStore<br/><i>service</i>"]
     ViolationDetector["ViolationDetector<br/><i>control_role</i>"]
     WorkspacePort["WorkspacePort<br/><i>port</i>"]
   end
