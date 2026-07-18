@@ -91,9 +91,10 @@ SETTINGS: dict[str, SettingSpec] = {
     # compatible cheap direct model — openrouter or zai) paired with its model id
     # — both editable here, no config file. Live: the next spawn re-reads them.
     # The provider API keys are secrets and are intentionally NOT here — they
-    # stay in .env (OPENROUTER_API_KEY / ZAI_API_KEY).
+    # stay in .env (OPENROUTER_API_KEY / ZAI_API_KEY / MOONSHOT_API_KEY).
     "openrouter_base_url": SettingSpec("Model Routing", live=True, order=0),
     "zai_base_url": SettingSpec("Model Routing", live=True, order=1),
+    "kimi_base_url": SettingSpec("Model Routing", live=True, order=2),
     "wiki_compilation_provider": SettingSpec("Model Routing", live=True, order=10),
     "wiki_compilation_model": SettingSpec("Model Routing", live=True, order=11),
     "adr_review_provider": SettingSpec("Model Routing", live=True, order=20),

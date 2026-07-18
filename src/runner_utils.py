@@ -577,6 +577,7 @@ async def stream_claude_with_telemetry(
 
 _OPENROUTER = "openrouter"
 _ZAI = "zai"
+_KIMI = "kimi"
 
 
 @dataclass(frozen=True)
@@ -616,6 +617,12 @@ _OPENAI_COMPAT_BACKENDS: dict[str, _OpenAICompatBackend] = {
     _ZAI: _OpenAICompatBackend(
         base_url_field="zai_base_url",
         api_key_envs=("ZAI_API_KEY", "HYDRAFLOW_ZAI_API_KEY"),
+    ),
+    _KIMI: _OpenAICompatBackend(
+        base_url_field="kimi_base_url",
+        # MOONSHOT_API_KEY is Moonshot's own canonical env var; KIMI_API_KEY is a
+        # friendlier alias, and HYDRAFLOW_KIMI_API_KEY mirrors the sibling prefix.
+        api_key_envs=("MOONSHOT_API_KEY", "KIMI_API_KEY", "HYDRAFLOW_KIMI_API_KEY"),
     ),
 }
 
