@@ -5,13 +5,13 @@ kind: "service"
 bounded_context: "shared-kernel"
 code_anchor: "src/state/__init__.py:StateTracker"
 aliases: ["state tracker", "state facade", "state mixin facade"]
-related: []
+related: [{"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488B"}]
 evidence: ["01KQNZNK5CTPJHBXJBAJZ5XJW6", "01KQP0AJ4Y4348S0D9AKRTCPP7", "01KQP0AJ4Z2MY1EXMWW9BTXN97", "01KQP0AJ4Z2MY1EXMWW9BTXN99", "01KQP0DZNDCVJVV0YHTG430T31", "01KQP0V9KK99G77287P414NFQY", "01KRBX2N4QP7VW8FGH3J5YD0M6", "01KRBX2N4QP7VW8FGH3J5YD0M7"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668771+00:00"
-updated_at: "2026-07-18T03:15:16.509128+00:00"
+updated_at: "2026-07-18T16:54:44.140952+00:00"
 ---
 
 ## Definition
