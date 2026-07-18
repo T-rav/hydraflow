@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/route_back.py:RouteBackCounterPort"
 aliases: ["route-back counter port", "route back counter", "precondition retry counter port"]
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K7"}]
-evidence: []
+evidence: ["01KQNZNK5CTPJHBXJBAJZ5XJWJ"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T00:00:00.000000+00:00"
-updated_at: "2026-06-12T04:17:13.434460+00:00"
+updated_at: "2026-07-18T05:15:20.722376+00:00"
 ---
 
 ## Definition
