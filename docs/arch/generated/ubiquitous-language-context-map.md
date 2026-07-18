@@ -53,6 +53,7 @@ graph LR
     DisturbanceDampenerLoop["DisturbanceDampenerLoop<br/><i>loop</i>"]
     Error["Error<br/><i>control_role</i>"]
     EventBus["EventBus<br/><i>service</i>"]
+    EventType["EventType<br/><i>value_object</i>"]
     Governor["Governor<br/><i>control_role</i>"]
     HumanSteeringLoop["HumanSteeringLoop<br/><i>control_role</i>"]
     HydraFlowConfig["HydraFlowConfig<br/><i>aggregate</i>"]
@@ -129,6 +130,17 @@ graph LR
   EntryEvidenceLoop -->|depends_on| RepoWikiStore
   EntryEvidenceLoop -->|depends_on| HydraFlowConfig
   EntryEvidenceLoop -->|implements| BaseBackgroundLoop
+  EventType -->|depends_on| AgentRunner
+  EventType -->|depends_on| BaseBackgroundLoop
+  EventType -->|depends_on| Governor
+  EventType -->|depends_on| Actuator
+  EventType -->|depends_on| DependabotMergeLoop
+  EventType -->|depends_on| DiagnosticLoop
+  EventType -->|depends_on| FitnessScorecardLoop
+  EventType -->|depends_on| Controller
+  EventType -->|depends_on| Set-point
+  EventType -->|depends_on| MergeStateWatcherLoop
+  EventType -->|depends_on| ReportIssueLoop
   FakeCoverageAuditorLoop -->|depends_on| BaseBackgroundLoop
   FakeCoverageAuditorLoop -->|depends_on| HydraFlowConfig
   FakeCoverageAuditorLoop -->|depends_on| StateTracker

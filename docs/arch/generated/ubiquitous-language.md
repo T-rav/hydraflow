@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_62 terms across 3 bounded contexts._
+_63 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -280,6 +280,17 @@ Async pub/sub bus that fans HydraFlowEvent objects out to subscriber asyncio.Que
 - History length is capped at max_history (default 5000); oldest entries are evicted when full.
 - Slow subscribers do not block the publisher: a full subscriber queue drops its oldest entry before the new event is enqueued.
 - History mutation is serialized through an asyncio.Lock.
+
+## EventType
+
+**Kind:** `value_object` · **Context:** `shared-kernel` · **Anchor:** `src/events.py:EventType` · **Confidence:** `accepted`
+**Aliases:** `event category`, `event kind`
+
+Closed enumeration of event categories published by the orchestrator on the EventBus. Each member — from PHASE_CHANGE and WORKER_UPDATE to PR_CREATED and HITL_ESCALATION — names a distinct class of system happening that subscribers filter on. A frozenset subset (EPHEMERAL_EVENT_TYPES, currently just PIPELINE_SNAPSHOT) is delivered live-only and excluded from in-memory history and on-disk persistence to prevent stale-snapshot clobber on WebSocket reconnect.
+
+**Invariants:**
+- Every HydraFlowEvent carries exactly one EventType as its type discriminator.
+- EPHEMERAL_EVENT_TYPES members are fanned out to live subscribers but never retained in history nor persisted to the on-disk event log.
 
 ## FakeCoverageAuditorLoop
 
