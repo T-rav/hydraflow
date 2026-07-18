@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 9567
 source_phase: review
 created_at: 2026-06-20T09:15:00.395666+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0050
 ---
 
 # In-place diff truncation silently corrupts downstream non-LLM consumers
