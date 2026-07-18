@@ -3277,6 +3277,18 @@ class HydraFlowConfig(BaseModel):
         le=30,
         description="Extra minutes to wait after reported credit reset time",
     )
+    credit_pause_require_probe: bool = Field(
+        default=True,
+        description=(
+            "Before committing a GLOBAL credit pause, corroborate the "
+            "text-detected credit signal with a live Anthropic API probe. "
+            "is_credit_exhaustion matches credit-error PROSE, so a "
+            "diagnostic/reviewer run quoting a prior cap in its analysis would "
+            "otherwise trigger a multi-hour false global pause (#9807). The "
+            "probe is ground truth (False only when the API itself confirms "
+            "exhaustion). Kill-switch: set False to revert to pause-on-text."
+        ),
+    )
 
     # Process timeouts
     agent_timeout: int = Field(
