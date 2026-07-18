@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_62 terms across 3 bounded contexts._
+_63 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -674,6 +674,18 @@ Caretaker background loop that autonomously prunes stale terms from the ubiquito
 - Opens at most one PR per tick, bundling all eligible terms into a single `hydraflow-ul-deprecated`-labelled PR.
 - `ReviewPhase` skips routing for PRs carrying `TERM_PRUNER_PR_LABEL` so the deprecation PR is not sent through the agent pipeline.
 - Companion to `TermProposerLoop`: together they implement the two-tick grow/prune cycle that keeps `make lint-ul` anchor-resolution green without human intervention.
+
+## TribalWikiStore
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/tribal_wiki.py:TribalWikiStore` · **Confidence:** `accepted`
+**Aliases:** `tribal wiki`, `global wiki`, `cross-repo wiki`
+
+Cross-repo knowledge store that mirrors the per-repo wiki layout (index.json + topic.md pages) but is not namespaced by repo. All entries carry source_repo='global' and are written only by the generalization pass (src/wiki_compiler.py) when the same principle is observed in two or more per-repo wikis. Loaded at every plan/implement/review phase alongside the target repo's wiki so tribal rules apply regardless of which repo is being worked on. Routes reads, writes, staleness filtering, and contradiction marking through the underlying RepoWikiStore to keep on-disk format consistent with per-repo wikis.
+
+**Invariants:**
+- All entries carry source_repo='global'; the store is pinned to a single 'global' slug.
+- Entries are written only by the generalization pass when the same principle is observed in ≥2 per-repo wikis; direct modification from agent code is not a supported use case.
+- On-disk layout, staleness filtering, contradiction marking, and supersession are delegated to the underlying RepoWikiStore so per-repo and tribal formats stay consistent.
 
 ## ViolationDetector
 
