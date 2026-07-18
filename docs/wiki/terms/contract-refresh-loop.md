@@ -5,8 +5,8 @@ kind: "loop"
 bounded_context: "caretaker"
 code_anchor: "src/contract_refresh_loop.py:ContractRefreshLoop"
 aliases: ["contract refresh loop", "cassette refresh loop", "fake contract refresh loop"]
-related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
-evidence: ["01KQP0V9KK99G77287P414NFRC", "01KQP10AJV73YGEATZKR6QXCAP"]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488H"}]
+evidence: ["01KQP0V9KK99G77287P414NFRC"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"

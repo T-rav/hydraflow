@@ -5,8 +5,8 @@ kind: "loop"
 bounded_context: "caretaker"
 code_anchor: "src/adr_touchpoint_auditor_loop.py:AdrTouchpointAuditorLoop"
 aliases: ["ADR touchpoint auditor loop", "adr drift auditor loop", "adr touchpoint gate caretaker"]
-related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
-evidence: ["01KQRULESET2026B0PHASE2002"]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KVJPAQ8987YPSRSWWWJJTBSG"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488H"}]
+evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"

@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_63 terms across 3 bounded contexts._
+_64 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -305,6 +305,18 @@ Frozen, data-only Pydantic model that is the **sole input** to any `loop_fitness
 - Carries no live client or callable; the model is frozen (`model_config = {"frozen": True}`).
 - `issues` is a snapshot list of `IssueRecord` rows; each loop attributes its own artifacts by querying this list for its label.
 - The same `FitnessContext` instance that powers the live scorecard can power an offline optimizer replay — that equivalence is the design invariant this type enforces.
+
+## FitnessScorecardLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/fitness_scorecard_loop.py:FitnessScorecardLoop` · **Confidence:** `accepted`
+**Aliases:** `fitness scorecard`, `fitness scorecard loop`, `loop fitness scorecard`
+
+Read-only caretaker loop (ADR-0029) that produces the per-loop fitness scorecard on a configurable cadence (default 86400 s). Each tick it builds one `FitnessContext` per registered loop, calls every loop's `loop_fitness(ctx)`, persists results to `fitness.jsonl`, regenerates `docs/arch/generated/loop-fitness.md`, and emits a `LOOP_FITNESS_UPDATE` event. Mutates no loop state, so it sits off the ADR-0046 recursion ladder. Kill-switch via `enabled_cb("fitness_scorecard")` per ADR-0049. (ADR-0093)
+
+**Invariants:**
+- Kill-switch is via `enabled_cb("fitness_scorecard")` at the top of `_do_work()` (ADR-0049).
+- The loop is read-only: it calls `loop_fitness()` on peer loops but changes no loop config or state.
+- Declares its own fitness as `HOUSEKEEPING` — it produces no GitHub proposals or artifacts that have an acceptance lifecycle.
 
 ## FitnessScorecardLoop
 

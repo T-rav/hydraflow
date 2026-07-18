@@ -6,9 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W29
 
-- `901c807` — Merge remote-tracking branch 'origin/staging' into archheal-ul-proposer-5170ed13-20260718181352 *(2026-07-18)*
+- `541f406` — feat(ul): edge-proposer — 81 new edges across 40 terms *(2026-07-18)*
+- `f07fa2f` — feat(ul): entry-evidence — 20 new entry links across 14 terms (#9886) (#9886) *(2026-07-18)*
+- `c540840` — feat(ul): term-proposer batch — 1 drafts (#9864) (#9864) *(2026-07-18)*
+- `c91e35f` — feat(ul): entry-evidence — 15 new entry links across 12 terms (#9880) (#9880) *(2026-07-18)*
 - `5ed366d` — feat(ul): entry-evidence — 13 new entry links across 10 terms (#9868) (#9868) *(2026-07-18)*
-- `0280272` — feat(ul): term-proposer batch — 1 drafts *(2026-07-18)*
 - `dfa0ca8` — feat(ul): entry-evidence — 13 new entry links across 10 terms (#9790) (#9790) *(2026-07-18)*
 - `120e2eb` — feat: epic-to-epic lineage — nested decompose-to-converge (depth 2) (#9757) (#9761) (#9761) *(2026-07-17)*
 - `d721487` — feat: decompose-to-converge P1 — narrow HITL to genuine dead-ends (ADR-0105) (#9756) (#9756) *(2026-07-15)*

@@ -5,8 +5,8 @@ kind: "loop"
 bounded_context: "caretaker"
 code_anchor: "src/github_cache_loop.py:GitHubCacheLoop"
 aliases: ["github cache loop", "github data cache loop", "github poller"]
-related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
-evidence: ["01KXV82K5P3A5RCRB8SHD3C404"]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488H"}]
+evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
