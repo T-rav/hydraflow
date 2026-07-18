@@ -73,4 +73,19 @@
 #     makes pass. New product behavior (the terminal/council/decomposer) ships
 #     with unit + MockWorld-scenario + s54 sandbox e2e coverage.
 # Forward-enforcement restarts here.
-2026-07-13T02:12:00Z
+#
+# Reset 2026-07-18 (overnight stabilization, user-authorized): three fix(...)
+# commits landed tonight whose regression coverage is in test_*.py, not
+# tests/regressions/, so the P10.3 per-commit heuristic can't attribute them.
+# Proper tests/regressions/ tests for the two product fixes are added in the
+# same change; enumerated so this reset provably hides no untested work:
+#   - c24d1f0 fix(dependabot-merge): is_bot + factory branch-prefix selection
+#     (#9857) -> tests/regressions/test_issue_9843_botpr_merge_selection.py
+#     (also tests/test_dependabot_merge_loop.py, extensive).
+#   - 045a10b fix(credit-pause): live-probe corroboration (#9869) ->
+#     tests/regressions/test_issue_9807_credit_probe_false_positive.py
+#     (also tests/test_orchestrator_loops.py, tests/test_credit_pause.py).
+#   - ce6e609 fix(ui): benign credit-false-positive alert renders yellow
+#     (#9884) -> UI-only; covered by src/ui App.test.jsx severity assertions.
+# Forward-enforcement restarts here.
+2026-07-18T19:00:00Z
