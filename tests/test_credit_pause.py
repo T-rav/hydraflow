@@ -414,6 +414,18 @@ class TestRunStatusCreditsPaused:
 
 
 class TestCreditExhaustionPauseResume:
+    @pytest.fixture(autouse=True)
+    def _probe_confirms_exhaustion(self):
+        """These tests exercise pause/resume mechanics for a REAL credit-out, so
+        the corroborating probe in ``_pause_for_credits`` (#9807) must confirm
+        exhaustion (returns False); otherwise it correctly treats the signal as a
+        false positive and skips the pause."""
+        with patch(
+            "orchestrator.probe_credit_availability",
+            AsyncMock(return_value=False),
+        ):
+            yield
+
     @pytest.mark.asyncio
     async def test_credit_exhaustion_publishes_system_alert(
         self, config: HydraFlowConfig, event_bus
@@ -718,6 +730,18 @@ class TestConfigCreditPauseBuffer:
 
 
 class TestTryClearCreditPause:
+    @pytest.fixture(autouse=True)
+    def _probe_confirms_exhaustion(self):
+        """Tests here that TRIGGER a pause need the corroborating probe in
+        ``_pause_for_credits`` (#9807) to confirm exhaustion. try_clear's own
+        probe tests patch ``subprocess_util.probe_credit_availability`` (a
+        different reference), so this orchestrator-side patch never collides."""
+        with patch(
+            "orchestrator.probe_credit_availability",
+            AsyncMock(return_value=False),
+        ):
+            yield
+
     def test_returns_false_when_not_paused(self, config: HydraFlowConfig) -> None:
         """try_clear_credit_pause returns False when no pause is active."""
         orch = HydraFlowOrchestrator(config)
