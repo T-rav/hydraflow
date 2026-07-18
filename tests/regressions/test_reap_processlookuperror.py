@@ -46,6 +46,7 @@ class _DeadProc:
         ("flake_tracker_loop", "_GH_TIMEOUT_SECONDS"),
         ("rc_budget_loop", "_GH_TIMEOUT_SECONDS"),
         ("fake_coverage_auditor_loop", "_SUBPROCESS_TIMEOUT_SECONDS"),
+        ("adr_touchpoint_auditor_loop", "_GH_TIMEOUT_SECONDS"),
     ],
 )
 async def test_communicate_bounded_surfaces_timeout_not_processlookup(
