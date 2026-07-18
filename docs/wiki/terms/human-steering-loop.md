@@ -5,13 +5,13 @@ kind: "control_role"
 bounded_context: "shared-kernel"
 code_anchor: "src/human_steering_loop.py:HumanSteeringLoop"
 aliases: []
-related: []
+related: [{"kind": "depends_on", "target": "01JZ9FK3C0M03HYR42BF33W0C3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488H"}, {"kind": "depends_on", "target": "01KWN0R5WY93KMBF8CWG9MPFHB"}, {"kind": "depends_on", "target": "01JZ9FK3C0M01HYR42BF11W0A1"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
 evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-03T22:14:23.000000+00:00"
-updated_at: "2026-07-05T00:00:00.000000+00:00"
+updated_at: "2026-07-18T17:25:37.161820+00:00"
 ---
 
 ## Definition

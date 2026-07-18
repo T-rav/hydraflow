@@ -5,13 +5,13 @@ kind: "control_role"
 bounded_context: "shared-kernel"
 code_anchor: "src/disturbance/registry.py:DimensionSpec"
 aliases: []
-related: []
+related: [{"kind": "depends_on", "target": "01KWFR9AWM3NX19D0C1W10NNMM"}]
 evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-01T21:10:16.212905+00:00"
-updated_at: "2026-07-01T21:10:16.212906+00:00"
+updated_at: "2026-07-18T17:25:37.161820+00:00"
 ---
 
 ## Definition

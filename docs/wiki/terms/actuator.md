@@ -5,13 +5,13 @@ kind: "control_role"
 bounded_context: "shared-kernel"
 code_anchor: "src/base_runner.py:BaseRunner"
 aliases: []
-related: []
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K6"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KVJPAQ8987YPSRSWWWJJTBSG"}, {"kind": "depends_on", "target": "01KVHDB0GY6PSQPWY90DH8TNQS"}]
 evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-01T02:34:42.393494+00:00"
-updated_at: "2026-07-01T02:34:42.393495+00:00"
+updated_at: "2026-07-18T17:25:37.161820+00:00"
 ---
 
 ## Definition
