@@ -77,8 +77,12 @@ async def _communicate_bounded(
     try:
         return await asyncio.wait_for(proc.communicate(), timeout=_GH_TIMEOUT_SECONDS)
     except TimeoutError:
-        proc.kill()
+        # proc.kill() itself raises ProcessLookupError when the child already
+        # exited — suppress it too, not just proc.wait() — so the TimeoutError
+        # (the intended failed-read signal) propagates instead of crashing the
+        # caller with ProcessLookupError. (#9794/#9814)
         with contextlib.suppress(ProcessLookupError):
+            proc.kill()
             await proc.wait()
         raise
 
