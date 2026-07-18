@@ -48,7 +48,7 @@ class ClaudeCLIClient:
         config: HydraFlowConfig,
         *,
         tool: AgentTool = "claude",
-        model: str = "claude-sonnet-4-6",
+        model: str = "sonnet",
         timeout: int = 180,
         provider: str = "claude",
         source: str = "term_proposer",

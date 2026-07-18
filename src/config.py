@@ -2844,7 +2844,7 @@ class HydraFlowConfig(BaseModel):
         description="Cooldown before retrying a candidate that previously failed validation or LLM draft.",
     )
     term_proposer_model: str = Field(
-        default="claude-sonnet-4-6",
+        default="sonnet",
         description="Model for the term-proposer / entry-evidence drafters.",
     )
     term_proposer_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
