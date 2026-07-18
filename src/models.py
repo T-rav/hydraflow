@@ -2834,6 +2834,10 @@ class SystemAlertPayload(TypedDict, total=False):
 
     message: str
     source: str
+    # UI banner severity: "warning" renders yellow (benign/informational, e.g. a
+    # credit signal ignored as a false positive); anything else (default) renders
+    # red (critical, e.g. a real credit pause).
+    severity: str
     repo: str
     epic_number: int
     exception_type: str
