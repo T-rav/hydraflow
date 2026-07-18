@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/base_runner.py:BaseRunner"
 aliases: []
 related: []
-evidence: []
+evidence: ["implement-phase-half-state-on-skill-failure"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-01T02:34:42.393494+00:00"
-updated_at: "2026-07-01T02:34:42.393495+00:00"
+updated_at: "2026-07-18T14:39:52.319154+00:00"
 ---
 
 ## Definition

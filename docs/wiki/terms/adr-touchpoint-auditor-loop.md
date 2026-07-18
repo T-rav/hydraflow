@@ -6,12 +6,12 @@ bounded_context: "caretaker"
 code_anchor: "src/adr_touchpoint_auditor_loop.py:AdrTouchpointAuditorLoop"
 aliases: ["ADR touchpoint auditor loop", "adr drift auditor loop", "adr touchpoint gate caretaker"]
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
-evidence: []
+evidence: ["01KQRULESET2026B0PHASE2002"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T20:00:00.000000+00:00"
-updated_at: "2026-06-12T04:17:13.434460+00:00"
+updated_at: "2026-07-18T14:39:52.319154+00:00"
 ---
 
 ## Definition

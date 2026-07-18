@@ -6,12 +6,12 @@ bounded_context: "caretaker"
 code_anchor: "src/loop_fitness.py:FitnessContext"
 aliases: ["fitness context", "loop fitness context"]
 related: []
-evidence: []
+evidence: ["01JZ9FK3C0M04HYR42BF44W0D4"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-06-30T00:00:00.000000+00:00"
-updated_at: "2026-06-30T00:00:00.000000+00:00"
+updated_at: "2026-07-18T14:39:52.319154+00:00"
 ---
 
 ## Definition
