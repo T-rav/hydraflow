@@ -46,6 +46,8 @@ def _make_diagnostic_loop(
 ) -> tuple[DiagnosticLoop, MagicMock]:
     """Build a DiagnosticLoop with its PRPort mock."""
     deps = make_bg_loop_deps(tmp_path, enabled=True)
+    # DiagnosticLoop defaults OFF (#9895); enable the kill-switch to exercise it.
+    object.__setattr__(deps.config, "diagnostic_loop_enabled", True)
 
     runner = MagicMock()
     runner.diagnose = AsyncMock()
