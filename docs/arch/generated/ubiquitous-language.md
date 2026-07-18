@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_62 terms across 3 bounded contexts._
+_63 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -268,6 +268,18 @@ The gap between Set-point and measured state that a Controller acts to reduce: u
 
 **Invariants:**
 - Error is derived (Set-point minus measured state), never authored directly.
+
+## EscalationReconciler
+
+**Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/escalation_reconcile.py:EscalationReconciler` · **Confidence:** `accepted`
+**Aliases:** `escalation reconciliation service`, `stale escalation closer`
+
+Shared service that reconciles HITL escalation issues for trust loops. Handles two lifecycle paths: closed escalations (a human closed the issue → drop the dedup key and reset the attempt counter so the detector may re-fire) and open escalations (the gap is no longer detected at HEAD — fixed by a later PR or was a false positive → auto-close with an explanatory comment and clear state). Previously copy-pasted as `_reconcile_closed_escalations` across five loops; centralized to eliminate drift and to add the open-escalation path that prevented dead-letter issues from sitting unattended (#9618 sat six days). Each trust loop supplies its own `subject_from_title` parser so subjects are recovered from issue titles, never from dedup keys.
+
+**Invariants:**
+- reconcile_open skips entirely when active_subjects is None (failed or partial detection) — closing on incomplete data would kill real escalations and reset their attempt budgets
+- Close-then-clear: dedup key and attempt counter reset only after a successful issue close, persisted per subject; a failed close leaves that subject's state for the next tick
+- Port errors propagate without broad excepts — the caller's cycle handler owns error classification per the reraise_on_credit_or_bug rule
 
 ## EventBus
 

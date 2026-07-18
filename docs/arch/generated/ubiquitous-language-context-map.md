@@ -22,6 +22,7 @@ graph LR
     DiagramLoop["DiagramLoop<br/><i>loop</i>"]
     EdgeProposerLoop["EdgeProposerLoop<br/><i>loop</i>"]
     EntryEvidenceLoop["EntryEvidenceLoop<br/><i>loop</i>"]
+    EscalationReconciler["EscalationReconciler<br/><i>service</i>"]
     FakeCoverageAuditorLoop["FakeCoverageAuditorLoop<br/><i>loop</i>"]
     FitnessContext["FitnessContext<br/><i>value_object</i>"]
     FitnessScorecardLoop["FitnessScorecardLoop<br/><i>loop</i>"]
