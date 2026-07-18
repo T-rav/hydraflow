@@ -39,6 +39,19 @@ _ESCALATION_LABEL_STUCK = "discover-stuck"
 _ESCALATION_LABEL_HITL = "hitl-escalation"
 
 
+def _mockworld_sentinel_active(runner: DiscoverRunner) -> bool:
+    """True when the ADR-0063 MockWorld sentinel is attached to *runner*.
+
+    Under the sentinel the runner must NEVER dispatch a subprocess: in the
+    air-gapped docker sandbox a real ``claude -p`` spawn blocks for the full
+    ``agent_timeout``, wedging the discover phase loop mid-tick (frozen
+    heartbeat) and starving every scenario that routes an issue through
+    discover (#9796 — s51 failed every rc/* promotion this way).
+    """
+    fake_llm = getattr(runner, "_mockworld_fake_llm", None)
+    return fake_llm is not None and bool(getattr(fake_llm, "_is_fake_adapter", False))
+
+
 def _consume_mockworld_discover_script(
     runner: DiscoverRunner, issue_number: int
 ) -> tuple[bool, str, list[str]] | None:
@@ -273,6 +286,20 @@ class DiscoverRunner(BaseRunner):
         result = DiscoverResult(issue_number=task.id)
         transcript = ""
 
+        # MockWorld bypass (ADR-0063 sentinel): never spawn a subprocess in
+        # the sandbox. Without this, the air-gapped ``claude -p`` spawn blocks
+        # for the full agent_timeout and wedges the discover loop (#9796).
+        # ``_evaluate_brief`` still consumes any scripted coherence verdict,
+        # so failure-path scenarios keep working against this stub brief.
+        if _mockworld_sentinel_active(self):
+            result.research_brief = (
+                f"MockWorld discovery brief for issue #{task.id} (attempt "
+                f"{attempt}). Deterministic sandbox stub — no subprocess was "
+                f"dispatched."
+            )
+            result.opportunities = ["MockWorld sandbox stub"]
+            return result
+
         try:
             cmd = self._build_command()
             prompt = self._build_prompt(task, guidance=guidance)
@@ -373,6 +400,14 @@ class DiscoverRunner(BaseRunner):
         scripted = _consume_mockworld_discover_script(self, task.id)
         if scripted is not None:
             return scripted
+
+        # MockWorld fail-open (companion to the ``_run_discovery_once``
+        # bypass): a scenario that seeded no ``discover`` script must not
+        # fall through to a real evaluator subprocess — that spawn wedges
+        # the air-gapped sandbox exactly like the main discovery pass
+        # (#9796). Scripted verdicts were already consumed above.
+        if _mockworld_sentinel_active(self):
+            return True, "MockWorld sandbox: no scripted verdict — fail open", []
 
         skill = next((s for s in BUILTIN_SKILLS if s.name == _SKILL_NAME), None)
         if skill is None:

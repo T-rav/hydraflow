@@ -36,8 +36,11 @@ PIPELINE ROUTE THAT PRODUCES BOTH LOOP_BACKs SIMULTANEOUSLY
 2. Triage scripts ``needs_discovery=True`` → routing outcome ``"discover"`` →
    ``_TRIAGE_VERDICT_MAP["discover"] == "LOOP_BACK"`` recorded for stage
    ``"triage"``.  Issue gets ``hydraflow-discover`` label.
-3. DiscoverPhase runs with no real runner (sandbox) → stub brief → routes
-   issue to ``hydraflow-shape``.
+3. DiscoverPhase runs its DiscoverRunner under the MockWorld sentinel
+   (``_mockworld_fake_llm``) → the ``_run_discovery_once`` bypass returns a
+   deterministic stub brief with NO subprocess spawn, and the unscripted
+   evaluator fails open (#9796 — a real spawn wedges the air-gapped
+   sandbox for the full agent_timeout) → routes issue to ``hydraflow-shape``.
 4. ShapePhase runs with a shape runner (FakeSubprocessRunner, success) and
    the ExpertCouncil wired up via ``expert_council._mockworld_fake_llm``.
    ``phase_scripts={"shape_council": {1: {1: "consensus"}}}`` returns
