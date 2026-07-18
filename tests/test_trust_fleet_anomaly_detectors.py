@@ -110,6 +110,30 @@ def test_tick_error_ratio_at_threshold_breaches() -> None:
     assert breached is True
 
 
+def test_tick_error_ratio_below_min_sample_does_not_breach() -> None:
+    """A single error out of 2 ticks is a 50% ratio but too small a sample
+    to escalate — regression for issue #9772 (rc_budget false positive)."""
+    metrics = {"ticks_total": 2, "ticks_errored": 1}
+    breached, details = detect_tick_error_ratio(
+        "rc_budget", metrics, threshold=0.2, min_sample=3
+    )
+    assert breached is False
+    assert details["status"] == "insufficient_data"
+
+
+def test_tick_error_ratio_min_sample_floor_is_inclusive_lower_bound() -> None:
+    below = detect_tick_error_ratio(
+        "x", {"ticks_total": 2, "ticks_errored": 2}, threshold=0.2, min_sample=3
+    )
+    assert below[0] is False
+    assert below[1]["status"] == "insufficient_data"
+
+    at_floor = detect_tick_error_ratio(
+        "x", {"ticks_total": 3, "ticks_errored": 1}, threshold=0.2, min_sample=3
+    )
+    assert at_floor[0] is True
+
+
 # --- 4. staleness ---
 
 

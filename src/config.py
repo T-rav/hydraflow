@@ -319,6 +319,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_LOOP_ANOMALY_REPAIR_MIN_SAMPLE",
         3,
     ),
+    (
+        "loop_anomaly_tick_error_min_sample",
+        "HYDRAFLOW_LOOP_ANOMALY_TICK_ERROR_MIN_SAMPLE",
+        3,
+    ),
     ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 3600),
     ("contract_refresh_interval", "HYDRAFLOW_CONTRACT_REFRESH_INTERVAL", 604800),
     ("max_fake_repair_attempts", "HYDRAFLOW_MAX_FAKE_REPAIR_ATTEMPTS", 3),
@@ -3106,6 +3111,18 @@ class HydraFlowConfig(BaseModel):
         description=(
             "TrustFleetSanityLoop: `ticks_errored / ticks_total` over 24h "
             "breach threshold (spec §12.1)."
+        ),
+    )
+    loop_anomaly_tick_error_min_sample: int = Field(
+        default=3,
+        ge=1,
+        le=1000,
+        description=(
+            "TrustFleetSanityLoop: minimum 24h `ticks_total` before the "
+            "tick_error_ratio detector can breach. Below this floor the "
+            "signal is too small to escalate and the detector returns "
+            "`insufficient_data` (false-positive guard, mirrors "
+            "loop_anomaly_repair_min_sample, issue #9458 / #9772)."
         ),
     )
     loop_anomaly_staleness_multiplier: float = Field(

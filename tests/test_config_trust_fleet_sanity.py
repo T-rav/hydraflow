@@ -13,6 +13,7 @@ def test_default_values() -> None:
     assert cfg.loop_anomaly_issues_per_hour == 10
     assert cfg.loop_anomaly_repair_ratio == 2.0
     assert cfg.loop_anomaly_tick_error_ratio == 0.2
+    assert cfg.loop_anomaly_tick_error_min_sample == 3
     assert cfg.loop_anomaly_staleness_multiplier == 2.0
     assert cfg.loop_anomaly_cost_spike_ratio == 5.0
 
@@ -22,6 +23,7 @@ def test_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HYDRAFLOW_LOOP_ANOMALY_ISSUES_PER_HOUR", "25")
     monkeypatch.setenv("HYDRAFLOW_LOOP_ANOMALY_REPAIR_RATIO", "3.5")
     monkeypatch.setenv("HYDRAFLOW_LOOP_ANOMALY_TICK_ERROR_RATIO", "0.5")
+    monkeypatch.setenv("HYDRAFLOW_LOOP_ANOMALY_TICK_ERROR_MIN_SAMPLE", "5")
     monkeypatch.setenv("HYDRAFLOW_LOOP_ANOMALY_STALENESS_MULTIPLIER", "4.0")
     monkeypatch.setenv("HYDRAFLOW_LOOP_ANOMALY_COST_SPIKE_RATIO", "10.0")
     cfg = HydraFlowConfig()
@@ -29,6 +31,7 @@ def test_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.loop_anomaly_issues_per_hour == 25
     assert cfg.loop_anomaly_repair_ratio == 3.5
     assert cfg.loop_anomaly_tick_error_ratio == 0.5
+    assert cfg.loop_anomaly_tick_error_min_sample == 5
     assert cfg.loop_anomaly_staleness_multiplier == 4.0
     assert cfg.loop_anomaly_cost_spike_ratio == 10.0
 

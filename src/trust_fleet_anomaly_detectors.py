@@ -141,8 +141,18 @@ def detect_tick_error_ratio(
     metrics: dict[str, Any],
     *,
     threshold: float,
+    min_sample: int = 1,
 ) -> tuple[bool, dict[str, Any]]:
-    """`ticks_errored / ticks_total >= threshold` over 24h (spec §12.1 bullet 3)."""
+    """`ticks_errored / ticks_total >= threshold` over 24h (spec §12.1 bullet 3).
+
+    ``min_sample`` is the floor on 24h ``ticks_total`` required before the
+    ratio can breach. A loop that has only ticked once or twice in the
+    window (just started, or a long interval) can show a 50-100% error
+    ratio from a single transient failure — below the floor the detector
+    returns no breach with ``status="insufficient_data"``, mirroring the
+    ``detect_repair_ratio`` min-sample guard (false-positive guard, issue
+    #9458 / #9772).
+    """
     total = int(metrics.get("ticks_total", 0))
     errored = int(metrics.get("ticks_errored", 0))
     if total == 0:
@@ -150,6 +160,14 @@ def detect_tick_error_ratio(
             "worker": worker,
             "status": "insufficient_data",
             "ticks_total": 0,
+        }
+    if total < min_sample:
+        return False, {
+            "worker": worker,
+            "status": "insufficient_data",
+            "ticks_total": total,
+            "ticks_errored": errored,
+            "min_sample": min_sample,
         }
     ratio = errored / total
     breached = ratio >= threshold

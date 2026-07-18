@@ -251,6 +251,58 @@ class TestTrustFleetSanityBreachScenario:
         titles = [issue.title for issue in world.github._issues.values()]
         assert any("tick_error_ratio" in t and "corpus_learning" in t for t in titles)
 
+    async def test_tick_error_ratio_below_min_sample_does_not_breach(
+        self, tmp_path
+    ) -> None:
+        """rc_budget with 1 errored / 2 total ticks -> no escalation.
+
+        Regression for issue #9772: a 50% error ratio from only 2 ticks in
+        the 24h window (e.g. a loop that just started, or one transient
+        failure) is too small a sample to page a human. Mirrors the
+        min-sample guard added to repair_ratio for #9458.
+        """
+        world = MockWorld(tmp_path)
+
+        now = _dt.datetime.now(_dt.UTC)
+        seeded_bus = EventBus()
+
+        def _make_ev(status: str, ago_s: int) -> HydraFlowEvent:
+            ts = (now - _dt.timedelta(seconds=ago_s)).isoformat()
+            return HydraFlowEvent(
+                type=EventType.BACKGROUND_WORKER_STATUS,
+                timestamp=ts,
+                data={"worker": "rc_budget", "status": status, "details": {}},
+            )
+
+        all_events = [
+            _make_ev("ok", 3601),
+            _make_ev("error", 3602),
+        ]
+
+        async def _preloaded_load(since: _dt.datetime) -> list[HydraFlowEvent]:
+            return [e for e in all_events if e.timestamp >= since.isoformat()]
+
+        seeded_bus.load_events_since = _preloaded_load  # type: ignore[method-assign]
+
+        state = MagicMock()
+        state.get_worker_heartbeats.return_value = {}
+        state.get_trust_fleet_sanity_attempts.return_value = 0
+        state.inc_trust_fleet_sanity_attempts.return_value = 1
+        state.get_trust_fleet_sanity_last_seen_counts.return_value = {}
+
+        _seed_ports(
+            world,
+            trust_fleet_sanity_state=state,
+            event_bus=seeded_bus,
+        )
+
+        stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
+
+        assert stats["trust_fleet_sanity"]["status"] == "ok", stats
+        assert stats["trust_fleet_sanity"].get("filed", 0) == 0, stats
+        titles = [issue.title for issue in world.github._issues.values()]
+        assert not any("tick_error_ratio" in t for t in titles)
+
     async def test_repair_ratio_breach_files_escalation(self, tmp_path) -> None:
         """rc_budget with failed repairs dominating successes -> escalation."""
         world = MockWorld(tmp_path)

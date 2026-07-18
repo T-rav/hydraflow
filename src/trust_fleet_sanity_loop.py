@@ -267,6 +267,7 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                     worker,
                     metrics,
                     threshold=cfg.loop_anomaly_tick_error_ratio,
+                    min_sample=cfg.loop_anomaly_tick_error_min_sample,
                 )
                 if breached:
                     per_worker_breaches.append(("tick_error_ratio", details))
