@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -126,8 +127,13 @@ class HostRunner:
                 proc.communicate(input=input), timeout=timeout
             )
         except TimeoutError:
-            proc.kill()
-            await proc.wait()
+            # proc.kill() raises ProcessLookupError when the child already
+            # exited between the timeout and the reap — suppress it so the
+            # TimeoutError (the intended signal) propagates instead of the
+            # ProcessLookupError crashing the caller/loop. (#9794/#9814)
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+                await proc.wait()
             raise
         return SimpleResult(
             stdout=stdout_bytes.decode(errors="replace").strip()
