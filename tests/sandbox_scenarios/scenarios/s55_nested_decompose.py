@@ -27,6 +27,15 @@ import json
 from mockworld.seed import MockWorldSeed
 
 NAME = "s55_nested_decompose"
+
+# Born-racy: the review-convergence escalation → hop-2 decompose handoff is
+# nondeterministic (~80% red 2026-07-18; blocked every rc/* promotion and all
+# staging code PRs). Full evidence dossier, mitigation design, and the
+# real-fix acceptance bar (10 consecutive green docker runs) live in #9925.
+# REMOVING this marker is part of #9925's acceptance criteria — do not remove
+# it without the race fix. Collective runs (run-all, CI fast subset) exclude
+# this scenario LOUDLY; explicit `run s55_nested_decompose` still works.
+QUARANTINED = "#9925"
 DESCRIPTION = (
     "Depth-2 nested decompose: a stalled decomposed child re-decomposes and the "
     "root epic converges via epic-to-epic lineage."
