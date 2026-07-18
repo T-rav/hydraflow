@@ -1443,26 +1443,34 @@ class HydraFlowConfig(BaseModel):
             "(a secret — never stored on config or shown in the UI)."
         ),
     )
+    kimi_base_url: str = Field(
+        default="https://api.moonshot.ai/v1",
+        description=(
+            "OpenAI-compatible base URL for the 'kimi' one-shot LLM provider "
+            "(Moonshot / Kimi). The API key is read from the MOONSHOT_API_KEY "
+            "env var (a secret — never stored on config or shown in the UI)."
+        ),
+    )
     # Per-role backend dials for the one-shot (no-tools) loops. "claude" keeps
-    # the CLI harness; "openrouter" and "zai" call a cheap direct model over an
-    # OpenAI-compatible endpoint. Pair each with the role's *_model (e.g. a
-    # DeepSeek id for openrouter, "glm-4.6" for zai).
-    wiki_compilation_provider: Literal["claude", "openrouter", "zai"] = Field(
+    # the CLI harness; "openrouter", "zai", and "kimi" call a cheap direct model
+    # over an OpenAI-compatible endpoint. Pair each with the role's *_model (e.g.
+    # a DeepSeek id for openrouter, "glm-5.2" for zai, "kimi-k3" for kimi).
+    wiki_compilation_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
         default="claude", description="Backend for wiki topic compilation."
     )
-    adr_review_provider: Literal["claude", "openrouter", "zai"] = Field(
+    adr_review_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
         default="claude", description="Backend for the ADR reviewer."
     )
-    transcript_summary_provider: Literal["claude", "openrouter", "zai"] = Field(
+    transcript_summary_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
         default="claude", description="Backend for transcript summarization."
     )
-    triage_honeypot_provider: Literal["claude", "openrouter", "zai"] = Field(
+    triage_honeypot_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
         default="claude", description="Backend for the triage injection honeypot."
     )
-    pr_unstick_provider: Literal["claude", "openrouter", "zai"] = Field(
+    pr_unstick_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
         default="claude", description="Backend for the PR-unsticker cause analysis."
     )
-    term_proposer_provider: Literal["claude", "openrouter", "zai"] = Field(
+    term_proposer_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
         default="claude",
         description="Backend for the term-proposer / entry-evidence drafters.",
     )

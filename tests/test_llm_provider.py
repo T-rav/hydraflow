@@ -91,6 +91,14 @@ class TestTelemetryCmd:
             "glm-4.6",
         ]
 
+    def test_kimi_head_is_provider_name(self):
+        # kimi (Moonshot) gets its own attribution bucket on the cost dashboard.
+        assert _telemetry_cmd("kimi", "claude", "kimi-k3") == [
+            "kimi",
+            "--model",
+            "kimi-k3",
+        ]
+
     def test_claude_head_is_tool(self):
         assert _telemetry_cmd("claude", "claude", "haiku") == [
             "claude",
@@ -121,12 +129,31 @@ class TestBackendRegistry:
         monkeypatch.setenv("HYDRAFLOW_ZAI_API_KEY", "sk-zai-hf")
         assert _OPENAI_COMPAT_BACKENDS["zai"].api_key() == "sk-zai-hf"
 
+    def test_kimi_reads_moonshot_env(self, monkeypatch):
+        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-kimi-123")
+        assert _OPENAI_COMPAT_BACKENDS["kimi"].api_key() == "sk-kimi-123"
+
+    def test_kimi_falls_back_to_kimi_then_hydraflow_prefixed(self, monkeypatch):
+        monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+        monkeypatch.setenv("KIMI_API_KEY", "sk-kimi-alias")
+        assert _OPENAI_COMPAT_BACKENDS["kimi"].api_key() == "sk-kimi-alias"
+        monkeypatch.delenv("KIMI_API_KEY", raising=False)
+        monkeypatch.setenv("HYDRAFLOW_KIMI_API_KEY", "sk-kimi-hf")
+        assert _OPENAI_COMPAT_BACKENDS["kimi"].api_key() == "sk-kimi-hf"
+
     def test_backends_do_not_cross_read_keys(self, monkeypatch):
-        # z.ai's key must never satisfy the openrouter backend, and vice versa.
-        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-        monkeypatch.delenv("HYDRAFLOW_OPENROUTER_API_KEY", raising=False)
+        # Each backend's key must satisfy only that backend, never a sibling.
+        for env in (
+            "OPENROUTER_API_KEY",
+            "HYDRAFLOW_OPENROUTER_API_KEY",
+            "MOONSHOT_API_KEY",
+            "KIMI_API_KEY",
+            "HYDRAFLOW_KIMI_API_KEY",
+        ):
+            monkeypatch.delenv(env, raising=False)
         monkeypatch.setenv("ZAI_API_KEY", "sk-zai-only")
         assert _OPENAI_COMPAT_BACKENDS["openrouter"].api_key() == ""
+        assert _OPENAI_COMPAT_BACKENDS["kimi"].api_key() == ""
         assert _OPENAI_COMPAT_BACKENDS["zai"].api_key() == "sk-zai-only"
 
     def test_empty_when_unset(self, monkeypatch):
@@ -135,10 +162,14 @@ class TestBackendRegistry:
             "HYDRAFLOW_OPENROUTER_API_KEY",
             "ZAI_API_KEY",
             "HYDRAFLOW_ZAI_API_KEY",
+            "MOONSHOT_API_KEY",
+            "KIMI_API_KEY",
+            "HYDRAFLOW_KIMI_API_KEY",
         ):
             monkeypatch.delenv(env, raising=False)
         assert _OPENAI_COMPAT_BACKENDS["openrouter"].api_key() == ""
         assert _OPENAI_COMPAT_BACKENDS["zai"].api_key() == ""
+        assert _OPENAI_COMPAT_BACKENDS["kimi"].api_key() == ""
 
     def test_base_url_reads_the_backends_config_field(self):
         from tests.helpers import ConfigFactory
@@ -149,6 +180,7 @@ class TestBackendRegistry:
             == config.openrouter_base_url
         )
         assert _OPENAI_COMPAT_BACKENDS["zai"].base_url(config) == config.zai_base_url
+        assert _OPENAI_COMPAT_BACKENDS["kimi"].base_url(config) == config.kimi_base_url
 
 
 class TestProviderKeyPresence:
@@ -161,6 +193,9 @@ class TestProviderKeyPresence:
             "HYDRAFLOW_OPENROUTER_API_KEY",
             "ZAI_API_KEY",
             "HYDRAFLOW_ZAI_API_KEY",
+            "MOONSHOT_API_KEY",
+            "KIMI_API_KEY",
+            "HYDRAFLOW_KIMI_API_KEY",
         ):
             monkeypatch.delenv(env, raising=False)
 
@@ -176,10 +211,15 @@ class TestProviderKeyPresence:
         presence = provider_key_presence()
         assert presence["zai"] is True
         assert presence["openrouter"] is False
+        assert presence["kimi"] is False
 
     def test_all_false_when_unset(self, monkeypatch):
         self._clear(monkeypatch)
-        assert provider_key_presence() == {"openrouter": False, "zai": False}
+        assert provider_key_presence() == {
+            "openrouter": False,
+            "zai": False,
+            "kimi": False,
+        }
 
 
 @pytest.mark.asyncio
