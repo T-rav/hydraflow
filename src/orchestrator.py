@@ -1780,6 +1780,9 @@ class HydraFlowOrchestrator:
                                 "— ignoring as a false positive."
                             ),
                             "source": source,
+                            # Benign: a false positive was suppressed, nothing
+                            # paused. Render yellow, not the red critical banner.
+                            "severity": "warning",
                         },
                     )
                 )

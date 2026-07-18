@@ -103,9 +103,10 @@ function SystemAlertBanner({ alert, onDismiss, onRefreshCredit, onClearCredit })
 
   if (!alert) return null
   const resumeTime = formatResumeAt(alert.resume_at)
+  const isWarning = alert?.severity === 'warning'
   return (
-    <div style={styles.alertBanner}>
-      <span style={styles.alertIcon}>!</span>
+    <div style={isWarning ? styles.alertBannerWarning : styles.alertBanner}>
+      <span style={isWarning ? styles.alertIconWarning : styles.alertIcon}>!</span>
       <span>{alert.message}{resumeTime && ` Resumes at ${resumeTime}.`}</span>
       {alert.source && <span style={styles.alertSource}>Source: {alert.source}</span>}
       {refreshState === 'still_exhausted' && (
@@ -384,6 +385,19 @@ const styles = {
     fontSize: 13,
     fontWeight: 600,
   },
+  // Warning (yellow) variant — benign alerts (e.g. a credit false positive
+  // that was suppressed), so it reads as informational, not critical.
+  alertBannerWarning: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '8px 16px',
+    background: theme.yellowSubtle,
+    borderBottom: `2px solid ${theme.yellow}`,
+    color: theme.yellow,
+    fontSize: 13,
+    fontWeight: 600,
+  },
   alertIcon: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -392,6 +406,19 @@ const styles = {
     height: 20,
     borderRadius: '50%',
     background: theme.red,
+    color: theme.white,
+    fontSize: 12,
+    fontWeight: 700,
+    flexShrink: 0,
+  },
+  alertIconWarning: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 20,
+    height: 20,
+    borderRadius: '50%',
+    background: theme.yellow,
     color: theme.white,
     fontSize: 12,
     fontWeight: 700,

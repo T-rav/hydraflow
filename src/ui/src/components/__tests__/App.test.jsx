@@ -111,6 +111,35 @@ describe('HITL badge rendering', () => {
   })
 })
 
+describe('SystemAlertBanner severity', () => {
+  it('renders a warning (yellow) banner for severity="warning"', async () => {
+    mockState.systemAlert = {
+      message:
+        'Credit signal not corroborated by API probe — ignoring as a false positive.',
+      source: 'diagnostic',
+      severity: 'warning',
+    }
+    const { default: App } = await import('../../App')
+    render(<App />)
+
+    const banner = screen.getByText(/not corroborated/).closest('div')
+    expect(banner).toHaveStyle({ background: 'var(--yellow-subtle)' })
+    expect(banner).toHaveStyle({ borderBottomColor: 'var(--yellow)' })
+  })
+
+  it('renders a critical (red) banner for a real credit-limit alert', async () => {
+    mockState.systemAlert = {
+      message: 'Credit limit reached. Pausing all loops.',
+      source: 'plan',
+    }
+    const { default: App } = await import('../../App')
+    render(<App />)
+
+    const banner = screen.getByText(/Credit limit reached/).closest('div')
+    expect(banner).toHaveStyle({ background: 'var(--red-subtle)' })
+  })
+})
+
 describe('Layout min-width', () => {
   it('root layout has minWidth to prevent overlap at narrow viewports', async () => {
     const { default: App } = await import('../../App')
