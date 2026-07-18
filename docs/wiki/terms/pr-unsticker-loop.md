@@ -6,12 +6,12 @@ bounded_context: "caretaker"
 code_anchor: "src/pr_unsticker_loop.py:PRUnstickerLoop"
 aliases: ["pr unsticker loop", "pr unsticker", "hitl unsticker"]
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K7"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
-evidence: []
+evidence: ["swap-pipeline-labels-ready-review-boundary"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T20:00:00.000000+00:00"
-updated_at: "2026-06-12T04:17:13.434460+00:00"
+updated_at: "2026-07-18T03:53:12.562779+00:00"
 ---
 
 ## Definition
