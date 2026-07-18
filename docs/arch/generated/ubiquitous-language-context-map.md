@@ -79,6 +79,7 @@ graph LR
   Actuator -->|depends_on| EventBus
   Actuator -->|depends_on| RepoWikiStore
   Actuator -->|depends_on| HydraFlowConfig
+  Actuator -->|depends_on| TribalWikiStore
   ADRCouncilReviewer -->|depends_on| EventBus
   ADRCouncilReviewer -->|depends_on| HydraFlowConfig
   ADRCouncilReviewer -->|depends_on| Credentials
@@ -105,6 +106,7 @@ graph LR
   AgentRunner -->|depends_on| Credentials
   AgentRunner -->|depends_on| Actuator
   AgentRunner -->|implements| Actuator
+  AgentRunner -->|depends_on| TribalWikiStore
   BaseBackgroundLoop -->|depends_on| EventBus
   BaseBackgroundLoop -->|depends_on| HydraFlowConfig
   BaseBackgroundLoop -->|depends_on| FitnessContext
@@ -269,6 +271,7 @@ graph LR
   TermPrunerLoop -->|depends_on| BotPRPort
   TermPrunerLoop -->|implements| BaseBackgroundLoop
   TermPrunerLoop -->|depends_on| Governor
+  TribalWikiStore -->|depends_on| RepoWikiStore
   WikiRotDetectorLoop -->|depends_on| BaseBackgroundLoop
   WikiRotDetectorLoop -->|depends_on| RepoWikiStore
   WikiRotDetectorLoop -->|depends_on| HydraFlowConfig
