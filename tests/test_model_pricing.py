@@ -234,3 +234,33 @@ class TestLoadPricing:
         path.write_text(json.dumps({"schema_version": 1, "models": {}}))
         table = load_pricing(path)
         assert isinstance(table, ModelPricingTable)
+
+
+class TestOpenAICompatBackendModelsPriced:
+    """Drift guard (#9856): the OpenAI-compatible one-shot backends send these
+    exact model ids (config: zai -> ``glm-5.2``, kimi -> ``kimi-k3``). Telemetry
+    records the model string, so the shipped pricing table MUST resolve it —
+    otherwise kimi/z.ai bg-worker cost silently records as $0 next to the tracked
+    Claude spend. When a backend model id is bumped, add the new id to
+    src/assets/model_pricing.json AND to this list.
+    """
+
+    # (model_id, min tokens rate must be > 0)
+    _BACKEND_MODEL_IDS = ["glm-5.2", "kimi-k3"]
+
+    @pytest.mark.parametrize("model", _BACKEND_MODEL_IDS)
+    def test_backend_model_is_priced_in_shipped_table(self, model: str) -> None:
+        # load_pricing() with no path loads the real src/assets/model_pricing.json.
+        pricing = load_pricing()
+        cost = pricing.estimate_cost(model, input_tokens=1000, output_tokens=1000)
+        assert cost is not None and cost > 0, (
+            f"{model!r} is not priced in the shipped table — kimi/z.ai bg-worker "
+            "cost telemetry will record $0. Add it to "
+            "src/assets/model_pricing.json (#9856)."
+        )
+
+    def test_provider_prefixed_alias_resolves(self) -> None:
+        # The telemetry model string is bare ``glm-5.2``, but the provider-form
+        # ``zai/glm-5.2`` must resolve too (alias), for robustness.
+        pricing = load_pricing()
+        assert pricing.get_rate("zai/glm-5.2") is not None

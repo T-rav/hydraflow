@@ -217,6 +217,28 @@
       "output_cost_per_million": 25.0,
       "cache_write_cost_per_million": 6.25,
       "cache_read_cost_per_million": 0.5
+    },
+    "glm-5.2": {
+      "provider": "zai",
+      "aliases": [
+        "zai/glm-5.2",
+        "glm-5p2"
+      ],
+      "input_cost_per_million": 1.4,
+      "output_cost_per_million": 4.4,
+      "cache_write_cost_per_million": 1.4,
+      "cache_read_cost_per_million": 0.26
+    },
+    "kimi-k3": {
+      "provider": "moonshot",
+      "aliases": [
+        "kimi",
+        "kimi-latest"
+      ],
+      "input_cost_per_million": 2.0,
+      "output_cost_per_million": 5.0,
+      "cache_write_cost_per_million": 2.0,
+      "cache_read_cost_per_million": 0.15
     }
   }
 }
