@@ -7,7 +7,7 @@ import contextlib
 from collections.abc import Callable, Coroutine, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -174,7 +174,13 @@ async def test_credit_pause_publishes_alerts_and_restores_loops(tmp_path) -> Non
         resume_at = datetime.now(UTC) + timedelta(seconds=0.02)
         exc = CreditExhaustedError("limit reached", resume_at=resume_at)
 
-        await orch._pause_for_credits(exc, "triage", tasks, loop_factories)
+        # Probe confirms the cap is real (#9807), so the pause/resume flow runs
+        # instead of being treated as a false-positive and skipped.
+        with patch(
+            "orchestrator.probe_credit_availability",
+            AsyncMock(return_value=False),
+        ):
+            await orch._pause_for_credits(exc, "triage", tasks, loop_factories)
 
         assert orch._credits_paused_until is None
         assert tasks["triage"].get_name().startswith("hydraflow")

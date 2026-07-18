@@ -51,6 +51,7 @@ from state_restorer import StateRestorer
 from subprocess_util import (
     AuthenticationError,
     CreditExhaustedError,
+    probe_credit_availability,
 )
 
 if TYPE_CHECKING:
@@ -1747,6 +1748,41 @@ class HydraFlowOrchestrator:
                 self._credits_paused_until is not None
                 and self._credits_paused_until > datetime.now(UTC)
             ):
+                return
+
+            # Corroborate the text-detected signal with a live API probe before
+            # committing a GLOBAL pause. ``is_credit_exhaustion`` matches
+            # credit-error PROSE, so a diagnostic/reviewer run that merely quotes
+            # a prior cap in its analysis would otherwise trigger a multi-hour
+            # false global pause (#9807). The probe is ground truth: it returns
+            # False only when the API itself confirms exhaustion, and fails open
+            # (True on no-key/network error) so a flaky probe delays a real pause
+            # by at most one detection cycle rather than masking it. Kill-switch:
+            # ``credit_pause_require_probe=False`` reverts to pause-on-text.
+            # ``and`` short-circuits: with the kill-switch off, the probe is
+            # never called (pause-on-text, the legacy behavior).
+            if (
+                self._config.credit_pause_require_probe
+                and await probe_credit_availability()
+            ):
+                logger.warning(
+                    "Credit-exhaustion signal from %r NOT corroborated by live "
+                    "API probe — treating as a false positive (likely quoted "
+                    "credit-error prose); not pausing.",
+                    source,
+                )
+                await self._bus.publish(
+                    HydraFlowEvent(
+                        type=EventType.SYSTEM_ALERT,
+                        data={
+                            "message": (
+                                "Credit signal not corroborated by API probe "
+                                "— ignoring as a false positive."
+                            ),
+                            "source": source,
+                        },
+                    )
+                )
                 return
 
             resume_at = self._compute_resume_time(exc)
