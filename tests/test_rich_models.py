@@ -228,7 +228,8 @@ class TestRecordSuccessfulMerge:
         assert outcome.outcome.value == "merged"
         assert outcome.pr_number == 100
         assert outcome.phase == "review"
-        assert tracker.get_review_attempts(42) == 0
+        ledger = tracker.get_convergence_ledger(42)
+        assert ledger is None or ledger.get_attempts("review") == 0
         assert tracker.get_issue_attempts(42) == 0
         assert tracker.get_review_feedback(42) is None
 
@@ -256,18 +257,24 @@ class TestRecordSuccessfulMerge:
 
     def test_merge_clears_existing_attempts(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
-        # Set up prior state
-        tracker.increment_review_attempts(42)
-        tracker.increment_review_attempts(42)
+        # Set up prior state via ledger-direct calls
+        ledger = tracker.ensure_convergence_ledger(42)
+        ledger.increment_attempts("review")
+        ledger.increment_attempts("review")
+        tracker.save_convergence_ledger(42, ledger)
         tracker.increment_issue_attempts(42)
         tracker.set_review_feedback(42, "needs changes")
-        assert tracker.get_review_attempts(42) == 2
+        assert tracker.ensure_convergence_ledger(42).get_attempts("review") == 2
         assert tracker.get_issue_attempts(42) == 1
         assert tracker.get_review_feedback(42) == "needs changes"
 
         tracker.record_successful_merge(issue_number=42, pr_number=100)
 
-        assert tracker.get_review_attempts(42) == 0
+        # reset_review_attempts zeroes the review counter; record_successful_merge
+        # calls reset_review_attempts (not clear_convergence_ledger), so the
+        # ledger entry survives with attempts reset to 0.
+        post_ledger = tracker.get_convergence_ledger(42)
+        assert post_ledger is None or post_ledger.get_attempts("review") == 0
         assert tracker.get_issue_attempts(42) == 0
         assert tracker.get_review_feedback(42) is None
 

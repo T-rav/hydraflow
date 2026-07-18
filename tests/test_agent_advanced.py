@@ -619,3 +619,53 @@ class TestPriorFailureInPrompt:
         prompt, _ = await runner._build_prompt_with_stats(issue, prior_failure="")
 
         assert "## Prior Attempt Failure" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_retry_includes_attempt_count_and_strategy_delta(
+        self, config, event_bus: EventBus
+    ) -> None:
+        """Diverse-retry: without a strategy-delta directive the attempt
+        budget burns three near-identical tries against the same wall."""
+        runner = AgentRunner(config, event_bus)
+        issue = TaskFactory.create()
+
+        prompt, _ = await runner._build_prompt_with_stats(
+            issue,
+            prior_failure="pytest: 3 failed in tests/test_x.py",
+            attempt_number=2,
+        )
+
+        assert f"attempt 2 of {config.max_issue_attempts}" in prompt
+        assert "materially different strategy" in prompt
+
+    @pytest.mark.asyncio
+    async def test_no_strategy_delta_without_prior_failure(
+        self, config, event_bus: EventBus
+    ) -> None:
+        """The directive rides the prior-failure section — a fresh first
+        attempt (or a review-feedback retry) must not carry it."""
+        runner = AgentRunner(config, event_bus)
+        issue = TaskFactory.create()
+
+        prompt, _ = await runner._build_prompt_with_stats(
+            issue, prior_failure="", attempt_number=2
+        )
+
+        assert "materially different strategy" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_unknown_attempt_number_omits_count(
+        self, config, event_bus: EventBus
+    ) -> None:
+        """attempt_number=0 (caller didn't thread it) keeps the legacy
+        section without a bogus 'attempt 0 of N' line."""
+        runner = AgentRunner(config, event_bus)
+        issue = TaskFactory.create()
+
+        prompt, _ = await runner._build_prompt_with_stats(
+            issue, prior_failure="boom", attempt_number=0
+        )
+
+        assert "## Prior Attempt Failure" in prompt
+        assert "attempt 0" not in prompt
+        assert "materially different strategy" in prompt

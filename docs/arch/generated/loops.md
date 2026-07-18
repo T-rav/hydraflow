@@ -7,30 +7,37 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | Loop | Module | Tick (s) | Kill Switch | Events | ADRs |
 |---|---|---|---|---|---|
 | **ADRReviewerLoop** | `src.adr_reviewer_loop` | 86400 | — | — | — |
+| **AdrConformanceLoop** | `src.adr_conformance_loop` | 86400 | — | ADR_CONFORMANCE_UPDATE | ADR-0100 |
 | **AdrTouchpointAuditorLoop** | `src.adr_touchpoint_auditor_loop` | 14400 | — | — | ADR-0056 |
 | **AutoAgentPreflightLoop** | `src.auto_agent_preflight_loop` | 120 | — | — | — |
+| **AutoTightenLoop** | `src.auto_tighten_loop` | 86400 | — | RATCHET_TIGHTENED | — |
 | **BranchProtectionAuditorLoop** | `src.branch_protection_auditor_loop` | 604800 | — | — | ADR-0029, ADR-0049, ADR-0082 |
 | **CIMonitorLoop** | `src.ci_monitor_loop` | 300 | — | — | — |
 | **ContractRefreshLoop** | `src.contract_refresh_loop` | 604800 | — | — | — |
+| **ConvergenceOscillationLoop** | `src.convergence_oscillation_loop` | 3600 | — | — | ADR-0029, ADR-0049 |
 | **CorpusLearningLoop** | `src.corpus_learning_loop` | 3600 | — | — | — |
 | **CostBudgetWatcherLoop** | `src.cost_budget_watcher_loop` | 300 | `HYDRAFLOW_DISABLE_COST_BUDGET_WATCHER` | — | — |
-| **DependabotMergeLoop** | `src.dependabot_merge_loop` | 3600 | — | — | — |
+| **DependabotMergeLoop** | `src.dependabot_merge_loop` | 3600 | — | SYSTEM_ALERT | — |
+| **DetectorCalibrationLoop** | `src.detector_calibration_loop` | 3600 | — | — | — |
 | **DiagnosticLoop** | `src.diagnostic_loop` | 30 | — | DIAGNOSTIC_UPDATE | — |
 | **DiagramLoop** | `src.diagram_loop` | 14400 | `HYDRAFLOW_DISABLE_DIAGRAM_LOOP` | — | ADR-0029, ADR-0049 |
+| **DisturbanceDampenerLoop** | `src.disturbance_dampener_loop` | — | — | — | ADR-0095 |
 | **EdgeProposerLoop** | `src.edge_proposer_loop` | 86400 | — | — | — |
 | **EntryEvidenceLoop** | `src.entry_evidence_loop` | 86400 | — | — | ADR-0062 |
 | **EpicMonitorLoop** | `src.epic_monitor_loop` | 1800 | — | — | — |
 | **EpicSweeperLoop** | `src.epic_sweeper_loop` | 3600 | — | — | — |
 | **FakeCoverageAuditorLoop** | `src.fake_coverage_auditor_loop` | 604800 | — | — | — |
+| **FitnessScorecardLoop** | `src.fitness_scorecard_loop` | 86400 | — | BACKGROUND_WORKER_STATUS, LOOP_FITNESS_UPDATE | ADR-0029, ADR-0046 |
 | **FlakeTrackerLoop** | `src.flake_tracker_loop` | 14400 | — | — | — |
 | **GateActivatorLoop** | `src.gate_activator_loop` | 604800 | — | — | ADR-0029, ADR-0049, ADR-0082 |
 | **GitHubCacheLoop** | `src.github_cache_loop` | 300 | — | — | — |
 | **HealthMonitorLoop** | `src.health_monitor_loop` | 7200 | — | — | — |
+| **HumanSteeringLoop** | `src.human_steering_loop` | — | — | — | ADR-0099 |
 | **LabelDriftWatcherLoop** | `src.label_drift_watcher_loop` | 600 | — | — | — |
 | **LiveCorpusReplayLoop** | `src.live_corpus_replay_loop` | 900 | — | — | — |
 | **LogIngestLoop** | `src.log_ingest_loop` | 14400 | — | — | — |
 | **MemoryBacklogLoop** | `src.memory_backlog_loop` | 86400 | — | — | — |
-| **MergeStateWatcherLoop** | `src.merge_state_watcher_loop` | 600 | — | — | — |
+| **MergeStateWatcherLoop** | `src.merge_state_watcher_loop` | 600 | — | SYSTEM_ALERT | — |
 | **PRUnstickerLoop** | `src.pr_unsticker_loop` | 3600 | — | — | — |
 | **PricingRefreshLoop** | `src.pricing_refresh_loop` | 86400 | `HYDRAFLOW_DISABLE_PRICING_REFRESH` | — | — |
 | **PrinciplesAuditLoop** | `src.principles_audit_loop` | 604800 | — | — | ADR-0044 |
@@ -38,13 +45,13 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **RepoWikiLoop** | `src.repo_wiki_loop` | 3600 | — | — | — |
 | **ReportIssueLoop** | `src.report_issue_loop` | 30 | — | REPORT_UPDATE | — |
 | **RetrospectiveLoop** | `src.retrospective_loop` | 1800 | — | RETROSPECTIVE_UPDATE | — |
-| **RunsGCLoop** | `src.runs_gc_loop` | 3600 | — | — | — |
+| **RunsGCLoop** | `src.runs_gc_loop` | 3600 | — | SYSTEM_ALERT | — |
 | **SandboxFailureFixerLoop** | `src.sandbox_failure_fixer_loop` | 3600 | — | — | ADR-0049 |
 | **SecurityPatchLoop** | `src.security_patch_loop` | 3600 | — | — | — |
 | **SentryLoop** | `src.sentry_loop` | 600 | — | — | — |
 | **SkillPromptEvalLoop** | `src.skill_prompt_eval_loop` | 604800 | — | — | — |
 | **StagingBisectLoop** | `src.staging_bisect_loop` | 600 | — | — | ADR-0042 |
-| **StagingPromotionLoop** | `src.staging_promotion_loop` | 300 | — | — | ADR-0042 |
+| **StagingPromotionLoop** | `src.staging_promotion_loop` | 300 | — | SYSTEM_ALERT | ADR-0042 |
 | **StaleIssueGCLoop** | `src.stale_issue_gc_loop` | 3600 | — | — | — |
 | **StaleIssueLoop** | `src.stale_issue_loop` | 86400 | — | — | — |
 | **TermProposerLoop** | `src.term_proposer_loop` | 14400 | — | — | ADR-0054 |

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -839,6 +840,184 @@ async def test_refresh_real_conflict_aborts_no_push(
 
 
 # ---------------------------------------------------------------------------
+# req_id threading (CH-5, #9733)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_req_id_trails_commit_message_and_pr_body(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """req_id lands as a trailer on BOTH the commit message and the PR body,
+    so the traceability matrix can recover it from git history and the PR
+    alike (CH-5)."""
+    from auto_pr import open_automated_pr_async
+
+    commit_msgs: list[str] = []
+    pr_bodies: list[str] = []
+
+    def on_cmd(cmd: tuple[str, ...]) -> None:
+        if "commit" in cmd and "-m" in cmd:
+            commit_msgs.append(cmd[cmd.index("-m") + 1])
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        if cmd[2] == "create":
+            pr_bodies.append(cmd[cmd.index("--body") + 1])
+            return "https://github.com/x/y/pull/7\n"
+        return ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler, on_cmd=on_cmd),
+    )
+
+    target = local_repo / "traced.txt"
+    target.write_text("traced\n")
+
+    await open_automated_pr_async(
+        repo_root=local_repo,
+        branch="feature/traced",
+        files=[target],
+        pr_title="feat: traced change",
+        pr_body="body",
+        req_id="REQ-042",
+        auto_merge=False,
+    )
+
+    assert commit_msgs[0].rstrip().endswith("Req-ID: REQ-042")
+    assert pr_bodies[0].rstrip().endswith("Req-ID: REQ-042")
+
+
+@pytest.mark.asyncio
+async def test_async_no_req_id_adds_no_trailer(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zero friction: without req_id nothing about the messages changes."""
+    from auto_pr import open_automated_pr_async
+
+    commit_msgs: list[str] = []
+    pr_bodies: list[str] = []
+
+    def on_cmd(cmd: tuple[str, ...]) -> None:
+        if "commit" in cmd and "-m" in cmd:
+            commit_msgs.append(cmd[cmd.index("-m") + 1])
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        if cmd[2] == "create":
+            pr_bodies.append(cmd[cmd.index("--body") + 1])
+            return "https://github.com/x/y/pull/7\n"
+        return ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler, on_cmd=on_cmd),
+    )
+
+    target = local_repo / "plain.txt"
+    target.write_text("plain\n")
+
+    await open_automated_pr_async(
+        repo_root=local_repo,
+        branch="feature/plain",
+        files=[target],
+        pr_title="feat: plain change",
+        pr_body="body",
+        auto_merge=False,
+    )
+
+    assert "Req-ID" not in commit_msgs[0]
+    assert "Req-ID" not in pr_bodies[0]
+
+
+@pytest.mark.asyncio
+async def test_generate_and_open_req_id_trails_commit_and_lazy_body(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On the generate-in-worktree path the trailer lands on the commit
+    message too, and on the PR body only AFTER a callable pr_body resolves."""
+    from auto_pr import generate_and_open_pr_async
+
+    commit_msgs: list[str] = []
+    pr_bodies: list[str] = []
+
+    def on_cmd(cmd: tuple[str, ...]) -> None:
+        if "commit" in cmd and "-m" in cmd:
+            commit_msgs.append(cmd[cmd.index("-m") + 1])
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        if cmd[2] == "create":
+            pr_bodies.append(cmd[cmd.index("--body") + 1])
+            return "https://github.com/x/y/pull/7\n"
+        return ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler, on_cmd=on_cmd),
+    )
+
+    async def generate(worktree: Path) -> None:
+        (worktree / "gen.txt").write_text("generated\n")
+
+    await generate_and_open_pr_async(
+        repo_root=local_repo,
+        branch="feature/lazy-traced",
+        generate=generate,
+        path_specs=["gen.txt"],
+        pr_title="feat: lazy traced",
+        pr_body=lambda: "lazy body",
+        req_id="SYS-9",
+        auto_merge=False,
+    )
+
+    assert commit_msgs[0].rstrip().endswith("Req-ID: SYS-9")
+    assert pr_bodies[0].rstrip().endswith("Req-ID: SYS-9")
+    assert pr_bodies[0].startswith("lazy body")
+
+
+@pytest.mark.asyncio
+async def test_generate_and_open_no_req_id_adds_no_trailer(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zero friction on the generate-in-worktree path too: without req_id
+    neither the commit message nor the PR body mentions Req-ID."""
+    from auto_pr import generate_and_open_pr_async
+
+    commit_msgs: list[str] = []
+    pr_bodies: list[str] = []
+
+    def on_cmd(cmd: tuple[str, ...]) -> None:
+        if "commit" in cmd and "-m" in cmd:
+            commit_msgs.append(cmd[cmd.index("-m") + 1])
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        if cmd[2] == "create":
+            pr_bodies.append(cmd[cmd.index("--body") + 1])
+            return "https://github.com/x/y/pull/7\n"
+        return ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler, on_cmd=on_cmd),
+    )
+
+    async def generate(worktree: Path) -> None:
+        (worktree / "gen.txt").write_text("generated\n")
+
+    await generate_and_open_pr_async(
+        repo_root=local_repo,
+        branch="feature/plain-gen",
+        generate=generate,
+        path_specs=["gen.txt"],
+        pr_title="feat: plain generated change",
+        pr_body="body",
+        auto_merge=False,
+    )
+
+    assert "Req-ID" not in commit_msgs[0]
+    assert "Req-ID" not in pr_bodies[0]
+
+
+# ---------------------------------------------------------------------------
 # generate_and_open_pr_async — generate-in-worktree (#9539)
 # ---------------------------------------------------------------------------
 
@@ -927,3 +1106,180 @@ async def test_generate_and_open_pr_no_diff_when_generate_writes_nothing(
 
     assert result.status == "no-diff"
     assert not any(c[:3] == ("gh", "pr", "create") for c in gh_calls)
+
+
+@pytest.mark.asyncio
+async def test_generate_and_open_pr_resolves_lazy_body_after_generate(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A callable ``pr_body`` is resolved AFTER ``generate`` runs, so it can
+    summarise what the generator produced (counts, changed files)."""
+    from auto_pr import generate_and_open_pr_async
+
+    create_bodies: list[str] = []
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        if cmd[2] == "create":
+            # Capture the --body argument passed to gh pr create.
+            idx = cmd.index("--body")
+            create_bodies.append(cmd[idx + 1])
+            return "https://github.com/x/y/pull/9\n"
+        return ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler),
+    )
+
+    produced: dict[str, int] = {}
+
+    async def generate(worktree: Path) -> None:
+        gen_dir = worktree / "docs" / "arch" / "generated"
+        gen_dir.mkdir(parents=True, exist_ok=True)
+        (gen_dir / "loops.md").write_text("# loops\n")
+        produced["files"] = 1  # state the body callable will read
+
+    def body() -> str:
+        # If resolved too early (before generate), produced would be empty.
+        return f"generated {produced.get('files', 0)} file(s)"
+
+    result = await generate_and_open_pr_async(
+        repo_root=local_repo,
+        branch="lazy-body-regen",
+        generate=generate,
+        path_specs=["docs/arch/generated"],
+        pr_title="t",
+        pr_body=body,
+        auto_merge=False,
+    )
+
+    assert result.status == "opened"
+    assert len(create_bodies) == 1
+    # The lazy body leads; the reproducibility manifest is appended after it.
+    assert create_bodies[0].startswith("generated 1 file(s)")
+
+
+# ---------------------------------------------------------------------------
+# Reproducibility manifest (CH-7, #9735) — every auto_pr authoring entry
+# point must append the evidence block to the PR body.
+# ---------------------------------------------------------------------------
+
+
+def test_open_automated_pr_body_carries_reproducibility_manifest(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pr import open_automated_pr
+    from repro_manifest import MANIFEST_HEADING, MANIFEST_SCHEMA
+
+    create_bodies: list[str] = []
+
+    def fake_gh(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        if "create" in cmd:
+            create_bodies.append(cmd[cmd.index("--body") + 1])
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="https://github.com/x/y/pull/2\n", stderr=""
+        )
+
+    monkeypatch.setattr("auto_pr._run_gh", fake_gh)
+    (local_repo / "m.txt").write_text("m\n")
+
+    open_automated_pr(
+        repo_root=local_repo,
+        branch="feature/manifest-sync",
+        files=[local_repo / "m.txt"],
+        title="feat: m",
+        body="caller body",
+        base="main",
+        auto_merge=False,
+    )
+
+    assert len(create_bodies) == 1
+    body = create_bodies[0]
+    assert body.startswith("caller body")
+    assert MANIFEST_HEADING in body
+    payload = body.split("```json\n", 1)[1].rsplit("\n```", 1)[0]
+    manifest = json.loads(payload)
+    assert manifest["schema"] == MANIFEST_SCHEMA
+    assert "models" in manifest
+
+
+@pytest.mark.asyncio
+async def test_generate_and_open_pr_body_carries_reproducibility_manifest(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pr import generate_and_open_pr_async
+    from repro_manifest import MANIFEST_HEADING, MANIFEST_SCHEMA
+
+    create_bodies: list[str] = []
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        if cmd[2] == "create":
+            create_bodies.append(cmd[cmd.index("--body") + 1])
+            return "https://github.com/x/y/pull/10\n"
+        return ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler),
+    )
+
+    async def generate(worktree: Path) -> None:
+        (worktree / "gen.txt").write_text("g\n")
+
+    result = await generate_and_open_pr_async(
+        repo_root=local_repo,
+        branch="feature/manifest-async",
+        generate=generate,
+        path_specs=["gen.txt"],
+        pr_title="feat: g",
+        pr_body="async caller body",
+        auto_merge=False,
+    )
+
+    assert result.status == "opened"
+    assert len(create_bodies) == 1
+    body = create_bodies[0]
+    assert body.startswith("async caller body")
+    assert MANIFEST_HEADING in body
+    payload = body.split("```json\n", 1)[1].rsplit("\n```", 1)[0]
+    assert json.loads(payload)["schema"] == MANIFEST_SCHEMA
+
+
+@pytest.mark.asyncio
+async def test_finalize_manifest_failure_does_not_block_pr(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """append_manifest is fail-open: a manifest error must not stop the PR."""
+    from unittest.mock import patch as mock_patch
+
+    from auto_pr import generate_and_open_pr_async
+
+    create_bodies: list[str] = []
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        if cmd[2] == "create":
+            create_bodies.append(cmd[cmd.index("--body") + 1])
+            return "https://github.com/x/y/pull/11\n"
+        return ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler),
+    )
+
+    async def generate(worktree: Path) -> None:
+        (worktree / "gen2.txt").write_text("g\n")
+
+    with mock_patch("repro_manifest.build_manifest", side_effect=RuntimeError("boom")):
+        result = await generate_and_open_pr_async(
+            repo_root=local_repo,
+            branch="feature/manifest-failopen",
+            generate=generate,
+            path_specs=["gen2.txt"],
+            pr_title="feat: g2",
+            pr_body="plain body",
+            auto_merge=False,
+        )
+
+    assert result.status == "opened"
+    assert create_bodies == ["plain body"]

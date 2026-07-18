@@ -6,12 +6,12 @@ bounded_context: "caretaker"
 code_anchor: "src/adr_reviewer_loop.py:ADRReviewerLoop"
 aliases: ["ADR reviewer loop", "adr council review loop", "adr review loop"]
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KTX0X7RK9NPDNYRPZ58BVT9J"}]
-evidence: []
+evidence: ["01KV254C264KNTZ962PHQ8SZ2E"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T20:00:00.000000+00:00"
-updated_at: "2026-06-12T04:21:53.179108+00:00"
+updated_at: "2026-06-14T04:41:09.432376+00:00"
 ---
 
 ## Definition

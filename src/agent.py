@@ -13,6 +13,7 @@ from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import exc_detail, is_likely_bug, reraise_on_credit_or_bug
+from human_steering import fenced_steering_guidance
 from models import LoopResult, Task, WorkerResult, WorkerStatus, WorkerUpdatePayload
 from plugin_skill_registry import (
     discover_plugin_skills,
@@ -37,7 +38,7 @@ from task_graph import extract_phases, has_task_graph, topological_sort
 from untrusted_text import UNTRUSTED_DATA_PREAMBLE, fence_untrusted
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
     from config import Credentials, HydraFlowConfig
     from execution import SubprocessRunner
@@ -167,8 +168,14 @@ Run through this checklist before your final commit:
         review_feedback: str = "",
         prior_failure: str = "",
         bead_mapping: dict[str, str] | None = None,
+        human_guidance: str = "",
+        attempt_number: int = 0,
     ) -> WorkerResult:
         """Run the implementation agent for *task*.
+
+        ``attempt_number`` is the 1-based issue attempt this run represents
+        (0 = unknown); on cycling retries it feeds the diverse-retry
+        directive in the prior-failure prompt section.
 
         Returns a :class:`WorkerResult` with success/failure info.
         """
@@ -199,6 +206,8 @@ Run through this checklist before your final commit:
                 review_feedback=review_feedback,
                 prior_failure=prior_failure,
                 bead_mapping=bead_mapping,
+                human_guidance=human_guidance,
+                attempt_number=attempt_number,
             )
             transcript = await self._execute(
                 cmd,
@@ -206,6 +215,7 @@ Run through this checklist before your final commit:
                 worktree_path,
                 {"issue": task.id, "source": "implementer"},
                 telemetry_stats=prompt_stats,
+                issue_labels=task.tags,
             )
             result.transcript = transcript
 
@@ -575,6 +585,8 @@ Run through this checklist before your final commit:
         review_feedback: str = "",
         prior_failure: str = "",
         bead_mapping: dict[str, str] | None = None,
+        human_guidance: str = "",
+        attempt_number: int = 0,
     ) -> tuple[str, dict[str, object]]:
         """Build the implementation prompt and pruning stats."""
         builder = PromptBuilder()
@@ -640,11 +652,27 @@ Run through this checklist before your final commit:
                 label="Prior failure",
             )
             builder.record_history("Prior failure", raw_prior_failure, prior_failure)
+            # Diverse-retry: the attempt budget is 3 near-identical tries
+            # against the same wall unless the retry is told to pivot. The
+            # directive rides the prior-failure section only — review-feedback
+            # retries (which suppress prior_failure) keep their own framing.
+            attempt_line = (
+                f"This is attempt {attempt_number} of "
+                f"{self._config.max_issue_attempts}; the budget exhausts "
+                f"after that and a human is paged. "
+                if attempt_number >= 1
+                else ""
+            )
             prior_failure_section = (
                 f"\n\n## Prior Attempt Failure\n\n"
                 f"Your previous implementation attempt failed with the following error. "
                 f"Avoid repeating the same mistake:\n\n"
-                f"```\n{prior_failure}\n```"
+                f"```\n{prior_failure}\n```\n\n"
+                f"{attempt_line}"
+                f"Do NOT retry the same approach: first diagnose why the "
+                f"previous attempt failed, then take a materially different "
+                f"strategy — a different design, different files, or a "
+                f"different diagnosis of the root cause."
             )
 
         comments_section = ""
@@ -661,6 +689,8 @@ Run through this checklist before your final commit:
             )
             if len(other_comments) > max_comments:
                 comments_section += f"\n- ... ({len(other_comments) - max_comments} more comments omitted)"
+
+        guidance_section = fenced_steering_guidance(human_guidance)
 
         raw_feedback_section = self._get_review_feedback_section()
         feedback_section = ""
@@ -717,6 +747,7 @@ Run through this checklist before your final commit:
             ("Prior failure", prior_failure_section),
             ("Discussion", comments_section),
             ("Memory", memory_section),
+            ("Human steering", guidance_section),
         )
         dedup_map = dict(deduped)
         body = dedup_map["Issue body"]
@@ -725,6 +756,7 @@ Run through this checklist before your final commit:
         prior_failure_section = dedup_map["Prior failure"]
         comments_section = dedup_map["Discussion"]
         memory_section = dedup_map["Memory"]
+        guidance_section = dedup_map["Human steering"]
 
         if section_chars_saved:
             self._last_context_stats["section_dedup_chars_saved"] = section_chars_saved
@@ -749,7 +781,7 @@ Run through this checklist before your final commit:
 {fence_untrusted("issue_title", issue.title)}
 
 ### Description
-{fence_untrusted("issue_body", body)}{plan_section}{review_feedback_section}{prior_failure_section}{comments_section}{memory_section}{log_section}
+{fence_untrusted("issue_body", body)}{plan_section}{review_feedback_section}{prior_failure_section}{comments_section}{guidance_section}{memory_section}{log_section}
 
 ## Instructions — Test-Driven Development
 
@@ -1038,6 +1070,7 @@ SUMMARY: <one-line summary>
                 review_prompt,
                 worktree_path,
                 {"issue": issue.id, "source": "implementer"},
+                issue_labels=issue.tags,
             )
             await self._force_commit_uncommitted(issue, worktree_path)
             review_result = self._parse_skill_result(
@@ -1051,6 +1084,7 @@ SUMMARY: <one-line summary>
                 run_tool_prompt,
                 worktree_path,
                 {"issue": issue.id, "source": "implementer"},
+                issue_labels=issue.tags,
             )
             await self._force_commit_uncommitted(issue, worktree_path)
             run_tool_result = self._parse_skill_result(
@@ -1115,18 +1149,21 @@ SUMMARY: <one-line summary>
         if commits == 0:
             return LoopResult(passed=True, summary="No commits to check")
 
-        diff = await self._get_branch_diff(worktree_path, branch)
-        if not diff.strip():
+        full_diff = await self._get_branch_diff(worktree_path, branch)
+        if not full_diff.strip():
             return LoopResult(passed=True, summary="Empty diff")
 
         max_diff = self._config.max_review_diff_chars
-        if len(diff) > max_diff:
-            diff = diff[:max_diff] + f"\n[Diff truncated at {max_diff:,} chars]"
+        prompt_diff = (
+            full_diff[:max_diff] + f"\n[Diff truncated at {max_diff:,} chars]"
+            if len(full_diff) > max_diff
+            else full_diff
+        )
 
         prompt = skill.prompt_builder(
             issue_number=issue.id,
             issue_title=issue.title,
-            diff=diff,
+            diff=prompt_diff,
             plan_text=plan_text,
         )
         if not prompt.strip():
@@ -1145,6 +1182,7 @@ SUMMARY: <one-line summary>
                 prompt,
                 worktree_path,
                 {"issue": issue.id, "source": "implementer"},
+                issue_labels=issue.tags,
             )
             passed, summary, findings = skill.result_parser(transcript)
             if passed:
@@ -1159,6 +1197,30 @@ SUMMARY: <one-line summary>
                 )
         else:
             result = LoopResult(passed=False, summary=summary, attempts=max_attempts)
+
+        # Coverage delta runs once after the LLM attempt loop — not per-attempt.
+        # Running make coverage on each retry is expensive and redundant because
+        # the worktree code doesn't change between LLM attempts.
+        if result.passed and skill.coverage_check:
+            uncovered = await self._run_coverage_delta_check(
+                worktree_path, full_diff, issue.id
+            )
+            if uncovered:
+                cov_summary = (
+                    f"Coverage delta: {len(uncovered)} uncovered changed line(s): "
+                    + "; ".join(uncovered[:5])
+                    + (f" (+ {len(uncovered) - 5} more)" if len(uncovered) > 5 else "")
+                )
+                logger.info(
+                    "coverage-delta findings for #%d: %s",
+                    issue.id,
+                    "; ".join(uncovered[:5]),
+                )
+                result = LoopResult(
+                    passed=False,
+                    summary=cov_summary,
+                    attempts=result.attempts,
+                )
 
         # Append the skill result to run-N/skill_results.json alongside
         # the parent run. This is the source of truth for skill-effectiveness
@@ -1175,6 +1237,66 @@ SUMMARY: <one-line summary>
             )
 
         return result
+
+    async def _run_coverage_delta_check(
+        self,
+        worktree_path: Path,
+        diff: str,
+        issue_id: int,
+    ) -> list[str]:
+        """Run ``make coverage 0`` and return uncovered changed-line refs.
+
+        Returns a list of ``path:line`` strings for changed production lines
+        that the test suite does not exercise.  Returns an empty list when
+        make fails, times out, or no coverage XML is produced — preserving
+        the LLM verdict in those cases.
+        """
+        from coverage_delta import (  # noqa: PLC0415
+            compute_uncovered_changed_lines,
+            parse_cobertura_covered_lines,
+            parse_diff_changed_lines,
+        )
+
+        try:
+            timeout_secs = self._config.test_adequacy_coverage_timeout_secs
+            cov_result = await self._runner.run_simple(
+                ["make", "coverage", "0"],
+                cwd=str(worktree_path),
+                timeout=float(timeout_secs),
+            )
+        except (TimeoutError, FileNotFoundError):
+            logger.warning(
+                "Coverage delta check failed for #%d (timeout or make not found)",
+                issue_id,
+            )
+            return []
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "Coverage delta check unexpected error for #%d: %s", issue_id, exc
+            )
+            return []
+
+        if cov_result.returncode != 0:
+            logger.warning(
+                "Coverage delta: make coverage 0 returned rc=%d for #%d",
+                cov_result.returncode,
+                issue_id,
+            )
+            return []
+
+        coverage_xml = worktree_path / "coverage.xml"
+        if not coverage_xml.is_file():
+            logger.warning(
+                "Coverage delta: coverage.xml not found at %s for #%d",
+                coverage_xml,
+                issue_id,
+            )
+            return []
+
+        changed = parse_diff_changed_lines(diff)
+        covered = parse_cobertura_covered_lines(coverage_xml, worktree_path)
+        return compute_uncovered_changed_lines(changed, covered)
 
     def _append_skill_result(
         self,
@@ -1257,6 +1379,7 @@ SUMMARY: <one-line summary>
                 prompt,
                 worktree_path,
                 {"issue": issue.id, "source": "implementer"},
+                issue_labels=issue.tags,
             )
             await self._force_commit_uncommitted(issue, worktree_path)
 
@@ -1375,8 +1498,13 @@ SUMMARY: <one-line summary>
         *,
         on_output: Callable[[str], bool] | None = None,
         telemetry_stats: Mapping[str, object] | None = None,
+        issue_labels: Sequence[str] | None = None,
     ) -> str:
-        """Public AgentPort entry point — delegates to ``_execute``."""
+        """Public AgentPort entry point — delegates to ``_execute``.
+
+        Infrastructure callers with issue/PR label context MUST pass
+        *issue_labels* so the CH-6 gate's data-class label elevation applies.
+        """
         return await self._execute(
             cmd,
             prompt,
@@ -1384,6 +1512,7 @@ SUMMARY: <one-line summary>
             event_data,
             on_output=on_output,
             telemetry_stats=telemetry_stats,
+            issue_labels=issue_labels,
         )
 
     async def verify_result(self, worktree_path: Path, branch: str) -> LoopResult:

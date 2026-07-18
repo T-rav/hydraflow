@@ -92,3 +92,108 @@ def test_names_helper_produces_expected_variants() -> None:
     assert names["upper"] == "BLARG_MONITOR"
     # `today` is dynamic — just check it's set.
     assert names["today"]
+
+
+def test_loop_template_defines_loop_fitness_override(
+    fixture_names: dict[str, str],
+) -> None:
+    """New loops are NOT grandfathered by test_loop_fitness_completeness —
+    a scaffolded loop without a loop_fitness override fails the ratchet on
+    its very first CI run. The template must emit one (HOUSEKEEPING
+    default; scored loops customize)."""
+    import ast
+    from importlib import import_module
+
+    scaffold_loop = import_module("scaffold_loop")
+    rendered = scaffold_loop._render_templates(fixture_names, "Fixture description.")
+    loop_path = next(p for p in rendered if p.name == "fixture_loop_loop.py")
+    content = rendered[loop_path]
+
+    tree = ast.parse(content)
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef))
+    names = {
+        n.name
+        for n in cls.body
+        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    assert "loop_fitness" in names
+    assert "FitnessKind.HOUSEKEEPING" in content
+    assert "worker_name=self._worker_name" in content or (
+        f'worker_name="{fixture_names["snake"]}"' in content
+    )
+
+
+def test_patch_plan_covers_bg_worker_defs(fixture_names: dict[str, str]) -> None:
+    """The wiring-completeness ratchet (TestBgWorkerDefsParity) requires every
+    registry loop in dashboard _bg_worker_defs — caught missing on the first
+    scaffold dogfood (detector_calibration)."""
+    from importlib import import_module
+
+    scaffold_loop = import_module("scaffold_loop")
+    patches = scaffold_loop._compute_patches(fixture_names, "Fixture description.")
+    control_routes = next(
+        (text for path, text in patches if path.name == "_control_routes.py"),
+        None,
+    )
+    assert control_routes is not None
+    assert '"fixture_loop",' in control_routes
+    assert "Fixture Loop" in control_routes
+    # NOT at the list head: the first seven defs are pipeline workers
+    # pinned by tests/test_bg_worker_status.py.
+    assert (
+        not control_routes.split("_bg_worker_defs = [", 1)[1]
+        .lstrip()
+        .startswith('(\n        "fixture_loop"')
+    )
+
+
+def test_patch_plan_covers_fake_service_registry(
+    fixture_names: dict[str, str],
+) -> None:
+    """tests/orchestrator_integration_utils.py builds a fake ServiceRegistry;
+    a new loop missing there AttributeErrors every orchestrator integration
+    test (caught on the detector_calibration dogfood)."""
+    from importlib import import_module
+
+    scaffold_loop = import_module("scaffold_loop")
+    patches = scaffold_loop._compute_patches(fixture_names, "Fixture description.")
+    fake_svc = next(
+        (
+            text
+            for path, text in patches
+            if path.name == "orchestrator_integration_utils.py"
+        ),
+        None,
+    )
+    assert fake_svc is not None
+    assert "services.fixture_loop_loop = FakeBackgroundLoop()" in fake_svc
+
+
+def test_patch_plan_covers_state_keys_pin(fixture_names: dict[str, str]) -> None:
+    """tests/test_state_tracking.py pins StateData keys; the scaffold adds
+    a {snake}_attempts field, so it must add the pin entry too (caught on
+    the detector_calibration dogfood)."""
+    from importlib import import_module
+
+    scaffold_loop = import_module("scaffold_loop")
+    patches = scaffold_loop._compute_patches(fixture_names, "Fixture description.")
+    pin = next(
+        (text for path, text in patches if path.name == "test_state_tracking.py"),
+        None,
+    )
+    assert pin is not None
+    assert '"fixture_loop_attempts",' in pin
+
+
+def test_registry_patch_emits_no_f841_noqa(fixture_names: dict[str, str]) -> None:
+    """The constructed loop variable IS used (ServiceRegistry return), so the
+    suppression is dead weight — and the disturbance ratchet blocks new
+    noqa keys per file (detector_calibration dogfood finding)."""
+    from importlib import import_module
+
+    scaffold_loop = import_module("scaffold_loop")
+    patches = scaffold_loop._compute_patches(fixture_names, "Fixture description.")
+    registry = next(
+        text for path, text in patches if path.name == "service_registry.py"
+    )
+    assert "FixtureLoopLoop(  # noqa: F841" not in registry

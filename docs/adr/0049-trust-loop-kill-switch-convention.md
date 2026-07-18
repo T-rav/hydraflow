@@ -6,7 +6,12 @@
 - **Supersedes:** none
 - **Superseded by:** none
 - **Related:** [ADR-0045](0045-trust-architecture-hardening.md) §12.2 (spec reference); [ADR-0048](0048-auto-revert-on-rc-red.md) (relies on live kill for StagingBisectLoop).
-- **Enforced by:** tests/test_loop_kill_switch_completeness.py, tests/regressions/test_canonical_killswitch.py
+
+**Enforcement:** enforced
+
+**Enforced by:**
+pytest:tests/test_loop_kill_switch_completeness.py
+pytest:tests/regressions/test_canonical_killswitch.py
 
 ## Context
 

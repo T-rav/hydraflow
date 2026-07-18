@@ -3,18 +3,30 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import subprocess
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from acceptance_criteria import AcceptanceCriteriaGenerator
+from adr_conformance_loop import AdrConformanceLoop
+from adr_conformance_runner import SubprocessConformanceRunner
 from adr_index import ADRIndex
 from adr_reviewer import ADRCouncilReviewer
 from adr_reviewer_loop import ADRReviewerLoop
 from adr_touchpoint_auditor_loop import AdrTouchpointAuditorLoop
 from agent import AgentRunner
 from auto_agent_preflight_loop import AutoAgentPreflightLoop
+from auto_tighten.attribution import AttributionResolver
+from auto_tighten.coverage_adapter import CoverageAdapter
+from auto_tighten.coverage_ingestor import CoverageIngestor
+from auto_tighten.observation_store import ObservationStore
+from auto_tighten.pr_author import TighteningPrAuthor
+from auto_tighten_loop import AutoTightenLoop
 from base_background_loop import LoopDeps
 from baseline_policy import BaselinePolicy
 from beads_manager import BeadsManager
@@ -25,15 +37,18 @@ from caching_issue_store import CachingIssueStore
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
 from config import Credentials, HydraFlowConfig
 from contract_refresh_loop import ContractRefreshLoop
+from convergence_oscillation_loop import ConvergenceOscillationLoop
 from corpus_learning_loop import CorpusLearningLoop
 from cost_budget_watcher_loop import CostBudgetWatcherLoop  # noqa: TCH001
 from crate_manager import CrateManager
 from dependabot_merge_loop import DependabotMergeLoop
+from detector_calibration_loop import DetectorCalibrationLoop
 from diagnostic_loop import DiagnosticLoop  # noqa: TCH001
 from diagnostic_runner import DiagnosticRunner
 from diagram_loop import DiagramLoop  # noqa: TCH001
 from discover_phase import DiscoverPhase  # noqa: TCH001
 from discover_runner import DiscoverRunner
+from disturbance_dampener_loop import DisturbanceDampenerLoop
 from docker_runner import get_docker_runner
 from edge_proposer_loop import EdgeProposerLoop
 from entry_evidence_loop import EntryEvidenceLoop
@@ -43,6 +58,7 @@ from epic_sweeper_loop import EpicSweeperLoop
 from events import EventBus
 from execution import SubprocessRunner
 from fake_coverage_auditor_loop import FakeCoverageAuditorLoop
+from fitness_scorecard_loop import FitnessScorecardLoop
 from flake_tracker_loop import FlakeTrackerLoop
 from gate_activation_check import check_gate_activation
 from gate_activator_loop import GateActivatorLoop  # noqa: TCH001
@@ -51,6 +67,7 @@ from harness_insights import HarnessInsightStore
 from health_monitor_loop import HealthMonitorLoop
 from hitl_phase import HITLPhase
 from hitl_runner import HITLRunner
+from human_steering_loop import HumanSteeringLoop
 from implement_phase import ImplementPhase
 from issue_cache import IssueCache
 from issue_fetcher import GitHubTaskFetcher, IssueFetcher
@@ -60,6 +77,7 @@ from live_corpus_replay_loop import (
     LiveCorpusReplayLoop,  # noqa: TCH001 — dataclass annotation
 )
 from log_ingest_loop import LogIngestLoop  # noqa: TCH001 — used in dataclass field
+from loop_fitness import IssueRecord as _IssueRecord
 from memory_backlog_loop import MemoryBacklogLoop
 from merge_conflict_resolver import MergeConflictResolver
 from merge_state_watcher_loop import MergeStateWatcherLoop
@@ -125,9 +143,104 @@ from workspace_gc_loop import WorkspaceGCLoop
 if TYPE_CHECKING:
     from scripts.gates.activation import ActivationProposal
 
+    from auto_tighten.ratchet_adapter import RatchetAdapter
     from metrics_manager import MetricsManager
 
 logger = logging.getLogger("hydraflow.service_registry")
+
+_ISSUE_LIMIT = 1000
+_PR_LIMIT = 1000
+
+
+def _make_fitness_issue_fetcher(prs: PRManager):
+    """Return an async closure that fetches issues + PRs and maps them to IssueRecord.
+
+    Uses two ``gh`` CLI calls via ``prs._run_gh`` (the same low-level seam
+    used by StaleIssueLoop). If either call returns exactly the --limit count,
+    a warning is logged so the caller knows results may be capped.
+    """
+    import json as _json
+    from datetime import datetime as _datetime
+
+    def _parse_dt(s: str | None) -> _datetime | None:
+        if not s:
+            return None
+        return _datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+    async def _fetcher() -> list[_IssueRecord]:
+        records: list[_IssueRecord] = []
+
+        # -- issues --
+        raw_issues = await prs._run_gh(
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            prs._repo,
+            "--state",
+            "all",
+            "--limit",
+            str(_ISSUE_LIMIT),
+            "--json",
+            "number,state,labels,createdAt,closedAt",
+        )
+        issues: list[dict] = _json.loads(raw_issues) if raw_issues else []
+        if len(issues) == _ISSUE_LIMIT:
+            logger.warning(
+                "fitness_issue_fetcher: issue results capped at %d; "
+                "some issues may be missing from the fitness window",
+                _ISSUE_LIMIT,
+            )
+        for item in issues:
+            records.append(
+                _IssueRecord(
+                    number=item["number"],
+                    labels=[lbl["name"] for lbl in item.get("labels", [])],
+                    is_pr=False,
+                    state=item["state"].lower(),
+                    merged=False,
+                    created_at=_parse_dt(item.get("createdAt")),  # type: ignore[arg-type]
+                    closed_at=_parse_dt(item.get("closedAt")),
+                )
+            )
+
+        # -- pull requests --
+        raw_prs = await prs._run_gh(
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            prs._repo,
+            "--state",
+            "all",
+            "--limit",
+            str(_PR_LIMIT),
+            "--json",
+            "number,state,labels,createdAt,closedAt,mergedAt",
+        )
+        pull_requests: list[dict] = _json.loads(raw_prs) if raw_prs else []
+        if len(pull_requests) == _PR_LIMIT:
+            logger.warning(
+                "fitness_issue_fetcher: PR results capped at %d; "
+                "some PRs may be missing from the fitness window",
+                _PR_LIMIT,
+            )
+        for item in pull_requests:
+            records.append(
+                _IssueRecord(
+                    number=item["number"],
+                    labels=[lbl["name"] for lbl in item.get("labels", [])],
+                    is_pr=True,
+                    state=item["state"].lower(),
+                    merged=item.get("mergedAt") is not None,
+                    created_at=_parse_dt(item.get("createdAt")),  # type: ignore[arg-type]
+                    closed_at=_parse_dt(item.get("closedAt")),
+                )
+            )
+
+        return records
+
+    return _fetcher
 
 
 @dataclass
@@ -212,6 +325,8 @@ class ServiceRegistry:
     skill_prompt_eval_loop: SkillPromptEvalLoop
     fake_coverage_auditor_loop: FakeCoverageAuditorLoop
     adr_touchpoint_auditor_loop: AdrTouchpointAuditorLoop
+    adr_conformance_loop: AdrConformanceLoop
+    auto_tighten_loop: AutoTightenLoop
     memory_backlog_loop: MemoryBacklogLoop
     rc_budget_loop: RCBudgetLoop
     wiki_rot_detector_loop: WikiRotDetectorLoop
@@ -220,7 +335,10 @@ class ServiceRegistry:
     contract_refresh_loop: ContractRefreshLoop
     corpus_learning_loop: CorpusLearningLoop
     auto_agent_preflight_loop: AutoAgentPreflightLoop
+    detector_calibration_loop: DetectorCalibrationLoop
     sandbox_failure_fixer_loop: SandboxFailureFixerLoop
+    disturbance_dampener_loop: DisturbanceDampenerLoop
+    human_steering_loop: HumanSteeringLoop
     diagram_loop: DiagramLoop
     cost_budget_watcher_loop: CostBudgetWatcherLoop
     pricing_refresh_loop: PricingRefreshLoop
@@ -230,6 +348,8 @@ class ServiceRegistry:
     entry_evidence_loop: EntryEvidenceLoop
     live_corpus_replay_loop: LiveCorpusReplayLoop
     triage_retry_loop: TriageRetryLoop
+    convergence_oscillation_loop: ConvergenceOscillationLoop
+    fitness_scorecard_loop: FitnessScorecardLoop
 
     # Optional integrations
 
@@ -245,6 +365,198 @@ class WorkerRegistryCallbacks:
     update_status: StatusCallback
     is_enabled: Callable[[str], bool]
     get_interval: Callable[[str], int]
+
+
+_GH_SUBPROCESS_TIMEOUT_S = 120
+
+# Injectable `gh` runner type shared by the two auto-tighten closures below.
+# Mirrors `auto_pr._run_gh`'s shape (a thin `subprocess.run` wrapper) so unit
+# tests can pass a fake without monkeypatching `subprocess.run` globally.
+GhRunner = Callable[..., "subprocess.CompletedProcess[str]"]
+
+
+def run_gh_command(cmd: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Default `gh` subprocess runner for the auto-tighten closures.
+
+    Kept as a free function (mirrors `auto_pr._run_gh`) so
+    `make_gh_coverage_fetch` / `make_gh_merged_pr_lister` can be unit-tested
+    by injecting a fake `runner` instead of monkeypatching `subprocess.run`.
+    """
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=_GH_SUBPROCESS_TIMEOUT_S,
+    )
+
+
+def make_gh_coverage_fetch(
+    config: HydraFlowConfig, *, runner: GhRunner = run_gh_command
+) -> Callable[[], tuple[str, str, str] | None]:
+    """Build the ``fetch_latest`` closure ``CoverageIngestor`` needs.
+
+    Finds the most recent successful CI run on the base branch, downloads its
+    ``coverage-json`` artifact, and returns ``(run_id, head_sha, coverage_json_text)``.
+    Returns ``None`` on any failure (no successful runs yet, no artifact,
+    unreadable JSON) — a safe "nothing new to ingest" signal, never a crash.
+    """
+
+    def _fetch_latest() -> tuple[str, str, str] | None:
+        base = config.base_branch()
+        list_proc = runner(
+            [
+                "gh",
+                "run",
+                "list",
+                "--branch",
+                base,
+                "--workflow",
+                "ci.yml",
+                "--json",
+                "databaseId,headSha,status,conclusion",
+                "--limit",
+                "20",
+            ],
+            cwd=config.repo_root,
+        )
+        if list_proc.returncode != 0:
+            return None
+        try:
+            runs = json.loads(list_proc.stdout)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+        latest = next(
+            (
+                run
+                for run in runs
+                if run.get("status") == "completed"
+                and run.get("conclusion") == "success"
+            ),
+            None,
+        )
+        if latest is None:
+            return None
+
+        run_id = str(latest["databaseId"])
+        head_sha = str(latest["headSha"])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            download_proc = runner(
+                [
+                    "gh",
+                    "run",
+                    "download",
+                    run_id,
+                    "--name",
+                    "coverage-json",
+                    "--dir",
+                    tmpdir,
+                ],
+                cwd=config.repo_root,
+            )
+            if download_proc.returncode != 0:
+                return None
+            cov_path = Path(tmpdir) / "coverage.json"
+            if not cov_path.exists():
+                return None
+            cov_text = cov_path.read_text()
+
+        return (run_id, head_sha, cov_text)
+
+    return _fetch_latest
+
+
+def make_gh_merged_pr_lister(
+    config: HydraFlowConfig, *, runner: GhRunner = run_gh_command
+) -> Callable[[str], list[dict]]:
+    """Build the ``list_merged_prs`` closure ``AttributionResolver`` needs.
+
+    Lists PRs merged to the base branch since ``since_iso``, normalizing
+    ``gh``'s ``files: [{"path": ...}]`` objects to the flat
+    ``files: [path, ...]`` list of strings ``AttributionResolver.attribute``
+    expects, and ``mergedAt`` -> ``merged_at``. Returns ``[]`` on failure —
+    attribution failure is a safe HOLD downstream, never a crash.
+    """
+
+    def _list_merged_prs(since_iso: str) -> list[dict]:
+        base = config.base_branch()
+        proc = runner(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--base",
+                base,
+                "--state",
+                "merged",
+                "--search",
+                f"merged:>={since_iso}",
+                "--json",
+                "number,files,mergedAt",
+                "--limit",
+                "100",
+            ],
+            cwd=config.repo_root,
+        )
+        if proc.returncode != 0:
+            return []
+        try:
+            prs = json.loads(proc.stdout)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+        out: list[dict] = []
+        for pr in prs:
+            out.append(
+                {
+                    "number": pr["number"],
+                    "files": [f["path"] for f in pr.get("files", [])],
+                    "merged_at": pr.get("mergedAt"),
+                }
+            )
+        return out
+
+    return _list_merged_prs
+
+
+def make_gh_open_pr_exists(
+    config: HydraFlowConfig, *, runner: GhRunner = run_gh_command
+) -> Callable[[str], bool]:
+    """Build the open-PR probe ``TighteningPrAuthor`` uses for cross-tick dedup.
+
+    Returns True when a PR is already open for ``branch`` (its head), so the
+    loop skips re-opening a tightening PR whose prior tick's PR has not merged.
+    Fails open (returns False on any ``gh`` error): a probe failure must not
+    block a legitimate tightening, and a genuine duplicate-head open still
+    resolves to a benign hold downstream via ``raise_on_failure=False``.
+    """
+
+    def _open_pr_exists(branch: str) -> bool:
+        proc = runner(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--head",
+                branch,
+                "--state",
+                "open",
+                "--json",
+                "number",
+            ],
+            cwd=config.repo_root,
+        )
+        if proc.returncode != 0:
+            return False
+        try:
+            return bool(json.loads(proc.stdout))
+        except (json.JSONDecodeError, TypeError):
+            return False
+
+    return _open_pr_exists
 
 
 def build_state_tracker(config: HydraFlowConfig) -> StateTracker:
@@ -384,6 +696,7 @@ def build_services(
         config=config,
         runner=subprocess_runner,
         credentials=credentials,
+        event_bus=event_bus,
     )
     agents = AgentRunner(
         config,
@@ -984,6 +1297,12 @@ def build_services(
         pr_manager=prs,
         deps=loop_deps,
     )
+    convergence_oscillation_loop = ConvergenceOscillationLoop(
+        config=config,
+        state=state,
+        pr_manager=prs,
+        deps=loop_deps,
+    )
     gh_cache_loop = GitHubCacheLoop(config, gh_cache, deps=loop_deps)  # noqa: F841
     from dedup_store import DedupStore  # noqa: PLC0415
 
@@ -1070,11 +1389,24 @@ def build_services(
         queue=retrospective_queue,
         prs=prs,
     )
+    # PrinciplesAuditLoop runs make audit-json once per HydraFlow-self and once
+    # per managed repo in a single cycle; multiple repos can push a cycle past
+    # the 2-hour default watchdog. Give it the LLM bound (4 h) via timeout_cb
+    # instead of setting LONG_LLM_CYCLE=True in the protected loop file (#9639).
+    _principles_audit_deps = LoopDeps(
+        event_bus=loop_deps.event_bus,
+        stop_event=loop_deps.stop_event,
+        status_cb=loop_deps.status_cb,
+        enabled_cb=loop_deps.enabled_cb,
+        sleep_fn=loop_deps.sleep_fn,
+        interval_cb=loop_deps.interval_cb,
+        timeout_cb=lambda _: config.loop_watchdog_llm_seconds,
+    )
     principles_audit_loop = PrinciplesAuditLoop(
         config=config,
         state=state,
         pr_manager=prs,
-        deps=loop_deps,
+        deps=_principles_audit_deps,
     )
     flake_tracker_dedup = DedupStore(
         "flake_tracker",
@@ -1121,6 +1453,58 @@ def build_services(
         dedup=adr_touchpoint_auditor_dedup,
         adr_index=ADRIndex(config.repo_root / "docs" / "adr"),
         deps=loop_deps,
+    )
+
+    adr_conformance_dedup = DedupStore(
+        "adr_conformance",
+        config.data_root / "dedup" / "adr_conformance.json",
+    )
+    adr_conformance_loop = AdrConformanceLoop(  # noqa: F841
+        config=config,
+        state=state,
+        pr_manager=prs,
+        dedup=adr_conformance_dedup,
+        adr_index=ADRIndex(config.repo_root / "docs" / "adr"),
+        runner=SubprocessConformanceRunner(),
+        deps=loop_deps,
+    )
+
+    _auto_tighten_metrics = config.repo_data_root / "metrics"
+    _auto_tighten_cov_jsonl = _auto_tighten_metrics / "coverage.jsonl"
+    # CoverageAdapter's methods are typed over concrete `float` (the only
+    # Measurement shape it deals with) rather than the full `Measurement`
+    # union the RatchetAdapter Protocol declares, so pyright sees it as
+    # narrower-than-the-protocol at the list-literal boundary. Runtime-safe
+    # (CoverageAdapter is a real structural match; `RatchetAdapter` is
+    # `@runtime_checkable`) — the cast documents this rather than papering
+    # over an actual mismatch.
+    _auto_tighten_adapters = cast(
+        "list[RatchetAdapter]",
+        [
+            CoverageAdapter(
+                coverage_jsonl=_auto_tighten_cov_jsonl,
+                margin=config.auto_tighten_coverage_margin,
+            )
+        ],
+    )
+    auto_tighten_loop = AutoTightenLoop(  # noqa: F841
+        config=config,
+        state=state,
+        deps=loop_deps,
+        adapters=_auto_tighten_adapters,
+        ingestor=CoverageIngestor(
+            _auto_tighten_cov_jsonl,
+            fetch_latest=make_gh_coverage_fetch(config),
+        ),
+        attribution=AttributionResolver(
+            list_merged_prs=make_gh_merged_pr_lister(config)
+        ),
+        pr_author=TighteningPrAuthor(
+            repo_root=config.repo_root,
+            base=config.base_branch(),
+            open_pr_exists=make_gh_open_pr_exists(config),
+        ),
+        observation_store=ObservationStore(_auto_tighten_metrics / "tighten.jsonl"),
     )
 
     branch_protection_auditor_dedup = DedupStore(
@@ -1266,6 +1650,13 @@ def build_services(
         state=state,
     )
 
+    detector_calibration_loop = DetectorCalibrationLoop(
+        config=config,
+        state=state,
+        pr_manager=prs,
+        deps=loop_deps,
+    )
+
     auto_agent_audit_store = PreflightAuditStore(config.data_root)
     auto_agent_preflight_loop = AutoAgentPreflightLoop(  # noqa: F841
         config=config,
@@ -1275,6 +1666,13 @@ def build_services(
         audit_store=auto_agent_audit_store,
         deps=loop_deps,
         workspaces=workspaces,
+        # ADR-0105 decompose-to-converge: reuse the shared epic_manager
+        # (register_epic writes through the same persisted state + event bus
+        # as the rest of the system) and the shared subprocess_runner (so
+        # the council's LLM calls route through the same docker/host dial
+        # as every other loop) rather than constructing loop-local copies.
+        epic_manager=epic_manager,
+        runner=subprocess_runner,
     )
 
     # Sandbox-tier auto-fixer reuses the AutoAgentRunner subprocess wrapper
@@ -1291,13 +1689,46 @@ def build_services(
         workspaces=workspaces,
     )
 
+    # Disturbance dampener burn-down actuator (ADR-0095, Pattern A). Reuses
+    # the same AutoAgentRunner subprocess wrapper as the sandbox fixer above.
+    disturbance_dampener_runner = AutoAgentRunner(config=config, event_bus=event_bus)
+    disturbance_dampener_dedup = DedupStore(
+        "disturbance_dampener",
+        config.data_root / "dedup" / "disturbance_dampener.json",
+    )
+    disturbance_dampener_loop = DisturbanceDampenerLoop(  # noqa: F841
+        config=config,
+        state=state,
+        prs=prs,
+        dedup=disturbance_dampener_dedup,
+        deps=loop_deps,
+        runner=disturbance_dampener_runner,
+    )
+
+    # Human-on-the-loop continuous steering sensor (ADR-0099 #4). Reads
+    # the full-pipeline active-issue set straight off the IssueStore
+    # (queued/in-flight/active — every phase from triage through HITL),
+    # not just the narrower implement/review/HITL-in-flight set that
+    # ``state.get_active_issue_numbers`` exposes via the orchestrator's
+    # ``_sync_active_issue_numbers``. This ensures a directive posted on
+    # an issue in triage/discover/shape/plan is sensed too, matching the
+    # actuator's own enumeration (``store.get_active_issues()``).
+    human_steering_loop = HumanSteeringLoop(
+        config=config,
+        state=state,
+        prs=prs,
+        deps=loop_deps,
+        active_issues_cb=lambda: list(store.get_active_issues().keys()),
+    )
+
     # Term-Proposer (ADR-0054). Production adapters wire the loop to:
     # - ClaudeCLIClient: shells out to `claude -p` via SubprocessRunner,
     #   mirroring `wiki_compiler.WikiCompiler._call_model`.
-    # - OpenAutoPRBotPRPort: writes term files and delegates to
-    #   `auto_pr.open_automated_pr_async` for the worktree → commit →
-    #   push → `gh pr create` flow. `auto_merge=False` — DependabotMergeLoop
-    #   handles auto-merge once the PR carries `hydraflow-ul-proposed`.
+    # - OpenAutoPRBotPRPort: writes term files INTO an ephemeral worktree and
+    #   delegates to `auto_pr.generate_and_open_pr_async` for the commit →
+    #   push → `gh pr create` flow — repo_root is never mutated (#9539).
+    #   `auto_merge=False` — DependabotMergeLoop handles auto-merge once the
+    #   PR carries `hydraflow-ul-proposed`.
     from term_proposer_llm import TermProposerLLM  # noqa: PLC0415
     from term_proposer_loop import TermProposerLoop  # noqa: PLC0415
     from term_proposer_runtime import (  # noqa: PLC0415
@@ -1311,7 +1742,14 @@ def build_services(
         deps=loop_deps,
     )
 
-    term_proposer_claude_client = ClaudeCLIClient(runner=subprocess_runner)
+    term_proposer_claude_client = ClaudeCLIClient(
+        runner=subprocess_runner,
+        config=config,
+        tool=config.term_proposer_tool,
+        model=config.term_proposer_model,
+        timeout=config.term_proposer_timeout,
+        provider=config.term_proposer_provider,
+    )
     term_proposer_llm = TermProposerLLM(client=term_proposer_claude_client)
     term_proposer_pr_port = OpenAutoPRBotPRPort(
         repo_root=config.repo_root,
@@ -1365,6 +1803,14 @@ def build_services(
         pr_port=term_proposer_pr_port,
         repo_root=config.repo_root,
         dedup_path=config.data_root / "dedup" / "entry_evidence.json",
+    )
+
+    _fitness_issue_fetcher = _make_fitness_issue_fetcher(prs)
+    fitness_scorecard_loop = FitnessScorecardLoop(
+        config=config,
+        deps=loop_deps,
+        issue_fetcher=_fitness_issue_fetcher,
+        repo_root=config.repo_root,
     )
 
     return ServiceRegistry(
@@ -1430,6 +1876,8 @@ def build_services(
         skill_prompt_eval_loop=skill_prompt_eval_loop,
         fake_coverage_auditor_loop=fake_coverage_auditor_loop,
         adr_touchpoint_auditor_loop=adr_touchpoint_auditor_loop,
+        adr_conformance_loop=adr_conformance_loop,
+        auto_tighten_loop=auto_tighten_loop,
         memory_backlog_loop=memory_backlog_loop,
         rc_budget_loop=rc_budget_loop,
         wiki_rot_detector_loop=wiki_rot_detector_loop,
@@ -1438,7 +1886,10 @@ def build_services(
         contract_refresh_loop=contract_refresh_loop,
         corpus_learning_loop=corpus_learning_loop,
         auto_agent_preflight_loop=auto_agent_preflight_loop,
+        detector_calibration_loop=detector_calibration_loop,
         sandbox_failure_fixer_loop=sandbox_failure_fixer_loop,
+        disturbance_dampener_loop=disturbance_dampener_loop,
+        human_steering_loop=human_steering_loop,
         diagram_loop=diagram_loop,
         cost_budget_watcher_loop=cost_budget_watcher_loop,
         pricing_refresh_loop=pricing_refresh_loop,
@@ -1448,4 +1899,6 @@ def build_services(
         entry_evidence_loop=entry_evidence_loop,
         live_corpus_replay_loop=_live_corpus_replay_loop,
         triage_retry_loop=triage_retry_loop,
+        convergence_oscillation_loop=convergence_oscillation_loop,
+        fitness_scorecard_loop=fitness_scorecard_loop,
     )

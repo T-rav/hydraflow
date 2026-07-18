@@ -255,6 +255,19 @@ has merge conflicts" if main moved during CI. The `--auto` flag is the
 ideal recipe but only works if the repo enables it; otherwise, monitor
 CI completion and manually merge.
 
+### 4.7 Cost-watcher operator-override windows
+
+CostBudgetWatcherLoop takes authorship of two reversible actions — the
+hard-cap **kill** (`set_enabled False`) and the soft-band **throttle**
+(interval stretch, `cost_throttled_workers` priors). In both cases an
+operator change made *inside the window* is silently superseded on
+recovery: a worker manually disabled after we killed it gets re-enabled;
+an interval changed mid-throttle is overwritten by the pre-throttle
+value (None → cleared to the loop default). Detecting either would need
+an event log keyed on (name, source, timestamp) for every control-plane
+write. Accepted trade-off: the windows are short (band crossings move at
+rolling-24h speed) and recovery restores the pre-window operator intent.
+
 ## §5 — Verifying the contract is honored
 
 Auto-discovery tests that fail when a load-bearing convention is broken:
@@ -283,10 +296,22 @@ scaffold scripts that generate boilerplate with all the conventions
 correct, conformance tests that catch contract drift, pre-commit checks
 that block the most common omissions.
 
-See ADR-0051 (when written) for the formal "iterative production-readiness
-review" process and the planned infrastructure improvements
-(`BaseSubprocessRunner`, `scripts/scaffold-loop.py`, auto-PRPort
-conformance, subagent-verify wrapper, pre-commit arch-regen).
+See ADR-0051 for the formal "iterative production-readiness review"
+process. The infrastructure improvements this section originally planned
+have since SHIPPED — check for the current state before rebuilding any of
+them (two 2026-07 sessions nearly did):
+
+- `BaseSubprocessRunner` (`src/runners/base_subprocess_runner.py`, #8446)
+  — auto-applies `reraise_on_credit_or_bug` + telemetry ordering.
+- `scripts/scaffold_loop.py` + `scripts/scaffold_templates/` (#8448) —
+  atomic five-checkpoint patcher; template kept current with the ratchets
+  (kill-switch gate order, `loop_fitness` override).
+- Conformance ratchets: `tests/test_loop_wiring_completeness.py`,
+  `tests/test_loop_fitness_completeness.py`,
+  `tests/test_loop_kill_switch_completeness.py`, Port↔Fake signature
+  conformance (#8446).
+
+Still open: subagent-verify wrapper, pre-commit arch-regen.
 
 ## Onboarding a foreign managed repo
 

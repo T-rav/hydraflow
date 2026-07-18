@@ -19,6 +19,7 @@ from models import (
     EpicDecompResult,
     IssueType,
     NewIssueSpec,
+    SystemAlertPayload,
     Task,
     TranscriptLinePayload,
     TriageResult,
@@ -31,6 +32,7 @@ from plugin_skill_registry import (
     skills_for_phase,
 )
 from prompt_builder import PromptBuilder
+from triage_honeypot import screen_issue
 
 logger = logging.getLogger("hydraflow.triage")
 
@@ -141,6 +143,12 @@ class TriageRunner(BaseRunner):
             )
             return result
 
+        # --- Injection honeypot: validate the request before handling it ---
+        if self._config.triage_honeypot_enabled:
+            quarantine = await self._run_injection_honeypot(issue, worker_id)
+            if quarantine is not None:
+                return quarantine
+
         # --- LLM evaluation ---
         await self._emit_transcript(
             issue.id,
@@ -186,6 +194,105 @@ class TriageRunner(BaseRunner):
             result.reasons or "none",
         )
         return result
+
+    async def _run_injection_honeypot(
+        self, issue: Task, worker_id: int
+    ) -> TriageResult | None:
+        """Screen the untrusted request through the mock-tool honeypot.
+
+        Returns a quarantine :class:`TriageResult` when ``triage_honeypot_enforce``
+        is on and the honeypot trips; otherwise ``None`` (proceed to normal
+        triage). Shadow mode (the default) still alerts + records telemetry on a
+        trip but never blocks — so efficacy can be evaluated before it gates
+        real work. Infra failures fail **open** (return ``None``).
+        """
+        gh_token = getattr(getattr(self, "_credentials", None), "gh_token", "") or ""
+        try:
+            verdict = await screen_issue(
+                runner=self._runner,
+                config=self._config,
+                title=issue.title or "",
+                body=issue.body or "",
+                issue_labels=list(issue.tags or []),
+                gh_token=gh_token,
+                source="triage_honeypot",
+            )
+        except Exception as exc:  # noqa: BLE001 — classify, else fail open
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "Triage honeypot raised for #%d: %s; failing open", issue.id, exc
+            )
+            return None
+
+        if verdict.error:
+            logger.warning(
+                "Triage honeypot could not run for #%d (%s); failing open",
+                issue.id,
+                verdict.error,
+            )
+            return None
+
+        if not verdict.injection_detected:
+            return None
+
+        # Tripped — alert + telemetry in BOTH modes.
+        tools = ", ".join(verdict.tripped_tools) or "unknown"
+        enforce = self._config.triage_honeypot_enforce
+        await self._emit_injection_alert(issue, verdict.tripped_tools, enforce)
+        await self._emit_transcript(
+            issue.id,
+            f"⚠️ Injection honeypot tripped (mock tools: {tools}) — "
+            + (
+                "QUARANTINED; not handed to the triage agent."
+                if enforce
+                else "SHADOW mode: proceeding to triage, logged for evaluation."
+            ),
+        )
+        logger.warning(
+            "SECURITY: triage injection honeypot tripped on issue #%d "
+            "(mode=%s, mock tools: %s)",
+            issue.id,
+            "enforce" if enforce else "shadow",
+            tools,
+        )
+
+        if not enforce:
+            return None  # shadow: observe only, don't block
+
+        await self._emit_status(issue.id, worker_id, TriageStatus.DONE)
+        return TriageResult(
+            issue_number=issue.id,
+            ready=False,
+            quarantined=True,
+            reasons=[
+                "Quarantined by the injection honeypot: the request drove a "
+                f"mock-tool call ({tools}), indicating a prompt-injection attempt. "
+                "Not handed to the triage agent."
+            ],
+        )
+
+    async def _emit_injection_alert(
+        self, issue: Task, tripped_tools: list[str], enforce: bool
+    ) -> None:
+        """Publish a ``SYSTEM_ALERT`` for a honeypot trip (both modes)."""
+        mode = "enforce" if enforce else "shadow"
+        tools = ", ".join(tripped_tools) or "unknown"
+        try:
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    data=SystemAlertPayload(
+                        message=(
+                            f"Triage injection honeypot tripped on issue "
+                            f"#{issue.id} (mode={mode}, mock tools: {tools})"
+                        ),
+                        source="triage_honeypot",
+                    ),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — alerting must not crash triage
+            reraise_on_credit_or_bug(exc)
+            logger.debug("Failed to publish injection SYSTEM_ALERT for #%d", issue.id)
 
     def _build_command(self, _worktree_path: Path | None = None) -> list[str]:
         """Construct the CLI invocation for triage evaluation.

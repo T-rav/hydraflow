@@ -12,6 +12,10 @@ Accepted
 
 `tests/test_atlas_routes.py`, `src/ui/src/components/atlas/__tests__/`
 
+**Enforcement:** enforced
+
+**Enforced by:** pytest:tests/test_atlas_routes.py
+
 ## Context
 
 [ADR-0090](0090-atlas-knowledge-graph-dashboard.md) shipped Atlas Phase 1: a `Domain` view rendering the ubiquitous-language term graph as React Flow parent-grouped nodes, an `Articles` browser unifying ADRs and wiki entries, and a `Maintenance` panel. Five new term + ADR endpoints exposed the data.

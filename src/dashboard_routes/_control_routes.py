@@ -39,6 +39,7 @@ from route_types import (
     ControlStatusResponse,
     RepoSlugParam,
 )
+from settings_registry import build_settings_schema, mutable_field_names
 from update_check import load_cached_update_result
 
 if TYPE_CHECKING:
@@ -158,6 +159,12 @@ _bg_worker_defs = [
         "Scans per-repo wikis for citations whose source code has moved or vanished.",
     ),
     (
+        "detector_calibration",
+        "Detector Calibration",
+        "Mines closed escalations for repeat-offender subjects — churn means "
+        "the detector is miscalibrated, not the code.",
+    ),
+    (
         "trust_fleet_sanity",
         "Trust Fleet Sanity",
         "Meta-observer — watches the 9 trust loops for stalls, escalation spam, dedup growth, errors, cost spikes.",
@@ -179,6 +186,16 @@ _bg_worker_defs = [
         "adr_touchpoint_auditor",
         "ADR Touchpoint Auditor",
         "Scans recently-merged PRs for ADR drift — cited src/ modules changed without the ADR being updated. Replaces the synchronous touchpoint gate. See ADR-0056.",
+    ),
+    (
+        "adr_conformance",
+        "ADR Conformance",
+        "Evaluates every Accepted ADR's `Enforced by:` checks and files/updates remediation issues on drift. See ADR-0100.",
+    ),
+    (
+        "auto_tighten",
+        "Auto-Tighten Ratchet",
+        "Locks in coverage-floor gains",
     ),
     (
         "auto_agent_preflight",
@@ -281,6 +298,16 @@ _bg_worker_defs = [
         "Auto-fixes promotion PRs failing sandbox CI by dispatching the auto-agent",
     ),
     (
+        "disturbance_dampener",
+        "Disturbance Dampener",
+        "Burns down disturbance backlog by selecting units per dimension+file, dispatching an auto-agent fix, and opening one PR per file (ADR-0095).",
+    ),
+    (
+        "human_steering",
+        "Human Steering",
+        "Senses per-issue GitHub-comment steering directives (/steer, /pause, /resume, /redo, /abort) each tick and writes the steering reference (ADR-0099 #4).",
+    ),
+    (
         "security_patch",
         "Security Patch",
         "Polls Dependabot alerts and files issues for fixable vulnerabilities.",
@@ -326,6 +353,16 @@ _bg_worker_defs = [
         "Re-runs parked-issue triage every 24h with the original parking reason as context. Caps at 3 retries before escalating to HITL with the triage-retry-exhausted sub-label. Closes the only factory phase with no autonomous re-entry path. See ADR-0063 W2.",
     ),
     (
+        "convergence_oscillation",
+        "Convergence Oscillation",
+        "Scans issue convergence ledgers for cross-boundary oscillation (repeated LOOP_BACK across triage/shape/plan or recurring review-lap findings) and escalates stuck issues to HITL, once each. See ADR-0098.",
+    ),
+    (
+        "fitness_scorecard",
+        "Fitness Scorecard",
+        "Computes per-loop fitness scores each tick by combining event history and issue attribution. Persists to fitness.jsonl and regenerates docs/arch/generated/loop-fitness.md. Read-only caretaker per ADR-0029.",
+    ),
+    (
         "workspace_gc",
         "Workspace GC",
         "Garbage-collects stale workspaces and orphaned branches.",
@@ -366,36 +403,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
     """Register control-related routes on *router*."""
 
     # Mutable fields that can be changed at runtime via PATCH
-    _MUTABLE_FIELDS = {
-        "gh_circuit_breaker_enabled",
-        "max_triagers",
-        "max_workers",
-        "max_planners",
-        "max_reviewers",
-        "max_hitl_workers",
-        "model",
-        "review_model",
-        "planner_model",
-        "batch_size",
-        "max_ci_fix_attempts",
-        "max_quality_fix_attempts",
-        "max_review_fix_attempts",
-        "min_review_findings",
-        "max_merge_conflict_fix_attempts",
-        "ci_check_timeout",
-        "ci_poll_interval",
-        "poll_interval",
-        "pr_unstick_interval",
-        "pr_unstick_batch_size",
-        "unstick_auto_merge",
-        "unstick_all_causes",
-        "memory_auto_approve",
-        "workspace_base",
-        "staging_enabled",
-        "staging_branch",
-        "main_branch",
-        "rc_cadence_hours",
-    }
+    # The editable-field allowlist is the schema-derived settings registry —
+    # add a field to ``settings_registry.SETTINGS`` to expose it (that is the
+    # only step; type/description/bounds/choices are derived from the Field).
+    _MUTABLE_FIELDS = mutable_field_names()
 
     def _build_system_worker_inference_stats(
         cfg: HydraFlowConfig | None = None,
@@ -587,6 +598,8 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             model=cfg.model,
             pr_unstick_batch_size=cfg.pr_unstick_batch_size,
             workspace_base=str(cfg.workspace_base),
+            test_adequacy_coverage_timeout_secs=cfg.test_adequacy_coverage_timeout_secs,
+            merge_policy_enabled=cfg.merge_policy_enabled,
         )
 
     def _runtime_status(orch: object | None) -> tuple[ControlStatus, str | None, bool]:
@@ -757,6 +770,32 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         repo: str | None = Query(default=None, description="Repo slug to target"),
     ) -> JSONResponse:
         return await ctx.execute_admin_task("compact", run_compact, repo)
+
+    @router.get("/api/control/settings-schema")
+    async def get_settings_schema(repo: RepoSlugParam = None) -> JSONResponse:
+        """Schema for the runtime settings screen.
+
+        One row per :data:`settings_registry.SETTINGS` entry, with input type,
+        description, default, min/max, enum choices, current value and the
+        live/restart flag — everything but group/live derived from the Pydantic
+        ``Field``. The screen renders generically from this; ``PATCH
+        /api/control/config`` applies edits.
+
+        ``provider_keys`` reports, per OpenAI-compatible backend, whether its
+        secret API key is present in the environment (booleans only — the key
+        value never leaves the process). The UI shows a 'key detected / not set'
+        badge so an operator can confirm a backend is wired without opening the
+        ``.env`` file.
+        """
+        from runner_utils import provider_key_presence  # noqa: PLC0415
+
+        _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
+        return JSONResponse(
+            {
+                "settings": build_settings_schema(_cfg),
+                "provider_keys": provider_key_presence(),
+            }
+        )
 
     @router.patch("/api/control/config")
     async def patch_config(

@@ -21,7 +21,13 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from dedup_store import DedupStore
 from knowledge_metrics import metrics as _metrics
+from prompt_gate_alerts import (
+    alert_prompt_gate_block,
+    clear_prompt_gate_block,
+    is_prompt_gate_blocked,
+)
 from repo_wiki import WikiEntry
 
 _SYNTHESIS_ID_RE = re.compile(r"^(\d+)-")
@@ -77,6 +83,7 @@ class ADRDraftDecision(BaseModel):
 
 if TYPE_CHECKING:
     from config import Credentials, HydraFlowConfig
+    from events import EventBus
     from execution import SubprocessRunner
     from repo_wiki import RepoWikiStore
     from tribal_wiki import TribalWikiStore
@@ -478,6 +485,8 @@ class WikiCompiler:
         config: HydraFlowConfig,
         runner: SubprocessRunner,
         credentials: Credentials | None = None,
+        event_bus: EventBus | None = None,
+        gate_block_dedup: DedupStore | None = None,
     ) -> None:
         self._config = config
         self._runner = runner
@@ -486,6 +495,13 @@ class WikiCompiler:
 
             credentials = _Creds()
         self._credentials = credentials
+        # Prompt-gate block escalation (#9734 finding 3): without a bus the
+        # ERROR log still fires; the SYSTEM_ALERT is simply skipped.
+        self._bus = event_bus
+        self._gate_block_dedup = gate_block_dedup or DedupStore(
+            "prompt_gate_blocked",
+            config.data_root / "dedup" / "prompt_gate_blocked.json",
+        )
 
     async def compile_topic(
         self,
@@ -891,18 +907,33 @@ class WikiCompiler:
                 config=self._config,
                 tool=self._config.wiki_compilation_tool,
                 model=self._config.wiki_compilation_model,
+                provider=self._config.wiki_compilation_provider,
                 prompt=prompt,
                 source="wiki_compilation",
                 timeout=self._config.wiki_compilation_timeout,
                 gh_token=self._credentials.gh_token,
             )
             if result.returncode != 0:
+                if is_prompt_gate_blocked(result.stderr):
+                    # A gate block is a persistent policy misconfiguration,
+                    # not a transient failure: every tick re-blocks, so a
+                    # soft warn would be a PERMANENT silent no-op (#9734
+                    # review finding 3). Escalate: ERROR + one SYSTEM_ALERT.
+                    await alert_prompt_gate_block(
+                        dedup=self._gate_block_dedup,
+                        event_bus=self._bus,
+                        source="wiki_compilation",
+                        repo=self._config.repo or "",
+                        detail=result.stderr[:200],
+                    )
+                    return None
                 logger.warning(
                     "Wiki compilation model failed (rc=%d): %s",
                     result.returncode,
                     result.stderr[:200],
                 )
                 return None
+            clear_prompt_gate_block(self._gate_block_dedup, "wiki_compilation")
             return result.stdout if result.stdout else None
         except TimeoutError:
             logger.warning("Wiki compilation model timed out")

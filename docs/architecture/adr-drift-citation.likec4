@@ -1,0 +1,99 @@
+// Issue #9507 — ADR citation drift: dead `src/dashboard_routes.py` references
+// and the bare-cited live `src/dashboard.py` false-positive.
+//
+// Captures the ADR-drift detection pipeline (ADR-0056) and the dashboard
+// route topology after `src/dashboard_routes.py` was split into the
+// `src/dashboard_routes/` package (PR #5901) and `src/state.py` into the
+// `src/state/` package. ADR-0007/0013/0019 still cite the deleted flat files.
+
+specification {
+  element system
+  element store
+  element module
+  element symbol
+  element doc
+  element loop
+
+  relationship cites
+  relationship parses
+  relationship flags
+}
+
+model {
+  drift = system 'ADR Drift Detection (ADR-0056)' {
+    description 'Flags PRs whose cited src/ modules changed without the ADR being updated'
+
+    auditor = loop 'AdrTouchpointAuditorLoop' {
+      description 'Background caretaker; files one rollup issue per drifted ADR (#8987)'
+    }
+    index = module 'adr_index.parse_adr_file' {
+      description 'Extracts `src/...py(:Symbol)?` citations via _SOURCE_FILE_CITATION_RE'
+    }
+    driftFn = module 'adr_drift.compute_drift' {
+      description 'Pure citation-intersection; bare cite drifts on ANY touch, symbol cite never drifts on file-only diff'
+    }
+
+    auditor -> index 'scan_adr_directory'
+    auditor -> driftFn 'compute_drift_by_adr(diffs)'
+    index -> driftFn 'ADRIndex.adrs_touching(paths)'
+  }
+
+  adrs = doc 'Architecture Decision Records' {
+    adr7  = doc 'ADR-0007 Dashboard API Multi-Repo Scoping'
+    adr13 = doc 'ADR-0013 Screenshot Capture Pipeline'
+    adr19 = doc 'ADR-0019 Background Task Delegation'
+  }
+
+  // Live code after the package splits.
+  routes = store 'src/dashboard_routes/ (package)' {
+    description 'Was the flat src/dashboard_routes.py (split in #5901)'
+    routesMod  = symbol '_routes.py:create_router / _resolve_runtime'
+    reportsMod = symbol '_reports_routes.py:submit_report (POST /api/report)'
+    epicMod    = symbol '_epic_routes.py:trigger_epic_release (POST /api/epics/{n}/release)'
+  }
+  dashMod  = module 'src/dashboard.py:HydraFlowDashboard' {
+    description 'Live, non-shared-infra; bare citation = ADR-0007 drift FP'
+  }
+  stateMod = symbol 'src/state/_report.py:ReportStateMixin.enqueue_report/dequeue_report' {
+    description 'Was the flat src/state.py report queue'
+  }
+
+  // Dead flat-file targets the ADRs still point at.
+  deadRoutes = store 'src/dashboard_routes.py (DELETED flat file)'
+  deadState  = store 'src/state.py (DELETED flat file)'
+
+  // Current (broken) citations — the bug.
+  adr7  -> deadRoutes 'cites (dead ref)'
+  adr7  -> dashMod    'cites BARE → drifts on any touch (FP, rollup #9414)'
+  adr13 -> deadRoutes 'cites (dead ref)'
+  adr13 -> deadState  'cites (dead ref)'
+  adr19 -> deadRoutes 'cites (dead ref)'
+
+  // Target (fixed) citations — the intended state.
+  adr7  -> routesMod  'FIX: symbol-qualified live cite'
+  adr7  -> dashMod    'FIX: src/dashboard.py:HydraFlowDashboard (qualified → inert)'
+  adr13 -> reportsMod 'FIX: symbol-qualified live cite'
+  adr13 -> stateMod   'FIX: symbol-qualified live cite'
+  adr19 -> epicMod    'FIX: symbol-qualified live cite'
+
+  index -> adrs 'parses citations from'
+  driftFn -> adrs 'flags drift on'
+}
+
+views {
+  view index {
+    title 'ADR-0007/0013/0019 citation drift — current vs. fixed'
+    include *
+  }
+
+  view driftPipeline {
+    title 'Drift detection pipeline'
+    include drift, drift.*, adrs, adrs.*
+  }
+
+  view dashboardTargets {
+    title 'Dashboard/state live targets vs. deleted flat files'
+    include routes, routes.*, dashMod, stateMod, deadRoutes, deadState,
+            adr7, adr13, adr19
+  }
+}

@@ -10,16 +10,20 @@ import { StreamView } from './components/StreamView'
 import { SessionSidebar } from './components/SessionSidebar'
 import { AtlasExplorer } from './components/atlas/AtlasExplorer'
 import { ProjectView } from './components/ProjectView'
+import { LoopFitnessPanel } from './components/LoopFitnessPanel'
+import { AdrConformancePanel } from './components/AdrConformancePanel'
 import { theme } from './theme'
 import { canonicalRepoSlug } from './constants'
 
-const TABS = ['issues', 'hitl', 'outcomes', 'atlas', 'system']
+const TABS = ['issues', 'hitl', 'outcomes', 'atlas', 'loop-fitness', 'adr-conformance', 'system']
 
 const TAB_LABELS = {
   issues: 'Work Stream',
   outcomes: 'Outcomes',
   hitl: 'HITL',
   atlas: 'Atlas',
+  'loop-fitness': 'Loop Fitness',
+  'adr-conformance': 'ADR Conformance',
   system: 'System',
 }
 
@@ -272,6 +276,8 @@ function AppContent() {
               : <div style={idleMessage}>Pipeline is not running — HITL actions are unavailable.</div>
           )}
           {activeTab === 'atlas' && <AtlasExplorer />}
+          {activeTab === 'loop-fitness' && <LoopFitnessPanel />}
+          {activeTab === 'adr-conformance' && <AdrConformancePanel />}
           {activeTab === 'system' && (
             <SystemPanel
               backgroundWorkers={backgroundWorkers}

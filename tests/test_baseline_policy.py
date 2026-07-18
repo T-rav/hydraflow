@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from baseline_policy import BaselinePolicy, _glob_match
+from baseline_policy import BaselinePolicy, glob_match
 from events import EventBus, EventType
 from models import (
     BaselineApprovalResult,
@@ -42,37 +42,37 @@ def policy(baseline_config, state, event_bus):
 
 
 # ---------------------------------------------------------------------------
-# _glob_match
+# glob_match
 # ---------------------------------------------------------------------------
 
 
 class TestGlobMatch:
     def test_standard_fnmatch_still_works(self):
-        assert _glob_match("ui/dashboard.snap.png", "**/*.snap.png") is True
+        assert glob_match("ui/dashboard.snap.png", "**/*.snap.png") is True
 
     def test_double_star_leading_matches_zero_dirs(self):
         """** at the start should match files in the root directory."""
-        assert _glob_match("dashboard.snap.png", "**/*.snap.png") is True
+        assert glob_match("dashboard.snap.png", "**/*.snap.png") is True
 
     def test_double_star_trailing_matches_zero_dirs(self):
         """** at the end should match files without trailing path segments."""
-        assert _glob_match("__snapshots__/file.png", "**/__snapshots__/**") is True
+        assert glob_match("__snapshots__/file.png", "**/__snapshots__/**") is True
 
     def test_double_star_both_sides_zero_dirs(self):
         """** on both sides should match a single-segment __snapshots__ path."""
-        assert _glob_match("__snapshots__/file.png", "**/__snapshots__/**") is True
+        assert glob_match("__snapshots__/file.png", "**/__snapshots__/**") is True
 
     def test_deep_nested_path(self):
-        assert _glob_match("a/b/c/__snapshots__/d.png", "**/__snapshots__/**") is True
+        assert glob_match("a/b/c/__snapshots__/d.png", "**/__snapshots__/**") is True
 
     def test_no_match(self):
-        assert _glob_match("src/app.py", "**/*.snap.png") is False
+        assert glob_match("src/app.py", "**/*.snap.png") is False
 
     def test_exact_filename_pattern(self):
-        assert _glob_match("file.golden", "*.golden") is True
+        assert glob_match("file.golden", "*.golden") is True
 
     def test_nested_with_no_double_star(self):
-        assert _glob_match("a/file.golden", "*.golden") is True
+        assert glob_match("a/file.golden", "*.golden") is True
 
 
 # ---------------------------------------------------------------------------

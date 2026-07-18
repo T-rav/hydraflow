@@ -36,6 +36,25 @@ services:
       # disable it explicitly here.  Sandbox scenarios assert lifecycle
       # outcomes, never summarizer comment text.
       HYDRAFLOW_TRANSCRIPT_SUMMARIZATION_ENABLED: "false"
+      # ConvergenceOscillationLoop interval (s51). Intent: tick every 5 s for
+      # fast sandbox validation. NOTE: the pydantic field enforces ge=300 (5 min
+      # minimum); _apply_env_overrides raises ValueError (suppressed) so the
+      # config field stays at its default 3600. This is harmless in sandbox
+      # because WorkerRegistryCallbacks(get_interval=lambda *_: 60) overrides
+      # every caretaker loop's interval to 60 s via LoopDeps.interval_cb,
+      # which takes precedence over _get_default_interval(). Effective interval
+      # is 60 s regardless of this env var.
+      HYDRAFLOW_CONVERGENCE_OSCILLATION_INTERVAL: "5"
+      HYDRAFLOW_CONVERGENCE_OSCILLATION_LOOP_ENABLED: "true"
+      # HumanSteeringLoop (ADR-0099 #4, s52). human_steering_enabled is
+      # already default-on (src/config.py) but is set explicitly here for
+      # clarity. The allowlist defaults to [] (honors nobody, safe-by-
+      # default) so s52's seeded /pause comment needs its author explicitly
+      # allow-listed here — "steer-bot" must match the login s52 seeds the
+      # /pause comment from (tests/sandbox_scenarios/scenarios/
+      # s52_human_steering_directive.py).
+      HYDRAFLOW_HUMAN_STEERING_ENABLED: "true"
+      HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS: "steer-bot"
     volumes:
       - ./tests/sandbox_scenarios/seeds:/seed:ro
     networks: [sandbox]

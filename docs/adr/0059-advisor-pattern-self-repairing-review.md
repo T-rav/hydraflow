@@ -72,9 +72,6 @@ Nine OTel metrics (all surface-tagged), wired via [ADR-0055](0055-otel-honeycomb
 - `review_advisor_post_verify_degraded_total{surface}`
 - `review_advisor_disagreement_total{surface, role, severity}`
 - `review_advisor_disagreement_validated_total{surface, role}`
-- `review_advisor_veto_retries_total{surface, attempt}`
-- `review_advisor_veto_recovered_total{surface}`
-- `review_advisor_veto_exhausted_total{surface}`
 
 **Headline KPIs:**
 

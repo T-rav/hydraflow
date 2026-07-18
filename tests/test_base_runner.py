@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from pathlib import Path
@@ -248,6 +249,42 @@ class TestExecute:
         assert result == "transcript output"
         assert mock.await_count == 2
         assert sleep_mock.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_non_finite_usage_payload_does_not_fail_the_run(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """Telemetry runs unguarded in _execute's ``finally``: a NaN in a
+        backend raw_usage payload must not convert a SUCCESSFUL agent run
+        into a hard failure (it would burn attempt budget), and the
+        telemetry record must still land."""
+        runner = _TestRunner(config, event_bus)
+
+        with patch("base_runner.stream_claude_process", new_callable=AsyncMock) as mock:
+            mock.return_value = "transcript output"
+            result = await runner._execute(
+                ["claude", "-p"],
+                "prompt",
+                tmp_path,
+                {"issue": 42},
+                telemetry_stats={
+                    "raw_usage": [
+                        {
+                            "backend": "claude",
+                            "event_type": "result",
+                            "payload": {"tokens_per_second": float("nan")},
+                        }
+                    ]
+                },
+            )
+
+        assert result == "transcript output"
+        inf_file = config.cost_inferences_path
+        rows = [
+            json.loads(ln) for ln in inf_file.read_text().splitlines() if ln.strip()
+        ]
+        assert len(rows) == 1
+        assert rows[0]["raw_usage"][0]["payload"]["tokens_per_second"] == "NaN"
 
 
 # ---------------------------------------------------------------------------

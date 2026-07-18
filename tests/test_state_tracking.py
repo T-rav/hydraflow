@@ -53,6 +53,8 @@ class TestInitialization:
             "ci_monitor_settings",
             "ci_monitor_tracked_failures",
             "cost_budget_killed_workers",
+            "detector_calibration_attempts",
+            "cost_throttled_workers",
             "default_disabled_workers_seeded",
             "disabled_workers",
             "epic_states",
@@ -77,8 +79,7 @@ class TestInitialization:
             "tracked_reports",
             "processed_issues",
             "releases",
-            "review_attempts",
-            "review_blast_radii",
+            "convergence_ledgers",
             "review_feedback",
             "completed_timelines",
             "digest_hashes",
@@ -140,16 +141,22 @@ class TestInitialization:
             "live_corpus_drift_rollup",
             "live_corpus_escalation_issue",
             # Auto-Agent — AutoAgentPreflightLoop (spec §3.6)
-            "auto_agent_attempts",
+            # auto_agent_attempts migrated to convergence_ledgers (Task 1)
             "auto_agent_daily_spend",
             # SandboxFailureFixerLoop (sandbox-tier scenario testing track)
-            "sandbox_failure_fixer_attempts",
+            # sandbox_failure_fixer_attempts migrated to convergence_ledgers (Task 2)
+            # DisturbanceDampenerLoop (ADR-0101, Pattern A)
+            "disturbance_dampener_attempts",
             # AdrTouchpointAuditorLoop (ADR-0056)
             "adr_audit_cursor",
             "adr_audit_attempts",
             # Per-ADR rollup tracking (#8987) — see ADR-0056 amendment.
             "adr_rollup_issues",
             "rollup_issues",
+            # AdrConformanceLoop (ADR-0100) — mirrors adr_audit_attempts/
+            # adr_rollup_issues above under a distinct namespace.
+            "adr_conformance_attempts",
+            "adr_conformance_rollup_issues",
             # MemoryBacklogLoop (ADR-0089)
             "memory_backlog_attempts",
             # TriageRetryLoop (ADR-0063 W2)
@@ -159,6 +166,8 @@ class TestInitialization:
             # rebase; the enumeration needs the entry so set-equality
             # holds against the live StateData.
             "adversarial_states",
+            # HumanSteeringLoop per-issue steering reference (ADR-0099 #4)
+            "human_steering",
         }
         assert set(d.keys()) == expected_keys
 
@@ -952,8 +961,6 @@ class TestToDict:
             "reviewed_prs",
             "hitl_origins",
             "hitl_causes",
-            "review_attempts",
-            "review_blast_radii",
             "review_feedback",
             "worker_result_meta",
             "issue_attempts",
@@ -1091,3 +1098,15 @@ class TestLifetimeStats:
         assert stats.total_hitl_escalations == 0
         # Existing data is preserved
         assert tracker.to_dict()["processed_issues"].get(str(1)) == "success"
+
+
+def test_human_steering_get_set_round_trip(tmp_path: Path) -> None:
+    from models import SteeringState
+
+    t = make_tracker(tmp_path)
+    assert t.get_human_steering("7").flow == "running"  # default
+    t.set_human_steering("7", SteeringState(guidance="g", flow="paused"))
+    fresh = make_tracker(tmp_path)  # reload from disk
+    fresh.load()
+    assert fresh.get_human_steering("7").guidance == "g"
+    assert fresh.get_human_steering("7").flow == "paused"

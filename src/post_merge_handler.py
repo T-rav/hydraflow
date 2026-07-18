@@ -14,6 +14,11 @@ from config import HydraFlowConfig
 from epic import EpicCompletionChecker
 from events import EventBus, EventType, HydraFlowEvent
 from knowledge_metrics import metrics as _metrics
+from merge_policy import (
+    ROLE_ORCHESTRATOR_REVIEWER,
+    MergeApproval,
+    enforce_merge_policy,
+)
 from subprocess_util import AuthenticationError, CreditExhaustedError
 
 if TYPE_CHECKING:
@@ -350,6 +355,65 @@ class PostMergeHandler:
         if not await self._run_visual_gate(ctx):
             return
 
+        # CH-3 (#9731): consult the factory-autonomy policy before the
+        # autonomous merge. This seam's approval evidence is the review
+        # pipeline's own APPROVE verdict — handle_approved only runs after
+        # the orchestrator's reviewer approved (a formal GitHub self-review
+        # is impossible on own PRs, so the verdict IS the record).
+        policy_verdict = await enforce_merge_policy(
+            config=self._config,
+            prs=self._prs,
+            pr_number=pr.number,
+            actor="hydraflow:post_merge_handler",
+            approvals=[
+                MergeApproval(
+                    actor=f"hydraflow-reviewer:worker-{worker_id}",
+                    role=ROLE_ORCHESTRATOR_REVIEWER,
+                    source="review_phase_approved_verdict",
+                )
+            ],
+            lane="post_merge_handler",
+        )
+        if not policy_verdict.allowed:
+            logger.warning(
+                "PR #%d (issue #%d): merge blocked by policy — escalating: %s",
+                pr.number,
+                pr.issue_number,
+                policy_verdict.reason,
+            )
+            await publish_fn(pr, worker_id, "escalating")
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    data=SystemAlertPayload(
+                        message=(
+                            f"Merge policy denied autonomous merge of PR "
+                            f"#{pr.number}: {policy_verdict.reason}"
+                        ),
+                        source="merge_policy",
+                        issue=pr.issue_number,
+                    ),
+                )
+            )
+            await escalate_fn(
+                HitlEscalation(
+                    issue_number=pr.issue_number,
+                    pr_number=pr.number,
+                    cause=f"Blocked by merge policy: {policy_verdict.reason}",
+                    origin_label=self._config.review_label[0],
+                    comment=(
+                        "**Merge blocked by policy** — "
+                        f"{policy_verdict.reason}\n\n"
+                        "Approve the PR (or add a `policy-override:<reason-slug>` "
+                        "label for an audited break-glass merge) and re-queue. "
+                        "See docs/standards/factory_autonomy/policy.yaml."
+                    ),
+                    event_cause="merge_policy_denied",
+                    task=issue,
+                )
+            )
+            return
+
         # Normalize PR title to canonical "Fixes #N: title" before merge
         # so the merge commit and event history show a consistent format.
         try:
@@ -423,6 +487,9 @@ class PostMergeHandler:
             await self._prs.close_issue(pr.issue_number)
             await self._post_inference_totals_comment(pr, issue)
             await self._run_post_merge_hooks(pr, issue, result, diff, visual_decision)
+            # Clear convergence ledger AFTER hooks so retrospective and other
+            # hooks can read quality_fix_rounds before it is wiped (C1 fix).
+            self._state.clear_convergence_ledger(pr.issue_number)
         else:
             logger.warning("PR #%d merge failed — escalating to HITL", pr.number)
             await publish_fn(pr, worker_id, "escalating")
@@ -647,6 +714,7 @@ class PostMergeHandler:
                     issue_number=pr.issue_number,
                     pr_number=pr.number,
                     diff=diff,
+                    issue_labels=issue.tags,
                 ),
                 pr.issue_number,
             )

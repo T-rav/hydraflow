@@ -307,7 +307,7 @@ def run_phase_gates(
         "test_loop_wiring_completeness": "loop registry/service/UI/interval parity",
         "test_config_consistency": "config field/env-override/interval-bounds parity",
         "test_event_type_reducer_parity": "EventType↔JSX reducer parity",
-        "test_mock_spec_discipline": "AsyncMock spec= ratchet",
+        "test_disturbance_ratchet": "disturbance dampener ratchet (mock-spec + suppressions)",
         "test_audit_prompts": "prompt structure",
     }
     _ENFORCEMENT_KEYWORDS = {"wiring", "parity", "consistency", "discipline"}

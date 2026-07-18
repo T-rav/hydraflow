@@ -233,10 +233,10 @@ describe('Config warning banner', () => {
 })
 
 describe('Main tab bar', () => {
-  it('has exactly 5 main tabs including Atlas', async () => {
+  it('has exactly 7 main tabs including Atlas, Loop Fitness, and ADR Conformance', async () => {
     const { default: App } = await import('../../App')
     render(<App />)
-    const tabLabels = ['Work Stream', 'HITL', 'Outcomes', 'Atlas', 'System']
+    const tabLabels = ['Work Stream', 'HITL', 'Outcomes', 'Atlas', 'Loop Fitness', 'ADR Conformance', 'System']
     const tabContainer = screen.getByTestId('main-tabs')
     expect(tabContainer.childElementCount).toBe(tabLabels.length)
     for (const label of tabLabels) {

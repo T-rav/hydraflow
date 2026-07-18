@@ -440,6 +440,12 @@ class MockWorld:
             "plan": self._llm.script_plan,
             "implement": self._llm.script_implement,
             "review": self._llm.script_review,
+            # "decomposition" isn't a pipeline-phase runner: it queues the raw
+            # council transcripts the DecompositionCouncil seam returns (ADR-0105).
+            # Included here so a sandbox scenario's seed.scripts["decomposition"]
+            # loads in-process too — matching how sandbox_main dispatches
+            # seed.scripts generically via getattr(fake_llm, f"script_{phase}").
+            "decomposition": self._llm.script_decomposition,
         }
         # fix_ci uses a single-result scripting API (the latest call wins);
         # convert per-call here so scenarios can describe it uniformly.

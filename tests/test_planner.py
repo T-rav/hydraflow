@@ -13,6 +13,7 @@ import pytest
 
 from base_runner import BaseRunner
 from events import EventType
+from human_steering import fenced_steering_guidance
 from models import PlannerStatus
 from planner import PlannerRunner
 from tests.conftest import TaskFactory
@@ -235,6 +236,40 @@ async def test_build_prompt_includes_principles_checklist(config, event_bus, iss
 
 
 @pytest.mark.asyncio
+async def test_build_prompt_folds_fenced_human_steering_guidance(
+    config, event_bus, issue
+):
+    """ADR-0099 #4 — live operator guidance is folded in FENCED.
+
+    Plan has a single prompt-construction site (``_build_prompt_with_stats``,
+    unlike discover/shape's two builders). Guidance must reach the prompt
+    only via ``fenced_steering_guidance`` — never as raw comment text
+    (ADR-0092 fence invariant).
+    """
+    runner = _make_runner(config, event_bus)
+    task = issue.to_task()
+
+    guidance = "Prioritize the enterprise SSO angle over consumer features."
+    prompt, _ = await runner._build_prompt_with_stats(task, guidance=guidance)
+
+    assert "## Human Steering Guidance" in prompt
+    assert fenced_steering_guidance(guidance) in prompt
+
+
+@pytest.mark.asyncio
+async def test_build_prompt_empty_guidance_produces_no_steering_section(
+    config, event_bus, issue
+):
+    """No guidance posted -> no steering section (unchanged behavior)."""
+    runner = _make_runner(config, event_bus)
+    task = issue.to_task()
+
+    prompt, _ = await runner._build_prompt_with_stats(task, guidance="")
+
+    assert "## Human Steering Guidance" not in prompt
+
+
+@pytest.mark.asyncio
 async def test_step8_includes_killswitch_principle(config, event_bus, issue):
     """Planner step-8 principles must name the ADR-0049 kill-switch so plans
     that introduce new loops/runners carry the disable env + enabled_cb check
@@ -277,9 +312,11 @@ async def test_build_prompt_truncates_long_body(config, event_bus):
 
     assert "…(truncated)" in prompt
     # Well under original 20k body. Upper bound accommodates the ADR titles
-    # index (now ~3.2k chars for ~50 ADRs) and the ADR-0044 principles checklist
+    # index (now ~64 ADRs, up from ~50, since the adr_index parser fix makes
+    # every ADR title/status format visible instead of silently dropping
+    # em-dash-titled or H2-status ADRs) and the ADR-0044 principles checklist
     # (~900 chars) that the plan prompt now injects.
-    assert len(prompt) < 16_000
+    assert len(prompt) < 20_000
 
 
 @pytest.mark.asyncio

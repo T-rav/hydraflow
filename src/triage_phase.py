@@ -12,7 +12,9 @@ from adr_utils import (
     is_adr_issue_title,
 )
 from config import HydraFlowConfig
+from convergence_recording import record_stage_verdict
 from events import EventBus, EventType, HydraFlowEvent
+from issue_decomposer import IssueDecomposer
 from models import Task, TriageResult
 from phase_utils import (
     _sentry_transaction,
@@ -35,6 +37,20 @@ logger = logging.getLogger("hydraflow.triage_phase")
 
 _SENTRY_MARKER = "<!-- [sentry:"
 _AUDITOR_MARKER = "<!-- [hydraflow-auditor:"
+
+# Verdict map for ConvergenceLedger boundary recording (ADR-0096 / convergence gate).
+# "ADVANCE" = issue moves forward in the pipeline.
+# "LOOP_BACK" = issue is requeued or parked and must re-enter triage.
+# Outcomes not in this map (e.g. "unknown") are not recorded.
+_TRIAGE_VERDICT_MAP: dict[str, str] = {
+    "plan": "ADVANCE",
+    "sentry_noise_closed": "ADVANCE",
+    "already_addressed": "ADVANCE",
+    "epic_decomposed": "ADVANCE",
+    "bug_not_present": "ADVANCE",
+    "discover": "LOOP_BACK",
+    "parked": "LOOP_BACK",
+}
 
 
 def _is_sentry_issue(issue: Task) -> bool:
@@ -466,6 +482,15 @@ class TriagePhase:
                         issue.id,
                         evidence,
                     )
+                    _verdict = _TRIAGE_VERDICT_MAP.get(routing_outcome)
+                    if _verdict is not None:
+                        record_stage_verdict(
+                            self._state,
+                            issue_number=issue.id,
+                            stage="triage",
+                            decision=_verdict,
+                            signatures=[],
+                        )
                     return 1
                 if str(repro.outcome) == "unable":
                     logger.warning(
@@ -493,6 +518,16 @@ class TriagePhase:
             await self._transitioner.transition(issue.id, "plan")
             self._state.increment_session_counter("triaged")
 
+        _verdict = _TRIAGE_VERDICT_MAP.get(routing_outcome)
+        if _verdict is not None:
+            record_stage_verdict(
+                self._state,
+                issue_number=issue.id,
+                stage="triage",
+                decision=_verdict,
+                signatures=[],
+            )
+
         return 1
 
     async def _maybe_decompose(self, issue: Task, result: object) -> bool:
@@ -508,6 +543,27 @@ class TriagePhase:
             or result.complexity_score
             < self._config.epic_decompose_complexity_threshold
         ):
+            return False
+
+        # Intake-vector guard (ADR-0105 §4): an issue stamped
+        # auto-decomposed-child was itself created by a prior decomposition
+        # (depth-cap-bound via create_epic_from_result). If intake's own
+        # complexity-gated path were allowed to decompose it again, the
+        # split would bypass the depth counter entirely — an uncounted
+        # re-split. Chosen fix (simpler-correct option per the task brief):
+        # skip intake decomposition outright for a stamped auto-child rather
+        # than plumbing its ancestor depth through this path. Further
+        # splitting of an auto-child, if ever needed, only happens through
+        # the stall-path call to create_epic_from_result(depth=...), which
+        # the depth-cap already bounds.
+        auto_child_label = self._config.auto_decomposed_child_label[0]
+        if auto_child_label in issue.tags:
+            logger.info(
+                "Issue #%d carries %r — skipping intake auto-decomposition "
+                "to avoid an uncounted re-split of an already-decomposed child",
+                issue.id,
+                auto_child_label,
+            )
             return False
 
         logger.info(
@@ -526,61 +582,13 @@ class TriagePhase:
             )
             return False
 
-        epic_label = self._config.epic_label[0]
-        epic_child_label = self._config.epic_child_label[0]
-        find_label = self._config.find_label[0]
-
-        # Create the epic issue
-        epic_number = await self._prs.create_issue(
-            decomp.epic_title,
-            decomp.epic_body,
-            [epic_label],
+        decomposer = IssueDecomposer(
+            self._prs, self._epic_manager, self._state, self._config
         )
-        if epic_number <= 0:
-            logger.warning(
-                "Failed to create epic issue for decomposition of #%d",
-                issue.id,
-            )
-            return False
-
-        # Create child issues
-        child_numbers: list[int] = []
-        for child_spec in decomp.children:
-            child_body = child_spec.body + f"\n\nParent Epic #{epic_number}"
-            child_num = await self._prs.create_issue(
-                child_spec.title,
-                child_body,
-                [epic_child_label, find_label],
-            )
-            if child_num > 0:
-                child_numbers.append(child_num)
-                self._state.record_issue_created()
-
-        # Register with EpicManager
-        await self._epic_manager.register_epic(
-            epic_number,
-            decomp.epic_title,
-            child_numbers,
-            auto_decomposed=True,
+        epic_number = await decomposer.create_epic_from_result(
+            source_task=issue,
+            result=decomp,
+            depth=0,
+            stall_context=None,
         )
-
-        # Close the original issue with a link to the epic
-        await self._prs.post_comment(
-            issue.id,
-            f"## Auto-Decomposed into Epic\n\n"
-            f"This issue was automatically decomposed into epic #{epic_number} "
-            f"with {len(child_numbers)} child issue(s).\n\n"
-            f"**Reason:** {decomp.reasoning}\n\n"
-            f"---\n*Generated by HydraFlow Triage*",
-        )
-        await self._prs.close_issue(issue.id)
-        self._state.mark_issue(issue.id, "decomposed")
-
-        logger.info(
-            "Issue #%d decomposed into epic #%d with %d children: %s",
-            issue.id,
-            epic_number,
-            len(child_numbers),
-            child_numbers,
-        )
-        return True
+        return epic_number is not None

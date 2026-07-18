@@ -4,19 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import signal
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from activity_parser import ActivityParser, get_activity_parser
 from events import EventBus, EventType, HydraFlowEvent
 from execution import SubprocessRunner, get_default_runner
 from models import TranscriptEventData, TranscriptLinePayload
+from prompt_gate import PromptGateBlockedError, gate_prompt
+from prompt_telemetry import parse_command_tool_model
 from stream_parser import StreamParser
 from subprocess_util import (
     CreditExhaustedError,
@@ -444,10 +447,7 @@ def _record_inference(
     Never raises — a telemetry write failure must not crash the spawn that
     produced it (matches the central runners' best-effort recording).
     """
-    from prompt_telemetry import (  # noqa: PLC0415
-        PromptTelemetry,
-        parse_command_tool_model,
-    )
+    from prompt_telemetry import PromptTelemetry  # noqa: PLC0415
 
     try:
         tool, model = parse_command_tool_model(cmd)
@@ -483,6 +483,7 @@ async def stream_claude_with_telemetry(
     stream_config: StreamConfig = StreamConfig(),
     issue_number: int | None = None,
     pr_number: int | None = None,
+    issue_labels: Sequence[str] = (),
 ) -> str:
     """Stream an agent subprocess AND record prompt/inference telemetry.
 
@@ -496,7 +497,30 @@ async def stream_claude_with_telemetry(
     Direct ``stream_claude_process`` callers that are NOT one of the central
     runners (``BaseRunner``/``BaseSubprocessRunner``) MUST use this wrapper so
     no LLM inference is invisible to telemetry.
+
+    *issue_labels* feeds the CH-6 gate's upward-only ``data-class:`` label
+    elevation. Callers with an issue in scope MUST pass its labels
+    (``issue.labels`` / ``issue.tags``); without them only the repo-declared
+    class is enforced.
     """
+    # CH-6 data-governance gate (#9734): redact/block BEFORE spawn. A
+    # regulated-class block raises pre-spawn — nothing was sent, no telemetry
+    # row — and propagates to the caller's failure path (fail closed).
+    gate_tool, _gate_model = parse_command_tool_model(cmd)
+    gated = gate_prompt(
+        prompt,
+        config=config,
+        source=str(event_data.get("source", "unknown")),
+        tool=gate_tool,
+        issue_number=(
+            issue_number
+            if issue_number is not None
+            else _as_opt_int(event_data.get("issue"))
+        ),
+        issue_labels=issue_labels,
+    )
+    prompt = gated.prompt
+
     # Capture usage stats even when the caller passed no collector, so
     # token-accurate cost lands in telemetry when the stream reports it.
     stats = stream_config.usage_stats
@@ -544,6 +568,197 @@ async def stream_claude_with_telemetry(
         )
 
 
+# --- Pluggable one-shot LLM backends -----------------------------------------
+# These live in THIS module (the gate + telemetry seam) on purpose: the raw
+# spawns (CLI ``build_lightweight_command`` / OpenRouter ``httpx``) must sit
+# inside the seam so ``run_lightweight_agent`` always gates the prompt first and
+# records telemetry after. The agentic path (tools/multi-turn) stays on the
+# Claude harness — Anthropic doesn't support routing it to non-Claude models.
+
+_OPENROUTER = "openrouter"
+_ZAI = "zai"
+_KIMI = "kimi"
+
+
+@dataclass(frozen=True)
+class _OpenAICompatBackend:
+    """A named OpenAI-compatible endpoint. Records where its (non-secret,
+    UI-editable) base URL lives on the config, and which environment variables
+    hold its (secret, environment-only) API key. Adding a backend is one entry
+    in the registry below + a ``*_base_url`` field on the config + the provider
+    name in the ``*_provider`` Literals (config.py)."""
+
+    base_url_field: str
+    api_key_envs: tuple[str, ...]
+
+    def base_url(self, config: HydraFlowConfig) -> str:
+        return getattr(config, self.base_url_field)
+
+    def api_key(self) -> str:
+        """The key, read straight from the environment. It is a secret, so it
+        never lives on ``HydraFlowConfig`` (which can persist to config_file)
+        and never appears in the settings UI — it stays in ``.env`` only."""
+        for env in self.api_key_envs:
+            value = os.environ.get(env, "")
+            if value:
+                return value
+        return ""
+
+
+# OpenAI-compatible one-shot backends: a direct HTTP POST to a
+# ``{base_url}/chat/completions`` endpoint — no CLI, no tools, no agent loop.
+# Both OpenRouter and z.ai speak this shape, so a role's dial can point at
+# whichever the operator has credits for.
+_OPENAI_COMPAT_BACKENDS: dict[str, _OpenAICompatBackend] = {
+    _OPENROUTER: _OpenAICompatBackend(
+        base_url_field="openrouter_base_url",
+        api_key_envs=("OPENROUTER_API_KEY", "HYDRAFLOW_OPENROUTER_API_KEY"),
+    ),
+    _ZAI: _OpenAICompatBackend(
+        base_url_field="zai_base_url",
+        api_key_envs=("ZAI_API_KEY", "HYDRAFLOW_ZAI_API_KEY"),
+    ),
+    _KIMI: _OpenAICompatBackend(
+        base_url_field="kimi_base_url",
+        # MOONSHOT_API_KEY is Moonshot's own canonical env var; KIMI_API_KEY is a
+        # friendlier alias, and HYDRAFLOW_KIMI_API_KEY mirrors the sibling prefix.
+        api_key_envs=("MOONSHOT_API_KEY", "KIMI_API_KEY", "HYDRAFLOW_KIMI_API_KEY"),
+    ),
+}
+
+
+def provider_key_presence() -> dict[str, bool]:
+    """Which OpenAI-compatible providers have their (secret) API key set in the
+    environment — booleans ONLY, never the key value. Powers the settings UI's
+    'key detected' badge so an operator can verify a backend is wired without
+    opening ``.env`` or the secret ever leaving the process. Reuses each
+    backend's own ``api_key()`` resolution, so the badge can never disagree with
+    what a real spawn would actually find."""
+    return {
+        name: bool(backend.api_key())
+        for name, backend in _OPENAI_COMPAT_BACKENDS.items()
+    }
+
+
+def _telemetry_cmd(provider: str, tool: str, model: str) -> list[str]:
+    """The ``cmd``-shaped descriptor ``_record_inference`` parses into
+    ``(tool, model)``. For an OpenAI-compatible backend the 'tool' is the
+    provider name (``openrouter`` / ``zai``) so the cost dashboard attributes
+    each backend distinctly from the CLI tools."""
+    head = provider if provider in _OPENAI_COMPAT_BACKENDS else tool
+    return [head, "--model", model]
+
+
+async def _claude_cli_complete(
+    *,
+    runner: SubprocessRunner,
+    tool: str,
+    model: str,
+    prompt: str,
+    timeout: float,
+    gh_token: str,
+    isolate_user_settings: bool,
+) -> SimpleResult:
+    """The Claude CLI backend (today's behaviour). Credit-out surfaces as
+    ``rc != 0`` output text, so it is detected and raised here."""
+
+    from agent_cli import AgentTool, build_lightweight_command  # noqa: PLC0415
+
+    cmd, cmd_input = build_lightweight_command(
+        tool=cast(AgentTool, tool),
+        model=model,
+        prompt=prompt,
+        isolate_user_settings=isolate_user_settings,
+    )
+    env = make_clean_env(gh_token)
+    result = await runner.run_simple(cmd, env=env, input=cmd_input, timeout=timeout)
+    raise_if_credit_exhausted(result.stdout, result.stderr, tool)
+    return result
+
+
+async def _openai_compatible_complete(
+    *,
+    provider: str,
+    base_url: str,
+    api_key: str,
+    model: str,
+    prompt: str,
+    timeout: float,
+    response_schema: dict[str, object] | None = None,
+    usage_out: dict[str, object] | None = None,
+) -> SimpleResult:
+    """Direct OpenAI-compatible completion (OpenRouter, z.ai, …). One HTTP POST;
+    no tools, no agent loop. ``response_schema`` switches on native strict-JSON
+    output (more reliable than parsing JSON out of prose). HTTP 429/402 and
+    quota/credit error bodies raise :class:`CreditExhaustedError` so the
+    orchestrator's pause/refund fires. ``provider`` only labels errors."""
+
+    import httpx  # noqa: PLC0415
+
+    from execution import SimpleResult  # noqa: PLC0415
+    from subprocess_util import (  # noqa: PLC0415
+        CreditExhaustedError,
+        is_credit_exhaustion,
+    )
+
+    if not api_key:
+        return SimpleResult(stderr=f"{provider}: API key is not set", returncode=-1)
+
+    payload: dict[str, object] = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if response_schema is not None:
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "response",
+                "strict": True,
+                "schema": response_schema,
+            },
+        }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+    except httpx.TimeoutException as exc:
+        raise TimeoutError(str(exc)) from exc
+
+    if resp.status_code in (402, 429):
+        raise CreditExhaustedError(f"{provider} {resp.status_code}: {resp.text[:200]}")
+    if resp.status_code >= 400:
+        body = resp.text or ""
+        if is_credit_exhaustion(body):
+            raise CreditExhaustedError(f"{provider}: {body[:200]}")
+        return SimpleResult(
+            stderr=f"{provider} http {resp.status_code}: {body[:300]}",
+            returncode=resp.status_code,
+        )
+    try:
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"] or ""
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
+        return SimpleResult(
+            stderr=f"{provider}: malformed response ({exc})", returncode=-1
+        )
+    # Surface the API's real token usage so telemetry records actual cost
+    # (token_source="actual") instead of the CLI path's char estimate.
+    if usage_out is not None:
+        u = data.get("usage") or {}
+        usage_out["input_tokens"] = int(u.get("prompt_tokens", 0) or 0)
+        usage_out["output_tokens"] = int(u.get("completion_tokens", 0) or 0)
+        usage_out["total_tokens"] = int(u.get("total_tokens", 0) or 0)
+        usage_out["usage_available"] = bool(u.get("total_tokens"))
+    return SimpleResult(stdout=content, returncode=0)
+
+
 async def run_lightweight_agent(
     *,
     runner: SubprocessRunner,
@@ -558,8 +773,20 @@ async def run_lightweight_agent(
     pr_number: int | None = None,
     session_id: str | None = None,
     isolate_user_settings: bool = True,
+    issue_labels: Sequence[str] = (),
+    provider: str = "claude",
+    response_schema: dict[str, object] | None = None,
 ) -> SimpleResult:
-    """One-shot lightweight LLM CLI call with credit detection + telemetry.
+    """One-shot lightweight LLM call with credit detection + telemetry.
+
+    *provider* selects the backend: ``"claude"`` (the CLI harness, default) or a
+    direct OpenAI-compatible HTTP call — ``"openrouter"`` or ``"zai"`` — for the
+    one-shot, no-tools loops that don't need the harness. Point a role's dial at
+    whichever backend the operator has credits for. All return the same
+    ``SimpleResult`` and own their own credit-exhaustion detection, so the
+    credit + telemetry contract below holds regardless of backend.
+    *response_schema*, when given, drives native strict-JSON output on the
+    OpenAI-compatible path (the CLI path uses prompt-based JSON).
 
     Centralizes the credit + telemetry contract for the non-streaming
     ``run_simple`` spawn path so callers don't reinvent it:
@@ -586,30 +813,74 @@ async def run_lightweight_agent(
     ``project`` settings to keep a host user-level ``SessionStart`` hook from
     leaking skill-invocation guidance into the reply. Pass ``False`` for a
     lightweight spawn that legitimately needs host plugins/skills.
+
+    *issue_labels* feeds the CH-6 gate's upward-only ``data-class:`` label
+    elevation, mirroring :func:`stream_claude_with_telemetry`. Callers with
+    an issue in scope MUST pass its labels (``issue.labels`` /
+    ``issue.tags``); without them only the repo-declared class is enforced
+    (``tests/test_prompt_gate_completeness.py`` pins every call site).
     """
-    from agent_cli import build_lightweight_command  # noqa: PLC0415
     from exception_classify import (  # noqa: PLC0415
         exc_detail,
         reraise_on_credit_or_bug,
     )
     from execution import SimpleResult  # noqa: PLC0415
 
-    cmd, cmd_input = build_lightweight_command(
-        tool=tool,
-        model=model,
-        prompt=prompt,
-        isolate_user_settings=isolate_user_settings,
-    )
-    env = make_clean_env(gh_token)
+    # CH-6 data-governance gate (#9734): redact/block BEFORE spawn. A block
+    # collapses to this seam's soft-failure contract (rc=-1) — the prompt was
+    # never sent (fail closed), the gate already wrote the audit record, and
+    # no telemetry row is recorded because no inference happened.
+    try:
+        gated = gate_prompt(
+            prompt,
+            config=config,
+            source=source,
+            tool=tool,
+            issue_number=issue_number,
+            issue_labels=issue_labels,
+        )
+    except PromptGateBlockedError as exc:
+        return SimpleResult(stderr=str(exc), returncode=-1)
+    prompt = gated.prompt
+
+    # Backend selection (pluggable one-shot provider). The chosen backend owns
+    # its own credit-exhaustion detection (CLI: output text; OpenRouter: HTTP
+    # 429/402). Both spawns live in THIS seam module so the CH-6 gate (above)
+    # and the telemetry record (below) always wrap them. ``cmd`` is only a
+    # telemetry descriptor parsed into (tool, model).
+    cmd = _telemetry_cmd(provider, tool, model)
     start = time.monotonic()
     success = False
     record_row = False
     result = SimpleResult(returncode=-1)
+    # Real token usage from the OpenRouter API (None on the CLI path, which has
+    # no usage stats and falls back to a char estimate).
+    usage_stats: dict[str, object] | None = None
+    backend = _OPENAI_COMPAT_BACKENDS.get(provider)
     try:
         try:
-            result = await runner.run_simple(
-                cmd, env=env, input=cmd_input, timeout=timeout
-            )
+            if backend is not None:
+                usage_stats = {}
+                result = await _openai_compatible_complete(
+                    provider=provider,
+                    base_url=backend.base_url(config),
+                    api_key=backend.api_key(),
+                    model=model,
+                    prompt=prompt,
+                    timeout=timeout,
+                    response_schema=response_schema,
+                    usage_out=usage_stats,
+                )
+            else:
+                result = await _claude_cli_complete(
+                    runner=runner,
+                    tool=tool,
+                    model=model,
+                    prompt=prompt,
+                    timeout=timeout,
+                    gh_token=gh_token,
+                    isolate_user_settings=isolate_user_settings,
+                )
         except TimeoutError:
             # ``asyncio.wait_for`` raises a *bare* TimeoutError whose ``str()``
             # is "", which would collapse to an undiagnosable "rc=-1: " at the
@@ -634,8 +905,6 @@ async def run_lightweight_agent(
             result = SimpleResult(stderr=exc_detail(exc), returncode=-1)
             record_row = True
             return result
-        # Credit-out via output text propagates without recording, same as above.
-        raise_if_credit_exhausted(result.stdout, result.stderr, tool)
         success = result.returncode == 0
         record_row = True
         return result
@@ -652,5 +921,5 @@ async def run_lightweight_agent(
                 issue_number=issue_number,
                 pr_number=pr_number,
                 session_id=session_id,
-                stats=None,
+                stats=usage_stats,
             )

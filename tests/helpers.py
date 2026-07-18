@@ -239,6 +239,7 @@ class ConfigFactory:
         dup_label: list[str] | None = None,
         epic_label: list[str] | None = None,
         epic_child_label: list[str] | None = None,
+        auto_decomposed_child_label: list[str] | None = None,
         verify_label: list[str] | None = None,
         find_label: list[str] | None = None,
         planner_label: list[str] | None = None,
@@ -349,6 +350,14 @@ class ConfigFactory:
         artifact_retention_days: int = 30,
         artifact_max_size_mb: int = 500,
         runs_gc_interval: int = 3600,
+        audit_retention_days_preflight: int | None = None,
+        audit_retention_days_health_decisions: int | None = None,
+        audit_retention_days_inference_telemetry: int | None = None,
+        audit_retention_days_approval_records: int | None = None,
+        audit_retention_days_evidence_packs: int | None = None,
+        approval_records_enabled: bool = True,
+        evidence_pack_enabled: bool = True,
+        merge_policy_enabled: bool = True,
         release_version_source: Literal[
             "epic_title", "milestone", "manual"
         ] = "epic_title",
@@ -395,6 +404,14 @@ class ConfigFactory:
         # actually run must pass `sandbox_failure_fixer_enabled=True` to
         # `_make_loop`/`make_bg_loop_deps`.
         sandbox_failure_fixer_enabled: bool = False,
+        disturbance_dampener_interval_seconds: int = 3600,
+        # Mirrors config.py's dark-by-default static config. Scenarios that
+        # exercise the burn-down path must pass
+        # `disturbance_dampener_enabled=True` explicitly.
+        disturbance_dampener_enabled: bool = False,
+        disturbance_dampener_max_prs_per_tick: int = 1,
+        detector_calibration_interval: int = 3600,
+        detector_calibration_enabled: bool = True,
         auto_agent_preflight_interval: int = 120,
         auto_agent_daily_budget_usd: float | None = None,
         auto_agent_cost_cap_usd: float | None = None,
@@ -407,6 +424,13 @@ class ConfigFactory:
         ),
         auto_agent_preflight_enabled: bool = True,
         implement_two_stage_review_enabled: bool = True,
+        fitness_scorecard_interval: int = 86400,
+        fitness_window_days: int = 30,
+        fitness_min_samples: int = 20,
+        # Off by default in tests: the injection honeypot spawns a lightweight
+        # agent before triage's LLM eval, which most triage tests neither mock
+        # nor want. Its own tests opt in. Production default is True.
+        triage_honeypot_enabled: bool = False,
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -419,6 +443,7 @@ class ConfigFactory:
                 )
             return HydraFlowConfig(
                 config_file=config_file,
+                triage_honeypot_enabled=triage_honeypot_enabled,
                 ready_label=ready_label if ready_label is not None else ["test-label"],
                 batch_size=batch_size,
                 max_workers=max_workers,
@@ -459,6 +484,11 @@ class ConfigFactory:
                     epic_child_label
                     if epic_child_label is not None
                     else ["hydraflow-epic-child"]
+                ),
+                auto_decomposed_child_label=(
+                    auto_decomposed_child_label
+                    if auto_decomposed_child_label is not None
+                    else ["auto-decomposed-child"]
                 ),
                 verify_label=(
                     verify_label if verify_label is not None else ["hydraflow-verify"]
@@ -576,6 +606,22 @@ class ConfigFactory:
                 artifact_retention_days=artifact_retention_days,
                 artifact_max_size_mb=artifact_max_size_mb,
                 runs_gc_interval=runs_gc_interval,
+                audit_retention_days_preflight=audit_retention_days_preflight,
+                audit_retention_days_health_decisions=(
+                    audit_retention_days_health_decisions
+                ),
+                audit_retention_days_inference_telemetry=(
+                    audit_retention_days_inference_telemetry
+                ),
+                audit_retention_days_approval_records=(
+                    audit_retention_days_approval_records
+                ),
+                audit_retention_days_evidence_packs=(
+                    audit_retention_days_evidence_packs
+                ),
+                approval_records_enabled=approval_records_enabled,
+                evidence_pack_enabled=evidence_pack_enabled,
+                merge_policy_enabled=merge_policy_enabled,
                 release_version_source=release_version_source,
                 release_tag_prefix=release_tag_prefix,
                 baseline_snapshot_patterns=baseline_snapshot_patterns
@@ -636,6 +682,11 @@ class ConfigFactory:
                 security_patch_severity_threshold=security_patch_severity_threshold,
                 sandbox_failure_fixer_interval=sandbox_failure_fixer_interval,
                 sandbox_failure_fixer_enabled=sandbox_failure_fixer_enabled,
+                disturbance_dampener_interval_seconds=disturbance_dampener_interval_seconds,
+                disturbance_dampener_enabled=disturbance_dampener_enabled,
+                disturbance_dampener_max_prs_per_tick=disturbance_dampener_max_prs_per_tick,
+                detector_calibration_interval=detector_calibration_interval,
+                detector_calibration_enabled=detector_calibration_enabled,
                 auto_agent_preflight_interval=auto_agent_preflight_interval,
                 auto_agent_daily_budget_usd=auto_agent_daily_budget_usd,
                 auto_agent_cost_cap_usd=auto_agent_cost_cap_usd,
@@ -647,7 +698,56 @@ class ConfigFactory:
                 auto_agent_persona=auto_agent_persona,
                 auto_agent_preflight_enabled=auto_agent_preflight_enabled,
                 implement_two_stage_review_enabled=implement_two_stage_review_enabled,
+                fitness_scorecard_interval=fitness_scorecard_interval,
+                fitness_window_days=fitness_window_days,
+                fitness_min_samples=fitness_min_samples,
             )
+
+
+#: A tightened CH-3 merge policy for deny-path seam tests: an extra ask
+#: entry matching every path requires TWO operator approvals, which no
+#: autonomous lane's standing evidence can satisfy.
+STRICT_MERGE_POLICY = """\
+schema_version: 1
+merge_gate:
+  unapproved_merge_class: high-blast-radius
+  break_glass_label_prefix: "policy-override:"
+  escalation: hitl
+classes:
+  - id: tractable-reversible
+    readme_row: "Tractable + reversible"
+    autonomy: act
+    default: true
+  - id: high-blast-radius
+    readme_row: "High blast radius"
+    autonomy: ask
+    actions: [merge-unapproved-pr]
+    required_approvals:
+      count: 1
+      roles: [operator, orchestrator-reviewer]
+    escalation: hitl
+  - id: operator-strict
+    readme_row: "Operator strict"
+    autonomy: ask
+    paths: ["**"]
+    required_approvals:
+      count: 2
+      roles: [operator]
+    escalation: hitl
+"""
+
+
+def install_repo_merge_policy(config: Any, text: str = STRICT_MERGE_POLICY) -> Path:
+    """Write *text* as the repo-local factory-autonomy policy for *config*.
+
+    ``HydraFlowConfig.merge_policy_path`` prefers the managed repo's own
+    ``docs/standards/factory_autonomy/policy.yaml`` over the packaged one,
+    so this is how seam tests tighten (or corrupt) the merge policy.
+    """
+    path = config.repo_root / "docs" / "standards" / "factory_autonomy" / "policy.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
 
 
 class CredentialsFactory:
@@ -1719,6 +1819,13 @@ def make_review_phase(
 
     _no_fix = _RR(pr_number=0, issue_number=0, fixes_made=False)
     phase._reviewers.fix_review_findings = AsyncMock(return_value=_no_fix)
+
+    # The convergence gate runs on every APPROVE; the deterministic check
+    # blocks on truthy code-scanning alert objects from an unset AsyncMock.
+    # Explicitly return None (no alerts) so the gate's approve-det is GREEN.
+    # This applies regardless of default_mocks — every test that reaches
+    # an APPROVE verdict needs the gate's det check to pass.
+    phase._prs.fetch_code_scanning_alerts = AsyncMock(return_value=None)
 
     if default_mocks:
         from tests.conftest import ReviewResultFactory

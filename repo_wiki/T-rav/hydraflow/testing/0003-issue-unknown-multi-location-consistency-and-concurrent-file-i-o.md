@@ -4,7 +4,9 @@ topic: testing
 source_issue: unknown
 source_phase: synthesis
 created_at: 2026-04-18T14:53:08.908953+00:00
-status: active
+status: superseded
+superseded_by: 0007
+superseded_by: 0183
 ---
 
 # Multi-Location Consistency and Concurrent File I/O Testing

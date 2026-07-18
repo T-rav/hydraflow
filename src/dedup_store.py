@@ -37,6 +37,19 @@ class DedupStore:
                 "Could not write dedup set %s", self._set_name, exc_info=True
             )
 
+    def discard(self, value: str) -> None:
+        """Remove *value* if present; silent no-op (no write) when absent."""
+        current = self.get()
+        if value not in current:
+            return
+        current.discard(value)
+        try:
+            atomic_write(self._file_path, json.dumps(sorted(current)))
+        except OSError:
+            logger.warning(
+                "Could not write dedup set %s", self._set_name, exc_info=True
+            )
+
     def set_all(self, values: set[str]) -> None:
         try:
             atomic_write(self._file_path, json.dumps(sorted(values)))

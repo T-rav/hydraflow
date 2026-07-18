@@ -1,8 +1,13 @@
 # ADR-0021: Persistence Architecture and Data Layout
 
 **Status:** Accepted
-**Enforced by:** tests/test_state_persistence.py, tests/test_event_persistence.py, tests/test_data_migration_d2.py
 **Date:** 2026-02-28
+**Enforcement:** enforced
+
+**Enforced by:**
+pytest:tests/test_state_persistence.py
+pytest:tests/test_event_persistence.py
+pytest:tests/test_data_migration_d2.py
 
 ## Context
 

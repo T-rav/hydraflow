@@ -16,10 +16,12 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from opentelemetry import metrics
 from pydantic import BaseModel, Field
+
+from human_steering import fenced_steering_guidance
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +120,12 @@ class PreFlightInput(BaseModel):
     # Production callers can leave this unset; the field only changes prompt
     # text when populated.
     issue_number: int | None = None
+    # Human-on-the-loop continuous steering (ADR-0099 #4): live operator
+    # guidance for this issue, sourced by :class:`ReviewPhase` from
+    # ``StateTracker.get_human_steering``. Folded into the prompt fenced
+    # via :func:`fenced_steering_guidance`. Empty when the feature is off
+    # or no guidance was posted — the fold is then a no-op.
+    human_guidance: str = ""
 
 
 class Disagreement(BaseModel):
@@ -146,12 +154,28 @@ class PostVerifyInput(BaseModel):
     # Production callers can leave this unset; the field only changes prompt
     # text when populated.
     issue_number: int | None = None
+    lens: Literal["correctness", "security", "spec"] | None = None
+    # Human-on-the-loop continuous steering (ADR-0099 #4): live operator
+    # guidance for this issue, sourced by :class:`ReviewPhase` from
+    # ``StateTracker.get_human_steering``. Folded into the prompt fenced
+    # via :func:`fenced_steering_guidance`. Empty when the feature is off
+    # or no guidance was posted — the fold is then a no-op.
+    human_guidance: str = ""
 
 
 # Signals shorter than this are too generic to validate against — short
 # words like "test gaps" false-positive against any disagreement that
 # contains those words coincidentally (T24.5 closed I5).
 _MIN_SIGNAL_MATCH_LEN = 10
+
+# Per-lens focus preambles prepended to the PostVerifyAdvisor prompt when a
+# lens is set. Promoted to module-level so tests can import the mapping and
+# verify prompt content without instantiating the full advisor.
+_POST_VERIFY_LENS_GUIDANCE: dict[str, str] = {
+    "correctness": "Focus this review pass on CORRECTNESS: logic errors, broken edge cases, race conditions, wrong behavior.",
+    "security": "Focus this review pass on SECURITY and RISK: injection, authz/authn, secrets, unsafe deserialization, blast radius.",
+    "spec": "Focus this review pass on SPEC ADHERENCE: does the diff do what the issue/spec requires, nothing more, nothing less.",
+}
 
 
 def _validate_disagreements_against_plan(
@@ -391,29 +415,6 @@ def min_review_passes_for_blast_radius(
     return BLAST_RADIUS_RETRIES[blast_radius]
 
 
-def post_verify_retry_budget(
-    blast_radius: Literal["low", "medium", "high"],
-    post_verify_authority: Literal["advisory", "veto"],
-) -> int:
-    """Return the PostVerifyAdvisor veto-retry budget for a diff (refinement R-2).
-
-    For veto-authority surfaces the budget is stratified by blast radius
-    (``BLAST_RADIUS_RETRIES``) so high-blast changes earn more automated fix
-    attempts before escalating to a human and trivial ones escalate sooner.
-
-    Advisory surfaces (``post_verify_authority == "advisory"``) are HARD-CAPPED
-    to 0: they never retry and never block a merge, preserving the zero-budget
-    contract. The cap derives from the authority — the single source of truth
-    for advisory-vs-veto — rather than a separate retry-count field. It is
-    defensive for the retry loop, which only the veto-authority PR-review
-    surfaces (pr_review, pre_merge_spec_check) reach; the advisory wiki_ingest
-    surface and the one-shot visual_gate/adr_review surfaces never enter it.
-    """
-    if post_verify_authority == "advisory":
-        return 0
-    return BLAST_RADIUS_RETRIES[blast_radius]
-
-
 def diff_stats_from_text(diff: str) -> DiffStats:
     """Compute a coarse :class:`DiffStats` from a raw unified-diff string.
 
@@ -555,7 +556,14 @@ class _AdvisorSubagentRunner(Protocol):
         model: str,
         subagent_type: str,
         prompt: str,
-        role: Literal["pre_flight", "mid_flight", "post_verify"],
+        role: Literal[
+            "pre_flight",
+            "mid_flight",
+            "post_verify",
+            "post_verify:correctness",
+            "post_verify:security",
+            "post_verify:spec",
+        ],
     ) -> str: ...  # pragma: no cover - protocol
 
 
@@ -594,12 +602,23 @@ class PostVerifyAdvisor:
     async def run(self, inp: PostVerifyInput) -> PostVerifyResult:
         prompt = self._build_prompt(inp)
         start = time.monotonic()
+        _role = cast(
+            Literal[
+                "pre_flight",
+                "mid_flight",
+                "post_verify",
+                "post_verify:correctness",
+                "post_verify:security",
+                "post_verify:spec",
+            ],
+            f"post_verify:{inp.lens}" if inp.lens else "post_verify",
+        )
         try:
             payload = await self._runner.run(
                 model=self._cfg.advisor_model,
                 subagent_type="hydraflow-review-advisor",
                 prompt=prompt,
-                role="post_verify",
+                role=_role,
             )
         except Exception as exc:
             # Authentication, credit, and likely-bug errors must propagate
@@ -825,7 +844,10 @@ class PostVerifyAdvisor:
             '"severity":"blocking"|"concern"}],'
             '"suggested_fix_direction":str|null}'
         )
-        return "\n".join(sections)
+        prompt = "\n".join(sections)
+        if inp.lens:
+            prompt = f"{_POST_VERIFY_LENS_GUIDANCE[inp.lens]}\n\n{prompt}"
+        return prompt + fenced_steering_guidance(inp.human_guidance)
 
 
 class PreFlightAdvisor:
@@ -974,7 +996,8 @@ class PreFlightAdvisor:
             "\nFocus on: what could go wrong with this diff, what the reviewer "
             "should look for, and any signals that suggest mid-flight consult."
         )
-        return "\n".join(sections)
+        prompt = "\n".join(sections)
+        return prompt + fenced_steering_guidance(inp.human_guidance)
 
 
 class MidFlightAdvisor:

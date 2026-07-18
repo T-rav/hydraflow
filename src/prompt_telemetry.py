@@ -7,8 +7,9 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from audit_chain import AuditChain
 from config import HydraFlowConfig
-from file_util import append_jsonl, atomic_write, file_lock
+from file_util import atomic_write, file_lock
 from model_pricing import ModelPricingTable, load_pricing
 
 logger = logging.getLogger("hydraflow.prompt_telemetry")
@@ -55,6 +56,8 @@ class PromptTelemetry:
         self._dir = self._inferences_file.parent
         self._lock_file = self._dir / ".lock"
         self._pricing = pricing or load_pricing()
+        # Hash-chained append path for inferences.jsonl (CH-1, #9729).
+        self._chain = AuditChain(self._inferences_file)
 
     def record(
         self,
@@ -244,9 +247,13 @@ class PromptTelemetry:
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
             with file_lock(self._lock_file):
-                append_jsonl(self._inferences_file, json.dumps(record, sort_keys=True))
+                self._chain.append(record)
                 self._update_pr_stats(record)
-        except OSError:
+        except (OSError, ValueError):
+            # ValueError covers AuditChain serialization failures (incl.
+            # json.JSONDecodeError from scrub paths). record() runs unguarded
+            # in BaseRunner._execute's ``finally`` — telemetry must never
+            # convert a successful agent run into a hard failure.
             logger.warning(
                 "Could not write prompt telemetry to %s",
                 self._inferences_file,
