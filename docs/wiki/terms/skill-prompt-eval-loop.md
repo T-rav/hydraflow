@@ -5,15 +5,13 @@ kind: "loop"
 bounded_context: "caretaker"
 code_anchor: "src/skill_prompt_eval_loop.py:SkillPromptEvalLoop"
 aliases: ["skill prompt eval loop", "skill prompt drift detector", "corpus health auditor"]
-related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488H"}]
 evidence: ["01KQP0V9KK99G77287P414NFRC"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T20:00:00.000000+00:00"
-updated_at: "2026-06-20T07:13:05.016210+00:00"
-updated_at: "2026-06-14T09:02:32.894574+00:00"
-updated_at: "2026-06-20T02:19:44.961938+00:00"
+updated_at: "2026-07-18T12:01:19.511226+00:00"
 ---
 
 ## Definition
