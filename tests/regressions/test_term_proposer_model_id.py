@@ -3,7 +3,9 @@
 ClaudeCLIClient hardcoded the stale model ID, causing every tick of
 TermProposerLoop to fail with a CLI error (issue #9223, tick_error_ratio=1.0).
 
-The default must always match the current active Sonnet model in the fleet.
+PR #9785 moved the default off a pinned version literal onto the "sonnet"
+tier alias, which the CLI resolves to the current active Sonnet model —
+so the default no longer goes stale when a model is retired.
 """
 
 from __future__ import annotations
@@ -16,7 +18,8 @@ def test_claude_cli_client_default_model_is_current() -> None:
 
     sig = inspect.signature(ClaudeCLIClient.__init__)
     default_model = sig.parameters["model"].default
-    assert default_model == "claude-sonnet-4-6", (
+    assert default_model == "sonnet", (
         f"ClaudeCLIClient default model is {default_model!r}; "
-        "update to the current active Sonnet model when models are retired"
+        "expected the 'sonnet' tier alias so it never goes stale when a "
+        "pinned version is retired"
     )
