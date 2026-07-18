@@ -2510,6 +2510,51 @@ class PRManager:
             return False, f"Failed checks: {', '.join(str(n) for n in failed)}"
         return True, f"All {len(checks)} checks passed"
 
+    async def _advisory_failures_only(self, pr_number: int) -> bool:
+        """Return True if only advisory (non-required) checks are non-passing.
+
+        ``_evaluate_ci_checks`` counts *every* non-passing check as a failure,
+        but a check that is not in the base branch's required-status-check set
+        must not block the merge — GitHub already allows it. Rather than parse
+        the base branch's ruleset (``main`` uses a ruleset, not classic branch
+        protection), we consult GitHub's own verdict: when all *required*
+        checks pass and only advisory checks fail, GitHub reports
+        ``mergeable=MERGEABLE`` with ``mergeStateStatus=UNSTABLE``. Any other
+        state — or an unreadable response — returns False (fail-closed) so a
+        real required-check failure never merges by accident. See #9910.
+        """
+        if self._config.dry_run:
+            return False
+        try:
+            raw = await self._run_gh(
+                "gh",
+                "pr",
+                "view",
+                str(pr_number),
+                "--repo",
+                self._repo,
+                "--json",
+                "mergeable,mergeStateStatus",
+            )
+        except Exception:  # noqa: BLE001 — fail-closed: any probe error keeps the failure verdict
+            logger.debug(
+                "Could not fetch merge-state for PR #%d (advisory-check gate)",
+                pr_number,
+                exc_info=True,
+            )
+            return False
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return False
+        mergeable = str(data.get("mergeable", "")).upper()
+        merge_state = str(data.get("mergeStateStatus", "")).upper()
+        return mergeable == "MERGEABLE" and merge_state in {
+            "CLEAN",
+            "UNSTABLE",
+            "HAS_HOOKS",
+        }
+
     async def wait_for_ci(
         self,
         pr_number: int,
@@ -2578,6 +2623,24 @@ class PRManager:
                     continue
 
             passed, msg = verdict
+            if not passed and await self._advisory_failures_only(pr_number):
+                advisory = [
+                    c["name"]
+                    for c in checks
+                    if c.get("state", "").upper() not in self._PASSING_STATES
+                ]
+                logger.info(
+                    "PR #%d: all required checks satisfied; %d advisory "
+                    "check(s) failing but non-blocking "
+                    "(mergeStateStatus=UNSTABLE): %s",
+                    pr_number,
+                    len(advisory),
+                    ", ".join(advisory),
+                )
+                passed, msg = (
+                    True,
+                    f"Required checks passed; advisory failing: {', '.join(advisory)}",
+                )
             data: CICheckPayload = CICheckPayload(
                 pr=pr_number,
                 status="passed" if passed else "failed",
