@@ -734,6 +734,14 @@ class MockWorld:
             sleep_fn=_counting_sleep,
         )
         config = bg.config
+        # The caller explicitly asked to run these loops, so enable any
+        # deploy-time kill-switch they gate on (e.g. diagnostic_loop_enabled
+        # defaults OFF, #9895). Otherwise _do_work short-circuits to
+        # config_disabled and the scenario can't exercise the loop.
+        for _name in loops:
+            _flag = f"{_name}_loop_enabled"
+            if hasattr(config, _flag):
+                object.__setattr__(config, _flag, True)
 
         # Persistent ports dict so catalog-allocated mocks survive across calls
         if not hasattr(self, "_loop_ports"):
