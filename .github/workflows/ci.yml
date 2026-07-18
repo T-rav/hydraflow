@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       python: ${{ steps.filter.outputs.python }}
-      core_python: ${{ steps.filter.outputs.core_python }}
+      core_python: ${{ steps.core_filter.outputs.core_python }}
       arch: ${{ steps.filter.outputs.arch }}
       scenario_tests: ${{ steps.filter.outputs.scenario_tests }}
       regression_tests: ${{ steps.filter.outputs.regression_tests }}
@@ -39,16 +39,6 @@ jobs:
             python:
               - 'src/**/*.py'
               - 'tests/**'
-              - 'pyproject.toml'
-              - 'uv.lock'
-            core_python:
-              - 'src/**/*.py'
-              - '!src/arch/**'
-              - 'tests/**'
-              - '!tests/architecture/**'
-              - '!tests/regressions/**'
-              - '!tests/scenarios/**'
-              - '!tests/sandbox_scenarios/**'
               - 'pyproject.toml'
               - 'uv.lock'
             arch:
@@ -92,6 +82,37 @@ jobs:
               - 'src/route_types.py'
               - 'tests/scenarios/browser/**'
               - 'tests/scenarios/fakes/mock_world.py'
+      # core_python lives in its OWN paths-filter step because it is the only
+      # filter with `!` negations, and negation semantics depend on the
+      # quantifier. Under the default `some`, each `!glob` independently
+      # matches every file NOT under glob — so `!src/arch/**` matched any
+      # docs file and core_python fired on EVERY PR (Tests/Smoke/Scenario ran
+      # on docs-only bot PRs; #9908). Under `every`, a file counts only if it
+      # matches ALL patterns: inside the brace-glob include AND outside each
+      # negated dir — the subtraction the filter always intended. The include
+      # must stay a single brace-glob: with `every`, separate include lines
+      # would demand a file match all of them at once (impossible).
+      - uses: dorny/paths-filter@v3
+        id: core_filter
+        with:
+          predicate-quantifier: 'every'
+          filters: |
+            core_python:
+              - '{src/**/*.py,tests/**,pyproject.toml,uv.lock}'
+              - '!src/arch/**'
+              - '!tests/architecture/**'
+              - '!tests/regressions/**'
+              - '!tests/scenarios/**'
+              - '!tests/sandbox_scenarios/**'
+      # Subset invariant: core_python ⊆ python by construction, so
+      # core_python=true with python=false can only mean filter semantics
+      # regressed (#9908's smoking gun). Fail loudly instead of silently
+      # running (or skipping) the wrong jobs.
+      - name: Filter subset invariant (core_python implies python)
+        if: steps.core_filter.outputs.core_python == 'true' && steps.filter.outputs.python != 'true'
+        run: |
+          echo "::error::core_python=true while python=false — paths-filter negation semantics regressed (see #9908)"
+          exit 1
 
   # Universal backstop (#9482): reject leftover git conflict markers on EVERY
   # PR/push, ungated by `changes` — a docs-only commit (e.g. a bot wiki write)
