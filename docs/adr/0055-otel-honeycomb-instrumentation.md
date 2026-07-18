@@ -89,21 +89,21 @@ Sentry stays as-is during Phase A. The decision to retire / consolidate / unify 
 
 The following files carry this ADR's decisions and must be kept in sync with any supersession:
 
-- `src/telemetry/__init__.py` — package marker; re-exports `init_otel`, `shutdown_otel`, `slug_for`.
-- `src/telemetry/otel.py` — `init_otel(config)` feature-gated SDK bootstrap, `shutdown_otel()` flush, OTLP/HTTP exporter to Honeycomb, auto-instrumentation registration (FastAPI, httpx, asyncio, logging).
-- `src/telemetry/spans.py` — `runner_span`, `loop_span`, `port_span` decorators; `add_hf_context()` helper (single source of truth for `hf.*` attributes); `validate_attr()` cardinality guard; `_safe_*` exception-isolating helpers; `_get_tracer()` lru_cache for Tracer-per-scope.
-- `src/telemetry/slugs.py` — `EXCEPTION_SLUGS` mapping + `slug_for(exc)` lookup; unknown → `err-unclassified`.
-- `src/telemetry/subprocess_bridge.py` — `bridge_event_to_span()` adapts `trace_collector` parsed events to OTel span events.
-- `src/config.py` — `otel_enabled`, `otel_endpoint`, `otel_service_name`, `otel_environment` fields + env overrides (`HYDRAFLOW_OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `HF_ENV`).
-- `src/server.py` — `init_otel(config)` call after `_init_sentry()` in `main()`.
-- `src/base_runner.py` — `BaseRunner._execute` decorated with `@runner_span()`; `phase` property bridges `_phase_name` ClassVar.
-- `src/base_background_loop.py` — `BaseBackgroundLoop._execute_cycle` decorated with `@loop_span()`; `name` property bridges `_worker_name`.
-- `src/pr_manager.py` — `PRManager.create_pr/merge_pr/create_issue/push_branch` decorated with `@port_span(...)`.
-- `src/workspace.py` — `WorkspaceManager.create/merge_main` decorated with `@port_span(...)`.
-- `src/exception_classify.py` — `reraise_on_credit_or_bug()` tags active span with `error=true` + `exception.slug` before re-raise (best-effort; never alters classify behavior).
-- `src/events.py` — `EventBus.publish` calls `span.add_event("hf.event", ...)` on active span (best-effort).
-- `src/trace_collector.py` — `_record_inner` calls `bridge_event_to_span` on every parsed subprocess event (lazy imports to avoid circular dependency).
-- `src/mockworld/fakes/fake_honeycomb.py` — `FakeHoneycomb` test fake wrapping `InMemorySpanExporter`; mirrors the `FakeSentry`/`FakeGitHub` convention.
+- `src/telemetry/__init__.py:init_otel` — package marker; re-exports `init_otel`, `shutdown_otel`, `slug_for`.
+- `src/telemetry/otel.py:init_otel` — `init_otel(config)` feature-gated SDK bootstrap, `shutdown_otel()` flush, OTLP/HTTP exporter to Honeycomb, auto-instrumentation registration (FastAPI, httpx, asyncio, logging).
+- `src/telemetry/spans.py:runner_span` — `runner_span`, `loop_span`, `port_span` decorators; `add_hf_context()` helper (single source of truth for `hf.*` attributes); `validate_attr()` cardinality guard; `_safe_*` exception-isolating helpers; `_get_tracer()` lru_cache for Tracer-per-scope.
+- `src/telemetry/slugs.py:slug_for` — `EXCEPTION_SLUGS` mapping + `slug_for(exc)` lookup; unknown → `err-unclassified`.
+- `src/telemetry/subprocess_bridge.py:bridge_event_to_span` — `bridge_event_to_span()` adapts `trace_collector` parsed events to OTel span events.
+- `src/config.py:HydraFlowConfig` — `otel_enabled`, `otel_endpoint`, `otel_service_name`, `otel_environment` fields + env overrides (`HYDRAFLOW_OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `HF_ENV`).
+- `src/server.py:main` — `init_otel(config)` call after `_init_sentry()` in `main()`.
+- `src/base_runner.py:BaseRunner` — `BaseRunner._execute` decorated with `@runner_span()`; `phase` property bridges `_phase_name` ClassVar.
+- `src/base_background_loop.py:BaseBackgroundLoop` — `BaseBackgroundLoop._execute_cycle` decorated with `@loop_span()`; `name` property bridges `_worker_name`.
+- `src/pr_manager.py:PRManager` — `PRManager.create_pr/merge_pr/create_issue/push_branch` decorated with `@port_span(...)`.
+- `src/workspace.py:WorkspaceManager` — `WorkspaceManager.create/merge_main` decorated with `@port_span(...)`.
+- `src/exception_classify.py:reraise_on_credit_or_bug` — `reraise_on_credit_or_bug()` tags active span with `error=true` + `exception.slug` before re-raise (best-effort; never alters classify behavior).
+- `src/events.py:EventBus` — `EventBus.publish` calls `span.add_event("hf.event", ...)` on active span (best-effort).
+- `src/trace_collector.py:TraceCollector` — `_record_inner` calls `bridge_event_to_span` on every parsed subprocess event (lazy imports to avoid circular dependency).
+- `src/mockworld/fakes/fake_honeycomb.py:FakeHoneycomb` — `FakeHoneycomb` test fake wrapping `InMemorySpanExporter`; mirrors the `FakeSentry`/`FakeGitHub` convention.
 - `tests/scenarios/fakes/mock_world.py` — `MockWorld.honeycomb` property exposes the fake.
 - `tests/conftest.py` — `_reset_otel_tracer_provider` autouse fixture clears `_TRACER_PROVIDER` + `_get_tracer.cache_clear()` between tests.
 - `.env.sample` — OpenTelemetry / Honeycomb block documents the four operator-settable knobs.
