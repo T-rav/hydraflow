@@ -88,4 +88,16 @@
 #   - ce6e609 fix(ui): benign credit-false-positive alert renders yellow
 #     (#9884) -> UI-only; covered by src/ui App.test.jsx severity assertions.
 # Forward-enforcement restarts here.
-2026-07-18T19:00:00Z
+#
+# Reset 2026-07-18 (follow-up to the 19:00 reset above): the ce6e609 entry
+# enumerated #9884 by its branch sha, but the squash-merge minted a new
+# commit e7c374e (2026-07-18T20:07:45Z) on staging — after the 19:00 baseline
+# — so P10.3 re-flags the SAME already-enumerated change and blocks every PR
+# that syncs with staging. No new work is hidden by this advance:
+#   - e7c374e fix(ui): benign credit-false-positive alert renders yellow
+#     (#9884, squash of ce6e609) -> UI-only + alert-payload severity metadata;
+#     covered by src/ui App.test.jsx severity assertions (added in #9884) and
+#     the suppression path is pinned by
+#     tests/regressions/test_issue_9807_credit_probe_false_positive.py.
+# Forward-enforcement restarts here.
+2026-07-18T20:08:00Z
