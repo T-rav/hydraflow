@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 9567
 source_phase: review
 created_at: 2026-06-20T09:15:00.395676+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0044
 ---
 
 # Coverage-delta gate semantics: asymmetric — gaps block, clean defers

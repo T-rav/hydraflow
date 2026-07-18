@@ -4,9 +4,10 @@ topic: gotchas
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-06-14T05:13:17.694669+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0001,0002,0003,0004,0005,0006,0007,0008,0009,0010,0011
+superseded_by: 0044
 ---
 
 # Use `log_exception_with_bug_classification()` to separate bugs from transient errors
