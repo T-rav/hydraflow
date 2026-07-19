@@ -1,0 +1,6 @@
+{
+  "name": "implement-login-fix",
+  "transcript": "Starting work on issue #412: login redirects to a 404 after SSO callback.\nRead src/auth_handler.py. The callback handler builds the redirect URL from session['next'] but never validates it — when 'next' is unset it becomes the string 'None' and routing 404s.\nAdded a guard: fall back to '/dashboard' when session['next'] is missing or empty.\nWrote a regression test in tests/regressions/test_issue_412.py covering the empty-next case.\nRan make quality — 1843 passed, 0 failed. Lint and types clean.\nCommitted and opened PR #418 targeting staging.",
+  "must_include": ["412", "auth_handler", "redirect", "regression test", "PR"],
+  "notes": "A good summary of this implement run must name the issue, the file changed, the bug (bad redirect), the added test, and the resulting PR."
+}

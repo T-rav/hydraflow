@@ -7,24 +7,26 @@ Two scenarios cover the loop's ends-of-the-world:
   nothing. ``cases_filed == 0``.
 * ``test_escape_signal_produces_case`` — one parseable escape issue is
   seeded via FakeGitHub. The loop reads it, synthesizes a
-  :class:`SynthesizedCase`, runs the three-gate validator, materializes
-  the case on disk, and files one PR via the stubbed ``auto_pr`` seam.
-  ``cases_filed >= 1``.
+  :class:`SynthesizedCase`, runs the three-gate validator, and files one
+  PR via the stubbed ``auto_pr`` seam. Materialization now happens inside
+  the ephemeral worktree the PR helper hands to its ``generate`` callback
+  (#9539); with the helper stubbed, the captured ``generate`` is driven
+  against a scratch worktree to prove the case tree lands there — never
+  under ``repo_root``. ``cases_filed >= 1``.
 
 The loop's external surfaces are handled as follows:
 
 * :meth:`PRManager.list_issues_by_label` is served by ``FakeGitHub``
   directly (no monkey-patching needed — the fake already returns the
   correct row shape).
-* :func:`auto_pr.open_automated_pr_async` is stubbed via the
+* :func:`auto_pr.generate_and_open_pr_async` is stubbed via the
   ``corpus_learning_auto_pr`` port seeded through
   :func:`tests.scenarios.helpers.loop_port_seeding.seed_ports` so no
   ``git`` or ``gh`` subprocess actually runs.
 
-Materialization writes under ``config.repo_root / tests / trust /
-adversarial / cases / <slug>`` — by default that is the temporary
-``tmp_path`` MockWorld hands out, so the sandbox never leaks onto the
-real repo.
+The loop never writes under ``config.repo_root`` for the PR — the
+generate callback writes only into the worktree it is given (#9539), so
+the factory checkout stays clean.
 """
 
 from __future__ import annotations
@@ -154,7 +156,7 @@ class TestCorpusLearningScenario:
         assert stats["corpus_learning"]["cases_filed"] >= 1, stats
 
         # The stubbed PR opener saw exactly one call with the expected
-        # title + label shape.
+        # title + label shape, a callable generate, and the case path_spec.
         assert len(open_calls) == 1
         kwargs = open_calls[0]
         assert kwargs["pr_title"] == (
@@ -163,13 +165,20 @@ class TestCorpusLearningScenario:
         labels = kwargs["labels"]
         assert "hydraflow-agent" in labels
         assert "corpus-learning" in labels
-
-        # The case directory actually landed on disk under the tmp sandbox.
-        # ``make_bg_loop_deps`` roots the loop's ``config.repo_root`` at
-        # ``tmp_path / "repo"``, so the materializer writes under there —
-        # not under tmp_path itself.
         slug = "diff-sanity-missed-renamed-symbol"
-        case_dir = (
-            tmp_path / "repo" / "tests" / "trust" / "adversarial" / "cases" / slug
-        )
+        assert "files" not in kwargs, "loop must generate in-worktree, not pre-write"
+        assert callable(kwargs["generate"])
+        assert kwargs["path_specs"] == [f"tests/trust/adversarial/cases/{slug}"]
+
+        # Drive the captured generate callback against a scratch worktree —
+        # the case tree materializes THERE, never under repo_root (#9539).
+        # ``make_bg_loop_deps`` roots the loop's ``config.repo_root`` at
+        # ``tmp_path / "repo"``; with the helper stubbed the generate
+        # callback never ran, so that checkout must stay clean.
+        worktree = tmp_path / "scratch-worktree"
+        worktree.mkdir()
+        await kwargs["generate"](worktree)
+        case_dir = worktree / "tests" / "trust" / "adversarial" / "cases" / slug
         assert (case_dir / "README.md").exists()
+        repo_root = tmp_path / "repo"
+        assert not (repo_root / "tests").exists()

@@ -52,3 +52,11 @@ GAPS:
 - Focus on whether production code is tested, not test code style.
 - Ignore test file changes when assessing adequacy.
 - Be pragmatic: simple getters/setters don't need dedicated tests. Focus on logic, branches, and error paths.
+
+## Note: implementer-loop gate also runs a deterministic coverage-delta check
+
+When `test-adequacy` runs inside the implementer loop (not this interactive slash command),
+`AgentRunner._run_skill` additionally runs `make coverage 0` after the LLM verdict and
+overrides a PASS to RETRY if any changed production line has zero coverage hits. This
+slash command remains read-only and LLM-only; the subprocess coverage check is an
+implementer-loop-only behaviour.

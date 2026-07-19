@@ -1,0 +1,77 @@
+# Factory Autonomy — machine-readable act-vs-ask policy (CH-3, #9731).
+#
+# NORMATIVE: this file is what the factory's own merge seam enforces
+# (src/merge_policy.py). The prose table in README.md is commentary bound to
+# this file by drift CI (tests/architecture/test_factory_autonomy_policy_drift.py):
+# every README table row must have exactly one entry here (matched on
+# `readme_row`, with the row's Action column direction matching `autonomy`)
+# and vice versa. Editing one without the other reddens CI.
+#
+# v1 encodes the README table 1:1 — no restrictions beyond the prose.
+# `paths` / `labels` matchers are intentionally empty: tightening the policy
+# (e.g. requiring an operator approval for workflow changes) is a one-line
+# edit here plus its README row, not a code change.
+
+schema_version: 1
+
+merge_gate:
+  # The one table binding enforced at the factory's own merge seam: merging a
+  # PR that neither the human operator nor the orchestrator's reviewer
+  # approved is the high-blast-radius action `merge-unapproved-pr`.
+  unapproved_merge_class: high-blast-radius
+  # Break-glass: an operator attaches `policy-override:<reason-slug>` to the
+  # PR; the merge proceeds and a `break_glass` record is appended to the CH-2
+  # approval-records audit chain.
+  break_glass_label_prefix: "policy-override:"
+  escalation: hitl
+
+classes:
+  - id: tractable-reversible
+    readme_row: "Tractable + reversible"
+    autonomy: act
+    default: true
+    description: >-
+      Act, then report what you did. Don't ask first.
+    actions:
+      - arch-regen-push
+      - lint-fix-push
+      - retarget-pr-base
+      - skip-adr-tag
+      - file-hydraflow-find-issue
+      - rebase-stale-branch
+    paths: []
+    labels: []
+
+  - id: high-blast-radius
+    readme_row: "High blast radius"
+    autonomy: ask
+    description: >-
+      Confirm before acting. Surface the proposal, get explicit OK.
+    actions:
+      - force-push-default-branch
+      - delete-branch-unmerged-work
+      - drop-persisted-data
+      - modify-repo-permissions-or-rulesets
+      - send-messages-on-behalf
+      - merge-unapproved-pr
+    paths: []
+    labels: []
+    required_approvals:
+      count: 1
+      roles: [operator, orchestrator-reviewer]
+    forbidden_actors: []
+    escalation: hitl
+
+  - id: authorial-scope
+    readme_row: "Authorial / scope"
+    autonomy: act
+    description: >-
+      Needs alignment, not permission: brainstorm -> spec -> plan -> TDD
+      execute per the workflow skills. Permission is implicit once the spec
+      is approved.
+    actions:
+      - new-feature
+      - refactor
+      - architectural-change
+    paths: []
+    labels: []

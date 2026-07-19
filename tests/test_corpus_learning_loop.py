@@ -46,14 +46,16 @@ from events import EventBus
 
 
 @pytest.fixture(autouse=True)
-def _stub_open_automated_pr_async(
+def _stub_generate_and_open_pr_async(
     monkeypatch: pytest.MonkeyPatch,
 ) -> list[dict[str, object]]:
     """Neutralize PR-open side effects in Task 14/15 ``_do_work`` tests.
 
     Without this, older tests that feed a validatable signal would reach
-    :func:`auto_pr.open_automated_pr_async` and try to ``git worktree
-    add`` against the real repo. Tests that want to observe PR-open
+    :func:`auto_pr.generate_and_open_pr_async` and try to ``git worktree
+    add`` against the real repo. The loop now generates the case tree
+    inside that worktree (#9539), so the seam to stub is the
+    generate-in-worktree helper. Tests that want to observe PR-open
     arguments monkeypatch the hook explicitly (overriding this stub);
     the rest get a silent no-op that returns ``status="no-diff"``.
     """
@@ -63,9 +65,9 @@ def _stub_open_automated_pr_async(
         calls.append(kwargs)
         return _AutoPrResultStub(status="no-diff", pr_url=None)
 
-    import corpus_learning_loop as mod
+    import auto_pr
 
-    monkeypatch.setattr(mod, "open_automated_pr_async", fake)  # type: ignore[attr-defined]
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake)
     return calls
 
 
@@ -819,15 +821,17 @@ def test_materialize_case_on_disk_handles_multiple_files(tmp_path: Path) -> None
     assert len(paths) == 6
 
 
-def test_open_pr_for_case_calls_open_automated_pr_async(
+def test_open_pr_for_case_calls_generate_and_open_pr_async(
     monkeypatch: object, tmp_path: Path
 ) -> None:
-    # `_open_pr_for_case` must delegate to auto_pr.open_automated_pr_async
-    # with a branch derived from the slug, the supplied files, and the
-    # supplied title/body. Returns the parsed PR number from the URL.
+    # `_open_pr_for_case` must delegate to auto_pr.generate_and_open_pr_async
+    # with a branch derived from the slug, a callable ``generate`` that
+    # writes the case tree into the worktree, the case-dir ``path_specs``,
+    # and the supplied title/body. Returns the parsed PR number from the URL.
+    # The loop never passes pre-written ``files`` — it generates in-worktree
+    # so repo_root stays clean (#9539).
     loop = _loop(tmp_path, dedup=_InMemoryDedup())
     case = _valid_case(issue_number=42, slug="my-slug")
-    paths = [tmp_path / "x"]
 
     captured: dict[str, object] = {}
 
@@ -838,16 +842,19 @@ def test_open_pr_for_case_calls_open_automated_pr_async(
             pr_url="https://github.com/hydra/hydraflow/pull/777",
         )
 
-    import corpus_learning_loop as mod
+    import auto_pr
 
-    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)  # type: ignore[attr-defined]
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_open)
 
-    pr_number = asyncio.run(loop._open_pr_for_case(case, paths, title="tt", body="bb"))
+    pr_number = asyncio.run(loop._open_pr_for_case(case, title="tt", body="bb"))
 
     assert pr_number == 777
     assert captured["pr_title"] == "tt"
     assert captured["pr_body"] == "bb"
-    assert captured["files"] == paths
+    # No pre-written files: the loop generates inside the worktree.
+    assert "files" not in captured
+    assert callable(captured["generate"])
+    assert captured["path_specs"] == ["tests/trust/adversarial/cases/my-slug"]
     assert captured["base"] == loop._config.base_branch()
     # Branch is derived from the case slug + issue number for traceability.
     assert "my-slug" in str(captured["branch"])
@@ -855,6 +862,45 @@ def test_open_pr_for_case_calls_open_automated_pr_async(
     labels = captured["labels"]
     assert isinstance(labels, list)
     assert "corpus-learning" in labels
+
+
+def test_open_pr_for_case_generate_writes_into_worktree_not_repo_root(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    # The ``generate`` callback handed to the PR helper must materialize the
+    # case tree under the WORKTREE it is given — never under repo_root.
+    # repo_root must stay clean (#9539): the loop's whole point is to stop
+    # mutating the factory checkout.
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    loop = _loop(tmp_path, dedup=_InMemoryDedup(), repo_root=repo_root)
+    case = _valid_case(issue_number=42, slug="my-slug")
+
+    captured: dict[str, object] = {}
+
+    async def fake_open(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return _AutoPrResultStub(status="opened", pr_url="x/y/pull/1")
+
+    import auto_pr
+
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_open)
+
+    asyncio.run(loop._open_pr_for_case(case, title="t", body="b"))
+
+    # Invoke the captured generate callback against the worktree and assert
+    # the case landed there.
+    generate = captured["generate"]
+    assert callable(generate)
+    asyncio.run(generate(worktree))  # type: ignore[operator]
+
+    case_dir = worktree / "tests" / "trust" / "adversarial" / "cases" / "my-slug"
+    assert (case_dir / "README.md").exists()
+    assert (case_dir / "expected_catcher.txt").exists()
+    # repo_root is untouched — no case tree leaked into the factory checkout.
+    assert not (repo_root / "tests").exists()
 
 
 def test_open_pr_for_case_dedup_suppresses_refile(
@@ -877,13 +923,11 @@ def test_open_pr_for_case_dedup_suppresses_refile(
             pr_url="https://github.com/x/y/pull/1",
         )
 
-    import corpus_learning_loop as mod
+    import auto_pr
 
-    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)  # type: ignore[attr-defined]
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_open)
 
-    result = asyncio.run(
-        loop._open_pr_for_case(case, [tmp_path / "f"], title="t", body="b")
-    )
+    result = asyncio.run(loop._open_pr_for_case(case, title="t", body="b"))
 
     assert result is None
     assert calls == []
@@ -902,11 +946,11 @@ def test_open_pr_for_case_records_dedup_after_success(
             pr_url="https://github.com/x/y/pull/99",
         )
 
-    import corpus_learning_loop as mod
+    import auto_pr
 
-    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)  # type: ignore[attr-defined]
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_open)
 
-    asyncio.run(loop._open_pr_for_case(case, [tmp_path / "f"], title="t", body="b"))
+    asyncio.run(loop._open_pr_for_case(case, title="t", body="b"))
 
     assert "corpus_learning:13:slug-x" in dedup.get()
 
@@ -924,13 +968,11 @@ def test_open_pr_for_case_returns_none_when_pr_open_fails(
     async def fake_open(**kwargs: object) -> object:
         return _AutoPrResultStub(status="failed", pr_url=None, error="boom")
 
-    import corpus_learning_loop as mod
+    import auto_pr
 
-    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)  # type: ignore[attr-defined]
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_open)
 
-    result = asyncio.run(
-        loop._open_pr_for_case(case, [tmp_path / "f"], title="t", body="b")
-    )
+    result = asyncio.run(loop._open_pr_for_case(case, title="t", body="b"))
 
     assert result is None
     # Failed filings must not pollute dedup — next tick should try again.
@@ -941,8 +983,9 @@ def test_do_work_files_validated_cases_and_reports_count(
     monkeypatch: object, tmp_path: Path
 ) -> None:
     # End-to-end wiring: a parseable + validatable signal must walk all
-    # three Task 15 steps (materialize, PR-open, dedup) and surface
-    # `cases_filed=1` in the status dict alongside the earlier counters.
+    # three Task 15 steps (generate-in-worktree, PR-open, dedup) and
+    # surface `cases_filed=1` in the status dict alongside the earlier
+    # counters.
     dedup = _InMemoryDedup()
     prs = AsyncMock()
     prs.list_issues_by_label = AsyncMock(
@@ -965,28 +1008,30 @@ def test_do_work_files_validated_cases_and_reports_count(
             pr_url="https://github.com/x/y/pull/321",
         )
 
-    import corpus_learning_loop as mod
+    import auto_pr
 
-    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)  # type: ignore[attr-defined]
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_open)
 
-    loop = _loop(tmp_path, prs=prs, dedup=dedup, repo_root=tmp_path)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    loop = _loop(tmp_path, prs=prs, dedup=dedup, repo_root=repo_root)
     result = asyncio.run(loop._do_work())
 
     assert result.get("escape_issues_seen") == 1
     assert result.get("cases_synthesized") == 1
     assert result.get("cases_validated") == 1
     assert result.get("cases_filed") == 1
-    # Materialized files landed under repo_root / tests/trust/adversarial/…
-    case_dir = (
-        tmp_path
-        / "tests"
-        / "trust"
-        / "adversarial"
-        / "cases"
-        / "diff-sanity-missed-renamed-symbol"
-    )
-    assert case_dir.exists()
-    assert open_calls, "expected one open_automated_pr_async call"
+    assert open_calls, "expected one generate_and_open_pr_async call"
+    # The PR-open seam was handed a callable generate + the case path_spec —
+    # not pre-written files. repo_root is never mutated (#9539): with the
+    # helper stubbed, the generate callback is not invoked, so no case tree
+    # leaks into the factory checkout.
+    kwargs = open_calls[0]
+    assert callable(kwargs["generate"])
+    assert kwargs["path_specs"] == [
+        "tests/trust/adversarial/cases/diff-sanity-missed-renamed-symbol"
+    ]
+    assert not (repo_root / "tests").exists()
 
 
 def test_do_work_skips_cases_already_in_dedup(
@@ -1014,9 +1059,9 @@ def test_do_work_skips_cases_already_in_dedup(
         open_calls.append(kwargs)
         return _AutoPrResultStub(status="opened", pr_url="x/y/pull/1")
 
-    import corpus_learning_loop as mod
+    import auto_pr
 
-    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)  # type: ignore[attr-defined]
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", fake_open)
 
     loop = _loop(tmp_path, prs=prs, dedup=dedup)
     result = asyncio.run(loop._do_work())
@@ -1091,7 +1136,6 @@ def test_do_work_caps_prs_per_tick(tmp_path: Path) -> None:
         readme="r",
     )
     loop._validate_case = lambda c: ValidationResult(ok=True)  # type: ignore[method-assign]
-    loop._materialize_case_on_disk = lambda c, r: []  # type: ignore[method-assign]
     loop._open_pr_for_case = AsyncMock(return_value=42)  # type: ignore[method-assign]
 
     result = asyncio.run(loop._do_work())

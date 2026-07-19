@@ -11,7 +11,7 @@ exclude = ["ui*", "templates*", "tests*"]
 
 [project]
 name = "hydraflow"
-version = "0.9.4"
+version = "0.9.7"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "pydantic>=2.0.0",
@@ -48,6 +48,7 @@ test = [
     "pytest-rerunfailures>=16.0",
     "httpx>=0.27.0",
     "hypothesis>=6.100.0",
+    "markdown>=3.0",
 ]
 dev = [
     "ruff==0.15.0",
@@ -199,5 +200,5 @@ source = ["src"]
 omit = ["tests/*", "*/__init__.py", "venv/*", ".venv/*", "templates/*"]
 
 [tool.coverage.report]
-fail_under = 70
+fail_under = 89.5
 show_missing = true

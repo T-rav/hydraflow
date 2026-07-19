@@ -5,7 +5,11 @@
 - **Supersedes:** none
 - **Superseded by:** none
 - **Related:** [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker-loop pattern), [ADR-0049](0049-trust-loop-kill-switch-convention.md) (kill-switch convention), [ADR-0051](0051-iterative-production-readiness-review.md) (iterative production-readiness review), ADR-0056 (gate → loop precedent — promotes to staging separately). Code: `src/memory_backlog_loop.py`, `src/memory_backlog_mirror.py`, `docs/wiki/memory-feedback/`.
-- **Enforced by:** `tests/test_memory_backlog_loop.py`, `tests/test_loop_wiring_completeness.py` (auto-discovery confirms 5-checkpoint wire), `tests/architecture/test_functional_area_coverage.py` (loop assigned in `functional_areas.yml`).
+- **Enforcement:** enforced
+- **Enforced by:**
+pytest:tests/test_memory_backlog_loop.py
+pytest:tests/test_loop_wiring_completeness.py
+pytest:tests/architecture/test_functional_area_coverage.py
 
 ## Context
 

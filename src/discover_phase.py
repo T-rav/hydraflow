@@ -316,7 +316,16 @@ class DiscoverPhase:
                     await self._run_assumption_surfacer(issue, adv, research_context="")
 
                 if self._runner:
-                    result = await self._runner.discover(issue)
+                    # Human-on-the-loop continuous steering (ADR-0099 #4):
+                    # fold live operator guidance into both discover
+                    # prompt-construction sites (main brief + the
+                    # discover-completeness evaluator). Reference signal
+                    # only — never blocking; empty when the feature is
+                    # off or no guidance was posted for this issue.
+                    guidance = (
+                        self._state.get_human_steering(str(issue.id)).guidance or ""
+                    )
+                    result = await self._runner.discover(issue, guidance=guidance)
                 else:
                     result = DiscoverResult(
                         issue_number=issue.id,

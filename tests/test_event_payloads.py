@@ -198,25 +198,28 @@ class TestLabelCounts:
 
 
 class TestWorkerResultMeta:
-    """WorkerResultMeta is total=False — all fields are optional."""
+    """WorkerResultMeta is total=False — all fields are optional.
+
+    Note: ``quality_fix_attempts`` has been migrated to the convergence ledger.
+    Use ``StateTracker.set_quality_fix_attempts`` / ``get_convergence_ledger``
+    to read or write that count.
+    """
 
     def test_all_fields(self) -> None:
         meta: WorkerResultMeta = {
-            "quality_fix_attempts": 2,
             "pre_quality_review_attempts": 1,
             "duration_seconds": 120.5,
             "error": None,
             "commits": 3,
         }
-        assert meta["quality_fix_attempts"] == 2
         assert meta["pre_quality_review_attempts"] == 1
         assert meta["duration_seconds"] == 120.5
         assert meta["error"] is None
         assert meta["commits"] == 3
 
     def test_partial_fields(self) -> None:
-        meta: WorkerResultMeta = {"quality_fix_attempts": 1}
-        assert meta["quality_fix_attempts"] == 1
+        meta: WorkerResultMeta = {"pre_quality_review_attempts": 1}
+        assert meta["pre_quality_review_attempts"] == 1
         assert "duration_seconds" not in meta
 
     def test_round_trips_through_state(self, tmp_path: object) -> None:
@@ -228,14 +231,14 @@ class TestWorkerResultMeta:
         tracker = StateTracker(state_file)
 
         meta: WorkerResultMeta = {
-            "quality_fix_attempts": 2,
+            "pre_quality_review_attempts": 2,
             "duration_seconds": 60.0,
             "error": "lint failed",
             "commits": 1,
         }
         tracker.set_worker_result_meta(42, meta)
         loaded = tracker.get_worker_result_meta(42)
-        assert loaded["quality_fix_attempts"] == 2
+        assert loaded["pre_quality_review_attempts"] == 2
         assert loaded["error"] == "lint failed"
 
 

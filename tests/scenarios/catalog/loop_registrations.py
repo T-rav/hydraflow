@@ -69,10 +69,18 @@ def _build_dependabot_merge(ports: dict[str, Any], config: Any, deps: Any) -> An
 def _build_merge_state_watcher(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from merge_state_watcher_loop import MergeStateWatcherLoop  # noqa: PLC0415
 
+    # CH-2 (#9730): the approval-record reconciler talks to gh at the raw
+    # subprocess boundary; stub it here so MockWorld ticks stay hermetic.
+    reconciler = ports.get("approval_reconciler")
+    if reconciler is None:
+        reconciler = MagicMock()
+        reconciler.reconcile = AsyncMock(return_value={"merged_seen": 0, "recorded": 0})
+        ports["approval_reconciler"] = reconciler
     return MergeStateWatcherLoop(
         config=config,
         prs=ports["github"],
         deps=deps,
+        approval_reconciler=reconciler,
     )
 
 
@@ -94,7 +102,20 @@ def _build_pr_unsticker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_health_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from health_monitor_loop import HealthMonitorLoop  # noqa: PLC0415
 
-    return HealthMonitorLoop(config=config, deps=deps, prs=ports["github"])
+    # ``state`` powers the dead-man-switch heartbeat reads; ``bg_workers``
+    # (seeded via seed_ports) powers the restart-first stall sweep. Both
+    # checks silently no-op when their deps are absent, so plain
+    # health-monitor scenarios are unaffected.
+    loop = HealthMonitorLoop(
+        config=config,
+        deps=deps,
+        prs=ports["github"],
+        state=ports.get("state"),
+    )
+    bg_workers = ports.get("bg_workers")
+    if bg_workers is not None:
+        loop.set_bg_workers(bg_workers)
+    return loop
 
 
 def _build_workspace_gc(ports: dict[str, Any], config: Any, deps: Any) -> Any:
@@ -683,6 +704,98 @@ def _build_adr_touchpoint_auditor(ports: dict[str, Any], config: Any, deps: Any)
     return loop
 
 
+def _build_adr_conformance(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build AdrConformanceLoop for scenarios (ADR-0100).
+
+    Mirrors ``_build_adr_touchpoint_auditor``. Tests pre-seed:
+    * ``adr_conformance_runner`` → a ``ConformanceRunnerPort`` (defaults to
+      ``FakeConformanceRunner``, which maps ``check.raw`` -> preset outcome
+      without shelling out).
+    * ``adr_conformance_index`` → an ``ADRIndex`` (or duck-typed substitute).
+
+    State + dedup default to MagicMocks behaving like a clean slate (no
+    rollup recorded, zero attempts, empty dedup set). Tests override via
+    ``adr_conformance_state`` / ``adr_conformance_dedup``.
+    """
+    from adr_conformance_loop import AdrConformanceLoop  # noqa: PLC0415
+    from mockworld.fakes import FakeConformanceRunner  # noqa: PLC0415
+
+    state = ports.get("adr_conformance_state")
+    if state is None:
+        state = MagicMock()
+        state.get_adr_conformance_rollup.return_value = None
+        state.inc_adr_conformance_attempts.return_value = 1
+        ports["adr_conformance_state"] = state
+
+    dedup = ports.get("adr_conformance_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["adr_conformance_dedup"] = dedup
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+    adr_index = ports.get("adr_conformance_index") or MagicMock(adrs=lambda: [])
+    runner = ports.get("adr_conformance_runner")
+    if runner is None:
+        runner = FakeConformanceRunner()
+        ports["adr_conformance_runner"] = runner
+
+    return AdrConformanceLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        adr_index=adr_index,
+        runner=runner,
+        deps=deps,
+    )
+
+
+def _build_auto_tighten(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build AutoTightenLoop for scenarios.
+
+    Tests pre-seed:
+    * ``auto_tighten_adapters`` -> a list of ``RatchetAdapter``-shaped fakes
+      (defaults to empty, so a tick is a no-op cold start).
+    * ``auto_tighten_ingestor`` / ``auto_tighten_attribution`` /
+      ``auto_tighten_pr_author`` -> collaborator fakes (default to MagicMocks
+      that behave like a clean, no-op tick — no gh shelling in scenarios).
+    * ``auto_tighten_obs`` -> an ``ObservationStore`` (defaults to a real one
+      rooted at ``config.repo_data_root``, matching production wiring).
+
+    State defaults to a MagicMock; tests override via ``auto_tighten_state``.
+    """
+    from auto_tighten.observation_store import ObservationStore  # noqa: PLC0415
+    from auto_tighten_loop import AutoTightenLoop  # noqa: PLC0415
+
+    obs = ports.get("auto_tighten_obs") or ObservationStore(
+        config.repo_data_root / "metrics" / "tighten.jsonl"
+    )
+    adapters = ports.get("auto_tighten_adapters") or []
+    ingestor = ports.get("auto_tighten_ingestor") or MagicMock(ingest=lambda: None)
+    attribution = ports.get("auto_tighten_attribution") or MagicMock(
+        attribute=lambda *a, **k: None
+    )
+    pr_author = ports.get("auto_tighten_pr_author") or MagicMock(
+        open=AsyncMock(return_value=None)
+    )
+    state = ports.get("auto_tighten_state")
+    if state is None:
+        state = MagicMock()
+        ports["auto_tighten_state"] = state
+
+    return AutoTightenLoop(
+        config=config,
+        state=state,
+        deps=deps,
+        adapters=adapters,
+        ingestor=ingestor,
+        attribution=attribution,
+        pr_author=pr_author,
+        observation_store=obs,
+    )
+
+
 def _build_branch_protection_auditor(
     ports: dict[str, Any], config: Any, deps: Any
 ) -> Any:
@@ -867,6 +980,94 @@ def _build_sandbox_failure_fixer(ports: dict[str, Any], config: Any, deps: Any) 
     )
 
 
+def _build_disturbance_dampener(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build DisturbanceDampenerLoop for scenarios (ADR-0095, Pattern A).
+
+    Scenarios that exercise the burn-down path must seed ``ports['github']``
+    (FakeGitHub satisfies the PRPort contract) and ``ports['auto_agent_runner']``
+    (an AsyncMock-style object whose ``run`` returns a ``PreflightSpawn``-like
+    namespace). Scenarios that only need scaffold-wiring smoke can omit both;
+    the loop falls back to a no-op tick. ``state`` and ``dedup`` default to
+    MagicMocks that behave like a clean slate (no prior attempts, no prior
+    dedup keys), mirroring FlakeTrackerLoop's builder.
+    """
+    from disturbance_dampener_loop import DisturbanceDampenerLoop  # noqa: PLC0415
+
+    state = ports.get("disturbance_dampener_state")
+    if state is None:
+        state = MagicMock()
+        state.get_disturbance_dampener_attempts.return_value = 0
+        state.bump_disturbance_dampener_attempts.return_value = 1
+        ports["disturbance_dampener_state"] = state
+
+    dedup = ports.get("disturbance_dampener_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["disturbance_dampener_dedup"] = dedup
+
+    return DisturbanceDampenerLoop(
+        config=config,
+        state=state,
+        prs=ports.get("github"),
+        dedup=dedup,
+        deps=deps,
+        runner=ports.get("auto_agent_runner"),
+    )
+
+
+def _build_human_steering(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build HumanSteeringLoop for scenarios (ADR-0099 #4).
+
+    ``prs`` defaults to a MagicMock whose ``list_issue_comments`` is an
+    AsyncMock returning ``[]`` (no comments, no directives parsed).
+    ``state`` defaults to a MagicMock whose ``get_human_steering`` returns a
+    clean ``SteeringState()``, mirroring the disturbance-dampener builder's
+    clean-slate default. ``active_issues_cb`` defaults to a no-op returning
+    ``[]`` so scenarios that only need scaffold-wiring smoke tick with zero
+    work; scenarios exercising the sensing path should seed
+    ``ports['human_steering_active_issues_cb']``.
+    """
+    from human_steering_loop import HumanSteeringLoop  # noqa: PLC0415
+    from models import SteeringState  # noqa: PLC0415
+
+    prs = ports.get("github")
+    if prs is None:
+        prs = MagicMock()
+        prs.list_issue_comments = AsyncMock(return_value=[])
+        ports["github"] = prs
+
+    state = ports.get("human_steering_state")
+    if state is None:
+        state = MagicMock()
+        state.get_human_steering.return_value = SteeringState()
+        ports["human_steering_state"] = state
+
+    active_issues_cb = ports.get("human_steering_active_issues_cb")
+    if active_issues_cb is None:
+        active_issues_cb = lambda: []  # noqa: E731
+        ports["human_steering_active_issues_cb"] = active_issues_cb
+
+    return HumanSteeringLoop(
+        config=config,
+        state=state,
+        prs=prs,
+        deps=deps,
+        active_issues_cb=active_issues_cb,
+    )
+
+
+def _build_detector_calibration(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build DetectorCalibrationLoop for scenarios."""
+    from detector_calibration_loop import DetectorCalibrationLoop  # noqa: PLC0415
+
+    state = ports.get("detector_calibration_state") or MagicMock()
+    ports.setdefault("detector_calibration_state", state)
+    return DetectorCalibrationLoop(
+        config=config, state=state, pr_manager=ports["github"], deps=deps
+    )
+
+
 def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build AutoAgentPreflightLoop for scenarios (spec §1–§11).
 
@@ -878,6 +1079,22 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
 
     State defaults to a MagicMock with the auto_agent_* accessors stubbed; tests
     can override via the ``auto_agent_state`` port to use a real StateTracker.
+
+    ADR-0105 decompose-to-converge: ``AutoAgentPreflightLoop`` only builds its
+    internal ``IssueDecomposer``/``DecompositionCouncil`` (and therefore only
+    calls ``decompose_or_escalate`` instead of going straight to
+    ``human-required``) when ``epic_manager``/``runner`` are passed at
+    construction. Both default to ``None`` here — unseeded scenarios keep
+    today's pre-ADR-0105 behavior unchanged. Tests exercising the decompose
+    path seed ``auto_agent_epic_manager`` (typically a real ``EpicManager``
+    wired against the scenario's real ``StateTracker``, so the epic it
+    registers is visible to ``epic_sweeper``) and
+    ``auto_agent_decompose_runner`` (any placeholder — the council's LLM
+    seam is scripted by monkeypatching ``runner_utils.run_lightweight_agent``
+    directly, mirroring ``tests/test_decomposition_council.py``, so the
+    runner object itself is never actually invoked). Distinct port keys from
+    ``_build_epic_monitor``'s ``epic_manager`` (a differently-shaped mock)
+    avoid a collision if a scenario ever runs both loops in one MockWorld.
     """
     from unittest.mock import MagicMock  # noqa: PLC0415
 
@@ -907,6 +1124,8 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
         audit_store=audit_store,
         deps=deps,
         workspaces=ports.get("workspaces"),
+        epic_manager=ports.get("auto_agent_epic_manager"),
+        runner=ports.get("auto_agent_decompose_runner"),
     )
 
 
@@ -946,14 +1165,16 @@ def _build_corpus_learning(ports: dict[str, Any], config: Any, deps: Any) -> Any
         deps=deps,
     )
 
-    # Optional: replace the auto_pr seam on the loop's module with a
-    # seeded async callable so tests can assert the opened PR without
-    # shelling out to ``git``/``gh``.
+    # Optional: replace the auto_pr seam with a seeded async callable so
+    # tests can assert the opened PR without shelling out to ``git``/``gh``.
+    # The loop now generates the case tree inside the worktree (#9539) and
+    # lazily imports :func:`auto_pr.generate_and_open_pr_async`, so the seam
+    # to patch is on the ``auto_pr`` module itself (mirrors DiagramLoop).
     auto_pr_stub = ports.get("corpus_learning_auto_pr")
     if auto_pr_stub is not None:
-        import corpus_learning_loop as _mod  # noqa: PLC0415
+        import auto_pr as _auto_pr  # noqa: PLC0415
 
-        _mod.open_automated_pr_async = auto_pr_stub  # type: ignore[assignment]
+        _auto_pr.generate_and_open_pr_async = auto_pr_stub  # type: ignore[assignment]
 
     return loop
 
@@ -1087,7 +1308,9 @@ def _build_contract_refresh(ports: dict[str, Any], config: Any, deps: Any) -> An
     * ``contract_refresh_record_git`` → ``record_git``
     * ``contract_refresh_record_docker`` → ``record_docker``
     * ``contract_refresh_record_claude`` → ``record_claude_stream``
-    * ``contract_refresh_auto_pr`` → ``open_automated_pr_async``
+    * ``contract_refresh_auto_pr`` → ``auto_pr.generate_and_open_pr_async``
+      (generate-in-worktree, #9539 — the loop imports it lazily so the
+      seam lives on the ``auto_pr`` module, not ``crl_module``)
 
     ``state`` defaults to a MagicMock wired with int-returning stubs for
     the Task 18 attempt counters (``get_contract_refresh_attempts`` →
@@ -1124,13 +1347,16 @@ def _build_contract_refresh(ports: dict[str, Any], config: Any, deps: Any) -> An
         "contract_refresh_record_claude", default_empty
     )
 
-    # Optional: replace the auto_pr seam on the loop's module with a
-    # seeded async callable so tests can assert the opened PR shape
-    # without shelling out to ``git`` / ``gh``. Mirrors the F1
-    # corpus-learning pattern.
+    # Optional: replace the generate-in-worktree seam (#9539) with a seeded
+    # async callable so tests can assert the opened PR shape without shelling
+    # out to ``git`` / ``gh`` or creating a real worktree. The loop imports
+    # ``generate_and_open_pr_async`` lazily from ``auto_pr`` at call time, so
+    # the seam must be patched on the ``auto_pr`` module (not ``_module``).
     auto_pr_stub = ports.get("contract_refresh_auto_pr")
     if auto_pr_stub is not None:
-        _module.open_automated_pr_async = auto_pr_stub  # type: ignore[assignment]
+        import auto_pr as _auto_pr_module  # noqa: PLC0415
+
+        _auto_pr_module.generate_and_open_pr_async = auto_pr_stub  # type: ignore[assignment]
 
     loop = ContractRefreshLoop(
         config=config,
@@ -1418,6 +1644,63 @@ def _build_triage_retry(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
+def _build_convergence_oscillation(
+    ports: dict[str, Any], config: Any, deps: Any
+) -> Any:
+    """Build ConvergenceOscillationLoop for scenarios (ADR-0098).
+
+    Caretaker loop that scans ConvergenceLedger entries held in StateTracker
+    and escalates cross-boundary oscillation to HITL once per issue.  Tests
+    seed a FakeGitHub via ``ports['github']``; the optional
+    ``convergence_oscillation_state`` port lets a scenario inject a pre-built
+    StateTracker mock when it needs to assert on ledger scanning or escalation.
+    """
+    from convergence_oscillation_loop import ConvergenceOscillationLoop  # noqa: PLC0415
+
+    state = ports.get("convergence_oscillation_state")
+    if state is None:
+        state = MagicMock()
+        state.iter_convergence_ledgers.return_value = []
+        state.mark_oscillation_escalated.return_value = None
+        ports["convergence_oscillation_state"] = state
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return ConvergenceOscillationLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        deps=deps,
+    )
+
+
+def _build_fitness_scorecard(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build FitnessScorecardLoop for scenarios (ADR-0093).
+
+    Read-only caretaker loop. Scenarios that need to assert on emitted
+    LOOP_FITNESS_UPDATE events can seed ``ports['fitness_issue_fetcher']``
+    with an async callable returning a list of IssueRecord-like objects.
+    The default is a no-op async function returning an empty list, which
+    is sufficient for smoke/wiring tests.
+    """
+    from fitness_scorecard_loop import FitnessScorecardLoop  # noqa: PLC0415
+
+    issue_fetcher = ports.get("fitness_issue_fetcher")
+    if issue_fetcher is None:
+
+        async def _no_issues() -> list:
+            return []
+
+        issue_fetcher = _no_issues
+        ports["fitness_issue_fetcher"] = issue_fetcher
+
+    return FitnessScorecardLoop(
+        config=config,
+        deps=deps,
+        issue_fetcher=issue_fetcher,
+    )
+
+
 _BUILDERS: dict[str, Any] = {
     # phase 1
     "ci_monitor": _build_ci_monitor,
@@ -1449,6 +1732,8 @@ _BUILDERS: dict[str, Any] = {
     "skill_prompt_eval": _build_skill_prompt_eval,
     "fake_coverage_auditor": _build_fake_coverage_auditor,
     "adr_touchpoint_auditor": _build_adr_touchpoint_auditor,
+    "adr_conformance": _build_adr_conformance,
+    "auto_tighten": _build_auto_tighten,
     "memory_backlog": _build_memory_backlog,
     "rc_budget": _build_rc_budget,
     "wiki_rot_detector": _build_wiki_rot_detector,
@@ -1469,7 +1754,12 @@ _BUILDERS: dict[str, Any] = {
     "cost_budget_watcher": _build_cost_budget_watcher_loop,
     # auto-agent (spec §1–§11; ADR-0050)
     "auto_agent_preflight": _build_auto_agent_preflight,
+    "detector_calibration": _build_detector_calibration,
     "sandbox_failure_fixer": _build_sandbox_failure_fixer,
+    # disturbance dampener burn-down actuator (ADR-0095, Pattern A)
+    "disturbance_dampener": _build_disturbance_dampener,
+    # human-on-the-loop continuous steering sensor (ADR-0099 #4)
+    "human_steering": _build_human_steering,
     # ubiquitous-language (ADR-0054 + ADR-0057 + ADR-0058 + ADR-0062)
     "edge_proposer": _build_edge_proposer,
     "entry_evidence": _build_entry_evidence,
@@ -1481,6 +1771,10 @@ _BUILDERS: dict[str, Any] = {
     "staging_promotion": _build_staging_promotion,
     # factory-phase drift mitigation (ADR-0063 W2)
     "triage_retry": _build_triage_retry,
+    # convergence oscillation escalation (ADR-0098)
+    "convergence_oscillation": _build_convergence_oscillation,
+    # loop fitness scorecard (ADR-0093)
+    "fitness_scorecard": _build_fitness_scorecard,
 }
 
 

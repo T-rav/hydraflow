@@ -827,6 +827,83 @@ class TestHandleLoopException:
         orch._pause_for_credits.assert_awaited_once_with(exc, "plan", tasks, factories)
 
     @pytest.mark.asyncio
+    async def test_pause_skipped_when_probe_says_credits_available(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """#9807: is_credit_exhaustion matches credit-error PROSE, so a diagnostic
+        run quoting a prior cap trips a false signal. If the live API probe says
+        credits are available, _pause_for_credits must NOT commit a global pause.
+        """
+        from subprocess_util import CreditExhaustedError
+
+        bus = EventBus()
+        orch = HydraFlowOrchestrator(config, event_bus=bus)
+        orch._cancel_all_loops_and_runners = AsyncMock()  # type: ignore[method-assign]
+        tasks: dict[str, asyncio.Task[None]] = {}
+        factories: list = [("plan", AsyncMock())]
+        exc = CreditExhaustedError("Your credit balance is too low")
+
+        with patch(
+            "orchestrator.probe_credit_availability",
+            AsyncMock(return_value=True),
+        ):
+            await orch._pause_for_credits(exc, "diagnostic", tasks, factories)
+
+        assert orch._credits_paused_until is None  # no pause committed
+        orch._cancel_all_loops_and_runners.assert_not_awaited()
+        alerts = [e for e in bus.get_history() if e.type == EventType.SYSTEM_ALERT]
+        assert any(
+            "not corroborated" in str(a.data.get("message", "")).lower() for a in alerts
+        )
+
+    @pytest.mark.asyncio
+    async def test_pause_proceeds_when_probe_confirms_exhaustion(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A real cap (probe returns False) still pauses."""
+        from subprocess_util import CreditExhaustedError
+
+        orch = HydraFlowOrchestrator(config)
+        orch._cancel_all_loops_and_runners = AsyncMock()  # type: ignore[method-assign]
+        orch._sleep_until_resume = AsyncMock()  # type: ignore[method-assign]
+        orch._resume_loops_after_credit_pause = AsyncMock()  # type: ignore[method-assign]
+        tasks: dict[str, asyncio.Task[None]] = {}
+        factories: list = [("plan", AsyncMock())]
+        exc = CreditExhaustedError("usage limit reached")
+
+        with patch(
+            "orchestrator.probe_credit_availability",
+            AsyncMock(return_value=False),
+        ):
+            await orch._pause_for_credits(exc, "plan", tasks, factories)
+
+        assert orch._credits_paused_until is not None  # pause committed
+        orch._cancel_all_loops_and_runners.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_probe_kill_switch_pauses_without_probing(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """credit_pause_require_probe=False reverts to pause-on-text (no probe)."""
+        from subprocess_util import CreditExhaustedError
+
+        object.__setattr__(config, "credit_pause_require_probe", False)
+        orch = HydraFlowOrchestrator(config)
+        orch._cancel_all_loops_and_runners = AsyncMock()  # type: ignore[method-assign]
+        orch._sleep_until_resume = AsyncMock()  # type: ignore[method-assign]
+        orch._resume_loops_after_credit_pause = AsyncMock()  # type: ignore[method-assign]
+        tasks: dict[str, asyncio.Task[None]] = {}
+        factories: list = [("plan", AsyncMock())]
+        exc = CreditExhaustedError("usage limit reached")
+        probe = AsyncMock(return_value=True)
+
+        with patch("orchestrator.probe_credit_availability", probe):
+            await orch._pause_for_credits(exc, "plan", tasks, factories)
+
+        probe.assert_not_awaited()  # kill-switch: probe skipped
+        assert orch._credits_paused_until is not None  # paused on text alone
+
+    @pytest.mark.asyncio
     async def test_generic_error_restarts_loop(self, config: HydraFlowConfig) -> None:
         """Generic exception should restart the crashed loop task."""
         bus = EventBus()

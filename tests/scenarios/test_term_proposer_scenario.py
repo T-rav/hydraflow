@@ -48,6 +48,12 @@ class TestTermProposerScenario:
         fake_llm.draft = AsyncMock(return_value=None)
 
         fake_pr_port = MagicMock()
+        fake_pr_port.find_open_bot_pr = AsyncMock(
+            return_value=None
+        )  # single-flight clear (#9893)
+        fake_pr_port.find_open_bot_pr = AsyncMock(
+            return_value=None
+        )  # single-flight clear (#9893)
         fake_pr_port.open_bot_pr = AsyncMock(return_value=0)
 
         _seed_ports(
@@ -90,6 +96,12 @@ class TestTermProposerScenario:
         fake_llm.draft = AsyncMock(return_value=valid_draft)
 
         fake_pr_port = MagicMock()
+        fake_pr_port.find_open_bot_pr = AsyncMock(
+            return_value=None
+        )  # single-flight clear (#9893)
+        fake_pr_port.find_open_bot_pr = AsyncMock(
+            return_value=None
+        )  # single-flight clear (#9893)
         fake_pr_port.open_bot_pr = AsyncMock(return_value=99)
 
         _seed_ports(

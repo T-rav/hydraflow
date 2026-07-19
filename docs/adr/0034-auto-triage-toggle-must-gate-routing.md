@@ -1,7 +1,8 @@
 # ADR-0034: Auto-Triage Toggle Must Gate Routing, Not Just Stat Tracking
 
 **Status:** Accepted
-**Enforced by:** tests/test_state_machine.py
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_state_machine.py
 **Date:** 2026-03-15
 
 ## Context

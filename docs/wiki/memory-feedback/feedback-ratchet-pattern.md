@@ -40,3 +40,5 @@ For retroactive convention enforcement (e.g. "no `AsyncMock(Port)` without `spec
 - Add fixture files to `pyproject.toml` `[tool.ruff.lint.per-file-ignores]` so ruff doesn't strip the intentional violations during `--fix`.
 - Pyright already excludes `tests/` (per `[tool.pyright]`), so synthetic-fixture noise is silenced.
 - **Edge cases the detector should silently skip rather than flag** when ambiguity exists — false negative > false positive for a ratchet (per Mock-spec spec §3 design).
+
+**Update (2026-07): generalized.** This ratchet pattern was generalized into the reusable **disturbance dampener** (ADR-0095): `src/disturbance/` + `tests/test_disturbance_ratchet.py`. The bespoke `tests/test_mock_spec_discipline.py` + `tests/_mock_spec_grandfathered.yaml` were retired; mock-spec discipline is now the `mock_spec` dimension (baseline in `disturbance/baselines/mock_spec.yaml`), alongside a `suppressions` dimension, with an automated burn-down loop planned (Phase B).

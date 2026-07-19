@@ -4,11 +4,16 @@ Tracks per-PR auto-fix attempts so the loop can cap retries and escalate
 to ``sandbox-hitl`` when the auto-agent fails to land a fix in
 ``auto_agent_max_attempts`` runs. Keys are stringified PR numbers (matches
 the JSON-friendly storage convention used by the other attempt counters).
+
+NOTE: sandbox_failure_fixer_attempts migrated to
+convergence_ledgers[str(pr_number)].stage_state["sandbox_fix"].attempts
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
+from models import ConvergenceLedger
 
 if TYPE_CHECKING:
     from models import StateData
@@ -23,22 +28,23 @@ class SandboxFailureFixerStateMixin:
 
     def get_sandbox_failure_fixer_attempts(self, pr_number: int) -> int:
         """Return the current attempt count for *pr_number* (0 if absent)."""
-        return int(self._data.sandbox_failure_fixer_attempts.get(str(pr_number), 0))
+        cl = self._data.convergence_ledgers.get(str(pr_number))
+        return cl.get_attempts("sandbox_fix") if cl else 0
 
     def bump_sandbox_failure_fixer_attempts(self, pr_number: int) -> int:
         """Increment and persist the attempt counter; return the new total."""
         key = str(pr_number)
-        current = int(self._data.sandbox_failure_fixer_attempts.get(key, 0))
-        attempts = dict(self._data.sandbox_failure_fixer_attempts)
-        attempts[key] = current + 1
-        self._data.sandbox_failure_fixer_attempts = attempts
+        cl = self._data.convergence_ledgers.get(key)
+        if cl is None:
+            cl = ConvergenceLedger(issue_number=pr_number)
+            self._data.convergence_ledgers[key] = cl
+        n = cl.increment_attempts("sandbox_fix")
         self.save()
-        return current + 1
+        return n
 
     def clear_sandbox_failure_fixer_attempts(self, pr_number: int) -> None:
         """Drop the counter for *pr_number* (e.g. after PR closure)."""
-        key = str(pr_number)
-        attempts = dict(self._data.sandbox_failure_fixer_attempts)
-        if attempts.pop(key, None) is not None:
-            self._data.sandbox_failure_fixer_attempts = attempts
+        cl = self._data.convergence_ledgers.get(str(pr_number))
+        if cl is not None and "sandbox_fix" in cl.stage_state:
+            cl.stage_state["sandbox_fix"].attempts = 0
             self.save()

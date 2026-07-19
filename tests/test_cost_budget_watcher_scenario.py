@@ -19,9 +19,11 @@ def _build_loop(*, cap: float | None = None):
         find_existing_issue=AsyncMock(return_value=0),
         create_issue=AsyncMock(return_value=0),
     )
+    config.cost_throttle_ratio = 0.0  # throttle tests opt in explicitly
     state = MagicMock()
     state.get_cost_budget_killed_workers = MagicMock(return_value=set())
     state.set_cost_budget_killed_workers = MagicMock()
+    state.get_cost_throttled_workers = MagicMock(return_value={})
     state.get_disabled_workers = MagicMock(return_value=set())
     deps = MagicMock()
     # Construct without bg_workers (chicken-and-egg per HealthMonitorLoop /
@@ -186,3 +188,44 @@ async def test_under_cap_no_close_when_no_open_issue() -> None:
         mock_rolling.return_value = {"total": {"cost_usd": 3.0}}
         await loop._do_work()
     pr.close_issue.assert_not_awaited()
+
+
+async def test_throttle_lifecycle_band_then_recovery() -> None:
+    """Full soft-throttle lifecycle: spend enters the band (stretch, priors
+    saved), stays (idempotent), drops below (exact restore) — detectors
+    stay ALIVE the whole time (no set_enabled calls)."""
+    loop, bg, pr, state = _build_loop(cap=10.0)
+    loop._config.cost_throttle_ratio = 0.8
+    bg.worker_intervals = {"repo_wiki": 900}
+    bg.get_interval = MagicMock(return_value=900)
+    priors_store: dict = {}
+    state.get_cost_throttled_workers = MagicMock(side_effect=lambda: dict(priors_store))
+    state.set_cost_throttled_workers = MagicMock(
+        side_effect=lambda p: (priors_store.clear(), priors_store.update(p))
+    )
+
+    with patch("cost_budget_watcher_loop.build_rolling_24h") as mock_rolling:
+        # Tick 1 — enter the band.
+        mock_rolling.return_value = {"total": {"cost_usd": 9.0}}
+        r1 = await loop._do_work()
+        assert r1["action"] == "throttled"
+        assert r1["newly_throttled"] > 0
+        bg.set_interval.assert_any_call("repo_wiki", 3600)
+        assert priors_store["repo_wiki"] == 900
+
+        # Tick 2 — still in the band: no re-stretch.
+        bg.set_interval.reset_mock()
+        r2 = await loop._do_work()
+        assert r2["action"] == "throttled"
+        assert r2["newly_throttled"] == 0
+        bg.set_interval.assert_not_called()
+
+        # Tick 3 — spend fell below the band: exact restore.
+        mock_rolling.return_value = {"total": {"cost_usd": 2.0}}
+        r3 = await loop._do_work()
+        assert r3["action"] == "unthrottled"
+        bg.set_interval.assert_any_call("repo_wiki", 900)
+        assert priors_store == {}
+
+    # The whole lifecycle never killed anything.
+    bg.set_enabled.assert_not_called()

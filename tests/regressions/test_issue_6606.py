@@ -60,6 +60,9 @@ def _make_loop(
     Returns (loop, runner_mock, prs_mock, state_mock).
     """
     deps = make_bg_loop_deps(tmp_path, enabled=True)
+    # DiagnosticLoop now defaults OFF (#9895); these tests exercise its _do_work
+    # logic, so enable the deploy-time kill-switch for the test config.
+    object.__setattr__(deps.config, "diagnostic_loop_enabled", True)
 
     runner = MagicMock()
     runner.diagnose = AsyncMock(return_value=_make_diagnosis())

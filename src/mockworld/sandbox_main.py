@@ -16,7 +16,7 @@ import signal
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from dashboard import HydraFlowDashboard
 from events import EventBus
@@ -38,6 +38,38 @@ from service_registry import (
     build_services,
     build_state_tracker,
 )
+
+if TYPE_CHECKING:
+    from config import HydraFlowConfig
+
+
+def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
+    """Turn off production code paths that reach services unreachable on the
+    air-gapped sandbox network (``internal: true`` in docker-compose.sandbox.yml).
+
+    The four primary LLM-backed runners (triage/plan/agent/review) are already
+    replaced with FakeLLM; these flags turn off the remaining external reachers,
+    which otherwise either hang for the full subprocess timeout or hard-fail:
+
+    - ``transcript_summarization``/``research``: secondary ``claude`` callers
+      (TranscriptSummarizer after each agent phase; ResearchRunner before each
+      plan phase) that hang ~30s on api_retry backoff before failing.
+    - ``contract_refresh_external``: ContractRefreshLoop's github/claude/docker
+      recorders reach the contracts-sandbox repo / api.anthropic.com / alpine
+      pull, each blocking up to the 120s subprocess timeout (s30).
+    - ``merge_policy`` (#9754): CH-3 ``enforce_merge_policy`` fetches PR labels
+      via a RAW ``gh pr view --json labels`` subprocess
+      (``merge_policy._fetch_pr_labels`` — deliberately not routed through
+      PRPort, so FakeGitHub never sees it). On the air-gapped network that gh
+      call runs against an empty ``config.repo``, falls back to git, and fails
+      with "not a git repository", so EVERY approved PR's merge raises and no
+      issue reaches the "merged" outcome (s01's happy path). The compliance
+      gate has its own unit tests; the sandbox exercises the pipeline.
+    """
+    config.transcript_summarization_enabled = False  # type: ignore[misc]
+    config.research_enabled = False  # type: ignore[misc]
+    config.contract_refresh_external_enabled = False  # type: ignore[misc]
+    config.merge_policy_enabled = False  # type: ignore[misc]
 
 
 def _load_seed() -> MockWorldSeed:
@@ -141,31 +173,9 @@ def _build_caretaker_enabled_cb(
 
 async def main() -> None:
     config = load_runtime_config()
-    # Sandbox-specific config overrides — disable downstream code paths
-    # that spawn real `claude` subprocesses. The sandbox is `internal: true`
-    # per docker-compose.sandbox.yml, so these subprocesses hang for ~30s
-    # of api_retry exponential backoff before failing with "unknown"
-    # network errors. With multiple parallel issues (s02_batch_three_issues)
-    # the cumulative hang exceeds the per-scenario 60s test timeout.
-    #
-    # The four primary LLM-backed runners (triage/plan/agent/review) are
-    # already overridden via `runners=fake_llm` below; these flags turn
-    # off the remaining secondary `claude` callers:
-    #
-    # - TranscriptSummarizer: spawns `claude` via subprocess_util.run_simple
-    #   after each agent phase to summarize the transcript.
-    # - ResearchRunner: spawns `claude` via _execute before each plan phase
-    #   to gather codebase context. PlanPhase._should_research() honors
-    #   this flag (see src/plan_phase.py).
-    config.transcript_summarization_enabled = False  # type: ignore[misc]
-    config.research_enabled = False  # type: ignore[misc]
-    # ContractRefreshLoop's github/claude/docker recorders reach external
-    # services (contracts-sandbox repo, api.anthropic.com, alpine pull) that
-    # are unreachable on the internal sandbox network; each blocks up to the
-    # 120s subprocess timeout, so the loop never emits its worker-status event
-    # within a scenario's window (s30). Skip them — only the local git
-    # recorder runs.
-    config.contract_refresh_external_enabled = False  # type: ignore[misc]
+    # Disable production code paths that reach services unreachable on the
+    # air-gapped sandbox network (see the helper for the per-flag rationale).
+    _apply_sandbox_config_overrides(config)
     seed = _load_seed()
     event_bus = EventBus()
     state = build_state_tracker(config)
@@ -198,6 +208,9 @@ async def main() -> None:
     # the seed.scripts payload. Without this, the sandbox would attempt
     # real LLM calls and fail under the air-gapped network.
     fake_llm = FakeLLM()
+    # Defaults to 0.0 (no-op) — see MockWorldSeed.plan_hold_seconds docstring
+    # for why a scenario (e.g. s52_human_steering_directive) might set this.
+    fake_llm.plan_hold_seconds = seed.plan_hold_seconds
     for phase, by_issue in seed.scripts.items():
         for issue_number, results in by_issue.items():
             getattr(fake_llm, f"script_{phase}")(issue_number, results)
@@ -217,6 +230,14 @@ async def main() -> None:
         for issue_number, payload in by_issue.items():
             _load_phase_script(fake_llm, phase_name, int(issue_number), payload)
 
+    # Pre-seed the auto-agent attempt counter (decompose-to-converge, ADR-0105).
+    # Lets s54 start an issue already at `auto_agent_max_attempts` so the
+    # decompose-or-escalate terminal fires on the first tick, instead of burning
+    # real auto-agent attempts to reach the cap. Empty for other scenarios.
+    for issue_number, count in seed.auto_agent_attempts.items():
+        for _ in range(count):
+            state.bump_auto_agent_attempts(int(issue_number))
+
     # Every async-touched ``subprocess.run`` site in production code now
     # specifies ``timeout=`` (PRs #8454, #8456, #8468 — enforced by
     # ``tests/regressions/test_async_subprocess_timeouts.py``), so caretaker
@@ -226,10 +247,15 @@ async def main() -> None:
     # gates caretaker-loop ``enabled_cb`` only; phase orchestrators consult
     # ``BGWorkerManager.is_enabled`` and are unaffected. See
     # ``_build_caretaker_enabled_cb`` docstring for full semantics.
+    # Caretaker-loop tick interval — default 60s (historical cadence); a long
+    # multi-hop scenario (s55) lowers it via the seed so its many pipeline stages
+    # advance fast enough for CI's slower runners. Bind the value now (loop late
+    # binding would otherwise capture the name, not the value).
+    _loop_interval = seed.sandbox_loop_interval
     callbacks = WorkerRegistryCallbacks(
         update_status=lambda *_a, **_kw: None,
         is_enabled=_build_caretaker_enabled_cb(seed.loops_enabled),
-        get_interval=lambda *_a, **_kw: 60,
+        get_interval=lambda *_a, _iv=_loop_interval, **_kw: _iv,
     )
 
     # FakeSubprocessRunner short-circuits every remaining shell-out to
@@ -286,6 +312,16 @@ async def main() -> None:
     expert_council = getattr(svc.shape_phase, "_council", None)
     if expert_council is not None:
         expert_council._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    # ShapeRunner post-dates the ``runners=fake_llm`` rebinding seam (which
+    # covers only triage/plan/implement/review), so build_services constructs
+    # a REAL one whose ``run_turn`` subprocess wedges the air-gapped sandbox
+    # exactly like the DiscoverRunner spawn (#9796 — froze the shape loop
+    # heartbeat once discover was unblocked). Drop it to None: ShapePhase's
+    # no-runner path posts stub Direction A/B options and the scripted
+    # ExpertCouncil (sentinel attached above) selects the direction —
+    # mirroring the Tier-1 in-process harness, which wires no shape runner
+    # either (tests/scenarios/fakes/mock_world.py).
+    svc.shape_phase._runner = None
     spec_reviewer = getattr(svc.implementer, "_spec_reviewer", None)
     if spec_reviewer is not None:
         spec_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
@@ -295,6 +331,13 @@ async def main() -> None:
     diagnostic_runner = getattr(svc.diagnostic_loop, "_runner", None)
     if diagnostic_runner is not None:
         diagnostic_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    # DecompositionCouncil (decompose-to-converge, ADR-0105): route its two
+    # seam calls (direction + validation) to scripted transcripts so a scenario
+    # (s54) can drive the decompose terminal deterministically. The council
+    # lives on the auto-agent loop when epic_manager/runner were wired.
+    decompose_council = getattr(svc.auto_agent_preflight_loop, "_council", None)
+    if decompose_council is not None:
+        decompose_council._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
 
     orch = HydraFlowOrchestrator(
         config,

@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING, Any
 from models import LoopResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
     from models import TranscriptEventData
 
@@ -111,13 +111,14 @@ class FakeAgent:
         *,
         on_output: Callable[[str], bool] | None = None,
         telemetry_stats: Mapping[str, object] | None = None,
+        issue_labels: Sequence[str] | None = None,
     ) -> str:
         """Return the next scripted transcript and record the call.
 
         When ``on_output`` is provided it is called once with the transcript
         text (mirrors the real ``AgentRunner.execute`` streaming behaviour).
         """
-        _ = (telemetry_stats,)
+        _ = (telemetry_stats, issue_labels)
         self.execute_calls.append((list(cmd), prompt, cwd, event_data))
 
         if self._exec_queue:

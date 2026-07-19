@@ -17,7 +17,8 @@ Sub-issues are registered two ways: formally as `EpicState` children and informa
 2. For each epic, collects sub-issue references by merging `EpicState.child_issues` and `parse_epic_sub_issues(body)` — both formal and checkbox refs are included.
 3. Skips epics with no sub-issues.
 4. For epics with sub-issues, fetches each referenced issue via `IssueFetcherPort`. If any sub-issue is still open (or not found), the epic is skipped this tick. If a sub-issue is missing from GitHub, the epic is skipped and a warning is logged prompting removal of the stale ref.
-5. When all sub-issues are closed: updates checkboxes via `check_all_checkboxes`, applies `config.fixed_label`, posts a completion comment, and closes the epic.
+4a. A closed sub-issue that was decomposed into a **replacement epic** (ADR-0105, nested decompose-to-converge) does not count as resolved on its own: `_try_sweep_epic` holds the parent open until that replacement epic itself closes (its GitHub state is the source of truth, exactly like every other sub-issue check). The gate chains, so a nested `E1 → E2 → E3` lineage converges level-by-level across successive sweeps rather than closing a parent whose real work is still in flight (PR #9761).
+5. When all sub-issues (including any replacement epics from step 4a) are closed: updates checkboxes via `check_all_checkboxes`, applies `config.fixed_label`, posts a completion comment, and closes the epic.
 
 Kill-switch: `enabled_cb("epic_sweeper")` and `config.epic_sweeper_loop_enabled` (ADR-0049).
 

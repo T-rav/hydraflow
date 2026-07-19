@@ -39,5 +39,5 @@ class TestPRReviewAdvisorPostVerifyFailsDegrades:
         result = await world.run_pipeline()
         outcome = result.issue(23)
         # Advisor was invoked (count == 1), got None → parse-error → APPROVE
-        assert world._llm.advisor_call_count_for("post_verify") == 1
+        assert world._llm.advisor_call_count_for("post_verify:correctness") == 1
         assert outcome.merged is True

@@ -22,6 +22,7 @@ areas:
       - EdgeProposerLoop
       - EntryEvidenceLoop
       - EpicMonitorLoop
+      - FitnessScorecardLoop
       - EpicSweeperLoop
       - GitHubCacheLoop
       - HealthMonitorLoop
@@ -68,7 +69,9 @@ areas:
       audit, flake tracker, corpus learning, fake coverage auditor,
       RC budget, meta-observability sanity.
     loops:
+      - AdrConformanceLoop
       - AdrTouchpointAuditorLoop
+      - AutoTightenLoop
       - ContractRefreshLoop
       - CorpusLearningLoop
       - FakeCoverageAuditorLoop
@@ -78,7 +81,9 @@ areas:
       - RCBudgetLoop
       - StagingBisectLoop
       - TrustFleetSanityLoop
-    related_adrs: ['0042', '0045', '0048', '0056']
+    ports:
+      - ConformanceRunnerPort
+    related_adrs: ['0042', '0045', '0048', '0056', '0100']
 
   hexagonal_boundaries:
     label: Hexagonal Boundaries
@@ -160,13 +165,20 @@ areas:
       before escalating to the same HITL queue Auto-Agent consumes.
     loops:
       - AutoAgentPreflightLoop
+      - DetectorCalibrationLoop
+      - DisturbanceDampenerLoop
+      - HumanSteeringLoop
       - SandboxFailureFixerLoop
       - TriageRetryLoop
+      - ConvergenceOscillationLoop
     modules:
       - src/auto_agent_preflight_loop.py
       - src/preflight/**
       - src/triage_retry_loop.py
-    related_adrs: ['0050', '0063']
+      - src/convergence_oscillation_loop.py
+      - src/human_steering_loop.py
+      - src/human_steering.py
+    related_adrs: ['0050', '0063', '0098', '0099']
 
   goal_driven_dev:
     label: Goal-Driven Development

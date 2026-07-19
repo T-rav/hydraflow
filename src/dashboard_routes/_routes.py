@@ -457,7 +457,10 @@ class RouteContext:
     registry: RepoRuntimeRegistry | None = None
     repo_store: RepoStore | None = None
     register_repo_cb: (
-        Callable[[Path, str | None], Awaitable[tuple[RepoRecord, HydraFlowConfig]]]
+        Callable[
+            [Path, str | None, str | None],
+            Awaitable[tuple[RepoRecord, HydraFlowConfig]],
+        ]
         | None
     ) = None
     remove_repo_cb: Callable[[str], Awaitable[bool]] | None = None
@@ -865,7 +868,7 @@ def create_router(
     registry: RepoRuntimeRegistry | None = None,
     repo_store: RepoStore | None = None,
     register_repo_cb: Callable[
-        [Path, str | None], Awaitable[tuple[RepoRecord, HydraFlowConfig]]
+        [Path, str | None, str | None], Awaitable[tuple[RepoRecord, HydraFlowConfig]]
     ]
     | None = None,
     remove_repo_cb: Callable[[str], Awaitable[bool]] | None = None,
@@ -1878,6 +1881,16 @@ def create_router(
     from dashboard_routes._metrics_routes import register as _register_metrics
 
     _register_metrics(router, ctx)
+
+    # --- Fitness routes (loop fitness scorecard read endpoint) ---
+    from dashboard_routes._fitness_routes import register as _register_fitness
+
+    _register_fitness(router, ctx)
+
+    # --- Conformance routes (ADR conformance scorecard read endpoint) ---
+    from dashboard_routes._conformance_routes import register as _register_conformance
+
+    _register_conformance(router, ctx)
 
     # --- Diagnostics routes (factory metrics + trace artifacts) ---
     from dashboard_routes._diagnostics_routes import build_diagnostics_router

@@ -11,6 +11,11 @@ the context map at
 [`../arch/generated/ubiquitous-language-context-map.md`](../arch/generated/ubiquitous-language-context-map.md).
 See [ADR-0053](../adr/0053-ubiquitous-language-as-living-artifact.md).
 
+New terms added 2026-06-30 (ADR-0093, `FitnessScorecardLoop`):
+- [`LoopFitness`](terms/loop-fitness.md) — value object returned by every loop's `loop_fitness()` call; carries kind, optional score, components, sample_count, confidence
+- [`FitnessScorecardLoop`](terms/fitness-scorecard.md) — read-only caretaker loop that produces the per-loop `LoopFitness` scorecard
+- [`FitnessContext`](terms/fitness-context.md) — frozen, data-only input to `loop_fitness()`; carries no live client (purity constraint)
+
 New terms added 2026-05-19 (wiki-gap backfill):
 - [`AgentPort`](terms/agent-port.md) — port for `AgentRunner` operations (dependency injection boundary for infra modules)
 - [`IssueFetcherPort`](terms/issue-fetcher-port.md) — port for GitHub issue fetching (two-method surface for domain code)
@@ -286,7 +291,7 @@ New terms added 2026-05-19 (wiki-gap backfill):
 - Never use git commit --no-verify or --no-hooks
 - StaleIssueLoop vs StaleIssueGCLoop — distinct scopes, zero business-logic overlap
 
-## Patterns (32)
+## Patterns (33)
 
 - Schema evolution with optional fields and type narrowing
 - Verify call sites before refactoring function signatures
@@ -321,6 +326,7 @@ New terms added 2026-05-19 (wiki-gap backfill):
 - Run and dev commands
 - Why memory/observation is harnessed, not autonomous
 - AdversarialRetryLoop pattern — shared contract for dissent stages
+- `LoopFitness` contract and AST ratchet (ADR-0093)
 
 ## Testing (34)
 

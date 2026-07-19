@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any, cast
 from models import BackgroundWorkerState
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from base_background_loop import BaseBackgroundLoop
     from config import HydraFlowConfig
     from state import StateTracker
@@ -33,6 +35,9 @@ class BGWorkerManager:
         self._bg_worker_states: dict[str, BackgroundWorkerState] = {}
         self._bg_worker_enabled: dict[str, bool] = {}
         self._bg_worker_intervals: dict[str, int] = {}
+        # Injected post-ctor by the orchestrator (chicken-and-egg with the
+        # supervisor's task dict) — mirrors HealthMonitor's set_bg_workers.
+        self._restart_cb: Callable[[str], Awaitable[bool]] | None = None
         self._seed_default_disabled_workers()
 
     @property
@@ -93,6 +98,54 @@ class BGWorkerManager:
         loop.trigger()
         return True
 
+    def set_restart_cb(self, cb: Callable[[str], Awaitable[bool]]) -> None:
+        """Inject the orchestrator's restart verb (post-ctor wiring)."""
+        self._restart_cb = cb
+
+    async def restart(self, name: str) -> bool:
+        """Cancel-and-recreate a loop task via the orchestrator's restart verb.
+
+        ``trigger`` wakes a *sleeping* loop; it cannot unstick one wedged on
+        an ``await`` mid-cycle. ``restart`` can — HealthMonitorLoop's
+        restart-first stall policy uses it before escalating to a human.
+        Returns ``False`` when unwired (minimal fixtures) or unknown *name*.
+        """
+        if self._restart_cb is None:
+            return False
+        return await self._restart_cb(name)
+
+    def registered_loop_names(self) -> set[str]:
+        """Names of workers backed by a registered ``BaseBackgroundLoop``.
+
+        Pipeline phases, the store poller, and other non-loop workers are
+        absent — their supervision semantics differ (no interval/watchdog
+        contract), so stall sweeps must not touch them.
+        """
+        return set(self._bg_loop_registry)
+
+    def cycle_timeout(self, name: str) -> int:
+        """Effective per-cycle watchdog bound for *name* (#9556 semantics).
+
+        Falls back to ``loop_watchdog_default_seconds`` for names without a
+        registered ``BaseBackgroundLoop``.
+        """
+        loop = self._bg_loop_registry.get(name)
+        if loop is None:
+            return self._config.loop_watchdog_default_seconds
+        return loop._cycle_timeout_seconds()
+
+    def run_started_at(self, name: str) -> datetime | None:
+        """When *name*'s current ``run()`` task started — ``None`` if unknown.
+
+        Stall sweeps compare against ``max(heartbeat, run_started_at)`` so a
+        freshly (re)created task with a stale persisted heartbeat (post
+        credit-pause / orchestrator restart) is never false-restarted.
+        """
+        loop = self._bg_loop_registry.get(name)
+        if loop is None:
+            return None
+        return loop._run_started_at
+
     def _restore_intervals(self, intervals: dict[str, int]) -> None:
         """Bulk-restore interval overrides (used during startup recovery)."""
         self._bg_worker_intervals.update(intervals)
@@ -140,6 +193,18 @@ class BGWorkerManager:
     def set_interval(self, name: str, seconds: int) -> None:
         """Set a dynamic interval override for a background worker."""
         self._bg_worker_intervals[name] = seconds
+        self._state.set_worker_intervals(dict(self._bg_worker_intervals))
+
+    def clear_interval(self, name: str) -> None:
+        """Remove a dynamic interval override and persist (no-op if absent).
+
+        The loop falls back to its own ``_get_default_interval()`` — used by
+        the cost-throttle recovery path to undo a stretch the operator never
+        asked for.
+        """
+        if name not in self._bg_worker_intervals:
+            return
+        del self._bg_worker_intervals[name]
         self._state.set_worker_intervals(dict(self._bg_worker_intervals))
 
     def get_interval(self, name: str) -> int:

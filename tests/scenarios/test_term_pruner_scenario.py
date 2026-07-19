@@ -63,6 +63,12 @@ class TestTermPrunerScenario:
         _seed_src(repo_root)
 
         fake_pr_port = MagicMock()
+        fake_pr_port.find_open_bot_pr = AsyncMock(
+            return_value=None
+        )  # single-flight clear (#9893)
+        fake_pr_port.find_open_bot_pr = AsyncMock(
+            return_value=None
+        )  # single-flight clear (#9893)
         fake_pr_port.open_bot_pr = AsyncMock(return_value=42)
 
         _seed_ports(
@@ -104,6 +110,12 @@ class TestTermPrunerScenario:
         dump_term_file(terms_root / "live-loop.md", live_term)
 
         fake_pr_port = MagicMock()
+        fake_pr_port.find_open_bot_pr = AsyncMock(
+            return_value=None
+        )  # single-flight clear (#9893)
+        fake_pr_port.find_open_bot_pr = AsyncMock(
+            return_value=None
+        )  # single-flight clear (#9893)
         fake_pr_port.open_bot_pr = AsyncMock(return_value=0)
 
         _seed_ports(

@@ -64,5 +64,5 @@ Key elements:
 - Superseded by: ADR-0009 (Multi-Repo Process-Per-Repo Model)
 - Source memory: #1615
 - Implementation: #1467
-- `src/orchestrator.py`, `src/state.py`, `src/issue_store.py`, `src/events.py`
-- `src/hf_cli/supervisor_service.py`
+- `src/orchestrator.py`, `src/state/__init__.py`, `src/issue_store.py`, `src/events.py`
+- Repo lifecycle now lives in `src/repo_runtime.py` (RepoRuntime) under one `server:main` process (the old `hf_cli/supervisor_service.py` TCP supervisor layer was removed).

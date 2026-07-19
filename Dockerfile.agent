@@ -73,7 +73,10 @@ RUN npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli @m
 
 # Install bd (beads) separately — its postinstall downloads a native binary
 # that needs the ICU compat symlinks from the base stage.
-RUN npm install -g @beads/bd --no-fund --no-audit
+# Pinned to 1.0.4: npm 1.0.5 is published but its v1.0.5 GitHub release asset
+# (beads_1.0.5_linux_amd64.tar.gz) was never created, so postinstall 404s.
+# Unpin once upstream publishes the v1.0.5 release asset. ref #9674
+RUN npm install -g @beads/bd@1.0.4 --no-fund --no-audit
 
 # Pre-clone Claude Code plugins into /opt/plugins/ (strip .git to save image space)
 RUN git clone --depth 1 https://github.com/anthropics/claude-plugins-official.git /opt/plugins/claude-plugins-official \

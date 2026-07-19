@@ -224,6 +224,49 @@ class TestPlanEpicGroup:
         assert len(gap_review_comments) == 0
 
     @pytest.mark.asyncio
+    async def test_gap_review_receives_child_issue_labels(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """run_gap_review gets the union of the reviewed children's labels.
+
+        The gap-review prompt embeds every successful child's plan, so the
+        CH-6 prompt gate must see a ``data-class:<class>`` elevation label
+        carried by ANY of those children (#9734 review finding 1).
+        """
+        phase, planners, prs, store, _stop = _make_phase(config)
+        children = [
+            _make_epic_child(id=10, title="Child A", epic_number=100),
+            _make_epic_child(id=11, title="Child B", epic_number=100),
+        ]
+        children[0].tags.append("data-class:regulated-phi")
+
+        planners.plan = AsyncMock(
+            side_effect=[
+                PlanResultFactory.create(
+                    issue_number=10, success=True, plan="Plan A", use_defaults=True
+                ),
+                PlanResultFactory.create(
+                    issue_number=11, success=True, plan="Plan B", use_defaults=True
+                ),
+            ]
+        )
+        planners.run_gap_review = AsyncMock(
+            return_value=(
+                "GAP_REVIEW_START\n"
+                "## Findings\nAll good.\n\n"
+                "## Re-plan Required\nNone\n\n"
+                "## Guidance\nNone needed.\n"
+                "GAP_REVIEW_END\n"
+            )
+        )
+
+        semaphore = asyncio.Semaphore(2)
+        await phase._plan_epic_group(100, children, semaphore)
+
+        labels = planners.run_gap_review.await_args.kwargs["issue_labels"]
+        assert "data-class:regulated-phi" in labels
+
+    @pytest.mark.asyncio
     async def test_replans_flagged_issues(self, config: HydraFlowConfig) -> None:
         """Gap review flags an issue for re-planning."""
         phase, planners, prs, store, _stop = _make_phase(config)

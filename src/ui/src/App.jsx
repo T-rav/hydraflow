@@ -10,16 +10,20 @@ import { StreamView } from './components/StreamView'
 import { SessionSidebar } from './components/SessionSidebar'
 import { AtlasExplorer } from './components/atlas/AtlasExplorer'
 import { ProjectView } from './components/ProjectView'
+import { LoopFitnessPanel } from './components/LoopFitnessPanel'
+import { AdrConformancePanel } from './components/AdrConformancePanel'
 import { theme } from './theme'
 import { canonicalRepoSlug } from './constants'
 
-const TABS = ['issues', 'hitl', 'outcomes', 'atlas', 'system']
+const TABS = ['issues', 'hitl', 'outcomes', 'atlas', 'loop-fitness', 'adr-conformance', 'system']
 
 const TAB_LABELS = {
   issues: 'Work Stream',
   outcomes: 'Outcomes',
   hitl: 'HITL',
   atlas: 'Atlas',
+  'loop-fitness': 'Loop Fitness',
+  'adr-conformance': 'ADR Conformance',
   system: 'System',
 }
 
@@ -99,9 +103,10 @@ function SystemAlertBanner({ alert, onDismiss, onRefreshCredit, onClearCredit })
 
   if (!alert) return null
   const resumeTime = formatResumeAt(alert.resume_at)
+  const isWarning = alert?.severity === 'warning'
   return (
-    <div style={styles.alertBanner}>
-      <span style={styles.alertIcon}>!</span>
+    <div style={isWarning ? styles.alertBannerWarning : styles.alertBanner}>
+      <span style={isWarning ? styles.alertIconWarning : styles.alertIcon}>!</span>
       <span>{alert.message}{resumeTime && ` Resumes at ${resumeTime}.`}</span>
       {alert.source && <span style={styles.alertSource}>Source: {alert.source}</span>}
       {refreshState === 'still_exhausted' && (
@@ -272,6 +277,8 @@ function AppContent() {
               : <div style={idleMessage}>Pipeline is not running — HITL actions are unavailable.</div>
           )}
           {activeTab === 'atlas' && <AtlasExplorer />}
+          {activeTab === 'loop-fitness' && <LoopFitnessPanel />}
+          {activeTab === 'adr-conformance' && <AdrConformancePanel />}
           {activeTab === 'system' && (
             <SystemPanel
               backgroundWorkers={backgroundWorkers}
@@ -378,6 +385,19 @@ const styles = {
     fontSize: 13,
     fontWeight: 600,
   },
+  // Warning (yellow) variant — benign alerts (e.g. a credit false positive
+  // that was suppressed), so it reads as informational, not critical.
+  alertBannerWarning: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '8px 16px',
+    background: theme.yellowSubtle,
+    borderBottom: `2px solid ${theme.yellow}`,
+    color: theme.yellow,
+    fontSize: 13,
+    fontWeight: 600,
+  },
   alertIcon: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -386,6 +406,19 @@ const styles = {
     height: 20,
     borderRadius: '50%',
     background: theme.red,
+    color: theme.white,
+    fontSize: 12,
+    fontWeight: 700,
+    flexShrink: 0,
+  },
+  alertIconWarning: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 20,
+    height: 20,
+    borderRadius: '50%',
+    background: theme.yellow,
     color: theme.white,
     fontSize: 12,
     fontWeight: 700,

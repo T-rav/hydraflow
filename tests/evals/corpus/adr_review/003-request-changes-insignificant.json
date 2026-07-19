@@ -1,0 +1,10 @@
+{
+  "name": "request-changes-insignificant-and-incomplete",
+  "adr_number": 73,
+  "adr_title": "Use 4-space indentation in Python files",
+  "adr_content": "# ADR-0073: Use 4-space indentation in Python files\n\n**Status:** Proposed\n\n## Context\n\nSome contributors use tabs and some use spaces.\n\n## Decision\n\nUse 4 spaces.\n\n## Consequences\n\nTBD.\n",
+  "index_context": "Existing ADRs (number: title [status]):\n- 0001: Five concurrent async loops [Accepted]\n- 0002: Labels as a state machine [Accepted]\n- 0003: Git worktrees for isolation [Accepted]\n- 0021: Persistence architecture and data layout [Accepted]\n- 0029: Caretaker loop pattern [Accepted]\n- 0042: Two-tier branch release promotion [Accepted]\n- 0045: Trust architecture hardening [Accepted]",
+  "duplicate_context": "No duplicate warnings.",
+  "expected_decision": "REQUEST_CHANGES",
+  "notes": "Below the ADR significance threshold: a lint-enforced formatting choice, not an architectural decision. It is also structurally incomplete: a one-line placeholder Context, a one-line Decision with no rationale or alternatives considered, and a 'TBD.' Consequences section. The pragmatist (significance) and editor (completeness) should push back, so the council should REQUEST_CHANGES rather than ACCEPT."
+}

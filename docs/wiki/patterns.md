@@ -454,3 +454,25 @@ Observability: `run_with_metrics()` returns per-invocation metrics that flow thr
 ```json:entry
 {"id":"01KRADV2026B0PHASE0001","title":"AdversarialRetryLoop pattern — shared contract for dissent stages","topic":null,"source_type":"compiled","source_issue":null,"source_repo":null,"created_at":"2026-05-17T00:00:00.000000+00:00","updated_at":"2026-05-17T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
+
+
+## `LoopFitness` contract and AST ratchet (ADR-0093)
+
+Every `BaseBackgroundLoop` subclass must implement `loop_fitness(self, ctx: FitnessContext) -> LoopFitness`. This is the bespoke-fitness contract on each loop, introduced in ADR-0093.
+
+**The purity constraint.** `loop_fitness()` must read only from `ctx`. No network calls, no clock reads, no mutable `self` state, no globals. `FitnessContext` is a frozen, data-only Pydantic model (window bounds, pre-filtered event history, issue snapshot, optional cost). Purity is the keystone: the same function can score live history now and replay candidate configs later in the deferred hill-climb optimizer — a live client call would silently score against today's repo instead of the historical snapshot.
+
+**Declaring the right kind.** Return `LoopFitness` with `kind=FitnessKind.SCORED` for loops with a meaningful 0–1 objective (proposer loops, auditor loops, monitor loops). Return `FitnessKind.HOUSEKEEPING` for maintenance-only loops (`WorkspaceGCLoop`, `DiagramLoop`, etc.) that have no acceptance lifecycle — this is a valid, explicit declaration, not a missing measurement. A `score` is never required; a declaration always is.
+
+**The no-leaderboard rule.** The normalized `score` field is valid for intra-loop trend tracking (this loop today vs. 30 days ago) and intra-loop config ranking (future optimizer). It is invalid to rank loops against each other. A GC loop reclaiming 12 branches is not "better" or "worse" than a proposer loop with 0.6 acceptance; the archetypes are incomparable by construction.
+
+**Confidence by `sample_count`.** `Confidence.OK` is only set when `sample_count >= min_samples` (default 20). Slow loops (daily cadence) legitimately sit in `INSUFFICIENT_DATA` for weeks — this is correct and deliberately keeps the future optimizer's hands off loops with thin evidence.
+
+**The AST ratchet.** `tests/test_loop_fitness_completeness.py` discovers every `BaseBackgroundLoop` subclass via AST and fails if `loop_fitness` is not defined directly on it (not just inherited). Existing loops before ADR-0093 are grandfathered by the default implementation on `BaseBackgroundLoop` itself. New loops cannot ship without an explicit override.
+
+**Why:** A fitness function that touches live state would corrupt the offline optimizer's replay. The ratchet prevents silent omission. The `HOUSEKEEPING` escape prevents garbage metrics for maintenance loops.
+
+
+```json:entry
+{"id":"01JZ9FK3C0M04HYR42BF44W0D4","title":"`LoopFitness` contract and AST ratchet (ADR-0093)","topic":null,"source_type":"compiled","source_issue":null,"source_repo":null,"created_at":"2026-06-30T00:00:00.000000+00:00","updated_at":"2026-06-30T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```

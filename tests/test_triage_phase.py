@@ -660,3 +660,55 @@ class TestBugReproducerNotPresentRouting:
         comment = prs.post_comment.call_args.args[1]
         assert "not present" in comment.lower() or "does not exist" in comment.lower()
         prs.transition.assert_not_called()
+
+
+class TestTriageConvergenceLedger:
+    """Triage phase records boundary verdicts into the ConvergenceLedger."""
+
+    @pytest.mark.asyncio
+    async def test_plan_routing_records_advance_verdict(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Issue triaged to 'plan' -> ledger stage_state['triage'].last_verdict == 'ADVANCE'."""
+        phase, state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(
+            id=101, title="Add pagination to the API", body="A" * 100
+        )
+
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=101,
+                ready=True,
+                clarity_score=9,
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        await phase.triage_issues()
+
+        ledger = state.get_convergence_ledger(101)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["triage"].last_verdict == "ADVANCE"
+
+    @pytest.mark.asyncio
+    async def test_parked_routing_records_loop_back_verdict(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Issue parked -> ledger stage_state['triage'].last_verdict == 'LOOP_BACK'."""
+        phase, state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(id=102, title="Fix the thing", body="")
+
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=102,
+                ready=False,
+                reasons=["Body is too short or empty (minimum 50 characters)"],
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        await phase.triage_issues()
+
+        ledger = state.get_convergence_ledger(102)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["triage"].last_verdict == "LOOP_BACK"

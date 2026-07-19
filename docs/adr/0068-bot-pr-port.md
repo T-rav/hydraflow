@@ -19,23 +19,31 @@ they actually use?).
 ## Decision
 
 Define `BotPRPort` as a local `Protocol` in `src/term_proposer_loop.py` with
-exactly one method:
+two narrow methods:
 
 ```python
 async def open_bot_pr(
     *, branch, title, body, labels, files
 ) -> int: ...
+
+async def find_open_bot_pr(*, labels) -> int | None: ...
 ```
 
 Production wiring provides a thin adapter that composes `PRPort.push_branch` +
-`PRPort.create_pr` + `PRPort.add_pr_labels` behind this single call. Tests
-pass a `MagicMock(spec=BotPRPort)` with `open_bot_pr` scripted to return a PR
-number. `TermPrunerLoop` imports `BotPRPort` from `term_proposer_loop` to
-avoid defining it twice.
+`PRPort.create_pr` + `PRPort.add_pr_labels` behind `open_bot_pr`. Tests
+pass a `MagicMock(spec=BotPRPort)` with these methods scripted. `TermPrunerLoop`
+imports `BotPRPort` from `term_proposer_loop` to avoid defining it twice.
+
+`find_open_bot_pr` was added by PR #9939 for the UL single-flight guard
+(`skip_if_family_pr_open`, #9893/#9890): it returns the newest open bot-PR
+carrying any of the given labels (or `None`) so a caretaker skips opening a
+duplicate while a sibling family PR is still open. The port stays minimal —
+two methods, not the 50+ of the full `PRPort` — so the interface's intent and
+light test surface are preserved.
 
 ## Consequences
 
-- Caretaker loop tests are lighter — only one method to script.
+- Caretaker loop tests are lighter — two methods to script (`open_bot_pr` + `find_open_bot_pr`), still far below the full `PRPort` surface.
 - The port is co-located with its primary consumer rather than cluttering `src/ports.py` with a very narrow interface.
 - Adding a new caretaker loop that opens bot-PRs should reuse `BotPRPort` from `term_proposer_loop` rather than defining a third Protocol.
 

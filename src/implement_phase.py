@@ -586,8 +586,8 @@ class ImplementPhase:
                 f"Error: {result.error or 'none'}",
                 stage=PipelineStage.IMPLEMENT,
             )
+        self._state.set_quality_fix_attempts(issue.id, result.quality_fix_attempts)
         meta: WorkerResultMeta = {
-            "quality_fix_attempts": result.quality_fix_attempts,
             "pre_quality_review_attempts": result.pre_quality_review_attempts,
             "duration_seconds": result.duration_seconds,
             "error": result.error,
@@ -631,6 +631,11 @@ class ImplementPhase:
             issue, branch, reset_for_retry=reset_for_retry
         )
 
+        # Human-on-the-loop continuous steering (ADR-0099 #4): fold live
+        # operator guidance into the prompt. Reference signal only — never
+        # blocking; empty when the feature is off or no guidance was posted.
+        human_guidance = self._state.get_human_steering(str(issue.id)).guidance or ""
+
         # Capture items.jsonl hash before agent runs (for outcome tracking)
         import hashlib  # noqa: PLC0415
 
@@ -670,6 +675,10 @@ class ImplementPhase:
             "worker_id": worker_id,
             "review_feedback": review_feedback,
             "prior_failure": prior_failure,
+            "human_guidance": human_guidance,
+            # Diverse-retry: the agent frames its strategy-delta directive
+            # as "attempt N of M" (rendered only when prior_failure is set).
+            "attempt_number": self._state.get_issue_attempts(issue.id),
         }
         if bead_mapping:
             run_kwargs["bead_mapping"] = bead_mapping

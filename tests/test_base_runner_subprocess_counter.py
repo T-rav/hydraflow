@@ -23,6 +23,9 @@ def _make_runner(tmp_path: Path) -> BaseRunner:
     config = MagicMock()
     config.data_root = tmp_path
     config.agent_timeout = 60
+    # CH-6 prompt gate reads the data class in _execute; the MagicMock default
+    # would fail closed as an unknown class, so pin the no-op class.
+    config.repo_data_class = "internal"
     event_bus = MagicMock()
     event_bus.current_session_id = None
     runner = MagicMock()

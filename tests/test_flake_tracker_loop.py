@@ -32,6 +32,8 @@ def loop_env(tmp_path: Path):
     state.inc_flake_attempts.return_value = 1
     pr_manager = AsyncMock()
     pr_manager.create_issue = AsyncMock(return_value=42)
+    pr_manager.list_issues_by_label = AsyncMock(return_value=[])
+    pr_manager.list_closed_issues_by_label = AsyncMock(return_value=[])
     dedup = MagicMock()
     dedup.get.return_value = set()
     return cfg, state, pr_manager, dedup
@@ -182,7 +184,7 @@ async def test_escalation_fires_after_three_attempts(loop_env, monkeypatch) -> N
     assert "flaky-test-stuck" in labels
 
 
-async def test_reconcile_closed_escalations_clears_dedup(loop_env, monkeypatch) -> None:
+async def test_reconcile_closed_escalations_clears_dedup(loop_env) -> None:
     cfg, state, pr, dedup = loop_env
     dedup.get.return_value = {"flake_tracker:tests.foo.test_bar"}
     stop = asyncio.Event()
@@ -190,19 +192,14 @@ async def test_reconcile_closed_escalations_clears_dedup(loop_env, monkeypatch) 
         config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
     )
 
-    class FakeProc:
-        returncode = 0
-
-        async def communicate(self):
-            return (
-                b'[{"title": "HITL: flaky test tests.foo.test_bar unresolved after 3 attempts"}]',
-                b"",
-            )
-
-    async def fake_subproc(*args, **kwargs):
-        return FakeProc()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    pr.list_closed_issues_by_label.return_value = [
+        {
+            "number": 9618,
+            "title": "HITL: flaky test tests.foo.test_bar unresolved after 3 attempts",
+            "body": "",
+            "updated_at": "",
+        }
+    ]
 
     await loop._reconcile_closed_escalations()
     dedup.set_all.assert_called_once()
@@ -292,6 +289,89 @@ async def test_recovery_skips_still_flaky_test(loop_env, monkeypatch) -> None:
 
     assert stats["resolved"] == 0
     pr.close_issue.assert_not_awaited()
+
+
+_STALE_ESCALATION = {
+    "number": 9618,
+    "title": "HITL: flaky test tests.foo.test_bar unresolved after 3 attempts",
+    "body": "",
+    "updated_at": "",
+}
+
+
+async def test_do_work_autocloses_stale_escalation(loop_env, monkeypatch) -> None:
+    """A test fixed by a later PR auto-closes its open `flaky-test-stuck`
+    escalation on the next completed tick (#9618 class). Discovery comes
+    from the escalation title, not the dedup key."""
+    cfg, state, pr, dedup = loop_env
+    dedup.get.return_value = {"flake_tracker:tests.foo.test_bar"}
+    # Escalated (attempts >= MAX) → the #9359 find-issue recovery path
+    # skips it; only the escalation issue is reconciled.
+    state.get_flake_attempts.return_value = 3
+    pr.find_existing_issue = AsyncMock(return_value=88)
+    pr.list_issues_by_label.return_value = [_STALE_ESCALATION]
+
+    async def all_pass(_run):
+        return {"tests.foo.test_bar": "pass", "tests.foo.test_ok": "pass"}
+
+    loop = _recovery_loop(loop_env, monkeypatch, download=all_pass)
+    stats = await loop._do_work()
+
+    pr.close_issue.assert_awaited_once_with(9618)
+    state.clear_flake_attempts.assert_called_once_with("tests.foo.test_bar")
+    assert stats["autoclosed"] == 1
+    remaining = dedup.set_all.call_args.args[0]
+    assert "flake_tracker:tests.foo.test_bar" not in remaining
+    # The escalated test's `flaky-test` find issue stays operator-owned.
+    assert stats["resolved"] == 0
+    pr.find_existing_issue.assert_not_awaited()
+
+
+async def test_do_work_keeps_escalation_for_still_flaky_test(
+    loop_env, monkeypatch
+) -> None:
+    """An escalation whose test is still flaky this window must survive."""
+    cfg, state, pr, dedup = loop_env
+    cfg.flake_threshold = 1
+    dedup.get.return_value = {"flake_tracker:tests.foo.test_bar"}
+    state.get_flake_attempts.return_value = 3
+    pr.list_issues_by_label.return_value = [_STALE_ESCALATION]
+
+    call = {"n": 0}
+
+    async def mixed(_run):
+        call["n"] += 1
+        # Mixed pass/fail record → still flaky per spec §4.5.
+        return {"tests.foo.test_bar": "fail" if call["n"] == 1 else "pass"}
+
+    loop = _recovery_loop(loop_env, monkeypatch, download=mixed)
+    stats = await loop._do_work()
+
+    pr.close_issue.assert_not_awaited()
+    state.clear_flake_attempts.assert_not_called()
+    assert stats["autoclosed"] == 0
+
+
+async def test_do_work_skips_open_reconcile_when_no_test_data(
+    loop_env, monkeypatch
+) -> None:
+    """Runs exist but every junit download came back empty: 'no data' is
+    indistinguishable from 'all tests healthy', so the open-escalation
+    re-verify is skipped entirely (active_subjects=None) and nothing closes."""
+    cfg, state, pr, dedup = loop_env
+    dedup.get.return_value = {"flake_tracker:tests.foo.test_bar"}
+    state.get_flake_attempts.return_value = 3
+    pr.list_issues_by_label.return_value = [_STALE_ESCALATION]
+
+    async def no_data(_run):
+        return {}
+
+    loop = _recovery_loop(loop_env, monkeypatch, download=no_data)
+    stats = await loop._do_work()
+
+    pr.close_issue.assert_not_awaited()
+    pr.list_issues_by_label.assert_not_awaited()
+    assert stats["autoclosed"] == 0
 
 
 @pytest.mark.asyncio
@@ -510,3 +590,46 @@ async def test_download_junit_only_malformed_xml_returns_empty(
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
     result = await loop._download_junit({"databaseId": 3})
     assert result == {}
+
+
+async def test_reconcile_open_round_trips_spaced_test_id(loop_env) -> None:
+    """Parametrized test_ids can contain spaces (pytest emits them verbatim
+    in JUnit names) — the title parser must capture the FULL id or a
+    still-flaky test's escalation false-closes and its 3-attempt budget
+    resets (escalation churn)."""
+    _cfg, _state, pr, _dedup = loop_env
+    spaced_id = "tests.scenarios.test_fixture[hello world]"
+    pr.list_issues_by_label.return_value = [
+        {
+            "number": 99,
+            "title": f"HITL: flaky test {spaced_id} unresolved after 3 attempts",
+            "body": "",
+            "updated_at": "",
+        }
+    ]
+    loop = _make_loop(loop_env)
+
+    # Still flaky — the escalation must survive.
+    closed = await loop._escalations.reconcile_open(active_subjects={spaced_id})
+    assert closed == 0
+    pr.close_issue.assert_not_awaited()
+
+
+async def test_reconcile_open_clears_exact_spaced_subject_on_close(
+    loop_env,
+) -> None:
+    _cfg, state, pr, _dedup = loop_env
+    spaced_id = "tests.scenarios.test_fixture[hello world]"
+    pr.list_issues_by_label.return_value = [
+        {
+            "number": 99,
+            "title": f"HITL: flaky test {spaced_id} unresolved after 3 attempts",
+            "body": "",
+            "updated_at": "",
+        }
+    ]
+    loop = _make_loop(loop_env)
+
+    closed = await loop._escalations.reconcile_open(active_subjects=set())
+    assert closed == 1
+    state.clear_flake_attempts.assert_called_once_with(spaced_id)

@@ -26,6 +26,35 @@ document.
 | **High blast radius** — still requires explicit consent | Force-push to the default branch. Delete a branch with un-merged work. Drop persisted data. Modify repo permissions, branch-protection rulesets, or repo-level settings. Send messages on behalf of the user (Slack, email, GitHub mentions). Merge a PR that the human operator hasn't approved AND the orchestrator's reviewer hasn't approved. | **Confirm before acting.** Surface the proposal, get explicit OK. |
 | **Authorial / scope** — needs alignment, not permission | New features, refactors, architectural changes. | **Brainstorm → spec → plan → TDD execute** per the existing workflow skills (`superpowers:brainstorming`, `writing-plans`, `subagent-driven-development`). Permission is implicit once the spec is approved; iteration on the plan does not need re-approval. |
 
+## Machine-readable policy (normative)
+
+The table above is **commentary**. The normative, enforced encoding of it
+lives in [`policy.yaml`](policy.yaml) (CH-3, #9731): machine-readable change
+classes that `src/merge_policy.py` consults at the factory's own autonomous
+merge seams (post-review Monitor merges, the PR unsticker, the bot-PR loop,
+epic bundle releases, RC promotion) before every merge. A `deny` verdict
+blocks the merge and escalates instead of merging; human/terminal merges are
+not intercepted (CH-2 approval records evidence those).
+
+Two writers, one set — the same pattern as ADRs: edit `policy.yaml` and this
+table **together**. Drift CI
+(`tests/architecture/test_factory_autonomy_policy_drift.py`) fails when a
+table row and a policy entry (matched on `readme_row`) don't line up in both
+directions, or when a row's Action direction disagrees with its entry's
+`autonomy`.
+
+Operational levers:
+
+- **Break-glass** — an operator attaches a `policy-override:<reason-slug>`
+  label to the PR; the merge proceeds and a `break_glass` record is appended
+  to the CH-2 approval-records audit chain (audited override, not a bypass).
+- **Kill-switch** — `merge_policy_enabled` (env
+  `HYDRAFLOW_MERGE_POLICY_ENABLED`, default true). While it is on, a missing
+  or unparseable `policy.yaml` fails CLOSED at the merge seams.
+- **Tightening** — adding `paths:` globs, `labels:`, `forbidden_actors`, or
+  stricter `required_approvals` to a class is a policy edit here plus its
+  table row, not a code change.
+
 ## How to act under the directive
 
 1. **Narrate before you act** — one short sentence stating the action and why.

@@ -1,0 +1,169 @@
+{
+  "repos": [],
+  "issues": [
+    {
+      "number": 1,
+      "title": "Too-broad stalled change",
+      "body": "A change that stalled and exhausted the auto-agent.",
+      "labels": [
+        "hitl-escalation",
+        "diagnose-failed"
+      ]
+    }
+  ],
+  "comments": {},
+  "prs": [],
+  "scripts": {
+    "decomposition": {
+      "1": [
+        "{\"epic_title\": \"Epic: split issue #1\", \"epic_body\": \"## Sub-issues\\n\\n- [ ] Child A\\n- [ ] Child B\", \"children\": [{\"title\": \"Child A\", \"body\": \"Child A body.\"}, {\"title\": \"Child B\", \"body\": \"Child B body.\"}], \"rationale\": \"Two independently shippable layers.\"}",
+        "{\"decision\": \"approve\", \"confidence\": \"high\", \"reasoning\": \"Sound split.\"}"
+      ],
+      "3": [
+        "{\"epic_title\": \"Epic: split the stalled child\", \"epic_body\": \"## Sub-issues\\n\\n- [ ] Grandchild A\\n- [ ] Grandchild B\", \"children\": [{\"title\": \"Grandchild A\", \"body\": \"Grandchild A body.\"}, {\"title\": \"Grandchild B\", \"body\": \"Grandchild B body.\"}], \"rationale\": \"Two independently shippable layers.\"}",
+        "{\"decision\": \"approve\", \"confidence\": \"high\", \"reasoning\": \"Sound split.\"}"
+      ]
+    },
+    "triage": {
+      "3": [
+        {
+          "ready": true
+        }
+      ],
+      "4": [
+        {
+          "ready": true
+        }
+      ],
+      "6": [
+        {
+          "ready": true
+        }
+      ],
+      "7": [
+        {
+          "ready": true
+        }
+      ]
+    },
+    "plan": {
+      "3": [
+        {
+          "success": true
+        }
+      ],
+      "4": [
+        {
+          "success": true
+        }
+      ],
+      "6": [
+        {
+          "success": true
+        }
+      ],
+      "7": [
+        {
+          "success": true
+        }
+      ]
+    },
+    "implement": {
+      "3": [
+        {
+          "success": true,
+          "branch": "hf/issue-3"
+        },
+        {
+          "success": true,
+          "branch": "hf/issue-3"
+        },
+        {
+          "success": true,
+          "branch": "hf/issue-3"
+        },
+        {
+          "success": true,
+          "branch": "hf/issue-3"
+        }
+      ],
+      "4": [
+        {
+          "success": true,
+          "branch": "hf/issue-4"
+        }
+      ],
+      "6": [
+        {
+          "success": true,
+          "branch": "hf/issue-6"
+        }
+      ],
+      "7": [
+        {
+          "success": true,
+          "branch": "hf/issue-7"
+        }
+      ]
+    },
+    "review": {
+      "3": [
+        {
+          "verdict": "request-changes",
+          "comments": [
+            "bad 1"
+          ]
+        },
+        {
+          "verdict": "request-changes",
+          "comments": [
+            "bad 2"
+          ]
+        },
+        {
+          "verdict": "request-changes",
+          "comments": [
+            "bad 3"
+          ]
+        }
+      ],
+      "4": [
+        {
+          "verdict": "approve",
+          "comments": []
+        }
+      ],
+      "6": [
+        {
+          "verdict": "approve",
+          "comments": []
+        }
+      ],
+      "7": [
+        {
+          "verdict": "approve",
+          "comments": []
+        }
+      ]
+    }
+  },
+  "advisor_scripts": {},
+  "phase_scripts": {},
+  "auto_agent_attempts": {
+    "1": 3,
+    "3": 3
+  },
+  "sandbox_loop_interval": 6,
+  "cycles_to_run": 30,
+  "loops_enabled": [
+    "diagnostic",
+    "auto_agent_preflight",
+    "epic_sweeper",
+    "github_cache"
+  ],
+  "main_branch_ci_status": [
+    "success",
+    ""
+  ],
+  "plan_hold_seconds": 0.0
+}

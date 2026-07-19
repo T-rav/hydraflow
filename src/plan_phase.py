@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from analysis import PlanAnalyzer
 from config import HydraFlowConfig
+from convergence_recording import record_stage_verdict, signatures_from_concerns
 from events import EventBus
 from exception_classify import reraise_on_credit_or_bug
 from harness_insights import FailureCategory, HarnessInsightStore
@@ -47,6 +48,7 @@ from src.spec_ac_generator import SpecACGenerator
 from src.spec_judge import JudgeResult, SpecJudge
 from state import StateTracker
 from task_source import TaskTransitioner
+from traceability import extract_req_id, missing_required_req_id
 from transcript_summarizer import TranscriptSummarizer
 
 if TYPE_CHECKING:
@@ -59,6 +61,16 @@ if TYPE_CHECKING:
     from wiki_compiler import CorroborationDecision, WikiCompiler  # noqa: TCH004
 
 logger = logging.getLogger("hydraflow.plan_phase")
+
+# Verdict map for ConvergenceLedger boundary recording (ADR-0096 / convergence gate).
+# "ADVANCE" = issue moves forward in the pipeline.
+# "LOOP_BACK" = issue failed planning and must re-enter the plan stage.
+# "ESCALATE" = issue is handed off to HITL.
+_PLAN_VERDICT_MAP: dict[str, str] = {
+    "success": "ADVANCE",
+    "failed": "LOOP_BACK",
+    "escalated": "ESCALATE",
+}
 
 # Minimum body length for auto-filed sub-issues discovered during planning.
 _MIN_ISSUE_BODY_CHARS: int = 50
@@ -474,6 +486,7 @@ class PlanPhase:
                     issue_title=issue.title,
                     duration_seconds=result.duration_seconds,
                     log_file=self._plan_log_reference(issue.id),
+                    issue_labels=issue.tags,
                 )
             except (RuntimeError, OSError):
                 logger.exception(
@@ -537,8 +550,32 @@ class PlanPhase:
         if diagram_attachments:
             diagram_section = f"\n\n## Architecture Diagrams\n\n{diagram_attachments}\n"
 
+        # CH-5 traceability: carry the requirement ID (req:<id> label or
+        # Req-ID: body line) into the plan comment immediately AFTER the
+        # "## Implementation Plan" heading, ABOVE the plan body. The
+        # implementer prompt extracts the plan from the heading up to the
+        # FIRST ^---$ line (AgentRunner._strip_plan_noise, agent.py) — a
+        # bare horizontal rule inside the plan body would sever anything
+        # placed below it, so the Req-ID must lead.
+        req_id = extract_req_id(labels=issue.tags, body=issue.body)
+        req_line = f"**Req-ID:** `{req_id}`\n\n" if req_id else ""
+        req_warning = ""
+        if missing_required_req_id(
+            labels=issue.tags,
+            body=issue.body,
+            regulated_labels=self._config.regulated_label_set(),
+        ):
+            req_warning = (
+                "> ⚠️ **Req-ID required:** this issue is in the regulated "
+                "change class but declares no requirement ID. Add a "
+                "`req:<id>` label or a `Req-ID:` line to the issue body so "
+                "the change is traceable in the requirements matrix.\n\n"
+            )
+
         comment_body = (
             f"## Implementation Plan\n\n"
+            f"{req_line}"
+            f"{req_warning}"
             f"{result.plan}\n\n"
             f"{diagram_section}"
             f"**Branch:** `{branch}`\n\n"
@@ -1042,6 +1079,7 @@ class PlanPhase:
                     issue_title=issue.title,
                     duration_seconds=result.duration_seconds,
                     log_file=self._plan_log_reference(issue.id),
+                    issue_labels=issue.tags,
                 )
             except (RuntimeError, OSError):
                 logger.exception(
@@ -1221,11 +1259,23 @@ class PlanPhase:
                             run_id=run_id,
                         )
                     )
+                    # Human-on-the-loop continuous steering (ADR-0099 #4):
+                    # fold live operator guidance into the plan prompt.
+                    # Reference signal only — never blocking; empty when
+                    # the feature is off or no guidance was posted for
+                    # this issue. Named `human_guidance` (not bare
+                    # `guidance`) to avoid colliding with the unrelated
+                    # `EpicGapReview.guidance` field used elsewhere in
+                    # this module.
+                    human_guidance = (
+                        self._state.get_human_steering(str(issue.id)).guidance or ""
+                    )
                     try:
                         result = await self._planners.plan(
                             issue,
                             worker_id=idx,
                             research_context=research_context,
+                            guidance=human_guidance,
                         )
                     finally:
                         self._planners.clear_tracing_context()
@@ -1303,6 +1353,15 @@ class PlanPhase:
                         else:
                             closed = await self._handle_already_satisfied(issue, result)
                             if closed:
+                                record_stage_verdict(
+                                    self._state,
+                                    issue_number=issue.id,
+                                    stage="plan",
+                                    decision="ADVANCE",
+                                    signatures=signatures_from_concerns(
+                                        adv.pending_concerns
+                                    ),
+                                )
                                 return result
                             # Evidence validation failed — escalate directly
                             # to HITL (do NOT fall through to _handle_plan_failure
@@ -1347,6 +1406,15 @@ class PlanPhase:
                         ts_status = "failed"
 
                     await self._post_plan_transcript(issue, result, status=ts_status)
+                    _verdict = _PLAN_VERDICT_MAP.get(ts_status)
+                    if _verdict is not None:
+                        record_stage_verdict(
+                            self._state,
+                            issue_number=issue.id,
+                            stage="plan",
+                            decision=_verdict,
+                            signatures=signatures_from_concerns(adv.pending_concerns),
+                        )
                     return result
 
     def _plan_one_with_context(
@@ -1431,6 +1499,12 @@ class PlanPhase:
             return results
 
         # Phase 2: gap review loop
+        # The gap-review prompt embeds every reviewed child's plan, so the
+        # CH-6 prompt gate must see the union of those children's labels
+        # (any data-class:<class> elevation on ANY child applies).
+        gap_review_labels = sorted(
+            {tag for c in children if c.id in plan_map for tag in c.tags}
+        )
         for iteration in range(1, max_iterations + 1):
             if self._stop_event.is_set():
                 break
@@ -1442,7 +1516,7 @@ class PlanPhase:
                 max_iterations,
             )
             transcript = await self._planners.run_gap_review(
-                epic_number, plan_map, title_map
+                epic_number, plan_map, title_map, issue_labels=gap_review_labels
             )
             review = self._parse_gap_review(transcript, epic_number)
 

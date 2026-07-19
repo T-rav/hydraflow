@@ -14,6 +14,11 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from issue_fetcher import IssueFetcher
+from merge_policy import (
+    ROLE_ORCHESTRATOR_REVIEWER,
+    MergeApproval,
+    enforce_merge_policy,
+)
 from models import (
     CIStatus,
     EpicChildInfo,
@@ -234,6 +239,25 @@ class EpicCompletionChecker:
                 continue
 
             if issue.state == GitHubIssueState.CLOSED:
+                # #9757 defense-in-depth: a decomposed child is closed the moment
+                # its replacement epic is created, but its work lives on there.
+                # Don't treat it as resolved until that replacement epic's GitHub
+                # issue closes — the same gate EpicSweeperLoop applies. This path
+                # (checker) is dormant when EpicManager is wired, but gating it
+                # keeps the nested-convergence invariant for any future caller.
+                replacement = (
+                    self._state.get_replacement_epic(issue_number)
+                    if self._state is not None
+                    else None
+                )
+                if replacement is not None:
+                    rep_issue = await self._fetcher.fetch_issue_by_number(
+                        replacement.epic_number
+                    )
+                    if rep_issue is not None and rep_issue.state != (
+                        GitHubIssueState.CLOSED
+                    ):
+                        return False
                 excluded_issues.append(issue_number)
                 logger.info(
                     "Sub-issue #%d closed without fixed label — treating as excluded "
@@ -1316,6 +1340,32 @@ class EpicManager:
                     # Halt on missing PR — bundle guarantee requires all PRs to merge
                     results.append({"issue": child_num, "status": "no_pr"})
                     halt_msg = f"no PR found for child #{child_num}; bundle halted"
+                elif not (
+                    policy_verdict := await enforce_merge_policy(
+                        config=self._config,
+                        prs=self._prs,
+                        pr_number=pr_number,
+                        actor="hydraflow:epic_release",
+                        approvals=[
+                            MergeApproval(
+                                actor=f"epic-{epic_number}",
+                                role=ROLE_ORCHESTRATOR_REVIEWER,
+                                source="epic_children_approved",
+                            )
+                        ],
+                        lane="epic_release",
+                    )
+                ).allowed:
+                    # CH-3 (#9731): the bundle only releases when every child
+                    # passed review (ready_to_merge) — that approval is this
+                    # lane's evidence. A policy deny halts the bundle.
+                    results.append(
+                        {"issue": child_num, "pr": pr_number, "status": "policy_denied"}
+                    )
+                    halt_msg = (
+                        f"merge policy denied child #{child_num} "
+                        f"(PR #{pr_number}): {policy_verdict.reason}; bundle halted"
+                    )
                 else:
                     merged = await self._prs.merge_pr(pr_number)
                     if merged:
@@ -1374,6 +1424,17 @@ class EpicManager:
                 parents.append(epic.epic_number)
         return parents
 
+    async def _propagate_epic_close(self, epic_number: int) -> None:
+        """When *epic_number* (a decompose replacement) closes, record its
+        superseded child completed in the parent epic and re-run the parent's
+        auto-close. on_child_completed → _try_auto_close → (if it closes the
+        parent) this helper again → recursion up the parent_epic chain until the
+        root (parent_epic None). Inert for every ordinary epic (#9757)."""
+        epic = self._state.get_epic_state(epic_number)
+        if epic is None or epic.parent_epic is None or epic.superseded_issue is None:
+            return
+        await self.on_child_completed(epic.parent_epic, epic.superseded_issue)
+
     async def _try_auto_close(self, epic_number: int) -> None:
         """Attempt to auto-close an epic if all children are resolved."""
         epic = self._state.get_epic_state(epic_number)
@@ -1392,6 +1453,7 @@ class EpicManager:
             self._state.close_epic(epic_number)
             await self._publish_update(epic_number, "closed")
             logger.info("Epic #%d auto-closed — all children resolved", epic_number)
+            await self._propagate_epic_close(epic_number)
             return
 
         if result is False:
@@ -1421,6 +1483,7 @@ class EpicManager:
         self._state.close_epic(epic_number)
         await self._publish_update(epic_number, "closed")
         logger.info("Epic #%d auto-closed — all children resolved", epic_number)
+        await self._propagate_epic_close(epic_number)
 
     def _is_stale(self, epic: EpicState) -> bool:
         """Return True if the epic has had no activity within the stale threshold."""

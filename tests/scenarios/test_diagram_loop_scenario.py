@@ -98,7 +98,11 @@ async def test_drift_opens_pr_with_correct_labels(tmp_path: Path, monkeypatch) -
     )
     assert "hydraflow-ready" in call_kwargs["labels"]
     assert "arch-regen" in call_kwargs["labels"]
-    assert call_kwargs["path_specs"] == ["docs/arch/generated", "docs/arch/.meta.json"]
+    assert call_kwargs["path_specs"] == [
+        "docs/arch/generated",
+        "docs/arch/.meta.json",
+        "disturbance/baselines/traceability.yaml",
+    ]
     assert callable(call_kwargs["generate"])
 
 

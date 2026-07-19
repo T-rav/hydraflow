@@ -19,17 +19,24 @@ The loop's external surfaces are handled as follows:
   / ``record_git`` / ``record_docker`` / ``record_claude_stream``)
   are monkey-patched on the loop's module via the builder's
   existing ``contract_refresh_record_*`` port seams.
-* :func:`auto_pr.open_automated_pr_async` is monkey-patched on the
-  loop's module via the new ``contract_refresh_auto_pr`` port seam
-  (mirrors the F1 corpus-learning pattern in
-  ``tests/scenarios/catalog/loop_registrations.py``).
+* :func:`auto_pr.generate_and_open_pr_async` (generate-in-worktree,
+  #9539) is monkey-patched on the ``auto_pr`` module via the
+  ``contract_refresh_auto_pr`` port seam (mirrors the F1 corpus-learning
+  pattern in ``tests/scenarios/catalog/loop_registrations.py``). The
+  ``generate`` callback is not invoked while the helper is mocked, so the
+  scenario asserts the call kwargs (branch, labels, path_specs, callable
+  generate) rather than written cassette bytes.
 * :func:`subprocess.run` (the replay gate) is monkey-patched at the
   module level for the drift scenario so the loop's
   ``make trust-contracts`` call does not spawn a real make.
 
 The committed cassette is written under ``config.repo_root / tests /
 trust / contracts / cassettes / git`` so the real
-:func:`contract_diff._committed_cassettes_for` can find it. Everything
+:func:`contract_diff._committed_cassettes_for` can find it. Under
+generate-in-worktree the loop never writes cassettes under
+``config.repo_root`` — it stages them into the worktree the PR helper
+hands its ``generate`` callback — so the scenario also asserts the
+committed cassette under ``repo_root`` is left untouched. Everything
 stays inside the MockWorld's ``tmp_path`` sandbox.
 """
 
@@ -230,10 +237,16 @@ class TestContractRefreshScenario:
         labels = kwargs["labels"]
         assert "contract-refresh" in labels
         assert "auto-merge" in labels
-        # The staged file lives under the loop's repo_root — not the
-        # ephemeral tmp/rec/git the recorder wrote to — because
-        # ``_stage_drifted_cassettes`` copies into the committed path.
-        files = [Path(p) for p in kwargs["files"]]
-        assert len(files) == 1
-        assert files[0].name == "commit.yaml"
-        assert files[0].is_relative_to(repo_root)
+        # Generate-in-worktree (#9539): no `files` kwarg — the helper gets a
+        # callable `generate` plus the drifted adapter's cassette dir in
+        # `path_specs`. The cassettes are written into the worktree by the
+        # callback (not invoked while the helper is mocked), never repo_root.
+        assert "files" not in kwargs
+        assert callable(kwargs["generate"])
+        assert kwargs["path_specs"] == ["tests/trust/contracts/cassettes/git"]
+
+        # repo_root is left untouched — the committed cassette still holds its
+        # original bytes; the refresh diff lives only in the torn-down worktree.
+        committed = repo_root / "tests/trust/contracts/cassettes/git/commit.yaml"
+        assert b"initial" in committed.read_bytes()
+        assert b"renamed" not in committed.read_bytes()

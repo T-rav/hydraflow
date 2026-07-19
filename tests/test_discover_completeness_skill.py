@@ -6,6 +6,7 @@ from discover_completeness import (
     build_discover_completeness_prompt,
     parse_discover_completeness_result,
 )
+from human_steering import fenced_steering_guidance
 
 
 class TestBuildDiscoverCompletenessPrompt:
@@ -53,6 +54,36 @@ class TestBuildDiscoverCompletenessPrompt:
             plan_text="ignored",
         )
         assert prompt  # didn't raise
+
+    def test_folds_fenced_human_steering_guidance(self):
+        """ADR-0099 #4 — live operator guidance is folded in FENCED.
+
+        This is the second of discover's two prompt-construction sites
+        (the first being ``DiscoverRunner._build_prompt``). Guidance must
+        reach the prompt only via ``fenced_steering_guidance`` — never as
+        raw comment text (ADR-0092 fence invariant).
+        """
+        guidance = "Prioritize the enterprise SSO angle over consumer features."
+        prompt = build_discover_completeness_prompt(
+            issue_number=1,
+            issue_title="T",
+            issue_body="b",
+            brief="b",
+            guidance=guidance,
+        )
+        assert "## Human Steering Guidance" in prompt
+        assert fenced_steering_guidance(guidance) in prompt
+
+    def test_empty_guidance_produces_no_steering_section(self):
+        """No guidance posted -> no steering section (unchanged behavior)."""
+        prompt = build_discover_completeness_prompt(
+            issue_number=1,
+            issue_title="T",
+            issue_body="b",
+            brief="b",
+            guidance="",
+        )
+        assert "## Human Steering Guidance" not in prompt
 
 
 class TestParseDiscoverCompletenessResult:
