@@ -20,9 +20,10 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
+from typing import TypeGuard
 
 
-def is_real_pid(pid: object) -> bool:
+def is_real_pid(pid: object) -> TypeGuard[int]:
     """True only for a genuine positive integer pid.
 
     ``bool`` is excluded explicitly (``True`` is an ``int`` and passes a

@@ -386,6 +386,7 @@ but every bug fix from today forward lands with a regression test.
 | P10.3 | CULTURAL | docs/wiki/testing.md | Bug-fix commits land with a regression test in `tests/regressions/` | Audit scans last 50 merged PRs tagged `bug`/`fix`; reports PRs missing a regression-test delta as a warning |
 | P10.4 | STRUCTURAL | docs/wiki/testing.md | Test names describe behaviour, not implementation (e.g. `test_merges_when_all_checks_pass` not `test_merge_function`) | Enforce via a test-name linter or review rubric; audit samples names and flags ones matching `test_<funcname>$` |
 | P10.5 | BEHAVIORAL | docs/wiki/testing.md | Test files use the Arrange / Act / Assert structure visibly | Prefer factories + one assertion per test; multi-assert tests are a smell |
+| P10.6 | BEHAVIORAL | docs/wiki/testing.md | A `fix(...)` PR carries a regression-test delta in its own diff — `tests/regressions/`, or a `src/ui` test delta for UI-only fixes; a `Skip-Regression: <justification>` commit trailer opts out with a greppable reason | Per-PR audit gate diffs the PR against its merge base and fails only the offending PR; the P10.3 history scan stays telemetry |
 
 ## Consequences
 

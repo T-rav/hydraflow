@@ -51,7 +51,23 @@ def _run_one(spec: CheckSpec, ctx: CheckContext) -> Finding:
     return result
 
 
+# Telemetry checks measure the CODEBASE, not the change under test —
+# ADR-0044 words P10.3 as "reports ... as a warning", and its history scan
+# runs in every open PR's CI, so its WARN blamed unrelated PRs and forced
+# consent-gated baseline advances for compliant work (#9902). Their WARN is
+# reported but never flips the exit code; per-PR enforcement is P10.6.
+TELEMETRY_CHECKS = frozenset({"P10.3"})
+
+
 def overall_exit_code(findings: list[Finding]) -> int:
-    """0 if every finding is PASS or NA; 1 otherwise."""
+    """0 if every finding is PASS/NA (or a telemetry WARN); 1 otherwise."""
     bad = {Status.FAIL, Status.WARN, Status.NOT_IMPLEMENTED}
-    return 1 if any(f.status in bad for f in findings) else 0
+    return (
+        1
+        if any(
+            f.status in bad
+            and not (f.check_id in TELEMETRY_CHECKS and f.status is Status.WARN)
+            for f in findings
+        )
+        else 0
+    )
