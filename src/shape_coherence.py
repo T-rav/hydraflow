@@ -37,6 +37,13 @@ def build_shape_coherence_prompt(
     when there is no guidance so behavior is unchanged when the feature
     is off.
     """
+    if not proposal.strip():
+        # No Shape proposal exists (#9823): issues that skipped Shape must
+        # not fail a rubric over an absent document. Empty prompt = the
+        # skill loop's "no input data" pass; ShapeRunner always supplies a
+        # real proposal, unchanged.
+        return ""
+
     prompt = f"""You are running the Shape Coherence skill for issue #{issue_number}: {issue_title}.
 
 You are evaluating a SHAPE PROPOSAL against the five-criterion rubric
