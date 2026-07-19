@@ -136,3 +136,20 @@ def test_tripwire_rejects_bundled_foreign_file_creation() -> None:
     )
     reasons = check_tripwires(patch, "diff-sanity", Path.cwd())
     assert any("only" in r and mod in r for r in reasons)
+
+
+def test_tripwire_rejects_bundled_empty_file_creation_no_hunk() -> None:
+    """A brand-new EMPTY file carries no ---/+++ lines at all — git omits the
+    hunk entirely for a zero-byte file, leaving only the `diff --git` header.
+    This is the truly-invisible creation shape (unlike a `+++ b/`-bearing
+    creation, which the old regex already caught) (#9724)."""
+    from prompt_refiner import SKILL_BUILDER_MODULES, check_tripwires
+
+    mod = SKILL_BUILDER_MODULES["diff-sanity"]
+    patch = (
+        f"--- a/{mod}\n+++ b/{mod}\n@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/tests/trust/empty_new_file.txt b/tests/trust/empty_new_file.txt\n"
+        "new file mode 100644\nindex 0000000..e69de29\n"
+    )
+    reasons = check_tripwires(patch, "diff-sanity", Path.cwd())
+    assert any("tests/trust" in r for r in reasons)
