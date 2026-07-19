@@ -374,10 +374,11 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
         f"expected merged=True; outcome={result.issue(1)!r}; "
         f"docker_invocations={len(world.docker.invocations)}"
     )
-    # Exactly 9 FakeDocker invocations:
-    # 1 agent + 3 skills + 2 pre-quality + 1 make-quality-fail + 1 fix-agent +
-    # 1 make-quality-pass
-    assert len(world.docker.invocations) >= 9
+    # FakeDocker invocations:
+    # 1 agent + 2 skills + 2 pre-quality + 1 make-quality-fail + 1 fix-agent +
+    # 1 make-quality-pass = 8. (Was 9: discover-completeness no longer spends
+    # a subprocess turn when no Discover brief exists — #9817.)
+    assert len(world.docker.invocations) >= 8
 
 
 async def test_A11_review_fix_ci_loop_resolves(tmp_path) -> None:
