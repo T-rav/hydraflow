@@ -17,6 +17,12 @@ on:
       - 'tests/scenarios/fakes/**'
       - 'tests/architecture/**'
 
+# Least-privilege GITHUB_TOKEN (code-scanning alert #103): this workflow only
+# reads the checkout to run drift checks — it never pushes, comments, or opens
+# PRs — so read-only contents access is sufficient.
+permissions:
+  contents: read
+
 jobs:
   arch-check:
     runs-on: ubuntu-latest
