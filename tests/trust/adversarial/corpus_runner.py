@@ -22,7 +22,9 @@ skill's ``result_parser``, and decides a per-case ``status``:
 The pytest harness asserts on this; the loop diffs ``PASS -> FAIL`` per case to
 detect skill-prompt drift. Run ``python corpus_runner.py --json`` to emit the
 loop-facing result list (``[{case_id, skill, status, provenance,
-expected_catcher}, ...]``) on stdout.
+expected_catcher, summary}, ...]``) on stdout. ``summary`` carries the failing
+run's transcript summary — the refiner reads it as the failure transcript, so
+the slim projection must include it (empty string when a branch produced none).
 """
 
 from __future__ import annotations
@@ -368,6 +370,11 @@ def main(argv: list[str] | None = None) -> int:
                 "status": r["status"],
                 "provenance": r["provenance"],
                 "expected_catcher": r["expected_catcher"],
+                # The loop reads this as the failure transcript fed to the
+                # refiner (`case.get("summary","")`); omitting it left the
+                # production refine context permanently blank. `.get` is
+                # shape-safe — the `--live-skill` branch omits `summary`.
+                "summary": r.get("summary", ""),
             }
             for r in results
         ]

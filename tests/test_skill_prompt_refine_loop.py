@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -222,6 +223,60 @@ async def test_try_refine_unknown_skill_is_error(refine_loop_factory) -> None:
     case["skill"] = "not-a-real-skill"
     assert await loop._try_refine(case) == "error"
     assert loop._state.get_skill_prompt_attempts("accidental-deletion") == 1
+
+
+def _plan_compliance_case() -> dict[str, object]:
+    """A drift case for a skill that HAS a builder module but NO held-out
+    honeypot coverage — refinable-gate stand-in (`plan-compliance` is in
+    `SKILL_BUILDER_MODULES` but not `REFINABLE_SKILLS`)."""
+    return {
+        "case_id": "plan-drift-case",
+        "skill": "plan-compliance",
+        "expected_catcher": "plan-compliance",
+        "status": "FAIL",
+    }
+
+
+async def test_try_refine_non_honeypot_skill_is_not_refinable(
+    refine_loop_factory,
+) -> None:
+    """A skill with a builder module but no held-out honeypots
+    (`plan-compliance`) is `not_refinable`: the overfit guard can't run, so we
+    refuse to auto-refine. Unlike an unknown-skill `error`, it is benign — no
+    LLM synthesis call, no repair attempt burned, no drift-issue comment
+    (#9724 final-review F2)."""
+    llm = _FakeRefineLLM(GOOD_PATCH)
+    loop = refine_loop_factory(llm=llm)
+    assert await loop._try_refine(_plan_compliance_case()) == "not_refinable"
+    assert llm.calls == []  # gated before synthesis
+    assert loop._state.get_skill_prompt_attempts("plan-drift-case") == 0
+    loop._pr.post_comment.assert_not_awaited()
+
+
+async def test_do_work_not_refinable_single_attempt_from_drift_branch(
+    refine_loop_factory, monkeypatch
+) -> None:
+    """End-to-end: a `plan-compliance` PASS->FAIL regression files its drift
+    issue and bumps the repair-attempt counter EXACTLY ONCE — the `_do_work`
+    drift branch. `_try_refine`'s `not_refinable` outcome adds no second
+    increment (contrast `test_do_work_refine_failure_double_increments_
+    attempts`) (#9724 final-review F2)."""
+    llm = _FakeRefineLLM(GOOD_PATCH)
+    loop = refine_loop_factory(llm=llm)
+    loop._pr.list_issues_by_label = AsyncMock(return_value=[])
+    loop._pr.list_closed_issues_by_label = AsyncMock(return_value=[])
+    loop._state.set_skill_prompt_last_green({"plan-drift-case": "PASS"})
+
+    async def fake_run_corpus() -> list[dict]:
+        return [_plan_compliance_case()]
+
+    monkeypatch.setattr(loop, "_run_corpus", fake_run_corpus)
+
+    stats = await loop._do_work()
+
+    assert stats["filed"] == 1
+    assert llm.calls == []
+    assert loop._state.get_skill_prompt_attempts("plan-drift-case") == 1
 
 
 async def test_try_refine_proposed_records_and_opens_pr(
@@ -613,3 +668,51 @@ async def test_do_work_iterates_pick_refine_order_not_raw_corpus_order(
     await loop._do_work()
 
     assert processed_order == ["case_b", "case_a"]
+
+
+# ---------------------------------------------------------------------------
+# `_all_required_pass` — the honeypot validation gate's pure result-parsing
+# core, factored out of `_validate_candidate` so it can be unit-tested without
+# the corpus-runner subprocess. It must FAIL CLOSED on every degenerate shape:
+# never ship a candidate we could not positively prove (#9724 final-review F3).
+# ---------------------------------------------------------------------------
+
+
+def test_all_required_pass_holdout_fail_is_false() -> None:
+    """A held-out honeypot regressed to FAIL in the results -> never ship."""
+    results = json.dumps(
+        [
+            {"case_id": "accidental-deletion", "status": "PASS"},
+            {"case_id": "holdout-trap", "status": "FAIL"},
+        ]
+    )
+    assert skill_prompt_eval_loop._all_required_pass(results) is False
+
+
+def test_all_required_pass_all_skipped_is_false() -> None:
+    """An all-SKIPPED result set proves nothing -> empty non-SKIPPED set fails
+    closed."""
+    results = json.dumps(
+        [
+            {"case_id": "a", "status": "SKIPPED"},
+            {"case_id": "b", "status": "SKIPPED"},
+        ]
+    )
+    assert skill_prompt_eval_loop._all_required_pass(results) is False
+
+
+def test_all_required_pass_malformed_json_is_false() -> None:
+    """Non-JSON stdout (a wedged/garbled subprocess) fails closed."""
+    assert skill_prompt_eval_loop._all_required_pass("not json {{{") is False
+
+
+def test_all_required_pass_mixed_pass_and_skipped_is_true() -> None:
+    """A PASS on every non-SKIPPED case, with irrelevant SKIPPED cases mixed
+    in, is the shipping shape -> True."""
+    results = json.dumps(
+        [
+            {"case_id": "accidental-deletion", "status": "PASS"},
+            {"case_id": "unrelated-skill-case", "status": "SKIPPED"},
+        ]
+    )
+    assert skill_prompt_eval_loop._all_required_pass(results) is True

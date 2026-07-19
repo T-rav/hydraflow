@@ -48,6 +48,28 @@ def test_no_holdout_content_reachable_via_context() -> None:
             assert trap.name not in ctx
 
 
+def test_discover_validation_ids_superset_of_every_holdout() -> None:
+    """Cross-check the two INDEPENDENT HOLDOUT scans against each other:
+    `discover_validation_case_ids` (prompt_refiner's WORKTREE-dir scan, used to
+    build the live `--cases` validation set) must be a SUPERSET of every case
+    the corpus_runner's own `is_holdout` scan flags — plus the regressed id.
+    If the two ever drift, a synthesized patch could ship without re-proving a
+    honeypot the synthesizer never saw (#9724 final-review F3)."""
+    from prompt_refiner import discover_validation_case_ids
+
+    holdout_ids = {c.name for c in discover_cases(CASES_DIR) if is_holdout(c)}
+    assert holdout_ids, "seed holdout cases missing"
+
+    # A committed non-holdout diff-sanity catcher case stands in for "the
+    # regressed case" the validation set must always carry.
+    regressed = "missing-import"
+    assert (CASES_DIR / regressed).is_dir(), "committed corpus case missing"
+
+    ids = set(discover_validation_case_ids(CASES_DIR, regressed))
+    assert holdout_ids <= ids, f"validation set missed holdouts: {holdout_ids - ids}"
+    assert regressed in ids
+
+
 def test_parse_patch_response_extracts_diff_fence() -> None:
     text = "reasoning...\n```diff\n--- a/src/diff_sanity.py\n+++ b/src/diff_sanity.py\n@@ -1 +1 @@\n-a\n+b\n```\ndone"
     assert parse_patch_response(text).startswith("--- a/src/diff_sanity.py")

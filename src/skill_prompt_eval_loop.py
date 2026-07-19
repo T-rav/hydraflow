@@ -44,6 +44,7 @@ from prompt_efficiency import (
 )
 from prompt_refiner import (
     PROMPT_LENGTH_DRIFT_LIMIT,
+    REFINABLE_SKILLS,
     SKILL_BUILDER_MODULES,
     assemble_refine_context,
     check_tripwires,
@@ -208,6 +209,31 @@ async def _assert_only_module_changed(worktree: Path, module_rel: str) -> None:
             f"found {sorted(touched)!r}"
         )
         raise RuntimeError(msg)
+
+
+def _all_required_pass(results_json: str) -> bool:
+    """True iff every non-SKIPPED result in *results_json* is PASS.
+
+    The honeypot validation gate's pure result-parsing core, factored out of
+    :meth:`SkillPromptEvalLoop._validate_candidate` so it can be unit-tested
+    without the corpus-runner subprocess plumbing. Fails CLOSED on every
+    degenerate shape — malformed/non-JSON stdout, a non-list payload, an empty
+    result set, or an all-SKIPPED set all return ``False``. A candidate we
+    could not positively prove passed the regressed case + 100% of holdouts +
+    benign sentinels must never ship.
+    """
+    try:
+        results = json.loads(results_json or "[]")
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(results, list):
+        return False
+    non_skipped = [
+        r for r in results if isinstance(r, dict) and r.get("status") != "SKIPPED"
+    ]
+    if not non_skipped:
+        return False
+    return all(r.get("status") == "PASS" for r in non_skipped)
 
 
 class _RefineLLM(Protocol):
@@ -638,12 +664,14 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
     async def _try_refine(self, case: dict[str, Any]) -> str:
         """Drift-triggered skill-prompt self-refinement.
 
-        Returns one of
-        ``proposed | capped | disabled | tripwire | validation_failed | error``.
-        On any outcome other than ``proposed``/``disabled``/``capped`` the case's
+        Returns one of ``proposed | capped | disabled | not_refinable |
+        tripwire | validation_failed | error``. On any outcome other than
+        ``proposed``/``disabled``/``capped``/``not_refinable`` the case's
         repair-attempt counter is bumped and the outcome is noted on the open
         drift issue, so a stuck auto-refine still walks the case toward HITL
-        escalation. Refinement failure is fully contained here — it never
+        escalation. ``not_refinable`` (a skill with no held-out honeypot
+        coverage) is benign like ``disabled``/``capped``: no attempt burned,
+        nothing commented. Refinement failure is fully contained here — it never
         propagates into the drift-issue flow that invoked it. That containment
         covers the outcome bookkeeping too: a PR-API hiccup while bumping the
         attempt counter or commenting the outcome must not escape and abort
@@ -656,7 +684,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             reraise_on_credit_or_bug(exc)
             logger.warning("refine crashed for %s: %s", case_id, exc)
             outcome = "error"
-        if outcome not in ("proposed", "disabled", "capped"):
+        if outcome not in ("proposed", "disabled", "capped", "not_refinable"):
             try:
                 attempts = self._state.inc_skill_prompt_attempts(case_id)
                 await self._comment_refine_outcome(case, outcome, attempts)
@@ -670,6 +698,31 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                 )
         return outcome
 
+    @staticmethod
+    def _refine_skill_eligibility(skill_name: str) -> str | None:
+        """Non-shipping early outcome if *skill_name* can't be auto-refined,
+        else ``None`` (it may proceed to synthesis).
+
+        ``error`` — no builder module registered at all (an unknown catcher
+        name; a misconfiguration worth a repair attempt + drift comment).
+        ``not_refinable`` — a known builder skill whose corpus carries no
+        held-out honeypots yet: the overfit guard auto-refinement relies on
+        (validate against 100% of holdouts) cannot run, so we never auto-merge
+        a candidate we can't prove didn't overfit. Benign, distinct from
+        ``error`` — it burns no repair attempt and posts no drift comment
+        (the drift issue was already filed by the normal flow).
+        """
+        if skill_name not in SKILL_BUILDER_MODULES:
+            logger.warning("refine: no builder module registered for %r", skill_name)
+            return "error"
+        if skill_name not in REFINABLE_SKILLS:
+            logger.info(
+                "refine: %r has no held-out honeypot coverage — not refinable",
+                skill_name,
+            )
+            return "not_refinable"
+        return None
+
     async def _compute_refine_outcome(self, case: dict[str, Any]) -> str:
         cfg = self._config
         if not cfg.skill_prompt_refine_enabled:
@@ -681,9 +734,9 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         ):
             return "capped"
         skill_name = str(case.get("expected_catcher") or case.get("skill") or "")
-        if skill_name not in SKILL_BUILDER_MODULES:
-            logger.warning("refine: no builder module registered for %r", skill_name)
-            return "error"
+        ineligible = self._refine_skill_eligibility(skill_name)
+        if ineligible is not None:
+            return ineligible
         case_id = str(case["case_id"])
         case_dir = cfg.repo_root / _CASES_REL / case_id
         try:
@@ -730,6 +783,11 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         cfg = self._config
         module_rel = SKILL_BUILDER_MODULES[skill_name]
         flags = {"ok": False, "length_tripwire": False, "path_tripwire": False}
+        # Resolve the drift issue (filed earlier this tick) so the PR body can
+        # name its provenance with an auto-linking `#N`. Read-only lookup;
+        # `find_existing_issue` returns 0 when unmatched → the body falls back
+        # to a title reference (see `_refine_pr_body`).
+        drift_issue = await self._pr.find_existing_issue(self._drift_title(case))
 
         async def _generate(worktree: Path) -> None:
             # Validate INSIDE the generate callback so a bad candidate aborts
@@ -768,7 +826,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             pr_title=(
                 f"fix(prompt): refine {skill_name} — corpus case {case_id} regressed"
             ),
-            pr_body=lambda: self._refine_pr_body(case, skill_name),
+            pr_body=lambda: self._refine_pr_body(case, skill_name, drift_issue),
             base=cfg.base_branch(),
             auto_merge=True,
             gh_token="",
@@ -888,18 +946,14 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                 stderr.decode(errors="replace")[:400],
             )
             return False
-        try:
-            results = json.loads(stdout.decode() or "[]")
-        except json.JSONDecodeError:
-            logger.warning("refine validation non-JSON response for %s", case_id)
-            return False
-        non_skipped = [r for r in results if r.get("status") != "SKIPPED"]
-        if not non_skipped:
+        passed = _all_required_pass(stdout.decode())
+        if not passed:
             logger.warning(
-                "refine validation had no non-SKIPPED results for %s", case_id
+                "refine validation for %s: no all-PASS non-SKIPPED result set "
+                "(malformed, empty, all-SKIPPED, or a FAIL present)",
+                case_id,
             )
-            return False
-        return all(r.get("status") == "PASS" for r in non_skipped)
+        return passed
 
     async def _comment_refine_outcome(
         self, case: dict[str, Any], outcome: str, attempts: int
@@ -915,15 +969,28 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             f"Repair attempts so far: {attempts}.",
         )
 
-    def _refine_pr_body(self, case: dict[str, Any], skill_name: str) -> str:
+    def _refine_pr_body(
+        self, case: dict[str, Any], skill_name: str, drift_issue: int = 0
+    ) -> str:
         module_rel = SKILL_BUILDER_MODULES[skill_name]
         limit_pct = int(PROMPT_LENGTH_DRIFT_LIMIT * 100)
+        # Name the provenance: prefer an auto-linking `#N` (from
+        # `find_existing_issue`); fall back to the drift-issue title when it
+        # couldn't be resolved (0 sentinel). A full per-case validation table
+        # is a follow-up (#9724) — one provenance line + the summary suffices.
+        provenance = (
+            f"#{drift_issue}"
+            if drift_issue > 0
+            else f'"{self._drift_title(case)}" (search by title)'
+        )
         return (
             f"## Automated skill-prompt refinement\n\n"
             f"Corpus case `{case.get('case_id')}` regressed and the "
             f"`{skill_name}` skill stopped catching it. This PR proposes a "
             f"minimal edit to `{module_rel}` that makes the skill catch the case "
             f"again.\n\n"
+            f"**Provenance.** Filed in response to skill-prompt drift issue "
+            f"{provenance}.\n\n"
             f"**Validation.** The candidate was rebuilt in an ephemeral worktree "
             f"and re-run live against the regressed case, 100% of held-out "
             f"honeypots, and the benign sentinels — every non-skipped case "

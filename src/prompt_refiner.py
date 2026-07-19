@@ -26,6 +26,27 @@ SKILL_BUILDER_MODULES: dict[str, str] = {
     "shape-coherence": "src/shape_coherence.py",
 }
 
+# Skills eligible for auto-merge self-refinement. STRICT SUBSET of
+# SKILL_BUILDER_MODULES: only skills whose adversarial corpus carries held-out
+# honeypot attack cases (a ``HOLDOUT`` marker dir) may be auto-refined.
+#
+# The overfit precondition: auto-refinement's only guard against a synthesized
+# patch overfitting to the single regressed case is the holdout gate — the
+# candidate must survive 100% of the skill's honeypots, which the synthesizer
+# never saw (``assemble_refine_context`` refuses holdout input). A skill with
+# NO holdout coverage has no such gate, so an auto-merge candidate for it could
+# silently overfit; we refuse to auto-refine it (outcome ``not_refinable``)
+# until holdouts exist. ``SKILL_BUILDER_MODULES`` stays complete because other
+# code paths resolve builder module paths for skills that are not (yet)
+# refinable.
+#
+# Follow-up (#9724): extend held-out honeypot coverage to the remaining
+# builder modules (``plan-compliance``, ``discover-completeness``,
+# ``shape-coherence``) and widen this set as each gains a holdout.
+REFINABLE_SKILLS: frozenset[str] = frozenset(
+    {"diff-sanity", "scope-check", "test-adequacy"}
+)
+
 PROMPT_LENGTH_DRIFT_LIMIT = 0.30
 
 _HOLDOUT_MARKER = "HOLDOUT"
