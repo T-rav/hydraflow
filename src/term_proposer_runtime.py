@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agent_cli import AgentTool
+from subprocess_util import run_subprocess
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -234,6 +235,45 @@ class OpenAutoPRBotPRPort:
                 f"error={result.error!r}"
             )
         return self._extract_pr_number(result.pr_url)
+
+    async def find_open_bot_pr(self, *, labels: list[str]) -> int | None:
+        """Newest open PR carrying ANY of *labels*, or None (#9893 single-flight).
+
+        Queries ``gh pr list`` from the repo root (30s gh timeout tier). Errors
+        return None with a warning — fail-open: a duplicate PR is recoverable
+        (DependabotMergeLoop supersede/heal paths), a loop starved forever on
+        a persistent query failure is not.
+        """
+        try:
+            out = await run_subprocess(
+                "gh",
+                "pr",
+                "list",
+                "--state",
+                "open",
+                "--limit",
+                "50",
+                "--json",
+                "number,labels",
+                cwd=self._repo_root,
+                gh_token=self._gh_token,
+                timeout=30.0,
+            )
+            rows = json.loads(out or "[]")
+        except (RuntimeError, OSError, ValueError) as exc:
+            logger.warning(
+                "find_open_bot_pr: gh pr list failed (%s) — proceeding unguarded",
+                exc,
+            )
+            return None
+        wanted = set(labels)
+        hits = [
+            int(row["number"])
+            for row in rows
+            if isinstance(row, dict)
+            and wanted & {lb.get("name", "") for lb in (row.get("labels") or [])}
+        ]
+        return max(hits) if hits else None
 
     @staticmethod
     def _extract_pr_number(pr_url: str) -> int:

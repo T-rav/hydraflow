@@ -14,7 +14,11 @@ from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from loop_fitness import FitnessContext, LoopFitness
-from term_proposer_loop import BotPRPort, _render_term_file_str
+from term_proposer_loop import (
+    BotPRPort,
+    _render_term_file_str,
+    skip_if_family_pr_open,
+)
 from ubiquitous_language import (
     Term,
     TermRel,
@@ -176,6 +180,15 @@ class EdgeProposerLoop(BaseBackgroundLoop):
                 edge_summary.append(
                     f"- `{term.name}` --[{rel.kind.value}]--> `{target_name}`"
                 )
+
+        skipped = await skip_if_family_pr_open(self._pr_port, worker_name=_WORKER_NAME)
+        if skipped is not None:
+            return {
+                **skipped,
+                "checked": len(terms),
+                "edges": sum(len(v) for v in proposals.values()),
+                "terms_touched": len(proposals),
+            }
 
         run_id = secrets.token_hex(4)
         title = (

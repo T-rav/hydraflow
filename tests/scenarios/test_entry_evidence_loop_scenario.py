@@ -96,6 +96,9 @@ class TestEntryEvidenceLoop:
 
         # 4. Capture the bot PR opened by the loop.
         pr_port = AsyncMock()
+        pr_port.find_open_bot_pr = AsyncMock(
+            return_value=None
+        )  # single-flight clear (#9893)
         pr_port.open_bot_pr = AsyncMock(return_value=1234)
 
         config = HydraFlowConfig(repo_root=tmp_path)

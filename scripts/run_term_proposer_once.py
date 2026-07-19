@@ -68,6 +68,10 @@ async def main() -> int:
                 print(f"  body excerpt:\n{body[:400]}")
                 return 999_999
 
+            async def find_open_bot_pr(self, *, labels) -> int | None:
+                print(f"[DRY-RUN] single-flight query for {labels} -> none open")
+                return None
+
         pr_port = _LoggingPort()
     else:
         pr_port = OpenAutoPRBotPRPort(
