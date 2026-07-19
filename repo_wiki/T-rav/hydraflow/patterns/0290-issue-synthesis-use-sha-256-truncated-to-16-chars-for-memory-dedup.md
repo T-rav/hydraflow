@@ -1,0 +1,18 @@
+---
+id: 0290
+topic: patterns
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-07-19T02:42:57.719801+00:00
+status: active
+corroborations: 1
+supersedes: 0218,0219,0220,0221,0222,0223,0224,0225,0226,0227,0228,0229,0230,0231,0232,0233,0234,0235,0236,0237,0238,0239,0240,0241,0242,0243,0244,0245,0246,0247,0248,0249,0250,0251,0252,0253,0254,0255,0256,0257,0258,0259
+---
+
+# Use SHA-256 truncated to 16 chars for memory dedup keys
+
+Compute dedup keys and recall-hit tracking via `SHA-256(content)[:16]`.
+
+Example: `key = hashlib.sha256(item['text'].encode()).hexdigest()[:16]`.
+
+**Why:** Consistent hashing ensures the same content maps to the same key across process restarts; truncation keeps keys human-scannable in logs.
