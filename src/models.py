@@ -2590,6 +2590,11 @@ class ControlStatusConfig(BaseModel):
     app_version: str = ""
     latest_version: str = ""
     update_available: bool = False
+    # #9663: in-memory boot SHA + commits-behind for at-a-glance staleness
+    # observability. Both are best-effort git reads: ``None`` when unavailable
+    # (git missing, detached, non-repo) rather than a fabricated value.
+    boot_sha: str | None = None
+    commits_behind: int | None = None
     repo: str = ""
     ready_label: list[str] = Field(default_factory=list)
     find_label: list[str] = Field(default_factory=list)
