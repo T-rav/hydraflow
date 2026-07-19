@@ -3071,12 +3071,18 @@ class ShippedWithKnownGapPayload(TypedDict):
 
 
 class GitHubIssueSummary(TypedDict):
-    """Lightweight issue dict returned by ``PRPort.list_issues_by_label``."""
+    """Lightweight issue dict returned by ``PRPort.list_issues_by_label``.
+
+    ``labels`` uses the gh wire shape (``[{"name": ...}, ...]``) and is only
+    populated by the OPEN listing — the closed listing keeps its narrower
+    projection (#9943).
+    """
 
     number: int
     title: str
     body: str
     updated_at: str
+    labels: NotRequired[list[dict[str, str]]]
 
 
 class PipelineSnapshotEntry(TypedDict):

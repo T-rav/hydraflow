@@ -1475,22 +1475,40 @@ class PRManager:
             "--state",
             "open",
             "--json",
-            "number,title,body,updatedAt",
+            "number,title,body,updatedAt,labels",
             "--limit",
             "100",
         )
         from contracts.boundary import field_or  # noqa: PLC0415
 
         results = parse_list_with_shape(output or "[]", GhIssueListItem)
-        return [
-            {
-                "number": field_or(r, "number", 0),
-                "title": field_or(r, "title", ""),
-                "body": field_or(r, "body", ""),
-                "updated_at": field_or(r, "updated_at", "", dict_key="updatedAt"),
-            }
-            for r in results
-        ]
+        summaries: list[GitHubIssueSummary] = []
+        for r in results:
+            # #9943: labels ride along in gh wire shape ({"name": ...}) so
+            # consumers like the preflight human-required filter see real
+            # data — the old projection omitted labels and the filter was
+            # a silent no-op.
+            if r.model_instance is not None:
+                labels = [
+                    {"name": lbl.name} for lbl in r.model_instance.labels if lbl.name
+                ]
+            else:
+                entry = r.payload if isinstance(r.payload, dict) else {}
+                labels = [
+                    {"name": str(lbl.get("name", ""))}
+                    for lbl in (entry.get("labels") or [])
+                    if isinstance(lbl, dict) and lbl.get("name")
+                ]
+            summaries.append(
+                {
+                    "number": field_or(r, "number", 0),
+                    "title": field_or(r, "title", ""),
+                    "body": field_or(r, "body", ""),
+                    "updated_at": field_or(r, "updated_at", "", dict_key="updatedAt"),
+                    "labels": labels,
+                }
+            )
+        return summaries
 
     async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
         """Return the numbers of ALL open issues (no label filter). #9905.
