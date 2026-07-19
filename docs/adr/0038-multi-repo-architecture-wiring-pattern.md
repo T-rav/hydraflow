@@ -1,8 +1,8 @@
 # ADR-0038: Multi-Repo Architecture Wiring Pattern
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-03-08
-**Revised:** 2026-03-15
+**Revised:** 2026-03-15 · realized 2026-07 (gap closed; see Context)
 
 ## Context
 
@@ -18,15 +18,17 @@ parameter in its constructor and forwards it to `create_router()`.
 The multi-repo API endpoints (`/api/runtimes`, `/api/runtimes/{slug}`, etc.) are
 fully implemented in the router and become operative when a registry is provided.
 
-However, a wiring gap remains in `server.py`:
+This wiring gap in `server.py` (originally identified via memory issue #2266) has
+since been **closed** — the decision below is the shipped behavior:
 
-- **`_run_with_dashboard()`** manually assembles bare `EventBus`, `EventLog`, and
-  `StateTracker` instances instead of creating a `RepoRuntime`. The headless path
-  (`_run_headless()`) correctly uses `RepoRuntime.create()`. This means the dashboard
-  path bypasses the runtime abstraction, duplicating initialization logic and
-  preventing multi-repo use when the dashboard is active.
+- **`_run_with_dashboard()`** now constructs a `RepoRuntimeRegistry` and a host
+  `RepoRuntime.from_shared(config, bus, state)`, deriving `event_bus`, `state`, and
+  `orchestrator` from the runtime (`src/server.py`). This matches the `_run_headless()`
+  path (`RepoRuntime.create()`) and eliminates the duplicate bare-object construction,
+  so the dashboard path no longer bypasses the runtime abstraction.
 
-This gap was identified through memory issue #2266 and confirmed by code inspection.
+Because the decision is realized in code, this ADR is now **Accepted** rather than
+Proposed.
 
 ## Decision
 

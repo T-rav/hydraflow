@@ -24,7 +24,7 @@ Phase 2d adds `ConvergenceOscillationLoop`, a background caretaker that consumes
 
 The detection method fires on EITHER of two complementary signals:
 
-**Temporal signal (post-review oscillation):** `detect_outer_oscillation(window)` returns True when the last `window` review laps produced identical, non-empty finding-signature sets. `lap_signatures` unions all boundary findings at `mark_lap`, so this signal is cross-boundary-aware for issues that reach review. It can catch review-lap oscillation earlier than the lap cap when `window` is below `max_convergence_laps`.
+**Temporal signal (post-review oscillation):** `detect_outer_oscillation(window)` returns True when the last `window` review laps produced identical, non-empty finding-signature sets. `lap_signatures` unions all boundary findings at `mark_lap`, so this signal is cross-boundary-aware for issues that reach review. The caretaker gates this arm via `detect_cross_boundary_oscillation(include_temporal=...)`, firing it only when `laps == 0` (pre-review, where the snapshot signal has no review data) or `laps >= max_convergence_laps` (review budget exhausted). Between those bounds (`0 < laps < max_convergence_laps`) the temporal arm defers to the review loop's own `detect_outer_oscillation`, so the caretaker and the review loop do not race on live laps (PR #9706).
 
 **Snapshot signal (pre-review churn):** at least `min_loopback_stages` distinct stages among {triage, shape, plan} currently have `last_verdict == "LOOP_BACK"`. This catches cross-boundary churn in issues that have not yet closed a review lap, where the temporal signal has no data.
 
@@ -61,7 +61,7 @@ All fields are env-overridable:
 
 ### Relationship to review escalation
 
-The caretaker complements, and does not replace, the review phase's lap-cap escalation. The lap cap catches issues that exhaust their review budget regardless of oscillation pattern. The caretaker catches two cases the lap cap misses: (a) cross-boundary churn that never reaches the review lap cap, and (b) review-lap oscillation that repeats before the cap is reached. Both mechanisms can trigger on the same issue without conflict: `oscillation_escalated` prevents duplicate caretaker escalations, while the lap cap follows its own logic independently.
+The caretaker complements, and does not replace, the review phase's lap-cap escalation. The lap cap catches issues that exhaust their review budget regardless of oscillation pattern. The caretaker catches two cases the lap cap misses: (a) cross-boundary churn that never reaches the review lap cap (snapshot signal, `laps == 0`), and (b) review-lap oscillation once the lap budget is exhausted (`laps >= max_convergence_laps`). While `0 < laps < max_convergence_laps`, case (b) is left to the review loop's own `detect_outer_oscillation` on live laps; the caretaker's temporal arm re-engages only at the cap (PR #9706), so the two never double-escalate the same live lap. Both mechanisms can trigger on the same issue without conflict: `oscillation_escalated` prevents duplicate caretaker escalations, while the lap cap follows its own logic independently.
 
 ## Rules and consequences
 
