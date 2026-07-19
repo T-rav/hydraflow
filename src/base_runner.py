@@ -20,7 +20,7 @@ from config import Credentials, HydraFlowConfig
 from events import EventBus
 from execution import get_default_runner
 from models import LoopResult, TranscriptEventData
-from prompt_gate import gate_prompt
+from prompt_gate import GateResult, gate_prompt
 from prompt_telemetry import PromptTelemetry, parse_command_tool_model
 from runner_utils import (
     AuthenticationRetryError,
@@ -181,14 +181,23 @@ class BaseRunner:
         # escalation machinery routes to HITL. No-op for internal/public-code.
         gate_tool, _gate_model = parse_command_tool_model(cmd)
         raw_issue = event_data.get("issue")
-        gated = gate_prompt(
-            prompt,
-            config=self._config,
-            source=str(event_data.get("source", "unknown")),
-            tool=gate_tool,
-            issue_number=raw_issue if isinstance(raw_issue, int) else None,
-            issue_labels=issue_labels or (),
-        )
+
+        # #9879: the gate regex-redacts the WHOLE prompt — pure CPU. On a
+        # large prompt (diagnostic prompts embed CI logs/diffs) running it
+        # inline starved the event loop for ~15s per Stage-1 run, freezing
+        # the dashboard and every other coroutine. Offload to a thread;
+        # regex matching over an immutable str is thread-safe.
+        def _run_gate() -> GateResult:
+            return gate_prompt(
+                prompt,
+                config=self._config,
+                source=str(event_data.get("source", "unknown")),
+                tool=gate_tool,
+                issue_number=raw_issue if isinstance(raw_issue, int) else None,
+                issue_labels=issue_labels or (),
+            )
+
+        gated = await asyncio.to_thread(_run_gate)
         prompt = gated.prompt
 
         start = time.monotonic()
