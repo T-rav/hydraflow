@@ -25,6 +25,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import statistics
 import tempfile
 import time
@@ -34,6 +35,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
+from escalation_reconcile import EscalationReconciler
 from models import WorkCycleResult  # noqa: TCH001
 
 if TYPE_CHECKING:
@@ -50,6 +52,24 @@ _HISTORY_CAP = 60
 _RECENT_N = 5
 _MIN_HISTORY = 5
 _WORKFLOW = "rc-promotion-scenario.yml"
+
+# Marker label on the HITL escalation issue (paired with ``hitl-escalation``).
+# Single-sourced so the filing path (`_file_escalation`) and the reconciler
+# can never drift apart.
+_STUCK_LABEL = "rc-duration-stuck"
+
+# Parses ``_file_escalation`` titles back to the dedup-key subject
+# (``median``/``spike``). Returns ``None`` for titles that aren't ours so the
+# shared ``EscalationReconciler`` skips operator-created issues untouched.
+_ESCALATION_TITLE_RE = re.compile(
+    r"^HITL: RC gate duration regression \((median|spike)\) unresolved after "
+)
+
+
+def _escalation_subject(title: str) -> str | None:
+    m = _ESCALATION_TITLE_RE.match(title)
+    return m.group(1) if m else None
+
 
 # Hard cap on each ``gh`` read/download. A wedged child must not hang the loop
 # cycle forever and freeze its heartbeat — the #9410 silent-stall failure
@@ -108,6 +128,14 @@ class RCBudgetLoop(BaseBackgroundLoop):
         self._state = state
         self._pr = pr_manager
         self._dedup = dedup
+        self._escalations = EscalationReconciler(
+            prs=pr_manager,
+            dedup=dedup,
+            key_prefix="rc_budget",
+            stuck_label=_STUCK_LABEL,
+            clear_attempts=state.clear_rc_budget_attempts,
+            subject_from_title=_escalation_subject,
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.rc_budget_interval
@@ -434,52 +462,14 @@ class RCBudgetLoop(BaseBackgroundLoop):
         )
 
     async def _reconcile_closed_escalations(self) -> None:
-        """Clear dedup keys + attempt counters for closed HITL issues (§3.2)."""
-        cmd = [
-            "gh",
-            "issue",
-            "list",
-            "--repo",
-            self._config.repo,
-            "--state",
-            "closed",
-            "--label",
-            "hitl-escalation",
-            "--label",
-            "rc-duration-stuck",
-            "--author",
-            "@me",
-            "--limit",
-            "100",
-            "--json",
-            "title",
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, _ = await _communicate_bounded(proc)
-        except TimeoutError:
-            return
-        if proc.returncode != 0:
-            return
-        try:
-            closed = json.loads(stdout.decode() or "[]")
-        except json.JSONDecodeError:
-            return
-        current = self._dedup.get()
-        keep = set(current)
-        for issue in closed:
-            title = issue.get("title", "")
-            for kind in ("median", "spike"):
-                key = f"rc_budget:{kind}"
-                if key in keep and f"({kind})" in title:
-                    keep.discard(key)
-                    self._state.clear_rc_budget_attempts(kind)
-        if keep != current:
-            self._dedup.set_all(keep)
+        """Clear dedup keys + attempt counters for closed HITL issues (§3.2).
+
+        Delegates to the shared :class:`EscalationReconciler` (PRPort-based;
+        replaced the raw ``gh issue list`` subprocess — #9932). Subjects
+        (``median``/``spike``) are parsed from the escalation-title shape
+        ``"HITL: RC gate duration regression (<kind>) unresolved after N …"``.
+        """
+        await self._escalations.reconcile_closed()
 
     def _emit_trace(self, t0: float, *, runs_seen: int, signals: int) -> None:
         """Best-effort subprocess trace via lazy-imported ``trace_collector``."""

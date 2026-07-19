@@ -1143,3 +1143,52 @@ def test_do_work_caps_prs_per_tick(tmp_path: Path) -> None:
     assert result["cases_filed"] == 5
     assert result["cases_validated"] == 25  # all validated, just deferred
     assert loop._open_pr_for_case.await_count == 5
+
+
+async def test_reconcile_closed_corpus_escalations_routes_through_prport(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Closed `corpus-learning-stuck` issues reset the per-issue counter.
+
+    The read routes through ``PRPort.list_closed_issues_by_label`` (#9932)
+    rather than a raw ``gh issue list`` subprocess, so it stays inside the
+    MockWorld air-gap. corpus_learning keeps its bespoke reset — the escalation
+    state is a per-``issue_number`` counter, not a DedupStore key, so it does
+    NOT adopt the dedup-key-gated shared ``EscalationReconciler``. The
+    ``create_subprocess_exec`` guard proves the raw path is gone.
+    """
+    prs = AsyncMock()
+    prs.list_closed_issues_by_label.return_value = [
+        {
+            "number": 4321,
+            "title": "Corpus learning stuck on escape #1234: flaky retry marker",
+            "body": "",
+            "updated_at": "",
+        },
+        {
+            "number": 4322,
+            "title": "Operator-created issue that does not parse",
+            "body": "",
+            "updated_at": "",
+        },
+    ]
+    state = MagicMock()
+    loop = CorpusLearningLoop(
+        config=HydraFlowConfig(data_root=tmp_path, repo="hydra/hydraflow"),
+        prs=prs,
+        dedup=MagicMock(),
+        deps=_deps(asyncio.Event()),
+        state=state,
+    )
+
+    def _no_subprocess(*_args, **_kwargs):
+        raise AssertionError("reconcile must route through the PRPort, not raw gh")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _no_subprocess)
+
+    await loop._reconcile_closed_corpus_escalations()
+
+    prs.list_closed_issues_by_label.assert_awaited_once_with(
+        "corpus-learning-stuck", limit=100
+    )
+    state.reset_corpus_validation_attempts.assert_called_once_with(1234)

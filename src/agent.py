@@ -170,8 +170,14 @@ Run through this checklist before your final commit:
         bead_mapping: dict[str, str] | None = None,
         human_guidance: str = "",
         attempt_number: int = 0,
+        known_traps: str = "",
     ) -> WorkerResult:
         """Run the implementation agent for *task*.
+
+        ``known_traps`` (#9858) is a pre-rendered "Known CI Traps" section
+        from harness-insights — recurring repo failure classes injected so
+        the agent stops re-hitting documented walls (ratchet, arch-regen,
+        …). Empty string leaves the prompt unchanged.
 
         ``attempt_number`` is the 1-based issue attempt this run represents
         (0 = unknown); on cycling retries it feeds the diverse-retry
@@ -209,6 +215,8 @@ Run through this checklist before your final commit:
                 human_guidance=human_guidance,
                 attempt_number=attempt_number,
             )
+            if known_traps:
+                prompt += "\n\n" + known_traps
             transcript = await self._execute(
                 cmd,
                 prompt,

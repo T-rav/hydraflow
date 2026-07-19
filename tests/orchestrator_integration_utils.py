@@ -487,6 +487,7 @@ def build_scripted_services(
     services.log_ingest_loop = FakeBackgroundLoop()
     services.github_cache_loop = FakeBackgroundLoop()
     services.stale_issue_gc_loop = FakeBackgroundLoop()
+    services.gate_health_loop = FakeBackgroundLoop()
     services.ci_monitor_loop = FakeBackgroundLoop()
     services.branch_protection_auditor_loop = FakeBackgroundLoop()
     services.gate_activator_loop = FakeBackgroundLoop()

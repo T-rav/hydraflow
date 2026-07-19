@@ -30,7 +30,7 @@ entries:
   src/adr_conformance_loop.py::noqa:TCH001: 3
   src/adr_draft_opener.py::noqa:BLE001: 1
   src/adr_reviewer.py::noqa:PLC0415: 2
-  src/adr_touchpoint_auditor_loop.py::noqa:PLC0415: 2
+  src/adr_touchpoint_auditor_loop.py::noqa:PLC0415: 1
   src/adr_touchpoint_auditor_loop.py::noqa:PLR0915: 1
   src/adr_touchpoint_auditor_loop.py::noqa:TCH001: 2
   src/adversarial_retry_loop.py::noqa:PLC0415: 4
@@ -234,7 +234,7 @@ entries:
   src/rc_budget_loop.py::noqa:PLC0415: 1
   src/rc_budget_loop.py::noqa:TCH001: 2
   src/repo_wiki.py::noqa:BLE001: 3
-  src/repo_wiki.py::noqa:PLC0415: 5
+  src/repo_wiki.py::noqa:PLC0415: 6
   "src/repo_wiki.py::noqa:PLC0415\u2014isolatedhere,notamodule-leveldep": 1
   src/repo_wiki.py::type-ignore[return-value]: 1
   src/repo_wiki_ingest.py::noqa:BLE001: 1
@@ -338,6 +338,7 @@ entries:
   "src/ubiquitous_language.py::noqa:PLR0911\u2014linearF1guards,eachwithitsownfailpath": 1
   src/verification_judge.py::noqa:PLC0415: 1
   src/whatsapp_bridge.py::noqa:PLC0415: 1
+  src/wiki_anchor_gate.py::noqa:PLC0415: 1
   src/wiki_compiler.py::noqa:BLE001: 3
   src/wiki_compiler.py::noqa:PLC0415: 5
   src/wiki_drift_detector.py::noqa:BLE001: 1
@@ -346,4 +347,4 @@ entries:
   src/wiki_rot_detector_loop.py::noqa:PLC0415: 3
   src/workspace.py::noqa:E402: 1
   src/workspace.py::noqa:S311: 1
-  src/workspace_gc_loop.py::noqa:BLE001: 7
+  src/workspace_gc_loop.py::noqa:BLE001: 8

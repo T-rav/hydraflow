@@ -21,6 +21,7 @@ by Plan 6b (§4.11 factory-cost work).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -348,12 +349,78 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
             "filed": filed,
         }
 
+    async def _find_open_escalation(self, worker: str, kind: str) -> int:
+        """Open issue/epic already covering this anomaly, or 0 (#9855).
+
+        Triage may CLOSE the filed anomaly issue by decomposing it into an
+        epic; the reconcile pass then clears the dedup key even though the
+        anomaly is not resolved — and the detector minted a fresh epic
+        every cycle (23 orphans on 2026-07-18). GitHub is the source of
+        truth: when ANY open issue still references this worker+kind
+        (the original escalation or a derived epic), reuse it instead of
+        filing again. Fail-open (0) on gh errors — filing is the safe
+        degradation.
+        """
+        cmd = [
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            self._config.repo,
+            "--state",
+            "open",
+            "--search",
+            f"{kind} in:title",
+            "--limit",
+            "50",
+            "--json",
+            "number,title",
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(
+                    proc.communicate(), timeout=_RECONCILE_GH_TIMEOUT_SECONDS
+                )
+            except TimeoutError:
+                # proc.kill() raises ProcessLookupError if the child already
+                # exited — suppress it so the timeout is handled here instead of
+                # crashing the loop cycle. (#9794/#9816/#9883)
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                logger.warning("open-escalation probe timed out — filing anyway")
+                return 0
+            rows = json.loads(stdout.decode() or "[]")
+        except (OSError, ValueError, RuntimeError) as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.debug("open-escalation probe failed: %s", exc)
+            return 0
+        for row in rows:
+            title = str(row.get("title", ""))
+            if worker in title and kind in title:
+                return int(row.get("number") or 0)
+        return 0
+
     async def _file_anomaly(
         self,
         worker: str,
         kind: str,
         details: dict[str, Any],
     ) -> int:
+        existing = await self._find_open_escalation(worker, kind)
+        if existing > 0:
+            logger.info(
+                "trust_fleet_sanity: open issue #%d already covers %s/%s — "
+                "reusing instead of re-filing (#9855)",
+                existing,
+                worker,
+                kind,
+            )
+            return existing
         title = f"HITL: trust-loop anomaly — {worker} {kind}"
         detail_lines = "\n".join(
             f"- `{k}`: `{v}`" for k, v in sorted(details.items()) if k not in {"worker"}
@@ -423,7 +490,11 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                 # than hang the cycle forever; the next tick retries. A visible
                 # warning (not debug) is deliberate — the original failure was a
                 # *silent* stall that only the dead-man-switch caught (#9410).
-                proc.kill()
+                # proc.kill() raises ProcessLookupError if the child already
+                # exited — suppress it so the timeout is handled here instead of
+                # crashing the loop cycle. (#9794/#9816/#9883)
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
                 logger.warning(
                     "gh issue list timed out after %ss; skipping reconcile pass",
                     _RECONCILE_GH_TIMEOUT_SECONDS,

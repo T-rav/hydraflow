@@ -106,7 +106,8 @@ class ManagedRepo(BaseModel):
 # Each tuple: (field_name, env_var_key, default_value)
 _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("dashboard_port", "HYDRAFLOW_DASHBOARD_PORT", 5555),
-    ("min_plan_words", "HYDRAFLOW_MIN_PLAN_WORDS", 200),
+    ("min_plan_words", "HYDRAFLOW_MIN_PLAN_WORDS", 60),
+    ("max_plan_chars", "HYDRAFLOW_MAX_PLAN_CHARS", 5000),
     (
         "max_pre_quality_review_attempts",
         "HYDRAFLOW_MAX_PRE_QUALITY_REVIEW_ATTEMPTS",
@@ -203,6 +204,9 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("artifact_retention_days", "HYDRAFLOW_ARTIFACT_RETENTION_DAYS", 30),
     ("artifact_max_size_mb", "HYDRAFLOW_ARTIFACT_MAX_SIZE_MB", 500),
     ("runs_gc_interval", "HYDRAFLOW_RUNS_GC_INTERVAL", 3600),
+    ("gate_health_interval", "HYDRAFLOW_GATE_HEALTH_INTERVAL", 604800),
+    ("gate_health_run_window", "HYDRAFLOW_GATE_HEALTH_RUN_WINDOW", 50),
+    ("gate_health_min_attempts", "HYDRAFLOW_GATE_HEALTH_MIN_ATTEMPTS", 3),
     ("adr_review_interval", "HYDRAFLOW_ADR_REVIEW_INTERVAL", 86400),
     ("adr_review_approval_threshold", "HYDRAFLOW_ADR_REVIEW_APPROVAL_THRESHOLD", 2),
     ("adr_review_max_rounds", "HYDRAFLOW_ADR_REVIEW_MAX_ROUNDS", 3),
@@ -258,8 +262,18 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("sentry_signal_cooldown_hours", "SENTRY_SIGNAL_COOLDOWN_HOURS", 24),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
+    (
+        "dependabot_update_branch_max_attempts",
+        "HYDRAFLOW_DEPENDABOT_UPDATE_BRANCH_MAX_ATTEMPTS",
+        1,
+    ),
     ("review_orphan_strike_threshold", "HYDRAFLOW_REVIEW_ORPHAN_STRIKE_THRESHOLD", 3),
     ("review_orphan_max_requeues", "HYDRAFLOW_REVIEW_ORPHAN_MAX_REQUEUES", 3),
+    (
+        "credit_fp_suppress_cooldown_seconds",
+        "HYDRAFLOW_CREDIT_FP_SUPPRESS_COOLDOWN_SECONDS",
+        300,
+    ),
     ("repo_wiki_min_batch_files", "HYDRAFLOW_REPO_WIKI_MIN_BATCH_FILES", 8),
     ("repo_wiki_max_batch_age_hours", "HYDRAFLOW_REPO_WIKI_MAX_BATCH_AGE_HOURS", 24),
     ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
@@ -600,6 +614,12 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("report_issue_loop_enabled", "HYDRAFLOW_REPORT_ISSUE_LOOP_ENABLED", True),
     ("retrospective_loop_enabled", "HYDRAFLOW_RETROSPECTIVE_LOOP_ENABLED", True),
     ("runs_gc_loop_enabled", "HYDRAFLOW_RUNS_GC_LOOP_ENABLED", True),
+    (
+        "event_log_periodic_rotate_enabled",
+        "HYDRAFLOW_EVENT_LOG_PERIODIC_ROTATE_ENABLED",
+        True,
+    ),
+    ("state_prune_enabled", "HYDRAFLOW_STATE_PRUNE_ENABLED", True),
     ("security_patch_loop_enabled", "HYDRAFLOW_SECURITY_PATCH_LOOP_ENABLED", True),
     ("sentry_loop_enabled", "HYDRAFLOW_SENTRY_LOOP_ENABLED", True),
     ("log_ingest_loop_enabled", "HYDRAFLOW_LOG_INGEST_LOOP_ENABLED", True),
@@ -621,6 +641,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("stale_issue_gc_loop_enabled", "HYDRAFLOW_STALE_ISSUE_GC_LOOP_ENABLED", True),
+    ("gate_health_loop_enabled", "HYDRAFLOW_GATE_HEALTH_LOOP_ENABLED", True),
     ("stale_issue_loop_enabled", "HYDRAFLOW_STALE_ISSUE_LOOP_ENABLED", True),
     ("triage_retry_loop_enabled", "HYDRAFLOW_TRIAGE_RETRY_LOOP_ENABLED", True),
     (
@@ -1273,6 +1294,27 @@ class HydraFlowConfig(BaseModel):
         le=86400,
         description="Runs GC loop interval in seconds (default 1 hour)",
     )
+    gate_health_interval: int = Field(
+        default=604800,
+        ge=3600,
+        le=2592000,
+        description="GateHealthLoop cycle interval in seconds (default weekly)",
+    )
+    gate_health_run_window: int = Field(
+        default=50,
+        ge=10,
+        le=200,
+        description="Workflow runs analyzed per GateHealthLoop cycle",
+    )
+    gate_health_min_attempts: int = Field(
+        default=3,
+        ge=2,
+        le=50,
+        description=(
+            "Minimum failures before GateHealthLoop flags a check: "
+            "born-broken needs N, blame-correlation N-1"
+        ),
+    )
 
     # Hash-chained audit stream retention (CH-1, #9729). None = keep forever.
     # A set value is a retention FLOOR: RunsGCLoop may prune records strictly
@@ -1547,10 +1589,23 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     min_plan_words: int = Field(
-        default=200,
-        ge=50,
+        default=60,
+        ge=20,
         le=2000,
-        description="Minimum word count for a valid plan",
+        description=(
+            "Minimum word count for a valid plan — a floor that rejects only "
+            "empty/skeletal plans; concise-but-complete briefs pass (#9955)"
+        ),
+    )
+    max_plan_chars: int = Field(
+        default=5000,
+        ge=1000,
+        le=45000,
+        description=(
+            "Hard character budget for a plan (#9955). Kept BELOW "
+            "max_impl_plan_chars so the implement boundary never truncates — "
+            "truncation is information loss the plan phase paid latency for."
+        ),
     )
     max_new_files_warning: int = Field(
         default=5,
@@ -1974,6 +2029,16 @@ class HydraFlowConfig(BaseModel):
         ge=300,
         le=604800,
         description="Seconds between repo wiki lint cycles",
+    )
+    dependabot_update_branch_max_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description=(
+            "Bounded update-branch heals per CI-failed bot PR (#9889): a "
+            "behind-base PR gets a fresh merge ref + full CI re-run before "
+            "the failure strategy applies. 0 disables."
+        ),
     )
     review_orphan_strike_threshold: int = Field(
         default=3,
@@ -2497,6 +2562,20 @@ class HydraFlowConfig(BaseModel):
             "to the next tick."
         ),
     )
+    wiki_anchor_prune_enabled: bool = Field(
+        default=False,
+        description=(
+            "When True (#9954), RepoWikiLoop runs a deterministic prune pass "
+            "that marks active tracked wiki entries stale when they lack a "
+            "repo-specific anchor (a src/*.py path, ADR number, loop/Port "
+            "class name, or config field) — i.e. generic best-practice "
+            "platitudes. Mark-only (never deletes); the flips ride the "
+            "normal batched maintenance PR. Off by default: enabling it does "
+            "the one-time cleanup of the accumulated platitude backlog. The "
+            "synthesis-time gate that blocks NEW anchor-less entries is "
+            "always on and independent of this flag."
+        ),
+    )
 
     # Paths (auto-detected)
     repo_root: Path = Field(default=Path("."), description="Repository root directory")
@@ -2531,6 +2610,22 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=90,
         description="Days of event history to retain during rotation",
+    )
+    event_log_periodic_rotate_enabled: bool = Field(
+        default=True,
+        description=(
+            "Rotate events.jsonl every RunsGCLoop cycle, not just at boot "
+            "(#9905). The size bound inside rotation guarantees the "
+            "post-rotation file fits event_log_max_size_mb."
+        ),
+    )
+    state_prune_enabled: bool = Field(
+        default=True,
+        description=(
+            "Prune per-issue state.json entries (adversarial states, "
+            "convergence ledgers, attempt counters) for issues that are no "
+            "longer open, during StaleIssueGCLoop cycles (#9905)."
+        ),
     )
 
     # Health monitor
@@ -3353,6 +3448,17 @@ class HydraFlowConfig(BaseModel):
         le=30,
         description="Extra minutes to wait after reported credit reset time",
     )
+    credit_fp_suppress_cooldown_seconds: int = Field(
+        default=300,
+        ge=10,
+        le=3600,
+        description=(
+            "Cooldown after suppressing a false-positive credit signal from a "
+            "source: within it, repeat signals from that source are log-only "
+            "(no probe, no banner) and the raising loop restarts with a delay "
+            "instead of a tight spin (#9888)."
+        ),
+    )
     credit_pause_require_probe: bool = Field(
         default=True,
         description=(
@@ -3363,6 +3469,20 @@ class HydraFlowConfig(BaseModel):
             "otherwise trigger a multi-hour false global pause (#9807). The "
             "probe is ground truth (False only when the API itself confirms "
             "exhaustion). Kill-switch: set False to revert to pause-on-text."
+        ),
+    )
+    auth_failure_require_probe: bool = Field(
+        default=True,
+        description=(
+            "Before halting ALL loops on a GitHub AuthenticationError, "
+            "corroborate the signal with a live `gh auth status` probe. A "
+            "single gh call's stderr can match an auth pattern during a "
+            "transient network/API blip, which used to stop the whole factory "
+            "for hours (#9621). The probe is ground truth (False only when gh "
+            "confirms the credentials are rejected); on a probe-refuted "
+            "(transient) signal the crashed loop is restarted instead of "
+            "stopping the factory. Kill-switch: set False to revert to "
+            "halt-on-signal."
         ),
     )
 
@@ -3622,6 +3742,10 @@ class HydraFlowConfig(BaseModel):
     stale_issue_gc_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for StaleIssueGCLoop.",
+    )
+    gate_health_loop_enabled: bool = Field(
+        default=True,
+        description="Deploy-time kill-switch for GateHealthLoop (#9974).",
     )
     stale_issue_loop_enabled: bool = Field(
         default=True,

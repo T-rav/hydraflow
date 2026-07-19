@@ -7,6 +7,7 @@ that phases call via PipelineHarness.
 
 from __future__ import annotations
 
+import copy
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -115,6 +116,11 @@ class FakeGitHub:
 
     def __init__(self) -> None:
         self._issues: dict[int, FakeIssue] = {}
+        self._pr_diff_names: dict[int, list[str]] = {}
+        # #9974: seeded workflow-run history for GateHealthLoop scenarios.
+        self._workflow_runs: list[dict[str, Any]] = []
+        self._workflow_jobs: dict[int, list[dict[str, Any]]] = {}
+        self._workflow_artifacts: dict[int, int] = {}
         self._prs: dict[int, FakePR] = {}
         self._pr_counter = 10_000
         self._ci_scripts: dict[int, deque[tuple[bool, str]]] = {}
@@ -147,6 +153,10 @@ class FakeGitHub:
         # attribute directly when constructing `gh` CLI args via _run_gh.
         # The value never reaches a real GitHub API in the sandbox.
         self._repo: str = "owner/repo"
+        # Branch-protection rulesets keyed by name, served by fetch_rulesets
+        # (ADR-0082, #9644). Mirrors the shape gh_fetch_rulesets returns:
+        # {name: {name, target, enforcement, conditions, rules, ...}}.
+        self._rulesets: dict[str, dict[str, Any]] = {}
 
     @classmethod
     def from_seed(cls, seed: MockWorldSeed) -> FakeGitHub:
@@ -183,6 +193,8 @@ class FakeGitHub:
         conclusion, url = seed.main_branch_ci_status
         if conclusion != "success":
             gh.set_ci_main_status(conclusion, url)
+        for name, cfg in seed.rulesets.items():
+            gh.add_ruleset(name, cfg)
         return gh
 
     # --- Seed API ---
@@ -260,6 +272,17 @@ class FakeGitHub:
     def add_alerts(self, *, branch: str, alerts: list[Any]) -> None:
         """Script code-scanning alerts returned by fetch_code_scanning_alerts."""
         self._alerts[branch] = list(alerts)
+
+    def add_ruleset(self, name: str, config: dict[str, Any]) -> None:
+        """Seed-API helper: register a live branch-protection ruleset by name.
+
+        The stored config is what ``fetch_rulesets`` serves — shaped like
+        GitHub's ``/repos/{repo}/rulesets/{id}`` response so it can be diffed
+        against the canonical contract by ``branch_protection_audit`` (#9644).
+        Stored as a shallow copy so later mutation of the caller's dict does
+        not retroactively alter seeded state.
+        """
+        self._rulesets[name] = dict(config)
 
     def script_ci(self, pr_number: int, results: list[tuple[bool, str]]) -> None:
         self._ci_scripts[pr_number] = deque(results)
@@ -566,9 +589,13 @@ class FakeGitHub:
         self._maybe_rate_limit()
         return "abc123"
 
+    def set_pr_diff_names(self, pr_number: int, names: list[str]) -> None:
+        """Seed the changed-file list one PR reports (#9974 blame scenarios)."""
+        self._pr_diff_names[pr_number] = list(names)
+
     async def get_pr_diff_names(self, pr_number: int) -> list[str]:
         self._maybe_rate_limit()
-        return ["src/app.py"]
+        return list(self._pr_diff_names.get(pr_number, ["src/app.py"]))
 
     async def get_pr_recent_commit_diffs(self, pr_number: int, *, n: int = 3) -> str:
         """Return a stub diff block for the last *n* commits on *pr_number*.
@@ -654,7 +681,11 @@ class FakeGitHub:
     # --- Loop-required PRPort methods ---
 
     async def list_issues_by_label(self, label: str) -> list[dict[str, Any]]:
-        """Return open issues carrying *label* as GitHubIssueSummary-style dicts."""
+        """Return open issues carrying *label* as GitHubIssueSummary-style dicts.
+
+        ``labels`` mirrors the gh wire shape (#9943) so filters reading
+        ``lbl["name"]`` behave identically under the fake and the adapter.
+        """
         self._maybe_rate_limit()
         return [
             {
@@ -662,10 +693,59 @@ class FakeGitHub:
                 "title": issue.title,
                 "body": issue.body,
                 "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
+                "labels": [{"name": name} for name in issue.labels],
             }
             for issue in self._issues.values()
             if issue.state == "open" and label in issue.labels
         ]
+
+    async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
+        """Return numbers of ALL open issues, mirroring the gh projection (#9905)."""
+        self._maybe_rate_limit()
+        numbers = [
+            issue.number for issue in self._issues.values() if issue.state == "open"
+        ]
+        return sorted(numbers)[:limit]
+
+    def add_workflow_run(
+        self,
+        run_id: int,
+        *,
+        workflow: str,
+        conclusion: str,
+        created_at: str = "2026-07-01T00:00:00Z",
+        pr_number: int = 0,
+        jobs: list[dict[str, Any]] | None = None,
+        artifact_count: int = 0,
+    ) -> None:
+        """Seed one workflow run (+jobs/artifacts) for gate-health scenarios."""
+        self._workflow_runs.append(
+            {
+                "id": run_id,
+                "workflow": workflow,
+                "conclusion": conclusion,
+                "created_at": created_at,
+                "pr_number": pr_number,
+            }
+        )
+        self._workflow_jobs[run_id] = jobs or []
+        self._workflow_artifacts[run_id] = artifact_count
+
+    async def list_workflow_runs(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Newest-first slice of the seeded run history (#9974)."""
+        self._maybe_rate_limit()
+        newest_first = sorted(
+            self._workflow_runs, key=lambda r: str(r["created_at"]), reverse=True
+        )
+        return [dict(r) for r in newest_first[:limit]]
+
+    async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        self._maybe_rate_limit()
+        return [dict(j) for j in self._workflow_jobs.get(run_id, [])]
+
+    async def count_workflow_run_artifacts(self, run_id: int) -> int:
+        self._maybe_rate_limit()
+        return self._workflow_artifacts.get(run_id, 0)
 
     async def list_closed_issues_by_label(
         self,
@@ -808,6 +888,13 @@ class FakeGitHub:
             state = self._issues[issue_number].state
             return "COMPLETED" if state == "closed" else "OPEN"
         return "OPEN"
+
+    async def get_issue_labels(self, issue_number: int) -> list[str]:
+        """Return the label names on an issue (empty list when unknown)."""
+        self._maybe_rate_limit()
+        if issue_number in self._issues:
+            return list(self._issues[issue_number].labels)
+        return []
 
     async def list_hitl_items(
         self, hitl_labels: list[str], *, concurrency: int = 10
@@ -969,6 +1056,23 @@ class FakeGitHub:
 
     async def apply_staging_branch_protection(self, branch: str) -> dict[str, Any]:
         return {"status": "protected", "branch": branch}
+
+    def fetch_rulesets(self, repo: str) -> dict[str, dict[str, Any]]:
+        """Serve seeded branch-protection rulesets, keyed by ruleset name.
+
+        Sync mirror of ``branch_protection_audit.gh_fetch_rulesets`` (which
+        shells out to ``gh api /repos/{repo}/rulesets``). Injectable verbatim
+        as the ``fetch_rulesets=`` seam of ``branch_protection_audit.audit_repo``
+        so a sandbox / scenario ``branch_protection_auditor`` run observes drift
+        against the canonical contract without a real network fetch — the seam
+        the s41 scenario needs (#9644, ADR-0082).
+
+        ``repo`` is accepted for signature parity with ``gh_fetch_rulesets`` but
+        ignored: the Fake serves one repo's worth of seeded state. Returns a
+        deep copy so a caller mutating the result cannot corrupt seeded state.
+        """
+        _ = repo
+        return copy.deepcopy(self._rulesets)
 
     # --- Concrete-only PRManager methods invoked at orchestrator boot ---
 

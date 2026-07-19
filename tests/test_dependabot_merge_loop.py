@@ -65,6 +65,18 @@ def _make_state(
         counter[pr_number] = counter.get(pr_number, 0) + 1
         return counter[pr_number]
 
+    ub_counter: dict[int, int] = {}
+
+    def _get_ub(pr_number: int) -> int:
+        return ub_counter.get(pr_number, 0)
+
+    def _bump_ub(pr_number: int) -> int:
+        ub_counter[pr_number] = ub_counter.get(pr_number, 0) + 1
+        return ub_counter[pr_number]
+
+    state.get_dependabot_update_branch_attempts.side_effect = _get_ub
+    state.bump_dependabot_update_branch_attempts.side_effect = _bump_ub
+
     state.get_dependabot_arch_refresh_attempts.side_effect = _get_attempts
     state.bump_dependabot_arch_refresh_attempts.side_effect = _bump_attempts
     state._arch_refresh_counter = counter  # exposed for assertions
@@ -85,6 +97,8 @@ def _make_loop(
     arch_refresh_attempts: dict[int, int] | None = None,
     arch_refresh_result: bool = True,
     arch_autoheal_max_attempts: int | None = None,
+    update_branch_max_attempts: int | None = None,
+    update_branch_result: bool = True,
 ) -> tuple[DependabotMergeLoop, asyncio.Event, MagicMock, MagicMock, MagicMock]:
     """Build a DependabotMergeLoop with test-friendly defaults.
 
@@ -99,6 +113,13 @@ def _make_loop(
             "dependabot_arch_autoheal_max_attempts",
             arch_autoheal_max_attempts,
         )
+    # #9889 heal class 2 defaults OFF in this harness so failure-strategy
+    # tests keep exercising the strategy path; tests opt in explicitly.
+    object.__setattr__(
+        deps.config,
+        "dependabot_update_branch_max_attempts",
+        update_branch_max_attempts if update_branch_max_attempts is not None else 0,
+    )
 
     cache = MagicMock()
     # DependabotMergeLoop reads the label-agnostic snapshot (get_all_open_prs);
@@ -110,6 +131,7 @@ def _make_loop(
     prs.wait_for_ci = AsyncMock(return_value=ci_result)
     prs.submit_review = AsyncMock(return_value=True)
     prs.merge_pr = AsyncMock(return_value=merge_result)
+    prs.update_pr_branch = AsyncMock(return_value=update_branch_result)
     prs.add_labels = AsyncMock()
     prs.post_comment = AsyncMock()
     prs.close_issue = AsyncMock()

@@ -50,8 +50,12 @@ async def _communicate_bounded(
     try:
         return await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except TimeoutError:
-        proc.kill()
+        # proc.kill() itself raises ProcessLookupError when the child already
+        # exited — suppress it too, not just proc.wait() — so the TimeoutError
+        # (the intended failed-read signal) propagates instead of crashing the
+        # caller with ProcessLookupError. (#9794/#9816)
         with contextlib.suppress(ProcessLookupError):
+            proc.kill()
             await proc.wait()
         raise
 
@@ -203,13 +207,22 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
                 continue
             if self._state.get_onboarding_status(mr.slug) != "blocked":
                 continue
-            snapshot = await self._audit_managed_repo(mr)
-            report = await self._fetch_last_report(mr)
-            fails = self._p1_p5_fails(report.get("findings", []))
-            if not fails:
-                self._state.set_onboarding_status(mr.slug, "ready")
-                self._state.set_last_green_audit(mr.slug, snapshot)
-                flipped += 1
+            # Per-target isolation (#9855/#9805) — see _reconcile_onboarding.
+            try:
+                snapshot = await self._audit_managed_repo(mr)
+                report = await self._fetch_last_report(mr)
+                fails = self._p1_p5_fails(report.get("findings", []))
+                if not fails:
+                    self._state.set_onboarding_status(mr.slug, "ready")
+                    self._state.set_last_green_audit(mr.slug, snapshot)
+                    flipped += 1
+            except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning(
+                    "principles_audit retry-blocked failed for %s: %s",
+                    mr.slug,
+                    exc,
+                )
         return flipped
 
     async def _run_audit(self, slug: str, repo_root: Path) -> dict[str, Any]:
@@ -585,12 +598,23 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         for mr in self._config.managed_repos:
             if not mr.enabled:
                 continue
-            status = self._state.get_onboarding_status(mr.slug)
-            if status is None:
-                self._state.set_onboarding_status(mr.slug, "pending")
-                await self._run_onboarding_audit(mr)
-                count += 1
-            elif status == "pending":
-                await self._run_onboarding_audit(mr)
-                count += 1
+            # Per-target isolation (#9855/#9805): one unreachable managed
+            # repo must not kill the whole tick — that pegged
+            # tick_error_ratio at 1.0 and fed the anomaly->epic runaway.
+            try:
+                status = self._state.get_onboarding_status(mr.slug)
+                if status is None:
+                    self._state.set_onboarding_status(mr.slug, "pending")
+                    await self._run_onboarding_audit(mr)
+                    count += 1
+                elif status == "pending":
+                    await self._run_onboarding_audit(mr)
+                    count += 1
+            except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning(
+                    "principles_audit onboarding failed for %s: %s",
+                    mr.slug,
+                    exc,
+                )
         return count

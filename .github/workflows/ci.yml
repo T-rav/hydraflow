@@ -130,6 +130,23 @@ jobs:
       - name: Scan tracked files for git conflict markers
         run: python3 scripts/check_conflict_markers.py --tracked
 
+  # Universal backstop (#9599): reject git-tracked runtime caches on EVERY
+  # PR/push, ungated by `changes`. docs/wiki/{log.jsonl,ingest_dedup.json,
+  # index.json} were tracked runtime caches the RepoWikiLoop rewrote every tick,
+  # leaving the working tree perpetually dirty (fixed reactively in #9537). This
+  # gate catches the next one before it lands. stdlib-only; no uv sync needed.
+  runtime-cache-guard:
+    name: Runtime Cache Guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Scan tracked files for runtime caches
+        run: python3 scripts/check_runtime_cache_tracked.py --tracked
+
   lint:
     name: Lint & Format
     needs: changes
@@ -341,6 +358,10 @@ jobs:
         run: |
           git fetch --no-tags origin main:refs/remotes/origin/main
           git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+          # P10.6 diffs the PR against its base; make the base ref resolvable.
+          if [ -n "${{ github.base_ref }}" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" || true
+          fi
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
@@ -352,6 +373,9 @@ jobs:
       - name: Run principles audit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # P10.6 per-PR regression gate: empty on push builds, so the gate
+          # is NA there and only the telemetry history scan runs (#9902).
+          HYDRAFLOW_AUDIT_PR_BASE: ${{ github.base_ref }}
         run: make audit
 
   ui-build:

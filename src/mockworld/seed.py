@@ -136,6 +136,22 @@ class MockWorldSeed:
     # ``claude``. Only consumed when ``skill_prompt_corpus_cases`` is non-empty.
     skill_prompt_refine_patch: str = ""
 
+    # Branch-protection rulesets served by ``FakeGitHub.fetch_rulesets`` for the
+    # ``branch_protection_auditor`` loop (ADR-0082, #9644). Keyed by ruleset name
+    # (e.g. ``"main protect"`` / ``"staging protect"``); each value is the ruleset
+    # config dict shaped like GitHub's ``/repos/{repo}/rulesets/{id}`` response
+    # (``name`` / ``target`` / ``enforcement`` / ``conditions`` / ``rules``).
+    #
+    # In production the auditor fetches live rulesets via ``gh_fetch_rulesets``
+    # (a ``gh api`` shell-out) — unreachable on the air-gapped sandbox network.
+    # Seeding this field lets a scenario stand up a *drifted* (or clean) live
+    # ruleset so the auditor produces an observable drift outcome without any
+    # real network fetch. All keys/values are JSON-native (string keys, list/dict
+    # values), so no ``from_json`` coercion is needed. Default empty:
+    # ``FakeGitHub.fetch_rulesets`` returns ``{}``, leaving every existing seed
+    # payload unchanged.
+    rulesets: dict[str, dict[str, Any]] = field(default_factory=dict)
+
     def to_json(self) -> str:
         """Serialize to JSON for cross-process transfer."""
         return json.dumps(asdict(self), indent=2)

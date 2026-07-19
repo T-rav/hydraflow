@@ -16,6 +16,7 @@ flowchart LR
         caretaking_EpicMonitorLoop([EpicMonitorLoop])
         caretaking_EpicSweeperLoop([EpicSweeperLoop])
         caretaking_FitnessScorecardLoop([FitnessScorecardLoop])
+        caretaking_GateHealthLoop([GateHealthLoop])
         caretaking_GitHubCacheLoop([GitHubCacheLoop])
         caretaking_HealthMonitorLoop([HealthMonitorLoop])
         caretaking_LabelDriftWatcherLoop([LabelDriftWatcherLoop])
@@ -110,6 +111,7 @@ Autonomous background loops that maintain the system without human input — wik
 - `EpicMonitorLoop` — `src.epic_monitor_loop`
 - `EpicSweeperLoop` — `src.epic_sweeper_loop`
 - `FitnessScorecardLoop` — `src.fitness_scorecard_loop`
+- `GateHealthLoop` — `src.gate_health_loop`
 - `GitHubCacheLoop` — `src.github_cache_loop`
 - `HealthMonitorLoop` — `src.health_monitor_loop`
 - `LabelDriftWatcherLoop` — `src.label_drift_watcher_loop`

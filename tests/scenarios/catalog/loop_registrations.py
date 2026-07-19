@@ -21,10 +21,26 @@ def _build_ci_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     return CIMonitorLoop(config=config, pr_manager=ports["github"], deps=deps)
 
 
+def _build_gate_health(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    from gate_health_loop import GateHealthLoop  # noqa: PLC0415
+
+    return GateHealthLoop(config=config, pr_manager=ports["github"], deps=deps)
+
+
 def _build_stale_issue_gc(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from stale_issue_gc_loop import StaleIssueGCLoop  # noqa: PLC0415
 
-    return StaleIssueGCLoop(config=config, pr_manager=ports["github"], deps=deps)
+    state = ports.get("state")
+    if state is None:
+        state = MagicMock()
+        # Real StateTracker returns {} when nothing was pruned — a bare
+        # MagicMock return would read as "pruned something" in loop results
+        # (fake-fidelity rule).
+        state.prune_issue_scoped_state.return_value = {}
+        ports["state"] = state
+    return StaleIssueGCLoop(
+        config=config, pr_manager=ports["github"], state=state, deps=deps
+    )
 
 
 def _build_dependabot_merge(ports: dict[str, Any], config: Any, deps: Any) -> Any:
@@ -1707,6 +1723,7 @@ _BUILDERS: dict[str, Any] = {
     "branch_protection_auditor": _build_branch_protection_auditor,
     "gate_activator": _build_gate_activator,
     "stale_issue_gc": _build_stale_issue_gc,
+    "gate_health": _build_gate_health,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,
     "merge_state_watcher": _build_merge_state_watcher,

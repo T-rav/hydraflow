@@ -188,8 +188,13 @@ class StagingBisectLoop(BaseBackgroundLoop):
                     proc.communicate(), timeout=timeout_s
                 )
             except TimeoutError:
-                proc.kill()
-                await proc.wait()
+                # proc.kill() itself raises ProcessLookupError when the child
+                # already exited — suppress it (and proc.wait()) so the timeout
+                # surfaces as a probe failure instead of crashing the loop.
+                # (#9794/#9816/#9883)
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                    await proc.wait()
                 exit_code = 124  # bash convention
                 stderr_excerpt = f"timeout after {timeout_s}s"
                 self._emit_trace(t0, cmd, exit_code, stderr_excerpt)
@@ -489,7 +494,11 @@ class StagingBisectLoop(BaseBackgroundLoop):
         while True:
             remaining = deadline - asyncio.get_event_loop().time()
             if remaining <= 0:
-                proc.kill()
+                # proc.kill() raises ProcessLookupError if the child already
+                # exited — suppress it so the intended TimeoutError propagates
+                # instead of crashing the loop cycle. (#9794/#9816/#9883)
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
                 with contextlib.suppress(asyncio.CancelledError):
                     await comm_task
                 raise TimeoutError(f"git command exceeded {timeout}s")
@@ -504,7 +513,11 @@ class StagingBisectLoop(BaseBackgroundLoop):
                     "staging_bisect: kill-switch tripped mid-run — "
                     "terminating git subprocess"
                 )
-                proc.kill()
+                # proc.kill() raises ProcessLookupError if the child already
+                # exited — suppress it so the intended BisectCancelledError
+                # propagates instead of crashing the loop cycle. (#9794/#9816/#9883)
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
                 with contextlib.suppress(asyncio.CancelledError):
                     await comm_task
                 raise BisectCancelledError("kill-switch tripped during git bisect run")
@@ -583,8 +596,12 @@ class StagingBisectLoop(BaseBackgroundLoop):
                 proc.communicate(), timeout=_GH_TIMEOUT_SECONDS
             )
         except TimeoutError as exc:
-            proc.kill()
+            # proc.kill() itself raises ProcessLookupError when the child
+            # already exited — suppress it too, not just proc.wait(), so the
+            # RuntimeError below propagates instead of crashing the loop cycle.
+            # (#9794/#9816/#9883)
             with contextlib.suppress(ProcessLookupError):
+                proc.kill()
                 await proc.wait()
             raise RuntimeError(
                 f"gh timed out after {_GH_TIMEOUT_SECONDS}s: {' '.join(cmd)}"

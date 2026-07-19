@@ -137,12 +137,14 @@ class GhIssueSummary(BaseModel):
 
 
 class GhIssueListItem(BaseModel):
-    """``gh issue list --json number,title,body,updatedAt`` element shape.
+    """``gh issue list --json number,title,body,updatedAt[,labels]`` element shape.
 
     Narrower than :class:`GhIssueSummary` — list invocations typically
-    omit ``state`` (the filter is already applied by ``--state open|closed``)
-    and ``labels``. A separate shape so the broader summary keeps its
-    drift-detection bite on view invocations.
+    omit ``state`` (the filter is already applied by ``--state open|closed``).
+    ``labels`` is projected by the OPEN listing only (#9943: the preflight
+    human-required filter needs it); the closed listing omits it and the
+    default keeps that parse valid. A separate shape so the broader summary
+    keeps its drift-detection bite on view invocations.
     """
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -151,6 +153,7 @@ class GhIssueListItem(BaseModel):
     title: str
     body: str | None = None
     updated_at: str | None = Field(default=None, alias="updatedAt")
+    labels: list[GhLabel] = Field(default_factory=list)
 
 
 class GhPromotionPR(BaseModel):

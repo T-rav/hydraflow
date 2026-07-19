@@ -54,12 +54,17 @@ function PipelineFlow({ stageGroups }) {
     return { mergedCount: merged, failedCount: failed }
   }, [stageGroups])
 
+  // #9863: a big backlog (67 queued in PLAN) rendered 67 dots in one
+  // non-wrapping row and blew out the strip. Cap the dots and show the
+  // remainder as a +N badge — the count survives, the layout does too.
+  const FLOW_DOT_CAP = 10
+
   const renderFlowStage = (group) => (
     <div style={styles.flowStage} key={group.stage.key}>
       <span style={flowLabelStyles[group.stage.key]}>{group.stage.label}</span>
       {group.issues.length > 0 && (
         <div style={styles.flowDots}>
-          {group.issues.map(issue => {
+          {group.issues.slice(0, FLOW_DOT_CAP).map(issue => {
             const isEpic = issue.isEpicChild || issue.epicNumber > 0
             const dotStyles = isEpic ? epicFlowDotStyleMap : regularFlowDotStyleMap
             const dotStyle =
@@ -79,6 +84,15 @@ function PipelineFlow({ stageGroups }) {
               </span>
             )
           })}
+          {group.issues.length > FLOW_DOT_CAP && (
+            <span
+              style={styles.flowDotOverflow}
+              title={`${group.issues.length - FLOW_DOT_CAP} more in ${group.stage.label}`}
+              data-testid={`flow-overflow-${group.stage.key}`}
+            >
+              +{group.issues.length - FLOW_DOT_CAP}
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -164,8 +178,17 @@ function EpicContainer({ epicNumber, issues, children }) {
 }
 
 function StageSection({ stage, issues, workerCount, workerCap, queuedCount, intentMap, onRequestChanges, open, onToggle, enabled, dotColor, workers, prs }) {
-  const failedCount = issues.filter(i => i.overallStatus === 'failed').length
-  const hitlCount = issues.filter(i => i.overallStatus === 'hitl').length
+  const safeIssues = issues || []
+  const failedCount = safeIssues.filter(i => i.overallStatus === 'failed').length
+  const hitlCount = safeIssues.filter(i => i.overallStatus === 'hitl').length
+  // #9793: the header count and the expanded list previously came from two
+  // sources (orchestrator live counters vs the label-derived /api/pipeline
+  // snapshot) — "1 queued" could render zero queued rows. The count shown is
+  // now derived from the SAME rows the expansion renders; when the
+  // orchestrator is ahead of the snapshot the delta is shown honestly as
+  // "syncing" instead of a phantom row count.
+  const listQueuedCount = safeIssues.filter(i => i.overallStatus === 'queued').length
+  const syncingCount = Math.max(0, (queuedCount || 0) - listQueuedCount)
   const hasRole = !!stage.role
 
   return (
@@ -186,7 +209,10 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
         <span style={sectionCountStyles[stage.key]}>
           {hasRole ? (
             <>
-              <span>{queuedCount} queued</span>
+              <span data-testid={`stage-queued-${stage.key}`}>
+                {listQueuedCount} queued
+                {syncingCount > 0 && ` (+${syncingCount} syncing)`}
+              </span>
               {failedCount > 0 && <span style={styles.failedBadge}> · {failedCount} failed</span>}
               {hitlCount > 0 && <span style={styles.hitlBadge}> · {hitlCount} hitl</span>}
               <span>
@@ -196,7 +222,7 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
               </span>
             </>
           ) : (
-            <span>{issues.length} {NO_ROLE_COUNT_LABELS[stage.key] ?? 'merged'}</span>
+            <span>{safeIssues.length} {NO_ROLE_COUNT_LABELS[stage.key] ?? 'merged'}</span>
           )}
         </span>
         <span
@@ -208,7 +234,7 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
         // Group epic children by epicNumber, keep standalone separate
         const epicGroups = {}
         const standalone = []
-        for (const issue of issues) {
+        for (const issue of safeIssues) {
           if (issue.isEpicChild && issue.epicNumber > 0) {
             if (!epicGroups[issue.epicNumber]) epicGroups[issue.epicNumber] = []
             epicGroups[issue.epicNumber].push(issue)
@@ -689,6 +715,13 @@ const styles = {
     display: 'flex',
     gap: 4,
     alignItems: 'center',
+  },
+  flowDotOverflow: {
+    fontSize: 9,
+    fontWeight: 700,
+    color: theme.textMuted,
+    marginLeft: 2,
+    whiteSpace: 'nowrap',
   },
   flowConnector: {
     width: 16,

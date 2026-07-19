@@ -17,9 +17,16 @@ from config import Credentials, HydraFlowConfig
 from events import EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from knowledge_metrics import metrics as _metrics
-from repo_wiki import DEFAULT_TOPICS, RepoWikiStore, WikiEntry, active_lint_tracked
+from repo_wiki import (
+    DEFAULT_TOPICS,
+    RepoWikiStore,
+    WikiEntry,
+    active_lint_tracked,
+    flag_generic_entries_stale,
+)
 from staleness import evaluate as evaluate_staleness
 from subprocess_util import run_subprocess
+from wiki_anchor_gate import config_field_vocabulary
 from wiki_drift_detector import (
     apply_drift_markers,
     detect_drift,
@@ -285,7 +292,12 @@ class RepoWikiLoop(BaseBackgroundLoop):
         total_marked_stale = 0
         total_pruned = 0
         total_compiled = 0
+        total_anchor_flagged = 0
         empty_topics: list[str] = []
+
+        # Resolved once — the anchor vocabulary is the same for every repo
+        # this tick (#9954).
+        anchor_vocab = config_field_vocabulary()
 
         for slug in repos:
             # Phase 1: Active lint — self-healing pass
@@ -312,6 +324,26 @@ class RepoWikiLoop(BaseBackgroundLoop):
                 total_entries += tracked.total_entries
                 total_marked_stale += tracked.entries_marked_stale
                 total_pruned += tracked.orphans_pruned
+
+                # #9954 prune pass: flag anchor-less generic platitudes
+                # stale so they drop out of prompt injection. Mark-only —
+                # the age-based prune in active_lint_tracked removes them on
+                # a later tick; the flips ride this maintenance PR. Gated
+                # off by default: enabling it does the one-time backlog
+                # cleanup. The synthesis-time gate (always on) prevents new
+                # anchor-less entries regardless of this flag.
+                if self._config.wiki_anchor_prune_enabled:
+                    flagged = await asyncio.to_thread(
+                        flag_generic_entries_stale,
+                        tracked_root,
+                        slug,
+                        anchor_vocabulary=anchor_vocab,
+                    )
+                    if flagged:
+                        total_stale += flagged
+                        total_marked_stale += flagged
+                        total_anchor_flagged += flagged
+                        _metrics.increment("wiki_entries_flagged_no_anchor", flagged)
 
             # Phase 2: LLM compilation — synthesize topics with many entries
             if self._wiki_compiler is not None:
@@ -382,6 +414,7 @@ class RepoWikiLoop(BaseBackgroundLoop):
             "entries_marked_stale": total_marked_stale,
             "entries_pruned": total_pruned,
             "entries_compiled": total_compiled,
+            "anchor_flagged": total_anchor_flagged,
             "empty_topics": len(empty_topics),
         }
 

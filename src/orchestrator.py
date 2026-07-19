@@ -51,6 +51,7 @@ from state_restorer import StateRestorer
 from subprocess_util import (
     AuthenticationError,
     CreditExhaustedError,
+    probe_auth_availability,
     probe_credit_availability,
 )
 
@@ -80,6 +81,14 @@ def _log_deferred_task_failure(task: asyncio.Task[Any]) -> None:
 
 # Delay after a merge to allow GitHub to propagate the merge state.
 _POST_MERGE_DELAY: int = 5
+
+# Delay before restarting a loop whose AuthenticationError was refuted by the
+# live probe (a transient blip). A restart with no delay would let a loop that
+# runs-on-startup re-crash immediately while a sustained blip lasts, spinning
+# the supervisor and storming WARNING logs — the same hot-loop pathology #9924
+# guarded against on the credit false-positive path. The delay lives inside the
+# recreated task, so it never blocks supervision of the other loops (#9621).
+_AUTH_TRANSIENT_RESTART_DELAY_S: float = 30.0
 
 
 class HydraFlowOrchestrator:
@@ -122,6 +131,8 @@ class HydraFlowOrchestrator:
         self._auth_failed = False
         # Credit pause — set when API credits are exhausted
         self._credits_paused_until: datetime | None = None
+        # Per-source last false-positive suppression (#9888 throttle).
+        self._credit_fp_last: dict[str, datetime] = {}
         self._credit_pause_lock = asyncio.Lock()
         self._credit_resume_event = asyncio.Event()
         # Session tracking
@@ -181,6 +192,7 @@ class HydraFlowOrchestrator:
             "log_ingest": svc.log_ingest_loop,
             "github_cache": svc.github_cache_loop,
             "stale_issue_gc": svc.stale_issue_gc_loop,
+            "gate_health": svc.gate_health_loop,
             "ci_monitor": svc.ci_monitor_loop,
             "branch_protection_auditor": svc.branch_protection_auditor_loop,
             "gate_activator": svc.gate_activator_loop,
@@ -1067,8 +1079,60 @@ class HydraFlowOrchestrator:
                 self._config.repo_root,
             )
 
-    async def _handle_auth_error(self, loop_name: str) -> None:
-        """Set auth_failed, publish SYSTEM_ALERT, stop all loops."""
+    async def _handle_auth_error(
+        self,
+        loop_name: str,
+        exc: BaseException,
+        tasks: dict[str, asyncio.Task[None]],
+        loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
+    ) -> None:
+        """Corroborate the auth signal with a live probe before halting the factory.
+
+        A single gh call's stderr can match an auth pattern during a transient
+        network/API blip; that used to propagate fatally and stop ALL loops for
+        hours (#9621 — a momentary blip stalled the factory ~2.5h; a restart
+        recovered instantly because the token was fine the whole time).
+
+        Mirror the credit-pause corroboration (#9807/#9924): probe live auth
+        with ``gh auth status`` before committing a global halt. If auth is
+        actually fine the signal is a transient false positive — restart the
+        crashed loop (non-fatal, retried next tick) instead of stopping. Only a
+        probe-confirmed, PERSISTENT auth rejection halts the factory (fail-safe).
+        Kill-switch: ``auth_failure_require_probe=False`` reverts to
+        halt-on-signal. ``and`` short-circuits so the probe is skipped when the
+        kill-switch is off.
+        """
+        if self._config.auth_failure_require_probe and await probe_auth_availability():
+            logger.warning(
+                "GitHub auth-failure signal from %r NOT corroborated by a live "
+                "`gh auth status` probe — treating as a transient blip; "
+                "restarting the loop instead of pausing all loops (#9621).",
+                loop_name,
+            )
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    data={
+                        "message": (
+                            "GitHub auth signal not corroborated by a live probe "
+                            "— treating as a transient blip; not pausing."
+                        ),
+                        "source": loop_name,
+                        # Benign: a transient blip was absorbed, nothing paused.
+                        # Render yellow, not the red critical banner.
+                        "severity": "warning",
+                    },
+                )
+            )
+            await self._restart_loop(
+                loop_name,
+                exc,
+                tasks,
+                loop_factories,
+                restart_delay=_AUTH_TRANSIENT_RESTART_DELAY_S,
+            )
+            return
+
         logger.error(
             "GitHub authentication failed in %r — pausing all loops",
             loop_name,
@@ -1107,7 +1171,19 @@ class HydraFlowOrchestrator:
         """
         paused = await self._pause_for_credits(exc, loop_name, tasks, loop_factories)
         if not paused:
-            await self._restart_loop(loop_name, exc, tasks, loop_factories)
+            # Suppressed false positive: restart with a delay so a loop that
+            # re-raises the same quoted-prose signal cannot tight-spin the
+            # supervisor (#9888). The delay lives inside the restarted task,
+            # never blocking supervision of other loops.
+            await self._restart_loop(
+                loop_name,
+                exc,
+                tasks,
+                loop_factories,
+                restart_delay=min(
+                    float(self._config.credit_fp_suppress_cooldown_seconds), 60.0
+                ),
+            )
 
     async def _restart_loop(
         self,
@@ -1115,8 +1191,14 @@ class HydraFlowOrchestrator:
         exc: BaseException,
         tasks: dict[str, asyncio.Task[None]],
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
+        restart_delay: float = 0.0,
     ) -> None:
-        """Log, publish ERROR event, create a new loop task."""
+        """Log, publish ERROR event, create a new loop task.
+
+        ``restart_delay`` > 0 sleeps INSIDE the recreated task before the
+        loop body starts (#9888 suppressed-credit backoff) — the supervisor
+        is never blocked and the task stays tracked in the map.
+        """
         logger.error("Loop %r crashed — restarting: %s", loop_name, exc)
         data: ErrorPayload = {
             "message": f"Loop {loop_name} crashed and was restarted",
@@ -1129,8 +1211,14 @@ class HydraFlowOrchestrator:
             )
         )
         factory_fn = dict(loop_factories)[loop_name]
+
+        async def _run_after_delay() -> None:
+            if restart_delay > 0:
+                await asyncio.sleep(restart_delay)
+            await factory_fn()
+
         tasks[loop_name] = asyncio.create_task(
-            factory_fn(), name=f"hydraflow-{loop_name}"
+            _run_after_delay(), name=f"hydraflow-{loop_name}"
         )
 
     async def restart_loop_task(self, name: str) -> bool:
@@ -1177,7 +1265,7 @@ class HydraFlowOrchestrator:
     ) -> None:
         """Handle a crashed loop task — auth failure, credit exhaustion, or generic restart."""
         if isinstance(exc, AuthenticationError):
-            await self._handle_auth_error(name)
+            await self._handle_auth_error(name, exc, tasks, loop_factories)
             return
 
         if isinstance(exc, CreditExhaustedError):
@@ -1236,6 +1324,7 @@ class HydraFlowOrchestrator:
             ("repo_wiki", self._svc.repo_wiki_loop.run),
             ("security_patch", self._svc.security_patch_loop.run),
             ("stale_issue_gc", self._svc.stale_issue_gc_loop.run),
+            ("gate_health", self._svc.gate_health_loop.run),
             ("retrospective", self._svc.retrospective_loop.run),
             ("principles_audit", self._svc.principles_audit_loop.run),
             ("flake_tracker", self._svc.flake_tracker_loop.run),
@@ -1851,10 +1940,28 @@ class HydraFlowOrchestrator:
             # ``credit_pause_require_probe=False`` reverts to pause-on-text.
             # ``and`` short-circuits: with the kill-switch off, the probe is
             # never called (pause-on-text, the legacy behavior).
+            # Throttle repeat false positives from the same source (#9888):
+            # within the cooldown, skip the probe AND the banner — log-only.
+            # Six suppression banners landed in 3ms before this guard.
+            fp_last = self._credit_fp_last.get(source)
+            cooldown = float(self._config.credit_fp_suppress_cooldown_seconds)
+            if (
+                self._config.credit_pause_require_probe
+                and fp_last is not None
+                and (datetime.now(UTC) - fp_last).total_seconds() < cooldown
+            ):
+                logger.debug(
+                    "Credit FP from %r within %.0fs cooldown — suppressed (log-only)",
+                    source,
+                    cooldown,
+                )
+                return False
+
             if (
                 self._config.credit_pause_require_probe
                 and await probe_credit_availability()
             ):
+                self._credit_fp_last[source] = datetime.now(UTC)
                 logger.warning(
                     "Credit-exhaustion signal from %r NOT corroborated by live "
                     "API probe — treating as a false positive (likely quoted "

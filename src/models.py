@@ -2074,6 +2074,9 @@ class StateData(BaseModel):
     # the merge+arch-regen+push retry so a real (non-arch) failure eventually
     # falls through to ``failure_strategy``. Cleared when the PR is merged/closed.
     dependabot_arch_refresh_attempts: dict[str, int] = Field(default_factory=dict)
+    # #9889 shepherd: bounded update-branch heals per bot PR (stale merge
+    # ref class — reruns pin the old base; update-branch forces fresh CI).
+    dependabot_update_branch_attempts: dict[str, int] = Field(default_factory=dict)
     shape_conversations: dict[str, ShapeConversation] = Field(default_factory=dict)
     shape_responses: dict[str, str] = Field(default_factory=dict)
     stale_issue_settings: StaleIssueSettings = Field(default_factory=StaleIssueSettings)
@@ -2594,6 +2597,11 @@ class ControlStatusConfig(BaseModel):
     app_version: str = ""
     latest_version: str = ""
     update_available: bool = False
+    # #9663: in-memory boot SHA + commits-behind for at-a-glance staleness
+    # observability. Both are best-effort git reads: ``None`` when unavailable
+    # (git missing, detached, non-repo) rather than a fabricated value.
+    boot_sha: str | None = None
+    commits_behind: int | None = None
     repo: str = ""
     ready_label: list[str] = Field(default_factory=list)
     find_label: list[str] = Field(default_factory=list)
@@ -3070,12 +3078,18 @@ class ShippedWithKnownGapPayload(TypedDict):
 
 
 class GitHubIssueSummary(TypedDict):
-    """Lightweight issue dict returned by ``PRPort.list_issues_by_label``."""
+    """Lightweight issue dict returned by ``PRPort.list_issues_by_label``.
+
+    ``labels`` uses the gh wire shape (``[{"name": ...}, ...]``) and is only
+    populated by the OPEN listing — the closed listing keeps its narrower
+    projection (#9943).
+    """
 
     number: int
     title: str
     body: str
     updated_at: str
+    labels: NotRequired[list[dict[str, str]]]
 
 
 class PipelineSnapshotEntry(TypedDict):

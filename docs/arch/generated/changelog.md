@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W29
 
+- `e9d54ab` — chore(arch): regenerate arch artifacts at head (#9724) (#9724) *(2026-07-19)*
 - `c91538d` — feat(loop): drift-triggered prompt refinement — synth, tripwires, worktree validation, auto-merge PR (#9724) (#9724) *(2026-07-19)*
 - `d58fd13` — docs(adr): sync README status cells to ADR files + add consistency guard (#9456) (#9967) (#9967) *(2026-07-18)*
 - `8cda10a` — fix(adr): repoint rotted src citations + add citation-existence ratchet (#9963) (#9963) *(2026-07-18)*

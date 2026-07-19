@@ -208,6 +208,17 @@ class IssueDecomposer:
                 source_task.id,
                 epic_number,
             )
+            # Close the just-created epic loudly (#9855): the 2026-07-18
+            # label-registration failure orphaned 23 of these in one day —
+            # "rare" only when child creation cannot systematically fail.
+            await self._prs.post_comment(
+                epic_number,
+                "## Decomposition Aborted\n\n"
+                "Every child-issue creation failed, so this epic has no "
+                f"children. Source #{source_task.id} stays open for "
+                "human-required escalation. Closing this orphan (#9855).",
+            )
+            await self._prs.close_issue(epic_number)
             return None
 
         # Register with EpicManager

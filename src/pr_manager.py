@@ -1475,22 +1475,140 @@ class PRManager:
             "--state",
             "open",
             "--json",
-            "number,title,body,updatedAt",
+            "number,title,body,updatedAt,labels",
             "--limit",
             "100",
         )
         from contracts.boundary import field_or  # noqa: PLC0415
 
         results = parse_list_with_shape(output or "[]", GhIssueListItem)
-        return [
-            {
-                "number": field_or(r, "number", 0),
-                "title": field_or(r, "title", ""),
-                "body": field_or(r, "body", ""),
-                "updated_at": field_or(r, "updated_at", "", dict_key="updatedAt"),
-            }
-            for r in results
-        ]
+        summaries: list[GitHubIssueSummary] = []
+        for r in results:
+            # #9943: labels ride along in gh wire shape ({"name": ...}) so
+            # consumers like the preflight human-required filter see real
+            # data — the old projection omitted labels and the filter was
+            # a silent no-op.
+            if r.model_instance is not None:
+                labels = [
+                    {"name": lbl.name} for lbl in r.model_instance.labels if lbl.name
+                ]
+            else:
+                entry = r.payload if isinstance(r.payload, dict) else {}
+                labels = [
+                    {"name": str(lbl.get("name", ""))}
+                    for lbl in (entry.get("labels") or [])
+                    if isinstance(lbl, dict) and lbl.get("name")
+                ]
+            summaries.append(
+                {
+                    "number": field_or(r, "number", 0),
+                    "title": field_or(r, "title", ""),
+                    "body": field_or(r, "body", ""),
+                    "updated_at": field_or(r, "updated_at", "", dict_key="updatedAt"),
+                    "labels": labels,
+                }
+            )
+        return summaries
+
+    async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
+        """Return the numbers of ALL open issues (no label filter). #9905.
+
+        Narrow ``--json number`` projection: number is the only field the
+        state-prune keep-set needs, and narrow projections skip the
+        required-fields shape gate by design.
+        """
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            self._repo,
+            "--state",
+            "open",
+            "--json",
+            "number",
+            "--limit",
+            str(limit),
+        )
+        try:
+            rows = json.loads(output or "[]")
+        except ValueError:
+            logger.warning("list_open_issue_numbers: unparseable gh output")
+            return []
+        numbers: list[int] = []
+        for row in rows if isinstance(rows, list) else []:
+            number = row.get("number") if isinstance(row, dict) else None
+            if isinstance(number, int) and number > 0:
+                numbers.append(number)
+        return numbers
+
+    async def list_workflow_runs(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return recent workflow runs, newest first (#9974, read-only).
+
+        Uses the REST runs endpoint (not ``gh run list``) because the run
+        object carries ``pull_requests`` — the PR association that
+        blame-correlation needs.
+        """
+        self._assert_repo()
+        per_page = max(1, min(int(limit), 100))
+        output = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/actions/runs?per_page={per_page}",
+            "--jq",
+            (
+                "[.workflow_runs[] | {id: .id, workflow: .name, "
+                'conclusion: (.conclusion // ""), created_at: .created_at, '
+                "pr_number: (.pull_requests[0].number // 0)}]"
+            ),
+        )
+        try:
+            rows = json.loads(output or "[]")
+        except ValueError:
+            logger.warning("list_workflow_runs: unparseable gh output")
+            return []
+        return (
+            [row for row in rows if isinstance(row, dict)]
+            if isinstance(rows, list)
+            else []
+        )
+
+    async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        """Return jobs for one workflow run: name + conclusion (#9974)."""
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/actions/runs/{int(run_id)}/jobs?per_page=100",
+            "--jq",
+            '[.jobs[] | {name: .name, conclusion: (.conclusion // "")}]',
+        )
+        try:
+            rows = json.loads(output or "[]")
+        except ValueError:
+            logger.warning("get_workflow_run_jobs: unparseable gh output")
+            return []
+        return (
+            [row for row in rows if isinstance(row, dict)]
+            if isinstance(rows, list)
+            else []
+        )
+
+    async def count_workflow_run_artifacts(self, run_id: int) -> int:
+        """Return how many artifacts a workflow run uploaded (#9974)."""
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/actions/runs/{int(run_id)}/artifacts",
+            "--jq",
+            ".total_count",
+        )
+        try:
+            return int((output or "0").strip())
+        except ValueError:
+            return 0
 
     async def list_closed_issues_by_label(
         self, label: str, limit: int = 100
@@ -1590,6 +1708,31 @@ class PRManager:
             ".updatedAt",
         )
         return output.strip()
+
+    async def get_issue_labels(self, issue_number: int) -> list[str]:
+        """Return the label names carried by a GitHub issue.
+
+        Delegates to ``gh issue view <n> --json labels --jq
+        '.labels[].name'`` (newline-separated names). Read failures
+        propagate rather than being swallowed so that
+        ``WorkspaceGCLoop._issue_has_pipeline_label`` can fail-closed on
+        error instead of GC'ing an issue whose labels were merely
+        unreadable (#9575).
+        """
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "issue",
+            "view",
+            str(issue_number),
+            "--repo",
+            self._repo,
+            "--json",
+            "labels",
+            "--jq",
+            ".labels[].name",
+        )
+        return [line.strip() for line in output.splitlines() if line.strip()]
 
     async def get_latest_ci_status(self) -> tuple[str, str]:
         """Return (conclusion, url) for the latest CI run on the main branch."""

@@ -288,10 +288,13 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
         return record, repo_cfg
 
     async def _remove_repo(slug: str) -> bool:
-        rt = registry.remove(slug)
+        # The UI sends the path-sanitized slug the listing emitted; the
+        # registry is keyed by the RAW record slug — resolve first (#9887).
+        raw = repo_store.resolve_slug(slug) or slug
+        rt = registry.remove(raw)
         if rt is not None:
             await rt.stop()
-        return repo_store.remove(slug)
+        return repo_store.remove(raw)
 
     credentials = build_credentials(config)
 
