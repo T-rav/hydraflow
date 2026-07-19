@@ -78,6 +78,20 @@ def _dedup_key(adr_number: int) -> str:
     return f"adr_touchpoint_auditor:{_rollup_key(adr_number)}"
 
 
+def _adr_num_from_key(rollup_key: str) -> int | None:
+    """Parse the ADR number out of an ``ADR-NNNN`` rollup key.
+
+    Returns ``None`` for malformed keys so a corrupt state entry can't wedge
+    the reconcile pass.
+    """
+    if not rollup_key.startswith("ADR-"):
+        return None
+    try:
+        return int(rollup_key[4:])
+    except ValueError:
+        return None
+
+
 class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
     """ADR drift auditor (ADR-0056). Replaces the deleted touchpoint gate.
 
@@ -155,6 +169,54 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             logger.warning("gh pr list returned non-JSON")
             return []
         return sorted(payload, key=lambda r: r.get("mergedAt") or "")
+
+    async def _fetch_pr_changed_files(self, pr_number: int) -> list[str]:
+        """Return one PR's changed file paths via ``gh pr view N --json files``.
+
+        Bounded by :data:`_GH_TIMEOUT_SECONDS`. Returns ``[]`` on any failure
+        (timeout, non-zero exit, malformed JSON) so a single unreadable PR
+        can't wedge the stale-rollup reconcile pass. Used to re-fetch a
+        tracked rollup's OWN historical PR diffs — which may predate the scan
+        cursor — so drift can be recomputed for just those PRs (#9622).
+        """
+        cmd = [
+            "gh",
+            "pr",
+            "view",
+            str(pr_number),
+            "--repo",
+            self._config.repo,
+            "--json",
+            "files",
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await _communicate_bounded(proc)
+        except TimeoutError:
+            logger.warning(
+                "gh pr view %s timed out after %ss; treating as no files",
+                pr_number,
+                _GH_TIMEOUT_SECONDS,
+            )
+            return []
+        if proc.returncode != 0:
+            logger.warning(
+                "gh pr view %s failed (rc=%s): %s",
+                pr_number,
+                proc.returncode,
+                stderr.decode(errors="replace").strip(),
+            )
+            return []
+        try:
+            payload = json.loads(stdout.decode() or "{}")
+        except json.JSONDecodeError:
+            logger.warning("gh pr view %s returned non-JSON", pr_number)
+            return []
+        return [f.get("path", "") for f in payload.get("files", []) if f.get("path")]
 
     @staticmethod
     def _changed_paths(pr: dict) -> list[str]:
@@ -333,6 +395,103 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             )
         return entries
 
+    async def _close_and_clear_rollup(self, adr_num: int, issue_number: int) -> None:
+        """Close a rollup issue and clear its state, attempts, and dedup key.
+
+        Atomic teardown shared by the ADR-file-resolved close path and the
+        stale-rollup reconcile pass (#9622). Closing an already-closed issue
+        is idempotent, so this is safe to call for a manually-closed rollup.
+        """
+        rollup_key = _rollup_key(adr_num)
+        try:
+            await self._pr.close_issue(int(issue_number))
+        except (
+            RuntimeError,
+            AttributeError,
+        ) as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Could not close ADR rollup issue #%s: %s",
+                issue_number,
+                exc,
+            )
+        self._state.clear_adr_rollup(rollup_key)
+        self._state.clear_adr_audit_attempts(rollup_key)
+        current = self._dedup.get()
+        if _dedup_key(adr_num) in current:
+            self._dedup.set_all(current - {_dedup_key(adr_num)})
+
+    async def _reconcile_stale_rollups(
+        self,
+        *,
+        drifting_adrs: set[int],
+        adrs_resolved_this_tick: set[int],
+    ) -> int:
+        """Close tracked rollups obsoleted outside this tick's scan window (#9622).
+
+        ``compute_drift_by_adr`` only scans PRs merged since the cursor, so
+        when a module is later added to ``_SHARED_INFRA_MODULES`` (or an ADR's
+        citations change), a rollup whose contributor PRs predate the cursor is
+        never rescanned — drift recomputes empty and the rollup strands open
+        forever, unable to update or auto-close.
+
+        For every tracked rollup whose ADR is NOT drifting in this tick's
+        window and was NOT resolved by an ADR-file touch this tick:
+
+        * if the rollup issue was manually closed (a non-escalated close that
+          :meth:`_reconcile_closed_escalations` never sees), clear its orphaned
+          state; otherwise
+        * re-fetch the rollup's OWN tracked PR diffs by stored ``pr_number`` and
+          recompute drift over JUST those PRs. Empty ⇒ obsolete ⇒ close + clear.
+
+        CRITICAL: recompute is scoped to the rollup's OWN PRs, never this
+        tick's window — otherwise every rollup would be wrongly closed on a
+        quiet tick.
+
+        Returns the number of rollups closed/cleared.
+        """
+        from adr_drift import compute_drift_by_adr  # noqa: PLC0415
+
+        closed = 0
+        for rollup_key, entry in self._state.all_adr_rollups().items():
+            adr_num = _adr_num_from_key(rollup_key)
+            if adr_num is None:
+                continue
+            # Actively drifting this tick, or resolved by an ADR-file touch this
+            # tick — both are handled by the main scan; don't second-guess them.
+            if adr_num in drifting_adrs or adr_num in adrs_resolved_this_tick:
+                continue
+            issue_number = int(entry.get("issue_number", 0))
+            if not issue_number:
+                continue
+
+            # Manually-closed non-escalated rollup: state is orphaned because
+            # ``_reconcile_closed_escalations`` only sees escalation-labeled
+            # closes. ``get_issue_state`` returns ``OPEN`` while open,
+            # ``COMPLETED``/``NOT_PLANNED`` when closed, and ``''``/``UNKNOWN``
+            # on error — only act on a *definitive* closed state (fail-closed).
+            state = await self._pr.get_issue_state(issue_number)
+            if state and state not in ("OPEN", "UNKNOWN"):
+                await self._close_and_clear_rollup(adr_num, issue_number)
+                closed += 1
+                continue
+
+            # Recompute drift over the rollup's OWN tracked PRs (NOT this tick's
+            # window). Empty ⇒ a shared-infra addition / citation change made
+            # the rollup obsolete.
+            pr_numbers = [int(n) for n in entry.get("pr_numbers", [])]
+            if not pr_numbers:
+                continue
+            pr_diffs: list[tuple[int, list[str]]] = []
+            for n in pr_numbers:
+                files = await self._fetch_pr_changed_files(n)
+                pr_diffs.append((n, files))
+            recomputed = compute_drift_by_adr(self._adr_index, pr_diffs)
+            if any(e.adr.number == adr_num for e in recomputed):
+                continue  # still genuinely drifts — leave the rollup open
+            await self._close_and_clear_rollup(adr_num, issue_number)
+            closed += 1
+        return closed
+
     async def _do_work(self) -> WorkCycleResult:  # noqa: PLR0915
         """Scan recently-merged PRs vs ADR citations, file per-ADR drift rollups."""
         if not self._enabled_cb(self._worker_name):
@@ -382,31 +541,25 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             new_cursor = max(new_cursor, merged_at)
 
         rollups = compute_drift_by_adr(self._adr_index, pr_diffs)
+        drifting_adrs = {entry.adr.number for entry in rollups}
 
         # Resolve rollups for ADRs that were updated in any PR diff this tick.
         closed = 0
         for adr_num in adrs_resolved_this_tick:
-            rollup_key = _rollup_key(adr_num)
-            existing = self._state.get_adr_rollup(rollup_key)
+            existing = self._state.get_adr_rollup(_rollup_key(adr_num))
             if not existing:
                 continue
-            try:
-                await self._pr.close_issue(int(existing["issue_number"]))
-            except (
-                RuntimeError,
-                AttributeError,
-            ) as exc:  # pragma: no cover - defensive
-                logger.warning(
-                    "Could not close ADR rollup issue #%s: %s",
-                    existing.get("issue_number"),
-                    exc,
-                )
-            self._state.clear_adr_rollup(rollup_key)
-            self._state.clear_adr_audit_attempts(rollup_key)
-            current = self._dedup.get()
-            if _dedup_key(adr_num) in current:
-                self._dedup.set_all(current - {_dedup_key(adr_num)})
+            await self._close_and_clear_rollup(adr_num, int(existing["issue_number"]))
             closed += 1
+
+        # Stale-rollup reconciliation (#9622): a shared-infra addition /
+        # citation change / manual close can obsolete a rollup whose original
+        # contributor PRs predate the cursor and are never rescanned by
+        # ``compute_drift_by_adr``. Re-evaluate those over their OWN PRs.
+        closed += await self._reconcile_stale_rollups(
+            drifting_adrs=drifting_adrs,
+            adrs_resolved_this_tick=adrs_resolved_this_tick,
+        )
 
         filed = 0
         updated = 0

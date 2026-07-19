@@ -51,6 +51,22 @@ class AdrAuditStateMixin:
             "pr_numbers": list(entry.get("pr_numbers", [])),
         }
 
+    def all_adr_rollups(self) -> dict[str, dict]:
+        """Return a normalized copy of every tracked rollup, keyed by ``ADR-NNNN``.
+
+        Used by the auditor's stale-rollup reconciliation pass (#9622) to
+        re-evaluate rollups whose ADR did not drift in the current scan
+        window — the original contributor PRs may predate the cursor and are
+        never rescanned by ``compute_drift_by_adr``.
+        """
+        return {
+            key: {
+                "issue_number": int(entry.get("issue_number", 0)),
+                "pr_numbers": list(entry.get("pr_numbers", [])),
+            }
+            for key, entry in self._data.adr_rollup_issues.items()
+        }
+
     def set_adr_rollup(
         self, adr_key: str, *, issue_number: int, pr_numbers: list[int]
     ) -> None:
