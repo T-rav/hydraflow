@@ -496,26 +496,38 @@ async def test_do_work_appends_scorecard_and_advances_baseline(
 async def test_do_work_files_prompt_inefficiency_issue_past_threshold(
     refine_loop_factory, monkeypatch
 ) -> None:
+    """`get_source_totals()` is LIFETIME-CUMULATIVE — never reset — so both
+    the stored baseline and the fake telemetry snapshots here model
+    realistic growing cumulative totals one tick apart (the reviewer's
+    concrete case from #9724 finding 1: a long-lived source's *window*
+    cost-per-call spikes 100x while its lifetime-cumulative totals barely
+    move). Both ticks below carry a genuine >0.5 window trend so the second
+    tick's non-refile is proven to come from the dedup guard, not from the
+    trend recomputing to a non-firing value."""
     loop = refine_loop_factory()
     loop._pr.list_issues_by_label = AsyncMock(return_value=[])
     loop._pr.list_closed_issues_by_label = AsyncMock(return_value=[])
     loop._pr.create_issue = AsyncMock(return_value=99)
 
-    # Last week: cheap. This week: 10x cost-per-call => trend > 0.5 threshold.
+    # Last week's cumulative baseline: 100,000 calls / $1000 total
+    # ($0.01/call lifetime average).
     loop._state.set_prompt_efficiency_baseline(
         {
             "diff-sanity": {
-                "inference_calls": 10,
-                "estimated_cost_microusd": 1_000_000,
+                "inference_calls": 100_000,
+                "estimated_cost_microusd": 1_000_000_000,
                 "usage_unavailable_calls": 0,
             }
         }
     )
+    # This week's cumulative total: +100 calls costing $1.00 each — a
+    # $1.00/call *window* rate, a genuine 99x trend vs. the $0.01/call
+    # baseline average (>> 0.5 threshold).
     loop._telemetry = _FakeTelemetry(
         {
             "diff-sanity": {
-                "inference_calls": 10,
-                "estimated_cost_microusd": 10_000_000,
+                "inference_calls": 100_100,
+                "estimated_cost_microusd": 1_100_000_000,
                 "usage_unavailable_calls": 0,
             }
         }
@@ -532,9 +544,23 @@ async def test_do_work_files_prompt_inefficiency_issue_past_threshold(
     title, _body, labels = loop._pr.create_issue.await_args.args
     assert "diff-sanity" in title
     assert "prompt-inefficiency" in labels
+    assert "skill_prompt_eval:inefficiency:diff-sanity" in loop._dedup.get()
 
-    # Second tick, same regressed source: dedup short-circuits, no re-file.
+    # Second tick: baseline has advanced to tick 1's cumulative snapshot
+    # (100,100 calls / $1100), and this tick escalates further — another
+    # +100 calls at $1.00 each, again a genuine >0.5 window trend vs. the
+    # ~$0.011/call baseline average. If dedup weren't guarding this, a
+    # fresh issue would fire; assert it does not.
     loop._pr.create_issue.reset_mock()
+    loop._telemetry = _FakeTelemetry(
+        {
+            "diff-sanity": {
+                "inference_calls": 100_200,
+                "estimated_cost_microusd": 1_200_000_000,
+                "usage_unavailable_calls": 0,
+            }
+        }
+    )
     monkeypatch.setattr(loop, "_run_corpus", fake_run_corpus)
     await loop._do_work()
     loop._pr.create_issue.assert_not_awaited()

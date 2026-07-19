@@ -23,7 +23,16 @@ INEFFICIENCY_THRESHOLD = 0.5
 
 @dataclass
 class SkillEfficiencyRow:
-    """One row of the weekly per-source efficiency scorecard."""
+    """One row of the weekly per-source efficiency scorecard.
+
+    ``calls``/``est_cost_usd`` are LIFETIME-CUMULATIVE (straight from
+    `PromptTelemetry.get_source_totals()`). ``cost_per_call`` is NOT simply
+    ``est_cost_usd / calls`` — it is this tick's marginal *window*
+    cost-per-call (``delta_cost / delta_calls`` since the baseline snapshot)
+    when there was window activity, falling back to the cumulative
+    lifetime average only when there wasn't (no baseline, no new calls this
+    tick, or a counter reset). See `compute_skill_efficiency`.
+    """
 
     source: str
     calls: int
@@ -52,33 +61,74 @@ def compute_skill_efficiency(
 ) -> list[SkillEfficiencyRow]:
     """Roll up per-source telemetry totals into ranked efficiency rows.
 
-    Sorted worst-first by ``cost_per_call`` — both the scorecard and
-    `pick_refine_order` want the most expensive-per-call source first.
-    ``trend_vs_baseline`` is the fractional change in cost-per-call versus the
-    matching *baseline* entry: ``None`` when *baseline* has no entry for the
-    source, or when the baseline's cost-per-call was zero (nothing to divide
-    by — a genuine "new source" or "was free" case, not a regression).
+    ``totals_by_source`` (current) and ``baseline`` (previous tick) are BOTH
+    LIFETIME-CUMULATIVE snapshots straight from
+    `PromptTelemetry.get_source_totals()` — the accumulator never resets, so
+    a source with a long history has a huge lifetime call count. Comparing
+    the two snapshots' cumulative averages directly would dilute any real
+    regression into noise (e.g. a genuine 100x-cost blowup over 100 calls on
+    a source with 100k lifetime calls barely moves the lifetime average).
+    Instead we derive the *marginal window* since baseline:
+
+    - ``delta_calls = current.calls - baseline.calls``,
+      ``delta_cost = current.est_cost_usd - baseline.est_cost_usd``.
+    - Window cost-per-call = ``delta_cost / delta_calls`` when
+      ``delta_calls > 0``. A zero or negative delta (no new calls this tick,
+      or a counter reset/file rotation dropping the lifetime total below the
+      stored baseline) means there's no window to measure — the window
+      cost-per-call and ``trend_vs_baseline`` are both ``None`` in that case.
+    - The baseline reference point is the baseline snapshot's own cumulative
+      average (``baseline.est_cost_usd / baseline.calls``), not a window —
+      there's nothing before "baseline" to window against. ``None`` when the
+      baseline has no entry for the source or its call count is zero.
+    - ``trend_vs_baseline`` is the fractional change of window cost-per-call
+      vs. that baseline average, when both are defined and the baseline
+      average is nonzero (nothing to divide by otherwise — a genuine "new
+      source" or "was free" case, not a regression).
+
+    ``SkillEfficiencyRow.cost_per_call`` (and the worst-first SORT below) use
+    the window cost-per-call when it's defined; otherwise they fall back to
+    the source's cumulative lifetime average so the scorecard still shows a
+    meaningful rate for a source with no baseline/no window activity instead
+    of a bare zero.
     """
     baseline_map = baseline if isinstance(baseline, dict) else {}
     rows: list[SkillEfficiencyRow] = []
     for source, totals in totals_by_source.items():
-        est_cost_usd, calls = _cost_and_calls(totals)
+        cum_cost_usd, cum_calls = _cost_and_calls(totals)
         anomalies = int(totals.get("usage_unavailable_calls", 0))
-        cost_per_call = est_cost_usd / calls if calls else 0.0
+        cumulative_cost_per_call = cum_cost_usd / cum_calls if cum_calls else 0.0
 
-        trend: float | None = None
+        window_cost_per_call: float | None = None
+        base_cost_per_call: float | None = None
         base_totals = baseline_map.get(source)
         if isinstance(base_totals, dict):
             base_cost_usd, base_calls = _cost_and_calls(base_totals)
-            base_cost_per_call = base_cost_usd / base_calls if base_calls else 0.0
-            if base_cost_per_call > 0:
-                trend = (cost_per_call - base_cost_per_call) / base_cost_per_call
+            base_cost_per_call = base_cost_usd / base_calls if base_calls else None
+            delta_calls = cum_calls - base_calls
+            if delta_calls > 0:
+                delta_cost = cum_cost_usd - base_cost_usd
+                window_cost_per_call = delta_cost / delta_calls
+
+        trend: float | None = None
+        if (
+            window_cost_per_call is not None
+            and base_cost_per_call is not None
+            and base_cost_per_call > 0
+        ):
+            trend = (window_cost_per_call - base_cost_per_call) / base_cost_per_call
+
+        cost_per_call = (
+            window_cost_per_call
+            if window_cost_per_call is not None
+            else cumulative_cost_per_call
+        )
 
         rows.append(
             SkillEfficiencyRow(
                 source=source,
-                calls=calls,
-                est_cost_usd=est_cost_usd,
+                calls=cum_calls,
+                est_cost_usd=cum_cost_usd,
                 anomalies=anomalies,
                 cost_per_call=cost_per_call,
                 trend_vs_baseline=trend,
@@ -89,10 +139,17 @@ def compute_skill_efficiency(
 
 
 def format_scorecard(rows: list[SkillEfficiencyRow]) -> str:
-    """Render *rows* (already worst-first) as a markdown table."""
+    """Render *rows* (already worst-first) as a markdown table.
+
+    ``calls``/``est_cost_usd`` are lifetime-cumulative; ``cost_per_call`` is
+    this tick's marginal window rate (falling back to the cumulative average
+    when there's no window to measure) — see `compute_skill_efficiency`. The
+    header spells this out so the table isn't mistaken for two cumulative
+    columns that happen to disagree.
+    """
     header = (
-        "| skill | calls | est_cost_usd | cost_per_call | anomalies "
-        "| trend_vs_baseline |"
+        "| skill | calls (lifetime) | est_cost_usd (lifetime) "
+        "| cost_per_call (window) | anomalies | trend_vs_baseline |"
     )
     sep = "|---|---|---|---|---|---|"
     lines = [header, sep]
@@ -110,19 +167,22 @@ def format_scorecard(rows: list[SkillEfficiencyRow]) -> str:
 
 
 def pick_refine_order(
-    regressed_cases: list[dict[str, Any]], rows: list[SkillEfficiencyRow]
+    cases: list[dict[str, Any]], rows: list[SkillEfficiencyRow]
 ) -> list[dict[str, Any]]:
-    """Reorder *regressed_cases* so the most cost-inefficient skill goes first.
+    """Reorder *cases* so the most cost-inefficient skill's case goes first.
 
-    *rows* is already worst-first (see `compute_skill_efficiency`), so a
-    case's rank is its ``expected_catcher``'s position in *rows*. Cases whose
-    catcher has no telemetry row sort last, keeping their original relative
-    order (`sorted` is stable) — "most-inefficient skill first, stable
-    otherwise".
+    *cases* is the unfiltered corpus-run output (not pre-filtered to
+    regressions) — the caller feeds the full case list and this function
+    just reorders it; callers decide separately which cases actually count
+    as a regression. *rows* is already worst-first (see
+    `compute_skill_efficiency`), so a case's rank is its
+    ``expected_catcher``'s position in *rows*. Cases whose catcher has no
+    telemetry row sort last, keeping their original relative order (`sorted`
+    is stable) — "most-inefficient skill first, stable otherwise".
     """
     rank = {row.source: i for i, row in enumerate(rows)}
     unranked = len(rows)
     return sorted(
-        regressed_cases,
+        cases,
         key=lambda case: rank.get(str(case.get("expected_catcher", "")), unranked),
     )

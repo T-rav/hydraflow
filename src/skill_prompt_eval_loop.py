@@ -565,11 +565,16 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         """Weekly telemetry rollup: scorecard + refine-priority ordering +
         inefficiency issue filing, then advance the baseline.
 
-        Trend is computed against the baseline stored on the *previous* tick
-        (trailing-window: current vs. immediately preceding tick — not a
-        multi-week rolling average). The baseline is overwritten with this
-        tick's snapshot only AFTER that comparison, so next tick's trend is
-        relative to what this tick just measured.
+        Both `self._telemetry.get_source_totals()` and the stored baseline
+        are LIFETIME-CUMULATIVE snapshots (never reset) — `compute_skill_
+        efficiency` derives the marginal *window* since the previous tick
+        from their deltas rather than comparing cumulative averages, or a
+        real regression would be diluted into noise by a source's lifetime
+        history. Trend is computed against the baseline stored on the
+        *previous* tick (trailing-window: current vs. immediately preceding
+        tick — not a multi-week rolling average). The baseline is
+        overwritten with this tick's snapshot only AFTER that comparison, so
+        next tick's window is relative to what this tick just measured.
         """
         totals_by_source = self._telemetry.get_source_totals()
         baseline = self._state.get_prompt_efficiency_baseline()
