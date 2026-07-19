@@ -55,6 +55,13 @@ services:
       # s52_human_steering_directive.py).
       HYDRAFLOW_HUMAN_STEERING_ENABLED: "true"
       HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS: "steer-bot"
+      # DiagnosticLoop defaults OFF in production (#9895/#9898 — credit flood),
+      # but s05's escalation chain (review exhaustion → diagnostic → HITL)
+      # needs the STATIC config gate open. The per-seed ADR-0049 kill-switch
+      # (loops_enabled) still decides which scenarios actually run the loop —
+      # only seeds listing "diagnostic" do; the sentinel routes its subprocess
+      # to a scripted not-fixable diagnosis, so no real spawn ever happens.
+      HYDRAFLOW_DIAGNOSTIC_LOOP_ENABLED: "true"
     volumes:
       - ./tests/sandbox_scenarios/seeds:/seed:ro
     networks: [sandbox]
