@@ -425,6 +425,77 @@ class TestL7bAutoAgentPrMerges:
 
 
 # ---------------------------------------------------------------------------
+# L7d: human-prefix branches get the shepherd-to-merge path (#9889 class 5)
+# ---------------------------------------------------------------------------
+
+
+class TestL7dHumanBranchShepherd:
+    """L7d: a CI-green human fix/ PR merges via the shepherd lane; the
+    no-auto-merge label leaves it to its author (operator-approved #9889)."""
+
+    async def test_green_human_fix_pr_merges(self, tmp_path):
+        world = MockWorld(tmp_path)
+
+        from unittest.mock import AsyncMock, patch
+
+        from mockworld.fakes.fake_github import FakePR
+        from models import PRListItem
+
+        human_pr = PRListItem(
+            pr=800,
+            title="fix(ui): cap dots",
+            author="T-rav",
+            branch="fix/pipeline-dots-cap",
+        )
+        world.github._prs[800] = FakePR(
+            number=800, issue_number=0, branch="fix/pipeline-dots-cap"
+        )
+
+        await world.run_with_loops(["dependabot_merge"], cycles=1)
+        world._dependabot_cache.get_open_prs.return_value = [human_pr]
+        world._dependabot_cache.get_all_open_prs.return_value = [human_pr]
+
+        # The opt-out label read is a raw gh subprocess (#9754 seam) — fake
+        # it at the loop boundary; the FakeGitHub port handles the rest.
+        with patch("dependabot_merge_loop.fetch_pr_labels", AsyncMock(return_value=[])):
+            stats = await world.run_with_loops(["dependabot_merge"], cycles=1)
+
+        assert stats["dependabot_merge"]["merged"] == 1
+        assert world.github.pr(800).merged is True
+
+    async def test_no_auto_merge_label_respected(self, tmp_path):
+        world = MockWorld(tmp_path)
+
+        from unittest.mock import AsyncMock, patch
+
+        from mockworld.fakes.fake_github import FakePR
+        from models import PRListItem
+
+        human_pr = PRListItem(
+            pr=801,
+            title="feat(x): risky",
+            author="T-rav",
+            branch="feat/risky-change",
+        )
+        world.github._prs[801] = FakePR(
+            number=801, issue_number=0, branch="feat/risky-change"
+        )
+
+        await world.run_with_loops(["dependabot_merge"], cycles=1)
+        world._dependabot_cache.get_open_prs.return_value = [human_pr]
+        world._dependabot_cache.get_all_open_prs.return_value = [human_pr]
+
+        with patch(
+            "dependabot_merge_loop.fetch_pr_labels",
+            AsyncMock(return_value=["no-auto-merge"]),
+        ):
+            stats = await world.run_with_loops(["dependabot_merge"], cycles=1)
+
+        assert stats["dependabot_merge"]["skipped"] == 1
+        assert world.github.pr(801).merged is False
+
+
+# ---------------------------------------------------------------------------
 # L7c: Dependabot Merge self-heals a bot PR stuck on stale arch artifacts
 # ---------------------------------------------------------------------------
 

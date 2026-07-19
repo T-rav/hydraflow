@@ -12,8 +12,9 @@ from merge_policy import (
     ROLE_ORCHESTRATOR_REVIEWER,
     MergeApproval,
     enforce_merge_policy,
+    fetch_pr_labels,
 )
-from models import ReviewVerdict, SystemAlertPayload
+from models import PRListItem, ReviewVerdict, SystemAlertPayload
 
 if TYPE_CHECKING:
     from github_cache_loop import GitHubDataCache
@@ -40,6 +41,24 @@ _AUTO_AGENT_BRANCH_PREFIX = "agent/auto-agent-"
 # unmerged (#9843). Matching on these exact factory-owned prefixes is safe: no
 # human or normal-pipeline branch uses them. Once selected, the CI-green merge
 # and the stale-arch self-heal path below handle the rest.
+# Class 5 (#9889, operator-approved 2026-07-19): human-prefix branches get
+# the same CI-green shepherd-to-merge path as factory branches. Before this,
+# a human fix/ PR had NO merge path at all — the review→merge pipeline keys
+# on agent/issue-N and this loop selected only bots/factory prefixes, so
+# every green human PR sat until someone hand-merged it. Guardrails: the
+# deploy-time kill-switch below, the existing draft exclusion, the CH-3
+# merge policy (which reads fresh PR labels, so policy-override:*/deny
+# still apply), and a per-PR ``no-auto-merge`` label opt-out.
+_HUMAN_SHEPHERD_BRANCH_PREFIXES = (
+    "fix/",
+    "feat/",
+    "docs/",
+    "test/",
+    "chore/",
+    "refactor/",
+)
+_HUMAN_SHEPHERD_OPT_OUT_LABEL = "no-auto-merge"
+
 _FACTORY_MAINTENANCE_BRANCH_PREFIXES = (
     "ul-proposer/",  # term_proposer_loop
     "ul-evidence/",  # entry_evidence_loop
@@ -119,6 +138,14 @@ class DependabotMergeLoop(BaseBackgroundLoop):
     def _get_default_interval(self) -> int:
         return self._config.dependabot_merge_interval
 
+    def _is_human_shepherd_pr(self, pr: PRListItem) -> bool:
+        """Class 5 (#9889): human-prefix branch eligible for shepherding."""
+        return (
+            self._config.human_branch_shepherd_enabled
+            and not pr.is_bot
+            and pr.branch.startswith(_HUMAN_SHEPHERD_BRANCH_PREFIXES)
+        )
+
     async def _do_work(self) -> dict[str, Any] | None:
         """Check bot PRs and auto-merge if CI passes."""
         if not self._enabled_cb(self._worker_name):
@@ -151,6 +178,8 @@ class DependabotMergeLoop(BaseBackgroundLoop):
                 # auto-agent preflight + the UL/pricing/wiki maintenance loops.
                 or pr.branch.startswith(_AUTO_AGENT_BRANCH_PREFIX)
                 or pr.branch.startswith(_FACTORY_MAINTENANCE_BRANCH_PREFIXES)
+                # Class 5 (#9889): human-prefix branches, kill-switch gated.
+                or self._is_human_shepherd_pr(pr)
             )
         ]
 
@@ -170,6 +199,22 @@ class DependabotMergeLoop(BaseBackgroundLoop):
                 break
 
             if passed:
+                # Class 5 opt-out: a fresh label read (not the cache — the
+                # author may attach it at any time) so ``no-auto-merge``
+                # reliably leaves the PR to its author.
+                # Guarded by merge_policy_enabled: the label read is a raw
+                # gh subprocess (#9754 — the sandbox air-gaps it by disabling
+                # the policy, and this opt-out must not reopen that escape).
+                if self._is_human_shepherd_pr(pr) and self._config.merge_policy_enabled:
+                    labels = await fetch_pr_labels(self._config, pr.pr)
+                    if _HUMAN_SHEPHERD_OPT_OUT_LABEL in labels:
+                        skipped += 1
+                        logger.info(
+                            "Human PR #%d carries %s — leaving it to its author",
+                            pr.pr,
+                            _HUMAN_SHEPHERD_OPT_OUT_LABEL,
+                        )
+                        continue
                 # CH-3 (#9731): consult the factory-autonomy policy before
                 # approving+merging. This lane's approval evidence is its own
                 # CI-green auto-approval (the submit_review below); a deny
@@ -184,7 +229,11 @@ class DependabotMergeLoop(BaseBackgroundLoop):
                         MergeApproval(
                             actor="dependabot_merge_loop",
                             role=ROLE_ORCHESTRATOR_REVIEWER,
-                            source="ci_green_bot_pr_auto_approval",
+                            source=(
+                                "ci_green_human_shepherd_auto_approval"
+                                if self._is_human_shepherd_pr(pr)
+                                else "ci_green_bot_pr_auto_approval"
+                            ),
                         )
                     ],
                     lane="dependabot_merge_loop",
@@ -212,7 +261,14 @@ class DependabotMergeLoop(BaseBackgroundLoop):
 
                 # CI green — approve and merge
                 await self._prs.submit_review(
-                    pr.pr, ReviewVerdict.APPROVE, "CI passed — auto-merging bot PR."
+                    pr.pr,
+                    ReviewVerdict.APPROVE,
+                    (
+                        "CI passed — auto-merging shepherded human-prefix PR "
+                        "(#9889 class 5; add the no-auto-merge label to opt out)."
+                        if self._is_human_shepherd_pr(pr)
+                        else "CI passed — auto-merging bot PR."
+                    ),
                 )
                 merge_ok = await self._prs.merge_pr(pr.pr, auto_rebase=True)
                 if merge_ok:
