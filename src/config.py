@@ -258,6 +258,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("sentry_signal_cooldown_hours", "SENTRY_SIGNAL_COOLDOWN_HOURS", 24),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
+    ("repo_wiki_min_batch_files", "HYDRAFLOW_REPO_WIKI_MIN_BATCH_FILES", 8),
+    ("repo_wiki_max_batch_age_hours", "HYDRAFLOW_REPO_WIKI_MAX_BATCH_AGE_HOURS", 24),
     ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
     ("diagnostic_interval", "HYDRAFLOW_DIAGNOSTIC_INTERVAL", 30),
     ("retrospective_interval", "HYDRAFLOW_RETROSPECTIVE_INTERVAL", 1800),
@@ -1959,6 +1961,27 @@ class HydraFlowConfig(BaseModel):
         ge=300,
         le=604800,
         description="Seconds between repo wiki lint cycles",
+    )
+    repo_wiki_min_batch_files: int = Field(
+        default=8,
+        ge=1,
+        le=100,
+        description=(
+            "Defer the wiki maintenance PR until at least this many files "
+            "changed — batches the near-hourly single-entry PR treadmill "
+            "(each merge re-stales sibling PRs via the arch cascade). "
+            "1 restores open-on-any-change."
+        ),
+    )
+    repo_wiki_max_batch_age_hours: int = Field(
+        default=24,
+        ge=1,
+        le=168,
+        description=(
+            "Force a wiki maintenance PR open regardless of batch size once "
+            "the newest merged maintenance PR is older than this — small "
+            "dribbles still land within a bounded window."
+        ),
     )
     max_repo_wiki_chars: int = Field(
         default=15_000,
