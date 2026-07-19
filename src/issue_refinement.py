@@ -1,9 +1,9 @@
-"""Pure engine for IssueGroomerLoop: index, dup-candidate prefilter, judged-pair
+"""Pure engine for IssueRefinementLoop: index, dup-candidate prefilter, judged-pair
 cache, judgment prompts, action tiering, guardrails, digest render.
 
 No I/O, no LLM spawns — stdlib only (``dataclasses``, ``datetime``, ``difflib``,
 ``hashlib``, ``itertools``, ``json``, ``re``). Callers (the loop, ports) build
-``GroomIssue`` from whatever the backlog read returns and pass the LLM's raw
+``RefinementIssue`` from whatever the backlog read returns and pass the LLM's raw
 text response back in; this module only reasons about content — it never
 calls an LLM and never calls ``datetime.now()`` itself (``now`` is always
 passed in, for determinism).
@@ -54,7 +54,7 @@ _WORD_RE = re.compile(r"\w+")
 
 
 @dataclass(frozen=True)
-class GroomIssue:
+class RefinementIssue:
     """Engine-side view of one backlog issue, built from the port item."""
 
     number: int
@@ -88,7 +88,7 @@ def body_hash(body: str) -> str:
     return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
 
 
-def pair_key(a: GroomIssue, b: GroomIssue) -> str:
+def pair_key(a: RefinementIssue, b: RefinementIssue) -> str:
     """Cache key for a judged pair: ``lo:hi:hash(lo.body):hash(hi.body)``.
 
     A body edit on EITHER side changes its hash and thus the whole key,
@@ -111,7 +111,7 @@ def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
     return len(a & b) / len(union)
 
 
-def _score(a: GroomIssue, b: GroomIssue) -> float:
+def _score(a: RefinementIssue, b: RefinementIssue) -> float:
     title_ratio = SequenceMatcher(
         None, normalize_title(a.title), normalize_title(b.title)
     ).ratio()
@@ -120,7 +120,7 @@ def _score(a: GroomIssue, b: GroomIssue) -> float:
 
 
 def find_dup_candidates(
-    issues: Sequence[GroomIssue],
+    issues: Sequence[RefinementIssue],
     changed: set[int],
     judged: set[str],
     budget: int,
@@ -272,8 +272,8 @@ def parse_priority_verdict(text: str) -> PriorityVerdict:
 
 
 # ---------------------------------------------------------------------------
-# Prompts — rubric + few-shot examples mined from the 2026-07-19 backlog groom
-# (memory: backlog-groom-2026-07-19; evidence comments on every close).
+# Prompts — rubric + few-shot examples mined from the 2026-07-19 backlog refinement
+# (memory: backlog-refinement-2026-07-19; evidence comments on every close).
 #
 # Both judgment prompts embed untrusted issue title/body text, which a
 # crafted issue could use to try to steer the verdict directly (prompt
@@ -302,7 +302,9 @@ for a priority judgment.
 """
 
 
-def _fence_issue_content(issue: GroomIssue, *, max_body: int = _MAX_BODY_CHARS) -> str:
+def _fence_issue_content(
+    issue: RefinementIssue, *, max_body: int = _MAX_BODY_CHARS
+) -> str:
     """Wrap one issue's untrusted title+body in an explicit data fence.
 
     The body is truncated at ``max_body`` chars (with a ``[truncated]``
@@ -320,7 +322,7 @@ def _fence_issue_content(issue: GroomIssue, *, max_body: int = _MAX_BODY_CHARS) 
 
 
 _DUP_JUDGMENT_RUBRIC = """\
-You are grooming the HydraFlow issue backlog for duplicates. You are given
+You are refinement the HydraFlow issue backlog for duplicates. You are given
 two open issues, A and B. Decide whether they describe the same underlying
 problem, and if so, which one should stay open as the canonical issue.
 
@@ -348,7 +350,7 @@ Confidence:
 - "medium": overlap is strong but relies on inference.
 - "low": surface similarity only (same title shape, different substance).
 
-Few-shot examples (mined from the 2026-07-19 backlog groom):
+Few-shot examples (mined from the 2026-07-19 backlog refinement):
 
 Example 1 — exact_dup/high:
   A: #9665 "DiscoverRunner wedges the s51 sandbox — kill sites never reap
@@ -385,7 +387,7 @@ Respond with ONLY a JSON object (a fenced ```json block is fine):
 """
 
 
-def build_dup_judgment_prompt(a: GroomIssue, b: GroomIssue) -> str:
+def build_dup_judgment_prompt(a: RefinementIssue, b: RefinementIssue) -> str:
     """Build the judged-pair prompt: rubric + injection framing + fenced issues.
 
     ``a`` and ``b``'s title/body are untrusted GitHub content — each is
@@ -420,7 +422,7 @@ Rubric:
 - "none": hygiene — docs, renames, cosmetic cleanup, nothing that changes
   factory behavior if left undone.
 
-Few-shot examples (mined from the 2026-07-19 backlog groom):
+Few-shot examples (mined from the 2026-07-19 backlog refinement):
 
 Example 1 — P0:
   Issue: "DiscoverRunner + ShapeRunner wedge the air-gapped sandbox — s51
@@ -450,7 +452,7 @@ Respond with ONLY a JSON object (a fenced ```json block is fine):
 """
 
 
-def build_priority_prompt(issue: GroomIssue) -> str:
+def build_priority_prompt(issue: RefinementIssue) -> str:
     """Build the priority-scoring prompt: rubric + injection framing + fenced issue.
 
     ``issue``'s title/body is untrusted GitHub content — wrapped in an
@@ -489,14 +491,14 @@ _ACTIVE_PIPELINE_PHASE_LABELS: frozenset[str] = frozenset(
         "hydraflow-verify",  # verify_label (config.py)
         # Orthogonal to the phase machine, but ``all_pipeline_labels``
         # includes it so ``swap_pipeline_labels`` clears it on a successful
-        # HITL correction — the groomer treats it the same way: don't touch
+        # HITL correction — the refinement loop treats it the same way: don't touch
         # a blocked issue.
         "human-required",
     }
 )
 
 # Caretaker-loop escalation families — a stuck-loop finding actively being
-# worked by another loop, not the groomer's to touch.
+# worked by another loop, not the refinement loop's to touch.
 _ESCALATION_LABELS: frozenset[str] = frozenset(
     {
         "hydraflow-adr-drift",  # adr_drift_label (config.py) — ADR-drift finding
@@ -507,17 +509,17 @@ _ESCALATION_LABELS: frozenset[str] = frozenset(
     }
 )
 
-# The groomer's own rolling digest issue is never a grooming target.
-_GROOM_DIGEST_LABELS: frozenset[str] = frozenset({"hydraflow-groom-digest"})
+# The refinement loop's own rolling digest issue is never a refinement target.
+_REFINEMENT_DIGEST_LABELS: frozenset[str] = frozenset({"hydraflow-refinement-digest"})
 
 GUARDRAIL_SKIP_LABELS: frozenset[str] = (
-    _ACTIVE_PIPELINE_PHASE_LABELS | _ESCALATION_LABELS | _GROOM_DIGEST_LABELS
+    _ACTIVE_PIPELINE_PHASE_LABELS | _ESCALATION_LABELS | _REFINEMENT_DIGEST_LABELS
 )
 
 SETTLING_WINDOW_MINUTES = 60
 
 
-def is_guarded(issue: GroomIssue) -> bool:
+def is_guarded(issue: RefinementIssue) -> bool:
     """True if ``issue`` carries any label in ``GUARDRAIL_SKIP_LABELS``."""
     return not GUARDRAIL_SKIP_LABELS.isdisjoint(issue.labels)
 
@@ -573,7 +575,7 @@ class PriorityQuestion:
 
 
 @dataclass(frozen=True)
-class GroomActions:
+class RefinementActions:
     """The full tiered output of one ``plan_actions`` call."""
 
     auto_closes: tuple[AutoClose, ...]
@@ -587,7 +589,7 @@ class GroomActions:
     skipped_rows: int = 0
 
 
-def _current_priority_label(issue: GroomIssue) -> str:
+def _current_priority_label(issue: RefinementIssue) -> str:
     """Return the issue's current P-label, or ``"none"`` if it has none."""
     for label in _PRIORITY_LABELS:
         if label in issue.labels:
@@ -607,7 +609,7 @@ def _parse_updated_at(value: str) -> datetime:
     A value that doesn't parse as ISO-8601 at all returns a sentinel far in
     the past (``datetime.min`` at UTC) instead of raising. Documented
     choice: for the settling-window check this means "age unknown, so
-    treat as settled" — grooming an issue whose timestamp we can't read is
+    treat as settled" — refinement an issue whose timestamp we can't read is
     fine (there's no fresher signal we'd be jumping ahead of), whereas
     raising here would crash ``plan_actions`` and discard every
     already-computed action for the whole tick over one bad row.
@@ -621,7 +623,7 @@ def _parse_updated_at(value: str) -> datetime:
     return parsed
 
 
-def _is_settled(issue: GroomIssue, now: datetime) -> bool:
+def _is_settled(issue: RefinementIssue, now: datetime) -> bool:
     """True once ``issue`` is older than ``SETTLING_WINDOW_MINUTES``.
 
     An unparseable ``updated_at`` (see ``_parse_updated_at``) reads as the
@@ -635,9 +637,9 @@ def _is_settled(issue: GroomIssue, now: datetime) -> bool:
 def plan_actions(
     verdicts: Mapping[tuple[int, int], DupVerdict],
     priorities: Mapping[int, PriorityVerdict],
-    issues_by_number: Mapping[int, GroomIssue],
+    issues_by_number: Mapping[int, RefinementIssue],
     now: datetime,
-) -> GroomActions:
+) -> RefinementActions:
     """Tier judged dup pairs and priority scores into concrete actions.
 
     Dup tier: ``AutoClose`` only when ``verdict == "exact_dup"``,
@@ -665,7 +667,7 @@ def plan_actions(
 
     Isolation: a single priority-tier row that raises while being
     evaluated (e.g. a malformed issue record) is caught and counted in
-    ``GroomActions.skipped_rows`` rather than propagating — one bad row
+    ``RefinementActions.skipped_rows`` rather than propagating — one bad row
     must never discard the dup tier's already-computed results.
 
     See docs/superpowers/specs/2026-07-19-issue-groomer-loop-design.md §2.
@@ -734,7 +736,7 @@ def plan_actions(
             skipped_rows += 1
             continue
 
-    return GroomActions(
+    return RefinementActions(
         auto_closes=tuple(auto_closes),
         relabels=tuple(relabels),
         dup_proposals=tuple(dup_proposals),
@@ -750,8 +752,8 @@ def plan_actions(
 _NO_ENTRIES = "_none this tick_"
 
 
-def render_digest(actions: GroomActions, stats: Mapping[str, object]) -> str:
-    """Render the rolling groom digest body.
+def render_digest(actions: RefinementActions, stats: Mapping[str, object]) -> str:
+    """Render the rolling refinement digest body.
 
     Four stable-order sections, each with an assert-friendly ``##`` header:
     Proposed closes (evidence + confidence), Priority changes applied,
@@ -813,13 +815,13 @@ def render_digest(actions: GroomActions, stats: Mapping[str, object]) -> str:
 # though its cached verdict means it is never re-judged (and so never
 # re-proposed) while its bodies are unchanged. These pure helpers merge each
 # tick's fresh questions into the persisted set, prune the ones whose issues
-# have left the backlog (or gained a P-label), and rebuild a ``GroomActions``
+# have left the backlog (or gained a P-label), and rebuild a ``RefinementActions``
 # for rendering. Loop-side I/O (state read/write) threads them; spec #9957.
 
 
 def merge_open_proposals(
     existing: Sequence[Mapping[str, Any]],
-    actions: GroomActions,
+    actions: RefinementActions,
     now_iso: str,
 ) -> list[dict[str, Any]]:
     """Merge this tick's dup proposals + priority questions into *existing*.
@@ -935,9 +937,9 @@ def prune_open_proposals(
 
 
 def open_proposals_to_actions(
-    actions: GroomActions, proposals: Sequence[Mapping[str, Any]]
-) -> GroomActions:
-    """Rebuild a ``GroomActions`` for rendering with accumulated questions.
+    actions: RefinementActions, proposals: Sequence[Mapping[str, Any]]
+) -> RefinementActions:
+    """Rebuild a ``RefinementActions`` for rendering with accumulated questions.
 
     Keeps *actions*' this-tick auto-closes / relabels / skipped-rows (those
     are completed work, not open questions) but replaces its dup proposals and
@@ -976,7 +978,7 @@ def open_proposals_to_actions(
         except (KeyError, TypeError, ValueError):
             continue
 
-    return GroomActions(
+    return RefinementActions(
         auto_closes=actions.auto_closes,
         relabels=actions.relabels,
         dup_proposals=tuple(dup_proposals),

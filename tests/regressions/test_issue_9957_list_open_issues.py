@@ -1,6 +1,6 @@
 """Regression: PRPort.list_open_issues atomic triplet (#9957).
 
-IssueGroomerLoop needs a backlog-wide read — ALL open issues, no label
+IssueRefinementLoop needs a backlog-wide read — ALL open issues, no label
 filter — carrying enough projection (title/body/labels) to reason about
 content, not just identity (that's already covered by the narrower
 ``list_open_issue_numbers``, #9905).

@@ -109,10 +109,10 @@ SETTINGS: dict[str, SettingSpec] = {
     "term_proposer_provider": SettingSpec("Model Routing", live=True, order=60),
     "term_proposer_model": SettingSpec("Model Routing", live=True, order=61),
     "background_model": SettingSpec("Models", live=True, order=3),
-    # --- Issue Groomer (backlog dedup + priority scoring, #9957) ----------
-    "issue_groomer_enabled": SettingSpec("Issue Groomer", live=True, order=0),
-    "issue_groomer_pair_budget": SettingSpec("Issue Groomer", live=True, order=1),
-    "issue_groomer_model": SettingSpec("Issue Groomer", live=True, order=2),
+    # --- Issue Refinement (backlog dedup + priority scoring, #9957) ----------
+    "issue_refinement_enabled": SettingSpec("Issue Refinement", live=True, order=0),
+    "issue_refinement_pair_budget": SettingSpec("Issue Refinement", live=True, order=1),
+    "issue_refinement_model": SettingSpec("Issue Refinement", live=True, order=2),
     # --- Prompt Refinement (skill-prompt self-refinement, #9724) ----------
     "skill_prompt_refine_enabled": SettingSpec("Prompt Refinement", live=True, order=0),
     "skill_prompt_refine_max_weekly": SettingSpec(

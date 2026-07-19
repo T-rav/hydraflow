@@ -39,12 +39,12 @@ _INTERVAL_BOUNDS_SKIP: set[str] = {
     # extra=ignore tolerates stale .env), but it no longer has an _INTERVAL_BOUNDS
     # entry because the worker is no longer operator-controllable.
     "memory_sync_interval",
-    # Config-first landing (#9957): IssueGroomerLoop itself isn't wired into
+    # Config-first landing (#9957): IssueRefinementLoop itself isn't wired into
     # the Workers tab yet (LoopCatalog/BACKGROUND_WORKERS registration lands
     # in a later task of the same build). Remove from this skip list and add
     # matching _INTERVAL_BOUNDS entries once the loop is wired.
-    "issue_groomer_interval",
-    "issue_groomer_full_sweep_interval",
+    "issue_refinement_interval",
+    "issue_refinement_full_sweep_interval",
 }
 
 

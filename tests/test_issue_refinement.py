@@ -1,10 +1,10 @@
-"""Unit tests for the pure IssueGroomerLoop engine (#9957).
+"""Unit tests for the pure IssueRefinementLoop engine (#9957).
 
 Covers ``normalize_title``, ``body_hash``, ``pair_key``, the
 ``find_dup_candidates`` prefilter, judgment-verdict parsing, judgment
 prompts, guardrails, action tiering (``plan_actions``), and the digest
 renderer. The module is pure (stdlib only, no I/O, no LLM spawns) so every
-test operates on in-memory ``GroomIssue`` fixtures — no fakes, no ports.
+test operates on in-memory ``RefinementIssue`` fixtures — no fakes, no ports.
 
 Determinism is load-bearing here: ``find_dup_candidates`` must return the
 same list, in the same order, given the same inputs (docs/superpowers/
@@ -17,8 +17,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-import issue_groomer
-from issue_groomer import (
+import issue_refinement
+from issue_refinement import (
     _MAX_BODY_CHARS,
     GUARDRAIL_SKIP_LABELS,
     SETTLING_WINDOW_MINUTES,
@@ -26,9 +26,9 @@ from issue_groomer import (
     AutoClose,
     DigestProposal,
     DupVerdict,
-    GroomIssue,
     PriorityQuestion,
     PriorityVerdict,
+    RefinementIssue,
     RelabelAction,
     VerdictParseError,
     _jaccard,
@@ -63,8 +63,8 @@ def _issue(
     body: str = "some body text here",
     labels: tuple[str, ...] = (),
     updated_at: str = "2026-07-01T00:00:00Z",
-) -> GroomIssue:
-    return GroomIssue(
+) -> RefinementIssue:
+    return RefinementIssue(
         number=number,
         title=title,
         body=body,
@@ -73,7 +73,7 @@ def _issue(
     )
 
 
-def _login_bug_family() -> list[GroomIssue]:
+def _login_bug_family() -> list[RefinementIssue]:
     """Four issues: 1/2/4 are near-dups of each other, 3 is unrelated."""
     return [
         _issue(1, "Fix login bug", body="the login page crashes on submit"),
@@ -104,8 +104,8 @@ class TestNormalizeTitle:
         """A real repo issue ref like #9957 is only 4 digits — must still
         strip identically to a title with no ref at all (sanctioned fix,
         Task 2 review: the old >=5-digit rule was inert for 4-digit refs)."""
-        with_ref = normalize_title("Groomer engine tests failing (#9957)")
-        without_ref = normalize_title("Groomer engine tests failing")
+        with_ref = normalize_title("Refinement loop engine tests failing (#9957)")
+        without_ref = normalize_title("Refinement loop engine tests failing")
 
         assert with_ref == without_ref
         assert "9957" not in with_ref
@@ -461,7 +461,7 @@ class TestGuardrails:
             "hydraflow-hitl",
             "hydraflow-adr-drift",
             "hitl-escalation",
-            "hydraflow-groom-digest",
+            "hydraflow-refinement-digest",
         ):
             assert label in GUARDRAIL_SKIP_LABELS
 
@@ -653,10 +653,10 @@ class TestPlanActions:
         )
         priorities = {3: PriorityVerdict(priority="P0", reason="throughput blocker")}
 
-        def _boom(issue: GroomIssue, now: object) -> bool:
+        def _boom(issue: RefinementIssue, now: object) -> bool:
             raise RuntimeError("simulated malformed row")
 
-        monkeypatch.setattr(issue_groomer, "_is_settled", _boom)
+        monkeypatch.setattr(issue_refinement, "_is_settled", _boom)
 
         actions = plan_actions({(1, 2): dup_verdict}, priorities, issues, now=_NOW)
 
@@ -720,8 +720,8 @@ class TestRenderDigest:
 _LATER = (_NOW + timedelta(hours=6)).isoformat()
 
 
-def _dup_actions(*proposals: DigestProposal) -> issue_groomer.GroomActions:
-    return issue_groomer.GroomActions(
+def _dup_actions(*proposals: DigestProposal) -> issue_refinement.RefinementActions:
+    return issue_refinement.RefinementActions(
         auto_closes=(),
         relabels=(),
         dup_proposals=proposals,
@@ -774,7 +774,7 @@ class TestMergeOpenProposals:
         assert pairs == {(1, 2), (3, 4)}
 
     def test_merges_priority_questions_by_number(self) -> None:
-        actions = issue_groomer.GroomActions(
+        actions = issue_refinement.RefinementActions(
             auto_closes=(),
             relabels=(),
             dup_proposals=(),
@@ -808,7 +808,7 @@ class TestPruneOpenProposals:
         assert len(kept) == 1
 
     def test_keeps_priority_question_while_current_label_unchanged(self) -> None:
-        actions = issue_groomer.GroomActions(
+        actions = issue_refinement.RefinementActions(
             auto_closes=(),
             relabels=(),
             dup_proposals=(),

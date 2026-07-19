@@ -41,7 +41,7 @@ from ._gc import StateGCMixin
 from ._hitl import HITLStateMixin
 from ._human_steering import HumanSteeringStateMixin
 from ._issue import IssueStateMixin
-from ._issue_groomer import IssueGroomerStateMixin
+from ._issue_refinement import IssueRefinementStateMixin
 from ._lifetime import LifetimeStatsMixin
 from ._live_corpus_replay import LiveCorpusReplayStateMixin
 from ._log_ingest import LogIngestStateMixin
@@ -122,7 +122,7 @@ class StateTracker(
     ConvergenceStateMixin,
     HumanSteeringStateMixin,
     DriverStateMixin,
-    IssueGroomerStateMixin,
+    IssueRefinementStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 

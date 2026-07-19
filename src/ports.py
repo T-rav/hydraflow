@@ -420,10 +420,10 @@ class PRPort(Protocol):
     async def list_open_issues(self) -> list[GitHubIssueSummary]:
         """Return ALL open issues (no label filter) as a list of typed dicts.
 
-        Used by the backlog groomer (``IssueGroomerLoop``, #9957) for a
+        Used by the backlog refinement loop (``IssueRefinementLoop``, #9957) for a
         full-repo sweep. Unlike ``list_issues_by_label`` this is unfiltered;
         unlike ``list_open_issue_numbers`` it carries the full projection
-        (title/body/labels) grooming needs to reason about content, not
+        (title/body/labels) refinement needs to reason about content, not
         just identity.
         """
         ...

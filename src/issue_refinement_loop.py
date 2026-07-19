@@ -1,24 +1,34 @@
-"""IssueGroomerLoop — backlog-wide dedup, priority scoring, rolling operator digest.
+"""IssueRefinementLoop — backlog-wide dedup, priority scoring, rolling operator digest.
+
+This is BACKLOG refinement — it reasons about open GitHub *issues* (dedup,
+priority, operator digest). It is deliberately distinct from the skill-prompt
+refinement feature (``skill_prompt_refine_*`` config/state, ``prompt_refiner``),
+which refines agent *prompts*. The shared "refinement" name is a known,
+intentional collision (operator naming decision, 2026-07-19): both are
+"make the thing better", on different subjects.
 
 Spec: ``docs/superpowers/specs/2026-07-19-issue-groomer-loop-design.md`` (#9957).
+The spec file keeps its original ``issue-groomer`` filename (read
+groomer -> refinement throughout); the code was renamed off "groomer" per the
+same operator decision.
 
 The loop is the integration core: it owns all GitHub I/O (via ``PRPort``) and
-all LLM spend (via an injectable ``groom_llm.complete``), and delegates every
-content decision to the pure engine in :mod:`issue_groomer` (index diff,
+all LLM spend (via an injectable ``refinement_llm.complete``), and delegates every
+content decision to the pure engine in :mod:`issue_refinement` (index diff,
 candidate prefilter, judged-pair cache, judgment prompts, action tiering,
 guardrails, digest render). The engine never calls an LLM or the clock; this
 loop threads both in.
 
 Tick pipeline (spec §3, steps 1-6):
 
-1. Fetch the open backlog (``list_open_issues``), drop the groomer's own
-   rolling digest issue (by stored number AND ``hydraflow-groom-digest``
-   label) so its every-tick self-update never re-triggers a groom, then diff
+1. Fetch the open backlog (``list_open_issues``), drop the refinement loop's own
+   rolling digest issue (by stored number AND ``hydraflow-refinement-digest``
+   label) so its every-tick self-update never re-triggers a refinement, then diff
    the rest against the persisted change-detection index → the *changed* set
    (new issues count as changed). A weekly full sweep
-   (``groom_last_full_sweep`` marker) treats every open issue as changed.
+   (``refinement_last_full_sweep`` marker) treats every open issue as changed.
 2. Prefilter duplicate-candidate pairs among the changed set, within the
-   per-tick ``issue_groomer_pair_budget``; judge each with one structured LLM
+   per-tick ``issue_refinement_pair_budget``; judge each with one structured LLM
    call. An unparseable/failed verdict degrades to a low-confidence digest
    proposal and the pair is still cached (no re-spend next tick).
 3. Score priority for changed issues lacking a P-label (all issues on a full
@@ -26,21 +36,21 @@ Tick pipeline (spec §3, steps 1-6):
 4. Tier the judged verdicts + priority scores into concrete actions, then
    apply them: exact-dup/high pairs auto-close, gating every side effect on a
    still-open re-check + a confirmed close (stale-guard → evidence comment →
-   close → ``groomed-auto`` label); safe priority deltas relabel. Every apply
+   close → ``refinement-auto`` label); safe priority deltas relabel. Every apply
    is wrapped per-action — one failure never aborts the tick, and credit/auth
    errors always reraise. A failed/stale close leaves the pair un-cached so it
    re-judges next tick.
 4b. Accumulate still-open operator questions (dup proposals + priority
-    questions) in ``groom_open_proposals``, pruned to the live backlog, so the
+    questions) in ``refinement_open_proposals``, pruned to the live backlog, so the
     digest renders EVERY open question, not just this tick's.
 5. Rewrite the rolling digest issue, recovering it if the stored issue was
    closed (reopen if supported, else mint a fresh one) or if state lost the
    number but the create-once dedup key survives (adopt the open digest found
    by label).
 6. Persist index + judged-pair cache + full-sweep marker + open proposals, and
-   publish one ``GROOM_UPDATE`` event for the dashboard.
+   publish one ``ISSUE_REFINEMENT_UPDATE`` event for the dashboard.
 
-Kill-switch (ADR-0049): ``_enabled_cb`` AND ``issue_groomer_enabled`` both gate
+Kill-switch (ADR-0049): ``_enabled_cb`` AND ``issue_refinement_enabled`` both gate
 the tick at the top. An empty backlog, or no changes with no full sweep due, is
 a cheap no-op — no LLM calls.
 """
@@ -56,12 +66,12 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from events import EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from execution import get_default_runner
-from issue_groomer import (
+from issue_refinement import (
     AutoClose,
     DupVerdict,
-    GroomActions,
-    GroomIssue,
     PriorityVerdict,
+    RefinementActions,
+    RefinementIssue,
     RelabelAction,
     VerdictParseError,
     body_hash,
@@ -88,42 +98,42 @@ if TYPE_CHECKING:
     from pr_manager import PRManager
     from state import StateTracker
 
-logger = logging.getLogger("hydraflow.issue_groomer_loop")
+logger = logging.getLogger("hydraflow.issue_refinement_loop")
 
 # Digest issue identity — single-sourced so create + update never drift.
-_DIGEST_TITLE = "Groom digest — backlog health"
-_DIGEST_LABEL = "hydraflow-groom-digest"
-_DIGEST_DEDUP_KEY = "issue_groomer:digest"
+_DIGEST_TITLE = "Issue refinement digest — backlog health"
+_DIGEST_LABEL = "hydraflow-refinement-digest"
+_DIGEST_DEDUP_KEY = "issue_refinement:digest"
 
 # Applied to an auto-closed duplicate so the fitness scorer (loop_fitness) can
-# attribute closes back to the groomer and a human can spot auto-actions.
-_GROOMED_AUTO_LABEL = "groomed-auto"
+# attribute closes back to the refinement loop and a human can spot auto-actions.
+_REFINEMENT_AUTO_LABEL = "refinement-auto"
 
-# Priority labels the groomer manages. Mirrors ``issue_groomer._PRIORITY_LABELS``
+# Priority labels the refinement loop manages. Mirrors ``issue_refinement._PRIORITY_LABELS``
 # (kept local rather than importing a private) — used only to skip re-scoring an
 # already-prioritised issue on an incremental tick.
 _PRIORITY_LABELS: tuple[str, ...] = ("P0", "P1", "P2")
 
 # Hard bound on one structured judgment/priority LLM call (seconds). Mirrors the
 # refine loop's per-call bound; the LONG_LLM_CYCLE watchdog bounds the whole tick.
-_GROOM_LLM_TIMEOUT_SECONDS = 300
+_REFINEMENT_LLM_TIMEOUT_SECONDS = 300
 
 
-class _GroomLLM(Protocol):
+class _RefinementLLM(Protocol):
     """Minimal one-shot text-completion seam for judgment/priority calls.
 
-    Tests inject a fake; production lazily builds :class:`_CLIGroomLLM`.
+    Tests inject a fake; production lazily builds :class:`_CLIRefinementLLM`.
     """
 
     async def complete(self, prompt: str) -> str: ...
 
 
-class _CLIGroomLLM:
-    """Production groom client: one-shot RAW-text completion via the shared
+class _CLIRefinementLLM:
+    """Production refinement client: one-shot RAW-text completion via the shared
     lightweight-agent seam (credit-aware, telemetried).
 
     Returns the CLI's raw stdout so the caller can parse the structured JSON
-    verdict. Never exercised under test; the loop's ``groom_llm`` kwarg injects
+    verdict. Never exercised under test; the loop's ``refinement_llm`` kwarg injects
     a fake for all unit coverage.
     """
 
@@ -138,17 +148,19 @@ class _CLIGroomLLM:
             tool="claude",
             model=self._model,
             prompt=prompt,
-            source="issue_groomer",
-            timeout=float(_GROOM_LLM_TIMEOUT_SECONDS),
+            source="issue_refinement",
+            timeout=float(_REFINEMENT_LLM_TIMEOUT_SECONDS),
             issue_labels=(),
         )
         if result.returncode != 0:
-            msg = f"groom LLM failed (rc={result.returncode}): {result.stderr[:200]}"
+            msg = (
+                f"refinement LLM failed (rc={result.returncode}): {result.stderr[:200]}"
+            )
             raise RuntimeError(msg)
         return result.stdout
 
 
-class IssueGroomerLoop(BaseBackgroundLoop):
+class IssueRefinementLoop(BaseBackgroundLoop):
     """Backlog-wide dedup + priority scoring + rolling operator digest (#9957)."""
 
     # Judgment + priority scoring spend LLM calls, so the loop earns the longer
@@ -163,10 +175,10 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         pr_manager: PRManager,
         dedup: DedupStore,
         deps: LoopDeps,
-        groom_llm: _GroomLLM | None = None,
+        refinement_llm: _RefinementLLM | None = None,
     ) -> None:
         super().__init__(
-            worker_name="issue_groomer",
+            worker_name="issue_refinement",
             config=config,
             deps=deps,
             run_on_startup=False,
@@ -174,15 +186,15 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         self._state = state
         self._pr = pr_manager
         self._dedup = dedup
-        # Injected fake under test; production lazily builds `_CLIGroomLLM`.
-        self._groom_llm = groom_llm
+        # Injected fake under test; production lazily builds `_CLIRefinementLLM`.
+        self._refinement_llm = refinement_llm
 
     def _get_default_interval(self) -> int:
-        return self._config.issue_groomer_interval
+        return self._config.issue_refinement_interval
 
     def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
-        # Objective: auto-close precision. Of the duplicates the groomer
-        # auto-closed (``groomed-auto`` label) in the window, how many stayed
+        # Objective: auto-close precision. Of the duplicates the refinement loop
+        # auto-closed (``refinement-auto`` label) in the window, how many stayed
         # closed rather than being reopened by a human — a reopened auto-close
         # is a false-positive dedup and scores against the loop. Pure over ctx.
         from loop_fitness import proposal_acceptance_fitness
@@ -190,65 +202,65 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         return proposal_acceptance_fitness(
             ctx,
             worker_name=self._worker_name,
-            label=_GROOMED_AUTO_LABEL,
+            label=_REFINEMENT_AUTO_LABEL,
             min_samples=self._config.fitness_min_samples,
         )
 
     # --- LLM seam -------------------------------------------------------------
 
-    async def _groom_complete(self, prompt: str) -> str:
+    async def _refinement_complete(self, prompt: str) -> str:
         """Complete *prompt* via the injected fake or a lazily-built CLI client."""
-        if self._groom_llm is None:
+        if self._refinement_llm is None:
             model = (
-                self._config.issue_groomer_model
+                self._config.issue_refinement_model
                 or self._config.background_model
                 or "sonnet"
             )
-            self._groom_llm = _CLIGroomLLM(self._config, model)
-        return await self._groom_llm.complete(prompt)
+            self._refinement_llm = _CLIRefinementLLM(self._config, model)
+        return await self._refinement_llm.complete(prompt)
 
     # --- Tick -----------------------------------------------------------------
 
     async def _do_work(self) -> WorkCycleResult:
-        """One groom tick (spec §3, steps 1-6)."""
+        """One refinement tick (spec §3, steps 1-6)."""
         # Kill-switch (ADR-0049): UI toggle AND static config, in-body so the
         # gate is testable and survives catchup/direct-invocation paths.
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
-        if not self._config.issue_groomer_enabled:
+        if not self._config.issue_refinement_enabled:
             return {"status": "disabled"}
 
         now = datetime.now(UTC)
 
-        # 1. Fetch backlog. Drop the groomer's own rolling digest issue up front
+        # 1. Fetch backlog. Drop the refinement loop's own rolling digest issue up front
         # (by stored number AND by label) so its every-tick self-update never
         # re-marks it "changed" and drives an endless non-quiet loop — a quiet
-        # tick after a groom must genuinely short-circuit (spec #9957, review
+        # tick after a refinement must genuinely short-circuit (spec #9957, review
         # finding: digest self-participation).
         raw_issues = await self._pr.list_open_issues()
-        digest_number = self._state.get_groom_digest_issue()
+        digest_number = self._state.get_refinement_digest_issue()
         issues = [
-            groomed
+            refined
             for r in raw_issues
-            if (groomed := self._to_groom_issue(r)).number != digest_number
-            and _DIGEST_LABEL not in groomed.labels
+            if (refined := self._to_refinement_issue(r)).number != digest_number
+            and _DIGEST_LABEL not in refined.labels
         ]
         if not issues:
             # Empty backlog: prune the index, heartbeat only (no LLM, no event).
-            self._state.set_groom_index({})
+            self._state.set_refinement_index({})
             return self._noop_stats(backlog=0)
 
         issues_by_number = {issue.number: issue for issue in issues}
 
         # 1b. Change-detection diff against the persisted index.
-        stored_index = self._state.get_groom_index()
+        stored_index = self._state.get_refinement_index()
         new_index = {str(issue.number): self._index_entry(issue) for issue in issues}
         changed = self._compute_changed(stored_index, new_index)
 
         # 1c. Weekly full sweep — treat every open issue as changed.
-        last_sweep = self._state.get_groom_last_full_sweep()
+        last_sweep = self._state.get_refinement_last_full_sweep()
         full_sweep = last_sweep is None or (now - last_sweep) >= timedelta(
-            seconds=self._config.issue_groomer_full_sweep_interval
+            seconds=self._config.issue_refinement_full_sweep_interval
         )
         if full_sweep:
             changed = {issue.number for issue in issues}
@@ -256,14 +268,14 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         if not changed and not full_sweep:
             # Nothing new since last tick and no sweep due — persist the pruned
             # index and short-circuit before any LLM spend.
-            self._state.set_groom_index(new_index)
+            self._state.set_refinement_index(new_index)
             return self._noop_stats(backlog=len(issues))
 
         # 2. Duplicate-candidate prefilter + per-pair judgment.
         judged_keys = set(self._state.get_judged_pairs())
         cache_hits = self._count_cache_hits(issues, changed, judged_keys)
         candidates = find_dup_candidates(
-            issues, changed, judged_keys, self._config.issue_groomer_pair_budget
+            issues, changed, judged_keys, self._config.issue_refinement_pair_budget
         )
         verdicts: dict[tuple[int, int], DupVerdict] = {}
         newly_judged: list[str] = []
@@ -274,11 +286,11 @@ class IssueGroomerLoop(BaseBackgroundLoop):
             key = pair_key(issue_a, issue_b)
             prompt = build_dup_judgment_prompt(issue_a, issue_b)
             try:
-                raw = await self._groom_complete(prompt)
+                raw = await self._refinement_complete(prompt)
             except Exception as exc:  # noqa: BLE001 — classify then fail-soft
                 reraise_on_credit_or_bug(exc)
                 logger.warning(
-                    "groom dup judgment failed for #%d/#%d: %s",
+                    "refinement dup judgment failed for #%d/#%d: %s",
                     cand.a,
                     cand.b,
                     exc,
@@ -293,7 +305,7 @@ class IssueGroomerLoop(BaseBackgroundLoop):
                 # Unparseable/refused verdict → low-confidence digest proposal,
                 # but STILL cache the pair (spec §Error handling: avoid re-spend).
                 logger.warning(
-                    "groom dup verdict unparseable for #%d/#%d: %s",
+                    "refinement dup verdict unparseable for #%d/#%d: %s",
                     cand.a,
                     cand.b,
                     exc,
@@ -312,11 +324,11 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         for issue in self._priority_targets(issues, changed, full_sweep=full_sweep):
             prompt = build_priority_prompt(issue)
             try:
-                raw = await self._groom_complete(prompt)
+                raw = await self._refinement_complete(prompt)
             except Exception as exc:  # noqa: BLE001 — classify then fail-soft
                 reraise_on_credit_or_bug(exc)
                 logger.warning(
-                    "groom priority scoring failed for #%d: %s", issue.number, exc
+                    "refinement priority scoring failed for #%d: %s", issue.number, exc
                 )
                 continue
             try:
@@ -326,7 +338,7 @@ class IssueGroomerLoop(BaseBackgroundLoop):
                 # asymmetry, spec §2): it is re-scored on the next change/sweep,
                 # so digesting it every tick would only bury the operator.
                 logger.warning(
-                    "groom priority verdict unparseable for #%d: %s",
+                    "refinement priority verdict unparseable for #%d: %s",
                     issue.number,
                     exc,
                 )
@@ -353,11 +365,11 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         current_labels = {i.number: self._current_priority_label(i) for i in issues}
         open_proposals = prune_open_proposals(
             merge_open_proposals(
-                self._state.get_groom_open_proposals(), actions, now.isoformat()
+                self._state.get_refinement_open_proposals(), actions, now.isoformat()
             ),
             current_labels,
         )
-        self._state.set_groom_open_proposals(open_proposals)
+        self._state.set_refinement_open_proposals(open_proposals)
         digest_actions = open_proposals_to_actions(actions, open_proposals)
 
         # 5. Rolling digest. Stats measure THIS tick's flow (new work); the
@@ -380,23 +392,23 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         await self._write_digest(digest_actions, stats, failures)
 
         # 6. Persist + publish.
-        self._state.set_groom_index(new_index)
+        self._state.set_refinement_index(new_index)
         if newly_judged:
             self._state.add_judged_pairs(newly_judged)
         if full_sweep:
-            self._state.set_groom_last_full_sweep(now)
+            self._state.set_refinement_last_full_sweep(now)
 
         if failures:
             logger.warning(
-                "groom: %d apply failure(s) this tick: %s", len(failures), failures
+                "refinement: %d apply failure(s) this tick: %s", len(failures), failures
             )
         if actions.skipped_rows:
             logger.warning(
-                "groom: %d priority row(s) skipped (malformed record)",
+                "refinement: %d priority row(s) skipped (malformed record)",
                 actions.skipped_rows,
             )
 
-        await self._publish_groom_event(
+        await self._publish_refinement_event(
             closed=closed,
             relabeled=relabeled,
             proposals=len(actions.dup_proposals),
@@ -408,7 +420,7 @@ class IssueGroomerLoop(BaseBackgroundLoop):
     # --- Apply ----------------------------------------------------------------
 
     async def _apply(
-        self, actions: GroomActions
+        self, actions: RefinementActions
     ) -> tuple[int, int, list[str], list[tuple[int, int]]]:
         """Apply auto-closes + relabels, isolating each action.
 
@@ -432,7 +444,7 @@ class IssueGroomerLoop(BaseBackgroundLoop):
             except Exception as exc:  # noqa: BLE001 — classify then fail-soft
                 reraise_on_credit_or_bug(exc)
                 logger.warning(
-                    "groom auto-close failed for #%d: %s", close.duplicate, exc
+                    "refinement auto-close failed for #%d: %s", close.duplicate, exc
                 )
                 failures.append(f"close #{close.duplicate}: {exc}")
                 uncache_pairs.append((close.canonical, close.duplicate))
@@ -443,7 +455,9 @@ class IssueGroomerLoop(BaseBackgroundLoop):
                 relabeled += 1
             except Exception as exc:  # noqa: BLE001 — classify then fail-soft
                 reraise_on_credit_or_bug(exc)
-                logger.warning("groom relabel failed for #%d: %s", relabel.number, exc)
+                logger.warning(
+                    "refinement relabel failed for #%d: %s", relabel.number, exc
+                )
                 failures.append(f"relabel #{relabel.number}: {exc}")
 
         return closed, relabeled, failures, uncache_pairs
@@ -458,7 +472,7 @@ class IssueGroomerLoop(BaseBackgroundLoop):
           another loop or a human may have closed/merged one between the
           judgment read and now, and closing on a stale verdict is the exact
           false-positive dedup the fitness scorer punishes.
-        * The ``groomed-auto`` label is added ONLY after the close reaches
+        * The ``refinement-auto`` label is added ONLY after the close reaches
           GitHub, so a failed close never leaves the fitness-attribution label
           on a still-open issue. ``close_issue`` returns False (rather than
           raising) on a gh failure; treat that as a failed action.
@@ -474,13 +488,13 @@ class IssueGroomerLoop(BaseBackgroundLoop):
 
         await self._pr.post_comment(
             close.duplicate,
-            f"**Groom (auto):** duplicate of #{close.canonical} — {close.evidence}",
+            f"**Refinement (auto):** duplicate of #{close.canonical} — {close.evidence}",
         )
         ok = await self._pr.close_issue(close.duplicate)
         if not ok:
             msg = f"close_issue returned False for #{close.duplicate}"
             raise RuntimeError(msg)
-        await self._pr.add_labels(close.duplicate, [_GROOMED_AUTO_LABEL])
+        await self._pr.add_labels(close.duplicate, [_REFINEMENT_AUTO_LABEL])
 
     async def _apply_relabel(self, relabel: RelabelAction) -> None:
         """Add the new P-label and remove the previous one if there was one."""
@@ -491,7 +505,7 @@ class IssueGroomerLoop(BaseBackgroundLoop):
     # --- Digest ---------------------------------------------------------------
 
     async def _write_digest(
-        self, actions: GroomActions, stats: dict[str, object], failures: list[str]
+        self, actions: RefinementActions, stats: dict[str, object], failures: list[str]
     ) -> None:
         """Create the digest issue on first run, else rewrite its body.
 
@@ -504,7 +518,7 @@ class IssueGroomerLoop(BaseBackgroundLoop):
           the body of a closed issue nobody is watching.
         * State lost the number (reset to 0) but the create-once dedup key
           survives, so a real digest is out there. Read-then-adopt: find the
-          open ``hydraflow-groom-digest`` issue by label and reclaim it before
+          open ``hydraflow-refinement-digest`` issue by label and reclaim it before
           creating a duplicate.
         """
         body = render_digest(actions, stats)
@@ -512,7 +526,7 @@ class IssueGroomerLoop(BaseBackgroundLoop):
             body += "\n## Apply failures\n" + "\n".join(f"- {f}" for f in failures)
             body += "\n"
 
-        digest_number = self._state.get_groom_digest_issue()
+        digest_number = self._state.get_refinement_digest_issue()
         if digest_number > 0:
             if await self._pr.get_issue_state(digest_number) == "OPEN":
                 await self._pr.update_issue_body(digest_number, body)
@@ -524,13 +538,13 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         elif _DIGEST_DEDUP_KEY in self._dedup.get():
             adopted = await self._find_open_digest_by_label()
             if adopted > 0:
-                self._state.set_groom_digest_issue(adopted)
+                self._state.set_refinement_digest_issue(adopted)
                 await self._pr.update_issue_body(adopted, body)
                 return
 
         created = await self._pr.create_issue(_DIGEST_TITLE, body, [_DIGEST_LABEL])
         if created > 0:
-            self._state.set_groom_digest_issue(created)
+            self._state.set_refinement_digest_issue(created)
             dedup = self._dedup.get()
             dedup.add(_DIGEST_DEDUP_KEY)
             self._dedup.set_all(dedup)
@@ -546,22 +560,16 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         reopen = getattr(self._pr, "reopen_issue", None)
         if reopen is None:
             return False
-        try:
-            result = await reopen(number)
-        except Exception as exc:  # noqa: BLE001 — classify then fail-soft
-            reraise_on_credit_or_bug(exc)
-            logger.warning("groom digest reopen failed for #%d: %s", number, exc)
-            return False
-        return result is not False
+        return await reopen(number) is not False
 
     async def _find_open_digest_by_label(self) -> int:
-        """Return the lowest-numbered open ``hydraflow-groom-digest`` issue, or 0."""
+        """Return the lowest-numbered open ``hydraflow-refinement-digest`` issue, or 0."""
         labeled = await self._pr.list_issues_by_label(_DIGEST_LABEL)
         numbers = [int(item.get("number", 0)) for item in labeled]
         open_numbers = [n for n in numbers if n > 0]
         return min(open_numbers) if open_numbers else 0
 
-    async def _publish_groom_event(
+    async def _publish_refinement_event(
         self,
         *,
         closed: int,
@@ -570,10 +578,10 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         judged: int,
         cache_hits: int,
     ) -> None:
-        """Publish one GROOM_UPDATE event summarising the tick (dashboard)."""
+        """Publish one ISSUE_REFINEMENT_UPDATE event summarising the tick (dashboard)."""
         await self._bus.publish(
             HydraFlowEvent(
-                type=EventType.GROOM_UPDATE,
+                type=EventType.ISSUE_REFINEMENT_UPDATE,
                 data={
                     "worker": self._worker_name,
                     "closed": closed,
@@ -588,13 +596,13 @@ class IssueGroomerLoop(BaseBackgroundLoop):
     # --- Helpers --------------------------------------------------------------
 
     @staticmethod
-    def _to_groom_issue(raw: GitHubIssueSummary) -> GroomIssue:
+    def _to_refinement_issue(raw: GitHubIssueSummary) -> RefinementIssue:
         labels = tuple(
             str(lbl.get("name", ""))
             for lbl in (raw.get("labels") or [])
             if isinstance(lbl, dict) and lbl.get("name")
         )
-        return GroomIssue(
+        return RefinementIssue(
             number=int(raw.get("number", 0)),
             title=str(raw.get("title", "")),
             body=str(raw.get("body", "")),
@@ -603,7 +611,7 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         )
 
     @staticmethod
-    def _index_entry(issue: GroomIssue) -> dict[str, str]:
+    def _index_entry(issue: RefinementIssue) -> dict[str, str]:
         """Small change-detection projection persisted per issue.
 
         A change to the title, body, or ``updated_at`` re-marks the issue as
@@ -622,7 +630,7 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         """Issue numbers whose index entry is new or differs from the stored one.
 
         Issues absent from ``current`` (closed since last tick) are naturally
-        excluded — they need no grooming and drop from the index on persist.
+        excluded — they need no refinement and drop from the index on persist.
         """
         changed: set[int] = set()
         for key, entry in current.items():
@@ -631,8 +639,8 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         return changed
 
     def _priority_targets(
-        self, issues: list[GroomIssue], changed: set[int], *, full_sweep: bool
-    ) -> list[GroomIssue]:
+        self, issues: list[RefinementIssue], changed: set[int], *, full_sweep: bool
+    ) -> list[RefinementIssue]:
         """Issues to score for priority this tick.
 
         Full sweep: every unguarded issue (re-score even already-P-labelled
@@ -640,7 +648,7 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         scoring an already-prioritised issue would only spend an LLM call for a
         no-op delta.
         """
-        targets: list[GroomIssue] = []
+        targets: list[RefinementIssue] = []
         for issue in issues:
             if is_guarded(issue):
                 continue
@@ -652,11 +660,11 @@ class IssueGroomerLoop(BaseBackgroundLoop):
         return targets
 
     @staticmethod
-    def _has_priority_label(issue: GroomIssue) -> bool:
+    def _has_priority_label(issue: RefinementIssue) -> bool:
         return any(label in issue.labels for label in _PRIORITY_LABELS)
 
     @staticmethod
-    def _current_priority_label(issue: GroomIssue) -> str:
+    def _current_priority_label(issue: RefinementIssue) -> str:
         """The issue's current P-label, or ``"none"``. Mirrors the engine's
         private ``_current_priority_label`` so the loop can build the
         live-label map ``prune_open_proposals`` needs without importing a
@@ -668,7 +676,7 @@ class IssueGroomerLoop(BaseBackgroundLoop):
 
     @staticmethod
     def _count_cache_hits(
-        issues: list[GroomIssue], changed: set[int], judged_keys: set[str]
+        issues: list[RefinementIssue], changed: set[int], judged_keys: set[str]
     ) -> int:
         """Judged-pair keys the cache spared us re-judging this tick.
 

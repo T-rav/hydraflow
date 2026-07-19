@@ -702,7 +702,7 @@ class FakeGitHub:
     async def list_open_issues(self) -> list[dict[str, Any]]:
         """Return ALL open issues (no label filter), mirroring the gh projection.
 
-        Used by IssueGroomerLoop's backlog-wide sweep (#9957). ``labels``
+        Used by IssueRefinementLoop's backlog-wide sweep (#9957). ``labels``
         mirrors the gh wire shape (fake-fidelity), same as
         ``list_issues_by_label``.
         """

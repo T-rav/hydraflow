@@ -1,9 +1,9 @@
-"""Config knobs + GroomState persistence for IssueGroomerLoop (spec #9957).
+"""Config knobs + RefinementState persistence for IssueRefinementLoop (spec #9957).
 
 Covers: config defaults + bounds (env-table byte-equality is enforced by the
 shared ``test_config_consistency.py`` guard), StateData round-trips, the
 judged-pair cache's dedupe + newest-5000-cap prune, and the
-naive-stored-timestamp -> tz-aware-UTC hardening on ``groom_last_full_sweep``.
+naive-stored-timestamp -> tz-aware-UTC hardening on ``refinement_last_full_sweep``.
 """
 
 from __future__ import annotations
@@ -27,67 +27,67 @@ def _tracker(tmp_path: Path) -> StateTracker:
 # ---------------------------------------------------------------------------
 
 
-class TestIssueGroomerConfigDefaults:
+class TestIssueRefinementConfigDefaults:
     def test_defaults(self) -> None:
         cfg = HydraFlowConfig()
-        assert cfg.issue_groomer_enabled is True
-        assert cfg.issue_groomer_interval == 86400
-        assert cfg.issue_groomer_full_sweep_interval == 604800
-        assert cfg.issue_groomer_pair_budget == 24
-        assert cfg.issue_groomer_model == ""
+        assert cfg.issue_refinement_enabled is True
+        assert cfg.issue_refinement_interval == 86400
+        assert cfg.issue_refinement_full_sweep_interval == 604800
+        assert cfg.issue_refinement_pair_budget == 24
+        assert cfg.issue_refinement_model == ""
 
 
-class TestIssueGroomerConfigBounds:
+class TestIssueRefinementConfigBounds:
     def test_pair_budget_accepts_lower_bound(self) -> None:
-        cfg = HydraFlowConfig(repo="test/repo", issue_groomer_pair_budget=0)
-        assert cfg.issue_groomer_pair_budget == 0
+        cfg = HydraFlowConfig(repo="test/repo", issue_refinement_pair_budget=0)
+        assert cfg.issue_refinement_pair_budget == 0
 
     def test_pair_budget_accepts_upper_bound(self) -> None:
-        cfg = HydraFlowConfig(repo="test/repo", issue_groomer_pair_budget=200)
-        assert cfg.issue_groomer_pair_budget == 200
+        cfg = HydraFlowConfig(repo="test/repo", issue_refinement_pair_budget=200)
+        assert cfg.issue_refinement_pair_budget == 200
 
     def test_pair_budget_rejects_below_minimum(self) -> None:
         with pytest.raises(ValidationError):
-            HydraFlowConfig(repo="test/repo", issue_groomer_pair_budget=-1)
+            HydraFlowConfig(repo="test/repo", issue_refinement_pair_budget=-1)
 
     def test_pair_budget_rejects_above_maximum(self) -> None:
         with pytest.raises(ValidationError):
-            HydraFlowConfig(repo="test/repo", issue_groomer_pair_budget=201)
+            HydraFlowConfig(repo="test/repo", issue_refinement_pair_budget=201)
 
 
-class TestIssueGroomerConfigEnvOverrides:
+class TestIssueRefinementConfigEnvOverrides:
     def test_enabled_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("HYDRAFLOW_ISSUE_GROOMER_ENABLED", "false")
-        assert HydraFlowConfig().issue_groomer_enabled is False
+        monkeypatch.setenv("HYDRAFLOW_ISSUE_REFINEMENT_ENABLED", "false")
+        assert HydraFlowConfig().issue_refinement_enabled is False
 
     def test_interval_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("HYDRAFLOW_ISSUE_GROOMER_INTERVAL", "43200")
-        assert HydraFlowConfig().issue_groomer_interval == 43200
+        monkeypatch.setenv("HYDRAFLOW_ISSUE_REFINEMENT_INTERVAL", "43200")
+        assert HydraFlowConfig().issue_refinement_interval == 43200
 
     def test_full_sweep_interval_env_override(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("HYDRAFLOW_ISSUE_GROOMER_FULL_SWEEP_INTERVAL", "259200")
-        assert HydraFlowConfig().issue_groomer_full_sweep_interval == 259200
+        monkeypatch.setenv("HYDRAFLOW_ISSUE_REFINEMENT_FULL_SWEEP_INTERVAL", "259200")
+        assert HydraFlowConfig().issue_refinement_full_sweep_interval == 259200
 
     def test_pair_budget_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("HYDRAFLOW_ISSUE_GROOMER_PAIR_BUDGET", "10")
-        assert HydraFlowConfig().issue_groomer_pair_budget == 10
+        monkeypatch.setenv("HYDRAFLOW_ISSUE_REFINEMENT_PAIR_BUDGET", "10")
+        assert HydraFlowConfig().issue_refinement_pair_budget == 10
 
     def test_model_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("HYDRAFLOW_ISSUE_GROOMER_MODEL", "sonnet")
-        assert HydraFlowConfig().issue_groomer_model == "sonnet"
+        monkeypatch.setenv("HYDRAFLOW_ISSUE_REFINEMENT_MODEL", "sonnet")
+        assert HydraFlowConfig().issue_refinement_model == "sonnet"
 
 
 # ---------------------------------------------------------------------------
-# GroomState — change-detection index
+# RefinementState — change-detection index
 # ---------------------------------------------------------------------------
 
 
-class TestGroomIndex:
+class TestRefinementIndex:
     def test_defaults_empty(self, tmp_path: Path) -> None:
         st = _tracker(tmp_path)
-        assert st.get_groom_index() == {}
+        assert st.get_refinement_index() == {}
 
     def test_roundtrip(self, tmp_path: Path) -> None:
         st = _tracker(tmp_path)
@@ -98,22 +98,22 @@ class TestGroomIndex:
                 "updated_at": "2026-07-19T00:00:00Z",
             }
         }
-        st.set_groom_index(index)
-        assert st.get_groom_index() == index
+        st.set_refinement_index(index)
+        assert st.get_refinement_index() == index
 
     def test_get_returns_a_copy(self, tmp_path: Path) -> None:
         """Mutating the returned dict must not leak back into state."""
         st = _tracker(tmp_path)
-        st.set_groom_index(
+        st.set_refinement_index(
             {"1": {"title_hash": "a", "body_hash": "b", "updated_at": "x"}}
         )
-        snapshot = st.get_groom_index()
+        snapshot = st.get_refinement_index()
         snapshot["1"]["title_hash"] = "mutated"
-        assert st.get_groom_index()["1"]["title_hash"] == "a"
+        assert st.get_refinement_index()["1"]["title_hash"] == "a"
 
 
 # ---------------------------------------------------------------------------
-# GroomState — judged-pair cache
+# RefinementState — judged-pair cache
 # ---------------------------------------------------------------------------
 
 
@@ -168,20 +168,20 @@ class TestJudgedPairs:
 
 
 # ---------------------------------------------------------------------------
-# GroomState — weekly full-sweep marker
+# RefinementState — weekly full-sweep marker
 # ---------------------------------------------------------------------------
 
 
 class TestLastFullSweep:
     def test_defaults_none(self, tmp_path: Path) -> None:
         st = _tracker(tmp_path)
-        assert st.get_groom_last_full_sweep() is None
+        assert st.get_refinement_last_full_sweep() is None
 
     def test_roundtrip_is_tz_aware(self, tmp_path: Path) -> None:
         st = _tracker(tmp_path)
         now = datetime.now(UTC)
-        st.set_groom_last_full_sweep(now)
-        result = st.get_groom_last_full_sweep()
+        st.set_refinement_last_full_sweep(now)
+        result = st.get_refinement_last_full_sweep()
         assert result is not None
         assert result.tzinfo is not None
         assert result == now
@@ -190,8 +190,8 @@ class TestLastFullSweep:
         """A pre-hardening/legacy naive timestamp must not raise and must
         come back tz-aware (assumed UTC), comparable against an aware now."""
         st = _tracker(tmp_path)
-        st._data.groom_last_full_sweep = "2026-07-12T00:00:00"
-        result = st.get_groom_last_full_sweep()
+        st._data.refinement_last_full_sweep = "2026-07-12T00:00:00"
+        result = st.get_refinement_last_full_sweep()
         assert result is not None
         assert result.tzinfo is not None
         # Comparable against an aware "now" without raising TypeError.
@@ -199,35 +199,35 @@ class TestLastFullSweep:
 
     def test_unparseable_value_returns_none(self, tmp_path: Path) -> None:
         st = _tracker(tmp_path)
-        st._data.groom_last_full_sweep = "not-a-timestamp"
-        assert st.get_groom_last_full_sweep() is None
+        st._data.refinement_last_full_sweep = "not-a-timestamp"
+        assert st.get_refinement_last_full_sweep() is None
 
 
 # ---------------------------------------------------------------------------
-# GroomState — rolling digest issue
+# RefinementState — rolling digest issue
 # ---------------------------------------------------------------------------
 
 
 class TestDigestIssue:
     def test_default_is_zero(self, tmp_path: Path) -> None:
         st = _tracker(tmp_path)
-        assert st.get_groom_digest_issue() == 0
+        assert st.get_refinement_digest_issue() == 0
 
     def test_roundtrip(self, tmp_path: Path) -> None:
         st = _tracker(tmp_path)
-        st.set_groom_digest_issue(9958)
-        assert st.get_groom_digest_issue() == 9958
+        st.set_refinement_digest_issue(9958)
+        assert st.get_refinement_digest_issue() == 9958
 
 
 # ---------------------------------------------------------------------------
-# GroomState — open operator proposals (carried across ticks)
+# RefinementState — open operator proposals (carried across ticks)
 # ---------------------------------------------------------------------------
 
 
 class TestOpenProposals:
     def test_defaults_empty(self, tmp_path: Path) -> None:
         st = _tracker(tmp_path)
-        assert st.get_groom_open_proposals() == []
+        assert st.get_refinement_open_proposals() == []
 
     def test_roundtrip(self, tmp_path: Path) -> None:
         st = _tracker(tmp_path)
@@ -243,13 +243,13 @@ class TestOpenProposals:
                 "first_seen": "2026-07-19T00:00:00+00:00",
             }
         ]
-        st.set_groom_open_proposals(proposals)
-        assert st.get_groom_open_proposals() == proposals
+        st.set_refinement_open_proposals(proposals)
+        assert st.get_refinement_open_proposals() == proposals
 
     def test_get_returns_a_copy(self, tmp_path: Path) -> None:
         """Mutating the returned list's entries must not leak back into state."""
         st = _tracker(tmp_path)
-        st.set_groom_open_proposals([{"kind": "priority", "number": 7}])
-        snapshot = st.get_groom_open_proposals()
+        st.set_refinement_open_proposals([{"kind": "priority", "number": 7}])
+        snapshot = st.get_refinement_open_proposals()
         snapshot[0]["number"] = 999
-        assert st.get_groom_open_proposals()[0]["number"] == 7
+        assert st.get_refinement_open_proposals()[0]["number"] == 7

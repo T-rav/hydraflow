@@ -1,7 +1,7 @@
-"""State accessors for IssueGroomerLoop (spec #9957).
+"""State accessors for IssueRefinementLoop (spec #9957).
 
 Persists the small change-detection index (NOT the engine's richer runtime
-``GroomIssue`` view — see ``src/issue_groomer.py``), the judged-pair cache
+``RefinementIssue`` view — see ``src/issue_refinement.py``), the judged-pair cache
 (newest-5000 cap), the weekly full-sweep marker, and the rolling digest
 issue number.
 """
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 _MAX_JUDGED_PAIRS = 5000
 
 
-class IssueGroomerStateMixin:
+class IssueRefinementStateMixin:
     """Change-detection index + judged-pair cache + full-sweep marker + digest issue."""
 
     _data: StateData
@@ -30,24 +30,24 @@ class IssueGroomerStateMixin:
 
     # --- change-detection index ---
 
-    def get_groom_index(self) -> dict[str, dict[str, str]]:
+    def get_refinement_index(self) -> dict[str, dict[str, str]]:
         """Return a copy of the persisted per-issue index.
 
         Keyed by issue number (str); value is
         ``{"title_hash", "body_hash", "updated_at"}``.
         """
-        return {k: dict(v) for k, v in self._data.groom_index.items()}
+        return {k: dict(v) for k, v in self._data.refinement_index.items()}
 
-    def set_groom_index(self, index: Mapping[str, Mapping[str, str]]) -> None:
+    def set_refinement_index(self, index: Mapping[str, Mapping[str, str]]) -> None:
         """Overwrite the persisted index with *index* and persist."""
-        self._data.groom_index = {k: dict(v) for k, v in index.items()}
+        self._data.refinement_index = {k: dict(v) for k, v in index.items()}
         self.save()
 
     # --- judged-pair cache ---
 
     def get_judged_pairs(self) -> list[str]:
         """Return a copy of the judged-pair cache keys, oldest first."""
-        return list(self._data.groom_judged_pairs)
+        return list(self._data.refinement_judged_pairs)
 
     def add_judged_pairs(self, keys: Iterable[str]) -> None:
         """Append newly-judged pair keys, de-duplicated, capped at the newest 5000.
@@ -58,7 +58,7 @@ class IssueGroomerStateMixin:
         dropped first, so insertion order is preserved among the entries
         that survive the prune.
         """
-        existing = self._data.groom_judged_pairs
+        existing = self._data.refinement_judged_pairs
         seen = set(existing)
         merged = list(existing)
         for key in keys:
@@ -68,12 +68,12 @@ class IssueGroomerStateMixin:
             merged.append(key)
         if len(merged) > _MAX_JUDGED_PAIRS:
             merged = merged[-_MAX_JUDGED_PAIRS:]
-        self._data.groom_judged_pairs = merged
+        self._data.refinement_judged_pairs = merged
         self.save()
 
     # --- weekly full-sweep marker ---
 
-    def get_groom_last_full_sweep(self) -> datetime | None:
+    def get_refinement_last_full_sweep(self) -> datetime | None:
         """Return the last full-sweep timestamp as a tz-aware ``datetime``.
 
         A naive-stored timestamp (no offset) is assumed UTC rather than left
@@ -81,7 +81,7 @@ class IssueGroomerStateMixin:
         without risking ``TypeError``. Returns ``None`` when never run or the
         stored value doesn't parse as ISO-8601.
         """
-        raw = self._data.groom_last_full_sweep
+        raw = self._data.refinement_last_full_sweep
         if not raw:
             return None
         try:
@@ -92,35 +92,37 @@ class IssueGroomerStateMixin:
             parsed = parsed.replace(tzinfo=UTC)
         return parsed
 
-    def set_groom_last_full_sweep(self, when: datetime) -> None:
+    def set_refinement_last_full_sweep(self, when: datetime) -> None:
         """Persist *when* (should be tz-aware — pass ``datetime.now(UTC)``)."""
-        self._data.groom_last_full_sweep = when.isoformat()
+        self._data.refinement_last_full_sweep = when.isoformat()
         self.save()
 
     # --- rolling digest issue ---
 
-    def get_groom_digest_issue(self) -> int:
+    def get_refinement_digest_issue(self) -> int:
         """Return the digest issue number, or 0 if not yet created."""
-        return self._data.groom_digest_issue
+        return self._data.refinement_digest_issue
 
-    def set_groom_digest_issue(self, number: int) -> None:
-        self._data.groom_digest_issue = number
+    def set_refinement_digest_issue(self, number: int) -> None:
+        self._data.refinement_digest_issue = number
         self.save()
 
     # --- open operator proposals (carried across ticks) ---
 
-    def get_groom_open_proposals(self) -> list[dict[str, Any]]:
+    def get_refinement_open_proposals(self) -> list[dict[str, Any]]:
         """Return a copy of the still-open operator questions.
 
         Each entry is a ``dup`` or ``priority`` record (see ``StateData.
-        groom_open_proposals``). The loop merges this tick's new proposals in,
+        refinement_open_proposals``). The loop merges this tick's new proposals in,
         prunes entries whose issues left the backlog, and renders the whole
         set in the digest so an operator question first raised on an earlier
         tick keeps showing until it's actioned or its issue closes.
         """
-        return [dict(p) for p in self._data.groom_open_proposals]
+        return [dict(p) for p in self._data.refinement_open_proposals]
 
-    def set_groom_open_proposals(self, proposals: Iterable[Mapping[str, Any]]) -> None:
+    def set_refinement_open_proposals(
+        self, proposals: Iterable[Mapping[str, Any]]
+    ) -> None:
         """Overwrite the persisted open-proposals list with *proposals*."""
-        self._data.groom_open_proposals = [dict(p) for p in proposals]
+        self._data.refinement_open_proposals = [dict(p) for p in proposals]
         self.save()

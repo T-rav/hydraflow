@@ -1,6 +1,6 @@
 # Hand-authored baseline (recorder_sha: "00000000").
 # list_open_issues returns ALL open issues (no label filter) for the
-# backlog groomer's full-repo sweep (#9957). The dispatcher seeds two open
+# backlog refinement loop's full-repo sweep (#9957). The dispatcher seeds two open
 # issues — one carrying a label, one with none — plus a closed issue that
 # must be excluded, so the contract covers both the label-flattening path
 # (gh wire shape, [{"name": ...}]) and the "no labels" empty-list path.

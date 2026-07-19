@@ -1513,10 +1513,10 @@ class PRManager:
     async def list_open_issues(self) -> list[GitHubIssueSummary]:
         """Return ALL open issues (no label filter) as a list of dicts.
 
-        Used by the backlog groomer (``IssueGroomerLoop``, #9957) for a
+        Used by the backlog refinement loop (``IssueRefinementLoop``, #9957) for a
         full-repo sweep. Same contracts-boundary lenient-parse pattern as
         ``list_issues_by_label`` — labels ride along in gh wire shape
-        (#9943) since grooming needs to reason about existing labels.
+        (#9943) since refinement needs to reason about existing labels.
         """
         from contracts.boundary import parse_list_with_shape
         from contracts.shapes import GhIssueListItem
