@@ -2506,6 +2506,20 @@ class HydraFlowConfig(BaseModel):
             "to the next tick."
         ),
     )
+    wiki_anchor_prune_enabled: bool = Field(
+        default=False,
+        description=(
+            "When True (#9954), RepoWikiLoop runs a deterministic prune pass "
+            "that marks active tracked wiki entries stale when they lack a "
+            "repo-specific anchor (a src/*.py path, ADR number, loop/Port "
+            "class name, or config field) — i.e. generic best-practice "
+            "platitudes. Mark-only (never deletes); the flips ride the "
+            "normal batched maintenance PR. Off by default: enabling it does "
+            "the one-time cleanup of the accumulated platitude backlog. The "
+            "synthesis-time gate that blocks NEW anchor-less entries is "
+            "always on and independent of this flag."
+        ),
+    )
 
     # Paths (auto-detected)
     repo_root: Path = Field(default=Path("."), description="Repository root directory")

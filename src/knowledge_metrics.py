@@ -23,6 +23,10 @@ _COUNTER_NAMES = (
     "adr_drafts_judged",
     "adr_drafts_opened",
     "reflections_bridged",
+    # #9954: synthesis/lint entries dropped or flagged for lacking a
+    # repo-specific anchor (generic best-practice platitudes).
+    "wiki_entries_rejected_no_anchor",
+    "wiki_entries_flagged_no_anchor",
 )
 
 
