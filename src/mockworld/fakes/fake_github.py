@@ -835,6 +835,13 @@ class FakeGitHub:
             return "COMPLETED" if state == "closed" else "OPEN"
         return "OPEN"
 
+    async def get_issue_labels(self, issue_number: int) -> list[str]:
+        """Return the label names on an issue (empty list when unknown)."""
+        self._maybe_rate_limit()
+        if issue_number in self._issues:
+            return list(self._issues[issue_number].labels)
+        return []
+
     async def list_hitl_items(
         self, hitl_labels: list[str], *, concurrency: int = 10
     ) -> list[Any]:

@@ -1,0 +1,23 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_issue_labels returns the label names carried by an issue, mirroring
+# `gh issue view <n> --json labels --jq '.labels[].name'` (newline-separated
+# names). The dispatcher seeds issue #42 with a deterministic two-label set
+# and asserts the newline-joined names back as stdout. Labels are plain
+# strings, so no normalizer is needed.
+adapter: github
+interaction: get_issue_labels
+recorded_at: "2026-07-18T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_issue_labels
+  args:
+    - "42"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "hydraflow-ready\nhydraflow-review\n"
+  stderr: ""
+normalizers: []
+baseline_only: true
