@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W29
 
+- `90be6dc` — docs(adr): resolve 5 ADR-drift rollups (#9950 #9779 #9781 #9775 #9418) (#9953) (#9953) *(2026-07-18)*
+- `0c27386` — fix(ul): single-flight guard — at most one open UL-graph bot PR across the family (#9893, #9890) (#9939) (#9939) *(2026-07-18)*
 - `4d20d74` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9926) (#9926) *(2026-07-18)*
 - `cb09ea0` — feat(ul): edge-proposer — 3 new edges across 3 terms (#9912) (#9912) *(2026-07-18)*
 - `15bbcac` — feat(ul): edge-proposer — 81 new edges across 40 terms (#9896) (#9896) *(2026-07-18)*

@@ -136,8 +136,8 @@ images are filtered out, and the DOM sanitizer strips external resources).
 - ADR issue: #1704
 - `src/ui/src/components/Header.jsx` (capture + three-tier fallback)
 - `src/ui/src/components/ReportIssueModal.jsx` (annotation + base64 conversion)
-- `src/dashboard_routes.py` (`POST /api/report` endpoint)
+- `src/dashboard_routes/_reports_routes.py:submit_report` (`POST /api/report` endpoint)
 - `src/models.py` (`PendingReport`, `ReportIssueRequest`, `ReportIssueResponse`)
-- `src/state.py` (`enqueue_report`, `dequeue_report`)
+- `src/state/_report.py` (`enqueue_report`, `dequeue_report`)
 - `src/report_issue_loop.py` (`ReportIssueLoop` background worker)
 - `src/pr_manager.py` (`upload_screenshot_gist` method)

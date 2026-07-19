@@ -12,10 +12,13 @@ all endpoints are defined inside `create_router()` and share `config`, `state`,
 `event_bus`, and `orchestrator` via closure variables. This design assumes a
 single repo context per dashboard instance.
 
-The supervisor layer (`supervisor_service.py`, `supervisor_client.py`,
-`supervisor_state.py`) already manages multi-repo lifecycle via a TCP protocol
-with actions: `ping`, `list_repos`, `add_repo`, `remove_repo`. Each repo gets
-its own subprocess with its own dashboard port.
+Multi-repo lifecycle is managed by `src/repo_runtime.py` (RepoRuntime /
+RepoRuntimeRegistry) inside a single `server:main` process; repos are
+started/stopped through the dashboard control routes rather than a separate
+subprocess per repo. (Historically this was a TCP supervisor layer —
+`supervisor_service.py` / `supervisor_client.py` — that spawned one subprocess
+per repo with its own dashboard port; that layer has since been removed. The
+API-scoping decision below is unchanged by that refactor.)
 
 The UI context (`HydraFlowContext.jsx`) already tracks `supervisedRepos` and
 exposes `addRepoShortcut` / `removeRepoShortcut`. Sessions support repo
@@ -77,7 +80,7 @@ Extend the dashboard API to support multi-repo scoping through two mechanisms:
 - Source memory: #1617
 - Implementation: #1468
 - `src/dashboard_routes/_routes.py:create_router`, `src/dashboard.py`
-- `src/hf_cli/supervisor_service.py`, `src/hf_cli/supervisor_client.py`
+- `src/repo_runtime.py:RepoRuntime`, `src/dashboard_routes/_state_routes.py` — per-repo start/stop/status control routes (replaced the removed supervisor TCP layer)
 - `src/ui/src/context/HydraFlowContext.jsx`
 - ADR-0006 (RepoRuntime Isolation Architecture)
 ## Council Amendment Notes

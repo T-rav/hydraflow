@@ -9,7 +9,7 @@
 HydraFlow's multi-repo support relies on `RepoRuntime` (bundles config, event bus,
 state tracker, and orchestrator per repository) and `RepoRuntimeRegistry` (manages
 multiple `RepoRuntime` instances by slug). Both abstractions exist in
-`src/repo_runtime.py` and the dashboard routes in `src/dashboard_routes.py` already
+`src/repo_runtime.py` and the dashboard routes in `src/dashboard_routes/_routes.py` already
 accept an optional `registry` parameter with a `_resolve_runtime()` fallback that
 transparently supports single-repo and multi-repo modes.
 
@@ -118,4 +118,4 @@ across the multi-repo deployment. They serve different architectural layers:
 - `src/repo_runtime.py` — `RepoRuntime` and `RepoRuntimeRegistry`
 - `src/server.py` — `_run_with_dashboard()` and `_run_headless()` startup paths
 - `src/dashboard.py` — `HydraFlowDashboard` (already accepts `registry` parameter)
-- `src/dashboard_routes.py` — `create_router()` and `_resolve_runtime()`
+- `src/dashboard_routes/_routes.py:create_router` — `create_router()` and `_resolve_runtime()`

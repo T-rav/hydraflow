@@ -106,10 +106,10 @@ Adopt **forward-progression-only** as the canonical semantics for all
 - Source memory: #1697
 - Implementation: PR #1689, issue #1542
 - `src/models.py:SessionCounters` — counter model definition
-- `src/state.py:StateTracker.increment_session_counter` — increment logic
+- `src/state/_session.py:SessionStateMixin.increment_session_counter` — increment logic
 - `src/triage_phase.py:_triage_single` — triaged counter (forward-progression)
 - `src/plan_phase.py:_handle_already_satisfied`, `src/plan_phase.py:_handle_plan_success` — planned counter (forward-progression)
 - `src/implement_phase.py:_handle_implementation_result` — implemented counter (forward-progression)
-- `src/review_phase.py:_record_review_outcome` — reviewed counter (guarded on APPROVE)
+- `src/review_phase/_phase.py:_record_review_outcome` — reviewed counter (guarded on APPROVE)
 - `src/post_merge_handler.py:handle_approved` — merged counter (forward-progression)
 - `src/orchestrator.py:build_pipeline_stats` — session_counter_map (stage-to-field mapping)

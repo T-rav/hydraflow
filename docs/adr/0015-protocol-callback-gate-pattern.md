@@ -141,6 +141,6 @@ exception in spirit: pragmatic co-location where the type has a narrow scope.
 - Issue: #1746
 - `src/models.py` — `CiGateFn`, `VisualGateFn`, `MergeConflictFixFn`, `EscalateFn`, `PublishFn`, `VisualValidationDecision`
 - `src/post_merge_handler.py` — `handle_approved()` callback injection
-- `src/review_phase.py:check_visual_gate`, `src/review_phase.py:_fetch_code_scanning_alerts`
+- `src/review_phase/_phase.py:check_visual_gate`, `src/review_phase/_phase.py:_fetch_code_scanning_alerts`
 - `src/visual_validation.py` — `compute_visual_validation()`
 - `src/escalation_gate.py` — `should_escalate_debug()`

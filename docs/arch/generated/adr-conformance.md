@@ -38,7 +38,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0032 | enforced | `pytest:tests/test_repo_wiki.py`, `pytest:tests/test_repo_wiki_store_git.py`, `pytest:tests/test_repo_wiki_ingest.py`, `pytest:tests/test_wiki_drift_detector.py`, `pytest:tests/test_wiki_drift_symbols.py`, `pytest:tests/test_wiki_semantic_drift.py`, `pytest:tests/test_repo_wiki_temporal.py`, `pytest:tests/test_wiki_corroboration.py` |
 | ADR-0034 | enforced | `pytest:tests/test_state_machine.py` |
 | ADR-0035 | manual | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
-| ADR-0036 | manual | `Code review of 'src/cli.py:build_config()' and 'src/hf_cli/__main__.py' dispatch wiring during PR review of CLI/config changes.` |
 | ADR-0037 | enforced | `pytest:tests/test_adr_pre_validator.py` |
 | ADR-0041 | enforced | `pytest:tests/test_issue_cache.py`, `pytest:tests/test_precondition_gate.py` |
 | ADR-0042 | manual | `branch-protection ruleset review per docs/standards/branch_protection` |
@@ -86,7 +85,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` | ADR-0051 |
 | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` | ADR-0023 |
 | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` | ADR-0035 |
-| `Code review of 'src/cli.py:build_config()' and 'src/hf_cli/__main__.py' dispatch wiring during PR review of CLI/config changes.` | ADR-0036 |
 | `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` | ADR-0065 |
 | `Process guardrail — reviewed at PR time via the process-per-repo model's operational invariants (one 'cli.py' subprocess per repo slug, no shared mutable state); no automated test asserts subprocess isolation directly.` | ADR-0009 |
 | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` | ADR-0025 |
@@ -197,7 +195,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0023 | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` |
 | ADR-0025 | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
 | ADR-0035 | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
-| ADR-0036 | `Code review of 'src/cli.py:build_config()' and 'src/hf_cli/__main__.py' dispatch wiring during PR review of CLI/config changes.` |
 | ADR-0042 | `branch-protection ruleset review per docs/standards/branch_protection` |
 | ADR-0051 | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` |
 | ADR-0065 | `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` |
