@@ -454,16 +454,18 @@ class FakeGitHub:
         if issue_number in self._issues:
             self._issues[issue_number].state = "closed"
 
-    async def close_issue(self, issue_number: int) -> None:
+    async def close_issue(self, issue_number: int) -> bool:
         self._maybe_rate_limit()
         if issue_number in self._issues:
             self._issues[issue_number].state = "closed"
+        return True
 
-    async def close_pr(self, pr_number: int) -> None:
+    async def close_pr(self, pr_number: int) -> bool:
         self._maybe_rate_limit()
         pr = self._prs.get(pr_number)
         if pr is not None:
             pr.closed = True
+        return True
 
     async def find_existing_issue(self, title: str) -> int:
         self._maybe_rate_limit()

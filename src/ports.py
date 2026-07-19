@@ -304,12 +304,22 @@ class PRPort(Protocol):
 
     # --- Issue management ---
 
-    async def close_issue(self, issue_number: int) -> None:
-        """Close GitHub issue *issue_number*."""
+    async def close_issue(self, issue_number: int) -> bool:
+        """Close GitHub issue *issue_number*.
+
+        Returns True when the close reached GitHub, False when the
+        underlying call failed (fail-soft: no raise). Background callers
+        may ignore the return; INTERACTIVE callers (HITL routes) MUST
+        check it — pretending a failed close succeeded makes the row
+        vanish and reappear on refresh (#9812).
+        """
         ...
 
-    async def close_pr(self, pr_number: int) -> None:
+    async def close_pr(self, pr_number: int) -> bool:
         """Close GitHub pull request *pr_number* without merging.
+
+        Returns True on success, False when the gh call failed (#9812 —
+        same contract as :meth:`close_issue`).
 
         Distinct from :meth:`close_issue`: a PR and an issue share the
         repo's number space but are different GraphQL/REST node types, so

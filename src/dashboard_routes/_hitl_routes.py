@@ -371,7 +371,18 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
             return JSONResponse({"status": "no orchestrator"}, status_code=400)
 
         pr_manager = ctx.pr_manager_for(_cfg, _bus)
-        await pr_manager.close_issue(issue_number)
+        if not await pr_manager.close_issue(issue_number):
+            # Do NOT run local cleanup: the row must stay, truthfully (#9812).
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "detail": (
+                        f"GitHub close failed for issue #{issue_number} — "
+                        "item left in the HITL queue"
+                    ),
+                },
+                status_code=502,
+            )
 
         return await _resolve_hitl_item(
             issue_number,
@@ -398,7 +409,18 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
         if not orch:
             return JSONResponse({"status": "no orchestrator"}, status_code=400)
         pr_manager = ctx.pr_manager_for(_cfg, _bus)
-        await pr_manager.close_issue(issue_number)
+        if not await pr_manager.close_issue(issue_number):
+            # Do NOT run local cleanup: the row must stay, truthfully (#9812).
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "detail": (
+                        f"GitHub close failed for issue #{issue_number} — "
+                        "item left in the HITL queue"
+                    ),
+                },
+                status_code=502,
+            )
 
         return await _resolve_hitl_item(
             issue_number,
