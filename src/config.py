@@ -630,6 +630,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("stale_issue_gc_loop_enabled", "HYDRAFLOW_STALE_ISSUE_GC_LOOP_ENABLED", True),
     ("gate_health_loop_enabled", "HYDRAFLOW_GATE_HEALTH_LOOP_ENABLED", True),
+    (
+        "human_branch_shepherd_enabled",
+        "HYDRAFLOW_HUMAN_BRANCH_SHEPHERD_ENABLED",
+        True,
+    ),
     ("stale_issue_loop_enabled", "HYDRAFLOW_STALE_ISSUE_LOOP_ENABLED", True),
     ("triage_retry_loop_enabled", "HYDRAFLOW_TRIAGE_RETRY_LOOP_ENABLED", True),
     (
@@ -2013,6 +2018,15 @@ class HydraFlowConfig(BaseModel):
             "Bounded update-branch heals per CI-failed bot PR (#9889): a "
             "behind-base PR gets a fresh merge ref + full CI re-run before "
             "the failure strategy applies. 0 disables."
+        ),
+    )
+    human_branch_shepherd_enabled: bool = Field(
+        default=True,
+        description=(
+            "Class 5 (#9889): DependabotMergeLoop shepherds human-prefix "
+            "branches (fix/, feat/, docs/, test/, chore/, refactor/) to merge "
+            "once CI is green — same path as factory branches. Per-PR opt-out: "
+            "the no-auto-merge label."
         ),
     )
     review_orphan_strike_threshold: int = Field(
