@@ -8,10 +8,14 @@ The reverse `module -> [ADRs]` index is computed by the generator.
 
 from __future__ import annotations
 
+import logging
 import re
+from collections import defaultdict
 from pathlib import Path
 
 from arch._models import ADRRef, ADRRefIndex
+
+logger = logging.getLogger(__name__)
 
 _ADR_FILE_RE = re.compile(r"^(\d{4})-.+\.md$")
 # Match "src/foo/bar.py", "src/foo/bar.py:Class", "src/foo/bar.py:func_name"
@@ -26,14 +30,34 @@ def _module_from_path_ref(s: str) -> str:
 
 def extract_adr_refs(adr_dir: Path) -> ADRRefIndex:
     adr_dir = Path(adr_dir).resolve()
-    refs: list[ADRRef] = []
+    # Accumulate the UNION of cited modules per adr_id. Two files can claim the
+    # same ADR number (the #9406 collisions); merging here keeps every file's
+    # citations instead of letting a dict-keyed downstream consumer silently
+    # drop one (issues #9505 / #9465).
+    modules_by_id: dict[str, set[str]] = defaultdict(set)
+    files_by_id: dict[str, list[str]] = defaultdict(list)
     for md in sorted(adr_dir.glob("*.md")):
         m = _ADR_FILE_RE.match(md.name)
         if not m:
             continue
         adr_id = f"ADR-{m.group(1)}"
         text = md.read_text()
-        modules = sorted({_module_from_path_ref(s) for s in _PATH_REF_RE.findall(text)})
-        refs.append(ADRRef(adr_id=adr_id, cited_modules=modules))
-    refs.sort(key=lambda r: r.adr_id)
+        modules_by_id[adr_id].update(
+            _module_from_path_ref(s) for s in _PATH_REF_RE.findall(text)
+        )
+        files_by_id[adr_id].append(md.name)
+    for adr_id, names in files_by_id.items():
+        if len(names) > 1:
+            logger.warning(
+                "Duplicate ADR number %s claimed by %d files: %s. Merging their "
+                "cited modules; dict-keyed callers would otherwise drop one — "
+                "renumber the later-authored file (issue #9505 / #9465 / #9406).",
+                adr_id,
+                len(names),
+                ", ".join(sorted(names)),
+            )
+    refs = [
+        ADRRef(adr_id=adr_id, cited_modules=sorted(modules_by_id[adr_id]))
+        for adr_id in sorted(modules_by_id)
+    ]
     return ADRRefIndex(adr_to_modules=refs)
