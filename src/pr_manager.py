@@ -1518,8 +1518,8 @@ class PRManager:
         ``list_issues_by_label`` — labels ride along in gh wire shape
         (#9943) since grooming needs to reason about existing labels.
         """
-        from contracts.boundary import parse_list_with_shape  # noqa: PLC0415
-        from contracts.shapes import GhIssueListItem  # noqa: PLC0415
+        from contracts.boundary import parse_list_with_shape
+        from contracts.shapes import GhIssueListItem
 
         self._assert_repo()
         output = await self._run_gh(
@@ -1535,7 +1535,7 @@ class PRManager:
             "--limit",
             "500",
         )
-        from contracts.boundary import field_or  # noqa: PLC0415
+        from contracts.boundary import field_or
 
         results = parse_list_with_shape(output or "[]", GhIssueListItem)
         summaries: list[GitHubIssueSummary] = []
@@ -1559,6 +1559,11 @@ class PRManager:
                     "updated_at": field_or(r, "updated_at", "", dict_key="updatedAt"),
                     "labels": labels,
                 }
+            )
+        if len(summaries) == 500:
+            logger.warning(
+                "list_open_issues returned exactly 500 rows — backlog may be"
+                " truncated; raise the limit"
             )
         return summaries
 

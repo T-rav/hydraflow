@@ -21,6 +21,7 @@ Pins:
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -31,6 +32,23 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from mockworld.fakes.fake_github import FakeGitHub
 from tests.helpers import make_pr_manager
+
+
+def _gh_payload(n: int) -> str:
+    """Build a gh-shaped JSON array of *n* open-issue rows."""
+    return json.dumps(
+        [
+            {
+                "number": i,
+                "title": f"issue {i}",
+                "body": "",
+                "updatedAt": "2026-07-01T00:00:00Z",
+                "labels": [],
+            }
+            for i in range(1, n + 1)
+        ]
+    )
+
 
 _GH_PAYLOAD = json.dumps(
     [
@@ -133,3 +151,46 @@ class TestFakeGitHubParity:
             {"name": "human-required"},
         ]
         assert issues[1]["labels"] == []
+
+
+class TestTruncationWarning:
+    """No-silent-caps: exactly 500 rows must warn (pattern: epic_sweeper_loop,
+    service_registry's fitness issue fetcher)."""
+
+    @pytest.mark.asyncio
+    async def test_exactly_500_rows_logs_truncation_warning(
+        self, config, event_bus, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mgr = make_pr_manager(config, event_bus)
+        run_gh = AsyncMock(return_value=_gh_payload(500))
+
+        with (
+            caplog.at_level(logging.WARNING, logger="hydraflow.pr_manager"),
+            patch.object(mgr, "_run_gh", run_gh),
+        ):
+            issues = await mgr.list_open_issues()
+
+        assert len(issues) == 500
+        assert any(
+            "list_open_issues returned exactly 500 rows" in r.message
+            for r in caplog.records
+        ), f"Expected truncation warning; got: {[r.message for r in caplog.records]}"
+
+    @pytest.mark.asyncio
+    async def test_499_rows_does_not_log_truncation_warning(
+        self, config, event_bus, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mgr = make_pr_manager(config, event_bus)
+        run_gh = AsyncMock(return_value=_gh_payload(499))
+
+        with (
+            caplog.at_level(logging.WARNING, logger="hydraflow.pr_manager"),
+            patch.object(mgr, "_run_gh", run_gh),
+        ):
+            issues = await mgr.list_open_issues()
+
+        assert len(issues) == 499
+        assert not any(
+            "list_open_issues returned exactly 500 rows" in r.message
+            for r in caplog.records
+        )
