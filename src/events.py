@@ -247,64 +247,31 @@ class EventLog:
         """Read events from the JSONL file, optionally filtered by timestamp."""
         return await asyncio.to_thread(self._load_sync, since, max_events)
 
-    def _rotate_sync(self, max_size_bytes: int, max_age_days: int) -> None:
+    def _rotate_sync(self, max_size_bytes: int, max_age_days: int) -> dict[str, int]:
         """Synchronous rotation — called via ``asyncio.to_thread``.
 
         Holds the lock across the entire read → filter → atomic_write cycle
         so concurrent appends block until rotation completes. Without the
         lock, events appended between the read and os.replace() write to
         the old (now unlinked) inode and are silently lost.
+
+        Returns ``{"kept": n, "dropped_age": n, "dropped_size": n}`` when a
+        rotation ran, else an empty dict (below threshold or I/O failure).
         """
         if not self._path.exists():
-            return
+            return {}
 
         try:
             file_size = self._path.stat().st_size
         except OSError:
-            return
+            return {}
 
         if file_size <= max_size_bytes:
-            return
+            return {}
 
         try:
             with file_lock(self._lock_path):
-                cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
-                kept_lines: list[str] = []
-
-                try:
-                    with open(self._path) as f:
-                        for raw_line in f:
-                            stripped = raw_line.strip()
-                            if not stripped:
-                                continue
-                            try:
-                                event = HydraFlowEvent.model_validate_json(stripped)
-                                ts = datetime.fromisoformat(event.timestamp)
-                                if ts >= cutoff:
-                                    kept_lines.append(stripped)
-                            except (ValidationError, ValueError):
-                                logger.debug(
-                                    "Dropping corrupt event line during rotation",
-                                    exc_info=True,
-                                )
-                                continue
-                except OSError:
-                    logger.warning(
-                        "Could not read event log for rotation: %s",
-                        self._path,
-                        exc_info=True,
-                    )
-                    return
-
-                content = "\n".join(kept_lines) + "\n" if kept_lines else ""
-                try:
-                    atomic_write(self._path, content)
-                except OSError:
-                    logger.warning(
-                        "Could not write rotated event log: %s",
-                        self._path,
-                        exc_info=True,
-                    )
+                return self._rotate_locked(max_size_bytes, max_age_days)
         except OSError:
             # file_lock acquisition failed (e.g. permissions on lock file)
             logger.warning(
@@ -312,14 +279,86 @@ class EventLog:
                 self._path,
                 exc_info=True,
             )
+            return {}
 
-    async def rotate(self, max_size_bytes: int, max_age_days: int) -> None:
+    def _rotate_locked(self, max_size_bytes: int, max_age_days: int) -> dict[str, int]:
+        """Read → age-filter → size-bound → atomic write, under the held lock."""
+        cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
+        kept_lines: list[str] = []
+        dropped_age = 0
+
+        try:
+            with open(self._path) as f:
+                for raw_line in f:
+                    stripped = raw_line.strip()
+                    if not stripped:
+                        continue
+                    try:
+                        event = HydraFlowEvent.model_validate_json(stripped)
+                        ts = datetime.fromisoformat(event.timestamp)
+                        if ts >= cutoff:
+                            kept_lines.append(stripped)
+                        else:
+                            dropped_age += 1
+                    except (ValidationError, ValueError):
+                        logger.debug(
+                            "Dropping corrupt event line during rotation",
+                            exc_info=True,
+                        )
+                        continue
+        except OSError:
+            logger.warning(
+                "Could not read event log for rotation: %s",
+                self._path,
+                exc_info=True,
+            )
+            return {}
+
+        # Size bound (#9905): the age filter alone retains 100% of a
+        # flood written within the retention window, so an event storm
+        # survives rotation and the post-rotation file can still be
+        # hundreds of MB. Enforce the byte budget by keeping only the
+        # newest suffix that fits — the invariant callers rely on is
+        # "post-rotation file <= max_size_bytes".
+        dropped_size = 0
+        if kept_lines:
+            budget = max_size_bytes
+            keep_from = len(kept_lines)
+            for i in range(len(kept_lines) - 1, -1, -1):
+                cost = len(kept_lines[i].encode("utf-8")) + 1
+                if budget - cost < 0:
+                    break
+                budget -= cost
+                keep_from = i
+            dropped_size = keep_from
+            if keep_from:
+                kept_lines = kept_lines[keep_from:]
+
+        content = "\n".join(kept_lines) + "\n" if kept_lines else ""
+        try:
+            atomic_write(self._path, content)
+        except OSError:
+            logger.warning(
+                "Could not write rotated event log: %s",
+                self._path,
+                exc_info=True,
+            )
+            return {}
+        return {
+            "kept": len(kept_lines),
+            "dropped_age": dropped_age,
+            "dropped_size": dropped_size,
+        }
+
+    async def rotate(self, max_size_bytes: int, max_age_days: int) -> dict[str, int]:
         """Rotate the log file if it exceeds *max_size_bytes*.
 
-        Keeps only events within *max_age_days*. Uses atomic write
-        (temp file + ``os.replace``) following the ``StateTracker`` pattern.
+        Keeps only events within *max_age_days*, then trims the oldest
+        survivors until the file fits *max_size_bytes* (#9905). Uses atomic
+        write (temp file + ``os.replace``) following the ``StateTracker``
+        pattern. Returns rotation stats (empty dict when nothing rotated).
         """
-        await asyncio.to_thread(self._rotate_sync, max_size_bytes, max_age_days)
+        return await asyncio.to_thread(self._rotate_sync, max_size_bytes, max_age_days)
 
 
 class EventBus:
@@ -449,11 +488,17 @@ class EventBus:
             return None
         return await self._event_log.load(since=since)
 
-    async def rotate_log(self, max_size_bytes: int, max_age_days: int) -> None:
-        """Rotate the on-disk event log if it exceeds *max_size_bytes*."""
+    async def rotate_log(
+        self, max_size_bytes: int, max_age_days: int
+    ) -> dict[str, int]:
+        """Rotate the on-disk event log if it exceeds *max_size_bytes*.
+
+        Returns rotation stats from :meth:`EventLog.rotate` (empty dict when
+        no log is configured or nothing rotated).
+        """
         if self._event_log is None:
-            return
-        await self._event_log.rotate(max_size_bytes, max_age_days)
+            return {}
+        return await self._event_log.rotate(max_size_bytes, max_age_days)
 
     def subscribe(self, max_queue: int = 500) -> asyncio.Queue[HydraFlowEvent]:
         """Return a new queue that will receive future events."""

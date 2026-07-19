@@ -8,7 +8,6 @@ drifted it. Subsequent ticks update the body. Dedup key is
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -594,23 +593,25 @@ async def test_close_reconcile_clears_dedup(loop_env, monkeypatch) -> None:
         deps=_deps(stop),
     )
 
-    closed_payload = json.dumps(
-        [{"title": f"HITL: ADR drift {stuck_attempt_key} unresolved after 3"}]
-    ).encode()
+    pr.list_closed_issues_by_label.return_value = [
+        {
+            "number": 9701,
+            "title": f"HITL: ADR drift {stuck_attempt_key} unresolved after 3",
+            "body": "",
+            "updated_at": "",
+        }
+    ]
 
-    class _FakeProc:
-        returncode = 0
+    def _no_subprocess(*_args, **_kwargs):
+        raise AssertionError("reconcile must route through the PRPort, not raw gh")
 
-        async def communicate(self):
-            return closed_payload, b""
-
-    async def fake_exec(*_args, **_kwargs):
-        return _FakeProc()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _no_subprocess)
 
     await loop._reconcile_closed_escalations()
 
+    pr.list_closed_issues_by_label.assert_awaited_once_with(
+        cfg.adr_drift_stuck_label[0], limit=100
+    )
     dedup.set_all.assert_called_once()
     remaining = dedup.set_all.call_args.args[0]
     assert full_dedup_key not in remaining

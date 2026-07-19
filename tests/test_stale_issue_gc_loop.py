@@ -27,10 +27,16 @@ def _make_loop(
     pr_manager.close_issue = AsyncMock()
     pr_manager.post_comment = AsyncMock()
     pr_manager.get_issue_updated_at = AsyncMock(return_value="2026-03-01T00:00:00Z")
+    # Empty listing -> the #9905 state prune fail-closes into a no-op.
+    pr_manager.list_open_issue_numbers = AsyncMock(return_value=[])
+
+    state = MagicMock()
+    state.prune_issue_scoped_state.return_value = {}
 
     loop = StaleIssueGCLoop(
         config=deps.config,
         pr_manager=pr_manager,
+        state=state,
         deps=deps.loop_deps,
     )
     return loop, deps.stop_event, pr_manager
@@ -134,7 +140,9 @@ class TestStaleIssueGCLoop:
         """In dry-run mode, _do_work returns None without closing anything."""
         deps = make_bg_loop_deps(tmp_path, dry_run=True)
         pr = MagicMock()
-        loop = StaleIssueGCLoop(config=deps.config, pr_manager=pr, deps=deps.loop_deps)
+        loop = StaleIssueGCLoop(
+            config=deps.config, pr_manager=pr, state=MagicMock(), deps=deps.loop_deps
+        )
         result = await loop._do_work()
         assert result is None
         pr.close_issue.assert_not_called()

@@ -690,6 +690,14 @@ class FakeGitHub:
             if issue.state == "open" and label in issue.labels
         ]
 
+    async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
+        """Return numbers of ALL open issues, mirroring the gh projection (#9905)."""
+        self._maybe_rate_limit()
+        numbers = [
+            issue.number for issue in self._issues.values() if issue.state == "open"
+        ]
+        return sorted(numbers)[:limit]
+
     async def list_closed_issues_by_label(
         self,
         label: str,
@@ -831,6 +839,13 @@ class FakeGitHub:
             state = self._issues[issue_number].state
             return "COMPLETED" if state == "closed" else "OPEN"
         return "OPEN"
+
+    async def get_issue_labels(self, issue_number: int) -> list[str]:
+        """Return the label names on an issue (empty list when unknown)."""
+        self._maybe_rate_limit()
+        if issue_number in self._issues:
+            return list(self._issues[issue_number].labels)
+        return []
 
     async def list_hitl_items(
         self, hitl_labels: list[str], *, concurrency: int = 10

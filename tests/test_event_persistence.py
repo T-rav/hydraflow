@@ -199,8 +199,9 @@ class TestEventLogRotation:
         await log.append(old_event)
         await log.append(new_event)
 
-        # Force rotation with a tiny max_size (1 byte) and 5-day retention
-        await log.rotate(max_size_bytes=1, max_age_days=5)
+        # Force rotation: budget below current size triggers it, and (#9905)
+        # the byte budget must still fit the age-surviving event.
+        await log.rotate(max_size_bytes=log.path.stat().st_size - 1, max_age_days=5)
 
         loaded = await log.load()
         assert len(loaded) == 1
@@ -212,7 +213,9 @@ class TestEventLogRotation:
         for days in [20, 15, 5, 1]:
             await log.append(_make_event_at(days_ago=days, data={"days_ago": days}))
 
-        await log.rotate(max_size_bytes=1, max_age_days=7)
+        # Budget below current size forces rotation but fits the survivors
+        # (#9905 size bound would otherwise trim them too).
+        await log.rotate(max_size_bytes=log.path.stat().st_size - 1, max_age_days=7)
 
         loaded = await log.load()
         assert len(loaded) == 2
@@ -237,7 +240,7 @@ class TestEventLogRotation:
         await log.append(event)
         await log.append(_make_event_at(days_ago=30, data={"keep": False}))
 
-        await log.rotate(max_size_bytes=1, max_age_days=7)
+        await log.rotate(max_size_bytes=log.path.stat().st_size - 1, max_age_days=7)
 
         # File should exist (not be left in a partial state)
         assert log.path.exists()
@@ -404,7 +407,7 @@ class TestEventBusWithPersistence:
         await log.append(_make_event_at(days_ago=1, data={"new": True}))
 
         bus = EventBus(event_log=log)
-        await bus.rotate_log(max_size_bytes=1, max_age_days=7)
+        await bus.rotate_log(max_size_bytes=log.path.stat().st_size - 1, max_age_days=7)
 
         loaded = await log.load()
         assert len(loaded) == 1
