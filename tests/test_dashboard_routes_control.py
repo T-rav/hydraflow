@@ -76,6 +76,58 @@ class TestControlStatusAppVersion:
         assert data["config"]["update_available"] is True
 
 
+class TestControlStatusBootShaCommitsBehind:
+    @pytest.mark.asyncio
+    async def test_status_includes_boot_sha_and_commits_behind(
+        self, config, event_bus: EventBus, state, tmp_path: Path, monkeypatch
+    ) -> None:
+        """GET /api/control/status projects the in-memory boot SHA and a
+        cheap commits-behind count for at-a-glance staleness observability."""
+        monkeypatch.setattr(
+            "dashboard_routes._control_routes.get_boot_sha",
+            lambda: "abc1234deadbeef",
+        )
+        monkeypatch.setattr(
+            "dashboard_routes._control_routes.get_commits_behind",
+            lambda: 5,
+        )
+
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+
+        get_control_status = find_endpoint(router, "/api/control/status")
+
+        assert get_control_status is not None
+        response = await get_control_status()
+        data = json.loads(response.body)
+        assert data["config"]["boot_sha"] == "abc1234deadbeef"
+        assert data["config"]["commits_behind"] == 5
+
+    @pytest.mark.asyncio
+    async def test_status_tolerates_unavailable_git(
+        self, config, event_bus: EventBus, state, tmp_path: Path, monkeypatch
+    ) -> None:
+        """When the git reads fail, the fields are null and the endpoint still
+        responds (never hangs or raises)."""
+        monkeypatch.setattr(
+            "dashboard_routes._control_routes.get_boot_sha",
+            lambda: None,
+        )
+        monkeypatch.setattr(
+            "dashboard_routes._control_routes.get_commits_behind",
+            lambda: None,
+        )
+
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+
+        get_control_status = find_endpoint(router, "/api/control/status")
+
+        assert get_control_status is not None
+        response = await get_control_status()
+        data = json.loads(response.body)
+        assert data["config"]["boot_sha"] is None
+        assert data["config"]["commits_behind"] is None
+
+
 class TestPatchConfigUnknownField:
     @pytest.mark.asyncio
     async def test_patch_config_ignored_field(

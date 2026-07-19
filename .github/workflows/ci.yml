@@ -130,6 +130,23 @@ jobs:
       - name: Scan tracked files for git conflict markers
         run: python3 scripts/check_conflict_markers.py --tracked
 
+  # Universal backstop (#9599): reject git-tracked runtime caches on EVERY
+  # PR/push, ungated by `changes`. docs/wiki/{log.jsonl,ingest_dedup.json,
+  # index.json} were tracked runtime caches the RepoWikiLoop rewrote every tick,
+  # leaving the working tree perpetually dirty (fixed reactively in #9537). This
+  # gate catches the next one before it lands. stdlib-only; no uv sync needed.
+  runtime-cache-guard:
+    name: Runtime Cache Guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Scan tracked files for runtime caches
+        run: python3 scripts/check_runtime_cache_tracked.py --tracked
+
   lint:
     name: Lint & Format
     needs: changes

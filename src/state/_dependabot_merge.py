@@ -45,6 +45,24 @@ class DependabotMergeStateMixin:
         self._data.dependabot_arch_refresh_attempts.pop(str(pr_number), None)
         self.save()
 
+    def get_dependabot_update_branch_attempts(self, pr_number: int) -> int:
+        """Bounded update-branch heals for *pr_number* (#9889)."""
+        return self._data.dependabot_update_branch_attempts.get(str(pr_number), 0)
+
+    def bump_dependabot_update_branch_attempts(self, pr_number: int) -> int:
+        key = str(pr_number)
+        new = self._data.dependabot_update_branch_attempts.get(key, 0) + 1
+        self._data.dependabot_update_branch_attempts[key] = new
+        self.save()
+        return new
+
+    def clear_dependabot_update_branch_attempts(self, pr_number: int) -> None:
+        if (
+            self._data.dependabot_update_branch_attempts.pop(str(pr_number), None)
+            is not None
+        ):
+            self.save()
+
     def get_dependabot_arch_refresh_attempts(self, pr_number: int) -> int:
         """Return how many arch-staleness self-heal refreshes have run on *pr_number*."""
         return self._data.dependabot_arch_refresh_attempts.get(str(pr_number), 0)

@@ -258,6 +258,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("sentry_signal_cooldown_hours", "SENTRY_SIGNAL_COOLDOWN_HOURS", 24),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
+    (
+        "dependabot_update_branch_max_attempts",
+        "HYDRAFLOW_DEPENDABOT_UPDATE_BRANCH_MAX_ATTEMPTS",
+        1,
+    ),
     ("review_orphan_strike_threshold", "HYDRAFLOW_REVIEW_ORPHAN_STRIKE_THRESHOLD", 3),
     ("review_orphan_max_requeues", "HYDRAFLOW_REVIEW_ORPHAN_MAX_REQUEUES", 3),
     (
@@ -1969,6 +1974,16 @@ class HydraFlowConfig(BaseModel):
         le=604800,
         description="Seconds between repo wiki lint cycles",
     )
+    dependabot_update_branch_max_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description=(
+            "Bounded update-branch heals per CI-failed bot PR (#9889): a "
+            "behind-base PR gets a fresh merge ref + full CI re-run before "
+            "the failure strategy applies. 0 disables."
+        ),
+    )
     review_orphan_strike_threshold: int = Field(
         default=3,
         ge=1,
@@ -2489,6 +2504,20 @@ class HydraFlowConfig(BaseModel):
             "Cost bound: cap how many semantic-drift LLM calls the wiki "
             "loop makes per tick. Older entries beyond this cap carry over "
             "to the next tick."
+        ),
+    )
+    wiki_anchor_prune_enabled: bool = Field(
+        default=False,
+        description=(
+            "When True (#9954), RepoWikiLoop runs a deterministic prune pass "
+            "that marks active tracked wiki entries stale when they lack a "
+            "repo-specific anchor (a src/*.py path, ADR number, loop/Port "
+            "class name, or config field) — i.e. generic best-practice "
+            "platitudes. Mark-only (never deletes); the flips ride the "
+            "normal batched maintenance PR. Off by default: enabling it does "
+            "the one-time cleanup of the accumulated platitude backlog. The "
+            "synthesis-time gate that blocks NEW anchor-less entries is "
+            "always on and independent of this flag."
         ),
     )
 
@@ -3349,6 +3378,20 @@ class HydraFlowConfig(BaseModel):
             "otherwise trigger a multi-hour false global pause (#9807). The "
             "probe is ground truth (False only when the API itself confirms "
             "exhaustion). Kill-switch: set False to revert to pause-on-text."
+        ),
+    )
+    auth_failure_require_probe: bool = Field(
+        default=True,
+        description=(
+            "Before halting ALL loops on a GitHub AuthenticationError, "
+            "corroborate the signal with a live `gh auth status` probe. A "
+            "single gh call's stderr can match an auth pattern during a "
+            "transient network/API blip, which used to stop the whole factory "
+            "for hours (#9621). The probe is ground truth (False only when gh "
+            "confirms the credentials are rejected); on a probe-refuted "
+            "(transient) signal the crashed loop is restarted instead of "
+            "stopping the factory. Kill-switch: set False to revert to "
+            "halt-on-signal."
         ),
     )
 

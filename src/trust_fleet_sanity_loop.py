@@ -21,6 +21,7 @@ by Plan 6b (§4.11 factory-cost work).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -386,7 +387,11 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                     proc.communicate(), timeout=_RECONCILE_GH_TIMEOUT_SECONDS
                 )
             except TimeoutError:
-                proc.kill()
+                # proc.kill() raises ProcessLookupError if the child already
+                # exited — suppress it so the timeout is handled here instead of
+                # crashing the loop cycle. (#9794/#9816/#9883)
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
                 logger.warning("open-escalation probe timed out — filing anyway")
                 return 0
             rows = json.loads(stdout.decode() or "[]")
@@ -485,7 +490,11 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                 # than hang the cycle forever; the next tick retries. A visible
                 # warning (not debug) is deliberate — the original failure was a
                 # *silent* stall that only the dead-man-switch caught (#9410).
-                proc.kill()
+                # proc.kill() raises ProcessLookupError if the child already
+                # exited — suppress it so the timeout is handled here instead of
+                # crashing the loop cycle. (#9794/#9816/#9883)
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
                 logger.warning(
                     "gh issue list timed out after %ss; skipping reconcile pass",
                     _RECONCILE_GH_TIMEOUT_SECONDS,

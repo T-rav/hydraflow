@@ -24,6 +24,7 @@ from config import HydraFlowConfig, save_config_file
 from dashboard_routes._common import _INTERVAL_BOUNDS
 from dashboard_routes._routes import RouteContext
 from events import EventType, HydraFlowEvent
+from git_revision import get_boot_sha, get_commits_behind
 from models import (
     BackgroundWorkersResponse,
     BackgroundWorkerState,
@@ -575,12 +576,19 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
     )
 
     def _control_status_config(
-        cfg: HydraFlowConfig, *, latest_version: str, update_available: bool
+        cfg: HydraFlowConfig,
+        *,
+        latest_version: str,
+        update_available: bool,
+        boot_sha: str | None,
+        commits_behind: int | None,
     ) -> ControlStatusConfig:
         return ControlStatusConfig(
             app_version=get_app_version(),
             latest_version=latest_version,
             update_available=update_available,
+            boot_sha=boot_sha,
+            commits_behind=commits_behind,
             repo=cfg.repo,
             ready_label=cfg.ready_label,
             find_label=cfg.find_label,
@@ -637,6 +645,11 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         update_available = (
             update_result.update_available if update_result is not None else False
         )
+        # Boot SHA + commits-behind describe the running *process*, not any one
+        # managed repo, so compute them once and reuse across the rollup. Both
+        # are cheap, local, failure-tolerant git reads (None when unavailable).
+        boot_sha = get_boot_sha()
+        commits_behind = get_commits_behind()
 
         if repo is not None and repo.strip().lower() == REPO_ALL:
             per_repo: list[dict[str, Any]] = []
@@ -659,6 +672,8 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                             _cfg,
                             latest_version=latest_version,
                             update_available=update_available,
+                            boot_sha=boot_sha,
+                            commits_behind=commits_behind,
                         ).model_dump(),
                     }
                 )
@@ -673,6 +688,8 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                     d_cfg,
                     latest_version=latest_version,
                     update_available=update_available,
+                    boot_sha=boot_sha,
+                    commits_behind=commits_behind,
                 ),
                 mockworld_active=mockworld_any,
                 repos=per_repo,
@@ -692,6 +709,8 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 _cfg,
                 latest_version=latest_version,
                 update_available=update_available,
+                boot_sha=boot_sha,
+                commits_behind=commits_behind,
             ),
             mockworld_active=mockworld_active,
         )

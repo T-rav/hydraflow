@@ -289,7 +289,12 @@ class TestL7DependabotMergeAutoMerges:
 class TestL8DependabotMergeSkipsOnFailure:
     """L8: Bot PRs with failing CI are skipped (strategy=skip)."""
 
-    async def test_bot_pr_skipped_on_ci_failure(self, tmp_path):
+    async def test_bot_pr_skipped_on_ci_failure(self, tmp_path, monkeypatch):
+        # Pin the #9889 update-branch heal OFF: this scenario asserts the
+        # strategy=skip contract, not the heal-first path (covered by
+        # tests/regressions/test_issue_9889_update_branch_heal.py).
+        # Env pin because run_with_loops builds a FRESH bg config.
+        monkeypatch.setenv("HYDRAFLOW_DEPENDABOT_UPDATE_BRANCH_MAX_ATTEMPTS", "0")
         world = MockWorld(tmp_path)
 
         from mockworld.fakes.fake_github import FakePR
@@ -437,8 +442,12 @@ class TestL7cDependabotArchSelfHeal:
         # No further refresh needed.
         assert world.github.arch_refresh_call_count(9422) == 1
 
-    async def test_real_failure_not_arch_falls_through_to_skip(self, tmp_path):
+    async def test_real_failure_not_arch_falls_through_to_skip(
+        self, tmp_path, monkeypatch
+    ):
         """A non-arch CI failure must NOT trigger the arch self-heal."""
+        # Pin the #9889 update-branch heal OFF (see L8 note above).
+        monkeypatch.setenv("HYDRAFLOW_DEPENDABOT_UPDATE_BRANCH_MAX_ATTEMPTS", "0")
         world = MockWorld(tmp_path)
 
         from mockworld.fakes.fake_github import FakePR

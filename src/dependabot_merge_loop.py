@@ -269,6 +269,30 @@ class DependabotMergeLoop(BaseBackgroundLoop):
                     pr.pr,
                 )
 
+            # Shepherd heal class 2 (#9889): a CI-failed bot PR that is
+            # BEHIND its base often fails on state the base already fixed
+            # (baseline advances, sibling regens) — and re-running failed
+            # jobs pins the OLD merge ref (the #9884 lesson). One bounded
+            # update-branch forces a fresh merge ref + full CI re-run.
+            # update_pr_branch returns False when already up to date or on
+            # API refusal, so this never loops on an actually-broken PR.
+            ub_cap = self._config.dependabot_update_branch_max_attempts
+            if (
+                ub_cap > 0
+                and self._state.get_dependabot_update_branch_attempts(pr.pr) < ub_cap
+                and await self._prs.update_pr_branch(pr.pr, method="merge")
+            ):
+                self._state.bump_dependabot_update_branch_attempts(pr.pr)
+                skipped += 1
+                logger.info(
+                    "Bot PR #%d CI failed while behind base — updated branch "
+                    "for a fresh merge ref; CI will re-run (attempt %d/%d)",
+                    pr.pr,
+                    self._state.get_dependabot_update_branch_attempts(pr.pr),
+                    ub_cap,
+                )
+                continue
+
             # CI truly failed — apply failure strategy
             strategy = settings.failure_strategy
             if strategy == "skip":

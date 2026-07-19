@@ -49,6 +49,7 @@ class TestInitialization:
             "bg_worker_states",
             "dependabot_merge_processed",
             "dependabot_arch_refresh_attempts",
+            "dependabot_update_branch_attempts",
             "dependabot_merge_settings",
             "ci_monitor_settings",
             "ci_monitor_tracked_failures",

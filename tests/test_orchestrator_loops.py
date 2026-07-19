@@ -677,7 +677,7 @@ class TestHITLLoop:
 class TestAuthFailure:
     @pytest.mark.asyncio
     async def test_auth_failure_stops_all_loops(self, config: HydraFlowConfig) -> None:
-        """An AuthenticationError in any loop should stop the orchestrator."""
+        """A probe-confirmed AuthenticationError in any loop stops the orchestrator."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
         orch._svc.workspaces.enable_rerere = AsyncMock()  # type: ignore[method-assign]
@@ -696,7 +696,12 @@ class TestAuthFailure:
 
         orch._sleep_or_stop = instant_sleep  # type: ignore[method-assign]
 
-        await orch.run()
+        # Probe confirms the auth failure is genuine/persistent (#9621), so the
+        # factory halts rather than treating it as a transient blip.
+        with patch(
+            "orchestrator.probe_auth_availability", AsyncMock(return_value=False)
+        ):
+            await orch.run()
 
         assert not orch.running
         assert orch._stop_event.is_set()
@@ -724,7 +729,10 @@ class TestAuthFailure:
 
         orch._sleep_or_stop = instant_sleep  # type: ignore[method-assign]
 
-        await orch.run()
+        with patch(
+            "orchestrator.probe_auth_availability", AsyncMock(return_value=False)
+        ):
+            await orch.run()
 
         alert_events = [
             e for e in event_bus.get_history() if e.type == EventType.SYSTEM_ALERT
@@ -756,7 +764,10 @@ class TestAuthFailure:
 
         orch._sleep_or_stop = instant_sleep  # type: ignore[method-assign]
 
-        await orch.run()
+        with patch(
+            "orchestrator.probe_auth_availability", AsyncMock(return_value=False)
+        ):
+            await orch.run()
 
         assert orch._auth_failed is True
 
@@ -793,15 +804,18 @@ class TestAuthFailure:
 class TestHandleLoopException:
     @pytest.mark.asyncio
     async def test_auth_error_sets_stop_and_flag(self, config: HydraFlowConfig) -> None:
-        """AuthenticationError should set _auth_failed and stop_event."""
+        """A probe-confirmed AuthenticationError sets _auth_failed and stop_event."""
         bus = EventBus()
         orch = HydraFlowOrchestrator(config, event_bus=bus)
         tasks: dict[str, asyncio.Task[None]] = {}
         factories: list = []
 
-        await orch._handle_loop_exception(
-            "plan", AuthenticationError("401"), tasks, factories
-        )
+        with patch(
+            "orchestrator.probe_auth_availability", AsyncMock(return_value=False)
+        ):
+            await orch._handle_loop_exception(
+                "plan", AuthenticationError("401"), tasks, factories
+            )
 
         assert orch._auth_failed is True
         assert orch._stop_event.is_set()
