@@ -594,12 +594,29 @@ class RepoWikiLoop(BaseBackgroundLoop):
                     "Wiki maintenance git status failed in worktree (stderr=%s)",
                     exc.stderr,
                 )
+            # Batch small maintenance runs: near-hourly single-entry PRs were
+            # a treadmill (every merge re-stales sibling PRs via the arch
+            # cascade). Below the threshold — and inside the age window — we
+            # revert the worktree so generate_and_open_pr_async sees no diff
+            # and skips the PR; the healed content simply regenerates on a
+            # later tick together with more accumulated entries.
+            if diff_files and await asyncio.to_thread(
+                self._maybe_defer_small_batch,
+                worktree,
+                path_prefix,
+                len(diff_files),
+                force_by_age,
+            ):
+                stats["maintenance_deferred_files"] = len(diff_files)
+                diff_files.clear()
 
         def _body() -> str:
             return _maintenance_pr_body(
                 {**heal_stats, "queue_drained": stats.get("queue_drained", 0)},
                 diff_files,
             )
+
+        force_by_age = await self._maintenance_batch_forced_by_age()
 
         timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
         branch = f"hydraflow/wiki-maint-{timestamp}"
@@ -644,6 +661,106 @@ class RepoWikiLoop(BaseBackgroundLoop):
                 branch,
                 result.error,
             )
+
+    def _maybe_defer_small_batch(
+        self, worktree: Path, path_prefix: str, n_files: int, forced: bool
+    ) -> bool:
+        """Revert a small maintenance changeset so no PR opens this tick.
+
+        Returns True when the batch was deferred (worktree reverted). The
+        healed content is deterministic — it regenerates on a later tick
+        together with more accumulated entries, so nothing is lost. A revert
+        failure keeps the changes (returns False): opening a small PR is the
+        safe degradation, silently committing a half-reverted tree is not.
+        """
+        if forced or n_files >= self._config.repo_wiki_min_batch_files:
+            return False
+        try:
+            # check=False: exits 1 when the pathspec matches no TRACKED files,
+            # which is the common maintenance case (a batch of brand-new entry
+            # files). ``git clean`` below owns the untracked half, and the
+            # porcelain probe is the authoritative success check.
+            subprocess.run(
+                ["git", "-C", str(worktree), "checkout", "--", path_prefix],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            subprocess.run(
+                ["git", "-C", str(worktree), "clean", "-fd", "--", path_prefix],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            residue = _porcelain_paths(worktree, path_prefix)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            logger.warning(
+                "Wiki maintenance batch-defer revert failed (%s) — opening the "
+                "small PR instead",
+                exc,
+            )
+            return False
+        if residue:
+            logger.warning(
+                "Wiki maintenance batch-defer left %d residual change(s) — "
+                "opening the small PR instead",
+                len(residue),
+            )
+            return False
+        logger.info(
+            "Wiki maintenance deferred: %d file(s) < min batch %d — will "
+            "accumulate (age valve %dh)",
+            n_files,
+            self._config.repo_wiki_min_batch_files,
+            self._config.repo_wiki_max_batch_age_hours,
+        )
+        return True
+
+    async def _maintenance_batch_forced_by_age(self) -> bool:
+        """True when the newest MERGED maintenance PR is older than the valve.
+
+        GitHub is the source of truth (mirrors the #9894 adoption pattern).
+        Fail-open on every edge — no token, no repo slug, gh error, no prior
+        maintenance PR, unparseable timestamp — forcing the PR open exactly
+        as the pre-batching behavior did.
+        """
+        if self._credentials is None or not self._credentials.gh_token:
+            return True
+        if not self._config.repo:
+            return True
+        try:
+            stdout = await run_subprocess(
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                self._config.repo,
+                "--label",
+                "hydraflow-wiki-maintenance",
+                "--state",
+                "merged",
+                "--limit",
+                "1",
+                "--json",
+                "mergedAt",
+                gh_token=self._credentials.gh_token,
+            )
+            rows = json.loads(stdout or "[]")
+        except (RuntimeError, OSError, ValueError) as exc:
+            logger.warning(
+                "Wiki maintenance batch-age query failed (%s) — forcing open",
+                exc,
+            )
+            return True
+        if not isinstance(rows, list) or not rows:
+            return True
+        merged_at = _parse_utc(str(rows[0].get("mergedAt") or ""))
+        if merged_at is None:
+            return True
+        age_hours = (datetime.now(UTC) - merged_at).total_seconds() / 3600
+        return age_hours >= self._config.repo_wiki_max_batch_age_hours
 
     async def _adopt_open_maintenance_pr(self, stats: dict[str, Any]) -> None:
         """Adopt an already-open maintenance PR after a restart (#9894).
@@ -920,6 +1037,22 @@ def _porcelain_paths(repo_root: Path, path_prefix: str) -> list[str]:
             payload = payload.split(" -> ", 1)[1]
         paths.append(payload.strip().strip('"'))
     return paths
+
+
+def _parse_utc(value: str) -> datetime | None:
+    """Parse an ISO-8601 timestamp (gh emits ``...Z``); None when unparseable.
+
+    Naive values are assumed UTC so age arithmetic never raises.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
 
 
 def _maintenance_pr_body(stats: dict[str, Any], diff_files: list[str]) -> str:
