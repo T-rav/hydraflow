@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -38,3 +39,21 @@ class SkillPromptEvalStateMixin:
         attempts.pop(case_id, None)
         self._data.skill_prompt_attempts = attempts
         self.save()
+
+    # --- Prompt self-refinement weekly cap (#9724) ---
+
+    def record_refine_proposal(self, now_iso: str) -> None:
+        self._data.skill_prompt_refine_proposals.append(now_iso)
+        self.save()
+
+    def refine_proposals_last_7d(self, now: datetime) -> int:
+        cutoff = now - timedelta(days=7)
+        kept = [
+            ts
+            for ts in self._data.skill_prompt_refine_proposals
+            if datetime.fromisoformat(ts) > cutoff
+        ]
+        if len(kept) != len(self._data.skill_prompt_refine_proposals):
+            self._data.skill_prompt_refine_proposals = kept
+            self.save()
+        return len(kept)

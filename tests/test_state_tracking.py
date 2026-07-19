@@ -130,6 +130,7 @@ class TestInitialization:
             "rc_cycle_id",
             "skill_prompt_attempts",
             "skill_prompt_last_green",
+            "skill_prompt_refine_proposals",
             "trust_fleet_sanity_attempts",
             "trust_fleet_sanity_last_run",
             "trust_fleet_sanity_last_seen_counts",

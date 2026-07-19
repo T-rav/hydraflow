@@ -278,6 +278,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("flake_threshold", "HYDRAFLOW_FLAKE_THRESHOLD", 3),
     ("skill_prompt_eval_interval", "HYDRAFLOW_SKILL_PROMPT_EVAL_INTERVAL", 604800),
     (
+        "skill_prompt_refine_max_weekly",
+        "HYDRAFLOW_SKILL_PROMPT_REFINE_MAX_WEEKLY",
+        2,
+    ),
+    (
         "fake_coverage_auditor_interval",
         "HYDRAFLOW_FAKE_COVERAGE_AUDITOR_INTERVAL",
         604800,
@@ -388,6 +393,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("otel_endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT", "https://api.honeycomb.io"),
     ("otel_service_name", "OTEL_SERVICE_NAME", "hydraflow"),
     ("otel_environment", "HF_ENV", "local"),
+    ("skill_prompt_refine_model", "HYDRAFLOW_SKILL_PROMPT_REFINE_MODEL", ""),
 ]
 
 _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
@@ -607,6 +613,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "skill_prompt_eval_loop_enabled",
         "HYDRAFLOW_SKILL_PROMPT_EVAL_LOOP_ENABLED",
+        True,
+    ),
+    (
+        "skill_prompt_refine_enabled",
+        "HYDRAFLOW_SKILL_PROMPT_REFINE_ENABLED",
         True,
     ),
     ("stale_issue_gc_loop_enabled", "HYDRAFLOW_STALE_ISSUE_GC_LOOP_ENABLED", True),
@@ -2763,6 +2774,25 @@ class HydraFlowConfig(BaseModel):
             "MAX_CASES (pre-spend) and applied as a Python-side sample "
             "(post-output) to bound operator-visible escalation flooding "
             "if the harness misses the env var."
+        ),
+    )
+
+    # Trust fleet — prompt self-refinement (#9724)
+    skill_prompt_refine_enabled: bool = Field(
+        default=True,
+        description="Deploy-time kill-switch for skill-prompt self-refinement proposals.",
+    )
+    skill_prompt_refine_max_weekly: int = Field(
+        default=2,
+        ge=0,
+        le=50,
+        description="Max refine proposals filed per rolling 7-day window.",
+    )
+    skill_prompt_refine_model: str = Field(
+        default="",
+        description=(
+            "Model override for skill-prompt refinement generation. "
+            "Empty string = use the background_model default."
         ),
     )
 

@@ -109,6 +109,12 @@ SETTINGS: dict[str, SettingSpec] = {
     "term_proposer_provider": SettingSpec("Model Routing", live=True, order=60),
     "term_proposer_model": SettingSpec("Model Routing", live=True, order=61),
     "background_model": SettingSpec("Models", live=True, order=3),
+    # --- Prompt Refinement (skill-prompt self-refinement, #9724) ----------
+    "skill_prompt_refine_enabled": SettingSpec("Prompt Refinement", live=True, order=0),
+    "skill_prompt_refine_max_weekly": SettingSpec(
+        "Prompt Refinement", live=True, order=1
+    ),
+    "skill_prompt_refine_model": SettingSpec("Prompt Refinement", live=True, order=2),
 }
 
 
