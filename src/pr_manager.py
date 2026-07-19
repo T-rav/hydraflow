@@ -1591,6 +1591,31 @@ class PRManager:
         )
         return output.strip()
 
+    async def get_issue_labels(self, issue_number: int) -> list[str]:
+        """Return the label names carried by a GitHub issue.
+
+        Delegates to ``gh issue view <n> --json labels --jq
+        '.labels[].name'`` (newline-separated names). Read failures
+        propagate rather than being swallowed so that
+        ``WorkspaceGCLoop._issue_has_pipeline_label`` can fail-closed on
+        error instead of GC'ing an issue whose labels were merely
+        unreadable (#9575).
+        """
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "issue",
+            "view",
+            str(issue_number),
+            "--repo",
+            self._repo,
+            "--json",
+            "labels",
+            "--jq",
+            ".labels[].name",
+        )
+        return [line.strip() for line in output.splitlines() if line.strip()]
+
     async def get_latest_ci_status(self) -> tuple[str, str]:
         """Return (conclusion, url) for the latest CI run on the main branch."""
         self._assert_repo()

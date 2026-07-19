@@ -449,6 +449,16 @@ class PRPort(Protocol):
         """Return the updated_at timestamp for an issue as ISO string."""
         ...
 
+    async def get_issue_labels(self, issue_number: int) -> list[str]:
+        """Return the label names carried by a GitHub issue.
+
+        Propagates read failures (does not swallow) so callers such as
+        ``WorkspaceGCLoop._issue_has_pipeline_label`` can fail-closed on
+        error rather than mistaking an unreadable issue for an unlabelled
+        one (#9575).
+        """
+        ...
+
     async def update_issue_body(self, issue_number: int, body: str) -> None:
         """Update the body of a GitHub issue."""
         ...
