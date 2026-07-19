@@ -12,6 +12,7 @@ holdout input; validation (loop side) always includes 100% of holdouts.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from pathlib import Path
 
@@ -47,6 +48,19 @@ _PATCH_RENAME = re.compile(r"^rename (?:from|to) (.+)$", re.MULTILINE)
 
 class PatchParseError(ValueError):
     """LLM response carried no parseable ```diff fence."""
+
+
+class PromptRenderError(RuntimeError):
+    """A skill builder module could not be loaded/rendered for the length gate."""
+
+
+# A fixed, minimal unified diff used only to *render* a builder's prompt so its
+# length can be measured. Its content is irrelevant to the drift ratio (the same
+# fixture feeds the before-patch and after-patch renders); it just has to be a
+# plausible ``diff`` argument for every builder signature.
+_LENGTH_PROBE_DIFF = (
+    "--- a/probe.py\n+++ b/probe.py\n@@ -1 +1 @@\n-old_value\n+new_value\n"
+)
 
 
 def assemble_refine_context(
@@ -116,3 +130,89 @@ def check_tripwires(patch_text: str, skill_name: str, repo_root: Path) -> list[s
         elif t != allowed:
             reasons.append(f"patch may only touch {allowed}, found {t}")
     return reasons
+
+
+def discover_validation_case_ids(cases_dir: Path, regressed_case_id: str) -> list[str]:
+    """Case ids a candidate prompt must survive during loop-side validation.
+
+    Returns the regressed case plus every holdout honeypot (a ``HOLDOUT`` marker
+    dir) and every benign sentinel (``expected_catcher.txt == "none"``), deduped
+    (a benign holdout satisfies both tests) and sorted for a stable ``--cases``
+    argument. 100% of holdouts are always included: the synthesizer never saw
+    them (``assemble_refine_context`` refuses holdout input), so passing them all
+    proves the candidate did not overfit to traps it could not read.
+
+    Scans the WORKTREE's cases dir (never imports tests code). A missing dir
+    yields just the regressed id.
+    """
+    ids: set[str] = {regressed_case_id}
+    if not cases_dir.is_dir():
+        return sorted(ids)
+    for case_dir in cases_dir.iterdir():
+        if not case_dir.is_dir():
+            continue
+        if (case_dir / _HOLDOUT_MARKER).is_file():
+            ids.add(case_dir.name)
+            continue
+        catcher = case_dir / "expected_catcher.txt"
+        if catcher.is_file() and catcher.read_text(encoding="utf-8").strip() == "none":
+            ids.add(case_dir.name)
+    return sorted(ids)
+
+
+def _builder_func_name(skill_name: str) -> str:
+    """``diff-sanity`` → ``build_diff_sanity_prompt`` (skill_registry convention)."""
+    return "build_" + skill_name.replace("-", "_") + "_prompt"
+
+
+def render_builder_prompt(builder_module_path: Path, skill_name: str) -> str:
+    """Render *skill_name*'s prompt by executing its builder module in isolation.
+
+    Loads the module fresh from *builder_module_path* via
+    ``importlib.util.spec_from_file_location`` under a throwaway name, so the host
+    process's already-imported ``src`` modules are never clobbered — the loop
+    patches ONE builder inside a worktree and must not poison its own live
+    imports by reloading them. Calls the module's ``build_<skill>_prompt`` on a
+    fixed fixture diff; the caller measures the returned length before and after
+    the patch for the ±30% drift tripwire.
+
+    Raises :class:`PromptRenderError` when the module can't be loaded or defines
+    no builder function.
+    """
+    func_name = _builder_func_name(skill_name)
+    spec = importlib.util.spec_from_file_location(
+        f"_refine_probe_{func_name}", builder_module_path
+    )
+    if spec is None or spec.loader is None:
+        msg = f"cannot load builder module at {builder_module_path}"
+        raise PromptRenderError(msg)
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:  # noqa: BLE001 — surface as a render error, uniform handling
+        msg = f"failed to exec builder module at {builder_module_path}: {exc}"
+        raise PromptRenderError(msg) from exc
+    builder = getattr(module, func_name, None)
+    if not callable(builder):
+        msg = f"{builder_module_path} defines no callable {func_name}"
+        raise PromptRenderError(msg)
+    # ``builder`` is resolved dynamically (``getattr``), so its return type is
+    # opaque to the type-checker; coerce to ``str`` for the length measurement.
+    rendered = builder(
+        issue_number=0,
+        issue_title="refine-length-probe",
+        diff=_LENGTH_PROBE_DIFF,
+        plan_text="",
+    )
+    return str(rendered)
+
+
+def length_drift_exceeds(before: str, after: str) -> bool:
+    """True when rendered-prompt length changed by more than ``PROMPT_LENGTH_DRIFT_LIMIT``.
+
+    An empty *before* is degenerate (builder produced nothing pre-patch): any
+    non-empty *after* then counts as exceeding, two empties as within.
+    """
+    if not before:
+        return bool(after)
+    return abs(len(after) - len(before)) / len(before) > PROMPT_LENGTH_DRIFT_LIMIT

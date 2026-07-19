@@ -30,6 +30,9 @@ def loop_env(tmp_path: Path):
     state.get_skill_prompt_last_green.return_value = {}
     state.get_skill_prompt_attempts.return_value = 0
     state.inc_skill_prompt_attempts.return_value = 1
+    # Refine weekly-cap read must return a real int (a bare MagicMock raises on
+    # the `>= max_weekly` compare); 0 lets `_try_refine` proceed past the cap.
+    state.refine_proposals_last_7d.return_value = 0
     pr = AsyncMock()
     pr.create_issue = AsyncMock(return_value=42)
     pr.list_issues_by_label = AsyncMock(return_value=[])

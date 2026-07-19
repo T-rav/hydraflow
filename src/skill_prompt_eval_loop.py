@@ -23,13 +23,27 @@ import math
 import os
 import random
 import re
+import sys
 import time
-from typing import TYPE_CHECKING, Any
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol
 
+from auto_pr import generate_and_open_pr_async
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
+from prompt_refiner import (
+    PROMPT_LENGTH_DRIFT_LIMIT,
+    SKILL_BUILDER_MODULES,
+    assemble_refine_context,
+    check_tripwires,
+    discover_validation_case_ids,
+    length_drift_exceeds,
+    parse_patch_response,
+    render_builder_prompt,
+)
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -85,6 +99,76 @@ async def _communicate_bounded(
         raise
 
 
+# --- Prompt self-refinement (#9724) ------------------------------------------
+
+# Labels attached to an auto-refinement PR. Minimal + descriptive; auto_pr
+# ensures the label exists on the repo before ``gh pr create``.
+_REFINE_PR_LABELS = ("skill-prompt-refine",)
+
+# Hard bound on the one-shot refine LLM synthesis call.
+_REFINE_LLM_TIMEOUT_SECONDS = 300
+
+# Cases dir, relative to a repo/worktree root, holding the adversarial corpus.
+_CASES_REL = "tests/trust/adversarial/cases"
+
+# Human-readable note commented on the drift issue per non-shipping outcome.
+_REFINE_OUTCOME_NOTES = {
+    "tripwire": (
+        "the candidate patch tripped a safety gate — it touched a path outside "
+        "the target builder module or drifted the rendered prompt length past "
+        "the ±30% limit"
+    ),
+    "validation_failed": (
+        "the candidate patch failed live re-validation against the regressed "
+        "case, the held-out honeypots, or the benign sentinels"
+    ),
+    "error": "a refinement patch could not be synthesized for this case",
+}
+
+
+class _RefineLLM(Protocol):
+    """Minimal one-shot text-completion seam for refine synthesis.
+
+    Tests inject a fake; production lazily builds :class:`_CLIRefineLLM`.
+    """
+
+    async def complete(self, prompt: str) -> str: ...
+
+
+class _CLIRefineLLM:
+    """Production refine client: one-shot RAW-text completion via the shared
+    lightweight-agent seam (CH-6 gated, telemetried, credit-aware).
+
+    Returns the CLI's raw stdout so the caller can parse the ```diff fence —
+    unlike ``ClaudeCLIClient.complete_structured`` (which parses JSON), refine
+    output is a unified diff, not a structured object. Never exercised under
+    test; the loop's ``refine_llm`` kwarg injects a fake for all unit coverage.
+    """
+
+    def __init__(self, config: HydraFlowConfig, model: str) -> None:
+        self._config = config
+        self._model = model
+
+    async def complete(self, prompt: str) -> str:
+        from execution import get_default_runner  # noqa: PLC0415
+        from runner_utils import run_lightweight_agent  # noqa: PLC0415
+
+        result = await run_lightweight_agent(
+            runner=get_default_runner(),
+            config=self._config,
+            tool="claude",
+            model=self._model,
+            prompt=prompt,
+            source="skill_prompt_refine",
+            timeout=float(_REFINE_LLM_TIMEOUT_SECONDS),
+            issue_labels=(),
+        )
+        if result.returncode != 0:
+            msg = f"refine LLM failed (rc={result.returncode}): {result.stderr[:200]}"
+            raise RuntimeError(msg)
+        return result.stdout
+
+
 class SkillPromptEvalLoop(BaseBackgroundLoop):
     """Weekly skill-prompt drift detector + corpus-health auditor (spec §4.6)."""
 
@@ -96,6 +180,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         pr_manager: PRManager,
         dedup: DedupStore,
         deps: LoopDeps,
+        refine_llm: _RefineLLM | None = None,
     ) -> None:
         super().__init__(
             worker_name="skill_prompt_eval",
@@ -106,6 +191,8 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         self._state = state
         self._pr = pr_manager
         self._dedup = dedup
+        # Injected fake under test; production lazily builds `_CLIRefineLLM`.
+        self._refine_llm = refine_llm
         self._escalations = EscalationReconciler(
             prs=pr_manager,
             dedup=dedup,
@@ -309,6 +396,10 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                 else:
                     await self._file_drift_issue(case, was)
                     filed += 1
+                    # Attempt a self-refinement PR (#9724). Wrapped so any
+                    # failure counts an attempt + comments the outcome but never
+                    # breaks the drift-issue flow above.
+                    await self._try_refine(case)
                 dedup.add(key)
                 self._dedup.set_all(dedup)
             elif now == "PASS" and key in dedup:
@@ -381,4 +472,282 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             exit_code=0,
             duration_ms=duration_ms,
             stderr_excerpt=f"cases_seen={cases_seen}",
+        )
+
+    # --- Prompt self-refinement (#9724) --------------------------------------
+
+    async def _try_refine(self, case: dict[str, Any]) -> str:
+        """Drift-triggered skill-prompt self-refinement.
+
+        Returns one of
+        ``proposed | capped | disabled | tripwire | validation_failed | error``.
+        On any outcome other than ``proposed``/``disabled``/``capped`` the case's
+        repair-attempt counter is bumped and the outcome is noted on the open
+        drift issue, so a stuck auto-refine still walks the case toward HITL
+        escalation. Refinement failure is fully contained here — it never
+        propagates into the drift-issue flow that invoked it.
+        """
+        case_id = str(case.get("case_id", ""))
+        try:
+            outcome = await self._compute_refine_outcome(case)
+        except Exception as exc:  # noqa: BLE001 — classify credit/bug, else fail-soft
+            reraise_on_credit_or_bug(exc)
+            logger.warning("refine crashed for %s: %s", case_id, exc)
+            outcome = "error"
+        if outcome not in ("proposed", "disabled", "capped"):
+            attempts = self._state.inc_skill_prompt_attempts(case_id)
+            await self._comment_refine_outcome(case, outcome, attempts)
+        return outcome
+
+    async def _compute_refine_outcome(self, case: dict[str, Any]) -> str:
+        cfg = self._config
+        if not cfg.skill_prompt_refine_enabled:
+            return "disabled"
+        now = datetime.now(UTC)
+        if (
+            self._state.refine_proposals_last_7d(now)
+            >= cfg.skill_prompt_refine_max_weekly
+        ):
+            return "capped"
+        skill_name = str(case.get("expected_catcher") or case.get("skill") or "")
+        if skill_name not in SKILL_BUILDER_MODULES:
+            logger.warning("refine: no builder module registered for %r", skill_name)
+            return "error"
+        case_id = str(case["case_id"])
+        case_dir = cfg.repo_root / _CASES_REL / case_id
+        try:
+            context = assemble_refine_context(
+                cfg.repo_root,
+                case_dir,
+                skill_name,
+                failure_transcript=str(case.get("summary", "")),
+            )
+            response = await self._refine_llm_complete(context)
+            patch_text = parse_patch_response(response)
+        except (ValueError, RuntimeError) as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning("refine synthesis failed for %s: %s", case_id, exc)
+            return "error"
+
+        reasons = check_tripwires(patch_text, skill_name, cfg.repo_root)
+        if reasons:
+            logger.warning("refine path/corpus tripwire for %s: %s", case_id, reasons)
+            return "tripwire"
+
+        return await self._open_refine_pr(
+            case=case,
+            skill_name=skill_name,
+            case_id=case_id,
+            patch_text=patch_text,
+            now=now,
+        )
+
+    async def _open_refine_pr(
+        self,
+        *,
+        case: dict[str, Any],
+        skill_name: str,
+        case_id: str,
+        patch_text: str,
+        now: datetime,
+    ) -> str:
+        """Generate the patched builder in a worktree, validate it, and open the
+        auto-merge PR. Validation runs inside ``generate`` so a bad candidate
+        aborts before any commit/push. Returns
+        ``proposed | tripwire | validation_failed | error``.
+        """
+        cfg = self._config
+        module_rel = SKILL_BUILDER_MODULES[skill_name]
+        flags = {"ok": False, "length_tripwire": False}
+
+        async def _generate(worktree: Path) -> None:
+            # Validate INSIDE the generate callback so a bad candidate aborts
+            # before any commit/push/PR (raising here → failed AutoPrResult).
+            module_path = worktree / module_rel
+            before = await asyncio.to_thread(
+                render_builder_prompt, module_path, skill_name
+            )
+            await self._apply_patch_in_worktree(worktree, patch_text)
+            after = await asyncio.to_thread(
+                render_builder_prompt, module_path, skill_name
+            )
+            if length_drift_exceeds(before, after):
+                flags["length_tripwire"] = True
+                msg = "candidate prompt length drift exceeds limit"
+                raise RuntimeError(msg)
+            flags["ok"] = await self._validate_candidate(worktree, skill_name, case_id)
+            if not flags["ok"]:
+                msg = "candidate failed corpus/holdout validation"
+                raise RuntimeError(msg)
+
+        result = await generate_and_open_pr_async(
+            repo_root=cfg.repo_root,
+            branch=f"bot/prompt-refine-{case_id}",
+            generate=_generate,
+            path_specs=[module_rel],
+            pr_title=(
+                f"fix(prompt): refine {skill_name} — corpus case {case_id} regressed"
+            ),
+            pr_body=lambda: self._refine_pr_body(case, skill_name),
+            base=cfg.base_branch(),
+            auto_merge=True,
+            gh_token="",
+            raise_on_failure=False,
+            commit_author_name=cfg.git_user_name,
+            commit_author_email=cfg.git_user_email,
+            labels=list(_REFINE_PR_LABELS),
+        )
+        if result.status == "opened":
+            self._state.record_refine_proposal(now.isoformat())
+            logger.info("refine proposed PR for %s: %s", case_id, result.pr_url)
+            return "proposed"
+        if flags["length_tripwire"]:
+            return "tripwire"
+        if not flags["ok"]:
+            return "validation_failed"
+        # The candidate validated but the PR still failed to open (git/gh
+        # transient). Not the case's fault, but still non-shipping.
+        logger.warning(
+            "refine PR open failed for %s despite valid candidate: status=%r err=%r",
+            case_id,
+            result.status,
+            result.error,
+        )
+        return "error"
+
+    async def _refine_llm_complete(self, prompt: str) -> str:
+        """Complete *prompt* via the injected fake or a lazily-built CLI client."""
+        if self._refine_llm is None:
+            model = (
+                self._config.skill_prompt_refine_model
+                or self._config.background_model
+                or "sonnet"
+            )
+            self._refine_llm = _CLIRefineLLM(self._config, model)
+        return await self._refine_llm.complete(prompt)
+
+    async def _apply_patch_in_worktree(self, worktree: Path, patch_text: str) -> None:
+        """Apply *patch_text* to *worktree* via ``git apply --whitespace=nowarn -``.
+
+        Raises ``RuntimeError`` on a non-zero exit so the caller's generate
+        callback aborts (→ no PR) when a candidate patch doesn't apply cleanly.
+        """
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "apply",
+            "--whitespace=nowarn",
+            "-",
+            cwd=worktree,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            _, stderr = await asyncio.wait_for(
+                proc.communicate(patch_text.encode()), timeout=60
+            )
+        except TimeoutError:
+            proc.kill()
+            with contextlib.suppress(ProcessLookupError):
+                await proc.wait()
+            raise
+        if proc.returncode != 0:
+            detail = stderr.decode(errors="replace")[:400]
+            msg = f"git apply failed (rc={proc.returncode}): {detail}"
+            raise RuntimeError(msg)
+
+    async def _validate_candidate(
+        self, worktree: Path, skill_name: str, case_id: str
+    ) -> bool:
+        """Re-run the corpus runner live INSIDE *worktree* over the regressed
+        case + 100% of holdouts + benign sentinels; True iff every non-SKIPPED
+        result is PASS.
+
+        Any subprocess/parse failure — or an empty non-SKIPPED set — is a
+        conservative False: never ship a candidate we could not prove.
+        """
+        cases_dir = worktree / _CASES_REL
+        case_ids = discover_validation_case_ids(cases_dir, case_id)
+        # `sys.executable`, not a bare "python": the loop's PATH may not carry a
+        # `python` shim (the runtime venv exposes the interpreter by full path).
+        cmd = [
+            sys.executable,
+            "tests/trust/adversarial/corpus_runner.py",
+            "--json",
+            "--live-skill",
+            skill_name,
+            "--cases",
+            ",".join(case_ids),
+        ]
+        env = {
+            **os.environ,
+            "HYDRAFLOW_TRUST_ADVERSARIAL_LIVE": "1",
+            "PYTHONPATH": "src:.",
+        }
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=worktree,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            stdout, stderr = await _communicate_bounded(
+                proc, timeout=_ADVERSARIAL_TIMEOUT_SECONDS
+            )
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "refine validation subprocess failed for %s: %s", case_id, exc
+            )
+            return False
+        if proc.returncode != 0:
+            logger.warning(
+                "refine validation exit=%d: %s",
+                proc.returncode,
+                stderr.decode(errors="replace")[:400],
+            )
+            return False
+        try:
+            results = json.loads(stdout.decode() or "[]")
+        except json.JSONDecodeError:
+            logger.warning("refine validation non-JSON response for %s", case_id)
+            return False
+        non_skipped = [r for r in results if r.get("status") != "SKIPPED"]
+        if not non_skipped:
+            logger.warning(
+                "refine validation had no non-SKIPPED results for %s", case_id
+            )
+            return False
+        return all(r.get("status") == "PASS" for r in non_skipped)
+
+    async def _comment_refine_outcome(
+        self, case: dict[str, Any], outcome: str, attempts: int
+    ) -> None:
+        """Note a non-shipping auto-refine outcome on the open drift issue."""
+        issue = await self._pr.find_existing_issue(self._drift_title(case))
+        if not issue:
+            return
+        note = _REFINE_OUTCOME_NOTES.get(outcome, outcome)
+        await self._pr.post_comment(
+            issue,
+            f"Auto-refinement did not land (`{outcome}`): {note}. "
+            f"Repair attempts so far: {attempts}.",
+        )
+
+    def _refine_pr_body(self, case: dict[str, Any], skill_name: str) -> str:
+        module_rel = SKILL_BUILDER_MODULES[skill_name]
+        limit_pct = int(PROMPT_LENGTH_DRIFT_LIMIT * 100)
+        return (
+            f"## Automated skill-prompt refinement\n\n"
+            f"Corpus case `{case.get('case_id')}` regressed and the "
+            f"`{skill_name}` skill stopped catching it. This PR proposes a "
+            f"minimal edit to `{module_rel}` that makes the skill catch the case "
+            f"again.\n\n"
+            f"**Validation.** The candidate was rebuilt in an ephemeral worktree "
+            f"and re-run live against the regressed case, 100% of held-out "
+            f"honeypots, and the benign sentinels — every non-skipped case "
+            f"PASSed. A ±{limit_pct}% prompt-length tripwire and a builder-only "
+            f"path allowlist gated it before validation.\n\n"
+            f"_Filed by the `skill_prompt_eval` loop (#9724). Spec §4.6._"
         )

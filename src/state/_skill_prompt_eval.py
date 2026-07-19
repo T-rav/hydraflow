@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -47,12 +47,25 @@ class SkillPromptEvalStateMixin:
         self.save()
 
     def refine_proposals_last_7d(self, now: datetime) -> int:
+        """Count refine proposals inside the rolling 7-day window ending at *now*.
+
+        Timezone contract: *now* MUST be timezone-aware — always pass
+        ``datetime.now(UTC)``. The cutoff inherits its tzinfo, so a naive *now*
+        would raise ``TypeError`` the moment it meets a stored aware timestamp.
+        Stored timestamps are parsed back with ``datetime.fromisoformat``; a
+        value written without an offset comes back naive, so each such value is
+        normalized to UTC (``replace(tzinfo=UTC)``) before comparison. This keeps
+        a naive/aware mix from raising and treats un-offset records as UTC, which
+        is what the loop writes (all proposals are recorded as ``now(UTC)``).
+        """
         cutoff = now - timedelta(days=7)
-        kept = [
-            ts
-            for ts in self._data.skill_prompt_refine_proposals
-            if datetime.fromisoformat(ts) > cutoff
-        ]
+        kept: list[str] = []
+        for ts in self._data.skill_prompt_refine_proposals:
+            dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            if dt > cutoff:
+                kept.append(ts)
         if len(kept) != len(self._data.skill_prompt_refine_proposals):
             self._data.skill_prompt_refine_proposals = kept
             self.save()
