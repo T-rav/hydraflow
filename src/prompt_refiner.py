@@ -24,8 +24,11 @@ SKILL_BUILDER_MODULES: dict[str, str] = {
     "shape-coherence": "src/shape_coherence.py",
 }
 
+PROMPT_LENGTH_DRIFT_LIMIT = 0.30
+
 _HOLDOUT_MARKER = "HOLDOUT"
 _DIFF_FENCE = re.compile(r"```diff\n(.*?)```", re.DOTALL)
+_PATCH_TARGET = re.compile(r"^\+\+\+ b/(.+)$", re.MULTILINE)
 
 
 class PatchParseError(ValueError):
@@ -68,3 +71,20 @@ def parse_patch_response(text: str) -> str:
     if not m or not m.group(1).strip():
         raise PatchParseError("no ```diff fence in refiner response")
     return m.group(1).strip() + "\n"
+
+
+def check_tripwires(patch_text: str, skill_name: str, repo_root: Path) -> list[str]:
+    """Pre-eval hard gates. Empty list means the candidate may proceed to eval."""
+    reasons: list[str] = []
+    allowed = SKILL_BUILDER_MODULES[skill_name]
+    targets = _PATCH_TARGET.findall(patch_text)
+    if not targets:
+        reasons.append("patch has no +++ targets")
+    for t in targets:
+        if t.startswith("tests/trust/"):
+            reasons.append(
+                f"patch edits the corpus itself ({t}) — tests/trust/** is off-limits"
+            )
+        elif t != allowed:
+            reasons.append(f"patch may only touch {allowed}, found {t}")
+    return reasons

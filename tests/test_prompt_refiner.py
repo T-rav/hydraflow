@@ -56,3 +56,30 @@ def test_parse_patch_response_extracts_diff_fence() -> None:
 def test_parse_patch_response_rejects_missing_fence() -> None:
     with pytest.raises(PatchParseError):
         parse_patch_response("no diff here")
+
+
+def test_tripwire_rejects_foreign_file() -> None:
+    from prompt_refiner import check_tripwires
+
+    patch = "--- a/src/pr_manager.py\n+++ b/src/pr_manager.py\n@@ -1 +1 @@\n-a\n+b\n"
+    reasons = check_tripwires(patch, "diff-sanity", Path.cwd())
+    assert any("only" in r and "diff_sanity" in r for r in reasons)
+
+
+def test_tripwire_rejects_corpus_edit() -> None:
+    from prompt_refiner import check_tripwires
+
+    patch = (
+        "--- a/tests/trust/adversarial/cases/x/README.md\n"
+        "+++ b/tests/trust/adversarial/cases/x/README.md\n@@ -1 +1 @@\n-a\n+b\n"
+    )
+    reasons = check_tripwires(patch, "diff-sanity", Path.cwd())
+    assert any("tests/trust" in r for r in reasons)
+
+
+def test_tripwire_accepts_builder_only_patch() -> None:
+    from prompt_refiner import SKILL_BUILDER_MODULES, check_tripwires
+
+    mod = SKILL_BUILDER_MODULES["diff-sanity"]
+    patch = f"--- a/{mod}\n+++ b/{mod}\n@@ -1 +1 @@\n-a\n+b\n"
+    assert check_tripwires(patch, "diff-sanity", Path.cwd()) == []
