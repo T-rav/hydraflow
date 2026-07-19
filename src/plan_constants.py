@@ -10,6 +10,14 @@ PlanScale = Literal["lite", "full"]
 # Each entry is (header, description).  Order matches the desired prompt order.
 PLAN_SECTION_DESCRIPTIONS: tuple[tuple[str, str], ...] = (
     (
+        "## Intent",
+        "1-2 sentences: what outcome this change produces and why (#9955 brief shape)",
+    ),
+    (
+        "## Approach",
+        "one short paragraph: the chosen approach and the key decision(s) behind it",
+    ),
+    (
         "## Files to Modify",
         "list each existing file and what changes are needed "
         "(must reference at least one file path)",
@@ -59,6 +67,8 @@ PLAN_SECTION_DESCRIPTIONS: tuple[tuple[str, str], ...] = (
 )
 
 REQUIRED_SECTIONS: tuple[str, ...] = (
+    "## Intent",
+    "## Approach",
     "## Files to Modify",
     "## New Files",
     "## File Delta",
@@ -69,6 +79,7 @@ REQUIRED_SECTIONS: tuple[str, ...] = (
 )
 
 LITE_REQUIRED_SECTIONS: tuple[str, ...] = (
+    "## Intent",
     "## Files to Modify",
     "## Implementation Steps",
     "## Testing Strategy",

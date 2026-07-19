@@ -20,6 +20,10 @@ def _valid_plan(*, word_pad: int = 200) -> str:
     """Return a plan with all required sections that passes validation."""
     padding = " ".join(["word"] * max(0, word_pad - 80))
     return (
+        "## Intent\n\n"
+        "Add the new data model plus its config knob so downstream consumers can rely on validated settings.\n\n"
+        "## Approach\n\n"
+        "Extend models.py with the model and config.py with the field; wire both through the orchestrator with validation at the boundary.\n\n"
         "## Files to Modify\n\n"
         "- src/models.py \u2014 add new data model\n"
         "- src/config.py \u2014 add configuration field\n\n"

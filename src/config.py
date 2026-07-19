@@ -106,7 +106,8 @@ class ManagedRepo(BaseModel):
 # Each tuple: (field_name, env_var_key, default_value)
 _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("dashboard_port", "HYDRAFLOW_DASHBOARD_PORT", 5555),
-    ("min_plan_words", "HYDRAFLOW_MIN_PLAN_WORDS", 200),
+    ("min_plan_words", "HYDRAFLOW_MIN_PLAN_WORDS", 60),
+    ("max_plan_chars", "HYDRAFLOW_MAX_PLAN_CHARS", 5000),
     (
         "max_pre_quality_review_attempts",
         "HYDRAFLOW_MAX_PRE_QUALITY_REVIEW_ATTEMPTS",
@@ -1577,10 +1578,23 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     min_plan_words: int = Field(
-        default=200,
-        ge=50,
+        default=60,
+        ge=20,
         le=2000,
-        description="Minimum word count for a valid plan",
+        description=(
+            "Minimum word count for a valid plan — a floor that rejects only "
+            "empty/skeletal plans; concise-but-complete briefs pass (#9955)"
+        ),
+    )
+    max_plan_chars: int = Field(
+        default=5000,
+        ge=1000,
+        le=45000,
+        description=(
+            "Hard character budget for a plan (#9955). Kept BELOW "
+            "max_impl_plan_chars so the implement boundary never truncates — "
+            "truncation is information loss the plan phase paid latency for."
+        ),
     )
     max_new_files_warning: int = Field(
         default=5,
