@@ -45,7 +45,11 @@ def _build_diagnosis_prompt(
         f"**Origin phase:** {context.origin_phase}\n",
     ]
     if context.ci_logs:
-        sections.append(f"**CI Logs:**\n```\n{context.ci_logs}\n```\n")
+        # Tail, not head: the failure evidence lives at the end of a CI log,
+        # and an unbounded log (a full pytest run can be tens of MB) made the
+        # prompt so large that gating/streaming it froze the event loop
+        # (#9879) and burned tokens the model never needed.
+        sections.append(f"**CI Logs (tail):**\n```\n{context.ci_logs[-8000:]}\n```\n")
     if context.review_comments:
         sections.append(
             "**Review Feedback:**\n"
@@ -53,7 +57,7 @@ def _build_diagnosis_prompt(
             + "\n"
         )
     if context.pr_diff:
-        sections.append(f"**PR Diff:**\n```diff\n{context.pr_diff}\n```\n")
+        sections.append(f"**PR Diff:**\n```diff\n{context.pr_diff[:12000]}\n```\n")
     if context.code_scanning_alerts:
         sections.append(
             "**Code Scanning Alerts:**\n"

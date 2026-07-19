@@ -7,7 +7,6 @@ import contextlib
 import json
 import logging
 import os
-import signal
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
@@ -18,6 +17,7 @@ from activity_parser import ActivityParser, get_activity_parser
 from events import EventBus, EventType, HydraFlowEvent
 from execution import SubprocessRunner, get_default_runner
 from models import TranscriptEventData, TranscriptLinePayload
+from process_group import kill_process_group
 from prompt_gate import PromptGateBlockedError, gate_prompt
 from prompt_telemetry import parse_command_tool_model
 from stream_parser import StreamParser
@@ -386,21 +386,11 @@ async def stream_claude_process(
 def _kill_proc_group(proc: asyncio.subprocess.Process) -> None:
     """SIGKILL *proc*'s whole process group (best-effort, never raises).
 
-    Every spawn in this module uses ``start_new_session=True`` so pid ==
-    pgid; a plain ``proc.kill()`` reaps only the direct child and leaks
-    grandchildren (sub-make, pytest workers) to launchd (#9911).
+    Delegates to the single guarded primitive (#9641) — see
+    ``process_group.kill_process_group`` for the mock-pid/pid-0 hazard
+    this guard exists for.
     """
-    with contextlib.suppress(ProcessLookupError, OSError):
-        pid = proc.pid
-        # Group-kill ONLY for a real positive pid. Mock procs' auto-created
-        # .pid coerces to 1 via __index__, so an unguarded killpg would
-        # signal pgid 1 (or, for a pid-0 fake, the CALLER'S OWN group —
-        # killing the test runner mid-suite; the CI smoke-job deaths on
-        # #10002). Same guard the #9648 run_simple fix landed.
-        if isinstance(pid, int) and pid > 0:
-            os.killpg(pid, signal.SIGKILL)
-        else:
-            proc.kill()
+    kill_process_group(proc)
 
 
 def terminate_processes(active_procs: set[asyncio.subprocess.Process]) -> None:

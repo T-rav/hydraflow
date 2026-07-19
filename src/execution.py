@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
-import signal
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
+
+from process_group import kill_process_group
 
 
 @dataclass
@@ -76,26 +76,12 @@ class SubprocessRunner(Protocol):
 def _reap_process_group(proc: asyncio.subprocess.Process) -> None:
     """Best-effort SIGKILL of *proc*'s whole process group.
 
-    A real asyncio child spawned with ``start_new_session=True`` is its own
-    process-group leader (``pid == pgid``), so ``os.killpg(proc.pid, SIGKILL)``
-    tears down the child AND the grandchildren it forked (sub-make / pytest /
-    agent workers) — the orphaned-grandchild defect from #9648 (mirrors
-    ``terminate_processes()`` and the #9579 caretaker fix).
-
-    The kill is guarded on an *integer* pid. A real child always has one; a
-    missing or non-int pid (a not-yet-started process, or a test double whose
-    ``pid`` is a mock) falls back to ``proc.kill()`` so the reap never issues
-    ``os.killpg`` against a fabricated pid — an int-coerced mock resolves to a
-    low number like ``1`` and would otherwise signal an unrelated, or even our
-    own, process group. ``ProcessLookupError``/``OSError`` (the group already
-    exited) are suppressed so the caller's ``TimeoutError``/``CancelledError``
-    still propagates. (#9648, #9794/#9814)
+    Delegates to the single guarded primitive (#9641). The guard is
+    STRICTER than the earlier inline check: it also rejects ``bool`` and
+    non-positive pids, so a pid-``0`` test double can never signal the
+    caller's own group. (#9648, #9794/#9814, #9911)
     """
-    with contextlib.suppress(ProcessLookupError, OSError):
-        if isinstance(proc.pid, int):
-            os.killpg(proc.pid, signal.SIGKILL)
-        else:
-            proc.kill()
+    kill_process_group(proc)
 
 
 class HostRunner:

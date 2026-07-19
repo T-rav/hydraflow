@@ -22,7 +22,9 @@ skill's ``result_parser``, and decides a per-case ``status``:
 The pytest harness asserts on this; the loop diffs ``PASS -> FAIL`` per case to
 detect skill-prompt drift. Run ``python corpus_runner.py --json`` to emit the
 loop-facing result list (``[{case_id, skill, status, provenance,
-expected_catcher}, ...]``) on stdout.
+expected_catcher, summary}, ...]``) on stdout. ``summary`` carries the failing
+run's transcript summary — the refiner reads it as the failure transcript, so
+the slim projection must include it (empty string when a branch produced none).
 """
 
 from __future__ import annotations
@@ -58,11 +60,25 @@ class MissingTranscriptError(RuntimeError):
     """Raised in strict mode when a case has no transcript fixture and live is off."""
 
 
-def discover_cases(cases_dir: Path = CASES_DIR) -> list[Path]:
+HOLDOUT_MARKER = "HOLDOUT"
+
+
+def is_holdout(case_dir: Path) -> bool:
+    """True when *case_dir* is a held-out honeypot (never shown to the refiner)."""
+    return (case_dir / HOLDOUT_MARKER).is_file()
+
+
+def discover_cases(
+    cases_dir: Path = CASES_DIR, *, include_holdout: bool = True
+) -> list[Path]:
     if not cases_dir.is_dir():
         return []
     return sorted(
-        p for p in cases_dir.iterdir() if p.is_dir() and not p.name.startswith(".")
+        p
+        for p in cases_dir.iterdir()
+        if p.is_dir()
+        and not p.name.startswith(".")
+        and (include_holdout or not is_holdout(p))
     )
 
 
@@ -240,13 +256,76 @@ def evaluate_case(
     }
 
 
+def evaluate_case_for_skill(
+    case_dir: Path, skill_name: str, *, live: bool = False
+) -> dict[str, Any]:
+    """Evaluate one case against ONE skill, building THAT skill's prompt.
+
+    Unlike :func:`evaluate_case` (one transcript, all parsers), this is the
+    validation path for a candidate prompt: the target skill's own
+    ``prompt_builder`` produces the live prompt, and only its parser judges
+    the transcript. Cases whose ``expected_catcher`` is neither *skill_name*
+    nor ``"none"`` return ``SKIPPED``.
+    """
+    case_id = case_dir.name
+    catcher = read_expected_catcher(case_dir)
+    if catcher not in (skill_name, "none"):
+        return {
+            "case_id": case_id,
+            "skill": skill_name,
+            "status": "SKIPPED",
+            "expected_catcher": catcher,
+            "provenance": read_provenance(case_dir),
+        }
+    skill = next(s for s in BUILTIN_SKILLS if s.name == skill_name)
+    diff = synthesize_diff(case_dir / "before", case_dir / "after")
+    prompt = skill.prompt_builder(
+        issue_number=0,
+        issue_title=f"adversarial-corpus::{case_id}",
+        diff=diff,
+        plan_text=load_plan_text(case_dir),
+    )
+    transcript = load_transcript(case_dir, prompt, live=live)
+    if transcript is None:
+        return {
+            "case_id": case_id,
+            "skill": skill_name,
+            "status": "SKIPPED",
+            "expected_catcher": catcher,
+            "provenance": read_provenance(case_dir),
+        }
+    passed, summary, findings = skill.result_parser(transcript)
+    if catcher == "none":
+        status = "PASS" if passed else "FAIL"
+    else:
+        keyword = read_keyword(case_dir / "README.md")
+        haystack = (summary + "\n" + "\n".join(findings)).lower()
+        status = "PASS" if (not passed and keyword.lower() in haystack) else "FAIL"
+    return {
+        "case_id": case_id,
+        "skill": skill_name,
+        "status": status,
+        "expected_catcher": catcher,
+        "provenance": read_provenance(case_dir),
+    }
+
+
 def run_corpus(
-    *, cases_dir: Path = CASES_DIR, live: bool = False, strict: bool = False
+    *,
+    cases_dir: Path = CASES_DIR,
+    live: bool = False,
+    strict: bool = False,
+    case_ids: frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Evaluate every discovered case and return the loop-facing result list."""
+    """Evaluate every discovered case and return the loop-facing result list.
+
+    Holdouts are always included (the weekly backstop covers them) — pass
+    *case_ids* to run a targeted subset by directory name.
+    """
     return [
         evaluate_case(case_dir, live=live, strict=strict)
         for case_dir in discover_cases(cases_dir)
+        if case_ids is None or case_dir.name in case_ids
     ]
 
 
@@ -257,9 +336,31 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="emit the loop-facing result list as JSON on stdout",
     )
+    parser.add_argument(
+        "--cases",
+        default="",
+        help="comma-separated case ids to run (default: all)",
+    )
+    parser.add_argument(
+        "--live-skill",
+        default="",
+        help="evaluate only this skill's cases, building its own prompt/parser",
+    )
     args = parser.parse_args(argv)
     live = os.environ.get("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE") == "1"
-    results = run_corpus(live=live, strict=False)
+    case_ids = (
+        frozenset(c.strip() for c in args.cases.split(",") if c.strip())
+        if args.cases.strip()
+        else None
+    )
+    if args.live_skill:
+        results = [
+            evaluate_case_for_skill(case_dir, args.live_skill, live=live)
+            for case_dir in discover_cases(CASES_DIR)
+            if case_ids is None or case_dir.name in case_ids
+        ]
+    else:
+        results = run_corpus(live=live, strict=False, case_ids=case_ids)
     if args.json:
         # Only the loop-facing keys belong on stdout (the loop json.loads it).
         slim = [
@@ -269,6 +370,11 @@ def main(argv: list[str] | None = None) -> int:
                 "status": r["status"],
                 "provenance": r["provenance"],
                 "expected_catcher": r["expected_catcher"],
+                # The loop reads this as the failure transcript fed to the
+                # refiner (`case.get("summary","")`); omitting it left the
+                # production refine context permanently blank. `.get` is
+                # shape-safe — the `--live-skill` branch omits `summary`.
+                "summary": r.get("summary", ""),
             }
             for r in results
         ]

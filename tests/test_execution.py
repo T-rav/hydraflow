@@ -171,7 +171,7 @@ class TestHostRunnerRunSimple:
         runner = HostRunner()
         with (
             patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)),
-            patch("execution.os.killpg") as mock_killpg,
+            patch("process_group.os.killpg") as mock_killpg,
             pytest.raises(TimeoutError),
         ):
             await runner.run_simple(["sleep", "999"], timeout=0.01)
@@ -195,7 +195,7 @@ class TestHostRunnerRunSimple:
         runner = HostRunner()
         with (
             patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)),
-            patch("execution.os.killpg") as mock_killpg,
+            patch("process_group.os.killpg") as mock_killpg,
             pytest.raises(TimeoutError),
         ):
             await runner.run_simple(["sleep", "999"], timeout=0.01)
@@ -216,7 +216,7 @@ class TestHostRunnerRunSimple:
         runner = HostRunner()
         with (
             patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)),
-            patch("execution.os.killpg", side_effect=ProcessLookupError),
+            patch("process_group.os.killpg", side_effect=ProcessLookupError),
             pytest.raises(TimeoutError),
         ):
             await runner.run_simple(["sleep", "999"], timeout=0.01)
@@ -237,7 +237,7 @@ class TestHostRunnerRunSimple:
         runner = HostRunner()
         with (
             patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)),
-            patch("execution.os.killpg") as mock_killpg,
+            patch("process_group.os.killpg") as mock_killpg,
             pytest.raises(TimeoutError),
         ):
             await runner.run_simple(["sleep", "999"], timeout=0.01)
@@ -263,7 +263,7 @@ class TestHostRunnerRunSimple:
         runner = HostRunner()
         with (
             patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)),
-            patch("execution.os.killpg") as mock_killpg,
+            patch("process_group.os.killpg") as mock_killpg,
             pytest.raises(asyncio.CancelledError),
         ):
             await runner.run_simple(["sleep", "999"], timeout=999)

@@ -1,0 +1,4 @@
+TEST_ADEQUACY_RESULT: RETRY
+SUMMARY: untested branch added to compute_backoff_seconds
+GAPS:
+- src/retry.py — new `if retries > 3:` branch has no covering test case

@@ -1,0 +1,31 @@
+{
+  "repos": [],
+  "issues": [],
+  "comments": {},
+  "prs": [],
+  "scripts": {},
+  "advisor_scripts": {},
+  "phase_scripts": {},
+  "auto_agent_attempts": {},
+  "sandbox_loop_interval": 6,
+  "cycles_to_run": 3,
+  "loops_enabled": [
+    "skill_prompt_eval"
+  ],
+  "main_branch_ci_status": [
+    "success",
+    ""
+  ],
+  "plan_hold_seconds": 0.0,
+  "skill_prompt_corpus_cases": [
+    {
+      "case_id": "s56-refine-regressed-case",
+      "skill": "diff-sanity",
+      "expected_catcher": "diff-sanity",
+      "status": "FAIL",
+      "provenance": "hand-crafted",
+      "summary": "the skill stopped catching this adversarial case"
+    }
+  ],
+  "skill_prompt_refine_patch": "```diff\n--- a/tests/trust/adversarial/corpus_runner.py\n+++ b/tests/trust/adversarial/corpus_runner.py\n@@ -1,1 +1,1 @@\n-CORPUS_RUNNER_UNTOUCHED\n+CORPUS_RUNNER_TAMPERED\n```\n"
+}

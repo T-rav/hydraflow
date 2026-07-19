@@ -6,6 +6,7 @@ Guards the contract SkillPromptEvalLoop._run_corpus depends on: a JSON list of
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from corpus_runner import (  # noqa: E402
     CASES_DIR,
     MissingTranscriptError,
     evaluate_case,
+    main,
     run_corpus,
 )
 
@@ -83,3 +85,17 @@ def test_missing_transcript_raises_when_strict(tmp_path: Path) -> None:
     case = _make_case_without_transcript(tmp_path)
     with pytest.raises(MissingTranscriptError):
         evaluate_case(case, live=False, strict=True)
+
+
+def test_json_output_carries_summary(capsys: pytest.CaptureFixture[str]) -> None:
+    """The slim `--json` projection must include `summary`. The loop reads it
+    as `case.get("summary","")` — the failure transcript fed to the refiner —
+    so omitting it left the production refine context permanently blank (#9724
+    final-review F1)."""
+    rc = main(["--json"])
+    assert rc == 0
+    slim = json.loads(capsys.readouterr().out)
+    assert slim, "expected a non-empty committed adversarial corpus"
+    for r in slim:
+        assert set(r) >= _LOOP_KEYS | {"summary"}, f"missing keys in {r}"
+        assert isinstance(r["summary"], str)

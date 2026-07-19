@@ -113,6 +113,12 @@ SETTINGS: dict[str, SettingSpec] = {
     "issue_groomer_enabled": SettingSpec("Issue Groomer", live=True, order=0),
     "issue_groomer_pair_budget": SettingSpec("Issue Groomer", live=True, order=1),
     "issue_groomer_model": SettingSpec("Issue Groomer", live=True, order=2),
+    # --- Prompt Refinement (skill-prompt self-refinement, #9724) ----------
+    "skill_prompt_refine_enabled": SettingSpec("Prompt Refinement", live=True, order=0),
+    "skill_prompt_refine_max_weekly": SettingSpec(
+        "Prompt Refinement", live=True, order=1
+    ),
+    "skill_prompt_refine_model": SettingSpec("Prompt Refinement", live=True, order=2),
 }
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -404,10 +404,14 @@ class TestDependabotMergeLoopAutoAgentBranch:
 
     @pytest.mark.asyncio
     async def test_does_not_merge_arbitrary_owner_branch(self, tmp_path: Path) -> None:
-        """A hand-authored owner PR on an arbitrary branch must not auto-merge."""
+        """A hand-authored PR on a NON-shepherd-prefix branch must not auto-merge.
+
+        (#9889 class 5 made human fix/-style prefixes shepherdable by design,
+        so the arbitrary-branch pin uses a prefix outside that set.)
+        """
         loop, _, _, prs, _ = _make_loop(
             tmp_path,
-            open_prs=[_make_pr(42, author="T-rav", branch="fix/manual-thing")],
+            open_prs=[_make_pr(42, author="T-rav", branch="spike-manual-thing")],
         )
 
         result = await loop._do_work()
@@ -836,3 +840,97 @@ class TestMergePolicyGate:
 
         assert result["merged"] == 1
         prs.merge_pr.assert_awaited_once_with(10, auto_rebase=True)
+
+
+# ---------------------------------------------------------------------------
+# Class 5 (#9889): human-prefix branch shepherding
+# ---------------------------------------------------------------------------
+
+
+class TestHumanBranchShepherd:
+    @pytest.mark.asyncio
+    async def test_green_human_fix_branch_is_merged(self, tmp_path: Path) -> None:
+        """Operator-approved contract: CI-green human fix/ PRs merge."""
+        loop, _, _, prs, _ = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(42, author="T-rav", branch="fix/manual-thing")],
+        )
+
+        with patch("dependabot_merge_loop.fetch_pr_labels", AsyncMock(return_value=[])):
+            result = await loop._do_work()
+
+        assert result["merged"] == 1
+        prs.merge_pr.assert_awaited_once_with(42, auto_rebase=True)
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_restores_no_merge_path(self, tmp_path: Path) -> None:
+        loop, _, _, prs, _ = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(42, author="T-rav", branch="fix/manual-thing")],
+        )
+        object.__setattr__(loop._config, "human_branch_shepherd_enabled", False)
+
+        result = await loop._do_work()
+
+        assert result == {"merged": 0, "skipped": 0, "failed": 0}
+        prs.wait_for_ci.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_auto_merge_label_leaves_pr_to_author(
+        self, tmp_path: Path
+    ) -> None:
+        loop, _, _, prs, _ = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(42, author="T-rav", branch="feat/my-feature")],
+        )
+
+        with patch(
+            "dependabot_merge_loop.fetch_pr_labels",
+            AsyncMock(return_value=["no-auto-merge"]),
+        ):
+            result = await loop._do_work()
+
+        assert result["skipped"] == 1
+        prs.merge_pr.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_bot_prs_never_pay_the_label_fetch(self, tmp_path: Path) -> None:
+        """The opt-out read is a raw gh subprocess — bot lane must skip it."""
+        loop, _, _, prs, _ = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(7, author="dependabot[bot]", is_bot=True)],
+        )
+
+        with patch("dependabot_merge_loop.fetch_pr_labels", AsyncMock()) as fetch:
+            result = await loop._do_work()
+
+        fetch.assert_not_awaited()
+        assert result["merged"] == 1
+
+    @pytest.mark.asyncio
+    async def test_airgap_skips_label_fetch_when_policy_disabled(
+        self, tmp_path: Path
+    ) -> None:
+        """#9754: with merge_policy_enabled=False (sandbox) no raw gh runs."""
+        loop, _, _, prs, _ = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(42, author="T-rav", branch="fix/manual-thing")],
+        )
+        object.__setattr__(loop._config, "merge_policy_enabled", False)
+
+        with patch("dependabot_merge_loop.fetch_pr_labels", AsyncMock()) as fetch:
+            result = await loop._do_work()
+
+        fetch.assert_not_awaited()
+        assert result["merged"] == 1
+
+    @pytest.mark.asyncio
+    async def test_draft_human_pr_excluded(self, tmp_path: Path) -> None:
+        pr = _make_pr(42, author="T-rav", branch="fix/manual-thing")
+        pr = pr.model_copy(update={"draft": True})
+        loop, _, _, prs, _ = _make_loop(tmp_path, open_prs=[pr])
+
+        result = await loop._do_work()
+
+        assert result == {"merged": 0, "skipped": 0, "failed": 0}
+        prs.wait_for_ci.assert_not_awaited()
