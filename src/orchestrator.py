@@ -51,6 +51,7 @@ from state_restorer import StateRestorer
 from subprocess_util import (
     AuthenticationError,
     CreditExhaustedError,
+    probe_auth_availability,
     probe_credit_availability,
 )
 
@@ -80,6 +81,14 @@ def _log_deferred_task_failure(task: asyncio.Task[Any]) -> None:
 
 # Delay after a merge to allow GitHub to propagate the merge state.
 _POST_MERGE_DELAY: int = 5
+
+# Delay before restarting a loop whose AuthenticationError was refuted by the
+# live probe (a transient blip). A restart with no delay would let a loop that
+# runs-on-startup re-crash immediately while a sustained blip lasts, spinning
+# the supervisor and storming WARNING logs — the same hot-loop pathology #9924
+# guarded against on the credit false-positive path. The delay lives inside the
+# recreated task, so it never blocks supervision of the other loops (#9621).
+_AUTH_TRANSIENT_RESTART_DELAY_S: float = 30.0
 
 
 class HydraFlowOrchestrator:
@@ -1069,8 +1078,60 @@ class HydraFlowOrchestrator:
                 self._config.repo_root,
             )
 
-    async def _handle_auth_error(self, loop_name: str) -> None:
-        """Set auth_failed, publish SYSTEM_ALERT, stop all loops."""
+    async def _handle_auth_error(
+        self,
+        loop_name: str,
+        exc: BaseException,
+        tasks: dict[str, asyncio.Task[None]],
+        loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
+    ) -> None:
+        """Corroborate the auth signal with a live probe before halting the factory.
+
+        A single gh call's stderr can match an auth pattern during a transient
+        network/API blip; that used to propagate fatally and stop ALL loops for
+        hours (#9621 — a momentary blip stalled the factory ~2.5h; a restart
+        recovered instantly because the token was fine the whole time).
+
+        Mirror the credit-pause corroboration (#9807/#9924): probe live auth
+        with ``gh auth status`` before committing a global halt. If auth is
+        actually fine the signal is a transient false positive — restart the
+        crashed loop (non-fatal, retried next tick) instead of stopping. Only a
+        probe-confirmed, PERSISTENT auth rejection halts the factory (fail-safe).
+        Kill-switch: ``auth_failure_require_probe=False`` reverts to
+        halt-on-signal. ``and`` short-circuits so the probe is skipped when the
+        kill-switch is off.
+        """
+        if self._config.auth_failure_require_probe and await probe_auth_availability():
+            logger.warning(
+                "GitHub auth-failure signal from %r NOT corroborated by a live "
+                "`gh auth status` probe — treating as a transient blip; "
+                "restarting the loop instead of pausing all loops (#9621).",
+                loop_name,
+            )
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    data={
+                        "message": (
+                            "GitHub auth signal not corroborated by a live probe "
+                            "— treating as a transient blip; not pausing."
+                        ),
+                        "source": loop_name,
+                        # Benign: a transient blip was absorbed, nothing paused.
+                        # Render yellow, not the red critical banner.
+                        "severity": "warning",
+                    },
+                )
+            )
+            await self._restart_loop(
+                loop_name,
+                exc,
+                tasks,
+                loop_factories,
+                restart_delay=_AUTH_TRANSIENT_RESTART_DELAY_S,
+            )
+            return
+
         logger.error(
             "GitHub authentication failed in %r — pausing all loops",
             loop_name,
@@ -1203,7 +1264,7 @@ class HydraFlowOrchestrator:
     ) -> None:
         """Handle a crashed loop task — auth failure, credit exhaustion, or generic restart."""
         if isinstance(exc, AuthenticationError):
-            await self._handle_auth_error(name)
+            await self._handle_auth_error(name, exc, tasks, loop_factories)
             return
 
         if isinstance(exc, CreditExhaustedError):

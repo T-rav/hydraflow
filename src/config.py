@@ -3351,6 +3351,20 @@ class HydraFlowConfig(BaseModel):
             "exhaustion). Kill-switch: set False to revert to pause-on-text."
         ),
     )
+    auth_failure_require_probe: bool = Field(
+        default=True,
+        description=(
+            "Before halting ALL loops on a GitHub AuthenticationError, "
+            "corroborate the signal with a live `gh auth status` probe. A "
+            "single gh call's stderr can match an auth pattern during a "
+            "transient network/API blip, which used to stop the whole factory "
+            "for hours (#9621). The probe is ground truth (False only when gh "
+            "confirms the credentials are rejected); on a probe-refuted "
+            "(transient) signal the crashed loop is restarted instead of "
+            "stopping the factory. Kill-switch: set False to revert to "
+            "halt-on-signal."
+        ),
+    )
 
     # Process timeouts
     agent_timeout: int = Field(

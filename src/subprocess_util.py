@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import random
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -593,6 +595,81 @@ async def probe_credit_availability() -> bool:
         # here — they propagate so they surface in logs instead of silently
         # returning False.
         return True
+
+
+# Ground-truth auth-rejection phrases in ``gh auth status`` output. These
+# indicate the stored credentials are genuinely bad/missing (a PERSISTENT
+# failure) rather than a transient network hiccup. Kept broader than the
+# ``_AUTH_PATTERNS`` used to classify per-call stderr because ``gh auth status``
+# renders its own diagnostic wording ("authentication failed", "bad
+# credentials", "token ... is invalid").
+_AUTH_STATUS_REJECTION_PATTERNS = (
+    "not logged in",
+    "not logged into",
+    "authentication failed",
+    "failed to authenticate",
+    "authentication required",
+    "requires authentication",
+    "bad credentials",
+    "token is invalid",
+    "invalid token",
+    "401",
+    "403",
+)
+
+# `gh auth status` can take several seconds on first invocation when the OS
+# keychain unlocks the token; bound it so a hung probe can't block the caller.
+# Module-level so tests can patch a smaller value.
+_GH_AUTH_PROBE_TIMEOUT_S = 15.0
+
+
+async def probe_auth_availability() -> bool:
+    """Corroborate a GitHub auth-failure signal with a live ``gh auth status``.
+
+    Returns ``True`` when auth appears healthy (or the probe cannot be run),
+    and ``False`` **only** when ``gh auth status`` positively confirms the
+    credentials are rejected/missing (a persistent failure).
+
+    Mirrors :func:`probe_credit_availability`'s fail-open philosophy: a single
+    ``AuthenticationError`` from a gh call can be a transient network/API blip
+    (#9621 — one such blip stalled the whole factory ~2.5h). So every
+    un-probeable or transient condition — gh missing, spawn failure, timeout,
+    or a non-auth network error — is treated as "auth is fine" (``True``), and
+    a factory-wide halt is only triggered on ground-truth auth rejection.
+    """
+    if shutil.which("gh") is None:
+        # Cannot probe — assume auth is fine (fail-open), same as the credit probe.
+        return True
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "gh",
+            "auth",
+            "status",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError:
+        # Could not even spawn gh (transient/environmental) — fail-open.
+        return True
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=_GH_AUTH_PROBE_TIMEOUT_S
+        )
+    except TimeoutError:
+        # Hung probe — transient, not a confirmed rejection. Kill and fail-open.
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        return True
+    if proc.returncode == 0:
+        return True
+    combined = (
+        (stdout or b"").decode(errors="replace")
+        + (stderr or b"").decode(errors="replace")
+    ).lower()
+    # rc != 0 AND the output names an auth rejection → confirmed persistent
+    # failure. Any other non-zero exit (e.g. an unreachable network) is
+    # transient, so fail-open.
+    return not any(p in combined for p in _AUTH_STATUS_REJECTION_PATTERNS)
 
 
 def parse_credit_resume_time(text: str) -> datetime | None:
