@@ -17,6 +17,12 @@ corpus regression (``seed.skill_prompt_corpus_cases`` /
 ``seed.skill_prompt_refine_patch``): ``_run_corpus`` returns the seeded PASS→FAIL
 case and the refine LLM returns the seeded patch.
 
+Escape-detection caveat: the ``status:ok`` assertion catches a *hanging* real
+escape (the established real-claude-in-air-gap failure mode — watchdog fires,
+status flips to ``error``). A hypothetical *fast-failing* escape is swallowed by
+``_try_refine``'s soft-failure handling and would leave ``status:ok`` — the
+guarantee here is hang-detection; the MockWorld tier owns outcome-level checks.
+
 Why a tripwire outcome, not a green PR. A *green* refine PR is not achievable
 air-gapped: ``_open_refine_pr`` runs a live ``corpus_runner`` validation
 subprocess (real LLM) and opens the PR through ``generate_and_open_pr_async``,
