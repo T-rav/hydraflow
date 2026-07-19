@@ -21,6 +21,7 @@ from subprocess_util import (
     make_clean_env,
     make_docker_env,
     parse_credit_resume_time,
+    probe_auth_availability,
     run_subprocess,
     run_subprocess_with_retry,
 )
@@ -1457,3 +1458,59 @@ class TestParseCreditResumeTime:
         caller falls back to its default pause, so parse returns None.
         """
         assert parse_credit_resume_time("You've hit your weekly limit") is None
+
+
+# --- probe_auth_availability (#9621) ---
+
+
+class TestProbeAuthAvailability:
+    """Live ``gh auth status`` corroboration probe for the auth-failure path.
+
+    Fail-open mirror of ``probe_credit_availability``: returns ``False`` ONLY on
+    a ground-truth, persistent auth rejection; every un-probeable/transient
+    condition returns ``True`` so a momentary blip never halts the factory.
+    """
+
+    @pytest.mark.asyncio
+    async def test_returns_true_when_gh_missing(self) -> None:
+        with patch("subprocess_util.shutil.which", return_value=None):
+            assert await probe_auth_availability() is True
+
+    @pytest.mark.asyncio
+    async def test_returns_true_when_authenticated(self) -> None:
+        proc = _make_proc(returncode=0, stdout=b"Logged in to github.com")
+        with (
+            patch("subprocess_util.shutil.which", return_value="/usr/bin/gh"),
+            patch("asyncio.create_subprocess_exec", return_value=proc),
+        ):
+            assert await probe_auth_availability() is True
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_confirmed_auth_rejection(self) -> None:
+        proc = _make_proc(returncode=1, stderr=b"X github.com: authentication failed")
+        with (
+            patch("subprocess_util.shutil.which", return_value="/usr/bin/gh"),
+            patch("asyncio.create_subprocess_exec", return_value=proc),
+        ):
+            assert await probe_auth_availability() is False
+
+    @pytest.mark.asyncio
+    async def test_returns_true_on_transient_network_failure(self) -> None:
+        # rc != 0 but the output is a network error, not an auth rejection.
+        proc = _make_proc(
+            returncode=1,
+            stderr=b"dial tcp: lookup api.github.com: no such host",
+        )
+        with (
+            patch("subprocess_util.shutil.which", return_value="/usr/bin/gh"),
+            patch("asyncio.create_subprocess_exec", return_value=proc),
+        ):
+            assert await probe_auth_availability() is True
+
+    @pytest.mark.asyncio
+    async def test_returns_true_on_oserror_spawning_gh(self) -> None:
+        with (
+            patch("subprocess_util.shutil.which", return_value="/usr/bin/gh"),
+            patch("asyncio.create_subprocess_exec", side_effect=OSError("boom")),
+        ):
+            assert await probe_auth_availability() is True
