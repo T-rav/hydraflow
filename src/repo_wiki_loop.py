@@ -201,6 +201,13 @@ class RepoWikiLoop(BaseBackgroundLoop):
         closed_issues = self._get_closed_issues()
         stats: dict[str, Any] = {"queue_drained": len(drained)}
 
+        # Restart-safe coalesce (#9894): the tracked open-PR state is
+        # process-local, so a restart forgets an open maintenance PR and the
+        # next tick would open a duplicate (2026-07-18: three same-day maint
+        # PRs coexisted, two went CONFLICTING+HITL). Rediscover from GitHub —
+        # the source of truth — before polling.
+        await self._adopt_open_maintenance_pr(stats)
+
         # Poll/merge any already-open maintenance PR first.
         await self._poll_and_merge_open_pr(stats)
 
@@ -637,6 +644,69 @@ class RepoWikiLoop(BaseBackgroundLoop):
                 branch,
                 result.error,
             )
+
+    async def _adopt_open_maintenance_pr(self, stats: dict[str, Any]) -> None:
+        """Adopt an already-open maintenance PR after a restart (#9894).
+
+        ``_open_pr_branch``/``_open_pr_url`` live in process memory only, so a
+        factory restart forgets an open ``hydraflow-wiki-maintenance`` PR and
+        the coalesce guard never fires — the next tick opens a duplicate that
+        then rots CONFLICTING until a human closes it. GitHub is the source
+        of truth: when nothing is tracked, query for open PRs by label and
+        adopt the newest so the existing poll/approve/merge path owns it.
+
+        Fail-soft on every edge (no token, no repo slug — the #9754 air-gap
+        lesson — or a gh error): log and behave exactly as before this guard
+        existed. Multiple open maintenance PRs (pre-existing duplication)
+        adopt the newest and log a warning; the older ones stay for the
+        operator or the stuck-PR sweep.
+        """
+        if self._open_pr_branch is not None or self._credentials is None:
+            return
+        if not self._config.repo_wiki_maintenance_pr_coalesce:
+            return
+        gh_token = self._credentials.gh_token
+        if not gh_token or not self._config.repo:
+            return
+        try:
+            stdout = await run_subprocess(
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                self._config.repo,
+                "--label",
+                "hydraflow-wiki-maintenance",
+                "--state",
+                "open",
+                "--json",
+                "number,url,headRefName",
+                gh_token=gh_token,
+            )
+            rows = json.loads(stdout or "[]")
+        except (RuntimeError, OSError, ValueError) as exc:
+            logger.warning("Wiki maintenance PR adoption query failed: %s", exc)
+            return
+        if not isinstance(rows, list) or not rows:
+            return
+        rows.sort(key=lambda r: int(r.get("number") or 0))
+        newest = rows[-1]
+        branch = str(newest.get("headRefName") or "")
+        url = str(newest.get("url") or "")
+        if not branch or not url:
+            return
+        self._open_pr_branch = branch
+        self._open_pr_url = url
+        stats["maintenance_pr_adopted"] = url
+        if len(rows) > 1:
+            logger.warning(
+                "Adopted newest of %d open maintenance PRs (%s) — older "
+                "duplicates need closing",
+                len(rows),
+                url,
+            )
+        else:
+            logger.info("Adopted open maintenance PR %s after restart", url)
 
     async def _poll_and_merge_open_pr(  # noqa: PLR0911 — linear state-machine guards
         self, stats: dict[str, Any]
