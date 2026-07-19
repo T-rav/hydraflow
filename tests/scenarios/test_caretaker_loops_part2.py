@@ -339,6 +339,53 @@ class TestL20RunsGCLoop:
         recorder.purge_expired.assert_called_once()
         recorder.purge_oversized.assert_called_once()
 
+    async def test_event_log_rotation_compacts_oversized_log(self, tmp_path):
+        """#9905: a GC cycle rotates an oversized events.jsonl to the byte budget.
+
+        Catalog-built loop + real EventBus/EventLog over a seeded flood
+        (recent events, so only the size bound can shrink it). Post-cycle
+        the on-disk file fits event_log_max_size_mb and the newest events
+        survive.
+        """
+        import json as _json
+
+        from base_background_loop import LoopDeps
+        from events import EventBus, EventLog, EventType, HydraFlowEvent
+        from tests.helpers import make_bg_loop_deps
+        from tests.scenarios.catalog import LoopCatalog
+
+        log_path = tmp_path / "events.jsonl"
+        now = datetime.now(UTC).isoformat()
+        with open(log_path, "w") as f:
+            for i in range(5000):
+                event = HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    timestamp=now,
+                    data={"seq": i, "pad": "x" * 200},
+                )
+                f.write(event.model_dump_json() + "\n")
+        max_bytes = 1 * 1024 * 1024
+        assert log_path.stat().st_size > max_bytes, "seeded flood must exceed 1MB"
+
+        bg = make_bg_loop_deps(tmp_path)
+        object.__setattr__(bg.config, "event_log_max_size_mb", 1)
+        deps = LoopDeps(
+            event_bus=EventBus(event_log=EventLog(log_path)),
+            stop_event=bg.stop_event,
+            status_cb=bg.status_cb,
+            enabled_cb=bg.enabled_cb,
+            sleep_fn=bg.sleep_fn,
+        )
+        loop = LoopCatalog.instantiate("runs_gc", ports={}, config=bg.config, deps=deps)
+
+        result = await loop._do_work()
+
+        assert result["event_log_rotation"]["dropped_size"] > 0
+        assert log_path.stat().st_size <= max_bytes
+        lines = log_path.read_text().splitlines()
+        assert lines, "rotation must keep the newest window, not empty the log"
+        assert _json.loads(lines[-1])["data"]["seq"] == 4999
+
 
 # ---------------------------------------------------------------------------
 # L20b: gate_health — CI reds as distributions (#9974)

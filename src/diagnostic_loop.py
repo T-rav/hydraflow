@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from dedup_store import DedupStore
 from events import EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from models import AttemptRecord, Severity
@@ -86,6 +88,14 @@ class DiagnosticLoop(BaseBackgroundLoop):
         self._prs = prs
         self._state = state
         self._workspaces = workspaces
+        # #9895 (absorbed #9845): during the 2026-06 exhaustion the loop
+        # posted ~33 identical no-op diagnosis comments on one issue. Keyed
+        # by issue + content hash, at most one key per issue (replaced when
+        # the diagnosis text changes), so re-runs re-post only NEW content.
+        self._hitl_comment_dedup = DedupStore(
+            "diagnostic_hitl_comments",
+            config.data_root / "dedup" / "diagnostic_hitl_comments.json",
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.diagnostic_interval
@@ -443,14 +453,31 @@ class DiagnosticLoop(BaseBackgroundLoop):
         involved. The Auto-Agent routes a *resolved* diagnose-failed issue back
         to review.
         """
-        try:
-            await self._prs.post_comment(issue_number, comment)
-        except Exception:
-            logger.warning(
-                "Diagnostic: failed to post comment for issue #%d",
+        digest = hashlib.sha256(comment.encode("utf-8")).hexdigest()[:16]
+        dedup_key = f"{issue_number}:{digest}"
+        seen = self._hitl_comment_dedup.get()
+        if dedup_key in seen:
+            logger.info(
+                "Diagnostic: identical diagnosis comment already posted on "
+                "issue #%d — skipping re-post (labels still applied)",
                 issue_number,
-                exc_info=True,
             )
+        else:
+            try:
+                await self._prs.post_comment(issue_number, comment)
+            except Exception:
+                logger.warning(
+                    "Diagnostic: failed to post comment for issue #%d",
+                    issue_number,
+                    exc_info=True,
+                )
+            else:
+                # Replace any previous hash for this issue: bounded at one
+                # key per issue, and a CHANGED diagnosis re-posts.
+                prefix = f"{issue_number}:"
+                self._hitl_comment_dedup.set_all(
+                    {k for k in seen if not k.startswith(prefix)} | {dedup_key}
+                )
         try:
             await self._prs.swap_pipeline_labels(
                 issue_number, self._config.hitl_label[0]

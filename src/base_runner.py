@@ -66,6 +66,12 @@ class BaseRunner:
 
     _log: ClassVar[logging.Logger]
     _phase_name: ClassVar[str] = "unknown"
+    # #9895: opt-out for scanning agent stdout prose for credit-exhaustion
+    # phrases. Runners whose agents ANALYZE failure transcripts (and thus
+    # quote credit-error prose) must set this False so only the CLI's own
+    # stderr signal can raise CreditExhaustedError. Mirrors the
+    # LONG_LLM_CYCLE ClassVar opt-in pattern.
+    CREDIT_PROSE_SCAN: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -244,6 +250,7 @@ class BaseRunner:
                             usage_stats=usage_stats,
                             gh_token=self._credentials.gh_token,
                             trace_collector=trace_collector,
+                            credit_prose_scan=self.CREDIT_PROSE_SCAN,
                         ),
                     )
                     succeeded = True

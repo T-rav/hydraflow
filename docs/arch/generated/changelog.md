@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W29
 
+- `66d2108` — feat(gate-health): GateHealthLoop — CI reds as distributions, not events (#9974) (#9974) *(2026-07-19)*
 - `3cb90cf` — fix(workspace-gc): route open-issue GitHub reads through PRPort (#9575) (#9988) (#9988) *(2026-07-19)*
 - `c63f057` — fix(ul): slugify context-map Mermaid node ids (stable + unique) (#9980) (#9980) *(2026-07-19)*
 - `d58fd13` — docs(adr): sync README status cells to ADR files + add consistency guard (#9456) (#9967) (#9967) *(2026-07-18)*

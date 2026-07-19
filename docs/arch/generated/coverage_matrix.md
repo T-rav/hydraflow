@@ -34,7 +34,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `FitnessScorecardLoop` | ✅ [0093, 0100, 0104] | ✅ [fitness-scorecard-loop.md, fitness-scorecard.md, loop-fitness.md] | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_fitness_scorecard_loop.py` | ✅ in catalog | ❌ |
 | `FlakeTrackerLoop` | ✅ [0045, 0056, 0065, 0089, 0099] | ✅ [flake-tracker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_flake_tracker_loop.py` | ✅ in catalog | ❌ |
 | `GateActivatorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_gate_activator_loop.py` | ✅ in catalog | ✅ `s45_gate_activator_no_proposals.py` |
-| `GateHealthLoop` | ❌ | ❌ | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_gate_health_loop.py` | ✅ in catalog | ❌ |
+| `GateHealthLoop` | ❌ | ✅ [dark-factory.md] | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_gate_health_loop.py` | ✅ in catalog | ❌ |
 | `GitHubCacheLoop` | ✅ [0076] | ✅ [git-hub-cache-loop.md, github-cache-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_github_cache_loop.py` | ✅ in catalog | ✅ `s44_github_cache_idle_poll.py` |
 | `HealthMonitorLoop` | ✅ [0045, 0046, 0093] | ✅ [testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_health_monitor_loop_primary_cycle.py` | ✅ in catalog | ✅ `s48_health_monitor_idle_poll.py` |
 | `HumanSteeringLoop` | ✅ [0103] | ✅ [human-steering-loop.md, steering-channel.md, steering-state.md] | ❌ | ❌ | ✅ `test_human_steering_loop.py` | ✅ in catalog | ✅ `s52_human_steering_directive.py` |

@@ -417,6 +417,14 @@ class PRPort(Protocol):
         """Return open issues with the given label as a list of typed dicts."""
         ...
 
+    async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
+        """Return the numbers of ALL open issues (no label filter).
+
+        Used by the state-prune sweep (#9905) as the keep-set: per-issue
+        state entries whose issue is no longer open are garbage.
+        """
+        ...
+
     async def list_closed_issues_by_label(
         self, label: str, limit: int = 100
     ) -> list[GitHubIssueSummary]:

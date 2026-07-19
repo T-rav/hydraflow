@@ -30,7 +30,17 @@ def _build_gate_health(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_stale_issue_gc(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from stale_issue_gc_loop import StaleIssueGCLoop  # noqa: PLC0415
 
-    return StaleIssueGCLoop(config=config, pr_manager=ports["github"], deps=deps)
+    state = ports.get("state")
+    if state is None:
+        state = MagicMock()
+        # Real StateTracker returns {} when nothing was pruned — a bare
+        # MagicMock return would read as "pruned something" in loop results
+        # (fake-fidelity rule).
+        state.prune_issue_scoped_state.return_value = {}
+        ports["state"] = state
+    return StaleIssueGCLoop(
+        config=config, pr_manager=ports["github"], state=state, deps=deps
+    )
 
 
 def _build_dependabot_merge(ports: dict[str, Any], config: Any, deps: Any) -> Any:

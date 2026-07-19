@@ -1336,6 +1336,7 @@ def build_services(
     stale_issue_gc_loop = StaleIssueGCLoop(  # noqa: F841
         config=config,
         pr_manager=prs,
+        state=state,
         deps=loop_deps,
     )
     gate_health_loop = GateHealthLoop(
