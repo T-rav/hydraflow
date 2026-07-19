@@ -381,8 +381,14 @@ def _kill_proc_group(proc: asyncio.subprocess.Process) -> None:
     grandchildren (sub-make, pytest workers) to launchd (#9911).
     """
     with contextlib.suppress(ProcessLookupError, OSError):
-        if proc.pid is not None:
-            os.killpg(proc.pid, signal.SIGKILL)
+        pid = proc.pid
+        # Group-kill ONLY for a real positive pid. Mock procs' auto-created
+        # .pid coerces to 1 via __index__, so an unguarded killpg would
+        # signal pgid 1 (or, for a pid-0 fake, the CALLER'S OWN group —
+        # killing the test runner mid-suite; the CI smoke-job deaths on
+        # #10002). Same guard the #9648 run_simple fix landed.
+        if isinstance(pid, int) and pid > 0:
+            os.killpg(pid, signal.SIGKILL)
         else:
             proc.kill()
 

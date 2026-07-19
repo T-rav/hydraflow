@@ -538,6 +538,13 @@ class TestStreamClaudeProcessLifecycle:
 
         mock_proc = AsyncMock()
         mock_proc.returncode = None
+        # #9911: a concrete int pid is load-bearing. Without it, AsyncMock's
+        # auto-attribute .pid coerces (via __index__) to 1, so the timeout
+        # reap's _kill_proc_group() calls the REAL os.killpg(1, SIGKILL) —
+        # signalling init's process group. On Linux CI (where pytest shares
+        # that group) this wedged the whole run; on macOS it was benign, so
+        # the test passed there and the hang only surfaced in CI.
+        mock_proc.pid = 4242
         mock_proc.stdin = MagicMock()
         mock_proc.stdin.drain = AsyncMock()
         mock_proc.stdout = HangingIter()
@@ -550,6 +557,7 @@ class TestStreamClaudeProcessLifecycle:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
+            patch("runner_utils.os.killpg"),
             pytest.raises(RuntimeError, match="timed out") as exc_info,
         ):
             await stream_claude_process(
@@ -898,6 +906,10 @@ class TestStreamClaudeProcessTimeout:
 
         mock_proc = AsyncMock()
         mock_proc.returncode = None
+        # #9911: concrete int pid + patched killpg, else the timeout reap's
+        # _kill_proc_group() calls the REAL os.killpg on AsyncMock().pid
+        # (which coerces to 1 = init's group) and wedges Linux CI.
+        mock_proc.pid = 4242
         mock_proc.stdin = MagicMock()
         mock_proc.stdin.drain = AsyncMock()
         mock_proc.stdout = HangingIter()
@@ -911,6 +923,7 @@ class TestStreamClaudeProcessTimeout:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
+            patch("runner_utils.os.killpg"),
             pytest.raises(RuntimeError),
         ):
             await stream_claude_process(
