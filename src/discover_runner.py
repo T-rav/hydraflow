@@ -339,6 +339,7 @@ class DiscoverRunner(BaseRunner):
                 self._config.repo_root,
                 {"issue": task.id, "source": f"discover:attempt-{attempt}"},
                 on_output=_check_complete,
+                issue_labels=task.tags,
             )
 
             parsed = self._extract_result(transcript, task.id)
@@ -425,6 +426,7 @@ class DiscoverRunner(BaseRunner):
                 prompt,
                 self._config.repo_root,
                 {"issue": task.id, "source": "discover:evaluator"},
+                issue_labels=task.tags,
             )
         except Exception as exc:
             reraise_on_credit_or_bug(exc)

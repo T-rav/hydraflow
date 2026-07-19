@@ -21,6 +21,7 @@ NOT grow.
 from __future__ import annotations
 
 import ast
+from pathlib import Path
 
 from tests._spawn_audit import SRC, iter_module_facts
 
@@ -100,17 +101,64 @@ def test_no_spawner_bypasses_the_gated_seams() -> None:
     )
 
 
-# Runner modules whose ``self._execute(...)`` call sites all have a task/issue
-# (or threaded label context) in scope. Every call MUST pass ``issue_labels=``
-# so the CH-6 upward-only ``data-class:`` label elevation reaches the gate —
-# omitting it silently disables label-based elevation for that spawn.
-_RUNNER_EXECUTE_MODULES = (
-    "agent.py",
-    "planner.py",
-    "research_runner.py",
-    "reviewer.py",
-    "hitl_runner.py",
-)
+# Runner modules are DERIVED from the BaseRunner subclass set (#10000): the
+# old hand-maintained tuple listed 5 of 12 subclass modules, so more than
+# half the runner surface silently bypassed the pin. Every ``self._execute``
+# call in a derived module MUST pass ``issue_labels=`` so the CH-6
+# upward-only ``data-class:`` label elevation reaches the gate — omitting it
+# silently disables label-based elevation for that spawn.
+
+# Interface-gap exemptions from the runner pin below. Mirrors the
+# implement_spec_reviewer.py precedent for _AGENTPORT_CALLER_FOLLOWUPS: an
+# entry means the module's enclosing interfaces verifiably carry no issue
+# context, and threading labels is an interface change tracked as a named
+# follow-up issue — never a silent skip. Currently empty: every BaseRunner
+# subclass has (or is threaded) label context at its _execute call sites.
+_RUNNER_EXECUTE_EXEMPT: tuple[str, ...] = ()
+
+
+def _base_runner_modules(src_dir: Path = SRC) -> tuple[str, ...]:
+    """Enumerate top-level ``*.py`` in *src_dir* defining a BaseRunner subclass.
+
+    AST-derived (``class X(BaseRunner)`` / ``class X(mod.BaseRunner)``) so the
+    module list can never rot the way the hand-maintained tuple did (#10000).
+    """
+    modules: list[str] = []
+    for path in sorted(src_dir.glob("*.py")):
+        tree = ast.parse(path.read_text(), filename=path.name)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            bases = {
+                getattr(base, "id", None) or getattr(base, "attr", None)
+                for base in node.bases
+            }
+            if "BaseRunner" in bases:
+                modules.append(path.name)
+                break
+    return tuple(modules)
+
+
+def _unlabeled_execute_calls(path: Path, rel: str) -> list[str]:
+    """Return ``rel:lineno`` for every ``self._execute(...)`` in *path* that
+    omits the ``issue_labels=`` kwarg."""
+    offenders: list[str] = []
+    tree = ast.parse(path.read_text(), filename=rel)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        is_self_execute = (
+            isinstance(func, ast.Attribute)
+            and func.attr == "_execute"
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "self"
+        )
+        if not is_self_execute:
+            continue
+        if not any(kw.arg == "issue_labels" for kw in node.keywords):
+            offenders.append(f"{rel}:{node.lineno}")
+    return offenders
 
 
 def test_every_runner_execute_call_passes_issue_labels() -> None:
@@ -121,33 +169,34 @@ def test_every_runner_execute_call_passes_issue_labels() -> None:
     the gate see only the repo-declared class, so a ``data-class:regulated-*``
     issue label on an internal repo would NOT redact/block that spawn. This
     pin makes the omission structurally impossible to reintroduce (#9734
-    review finding 1).
+    review finding 1) — and the module list is derived from the BaseRunner
+    subclass set so a new runner is covered the moment it exists (#10000).
     """
+    modules = _base_runner_modules()
+    # Sanity floor: if derivation ever breaks the pin must not pass vacuously.
+    core = {"agent.py", "planner.py", "reviewer.py", "triage.py"}
+    assert core <= set(modules), (
+        f"BaseRunner subclass derivation lost core runner modules: "
+        f"{sorted(core - set(modules))} — _base_runner_modules is broken."
+    )
+    stale_exempt = sorted(set(_RUNNER_EXECUTE_EXEMPT) - set(modules))
+    assert not stale_exempt, (
+        f"_RUNNER_EXECUTE_EXEMPT has stale entries that are no longer "
+        f"BaseRunner subclass modules: {stale_exempt}. Remove them."
+    )
     offenders: list[str] = []
-    for rel in _RUNNER_EXECUTE_MODULES:
-        path = SRC / rel
-        assert path.exists(), f"runner module {rel} not found in src/"
-        tree = ast.parse(path.read_text(), filename=rel)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            is_self_execute = (
-                isinstance(func, ast.Attribute)
-                and func.attr == "_execute"
-                and isinstance(func.value, ast.Name)
-                and func.value.id == "self"
-            )
-            if not is_self_execute:
-                continue
-            if not any(kw.arg == "issue_labels" for kw in node.keywords):
-                offenders.append(f"{rel}:{node.lineno}")
+    for rel in modules:
+        if rel in _RUNNER_EXECUTE_EXEMPT:
+            continue
+        offenders.extend(_unlabeled_execute_calls(SRC / rel, rel))
     assert not offenders, (
         f"These self._execute(...) call sites omit issue_labels=: {offenders}. "
         "Without it the CH-6 gate cannot apply the upward-only "
         "data-class:<class> label elevation for that spawn — pass "
         "issue_labels=task.tags / issue.tags / issue.labels (or thread the "
-        "labels into the enclosing method) at every call."
+        "labels into the enclosing method) at every call. If the enclosing "
+        "interface truly carries no issue context, add the module to "
+        "_RUNNER_EXECUTE_EXEMPT with a comment naming the follow-up issue."
     )
 
 

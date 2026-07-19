@@ -13,6 +13,8 @@ from base_runner import BaseRunner
 from exception_classify import reraise_on_credit_or_bug
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from models import EscalationContext
 
 from models import DiagnosisResult, Severity
@@ -137,8 +139,15 @@ class DiagnosticRunner(BaseRunner):
         issue_title: str,
         issue_body: str,
         context: EscalationContext,
+        *,
+        issue_labels: Sequence[str] = (),
     ) -> DiagnosisResult:
-        """Stage 1: Read-only diagnosis against repo root. Returns structured result."""
+        """Stage 1: Read-only diagnosis against repo root. Returns structured result.
+
+        *issue_labels* is threaded from the diagnostic loop's issue listing
+        so the CH-6 gate's upward-only ``data-class:`` label elevation
+        applies to the diagnosis spawn (#10000).
+        """
         bypass = self._mockworld_diagnosis()
         if bypass is not None:
             return bypass
@@ -150,6 +159,7 @@ class DiagnosticRunner(BaseRunner):
                 prompt,
                 self._config.repo_root,
                 {"issue": issue_number, "source": "diagnostic"},
+                issue_labels=issue_labels,
             )
         except (PermissionError, KeyboardInterrupt, SystemExit, MemoryError):
             raise
@@ -204,8 +214,15 @@ class DiagnosticRunner(BaseRunner):
         issue_body: str,
         diagnosis: DiagnosisResult,
         wt_path: str,
+        *,
+        issue_labels: Sequence[str] = (),
     ) -> tuple[bool, str]:
-        """Stage 2: Attempt fix in worktree. Returns (success, transcript)."""
+        """Stage 2: Attempt fix in worktree. Returns (success, transcript).
+
+        *issue_labels* is threaded from the diagnostic loop's issue listing
+        so the CH-6 gate's upward-only ``data-class:`` label elevation
+        applies to the fix spawn (#10000).
+        """
         prompt = (
             f"# Fix Issue #{issue_number}: {issue_title}\n\n"
             f"**Root Cause:** {diagnosis.root_cause}\n\n"
@@ -223,6 +240,7 @@ class DiagnosticRunner(BaseRunner):
                 prompt,
                 wt,
                 {"issue": issue_number, "source": "diagnostic_fix"},
+                issue_labels=issue_labels,
             )
             verify = await self._verify_quality(wt)
             return verify.passed, transcript
