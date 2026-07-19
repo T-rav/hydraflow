@@ -26,6 +26,7 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **EPIC_RELEASING** ⚠️ | `src.epic:EpicManager._execute_release` | — |
 | **EPIC_UPDATE** ⚠️ | `src.epic:EpicManager._publish_update` | — |
 | **ERROR** ⚠️ | `src.base_background_loop:BaseBackgroundLoop._report_cycle_failure`<br>`src.orchestrator:HydraFlowOrchestrator._polling_loop`<br>`src.orchestrator:HydraFlowOrchestrator._restart_loop` | — |
+| **GROOM_UPDATE** ⚠️ | `src.issue_groomer_loop:IssueGroomerLoop._publish_groom_event` | — |
 | **HITL_ESCALATION** ⚠️ | `src.dashboard_routes._routes:create_router.request_changes`<br>`src.review_phase._phase:ReviewPhase._escalate_to_hitl` | — |
 | **HITL_UPDATE** ⚠️ | `src.dashboard_routes._hitl_routes:register._resolve_hitl_item`<br>`src.dashboard_routes._hitl_routes:register.hitl_correct`<br>`src.hitl_phase:HITLPhase._process_one_hitl`<br>`src.hitl_runner:HITLRunner.run`<br>`src.pr_unsticker:PRUnsticker.unstick` | — |
 | **ISSUE_CREATED** ⚠️ | `src.pr_manager:PRManager.create_issue` | — |

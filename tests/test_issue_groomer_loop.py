@@ -1,0 +1,415 @@
+"""Tests for IssueGroomerLoop (spec #9957) — fakes only, no network.
+
+Mirrors the SkillPromptEvalLoop fixture idiom but drives a real
+``FakeGitHub`` + ``StateTracker`` so auto-close / relabel / digest behaviour is
+asserted against fake *state*, not mock call-counts. The LLM is a scripted
+in-memory fake keyed on the fenced ``<issue_content number="N">`` markers the
+engine's judgment/priority prompts embed.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
+
+import pytest
+
+from base_background_loop import LoopDeps
+from config import HydraFlowConfig
+from dedup_store import DedupStore
+from events import EventBus, EventType
+from issue_groomer_loop import (
+    _DIGEST_LABEL,
+    _DIGEST_TITLE,
+    _GROOMED_AUTO_LABEL,
+    IssueGroomerLoop,
+)
+from mockworld.fakes.fake_github import FakeGitHub
+from state import StateTracker
+from subprocess_util import CreditExhaustedError
+
+# --- scripted LLM fake --------------------------------------------------------
+
+_ISSUE_RE = re.compile(r'<issue_content number="(\d+)">')
+
+
+def _dup_json(
+    verdict: str, canonical: int, confidence: str, evidence: str = "x"
+) -> str:
+    return (
+        f'{{"verdict": "{verdict}", "canonical": {canonical}, '
+        f'"evidence": "{evidence}", "confidence": "{confidence}"}}'
+    )
+
+
+def _priority_json(priority: str, reason: str = "because") -> str:
+    return f'{{"priority": "{priority}", "reason": "{reason}"}}'
+
+
+class ScriptedGroomLLM:
+    """In-memory ``groom_llm`` fake.
+
+    ``dup`` maps ``frozenset({a, b})`` → raw verdict text; ``priority`` maps an
+    issue number → raw verdict text. Unscripted prompts fall back to a benign
+    ``distinct`` / ``none`` verdict. Every prompt is recorded in ``prompts``.
+    """
+
+    def __init__(
+        self,
+        dup: dict[frozenset[int], str] | None = None,
+        priority: dict[int, str] | None = None,
+    ) -> None:
+        self.dup = dup or {}
+        self.priority = priority or {}
+        self.prompts: list[str] = []
+
+    async def complete(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        nums = [int(n) for n in _ISSUE_RE.findall(prompt)]
+        if "for duplicates" in prompt:
+            return self.dup.get(
+                frozenset(nums), _dup_json("distinct", min(nums), "high")
+            )
+        return self.priority.get(nums[0] if nums else 0, _priority_json("none"))
+
+    def dup_calls(self) -> int:
+        return sum(1 for p in self.prompts if "for duplicates" in p)
+
+    def priority_nums(self) -> set[int]:
+        out: set[int] = set()
+        for p in self.prompts:
+            if "for priority" not in p:
+                continue
+            m = _ISSUE_RE.search(p)
+            if m:
+                out.add(int(m.group(1)))
+        return out
+
+
+# --- fixtures / helpers -------------------------------------------------------
+
+
+def _cfg(tmp_path, **overrides) -> HydraFlowConfig:
+    return HydraFlowConfig(data_root=tmp_path, repo="hydra/hydraflow", **overrides)
+
+
+def _make_loop(cfg, gh, state, dedup, bus, llm=None, *, enabled=True):
+    deps = LoopDeps(
+        event_bus=bus,
+        stop_event=asyncio.Event(),
+        status_cb=lambda *a, **k: None,
+        enabled_cb=lambda _name: enabled,
+    )
+    return IssueGroomerLoop(
+        config=cfg,
+        state=state,
+        pr_manager=gh,
+        dedup=dedup,
+        deps=deps,
+        groom_llm=llm,
+    )
+
+
+def _env(tmp_path):
+    gh = FakeGitHub()
+    state = StateTracker(state_file=tmp_path / "state.json")
+    dedup = DedupStore("issue_groomer", tmp_path / "dedup.json")
+    bus = EventBus()
+    return gh, state, dedup, bus
+
+
+def _near_dup_pair(gh: FakeGitHub) -> None:
+    gh.add_issue(
+        101,
+        "DiscoverRunner wedges the s51 sandbox subprocess group",
+        "The DiscoverRunner leaves an orphaned child process that outlives the "
+        "timeout so the s51 sandbox suite never reaps it and hangs forever.",
+        labels=[],
+    )
+    gh.add_issue(
+        102,
+        "DiscoverRunner wedges the s51 sandbox child process",
+        "DiscoverRunner leaves an orphaned subprocess that outlives the timeout; "
+        "the s51 sandbox suite never reaps the child process and hangs forever.",
+        labels=[],
+    )
+
+
+def _groom_events(bus: EventBus):
+    return [e for e in bus.get_history() if e.type == EventType.GROOM_UPDATE]
+
+
+# --- tests --------------------------------------------------------------------
+
+
+async def test_kill_switch_config_disabled_is_noop(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    llm = ScriptedGroomLLM()
+    loop = _make_loop(
+        _cfg(tmp_path, issue_groomer_enabled=False), gh, state, dedup, bus, llm
+    )
+
+    stats = await loop._do_work()
+
+    assert stats == {"status": "disabled"}
+    assert llm.prompts == []
+    assert gh._issues[102].state == "open"
+    assert _groom_events(bus) == []
+
+
+async def test_kill_switch_enabled_cb_disabled_is_noop(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    llm = ScriptedGroomLLM()
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm, enabled=False)
+
+    stats = await loop._do_work()
+
+    assert stats == {"status": "disabled"}
+    assert llm.prompts == []
+
+
+async def test_unchanged_backlog_short_circuits_without_llm(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    # Pre-seed the index to match the backlog and mark a full sweep as just done.
+    raw = await gh.list_open_issues()
+    issues = [IssueGroomerLoop._to_groom_issue(r) for r in raw]
+    state.set_groom_index(
+        {str(i.number): IssueGroomerLoop._index_entry(i) for i in issues}
+    )
+    state.set_groom_last_full_sweep(datetime.now(UTC))
+
+    llm = ScriptedGroomLLM()
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+    stats = await loop._do_work()
+
+    assert stats["status"] == "ok"
+    assert stats["changed"] == 0
+    assert llm.prompts == []  # zero LLM calls on a no-change tick
+    assert _groom_events(bus) == []  # heartbeat only
+
+
+async def test_empty_backlog_is_cheap_noop(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    llm = ScriptedGroomLLM()
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    stats = await loop._do_work()
+
+    assert stats["status"] == "ok"
+    assert stats["backlog"] == 0
+    assert llm.prompts == []
+    assert state.get_groom_digest_issue() == 0  # no digest created
+
+
+async def test_weekly_full_sweep_triggers_and_advances_marker(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    # Index already matches (an incremental tick would find nothing)...
+    raw = await gh.list_open_issues()
+    issues = [IssueGroomerLoop._to_groom_issue(r) for r in raw]
+    state.set_groom_index(
+        {str(i.number): IssueGroomerLoop._index_entry(i) for i in issues}
+    )
+    # ...but the last full sweep is 8 days ago, so a sweep is due.
+    eight_days_ago = datetime.now(UTC) - timedelta(days=8)
+    state.set_groom_last_full_sweep(eight_days_ago)
+
+    llm = ScriptedGroomLLM()
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+    stats = await loop._do_work()
+
+    assert stats["full_sweep"] is True
+    assert llm.prompts, "full sweep must judge/score even with a matching index"
+    assert state.get_groom_last_full_sweep() > eight_days_ago
+
+
+async def test_pair_budget_caps_dup_judgments(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    for n in (201, 202, 203):
+        gh.add_issue(
+            n,
+            "DiscoverRunner wedges the s51 sandbox subprocess group",
+            "DiscoverRunner leaves an orphaned child that outlives the timeout; "
+            "s51 never reaps it and the sandbox suite hangs forever.",
+            labels=[],
+        )
+    # 3 mutually-similar issues → C(3,2)=3 candidate pairs; budget caps to 1.
+    llm = ScriptedGroomLLM()
+    loop = _make_loop(
+        _cfg(tmp_path, issue_groomer_pair_budget=1), gh, state, dedup, bus, llm
+    )
+    await loop._do_work()
+
+    assert llm.dup_calls() == 1
+
+
+async def test_unparseable_verdict_goes_to_digest_and_is_cached(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    llm = ScriptedGroomLLM(dup={frozenset({101, 102}): "this is not json at all"})
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    await loop._do_work()
+
+    # Pair cached despite the parse failure (no re-spend next tick).
+    judged = state.get_judged_pairs()
+    assert len(judged) == 1
+    assert judged[0].startswith("101:102:")
+    # Surfaced as an operator question in the digest, not auto-closed.
+    assert gh._issues[102].state == "open"
+    digest = gh._issues[state.get_groom_digest_issue()]
+    assert "#101 vs #102" in digest.body
+    assert "(low)" in digest.body
+
+
+async def test_auto_close_applies_comment_label_and_close(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    llm = ScriptedGroomLLM(
+        dup={frozenset({101, 102}): _dup_json("exact_dup", 101, "high", "same reap")}
+    )
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    stats = await loop._do_work()
+
+    assert stats["closed"] == 1
+    dup = gh._issues[102]
+    assert dup.state == "closed"
+    assert _GROOMED_AUTO_LABEL in dup.labels
+    assert any(
+        c.body.startswith("**Groom (auto):** duplicate of #101 — ")
+        for c in dup.comments
+    )
+    # Canonical is untouched.
+    assert gh._issues[101].state == "open"
+    assert _GROOMED_AUTO_LABEL not in gh._issues[101].labels
+
+
+async def test_relabel_adds_new_and_removes_previous(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    gh.add_issue(301, "Investigate the wedged planner phase", "body", labels=["P2"])
+    llm = ScriptedGroomLLM(priority={301: _priority_json("P0", "blocks the factory")})
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    stats = await loop._do_work()
+
+    assert stats["relabeled"] == 1
+    labels = gh._issues[301].labels
+    assert "P0" in labels
+    assert "P2" not in labels
+
+
+async def test_per_action_failure_isolated_and_digested(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    gh.close_issue = AsyncMock(side_effect=RuntimeError("boom"))  # raising close
+    llm = ScriptedGroomLLM(
+        dup={frozenset({101, 102}): _dup_json("exact_dup", 101, "high")}
+    )
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    stats = await loop._do_work()
+
+    # Tick completes cleanly; the failing close is recorded, not fatal.
+    assert stats["status"] == "ok"
+    assert stats["closed"] == 0
+    assert stats["apply_failures"] == 1
+    digest = gh._issues[state.get_groom_digest_issue()]
+    assert "Apply failures" in digest.body
+    assert "close #102" in digest.body
+
+
+async def test_credit_error_during_apply_reraises(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    gh.close_issue = AsyncMock(side_effect=CreditExhaustedError("out of credit"))
+    llm = ScriptedGroomLLM(
+        dup={frozenset({101, 102}): _dup_json("exact_dup", 101, "high")}
+    )
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    with pytest.raises(CreditExhaustedError):
+        await loop._do_work()
+
+
+async def test_digest_created_then_updated(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    llm = ScriptedGroomLLM()
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    await loop._do_work()
+    digest_num = state.get_groom_digest_issue()
+    assert digest_num > 0
+    digest = gh._issues[digest_num]
+    assert digest.title == _DIGEST_TITLE
+    assert _DIGEST_LABEL in digest.labels
+    assert _DIGEST_DEDUP_KEY_present(dedup)
+    issue_count_after_first = len(gh._issues)
+
+    # Second tick: change an issue so the tick grooms and rewrites the digest.
+    gh._issues[101].body = "Completely different body text now, reindex me please."
+    gh.set_issue_updated_at(101, "2026-07-19T00:00:00Z")
+    await loop._do_work()
+
+    assert state.get_groom_digest_issue() == digest_num  # same rolling issue
+    assert len(gh._issues) == issue_count_after_first  # updated, not re-created
+
+
+def _DIGEST_DEDUP_KEY_present(dedup: DedupStore) -> bool:
+    from issue_groomer_loop import _DIGEST_DEDUP_KEY
+
+    return _DIGEST_DEDUP_KEY in dedup.get()
+
+
+async def test_publishes_one_groom_event_with_counters(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    llm = ScriptedGroomLLM(
+        dup={frozenset({101, 102}): _dup_json("exact_dup", 101, "high")}
+    )
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    await loop._do_work()
+
+    events = _groom_events(bus)
+    assert len(events) == 1
+    data = events[0].data
+    assert data["closed"] == 1
+    assert {"closed", "relabeled", "proposals", "judged", "cache_hits"} <= set(data)
+
+
+async def test_incremental_priority_skips_already_p_labeled(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    gh.add_issue(401, "OAuth login flow returns a blank page", "b1", labels=["P1"])
+    gh.add_issue(402, "Metrics dashboard chart renders upside down", "b2", labels=[])
+    # Incremental tick: sweep just done, both issues are new → both "changed".
+    state.set_groom_last_full_sweep(datetime.now(UTC))
+    llm = ScriptedGroomLLM()
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    stats = await loop._do_work()
+
+    assert stats["full_sweep"] is False
+    # 401 already carries a P-label → skipped; 402 (no P-label) → scored.
+    assert llm.priority_nums() == {402}
+
+
+async def test_full_sweep_scores_even_p_labeled(tmp_path) -> None:
+    gh, state, dedup, bus = _env(tmp_path)
+    gh.add_issue(401, "OAuth login flow returns a blank page", "b1", labels=["P1"])
+    gh.add_issue(402, "Metrics dashboard chart renders upside down", "b2", labels=[])
+    # Full sweep due → every unguarded issue is scored, P-labeled or not.
+    state.set_groom_last_full_sweep(datetime.now(UTC) - timedelta(days=8))
+    llm = ScriptedGroomLLM()
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    stats = await loop._do_work()
+
+    assert stats["full_sweep"] is True
+    assert llm.priority_nums() == {401, 402}

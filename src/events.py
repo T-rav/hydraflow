@@ -107,6 +107,8 @@ class EventType(StrEnum):
     CONCERN_FORWARDED = "concern_forwarded"
     CONCERN_ADDRESSED = "concern_addressed"
     SHIPPED_WITH_KNOWN_GAP = "shipped_with_known_gap"
+    # IssueGroomerLoop tick summary for the dashboard (#9957)
+    GROOM_UPDATE = "groom_update"
 
 
 #: Event types delivered live-only — fanned out to connected subscribers but
