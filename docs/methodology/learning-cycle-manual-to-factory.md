@@ -232,4 +232,5 @@ This doc you're reading was produced in step 8.5 — meta-extracting the pattern
 - [`factory_operation/README.md`](../standards/factory_operation/README.md) §"Self-modifying maintenance mode" — the inner cycle (factory learning from runtime)
 - [`self-documenting-architecture.md`](self-documenting-architecture.md) — how docs stay alive once written
 - [`onboarding-hydraflow-format-repos.md`](onboarding-hydraflow-format-repos.md) — the first complete worked example
+- [`backlog-to-loop-reflection.md`](backlog-to-loop-reflection.md) — the lightweight sibling: a fast N=1 reflection for when a detector already exists but doesn't *resolve* (turn manual backlog grooming into a resolver loop)
 - Future: as more methodology docs land via this cycle, list them here
