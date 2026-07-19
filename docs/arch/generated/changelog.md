@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W29
 
+- `e38a7e5` — refactor: rename IssueGroomerLoop -> IssueRefinementLoop (operator naming decision) (#9957) (#9957) *(2026-07-19)*
 - `e85b1a9` — feat(loop): IssueGroomerLoop — tiered dedup, priority labels, rolling digest (#9957) (#9957) *(2026-07-19)*
 - `7ab3c52` — Merge remote-tracking branch 'origin/staging' into feat/issue-groomer-loop *(2026-07-19)*
 - `33f8b6f` — feat(refine): prompt self-refinement — honeypot-gated auto-merge prompt-fix PRs + telemetry consumption (#9724) (#10006) (#10006) *(2026-07-19)*

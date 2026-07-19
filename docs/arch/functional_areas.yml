@@ -27,6 +27,7 @@ areas:
       - EpicSweeperLoop
       - GitHubCacheLoop
       - HealthMonitorLoop
+      - IssueRefinementLoop
       - LabelDriftWatcherLoop
       - LogIngestLoop
       - MemoryBacklogLoop

@@ -72,6 +72,7 @@ from human_steering_loop import HumanSteeringLoop
 from implement_phase import ImplementPhase
 from issue_cache import IssueCache
 from issue_fetcher import GitHubTaskFetcher, IssueFetcher
+from issue_refinement_loop import IssueRefinementLoop
 from issue_store import IssueStore
 from label_drift_watcher_loop import LabelDriftWatcherLoop
 from live_corpus_replay_loop import (
@@ -313,6 +314,7 @@ class ServiceRegistry:
     log_ingest_loop: LogIngestLoop
     stale_issue_gc_loop: StaleIssueGCLoop
     gate_health_loop: GateHealthLoop
+    issue_refinement_loop: IssueRefinementLoop
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
     gate_activator_loop: GateActivatorLoop
@@ -1344,6 +1346,17 @@ def build_services(
         pr_manager=prs,
         deps=loop_deps,
     )
+    issue_refinement_dedup = DedupStore(
+        "issue_refinement",
+        config.data_root / "dedup" / "issue_refinement.json",
+    )
+    issue_refinement_loop = IssueRefinementLoop(
+        config=config,
+        state=state,
+        pr_manager=prs,
+        dedup=issue_refinement_dedup,
+        deps=loop_deps,
+    )
     ci_monitor_loop = CIMonitorLoop(  # noqa: F841
         config=config,
         pr_manager=prs,
@@ -1871,6 +1884,7 @@ def build_services(
         log_ingest_loop=log_ingest_loop,
         stale_issue_gc_loop=stale_issue_gc_loop,
         gate_health_loop=gate_health_loop,
+        issue_refinement_loop=issue_refinement_loop,
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,
         gate_activator_loop=gate_activator_loop,

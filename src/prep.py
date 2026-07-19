@@ -176,6 +176,16 @@ HYDRAFLOW_LITERAL_LABELS: tuple[tuple[str, str, str], ...] = (
         "d93f0b",
         "Autonomous attempts exhausted — human action required",
     ),
+    (
+        "refinement-auto",
+        "ededed",
+        "Issue auto-closed as a duplicate by IssueRefinementLoop (#9957)",
+    ),
+    (
+        "hydraflow-refinement-digest",
+        "c5def5",
+        "Rolling backlog-health digest issue maintained by IssueRefinementLoop",
+    ),
 )
 
 

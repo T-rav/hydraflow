@@ -228,7 +228,7 @@ class IssueRefinementLoop(BaseBackgroundLoop):
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
         if not self._config.issue_refinement_enabled:
-            return {"status": "disabled"}
+            return {"status": "config_disabled"}
 
         now = datetime.now(UTC)
 

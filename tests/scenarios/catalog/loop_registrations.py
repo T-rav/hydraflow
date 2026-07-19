@@ -27,6 +27,53 @@ def _build_gate_health(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     return GateHealthLoop(config=config, pr_manager=ports["github"], deps=deps)
 
 
+def _build_issue_refinement(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build IssueRefinementLoop for scenarios (#9957).
+
+    ``state`` and ``dedup`` default to MagicMocks that behave like a clean
+    slate (empty index, no judged pairs, no full sweep yet, no digest issue,
+    no open proposals, no prior dedup keys) — mirrors the FlakeTrackerLoop /
+    SkillPromptEvalLoop pattern. ``issue_refinement_llm`` defaults to a
+    duck-typed client whose ``complete`` resolves to ``""`` — the loop's
+    fail-soft degrade path (unparseable verdict -> low-confidence proposal,
+    no crash) so a scenario never needs a real LLM call.
+    """
+    from issue_refinement_loop import IssueRefinementLoop  # noqa: PLC0415
+
+    state = ports.get("issue_refinement_state")
+    if state is None:
+        state = MagicMock()
+        state.get_refinement_index.return_value = {}
+        state.get_judged_pairs.return_value = []
+        state.get_refinement_last_full_sweep.return_value = None
+        state.get_refinement_digest_issue.return_value = 0
+        state.get_refinement_open_proposals.return_value = []
+        ports["issue_refinement_state"] = state
+
+    dedup = ports.get("issue_refinement_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["issue_refinement_dedup"] = dedup
+
+    llm = ports.get("issue_refinement_llm")
+    if llm is None:
+        llm = MagicMock()
+        llm.complete = AsyncMock(return_value="")
+        ports["issue_refinement_llm"] = llm
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return IssueRefinementLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        deps=deps,
+        refinement_llm=llm,
+    )
+
+
 def _build_stale_issue_gc(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from stale_issue_gc_loop import StaleIssueGCLoop  # noqa: PLC0415
 
@@ -1724,6 +1771,7 @@ _BUILDERS: dict[str, Any] = {
     "gate_activator": _build_gate_activator,
     "stale_issue_gc": _build_stale_issue_gc,
     "gate_health": _build_gate_health,
+    "issue_refinement": _build_issue_refinement,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,
     "merge_state_watcher": _build_merge_state_watcher,

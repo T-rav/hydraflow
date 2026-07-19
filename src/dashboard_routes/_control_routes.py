@@ -299,6 +299,11 @@ _bg_worker_defs = [
         "Weekly read-only CI-gate auditor: pass-rate distributions, blame-correlation, missing failure artifacts, stale quarantines.",
     ),
     (
+        "issue_refinement",
+        "Issue Refinement",
+        "Backlog-wide duplicate detection, priority scoring, and a rolling operator digest issue.",
+    ),
+    (
         "sandbox_failure_fixer",
         "Sandbox Failure Fixer",
         "Auto-fixes promotion PRs failing sandbox CI by dispatching the auto-agent",

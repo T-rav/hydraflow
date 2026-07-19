@@ -39,12 +39,6 @@ _INTERVAL_BOUNDS_SKIP: set[str] = {
     # extra=ignore tolerates stale .env), but it no longer has an _INTERVAL_BOUNDS
     # entry because the worker is no longer operator-controllable.
     "memory_sync_interval",
-    # Config-first landing (#9957): IssueRefinementLoop itself isn't wired into
-    # the Workers tab yet (LoopCatalog/BACKGROUND_WORKERS registration lands
-    # in a later task of the same build). Remove from this skip list and add
-    # matching _INTERVAL_BOUNDS entries once the loop is wired.
-    "issue_refinement_interval",
-    "issue_refinement_full_sweep_interval",
 }
 
 
@@ -147,6 +141,10 @@ class TestIntervalFieldsHaveBounds:
             "stale_issue_gc_interval": "stale_issue_gc",
             "ci_monitor_interval": "ci_monitor",
             "security_patch_interval": "security_patch",
+            # Secondary cadence knob on IssueRefinementLoop (#9957) — shares
+            # the loop's single dashboard-editable bounds entry rather than
+            # getting its own (there's one worker, not two).
+            "issue_refinement_full_sweep_interval": "issue_refinement",
         }
 
         missing = set()

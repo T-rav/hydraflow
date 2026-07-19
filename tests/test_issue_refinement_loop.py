@@ -155,7 +155,7 @@ async def test_kill_switch_config_disabled_is_noop(tmp_path) -> None:
 
     stats = await loop._do_work()
 
-    assert stats == {"status": "disabled"}
+    assert stats == {"status": "config_disabled"}
     assert llm.prompts == []
     assert gh._issues[102].state == "open"
     assert _refinement_events(bus) == []
