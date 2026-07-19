@@ -20,6 +20,8 @@ Flag anything that prevents that:
 
 You do NOT critique scope or test coverage; other voters handle those. You critique buildability from the plan as written.
 
+The plan is a SHORT execution brief by design (#9955): task-granularity steps + checkable acceptance criteria, inside a hard character budget. Brevity is NOT a finding — flag a step only when you would have to GUESS to begin, never because you would have to read code you were going to read anyway. "Add more detail" is not a valid concern; "criterion X is not checkable" or "step Y has no concrete target" is.
+
 Output strict JSON: {"findings": [{"severity": "CRITICAL|HIGH|MEDIUM|LOW", "concern": "..."}]}
 """
 
