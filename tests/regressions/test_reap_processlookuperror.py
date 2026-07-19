@@ -11,9 +11,10 @@ suppress at all — so the ``ProcessLookupError`` escaped and crashed the loop
 iteration instead of the caller handling the timeout. See #9794 / #9814.
 
 #9883 found the guard from #9794/#9816 had only reached a subset of the reap
-sites sharing this shape: four more ``_communicate_bounded`` helpers
-(``corpus_learning_loop``, ``memory_backlog_loop``, ``skill_prompt_eval_loop``,
-``principles_audit_loop``) plus inline reaps in ``staging_bisect_loop``,
+sites sharing this shape: more ``_communicate_bounded`` helpers
+(``memory_backlog_loop``, ``skill_prompt_eval_loop``, ``principles_audit_loop``;
+``corpus_learning_loop`` was later migrated off raw gh to PRPort in #9932) plus
+inline reaps in ``staging_bisect_loop``,
 ``contract_refresh_loop``, ``trust_fleet_sanity_loop`` and the MockWorld
 ``fake_subprocess_runner`` host path still killed the child outside the
 ``suppress``. The parametrized helper tests below pin the named helpers; the
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -37,10 +39,14 @@ sys.path.insert(0, str(SRC_DIR))
 
 
 class _DeadProc:
-    """Hangs on communicate() (so wait_for times out) and is already-dead on
-    kill() (so proc.kill() raises ProcessLookupError, like a real reaped child)."""
+    """Hangs on communicate() (so wait_for times out) and models an already-dead
+    child: proc.kill() raises ProcessLookupError, like a real reaped child. A
+    real asyncio Process always exposes a ``pid`` (used by the #9648 killpg reap
+    path in execution.run_simple); the tests that exercise killpg model the
+    process group as already-gone by patching os.killpg to raise."""
 
     returncode: int | None = None
+    pid: int = 424242
 
     async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
         await asyncio.sleep(5)  # longer than the patched timeout
@@ -61,8 +67,9 @@ class _DeadProc:
         ("rc_budget_loop", "_GH_TIMEOUT_SECONDS"),
         ("fake_coverage_auditor_loop", "_SUBPROCESS_TIMEOUT_SECONDS"),
         ("adr_touchpoint_auditor_loop", "_GH_TIMEOUT_SECONDS"),
-        # #9883: four sibling loops that shared the identical unguarded shape.
-        ("corpus_learning_loop", "_GH_TIMEOUT_SECONDS"),
+        # #9883: sibling loops that shared the identical unguarded shape.
+        # (corpus_learning_loop was later migrated off raw gh to PRPort in
+        # #9932, so its _communicate_bounded helper no longer exists.)
         ("memory_backlog_loop", "_SUBPROCESS_TIMEOUT_SECONDS"),
         # These two take the timeout as a call argument (no module-level attr),
         # signalled by timeout_attr=None below.
@@ -94,6 +101,17 @@ async def test_host_runner_run_simple_surfaces_timeout_not_processlookup(monkeyp
         return _DeadProc()
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create)
+
+    # #9648 changed the reap to os.killpg(proc.pid, SIGKILL). Model the process
+    # group as already-gone so killpg raises ProcessLookupError, exactly like a
+    # real reaped child. run_simple must still surface TimeoutError (the intended
+    # failed-read signal), never the ProcessLookupError from the reap (#9794/#9814).
+    def _dead_killpg(_pgid: int, _sig: int) -> None:
+        raise ProcessLookupError()
+
+    # execution.run_simple calls os.killpg on the shared os module, so patching
+    # it here also patches the call inside run_simple.
+    monkeypatch.setattr(os, "killpg", _dead_killpg)
     runner = execution.HostRunner()
     with pytest.raises(TimeoutError):
         await runner.run_simple(["gh", "issue", "list"], timeout=0.01)

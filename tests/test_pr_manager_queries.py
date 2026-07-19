@@ -1434,6 +1434,62 @@ class TestGetIssueState:
         assert "view" in call_args
 
 
+class TestGetIssueLabels:
+    """#9575: PRManager.get_issue_labels returns issue label names."""
+
+    @pytest.mark.asyncio
+    async def test_parses_newline_separated_names(self, config, event_bus):
+        mgr = make_pr_manager(config, event_bus)
+        mock_create = (
+            SubprocessMockBuilder()
+            .with_stdout("hydraflow-ready\nhydraflow-review\n")
+            .build()
+        )
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_issue_labels(42)
+
+        assert result == ["hydraflow-ready", "hydraflow-review"]
+
+    @pytest.mark.asyncio
+    async def test_empty_output_returns_empty_list(self, config, event_bus):
+        mgr = make_pr_manager(config, event_bus)
+        mock_create = SubprocessMockBuilder().with_stdout("").build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_issue_labels(42)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_queries_labels_via_issue_view(self, config, event_bus):
+        mgr = make_pr_manager(config, event_bus)
+        mock_create = SubprocessMockBuilder().with_stdout("").build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create) as m:
+            await mgr.get_issue_labels(99)
+
+        call_args = m.call_args[0]
+        assert "99" in call_args
+        assert "issue" in call_args
+        assert "view" in call_args
+        assert ".labels[].name" in call_args
+
+    @pytest.mark.asyncio
+    async def test_read_failure_propagates(self, config, event_bus):
+        """Errors are NOT swallowed so callers can fail-closed (#9575)."""
+        mgr = make_pr_manager(config, event_bus)
+        mock_create = (
+            SubprocessMockBuilder().with_returncode(1).with_stderr("gh boom").build()
+        )
+
+        with (
+            patch("asyncio.create_subprocess_exec", mock_create),
+            pytest.raises(RuntimeError),
+        ):
+            await mgr.get_issue_labels(42)
+
+
 # ---------------------------------------------------------------------------
 # try/except/raise wrapper removal (issue #6306)
 # ---------------------------------------------------------------------------

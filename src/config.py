@@ -106,7 +106,8 @@ class ManagedRepo(BaseModel):
 # Each tuple: (field_name, env_var_key, default_value)
 _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("dashboard_port", "HYDRAFLOW_DASHBOARD_PORT", 5555),
-    ("min_plan_words", "HYDRAFLOW_MIN_PLAN_WORDS", 200),
+    ("min_plan_words", "HYDRAFLOW_MIN_PLAN_WORDS", 60),
+    ("max_plan_chars", "HYDRAFLOW_MAX_PLAN_CHARS", 5000),
     (
         "max_pre_quality_review_attempts",
         "HYDRAFLOW_MAX_PRE_QUALITY_REVIEW_ATTEMPTS",
@@ -203,6 +204,9 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("artifact_retention_days", "HYDRAFLOW_ARTIFACT_RETENTION_DAYS", 30),
     ("artifact_max_size_mb", "HYDRAFLOW_ARTIFACT_MAX_SIZE_MB", 500),
     ("runs_gc_interval", "HYDRAFLOW_RUNS_GC_INTERVAL", 3600),
+    ("gate_health_interval", "HYDRAFLOW_GATE_HEALTH_INTERVAL", 604800),
+    ("gate_health_run_window", "HYDRAFLOW_GATE_HEALTH_RUN_WINDOW", 50),
+    ("gate_health_min_attempts", "HYDRAFLOW_GATE_HEALTH_MIN_ATTEMPTS", 3),
     ("adr_review_interval", "HYDRAFLOW_ADR_REVIEW_INTERVAL", 86400),
     ("adr_review_approval_threshold", "HYDRAFLOW_ADR_REVIEW_APPROVAL_THRESHOLD", 2),
     ("adr_review_max_rounds", "HYDRAFLOW_ADR_REVIEW_MAX_ROUNDS", 3),
@@ -604,6 +608,12 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("report_issue_loop_enabled", "HYDRAFLOW_REPORT_ISSUE_LOOP_ENABLED", True),
     ("retrospective_loop_enabled", "HYDRAFLOW_RETROSPECTIVE_LOOP_ENABLED", True),
     ("runs_gc_loop_enabled", "HYDRAFLOW_RUNS_GC_LOOP_ENABLED", True),
+    (
+        "event_log_periodic_rotate_enabled",
+        "HYDRAFLOW_EVENT_LOG_PERIODIC_ROTATE_ENABLED",
+        True,
+    ),
+    ("state_prune_enabled", "HYDRAFLOW_STATE_PRUNE_ENABLED", True),
     ("security_patch_loop_enabled", "HYDRAFLOW_SECURITY_PATCH_LOOP_ENABLED", True),
     ("sentry_loop_enabled", "HYDRAFLOW_SENTRY_LOOP_ENABLED", True),
     ("log_ingest_loop_enabled", "HYDRAFLOW_LOG_INGEST_LOOP_ENABLED", True),
@@ -620,6 +630,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("stale_issue_gc_loop_enabled", "HYDRAFLOW_STALE_ISSUE_GC_LOOP_ENABLED", True),
+    ("gate_health_loop_enabled", "HYDRAFLOW_GATE_HEALTH_LOOP_ENABLED", True),
     ("stale_issue_loop_enabled", "HYDRAFLOW_STALE_ISSUE_LOOP_ENABLED", True),
     ("triage_retry_loop_enabled", "HYDRAFLOW_TRIAGE_RETRY_LOOP_ENABLED", True),
     (
@@ -1272,6 +1283,27 @@ class HydraFlowConfig(BaseModel):
         le=86400,
         description="Runs GC loop interval in seconds (default 1 hour)",
     )
+    gate_health_interval: int = Field(
+        default=604800,
+        ge=3600,
+        le=2592000,
+        description="GateHealthLoop cycle interval in seconds (default weekly)",
+    )
+    gate_health_run_window: int = Field(
+        default=50,
+        ge=10,
+        le=200,
+        description="Workflow runs analyzed per GateHealthLoop cycle",
+    )
+    gate_health_min_attempts: int = Field(
+        default=3,
+        ge=2,
+        le=50,
+        description=(
+            "Minimum failures before GateHealthLoop flags a check: "
+            "born-broken needs N, blame-correlation N-1"
+        ),
+    )
 
     # Hash-chained audit stream retention (CH-1, #9729). None = keep forever.
     # A set value is a retention FLOOR: RunsGCLoop may prune records strictly
@@ -1546,10 +1578,23 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     min_plan_words: int = Field(
-        default=200,
-        ge=50,
+        default=60,
+        ge=20,
         le=2000,
-        description="Minimum word count for a valid plan",
+        description=(
+            "Minimum word count for a valid plan — a floor that rejects only "
+            "empty/skeletal plans; concise-but-complete briefs pass (#9955)"
+        ),
+    )
+    max_plan_chars: int = Field(
+        default=5000,
+        ge=1000,
+        le=45000,
+        description=(
+            "Hard character budget for a plan (#9955). Kept BELOW "
+            "max_impl_plan_chars so the implement boundary never truncates — "
+            "truncation is information loss the plan phase paid latency for."
+        ),
     )
     max_new_files_warning: int = Field(
         default=5,
@@ -2554,6 +2599,22 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=90,
         description="Days of event history to retain during rotation",
+    )
+    event_log_periodic_rotate_enabled: bool = Field(
+        default=True,
+        description=(
+            "Rotate events.jsonl every RunsGCLoop cycle, not just at boot "
+            "(#9905). The size bound inside rotation guarantees the "
+            "post-rotation file fits event_log_max_size_mb."
+        ),
+    )
+    state_prune_enabled: bool = Field(
+        default=True,
+        description=(
+            "Prune per-issue state.json entries (adversarial states, "
+            "convergence ledgers, attempt counters) for issues that are no "
+            "longer open, during StaleIssueGCLoop cycles (#9905)."
+        ),
     )
 
     # Health monitor
@@ -3651,6 +3712,10 @@ class HydraFlowConfig(BaseModel):
     stale_issue_gc_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for StaleIssueGCLoop.",
+    )
+    gate_health_loop_enabled: bool = Field(
+        default=True,
+        description="Deploy-time kill-switch for GateHealthLoop (#9974).",
     )
     stale_issue_loop_enabled: bool = Field(
         default=True,

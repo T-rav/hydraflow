@@ -98,6 +98,21 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         stdout = _json.dumps(issues) + "\n"
         return FakeOutput(exit_code=0, stdout=stdout, stderr="")
 
+    if method == "get_issue_labels":
+        issue_number = int(args[0])
+        # Seed the issue with a deterministic label set so the contract
+        # covers the non-empty path, mirroring the newline-separated output
+        # of `gh issue view --json labels --jq '.labels[].name'`.
+        fake.add_issue(
+            issue_number,
+            "Labelled issue",
+            "body",
+            labels=["hydraflow-ready", "hydraflow-review"],
+        )
+        names = await fake.get_issue_labels(issue_number)
+        stdout = "".join(f"{name}\n" for name in names)
+        return FakeOutput(exit_code=0, stdout=stdout, stderr="")
+
     if method == "create_issue":
         title = str(args[0])
         body = str(args[1]) if len(args) > 1 else ""

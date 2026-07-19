@@ -307,3 +307,46 @@ async def test_auth_error_propagates_not_swallowed(env) -> None:
 
     with pytest.raises(AuthenticationError):
         await loop._do_work()
+
+
+async def test_reconcile_closed_escalations_routes_through_prport(
+    env, monkeypatch
+) -> None:
+    """Closed memory-backlog-stuck escalations clear dedup key + counter.
+
+    The read goes through ``PRPort.list_closed_issues_by_label`` (shared
+    ``EscalationReconciler``) instead of a raw ``gh`` subprocess (#9932); the
+    ``create_subprocess_exec`` guard fails the test if the reconcile path
+    escapes the MockWorld air-gap. ``clear_memory_backlog_attempts`` is keyed
+    on the FULL dedup key, so the reconciler must pass ``memory_backlog:<slug>``.
+    """
+    cfg, state, pr, dedup, _ = env
+    dedup.get.return_value = {"memory_backlog:some-slug", "memory_backlog:other"}
+    loop = _make_loop(env)
+
+    pr.list_closed_issues_by_label.return_value = [
+        {
+            "number": 9702,
+            "title": "HITL: memory backlog some-slug unresolved after 3",
+            "body": "",
+            "updated_at": "",
+        }
+    ]
+
+    def _no_subprocess(*_args, **_kwargs):
+        raise AssertionError("reconcile must route through the PRPort, not raw gh")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _no_subprocess)
+
+    await loop._reconcile_closed_escalations()
+
+    pr.list_closed_issues_by_label.assert_awaited_once_with(
+        cfg.memory_backlog_stuck_label[0], limit=100
+    )
+    dedup.set_all.assert_called_once()
+    remaining = dedup.set_all.call_args.args[0]
+    assert "memory_backlog:some-slug" not in remaining
+    assert "memory_backlog:other" in remaining
+    state.clear_memory_backlog_attempts.assert_called_once_with(
+        "memory_backlog:some-slug"
+    )

@@ -294,6 +294,11 @@ _bg_worker_defs = [
         "Purges expired pipeline run artifacts per TTL and size-cap config; keeps the runs store from growing unbounded.",
     ),
     (
+        "gate_health",
+        "Gate Health",
+        "Weekly read-only CI-gate auditor: pass-rate distributions, blame-correlation, missing failure artifacts, stale quarantines.",
+    ),
+    (
         "sandbox_failure_fixer",
         "Sandbox Failure Fixer",
         "Auto-fixes promotion PRs failing sandbox CI by dispatching the auto-agent",

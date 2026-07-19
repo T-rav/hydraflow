@@ -48,8 +48,12 @@ _REPO = Path(__file__).resolve().parent.parent.parent
 # false-positive against the ``assert communicate_count`` guard below. The
 # fleet-wide AST scan in ``test_issue_9508.py`` is the authoritative source of
 # truth and correctly does not flag it.
+#
+# ``corpus_learning_loop.py`` left the list with #9932: its remaining raw
+# ``gh`` reconcile read moved behind the PRPort (shared EscalationReconciler),
+# so the module no longer spawns subprocesses at all — same shape as the
+# ``wiki_rot_detector_loop.py`` exclusion above.
 _UNHARDENED_COMMUNICATE_MODULES = [
-    "src/corpus_learning_loop.py",
     "src/memory_backlog_loop.py",
     "src/adr_touchpoint_auditor_loop.py",
     "src/rc_budget_loop.py",

@@ -87,6 +87,12 @@ class StreamConfig:
     usage_stats: dict[str, object] | None = field(default=None)
     gh_token: str = ""
     trace_collector: TraceCollector | None = None
+    # #9895: when False, credit exhaustion is detected from stderr (the
+    # CLI's own signal) only — agent stdout prose is NOT scanned. Runners
+    # that analyze failure transcripts (DiagnosticRunner) quote credit-error
+    # prose routinely; scanning it raised a false global CreditExhaustedError
+    # on essentially every diagnostic run (mirrors the _is_auth_failure rule).
+    credit_prose_scan: bool = True
 
 
 def _route_prompt_to_cmd(cmd: list[str], prompt: str) -> tuple[list[str], int]:
@@ -158,7 +164,11 @@ def _post_stream_result(
             "~/.gemini/settings.json / CODEX_HOME)"
         )
 
-    combined = f"{stderr_text}\n{accumulated_text}"
+    combined = (
+        f"{stderr_text}\n{accumulated_text}"
+        if config.credit_prose_scan
+        else stderr_text
+    )
     if not early_killed and is_credit_exhaustion(combined):
         resume_at = parse_credit_resume_time(combined)
         raise CreditExhaustedError("API credit limit reached", resume_at=resume_at)

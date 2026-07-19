@@ -417,6 +417,14 @@ class PRPort(Protocol):
         """Return open issues with the given label as a list of typed dicts."""
         ...
 
+    async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
+        """Return the numbers of ALL open issues (no label filter).
+
+        Used by the state-prune sweep (#9905) as the keep-set: per-issue
+        state entries whose issue is no longer open are garbage.
+        """
+        ...
+
     async def list_closed_issues_by_label(
         self, label: str, limit: int = 100
     ) -> list[GitHubIssueSummary]:
@@ -445,8 +453,35 @@ class PRPort(Protocol):
         """Return the resolved state of a GitHub issue (``'COMPLETED'``, ``'OPEN'``, etc.)."""
         ...
 
+    async def list_workflow_runs(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return recent workflow runs, newest first (#9974, read-only).
+
+        Each dict: ``{"id", "workflow", "conclusion", "created_at",
+        "pr_number"}`` — ``pr_number`` is 0 when the run has no PR
+        association.
+        """
+        ...
+
+    async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        """Return jobs for one run: ``{"name", "conclusion"}`` each (#9974)."""
+        ...
+
+    async def count_workflow_run_artifacts(self, run_id: int) -> int:
+        """Return the number of artifacts a run uploaded (#9974)."""
+        ...
+
     async def get_issue_updated_at(self, issue_number: int) -> str:
         """Return the updated_at timestamp for an issue as ISO string."""
+        ...
+
+    async def get_issue_labels(self, issue_number: int) -> list[str]:
+        """Return the label names carried by a GitHub issue.
+
+        Propagates read failures (does not swallow) so callers such as
+        ``WorkspaceGCLoop._issue_has_pipeline_label`` can fail-closed on
+        error rather than mistaking an unreadable issue for an unlabelled
+        one (#9575).
+        """
         ...
 
     async def update_issue_body(self, issue_number: int, body: str) -> None:

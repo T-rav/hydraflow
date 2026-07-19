@@ -455,6 +455,12 @@ class PlannerRunner(BaseRunner):
         if section_chars_saved:
             self._last_context_stats["section_dedup_chars_saved"] = section_chars_saved
 
+        # #9955: the budget shown to the agent is the ENFORCED one — never
+        # above the implement boundary, so nothing written is ever truncated.
+        max_plan_chars = min(
+            self._config.max_plan_chars, self._config.max_impl_plan_chars
+        )
+
         prompt = f"""You are a planning agent for GitHub issue #{issue.id}.
 
 ## Issue: {issue.title}
@@ -497,11 +503,18 @@ Use semantic tools first (before grep):
 3. Map the code topology — trace call graphs, data flows, and component boundaries.
    Write LikeC4 diagram files (.likec4) to `/tmp/hydraflow-diagrams/issue-{issue.id}/`
    capturing the C4 model (specification, model, views) for the change area.
-4. Identify concrete file-level deltas.
-5. Build a Task Graph with dependency-ordered phases (full plans only).
-6. Write behavioral test specs for each phase — describe observable outcomes, not test code.
+4. Identify concrete file-level deltas (paths and what changes — not diffs).
+5. Build a Task Graph with dependency-ordered phases at TASK granularity
+   (full plans only). One phase = one coherent task an implementer executes
+   in-context with the actual code open. Do NOT write line-by-line
+   instructions or code snippets — the implementer re-derives that detail
+   from the live code, so it costs plan latency twice and goes stale once
+   (upstream drift). A code fragment belongs in a plan only when it is
+   itself load-bearing (an exact signature, wire format, or invariant).
+6. Write behavioral test specs for each phase — one line each, observable
+   outcomes, not test code.
 7. For UI work, call out reusable components/shared modules (`constants.js`, `types.js`, `theme.js`).
-8. **Principles (ADR-0044).** Before declaring the plan done, check each item. Missing any of these in the plan is cheaper to fix now than at review:
+8. **Principles (ADR-0044).** Before declaring the plan done, VERIFY the brief against each item — fix by adjusting steps/criteria, not by expanding prose. Missing any of these in the plan is cheaper to fix now than at review:
    - **MockWorld scenario coverage:** if the change crosses phases or touches orchestrator/runner behaviour, add a release-gating scenario under `tests/scenarios/` that uses `MockWorld` fakes (no real subprocess / GitHub / git). Name the scenario after the behaviour, not the code.
    - **TDD + behavioral test names:** every phase's **Tests:** entries must describe observable behaviour (given/when/then-style), not function names. "POST /widgets with missing name returns 400" — good. "Test create_widget" — bad.
    - **Hexagonal Ports:** new GitHub / git / worktree / subprocess calls must go through `PRPort`, `IssueStorePort`, or `WorkspacePort`. If your plan introduces a direct `subprocess.run`, `gh`, or `git` call in a non-adapter file, route it through the existing Port (or extend the Port) instead.
@@ -511,9 +524,9 @@ Use semantic tools first (before grep):
      `BaseBackgroundLoop` subclass or subprocess-spawning runner MUST include the
      ADR-0049 kill-switch (`HYDRAFLOW_DISABLE_<WORKER>_LOOP` env + in-body
      `enabled_cb` gate); `run_phase_gates` rejects plans that omit it.
-9. **Audit the plan against `docs/wiki/gotchas.md`.** Every code snippet,
-   test fixture, and cross-module import in your plan must avoid the anti-patterns
-   listed there. Specifically check: symbols imported across modules do not start
+9. **Audit the plan against `docs/wiki/gotchas.md`.** Anything your plan
+   directs (fixtures, imports, logging idioms) must avoid the anti-patterns
+   listed there — note a violation risk as one line under Key Considerations. Specifically check: symbols imported across modules do not start
    with `_`; test helpers do not duplicate ones in `tests/conftest.py` (grep first);
    `logger.error` / `logger.warning` calls pass a literal format string, not a bare
    variable; hardcoded path lists that mirror filesystem or Dockerfile state are
@@ -523,10 +536,22 @@ Use semantic tools first (before grep):
 
 ## Required Output
 
+Your plan is a SHORT EXECUTION BRIEF: reviewed-and-ready-to-execute, with
+criteria to check — NOT a specification. Lead with intent (1-2 sentences)
+and approach (one short paragraph), keep steps at task granularity, and
+make every acceptance criterion CHECKABLE — something the implement and
+review phases can verify true/false. The required sections for this plan
+scale are listed below.
+
+HARD BUDGET: the entire plan must fit in {max_plan_chars} characters.
+Plans over budget are rejected; detail beyond the budget would be truncated
+before the implementer ever saw it. Spend the budget on decisions and
+criteria, not restated code.
+
 Output your plan between these exact markers:
 
 PLAN_START
-<your detailed implementation plan here>
+<your execution brief here — required sections, within budget>
 PLAN_END
 
 Then provide a one-line summary:

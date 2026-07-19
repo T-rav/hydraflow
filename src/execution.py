@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
+import signal
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -71,6 +73,31 @@ class SubprocessRunner(Protocol):
         ...
 
 
+def _reap_process_group(proc: asyncio.subprocess.Process) -> None:
+    """Best-effort SIGKILL of *proc*'s whole process group.
+
+    A real asyncio child spawned with ``start_new_session=True`` is its own
+    process-group leader (``pid == pgid``), so ``os.killpg(proc.pid, SIGKILL)``
+    tears down the child AND the grandchildren it forked (sub-make / pytest /
+    agent workers) — the orphaned-grandchild defect from #9648 (mirrors
+    ``terminate_processes()`` and the #9579 caretaker fix).
+
+    The kill is guarded on an *integer* pid. A real child always has one; a
+    missing or non-int pid (a not-yet-started process, or a test double whose
+    ``pid`` is a mock) falls back to ``proc.kill()`` so the reap never issues
+    ``os.killpg`` against a fabricated pid — an int-coerced mock resolves to a
+    low number like ``1`` and would otherwise signal an unrelated, or even our
+    own, process group. ``ProcessLookupError``/``OSError`` (the group already
+    exited) are suppressed so the caller's ``TimeoutError``/``CancelledError``
+    still propagates. (#9648, #9794/#9814)
+    """
+    with contextlib.suppress(ProcessLookupError, OSError):
+        if isinstance(proc.pid, int):
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+
+
 class HostRunner:
     """Execute subprocesses on the host using ``asyncio.create_subprocess_exec``."""
 
@@ -121,19 +148,39 @@ class HostRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
+            # Own process group so a timeout can reap the WHOLE tree, not just
+            # the direct child. This is the central runner path used broadly via
+            # subprocess_util.run_subprocess; the commands it runs (sub-make,
+            # pytest, agent CLIs) fork their own grandchildren. (#9648)
+            start_new_session=True,
         )
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 proc.communicate(input=input), timeout=timeout
             )
         except TimeoutError:
-            # proc.kill() raises ProcessLookupError when the child already
-            # exited between the timeout and the reap — suppress it so the
-            # TimeoutError (the intended signal) propagates instead of the
-            # ProcessLookupError crashing the caller/loop. (#9794/#9814)
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
+            # Reap the whole process group, not just the direct child. Without
+            # this, sub-make / pytest / agent grandchildren are re-parented to
+            # init and keep running (burning tokens, holding file handles)
+            # against an abandoned cycle — the orphaned-grandchild defect from
+            # #9648. start_new_session=True above makes the child a group leader
+            # so the group SIGKILL tears down the whole tree.
+            _reap_process_group(proc)
+            # Reap the now-signalled direct child so it does not linger as a
+            # zombie. SIGKILL is uncatchable, so this returns promptly; guard it
+            # in case the child was already reaped between the kill and here.
+            with contextlib.suppress(ProcessLookupError, OSError):
                 await proc.wait()
+            raise
+        except asyncio.CancelledError:
+            # A cancelled cycle (e.g. a loop watchdog cancelling the task) must
+            # tear down the same process group, or the child and its
+            # grandchildren are orphaned — the #9648 defect on the cancellation
+            # trigger rather than the timeout one. Shared reap mirrors
+            # stream_claude_process's TimeoutError/cancel handling. Do not block
+            # the cancellation on wait(); the child watcher reaps the SIGKILLed
+            # child in the background.
+            _reap_process_group(proc)
             raise
         return SimpleResult(
             stdout=stdout_bytes.decode(errors="replace").strip()

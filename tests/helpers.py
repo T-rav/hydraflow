@@ -259,7 +259,7 @@ class ConfigFactory:
         triage_model: str = "haiku",
         triage_max_turns: int = 3,
         auditor_finding_max_age_days: int = 14,
-        min_plan_words: int = 200,
+        min_plan_words: int = 60,
         max_new_files_warning: int = 5,
         lite_plan_labels: list[str] | None = None,
         repo: str = "test-org/test-repo",

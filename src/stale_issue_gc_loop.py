@@ -21,6 +21,7 @@ from exception_classify import reraise_on_credit_or_bug
 
 if TYPE_CHECKING:
     from ports import PRPort
+    from state import StateTracker
 
 logger = logging.getLogger("hydraflow.stale_issue_gc")
 
@@ -40,6 +41,7 @@ class StaleIssueGCLoop(BaseBackgroundLoop):
         self,
         config: HydraFlowConfig,
         pr_manager: PRPort,
+        state: StateTracker,
         deps: LoopDeps,
     ) -> None:
         super().__init__(
@@ -48,6 +50,7 @@ class StaleIssueGCLoop(BaseBackgroundLoop):
             deps=deps,
         )
         self._prs = pr_manager
+        self._state = state
 
     def _get_default_interval(self) -> int:
         return self._config.stale_issue_gc_interval
@@ -128,4 +131,37 @@ class StaleIssueGCLoop(BaseBackgroundLoop):
                     )
                     errors += 1
 
-        return {"closed": closed, "skipped": skipped, "errors": errors}
+        state_pruned: dict[str, int] = {}
+        if self._config.state_prune_enabled:
+            state_pruned = await self._prune_stale_issue_state()
+
+        return {
+            "closed": closed,
+            "skipped": skipped,
+            "errors": errors,
+            "state_pruned": state_pruned,
+        }
+
+    async def _prune_stale_issue_state(self) -> dict[str, int]:
+        """Drop per-issue state entries for issues no longer open (#9905).
+
+        Fail-closed: a failed or EMPTY open-issue listing skips the sweep —
+        an API fault returning zero issues is indistinguishable from an
+        empty repo, and pruning against it would wipe every in-flight
+        issue's state.
+        """
+        try:
+            open_numbers = await self._prs.list_open_issue_numbers()
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "Stale GC: could not list open issues for state prune — skipping",
+                exc_info=True,
+            )
+            return {}
+        if not open_numbers:
+            return {}
+        removed = self._state.prune_issue_scoped_state(set(open_numbers))
+        if removed:
+            logger.info("Stale GC: pruned per-issue state entries: %s", removed)
+        return removed

@@ -886,15 +886,18 @@ class TestRotateSyncUsesAtomicWrite:
         log_path.write_text((event.model_dump_json() + "\n") * 5)
 
         event_log = EventLog(log_path)
+        # Budget fits exactly 3 lines (#9905 size bound): rotation triggers
+        # (file > budget) and the newest 3 survive the byte budget.
+        budget = (len(event.model_dump_json()) + 1) * 3 + 5
         with patch("events.atomic_write") as mock_aw:
-            event_log._rotate_sync(max_size_bytes=10, max_age_days=365)
+            event_log._rotate_sync(max_size_bytes=budget, max_age_days=365)
 
         call_args = mock_aw.call_args[0]
         content = call_args[1]
         # Content should end with newline and contain valid JSON lines
         assert content.endswith("\n")
         lines = [line for line in content.split("\n") if line.strip()]
-        assert len(lines) == 5
+        assert len(lines) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -967,7 +970,11 @@ class TestRotateSyncCorruptContinuance:
         log_path.write_text("\n".join(lines) + "\n")
 
         event_log = EventLog(log_path)
-        event_log._rotate_sync(max_size_bytes=10, max_age_days=365)
+        # Budget fits both valid lines (#9905 size bound) while still being
+        # below the on-disk size (corrupt bytes inflate the file), so
+        # rotation triggers and both valid lines survive.
+        budget = (len(valid_line) + 1) * 2 + 5
+        event_log._rotate_sync(max_size_bytes=budget, max_age_days=365)
 
         # Read rotated file and verify both valid lines were kept
         content = log_path.read_text()

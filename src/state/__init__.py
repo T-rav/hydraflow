@@ -37,6 +37,7 @@ from ._driver import DriverStateMixin
 from ._epic import EpicStateMixin
 from ._fake_coverage import FakeCoverageStateMixin
 from ._flake_tracker import FlakeTrackerStateMixin
+from ._gc import StateGCMixin
 from ._hitl import HITLStateMixin
 from ._human_steering import HumanSteeringStateMixin
 from ._issue import IssueStateMixin
@@ -114,6 +115,7 @@ class StateTracker(
     SandboxFailureFixerStateMixin,
     AdrAuditStateMixin,
     AdversarialStateMixin,
+    StateGCMixin,
     TriageRetryStateMixin,
     DisturbanceStateMixin,
     ConvergenceStateMixin,

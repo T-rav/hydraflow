@@ -51,6 +51,10 @@ def _valid_plan(*, word_pad: int = 200) -> str:
     """Return a plan with all required sections that passes validation."""
     padding = " ".join(["word"] * max(0, word_pad - 80))
     return (
+        "## Intent\n\n"
+        "Add the new data model plus its config knob so downstream consumers can rely on validated settings.\n\n"
+        "## Approach\n\n"
+        "Extend models.py with the model and config.py with the field; wire both through the orchestrator with validation at the boundary.\n\n"
         "## Files to Modify\n\n"
         "- src/models.py — add new data model\n"
         "- src/config.py — add configuration field\n\n"
@@ -1709,8 +1713,10 @@ async def test_build_prompt_warns_about_rejection(config, event_bus, issue):
 
 
 def test_required_sections_has_seven_entries(config, event_bus):
-    """PlannerRunner.REQUIRED_SECTIONS should have 7 entries (including Task Graph)."""
-    assert len(PlannerRunner.REQUIRED_SECTIONS) == 7
+    """PlannerRunner.REQUIRED_SECTIONS has 9 entries (#9955 adds Intent/Approach)."""
+    assert len(PlannerRunner.REQUIRED_SECTIONS) == 9
+    assert "## Intent" in PlannerRunner.REQUIRED_SECTIONS
+    assert "## Approach" in PlannerRunner.REQUIRED_SECTIONS
     assert "## Files to Modify" in PlannerRunner.REQUIRED_SECTIONS
     assert "## New Files" in PlannerRunner.REQUIRED_SECTIONS
     assert "## File Delta" in PlannerRunner.REQUIRED_SECTIONS
@@ -1861,6 +1867,8 @@ def test_detect_plan_scale_custom_lite_labels(event_bus, tmp_path):
 def _lite_plan() -> str:
     """Return a plan with only lite-required sections."""
     return (
+        "## Intent\n\n"
+        "Fix the crash in app.py so the affected flow completes.\n\n"
         "## Files to Modify\n\n"
         "- src/app.py — fix the crash\n\n"
         "## Implementation Steps\n\n"
@@ -1873,7 +1881,7 @@ def _lite_plan() -> str:
 
 
 def test_validate_lite_plan_accepts_three_sections(config, event_bus):
-    """A lite plan with only 3 sections passes validation."""
+    """A lite plan with only the lite-required sections passes validation."""
     runner = _make_runner(config, event_bus)
     task = TaskFactory.create(id=1, title="Fix crash")
     errors = runner._validate_plan(task, _lite_plan(), scale="lite")

@@ -66,6 +66,26 @@ class RunsGCLoop(BaseBackgroundLoop):
         oversized = self._recorder.purge_oversized(self._config.artifact_max_size_mb)
         stats = self._recorder.get_storage_stats()
 
+        # #9905: events.jsonl rotation used to run only at boot, so a
+        # long-lived instance grows the log without bound (observed 660 MB
+        # after a flood). Rotate every GC cycle; the EventLog holds the
+        # append lock across the read→write, so this is safe against
+        # concurrent publishes.
+        event_log_rotation: dict[str, int] = {}
+        if self._config.event_log_periodic_rotate_enabled:
+            event_log_rotation = await self._bus.rotate_log(
+                self._config.event_log_max_size_mb * 1024 * 1024,
+                self._config.event_log_retention_days,
+            )
+            if event_log_rotation:
+                logger.info(
+                    "Runs GC: rotated event log (kept %d, dropped %d by age, "
+                    "%d by size bound)",
+                    event_log_rotation.get("kept", 0),
+                    event_log_rotation.get("dropped_age", 0),
+                    event_log_rotation.get("dropped_size", 0),
+                )
+
         total_purged = expired + oversized
         if total_purged > 0:
             logger.info(
@@ -86,6 +106,7 @@ class RunsGCLoop(BaseBackgroundLoop):
             "issues": stats["issues"],
             "audit_chain_status": audit_chain_status,
             "audit_pruned": audit_pruned,
+            "event_log_rotation": event_log_rotation,
         }
 
     async def _tend_audit_chains(self) -> tuple[dict[str, str], dict[str, int]]:

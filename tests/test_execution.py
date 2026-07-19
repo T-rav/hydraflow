@@ -153,8 +153,17 @@ class TestHostRunnerRunSimple:
         assert result.stderr == "error msg"
 
     @pytest.mark.asyncio
-    async def test_timeout_kills_process_and_raises(self) -> None:
+    async def test_timeout_reaps_process_group_and_raises(self) -> None:
+        """On timeout the WHOLE process group is reaped, not just the child.
+
+        Regression for #9648: run_simple previously called ``proc.kill()`` on
+        timeout, which only reaps the direct child and orphans sub-make / pytest
+        / agent grandchildren. With ``start_new_session=True`` the child is a
+        group leader (pid == pgid), so ``os.killpg(proc.pid, SIGKILL)`` tears
+        down the entire tree.
+        """
         mock_proc = MagicMock()
+        mock_proc.pid = 4242
         mock_proc.communicate = AsyncMock(side_effect=TimeoutError)
         mock_proc.kill = MagicMock()
         mock_proc.wait = AsyncMock()
@@ -162,12 +171,121 @@ class TestHostRunnerRunSimple:
         runner = HostRunner()
         with (
             patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)),
+            patch("execution.os.killpg") as mock_killpg,
             pytest.raises(TimeoutError),
         ):
             await runner.run_simple(["sleep", "999"], timeout=0.01)
 
-        mock_proc.kill.assert_called_once()
+        import signal
+
+        mock_killpg.assert_called_once_with(4242, signal.SIGKILL)
+        # The direct child must not be killed individually — the group kill covers it.
+        mock_proc.kill.assert_not_called()
         mock_proc.wait.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_timeout_falls_back_to_kill_when_no_pid(self) -> None:
+        """When proc.pid is None there is no group to reap; fall back to kill()."""
+        mock_proc = MagicMock()
+        mock_proc.pid = None
+        mock_proc.communicate = AsyncMock(side_effect=TimeoutError)
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock()
+
+        runner = HostRunner()
+        with (
+            patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)),
+            patch("execution.os.killpg") as mock_killpg,
+            pytest.raises(TimeoutError),
+        ):
+            await runner.run_simple(["sleep", "999"], timeout=0.01)
+
+        mock_killpg.assert_not_called()
+        mock_proc.kill.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_timeout_suppresses_process_lookup_error(self) -> None:
+        """If the group already exited, killpg raises ProcessLookupError; the
+        TimeoutError (the intended signal) must still propagate. (#9794/#9814)"""
+        mock_proc = MagicMock()
+        mock_proc.pid = 4242
+        mock_proc.communicate = AsyncMock(side_effect=TimeoutError)
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock()
+
+        runner = HostRunner()
+        with (
+            patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)),
+            patch("execution.os.killpg", side_effect=ProcessLookupError),
+            pytest.raises(TimeoutError),
+        ):
+            await runner.run_simple(["sleep", "999"], timeout=0.01)
+
+    @pytest.mark.asyncio
+    async def test_timeout_non_int_pid_falls_back_to_kill(self) -> None:
+        """A non-int pid must NOT reach os.killpg — the reap falls back to
+        proc.kill(). This guards the central run_simple path against firing a
+        real killpg at a fabricated pid: a mock pid int-coerces to 1, which
+        would signal an unrelated — possibly our own — process group and, in a
+        root CI container, SIGKILL PID 1 and hang the job. (#9648)"""
+        mock_proc = MagicMock()
+        mock_proc.pid = MagicMock()  # not an int (e.g. a test double / mock)
+        mock_proc.communicate = AsyncMock(side_effect=TimeoutError)
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock()
+
+        runner = HostRunner()
+        with (
+            patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)),
+            patch("execution.os.killpg") as mock_killpg,
+            pytest.raises(TimeoutError),
+        ):
+            await runner.run_simple(["sleep", "999"], timeout=0.01)
+
+        mock_killpg.assert_not_called()
+        mock_proc.kill.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cancellation_reaps_process_group(self) -> None:
+        """External cancellation (e.g. a loop watchdog) must reap the whole
+        process group too, not orphan the child and its grandchildren — the
+        #9648 defect on the cancel trigger rather than the timeout one. Shared
+        reap mirrors stream_claude_process's TimeoutError/cancel handling."""
+        import asyncio
+        import signal
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 4242
+        mock_proc.communicate = AsyncMock(side_effect=asyncio.CancelledError)
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock()
+
+        runner = HostRunner()
+        with (
+            patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)),
+            patch("execution.os.killpg") as mock_killpg,
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await runner.run_simple(["sleep", "999"], timeout=999)
+
+        mock_killpg.assert_called_once_with(4242, signal.SIGKILL)
+        mock_proc.kill.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_spawn_uses_start_new_session(self) -> None:
+        """run_simple must spawn with start_new_session=True so the child owns a
+        process group that can be reaped as a unit on timeout. (#9648)"""
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"ok", b""))
+        mock_create = AsyncMock(return_value=mock_proc)
+
+        runner = HostRunner()
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            await runner.run_simple(["echo", "hi"])
+
+        _, kwargs = mock_create.call_args
+        assert kwargs["start_new_session"] is True
 
     @pytest.mark.asyncio
     async def test_cwd_forwarded(self) -> None:

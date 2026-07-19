@@ -188,16 +188,11 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         }
         if not pipeline_labels:
             return False
+        # Route through PRPort so the air-gapped sandbox FakeGitHub can serve
+        # the read; raw ``gh`` would escape the air-gap and fail-close every
+        # cycle, making the open-issue GC path unreachable in scenarios (#9575).
         try:
-            output = await run_subprocess(
-                "gh",
-                "api",
-                f"repos/{self._config.repo}/issues/{issue_number}",
-                "--jq",
-                ".labels[].name",
-                cwd=self._config.repo_root,
-                gh_token=self._credentials.gh_token,
-            )
+            label_names = await self._prs.get_issue_labels(issue_number)
         except Exception as exc:  # noqa: BLE001
             reraise_on_credit_or_bug(exc)
             logger.debug(
@@ -206,7 +201,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 exc_info=True,
             )
             return True
-        labels = {line.strip().lower() for line in output.splitlines() if line.strip()}
+        labels = {name.strip().lower() for name in label_names if name.strip()}
         return bool(labels & pipeline_labels)
 
     async def _get_issue_state(self, issue_number: int) -> str:
@@ -223,32 +218,27 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         return output.strip()
 
     async def _has_open_pr(self, issue_number: int) -> bool:
-        """Check whether an open PR exists for the issue's branch."""
+        """Check whether an open PR exists for the issue's branch (via PRPort).
+
+        Routed through ``PRPort.find_open_pr_for_branch`` so the sandbox
+        FakeGitHub can serve the read instead of a raw ``gh`` subprocess that
+        escapes the air-gap (#9575). FakeGitHub signals "no open PR" with a
+        ``PRInfo(number=0)`` sentinel, so ``number > 0`` is the real check.
+        """
         branch = self._config.branch_for_issue(issue_number)
         try:
-            output = await run_subprocess(
-                "gh",
-                "pr",
-                "list",
-                "--head",
-                branch,
-                "--state",
-                "open",
-                "--json",
-                "number",
-                "--jq",
-                "length",
-                cwd=self._config.repo_root,
-                gh_token=self._credentials.gh_token,
+            pr = await self._prs.find_open_pr_for_branch(
+                branch, issue_number=issue_number
             )
-            return int(output.strip() or "0") > 0
-        except (RuntimeError, ValueError):
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
             logger.debug(
                 "GC: PR check failed for issue #%d",
                 issue_number,
                 exc_info=True,
             )
             return True  # Assume PR exists on error — don't GC
+        return pr is not None and pr.number > 0
 
     async def _collect_orphaned_dirs(self, tracked: dict[int, str], budget: int) -> int:
         """Scan filesystem for orphaned issue-* dirs not tracked in state."""

@@ -116,6 +116,11 @@ class FakeGitHub:
 
     def __init__(self) -> None:
         self._issues: dict[int, FakeIssue] = {}
+        self._pr_diff_names: dict[int, list[str]] = {}
+        # #9974: seeded workflow-run history for GateHealthLoop scenarios.
+        self._workflow_runs: list[dict[str, Any]] = []
+        self._workflow_jobs: dict[int, list[dict[str, Any]]] = {}
+        self._workflow_artifacts: dict[int, int] = {}
         self._prs: dict[int, FakePR] = {}
         self._pr_counter = 10_000
         self._ci_scripts: dict[int, deque[tuple[bool, str]]] = {}
@@ -584,9 +589,13 @@ class FakeGitHub:
         self._maybe_rate_limit()
         return "abc123"
 
+    def set_pr_diff_names(self, pr_number: int, names: list[str]) -> None:
+        """Seed the changed-file list one PR reports (#9974 blame scenarios)."""
+        self._pr_diff_names[pr_number] = list(names)
+
     async def get_pr_diff_names(self, pr_number: int) -> list[str]:
         self._maybe_rate_limit()
-        return ["src/app.py"]
+        return list(self._pr_diff_names.get(pr_number, ["src/app.py"]))
 
     async def get_pr_recent_commit_diffs(self, pr_number: int, *, n: int = 3) -> str:
         """Return a stub diff block for the last *n* commits on *pr_number*.
@@ -672,7 +681,11 @@ class FakeGitHub:
     # --- Loop-required PRPort methods ---
 
     async def list_issues_by_label(self, label: str) -> list[dict[str, Any]]:
-        """Return open issues carrying *label* as GitHubIssueSummary-style dicts."""
+        """Return open issues carrying *label* as GitHubIssueSummary-style dicts.
+
+        ``labels`` mirrors the gh wire shape (#9943) so filters reading
+        ``lbl["name"]`` behave identically under the fake and the adapter.
+        """
         self._maybe_rate_limit()
         return [
             {
@@ -680,10 +693,59 @@ class FakeGitHub:
                 "title": issue.title,
                 "body": issue.body,
                 "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
+                "labels": [{"name": name} for name in issue.labels],
             }
             for issue in self._issues.values()
             if issue.state == "open" and label in issue.labels
         ]
+
+    async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
+        """Return numbers of ALL open issues, mirroring the gh projection (#9905)."""
+        self._maybe_rate_limit()
+        numbers = [
+            issue.number for issue in self._issues.values() if issue.state == "open"
+        ]
+        return sorted(numbers)[:limit]
+
+    def add_workflow_run(
+        self,
+        run_id: int,
+        *,
+        workflow: str,
+        conclusion: str,
+        created_at: str = "2026-07-01T00:00:00Z",
+        pr_number: int = 0,
+        jobs: list[dict[str, Any]] | None = None,
+        artifact_count: int = 0,
+    ) -> None:
+        """Seed one workflow run (+jobs/artifacts) for gate-health scenarios."""
+        self._workflow_runs.append(
+            {
+                "id": run_id,
+                "workflow": workflow,
+                "conclusion": conclusion,
+                "created_at": created_at,
+                "pr_number": pr_number,
+            }
+        )
+        self._workflow_jobs[run_id] = jobs or []
+        self._workflow_artifacts[run_id] = artifact_count
+
+    async def list_workflow_runs(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Newest-first slice of the seeded run history (#9974)."""
+        self._maybe_rate_limit()
+        newest_first = sorted(
+            self._workflow_runs, key=lambda r: str(r["created_at"]), reverse=True
+        )
+        return [dict(r) for r in newest_first[:limit]]
+
+    async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        self._maybe_rate_limit()
+        return [dict(j) for j in self._workflow_jobs.get(run_id, [])]
+
+    async def count_workflow_run_artifacts(self, run_id: int) -> int:
+        self._maybe_rate_limit()
+        return self._workflow_artifacts.get(run_id, 0)
 
     async def list_closed_issues_by_label(
         self,
@@ -826,6 +888,13 @@ class FakeGitHub:
             state = self._issues[issue_number].state
             return "COMPLETED" if state == "closed" else "OPEN"
         return "OPEN"
+
+    async def get_issue_labels(self, issue_number: int) -> list[str]:
+        """Return the label names on an issue (empty list when unknown)."""
+        self._maybe_rate_limit()
+        if issue_number in self._issues:
+            return list(self._issues[issue_number].labels)
+        return []
 
     async def list_hitl_items(
         self, hitl_labels: list[str], *, concurrency: int = 10

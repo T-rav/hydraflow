@@ -54,7 +54,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_REPORT_ISSUE` | `report_issue_tool` | `report_issue_model` |
 | `HYDRAFLOW_TERM_PROPOSER` | `term_proposer_tool` | `term_proposer_model` |
 
-## Background loops (54)
+## Background loops (55)
 
 | Worker | Loop class | Area | Model role(s) | Long LLM cycle | Oversight | Purpose |
 |---|---|---|---|---|---|---|
@@ -82,6 +82,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `fitness_scorecard` | `FitnessScorecardLoop` | Caretaking | — | — | — | Computes per-loop fitness scores each tick by combining event history and issue attribution. Persists to fitness.jsonl and regenerates docs/arch/generated/loop-fitness.md. Read-only caretaker per ADR-0029. |
 | `flake_tracker` | `FlakeTrackerLoop` | Trust Fleet | — | — | HITL escalation | Detects persistently flaky tests across recent RC runs and files flake-tracker issues. |
 | `gate_activator` | `GateActivatorLoop` | Quality Gates | — | — | — | Proposes activating planned gates in gates.toml once the surface each protects exists (producing job + make target present, profile matches); files a reviewed issue. See ADR-0082. |
+| `gate_health` | `GateHealthLoop` | Caretaking | — | — | — | Weekly read-only CI-gate auditor: pass-rate distributions, blame-correlation, missing failure artifacts, stale quarantines. |
 | `github_cache` | `GitHubCacheLoop` | Caretaking | — | — | HITL escalation | Single-poller cache for GitHub data; serves all dashboard + loop consumers from one shared snapshot to avoid rate-limit fan-out. |
 | `health_monitor` | `HealthMonitorLoop` | Caretaking | — | — | HITL escalation | Analyzes pipeline trends, auto-tunes parameters, detects knowledge gaps, and ingests log patterns. |
 | `human_steering` | `HumanSteeringLoop` | Auto-Agent (HITL Pre-Flight) | — | — | — | Senses per-issue GitHub-comment steering directives (/steer, /pause, /resume, /redo, /abort) each tick and writes the steering reference (ADR-0099 #4). |
