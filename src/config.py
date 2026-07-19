@@ -604,6 +604,12 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("report_issue_loop_enabled", "HYDRAFLOW_REPORT_ISSUE_LOOP_ENABLED", True),
     ("retrospective_loop_enabled", "HYDRAFLOW_RETROSPECTIVE_LOOP_ENABLED", True),
     ("runs_gc_loop_enabled", "HYDRAFLOW_RUNS_GC_LOOP_ENABLED", True),
+    (
+        "event_log_periodic_rotate_enabled",
+        "HYDRAFLOW_EVENT_LOG_PERIODIC_ROTATE_ENABLED",
+        True,
+    ),
+    ("state_prune_enabled", "HYDRAFLOW_STATE_PRUNE_ENABLED", True),
     ("security_patch_loop_enabled", "HYDRAFLOW_SECURITY_PATCH_LOOP_ENABLED", True),
     ("sentry_loop_enabled", "HYDRAFLOW_SENTRY_LOOP_ENABLED", True),
     ("log_ingest_loop_enabled", "HYDRAFLOW_LOG_INGEST_LOOP_ENABLED", True),
@@ -2554,6 +2560,22 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=90,
         description="Days of event history to retain during rotation",
+    )
+    event_log_periodic_rotate_enabled: bool = Field(
+        default=True,
+        description=(
+            "Rotate events.jsonl every RunsGCLoop cycle, not just at boot "
+            "(#9905). The size bound inside rotation guarantees the "
+            "post-rotation file fits event_log_max_size_mb."
+        ),
+    )
+    state_prune_enabled: bool = Field(
+        default=True,
+        description=(
+            "Prune per-issue state.json entries (adversarial states, "
+            "convergence ledgers, attempt counters) for issues that are no "
+            "longer open, during StaleIssueGCLoop cycles (#9905)."
+        ),
     )
 
     # Health monitor

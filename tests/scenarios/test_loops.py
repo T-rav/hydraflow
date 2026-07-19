@@ -160,6 +160,36 @@ class TestL3StaleIssueGCClosesInactive:
         assert len(world.github.issue(99).comments) >= 1
         assert "auto-closed" in world.github.issue(99).comments[-1].lower()
 
+    async def test_state_prune_drops_entries_for_closed_issues(self, tmp_path):
+        """#9905: per-issue state stranded by off-path terminations is pruned.
+
+        GitHub truth (open issues) is the keep-set; entries for issues no
+        longer open are dropped in the same GC cycle, entries for live
+        issues survive.
+        """
+        from models import ConvergenceLedger
+        from pending_concerns import AdversarialState
+
+        world = MockWorld(tmp_path)
+        world.github.add_issue(300, "Live", "still open", labels=[])
+
+        state = world._harness.state
+        state._data.adversarial_states["999"] = AdversarialState(phase="plan")
+        state._data.convergence_ledgers["999"] = ConvergenceLedger(issue_number=999)
+        state._data.issue_attempts["999"] = 3
+        state._data.issue_attempts["300"] = 1
+
+        stats = await world.run_with_loops(["stale_issue_gc"], cycles=1)
+
+        assert stats["stale_issue_gc"] is not None
+        assert stats["stale_issue_gc"]["state_pruned"] == {
+            "adversarial_states": 1,
+            "convergence_ledgers": 1,
+            "issue_attempts": 1,
+        }
+        assert "999" not in state._data.adversarial_states
+        assert state._data.issue_attempts == {"300": 1}
+
 
 # ---------------------------------------------------------------------------
 # L4: PR Unsticker attempts to resolve HITL items

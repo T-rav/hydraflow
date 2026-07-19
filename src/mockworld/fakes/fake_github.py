@@ -685,6 +685,14 @@ class FakeGitHub:
             if issue.state == "open" and label in issue.labels
         ]
 
+    async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
+        """Return numbers of ALL open issues, mirroring the gh projection (#9905)."""
+        self._maybe_rate_limit()
+        numbers = [
+            issue.number for issue in self._issues.values() if issue.state == "open"
+        ]
+        return sorted(numbers)[:limit]
+
     async def list_closed_issues_by_label(
         self,
         label: str,
