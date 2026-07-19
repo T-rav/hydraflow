@@ -7,7 +7,6 @@ escalations, detects recurring patterns, and generates improvement suggestions.
 from __future__ import annotations
 
 import logging
-import re
 from collections import Counter
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -17,6 +16,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, Field
 
 from models import IsoTimestamp, PipelineStage
+from text_match import keyword_matches
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -131,19 +131,6 @@ class ImprovementSuggestion(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _keyword_matches(keyword: str, lowered_details: str) -> bool:
-    """Whole-word / phrase match of *keyword* against *lowered_details*.
-
-    Uses ``\\b`` boundaries around the keyword so a short token like "test"
-    matches "test"/"tests" but never inside a larger word like "latest", and so
-    broad terms ("type", "format") can never match inside a larger identifier
-    ("prototype", "typescript", "information"). Non-word characters inside a
-    keyword ("try/except") are matched literally (#9566).
-    """
-    pattern = r"\b" + re.escape(keyword) + r"\b"
-    return re.search(pattern, lowered_details) is not None
-
-
 def extract_subcategories(details: str) -> list[str]:
     """Extract subcategories from failure details using keyword matching.
 
@@ -157,7 +144,7 @@ def extract_subcategories(details: str) -> list[str]:
     return [
         sub
         for sub, keywords in SUBCATEGORY_KEYWORDS.items()
-        if any(_keyword_matches(kw.lower(), lower) for kw in keywords)
+        if any(keyword_matches(kw.lower(), lower) for kw in keywords)
     ]
 
 
