@@ -203,6 +203,9 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("artifact_retention_days", "HYDRAFLOW_ARTIFACT_RETENTION_DAYS", 30),
     ("artifact_max_size_mb", "HYDRAFLOW_ARTIFACT_MAX_SIZE_MB", 500),
     ("runs_gc_interval", "HYDRAFLOW_RUNS_GC_INTERVAL", 3600),
+    ("gate_health_interval", "HYDRAFLOW_GATE_HEALTH_INTERVAL", 604800),
+    ("gate_health_run_window", "HYDRAFLOW_GATE_HEALTH_RUN_WINDOW", 50),
+    ("gate_health_min_attempts", "HYDRAFLOW_GATE_HEALTH_MIN_ATTEMPTS", 3),
     ("adr_review_interval", "HYDRAFLOW_ADR_REVIEW_INTERVAL", 86400),
     ("adr_review_approval_threshold", "HYDRAFLOW_ADR_REVIEW_APPROVAL_THRESHOLD", 2),
     ("adr_review_max_rounds", "HYDRAFLOW_ADR_REVIEW_MAX_ROUNDS", 3),
@@ -620,6 +623,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("stale_issue_gc_loop_enabled", "HYDRAFLOW_STALE_ISSUE_GC_LOOP_ENABLED", True),
+    ("gate_health_loop_enabled", "HYDRAFLOW_GATE_HEALTH_LOOP_ENABLED", True),
     ("stale_issue_loop_enabled", "HYDRAFLOW_STALE_ISSUE_LOOP_ENABLED", True),
     ("triage_retry_loop_enabled", "HYDRAFLOW_TRIAGE_RETRY_LOOP_ENABLED", True),
     (
@@ -1271,6 +1275,27 @@ class HydraFlowConfig(BaseModel):
         ge=300,
         le=86400,
         description="Runs GC loop interval in seconds (default 1 hour)",
+    )
+    gate_health_interval: int = Field(
+        default=604800,
+        ge=3600,
+        le=2592000,
+        description="GateHealthLoop cycle interval in seconds (default weekly)",
+    )
+    gate_health_run_window: int = Field(
+        default=50,
+        ge=10,
+        le=200,
+        description="Workflow runs analyzed per GateHealthLoop cycle",
+    )
+    gate_health_min_attempts: int = Field(
+        default=3,
+        ge=2,
+        le=50,
+        description=(
+            "Minimum failures before GateHealthLoop flags a check: "
+            "born-broken needs N, blame-correlation N-1"
+        ),
     )
 
     # Hash-chained audit stream retention (CH-1, #9729). None = keep forever.
@@ -3651,6 +3676,10 @@ class HydraFlowConfig(BaseModel):
     stale_issue_gc_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for StaleIssueGCLoop.",
+    )
+    gate_health_loop_enabled: bool = Field(
+        default=True,
+        description="Deploy-time kill-switch for GateHealthLoop (#9974).",
     )
     stale_issue_loop_enabled: bool = Field(
         default=True,

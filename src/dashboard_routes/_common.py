@@ -50,6 +50,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "epic_sweeper": (600, 86400),
     "workspace_gc": (300, 86400),
     "runs_gc": (300, 86400),
+    "gate_health": (3600, 2592000),
     "health_monitor": (60, 86400),
     "dependabot_merge": (60, 86400),
     "staging_promotion": (60, 86400),

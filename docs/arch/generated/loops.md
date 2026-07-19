@@ -30,6 +30,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **FitnessScorecardLoop** | `src.fitness_scorecard_loop` | 86400 | — | BACKGROUND_WORKER_STATUS, LOOP_FITNESS_UPDATE | ADR-0029, ADR-0046 |
 | **FlakeTrackerLoop** | `src.flake_tracker_loop` | 14400 | — | — | — |
 | **GateActivatorLoop** | `src.gate_activator_loop` | 604800 | — | — | ADR-0029, ADR-0049, ADR-0082 |
+| **GateHealthLoop** | `src.gate_health_loop` | 604800 | — | — | — |
 | **GitHubCacheLoop** | `src.github_cache_loop` | 300 | — | — | — |
 | **HealthMonitorLoop** | `src.health_monitor_loop` | 7200 | — | — | — |
 | **HumanSteeringLoop** | `src.human_steering_loop` | — | — | — | ADR-0099 |

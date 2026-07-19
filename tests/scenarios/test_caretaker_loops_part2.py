@@ -341,6 +341,127 @@ class TestL20RunsGCLoop:
 
 
 # ---------------------------------------------------------------------------
+# L20b: gate_health — CI reds as distributions (#9974)
+# ---------------------------------------------------------------------------
+
+
+class TestL20bGateHealthLoop:
+    """L20b: GateHealthLoop finds born-broken gates, uncorrelated blame,
+    missing artifacts, and stale quarantines from seeded run history."""
+
+    def _issues_titled(self, world, fragment):
+        return [i for i in world.github._issues.values() if fragment in i.title]
+
+    async def test_born_broken_scenario_files_evidence_issue(self, tmp_path):
+        world = MockWorld(tmp_path)
+        for i in (1, 2, 3):
+            world.github.add_workflow_run(
+                i,
+                workflow="CI",
+                conclusion="failure",
+                created_at=f"2026-07-0{i}T00:00:00Z",
+                jobs=[
+                    {
+                        "name": "Sandbox (rc/* promotion PR full suite)",
+                        "conclusion": "failure",
+                    },
+                    {"name": "Tests", "conclusion": "success"},
+                ],
+                artifact_count=1,
+            )
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        assert stats["gate_health"]["filed"] == 1
+        filed = self._issues_titled(world, "0% pass rate")
+        assert len(filed) == 1
+        assert "failures in window | 3" in filed[0].body
+        # Healthy sibling check must NOT be flagged.
+        assert not self._issues_titled(world, "Tests has a 0%")
+
+    async def test_docs_only_blame_names_the_instrument(self, tmp_path):
+        world = MockWorld(tmp_path)
+        for i, pr in ((1, 101), (2, 102)):
+            world.github.set_pr_diff_names(pr, ["docs/wiki/x.md", "README.md"])
+            world.github.add_workflow_run(
+                i,
+                workflow="CI",
+                conclusion="failure",
+                created_at=f"2026-07-0{i}T00:00:00Z",
+                pr_number=pr,
+                jobs=[
+                    {"name": "Tests", "conclusion": "failure"},
+                    {"name": "Tests", "conclusion": "success"},
+                ],
+            )
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        assert stats["gate_health"]["filed"] == 1
+        filed = self._issues_titled(world, "docs-only PRs")
+        assert len(filed) == 1
+        assert "#9902" in filed[0].body or "instrument" in filed[0].body
+
+    async def test_failed_sandbox_run_with_zero_artifacts(self, tmp_path):
+        world = MockWorld(tmp_path)
+        world.github.add_workflow_run(
+            7,
+            workflow="Sandbox Nightly",
+            conclusion="failure",
+            jobs=[{"name": "Sandbox (nightly regression)", "conclusion": "failure"}],
+            artifact_count=0,
+        )
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        filed = self._issues_titled(world, "zero artifacts")
+        assert len(filed) == 1
+        assert stats["gate_health"]["filed"] >= 1
+
+    async def test_stale_quarantine_consent_package(self, tmp_path):
+        world = MockWorld(tmp_path)
+        world.github.add_issue(9925, "s55 race", "tracking", labels=[])
+        world.github.issue(9925).state = "closed"
+        world.github.add_workflow_run(
+            1,
+            workflow="CI",
+            conclusion="success",
+            jobs=[{"name": "Tests", "conclusion": "success"}],
+        )
+
+        # The loop reads markers under config.repo_root — the MockWorld
+        # harness config roots at tmp_path/repo.
+        bg_repo = tmp_path / "repo" / "tests" / "sandbox_scenarios" / "scenarios"
+        bg_repo.mkdir(parents=True, exist_ok=True)
+        (bg_repo / "s55_nested_decompose.py").write_text('QUARANTINED = "#9925"\n')
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        filed = self._issues_titled(world, "quarantine")
+        assert len(filed) == 1
+        assert "Consent package" in filed[0].body
+        assert "NOT execute" in filed[0].body
+        assert stats["gate_health"]["filed"] >= 1
+
+    async def test_read_only_green_history_files_nothing(self, tmp_path):
+        world = MockWorld(tmp_path)
+        for i in (1, 2, 3):
+            world.github.add_workflow_run(
+                i,
+                workflow="CI",
+                conclusion="success",
+                created_at=f"2026-07-0{i}T00:00:00Z",
+                jobs=[{"name": "Tests", "conclusion": "success"}],
+            )
+        before = len(world.github._issues)
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        assert stats["gate_health"]["findings"] == 0
+        assert len(world.github._issues) == before
+
+
+# ---------------------------------------------------------------------------
 # L21: sentry — no credentials and project polling paths
 # ---------------------------------------------------------------------------
 

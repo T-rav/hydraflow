@@ -262,7 +262,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'auto_tighten', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry', 'convergence_oscillation'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'auto_tighten', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry', 'convergence_oscillation', 'gate_health'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -305,6 +305,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   epic_monitor: 1800,
   github_cache: 30,
   runs_gc: 3600,
+  gate_health: 604800,
   label_drift_watcher: 600,
   triage_retry: 86400,
   convergence_oscillation: 3600,
@@ -384,6 +385,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'epic_monitor', label: 'Epic Monitor', description: 'Detects stale epics and refreshes progress cache so the dashboard shows accurate sub-issue rollups.', color: theme.textMuted, system: true, group: 'operations', tags: ['lifecycle'] },
   { key: 'github_cache', label: 'GitHub Cache', description: 'Single-poller cache for GitHub data; serves all dashboard + loop consumers from one shared snapshot to avoid rate-limit fan-out.', color: theme.textMuted, system: true, group: 'operations', tags: ['infra'] },
   { key: 'runs_gc', label: 'Runs GC', description: 'Purges expired pipeline run artifacts per TTL and size-cap config; keeps the runs store from growing unbounded.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['hygiene'] },
+  { key: 'gate_health', label: 'Gate Health', description: 'Weekly read-only CI-gate auditor: pass-rate distributions, blame-correlation, missing failure artifacts, stale quarantines. Files evidence issues; never mutates gates.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['hygiene'] },
 ]
 
 /**

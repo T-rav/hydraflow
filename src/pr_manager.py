@@ -1492,6 +1492,73 @@ class PRManager:
             for r in results
         ]
 
+    async def list_workflow_runs(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return recent workflow runs, newest first (#9974, read-only).
+
+        Uses the REST runs endpoint (not ``gh run list``) because the run
+        object carries ``pull_requests`` — the PR association that
+        blame-correlation needs.
+        """
+        self._assert_repo()
+        per_page = max(1, min(int(limit), 100))
+        output = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/actions/runs?per_page={per_page}",
+            "--jq",
+            (
+                "[.workflow_runs[] | {id: .id, workflow: .name, "
+                'conclusion: (.conclusion // ""), created_at: .created_at, '
+                "pr_number: (.pull_requests[0].number // 0)}]"
+            ),
+        )
+        try:
+            rows = json.loads(output or "[]")
+        except ValueError:
+            logger.warning("list_workflow_runs: unparseable gh output")
+            return []
+        return (
+            [row for row in rows if isinstance(row, dict)]
+            if isinstance(rows, list)
+            else []
+        )
+
+    async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        """Return jobs for one workflow run: name + conclusion (#9974)."""
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/actions/runs/{int(run_id)}/jobs?per_page=100",
+            "--jq",
+            '[.jobs[] | {name: .name, conclusion: (.conclusion // "")}]',
+        )
+        try:
+            rows = json.loads(output or "[]")
+        except ValueError:
+            logger.warning("get_workflow_run_jobs: unparseable gh output")
+            return []
+        return (
+            [row for row in rows if isinstance(row, dict)]
+            if isinstance(rows, list)
+            else []
+        )
+
+    async def count_workflow_run_artifacts(self, run_id: int) -> int:
+        """Return how many artifacts a workflow run uploaded (#9974)."""
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/actions/runs/{int(run_id)}/artifacts",
+            "--jq",
+            ".total_count",
+        )
+        try:
+            return int((output or "0").strip())
+        except ValueError:
+            return 0
+
     async def list_closed_issues_by_label(
         self, label: str, limit: int = 100
     ) -> list[GitHubIssueSummary]:
