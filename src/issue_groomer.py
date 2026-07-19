@@ -1,8 +1,12 @@
-"""Pure engine for IssueGroomerLoop: index, dup-candidate prefilter, judged-pair cache.
+"""Pure engine for IssueGroomerLoop: index, dup-candidate prefilter, judged-pair
+cache, judgment prompts, action tiering, guardrails, digest render.
 
-No I/O, no LLM spawns — stdlib only (``dataclasses``, ``difflib``, ``hashlib``,
-``itertools``, ``re``). Callers (the loop, ports) build ``GroomIssue`` from
-whatever the backlog read returns; this module only reasons about content.
+No I/O, no LLM spawns — stdlib only (``dataclasses``, ``datetime``, ``difflib``,
+``hashlib``, ``itertools``, ``json``, ``re``). Callers (the loop, ports) build
+``GroomIssue`` from whatever the backlog read returns and pass the LLM's raw
+text response back in; this module only reasons about content — it never
+calls an LLM and never calls ``datetime.now()`` itself (``now`` is always
+passed in, for determinism).
 
 Determinism is load-bearing: ``find_dup_candidates`` must return the same
 list, in the same order, given the same inputs — see
@@ -13,9 +17,11 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import json
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 
 # Title/body scoring weights and gate. Tuned in the design spec §2 — a pair
@@ -30,13 +36,17 @@ SCORE_FLOOR = 0.35
 # this many characters.
 MIN_TOKEN_LEN = 3
 
-# Issue-ref numbers ("#12345") are noise for title similarity — a title
-# quoting another issue number shouldn't be treated as textually similar to
-# that issue. Numbers this long or longer are assumed to be refs; shorter
-# numbers (version numbers, small counts) are kept.
-MIN_ISSUE_REF_DIGITS = 5
+# Issue-ref numbers are noise for title similarity — a title quoting another
+# issue number shouldn't be treated as textually similar to that issue.
+# `#`-prefixed refs are stripped regardless of digit count (this repo's
+# issue numbers run 4-5 digits, so a length gate on the `#` form is inert —
+# every real ref would pass it). Bare (no `#`) numbers are only assumed to
+# be refs at this digit count or longer; shorter bare numbers (version
+# numbers, small counts) are kept since they're rarely issue citations.
+MIN_ISSUE_REF_DIGITS = 4
 
-_ISSUE_REF_RE = re.compile(rf"\b\d{{{MIN_ISSUE_REF_DIGITS},}}\b")
+_HASH_ISSUE_REF_RE = re.compile(r"#\d+")
+_BARE_ISSUE_REF_RE = re.compile(rf"\b\d{{{MIN_ISSUE_REF_DIGITS},}}\b")
 _PUNCT_RE = re.compile(r"[^\w\s]")
 _WHITESPACE_RE = re.compile(r"\s+")
 _WORD_RE = re.compile(r"\w+")
@@ -65,8 +75,9 @@ class CandidatePair:
 def normalize_title(title: str) -> str:
     """Lowercase, strip punctuation and issue-ref numbers, collapse whitespace."""
     lowered = title.lower()
-    without_refs = _ISSUE_REF_RE.sub(" ", lowered)
-    without_punct = _PUNCT_RE.sub(" ", without_refs)
+    without_hash_refs = _HASH_ISSUE_REF_RE.sub(" ", lowered)
+    without_bare_refs = _BARE_ISSUE_REF_RE.sub(" ", without_hash_refs)
+    without_punct = _PUNCT_RE.sub(" ", without_bare_refs)
     return _WHITESPACE_RE.sub(" ", without_punct).strip()
 
 
@@ -116,8 +127,12 @@ def find_dup_candidates(
     """Score every pair with ≥1 changed side, drop judged/low-score pairs.
 
     Sort is ``(-score, a, b)`` so ties break on issue number — the same
-    inputs always produce the same list, in the same order.
+    inputs always produce the same list, in the same order. A non-positive
+    ``budget`` returns ``[]`` without scoring anything.
     """
+    if budget <= 0:
+        return []
+
     candidates: list[CandidatePair] = []
     for x, y in itertools.combinations(issues, 2):
         if x.number not in changed and y.number not in changed:
@@ -133,3 +148,536 @@ def find_dup_candidates(
 
     candidates.sort(key=lambda c: (-c.score, c.a, c.b))
     return candidates[:budget]
+
+
+# ---------------------------------------------------------------------------
+# Judgment prompts + verdict parsing
+# ---------------------------------------------------------------------------
+
+_DUP_VERDICT_VALUES = frozenset({"exact_dup", "likely_dup", "distinct"})
+_CONFIDENCE_VALUES = frozenset({"high", "medium", "low"})
+_PRIORITY_VALUES = frozenset({"P0", "P1", "P2", "none"})
+
+_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
+
+
+class VerdictParseError(ValueError):
+    """Raised when an LLM verdict response can't be parsed as a known verdict."""
+
+
+@dataclass(frozen=True)
+class DupVerdict:
+    """A judged duplicate-pair verdict — the parsed ``build_dup_judgment_prompt`` reply."""
+
+    verdict: str  # "exact_dup" | "likely_dup" | "distinct"
+    canonical: int
+    evidence: str
+    confidence: str  # "high" | "medium" | "low"
+
+
+@dataclass(frozen=True)
+class PriorityVerdict:
+    """A judged priority score — the parsed ``build_priority_prompt`` reply."""
+
+    priority: str  # "P0" | "P1" | "P2" | "none"
+    reason: str
+
+
+def _extract_json_object(text: str) -> dict[str, object]:
+    """Pull a JSON object out of an LLM response, tolerating a code fence.
+
+    Tries, in order: the contents of a ```json ... ``` (or bare ```) fence;
+    the whole stripped text as JSON; the first ``{...}`` span in the text
+    (for prose-wrapped JSON). Anything that still doesn't parse to a JSON
+    object raises ``VerdictParseError``.
+    """
+    fence_match = _FENCE_RE.search(text)
+    candidate = (fence_match.group(1) if fence_match else text).strip()
+    if not candidate:
+        raise VerdictParseError(f"empty verdict response: {text!r}")
+
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError as exc:
+        brace_start = candidate.find("{")
+        brace_end = candidate.rfind("}")
+        if brace_start == -1 or brace_end <= brace_start:
+            raise VerdictParseError(
+                f"no JSON object found in verdict response: {text!r}"
+            ) from exc
+        try:
+            parsed = json.loads(candidate[brace_start : brace_end + 1])
+        except json.JSONDecodeError as exc2:
+            raise VerdictParseError(
+                f"invalid JSON in verdict response: {text!r}"
+            ) from exc2
+
+    if not isinstance(parsed, dict):
+        raise VerdictParseError(
+            f"expected a JSON object, got {type(parsed).__name__}: {text!r}"
+        )
+    return parsed
+
+
+def _require_str(data: Mapping[str, object], key: str) -> str:
+    try:
+        value = data[key]
+    except KeyError as exc:
+        raise VerdictParseError(f"missing key {key!r} in verdict: {data!r}") from exc
+    if not isinstance(value, str):
+        raise VerdictParseError(f"{key!r} must be a string, got {value!r}")
+    return value
+
+
+def parse_dup_verdict(text: str) -> DupVerdict:
+    """Parse an LLM's ``build_dup_judgment_prompt`` reply into a ``DupVerdict``.
+
+    Fence-tolerant (accepts fenced or bare JSON). Raises ``VerdictParseError``
+    on unparseable JSON, a missing key, or an unknown enum value.
+    """
+    data = _extract_json_object(text)
+    verdict = _require_str(data, "verdict")
+    evidence = _require_str(data, "evidence")
+    confidence = _require_str(data, "confidence")
+    if verdict not in _DUP_VERDICT_VALUES:
+        raise VerdictParseError(f"unknown verdict value: {verdict!r}")
+    if confidence not in _CONFIDENCE_VALUES:
+        raise VerdictParseError(f"unknown confidence value: {confidence!r}")
+    try:
+        canonical = data["canonical"]
+    except KeyError as exc:
+        raise VerdictParseError(
+            f"missing key 'canonical' in verdict: {data!r}"
+        ) from exc
+    if not isinstance(canonical, int) or isinstance(canonical, bool):
+        raise VerdictParseError(f"'canonical' must be an int, got {canonical!r}")
+    return DupVerdict(
+        verdict=verdict, canonical=canonical, evidence=evidence, confidence=confidence
+    )
+
+
+def parse_priority_verdict(text: str) -> PriorityVerdict:
+    """Parse an LLM's ``build_priority_prompt`` reply into a ``PriorityVerdict``.
+
+    Fence-tolerant (accepts fenced or bare JSON). Raises ``VerdictParseError``
+    on unparseable JSON, a missing key, or an unknown priority value.
+    """
+    data = _extract_json_object(text)
+    priority = _require_str(data, "priority")
+    reason = _require_str(data, "reason")
+    if priority not in _PRIORITY_VALUES:
+        raise VerdictParseError(f"unknown priority value: {priority!r}")
+    return PriorityVerdict(priority=priority, reason=reason)
+
+
+# ---------------------------------------------------------------------------
+# Prompts — rubric + few-shot examples mined from the 2026-07-19 backlog groom
+# (memory: backlog-groom-2026-07-19; evidence comments on every close).
+# ---------------------------------------------------------------------------
+
+_DUP_JUDGMENT_RUBRIC = """\
+You are grooming the HydraFlow issue backlog for duplicates. You are given
+two open issues, A and B. Decide whether they describe the same underlying
+problem, and if so, which one should stay open as the canonical issue.
+
+Canonical-selection rubric (apply in order until one wins):
+1. Richer body — more concrete evidence, reproduction steps, or a linked
+   root cause beats a thin restatement.
+2. Newer evidence — if both are equally detailed, the issue with the more
+   recent concrete finding wins; staleness alone is not decisive.
+3. State-tracked / auditor-owned — an issue a caretaker loop actively
+   tracks (rollup parent, auditor-filed, epic child) beats an ad-hoc
+   duplicate filed on top of it, even if it was filed later.
+4. Tie-break — lower issue number (filed first) is canonical.
+
+Quote the specific overlapping claim from both bodies as `evidence` — not a
+paraphrase, the actual words that make these the same issue.
+
+Verdicts:
+- "exact_dup": same root cause, same fix would close both.
+- "likely_dup": strong overlap but enough divergence a human should
+  confirm before closing (different scope, different symptom).
+- "distinct": similar surface, different underlying problem.
+
+Confidence:
+- "high": evidence is unambiguous, quoted claim appears in both bodies.
+- "medium": overlap is strong but relies on inference.
+- "low": surface similarity only (same title shape, different substance).
+
+Few-shot examples (mined from the 2026-07-19 backlog groom):
+
+Example 1 — exact_dup/high:
+  A: #9665 "DiscoverRunner wedges the s51 sandbox — kill sites never reap
+     the child process group"
+  B: #9800 "Sandbox s51 hangs forever — DiscoverRunner leaves an orphaned
+     subprocess that outlives the timeout"
+  -> {"verdict": "exact_dup", "canonical": 9665, "evidence": "both describe
+      DiscoverRunner leaving an unreaped subprocess at the same two kill
+      sites in s51", "confidence": "high"}
+
+Example 2 — exact_dup/high (auditor-tracked rollup beats later filings):
+  A: #9415 "ADR drift auditor doesn't track module renames"
+  B: #9183 "Auditor false-positives on renamed modules under ADR drift"
+  The auditor loop itself posts against #9768, the tracked rollup for this
+  family — that state-tracked issue wins the tie-break over the filer
+  numbers.
+  -> {"verdict": "exact_dup", "canonical": 9768, "evidence": "both #9415
+      and #9183 report the auditor missing renamed-module citations; #9768
+      is the auditor's own tracked rollup for this family",
+      "confidence": "high"}
+
+Example 3 — distinct (surface similarity, different substance):
+  A: #9436 "FakeGitHub PR state goes stale after a fast-forward merge"
+  B: #8699 "Assumed PR state diverges from real GitHub after a rebase"
+  -> {"verdict": "distinct", "canonical": 9436, "evidence": "#9436 is a
+      fake-vs-real fidelity gap (frozen fake state after a real mutation);
+      #8699 is an assumed-vs-real drift in the live corpus — a different
+      failure class even though both titles mention stale PR state",
+      "confidence": "high"}
+
+Respond with ONLY a JSON object (a fenced ```json block is fine):
+{"verdict": "exact_dup"|"likely_dup"|"distinct", "canonical": <issue number>,
+ "evidence": "<quoted overlap>", "confidence": "high"|"medium"|"low"}
+"""
+
+
+def build_dup_judgment_prompt(a: GroomIssue, b: GroomIssue) -> str:
+    """Build the judged-pair prompt: rubric + few-shot + the two issues."""
+    return (
+        f"{_DUP_JUDGMENT_RUBRIC}\n"
+        f"Issue A — #{a.number}: {a.title}\n{a.body}\n\n"
+        f"Issue B — #{b.number}: {b.title}\n{b.body}\n"
+    )
+
+
+_PRIORITY_RUBRIC = """\
+You are triaging one open HydraFlow backlog issue for priority. Score it
+functionality-first — impact on the autonomous factory's throughput, not
+how interesting the code is.
+
+Rubric:
+- "P0": breaks factory throughput RIGHT NOW — a loop is wedged, a gate is
+  stuck red, credit/auth is silently eaten, or the pipeline can't advance
+  issues at all.
+- "P1": degrades autonomous operation — a loop limps (partial failures,
+  retries exhausted, drift accumulating) but the factory still makes
+  progress without a human.
+- "P2": observability or hardening — better signal, a guard against a
+  plausible-but-not-yet-hit failure, test/coverage gaps on load-bearing
+  paths.
+- "none": hygiene — docs, renames, cosmetic cleanup, nothing that changes
+  factory behavior if left undone.
+
+Few-shot examples (mined from the 2026-07-19 backlog groom):
+
+Example 1 — P0:
+  Issue: "DiscoverRunner + ShapeRunner wedge the air-gapped sandbox — s51
+  never goes green, blocking every RC" (#9796 family)
+  -> {"priority": "P0", "reason": "a stuck sandbox suite blocks every RC
+      promotion — the factory can't ship anything until this is fixed"}
+
+Example 2 — P1:
+  Issue: "UL-graph bot PRs pile up duplicates across the family — no
+  single-flight guard" (#9893/#9890 family)
+  -> {"priority": "P1", "reason": "the loop keeps making progress but
+      wastes review cycles on duplicate PRs — degraded, not blocked"}
+
+Example 3 — P2:
+  Issue: "GateHealthLoop should report CI reds as a distribution, not a
+  raw event count" (#9974)
+  -> {"priority": "P2", "reason": "pure observability improvement — no
+      behavior changes if this waits"}
+
+Example 4 — none:
+  Issue: "Rename a private helper for clarity in pr_manager.py"
+  -> {"priority": "none", "reason": "cosmetic rename, no functional or
+      observability impact"}
+
+Respond with ONLY a JSON object (a fenced ```json block is fine):
+{"priority": "P0"|"P1"|"P2"|"none", "reason": "<one sentence>"}
+"""
+
+
+def build_priority_prompt(issue: GroomIssue) -> str:
+    """Build the priority-scoring prompt: rubric + few-shot + the issue."""
+    return f"{_PRIORITY_RUBRIC}\nIssue #{issue.number}: {issue.title}\n{issue.body}\n"
+
+
+# ---------------------------------------------------------------------------
+# Guardrails
+# ---------------------------------------------------------------------------
+
+# Active pipeline-phase labels. This module is pure stdlib (no pydantic), so
+# these are hardcoded literals mirroring ``HydraFlowConfig.all_pipeline_labels``
+# (src/config.py) field defaults — same convention as
+# ``src/mockworld/fakes/fake_issue_fetcher.py``'s ``HYDRAFLOW_LABELS``. A
+# production label rename needs a matching update here.
+_ACTIVE_PIPELINE_PHASE_LABELS: frozenset[str] = frozenset(
+    {
+        "hydraflow-find",  # find_label (config.py)
+        "hydraflow-discover",  # discover_label (config.py)
+        "hydraflow-shape",  # shape_label (config.py)
+        "hydraflow-plan",  # planner_label (config.py)
+        "hydraflow-ready",  # ready_label (config.py)
+        "hydraflow-review",  # review_label (config.py)
+        "hydraflow-hitl",  # hitl_label (config.py)
+        "hydraflow-hitl-active",  # hitl_active_label (config.py)
+        "hydraflow-hitl-autofix",  # hitl_autofix_label (config.py)
+        "hydraflow-fixed",  # fixed_label (config.py)
+        "hydraflow-verify",  # verify_label (config.py)
+        # Orthogonal to the phase machine, but ``all_pipeline_labels``
+        # includes it so ``swap_pipeline_labels`` clears it on a successful
+        # HITL correction — the groomer treats it the same way: don't touch
+        # a blocked issue.
+        "human-required",
+    }
+)
+
+# Caretaker-loop escalation families — a stuck-loop finding actively being
+# worked by another loop, not the groomer's to touch.
+_ESCALATION_LABELS: frozenset[str] = frozenset(
+    {
+        "hydraflow-adr-drift",  # adr_drift_label (config.py) — ADR-drift finding
+        # bare literal (prep.py HYDRAFLOW_LITERAL_LABELS) — stuck-loop HITL
+        # escalation root, distinct from the hydraflow-hitl-escalation
+        # config field
+        "hitl-escalation",
+    }
+)
+
+# The groomer's own rolling digest issue is never a grooming target.
+_GROOM_DIGEST_LABELS: frozenset[str] = frozenset({"hydraflow-groom-digest"})
+
+GUARDRAIL_SKIP_LABELS: frozenset[str] = (
+    _ACTIVE_PIPELINE_PHASE_LABELS | _ESCALATION_LABELS | _GROOM_DIGEST_LABELS
+)
+
+SETTLING_WINDOW_MINUTES = 60
+
+
+def is_guarded(issue: GroomIssue) -> bool:
+    """True if ``issue`` carries any label in ``GUARDRAIL_SKIP_LABELS``."""
+    return not GUARDRAIL_SKIP_LABELS.isdisjoint(issue.labels)
+
+
+# ---------------------------------------------------------------------------
+# Action tiering
+# ---------------------------------------------------------------------------
+
+_PRIORITY_LABELS: tuple[str, ...] = ("P0", "P1", "P2")
+
+
+@dataclass(frozen=True)
+class AutoClose:
+    """A judged exact-dup pair safe to close without a human — canonical wins."""
+
+    canonical: int
+    duplicate: int
+    evidence: str
+
+
+@dataclass(frozen=True)
+class DigestProposal:
+    """A dup pair that needs an operator's eyes before anything is closed."""
+
+    a: int
+    b: int
+    verdict: DupVerdict
+
+
+@dataclass(frozen=True)
+class RelabelAction:
+    """A priority label safe to apply without a human."""
+
+    number: int
+    previous: str
+    priority: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class PriorityQuestion:
+    """A priority delta not auto-applied — surfaced in the digest instead.
+
+    Currently only reached by the "never auto-remove a priority" rule
+    (``priority == "none"``): stripping a human-set label needs a human.
+    """
+
+    number: int
+    current: str
+    proposed: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class GroomActions:
+    """The full tiered output of one ``plan_actions`` call."""
+
+    auto_closes: tuple[AutoClose, ...]
+    relabels: tuple[RelabelAction, ...]
+    dup_proposals: tuple[DigestProposal, ...]
+    priority_questions: tuple[PriorityQuestion, ...]
+
+
+def _current_priority_label(issue: GroomIssue) -> str:
+    """Return the issue's current P-label, or ``"none"`` if it has none."""
+    for label in _PRIORITY_LABELS:
+        if label in issue.labels:
+            return label
+    return "none"
+
+
+def _is_settled(issue: GroomIssue, now: datetime) -> bool:
+    """True once ``issue`` is older than ``SETTLING_WINDOW_MINUTES``."""
+    updated = datetime.fromisoformat(issue.updated_at.replace("Z", "+00:00"))
+    return now - updated >= timedelta(minutes=SETTLING_WINDOW_MINUTES)
+
+
+def plan_actions(
+    verdicts: Mapping[tuple[int, int], DupVerdict],
+    priorities: Mapping[int, PriorityVerdict],
+    issues_by_number: Mapping[int, GroomIssue],
+    now: datetime,
+) -> GroomActions:
+    """Tier judged dup pairs and priority scores into concrete actions.
+
+    Dup tier: ``AutoClose`` only when ``verdict == "exact_dup"``,
+    ``confidence == "high"``, neither issue in the pair is guarded, AND
+    ``canonical`` is one of the two pair members. Every other judged pair
+    becomes a ``DigestProposal`` — an operator question, not a skip; a
+    guarded side or an out-of-pair canonical downgrades to the digest
+    rather than disappearing.
+
+    Priority tier: ``RelabelAction`` only when the judged priority differs
+    from the issue's current P-label, the issue is unguarded, AND the issue
+    is older than ``SETTLING_WINDOW_MINUTES`` (freshly-touched issues are
+    left for a later tick). A delta to ``"none"`` never auto-relabels —
+    removing a human-set priority always goes to the digest as a
+    ``PriorityQuestion`` instead. Guarded or too-fresh deltas are silently
+    skipped: the pipeline already owns the issue, or it'll be reconsidered
+    once settled — no digest noise either way.
+
+    See docs/superpowers/specs/2026-07-19-issue-groomer-loop-design.md §2.
+    """
+    auto_closes: list[AutoClose] = []
+    dup_proposals: list[DigestProposal] = []
+    for (a_num, b_num), verdict in sorted(verdicts.items()):
+        issue_a = issues_by_number.get(a_num)
+        issue_b = issues_by_number.get(b_num)
+        eligible = (
+            verdict.verdict == "exact_dup"
+            and verdict.confidence == "high"
+            and issue_a is not None
+            and issue_b is not None
+            and not is_guarded(issue_a)
+            and not is_guarded(issue_b)
+            and verdict.canonical in (a_num, b_num)
+        )
+        if eligible:
+            duplicate = b_num if verdict.canonical == a_num else a_num
+            auto_closes.append(
+                AutoClose(
+                    canonical=verdict.canonical,
+                    duplicate=duplicate,
+                    evidence=verdict.evidence,
+                )
+            )
+        else:
+            dup_proposals.append(DigestProposal(a=a_num, b=b_num, verdict=verdict))
+
+    relabels: list[RelabelAction] = []
+    priority_questions: list[PriorityQuestion] = []
+    for number, priority_verdict in sorted(priorities.items()):
+        issue = issues_by_number.get(number)
+        if issue is None or is_guarded(issue):
+            continue
+        current = _current_priority_label(issue)
+        if priority_verdict.priority == current:
+            continue
+        if not _is_settled(issue, now):
+            continue
+        if priority_verdict.priority == "none":
+            priority_questions.append(
+                PriorityQuestion(
+                    number=number,
+                    current=current,
+                    proposed=priority_verdict.priority,
+                    reason=priority_verdict.reason,
+                )
+            )
+            continue
+        relabels.append(
+            RelabelAction(
+                number=number,
+                previous=current,
+                priority=priority_verdict.priority,
+                reason=priority_verdict.reason,
+            )
+        )
+
+    return GroomActions(
+        auto_closes=tuple(auto_closes),
+        relabels=tuple(relabels),
+        dup_proposals=tuple(dup_proposals),
+        priority_questions=tuple(priority_questions),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Digest render
+# ---------------------------------------------------------------------------
+
+_NO_ENTRIES = "_none this tick_"
+
+
+def render_digest(actions: GroomActions, stats: Mapping[str, object]) -> str:
+    """Render the rolling groom digest body.
+
+    Four stable-order sections, each with an assert-friendly ``##`` header:
+    Proposed closes (evidence + confidence), Priority changes applied,
+    Operator questions (batched dup + priority questions), Stats. Rows are
+    sorted by issue number so re-rendering the same actions twice produces
+    identical output.
+    """
+    lines: list[str] = ["## Proposed closes"]
+    if actions.auto_closes:
+        for close in sorted(actions.auto_closes, key=lambda c: c.duplicate):
+            lines.append(
+                f"- #{close.duplicate}: duplicate of #{close.canonical} "
+                f"(confidence: high) — {close.evidence}"
+            )
+    else:
+        lines.append(_NO_ENTRIES)
+
+    lines.append("")
+    lines.append("## Priority changes applied")
+    if actions.relabels:
+        for relabel in sorted(actions.relabels, key=lambda r: r.number):
+            lines.append(
+                f"- #{relabel.number}: {relabel.previous} -> {relabel.priority} "
+                f"— {relabel.reason}"
+            )
+    else:
+        lines.append(_NO_ENTRIES)
+
+    lines.append("")
+    lines.append("## Operator questions")
+    questions = [
+        f"- #{p.a} vs #{p.b}: {p.verdict.verdict} ({p.verdict.confidence}) — "
+        f"{p.verdict.evidence}"
+        for p in sorted(actions.dup_proposals, key=lambda p: (p.a, p.b))
+    ] + [
+        f"- #{q.number}: priority proposed {q.proposed} (current {q.current}) "
+        f"— {q.reason}"
+        for q in sorted(actions.priority_questions, key=lambda q: q.number)
+    ]
+    lines.extend(questions if questions else [_NO_ENTRIES])
+
+    lines.append("")
+    lines.append("## Stats")
+    if stats:
+        lines.extend(f"- {key}: {stats[key]}" for key in sorted(stats))
+    else:
+        lines.append(_NO_ENTRIES)
+
+    return "\n".join(lines) + "\n"
