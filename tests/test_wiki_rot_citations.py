@@ -6,8 +6,10 @@ from pathlib import Path
 
 from wiki_rot_citations import (
     Cite,
+    ShippedClaim,
     extract_cites,
     extract_fenced_hints,
+    extract_shipped_claims,
     fuzzy_suggest,
     verify_cite_ast,
     verify_cite_grep,
@@ -116,3 +118,88 @@ def test_fuzzy_suggest_close_match() -> None:
 
 def test_fuzzy_suggest_no_match() -> None:
     assert fuzzy_suggest("zzzzzz", ["alpha", "beta"]) is None
+
+
+# ---------------------------------------------------------------------------
+# Shipped-claim extraction (issue #9598)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_shipped_claims_from_json_entry_block() -> None:
+    md = (
+        "# Gotcha\n\nSome prose.\n\n"
+        "```json:entry\n"
+        "{\n"
+        '  "id": "example",\n'
+        '  "rule": "do the thing",\n'
+        '  "code_refs": ["src/foo.py:bar", "src/foo.py:baz"],\n'
+        '  "fixed_in_pr": "#8713",\n'
+        '  "added": "2026-05-07"\n'
+        "}\n"
+        "```\n"
+    )
+    claims = extract_shipped_claims(md)
+    assert len(claims) == 1
+    claim = claims[0]
+    assert isinstance(claim, ShippedClaim)
+    assert claim.pr_ref == "#8713"
+    assert claim.code_refs == ("src/foo.py:bar", "src/foo.py:baz")
+
+
+def test_extract_shipped_claims_ignores_entries_without_fixed_in_pr() -> None:
+    md = (
+        "```json:entry\n"
+        '{"id": "compiled", "title": "x", "source_issue": 6295, "stale": false}\n'
+        "```\n"
+    )
+    assert extract_shipped_claims(md) == []
+
+
+def test_extract_shipped_claims_ignores_source_footer_prose() -> None:
+    # ``_Source: #6295 (plan)_`` footers are provenance, not shipped claims.
+    md = "# Entry\n\nBody text.\n\n_Source: #6295 (plan)_\n"
+    assert extract_shipped_claims(md) == []
+
+
+def test_extract_shipped_claims_handles_missing_code_refs() -> None:
+    md = '```json:entry\n{"id": "x", "fixed_in_pr": "#9001"}\n```\n'
+    claims = extract_shipped_claims(md)
+    assert len(claims) == 1
+    assert claims[0].pr_ref == "#9001"
+    assert claims[0].code_refs == ()
+
+
+def test_extract_shipped_claims_tolerates_malformed_json() -> None:
+    md = (
+        "```json:entry\n"
+        "{ this is not valid json,, }\n"
+        "```\n"
+        "```json:entry\n"
+        '{"id": "ok", "fixed_in_pr": "#42", "code_refs": ["src/x.py:y"]}\n'
+        "```\n"
+    )
+    claims = extract_shipped_claims(md)
+    assert len(claims) == 1
+    assert claims[0].pr_ref == "#42"
+
+
+def test_extract_shipped_claims_multiple_blocks() -> None:
+    md = (
+        "```json:entry\n"
+        '{"id": "a", "fixed_in_pr": "#1", "code_refs": ["src/a.py:f"]}\n'
+        "```\n"
+        "```json:entry\n"
+        '{"id": "b", "fixed_in_pr": "#2", "code_refs": ["src/b.py:g"]}\n'
+        "```\n"
+    )
+    claims = extract_shipped_claims(md)
+    assert {c.pr_ref for c in claims} == {"#1", "#2"}
+
+
+def test_extract_shipped_claims_skips_blank_fixed_in_pr() -> None:
+    md = (
+        "```json:entry\n"
+        '{"id": "x", "fixed_in_pr": "", "code_refs": ["src/x.py:y"]}\n'
+        "```\n"
+    )
+    assert extract_shipped_claims(md) == []

@@ -151,6 +151,63 @@ class TestWikiRotDetectorScenario:
         assert stats["wiki_rot_detector"]["issues_filed"] == 0, stats
         assert await world.github.list_issues_by_label("wiki-rot") == []
 
+    async def test_fires_on_uncorroborated_shipped_claim(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A ``fixed_in_pr`` claim whose code_refs are all dead ⇒ exactly one
+        entry-level shipped-claim find (issue #9598).
+
+        The seeded source tree defines ``other`` but not ``vanished``, so the
+        claim's sole code_ref does not resolve — the loop files a single
+        ``hydraflow-find`` + ``wiki-rot`` issue naming the PR, and suppresses
+        the redundant per-cite finding for the same dead ref.
+        """
+        world = MockWorld(tmp_path)
+
+        wiki_dir = tmp_path / "wiki" / _SLUG
+        wiki_dir.mkdir(parents=True)
+        (wiki_dir / "gotchas.md").write_text(
+            "# Gotchas\n\n## Swap boundary\n\nProse.\n\n"
+            "```json:entry\n"
+            '{"id": "swap", "rule": "r", '
+            '"code_refs": ["src/foo.py:vanished"], "fixed_in_pr": "#8715"}\n'
+            "```\n"
+        )
+        _seed_source(tmp_path)
+
+        fake_state = MagicMock()
+        fake_state.get_wiki_rot_attempts.return_value = 0
+        fake_state.inc_wiki_rot_attempts.return_value = 1
+
+        fake_dedup = MagicMock()
+        fake_dedup.get.return_value = set()
+
+        fake_wiki_store = MagicMock()
+        fake_wiki_store.list_repos.return_value = [_SLUG]
+        fake_wiki_store.repo_dir.return_value = wiki_dir
+
+        _seed_ports(
+            world,
+            wiki_rot_state=fake_state,
+            wiki_rot_dedup=fake_dedup,
+            wiki_store=fake_wiki_store,
+        )
+
+        stats = await world.run_with_loops(["wiki_rot_detector"], cycles=1)
+
+        assert stats["wiki_rot_detector"]["status"] == "fired", stats
+        assert stats["wiki_rot_detector"]["issues_filed"] == 1, stats
+        assert stats["wiki_rot_detector"]["escalations"] == 0, stats
+
+        issues = await world.github.list_issues_by_label("wiki-rot")
+        assert len(issues) == 1, issues
+        issue = world.github.issue(issues[0]["number"])
+        assert "#8715" in issue.title
+        assert "shipped claim" in issue.title
+        assert "hydraflow-find" in issue.labels
+        assert "wiki-rot" in issue.labels
+
     async def test_reconcile_clears_closed_escalation(
         self,
         tmp_path: Path,
