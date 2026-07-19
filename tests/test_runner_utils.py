@@ -456,7 +456,7 @@ class TestStreamClaudeProcessLifecycle:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
-            patch("runner_utils.os.killpg") as mock_killpg,
+            patch("process_group.os.killpg") as mock_killpg,
             pytest.raises(asyncio.CancelledError),
         ):
             await stream_claude_process(
@@ -500,7 +500,7 @@ class TestStreamClaudeProcessLifecycle:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
-            patch("runner_utils.os.killpg") as mock_killpg,
+            patch("process_group.os.killpg") as mock_killpg,
             pytest.raises(RuntimeError, match="timed out"),
         ):
             await stream_claude_process(
@@ -557,7 +557,7 @@ class TestStreamClaudeProcessLifecycle:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
-            patch("runner_utils.os.killpg"),
+            patch("process_group.os.killpg"),
             pytest.raises(RuntimeError, match="timed out") as exc_info,
         ):
             await stream_claude_process(
@@ -599,7 +599,7 @@ class TestStreamClaudeProcessLifecycle:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
-            patch("runner_utils.os.killpg") as mock_killpg,
+            patch("process_group.os.killpg") as mock_killpg,
             pytest.raises(asyncio.CancelledError),
         ):
             await stream_claude_process(**_default_kwargs(event_bus))
@@ -757,7 +757,7 @@ class TestTerminateProcesses:
         proc2.pid = 222
         active: set[asyncio.subprocess.Process] = {proc1, proc2}
 
-        with patch("runner_utils.os.killpg") as mock_killpg:
+        with patch("process_group.os.killpg") as mock_killpg:
             terminate_processes(active)
 
         assert mock_killpg.call_count == 2
@@ -786,7 +786,7 @@ class TestTerminateProcesses:
         proc.pid = 12345
         active: set[asyncio.subprocess.Process] = {proc}
 
-        with patch("runner_utils.os.killpg") as mock_killpg:
+        with patch("process_group.os.killpg") as mock_killpg:
             terminate_processes(active)
 
         mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
@@ -797,7 +797,7 @@ class TestTerminateProcesses:
         proc.pid = 12345
         active: set[asyncio.subprocess.Process] = {proc}
 
-        with patch("runner_utils.os.killpg", side_effect=OSError("no such group")):
+        with patch("process_group.os.killpg", side_effect=OSError("no such group")):
             terminate_processes(active)
 
         # OSError suppressed, no crash
@@ -879,7 +879,7 @@ class TestStreamClaudeProcessTimeout:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
-            patch("runner_utils.os.killpg") as mock_killpg,
+            patch("process_group.os.killpg") as mock_killpg,
             pytest.raises(RuntimeError, match="timed out after 0.01s"),
         ):
             await stream_claude_process(
@@ -923,7 +923,7 @@ class TestStreamClaudeProcessTimeout:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
-            patch("runner_utils.os.killpg"),
+            patch("process_group.os.killpg"),
             pytest.raises(RuntimeError),
         ):
             await stream_claude_process(

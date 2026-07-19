@@ -100,7 +100,7 @@ class TestReapAllTrackedProcesses:
         exited = _FakeProc(pid=111, returncode=0)
         runner_utils._ALL_TRACKED_PROCS.add(exited)  # type: ignore[arg-type]
 
-        with patch("runner_utils.os.killpg") as killpg:
+        with patch("process_group.os.killpg") as killpg:
             reaped = reap_all_tracked_processes()
 
         assert reaped == 0
@@ -111,7 +111,7 @@ class TestReapAllTrackedProcesses:
         live = _FakeProc(pid=4242, returncode=None)
         runner_utils._ALL_TRACKED_PROCS.add(live)  # type: ignore[arg-type]
 
-        with patch("runner_utils.os.killpg") as killpg:
+        with patch("process_group.os.killpg") as killpg:
             reaped = reap_all_tracked_processes()
 
         assert reaped == 1
