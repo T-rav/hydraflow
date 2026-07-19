@@ -222,7 +222,7 @@ def render_builder_prompt(builder_module_path: Path, skill_name: str) -> str:
     sys.dont_write_bytecode = True
     try:
         spec.loader.exec_module(module)
-    except Exception as exc:  # noqa: BLE001 — surface as a render error, uniform handling
+    except Exception as exc:  # surface as a render error, uniform handling
         msg = f"failed to exec builder module at {builder_module_path}: {exc}"
         raise PromptRenderError(msg) from exc
     finally:

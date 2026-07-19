@@ -383,7 +383,9 @@ async def main() -> None:
         ) -> list[dict[str, Any]]:
             return [dict(c) for c in _cases]
 
-        _refine_loop._run_corpus = _seeded_run_corpus  # type: ignore[method-assign]
+        # vars() assignment: instance-level seam without tripping the
+        # method-assign checker or ruff's B010 setattr rewrite.
+        vars(_refine_loop)["_run_corpus"] = _seeded_run_corpus
         _refine_loop._refine_llm = _SeededRefineLLM(seed.skill_prompt_refine_patch)
 
     orch = HydraFlowOrchestrator(

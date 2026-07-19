@@ -680,7 +680,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         case_id = str(case.get("case_id", ""))
         try:
             outcome = await self._compute_refine_outcome(case)
-        except Exception as exc:  # noqa: BLE001 — classify credit/bug, else fail-soft
+        except Exception as exc:  # classify credit/bug, else fail-soft
             reraise_on_credit_or_bug(exc)
             logger.warning("refine crashed for %s: %s", case_id, exc)
             outcome = "error"
@@ -933,7 +933,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             stdout, stderr = await _communicate_bounded(
                 proc, timeout=_ADVERSARIAL_TIMEOUT_SECONDS
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             reraise_on_credit_or_bug(exc)
             logger.warning(
                 "refine validation subprocess failed for %s: %s", case_id, exc
