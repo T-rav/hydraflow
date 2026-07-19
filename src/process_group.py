@@ -20,7 +20,7 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
-from typing import TypeGuard
+from typing import Any, TypeGuard
 
 
 def is_real_pid(pid: object) -> TypeGuard[int]:
@@ -62,7 +62,7 @@ def kill_process_group(proc: object, sig: signal.Signals = signal.SIGKILL) -> No
 # (runner_utils imports execution) and this is the shared stdlib-only home.
 # ---------------------------------------------------------------------------
 
-_TRACKED: set[object] = set()
+_TRACKED: set[Any] = set()
 
 
 def track(proc: object) -> None:

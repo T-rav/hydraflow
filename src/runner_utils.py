@@ -407,7 +407,7 @@ def terminate_processes(active_procs: set[asyncio.subprocess.Process]) -> None:
 # terminate() at all), so stopping the runtime orphaned their children to
 # launchd for the length of a pytest/make run. stream_claude_process
 # registers every spawn here; the stop/shutdown path reaps the union.
-_ALL_TRACKED_PROCS: set[asyncio.subprocess.Process] = process_group._TRACKED  # type: ignore[assignment]
+_ALL_TRACKED_PROCS: set[asyncio.subprocess.Process] = process_group._TRACKED
 
 
 def reap_all_tracked_processes() -> int:
