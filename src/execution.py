@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
+import signal
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -121,18 +123,32 @@ class HostRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
+            # Own process group so a timeout can reap the WHOLE tree, not just
+            # the direct child. This is the central runner path used broadly via
+            # subprocess_util.run_subprocess; the commands it runs (sub-make,
+            # pytest, agent CLIs) fork their own grandchildren. (#9648)
+            start_new_session=True,
         )
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 proc.communicate(input=input), timeout=timeout
             )
         except TimeoutError:
-            # proc.kill() raises ProcessLookupError when the child already
-            # exited between the timeout and the reap — suppress it so the
-            # TimeoutError (the intended signal) propagates instead of the
-            # ProcessLookupError crashing the caller/loop. (#9794/#9814)
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
+            # Reap the whole process group, not just the direct child. Without
+            # this, sub-make / pytest / agent grandchildren are re-parented to
+            # init and keep running (burning tokens, holding file handles)
+            # against an abandoned cycle — the orphaned-grandchild defect from
+            # #9648 (mirrors terminate_processes() and the #9579 caretaker fix).
+            # start_new_session=True above makes the child a group leader
+            # (pid == pgid), so os.killpg(proc.pid, SIGKILL) tears down the tree.
+            # Best-effort: suppress ProcessLookupError/OSError when the group is
+            # already gone (#9794/#9814) so the TimeoutError still propagates;
+            # fall back to proc.kill() when no pid is available.
+            with contextlib.suppress(ProcessLookupError, OSError):
+                if proc.pid is not None:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                else:
+                    proc.kill()
                 await proc.wait()
             raise
         return SimpleResult(
