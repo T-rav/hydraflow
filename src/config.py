@@ -366,6 +366,13 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("fitness_min_samples", "HYDRAFLOW_FITNESS_MIN_SAMPLES", 20),
     ("auto_tighten_stability_ticks", "HYDRAFLOW_AUTO_TIGHTEN_STABILITY_TICKS", 3),
     ("auto_tighten_interval", "HYDRAFLOW_AUTO_TIGHTEN_INTERVAL", 86400),
+    ("issue_groomer_interval", "HYDRAFLOW_ISSUE_GROOMER_INTERVAL", 86400),
+    (
+        "issue_groomer_full_sweep_interval",
+        "HYDRAFLOW_ISSUE_GROOMER_FULL_SWEEP_INTERVAL",
+        604800,
+    ),
+    ("issue_groomer_pair_budget", "HYDRAFLOW_ISSUE_GROOMER_PAIR_BUDGET", 24),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -402,6 +409,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("otel_endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT", "https://api.honeycomb.io"),
     ("otel_service_name", "OTEL_SERVICE_NAME", "hydraflow"),
     ("otel_environment", "HF_ENV", "local"),
+    ("issue_groomer_model", "HYDRAFLOW_ISSUE_GROOMER_MODEL", ""),
 ]
 
 _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
@@ -650,6 +658,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("workspace_gc_loop_enabled", "HYDRAFLOW_WORKSPACE_GC_LOOP_ENABLED", True),
     ("auto_tighten_loop_enabled", "HYDRAFLOW_AUTO_TIGHTEN_LOOP_ENABLED", True),
+    ("issue_groomer_enabled", "HYDRAFLOW_ISSUE_GROOMER_ENABLED", True),
 ]
 
 # Literal-typed env-var overrides.
@@ -3739,6 +3748,45 @@ class HydraFlowConfig(BaseModel):
     workspace_gc_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for WorkspaceGCLoop.",
+    )
+
+    # IssueGroomerLoop (spec #9957) — backlog-wide dedup, priority scoring,
+    # operator digest.
+    issue_groomer_enabled: bool = Field(
+        default=True,
+        description="Deploy-time kill-switch for IssueGroomerLoop (ADR-0049).",
+    )
+    issue_groomer_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description="Seconds between IssueGroomerLoop incremental ticks (default 24h).",
+    )
+    issue_groomer_full_sweep_interval: int = Field(
+        default=604800,
+        ge=86400,
+        le=2_592_000,
+        description=(
+            "Seconds between IssueGroomerLoop full-sweep ticks, where every "
+            "open issue is treated as changed rather than just the "
+            "incremental diff since the persisted index (default 7d)."
+        ),
+    )
+    issue_groomer_pair_budget: int = Field(
+        default=24,
+        ge=0,
+        le=200,
+        description=(
+            "Max duplicate-candidate pairs judged by an LLM call per "
+            "IssueGroomerLoop tick."
+        ),
+    )
+    issue_groomer_model: str = Field(
+        default="",
+        description=(
+            "Model override for IssueGroomerLoop judgment calls. Empty "
+            "string = use the background_model default."
+        ),
     )
 
     @field_validator(

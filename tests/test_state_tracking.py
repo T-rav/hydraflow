@@ -171,6 +171,12 @@ class TestInitialization:
             "adversarial_states",
             # HumanSteeringLoop per-issue steering reference (ADR-0099 #4)
             "human_steering",
+            # IssueGroomerLoop (spec #9957) — change-detection index, judged-
+            # pair cache, weekly full-sweep marker, rolling digest issue.
+            "groom_index",
+            "groom_judged_pairs",
+            "groom_last_full_sweep",
+            "groom_digest_issue",
         }
         assert set(d.keys()) == expected_keys
 

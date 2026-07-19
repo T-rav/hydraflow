@@ -2234,6 +2234,23 @@ class StateData(BaseModel):
     adversarial_states: dict[str, AdversarialState] = Field(default_factory=dict)
     # Continuous human-steering reference, keyed by str(issue_id) (ADR-0099 #4).
     human_steering: dict[str, SteeringState] = Field(default_factory=dict)
+    # IssueGroomerLoop (spec #9957) — small change-detection projection, NOT
+    # the engine's richer runtime GroomIssue view (src/issue_groomer.py). Keyed
+    # by issue number (str); value is {"title_hash", "body_hash", "updated_at"}.
+    # The loop rebuilds full GroomIssue views from live backlog fetches each
+    # tick — this index only tells it which issues changed since last time.
+    groom_index: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # Judged dup-pair cache keys (issue_groomer.pair_key format), newest-5000
+    # cap enforced by IssueGroomerStateMixin.add_judged_pairs. Prevents
+    # re-spending an LLM call on a pair already judged since either side's
+    # body last changed (the pair_key embeds both bodies' hashes).
+    groom_judged_pairs: list[str] = Field(default_factory=list)
+    # ISO-8601 timestamp of the last weekly full-sweep tick (changed=all
+    # issues, not just the incremental diff). Empty string = never run.
+    groom_last_full_sweep: str = Field(default="")
+    # The groomer's own rolling digest issue number (#8987 rollup pattern);
+    # 0 = not yet created.
+    groom_digest_issue: int = Field(default=0)
     last_updated: str | None = None
 
 

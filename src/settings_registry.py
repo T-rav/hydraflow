@@ -109,6 +109,10 @@ SETTINGS: dict[str, SettingSpec] = {
     "term_proposer_provider": SettingSpec("Model Routing", live=True, order=60),
     "term_proposer_model": SettingSpec("Model Routing", live=True, order=61),
     "background_model": SettingSpec("Models", live=True, order=3),
+    # --- Issue Groomer (backlog dedup + priority scoring, #9957) ----------
+    "issue_groomer_enabled": SettingSpec("Issue Groomer", live=True, order=0),
+    "issue_groomer_pair_budget": SettingSpec("Issue Groomer", live=True, order=1),
+    "issue_groomer_model": SettingSpec("Issue Groomer", live=True, order=2),
 }
 
 
