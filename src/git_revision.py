@@ -23,6 +23,7 @@ Design notes:
 from __future__ import annotations
 
 import subprocess
+from typing import cast
 
 # Short timeout: these are all local, read-only git operations (no network).
 # Bounded so the status endpoint can never hang on a wedged git process.
@@ -69,7 +70,11 @@ def get_boot_sha() -> str | None:
     """
     if _BOOT_SHA_SLOT[0] is _UNSET:
         _BOOT_SHA_SLOT[0] = _run_git(["rev-parse", "HEAD"])
-    return _BOOT_SHA_SLOT[0]  # type: ignore[return-value]
+    # After the sentinel check the slot holds a captured ``str | None``; the
+    # ``_UNSET`` sentinel is typed ``object`` (indistinct from the union's
+    # ``object`` member) so identity narrowing can't exclude it — cast instead
+    # of a blanket ``type: ignore`` (which the suppressions ratchet forbids).
+    return cast("str | None", _BOOT_SHA_SLOT[0])
 
 
 def get_commits_behind(base_ref: str = _DEFAULT_BASE_REF) -> int | None:
