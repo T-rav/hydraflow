@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field, model_validator
 from ulid import ULID
 
 from staleness import evaluate as evaluate_staleness
+from wiki_anchor_gate import has_repo_anchor
 
 if TYPE_CHECKING:
     from dedup_store import DedupStore
@@ -537,7 +538,6 @@ def flag_generic_entries_stale(
     existing ``active_lint_tracked`` behavior is untouched.
     """
     from file_util import atomic_write  # noqa: PLC0415
-    from wiki_anchor_gate import has_repo_anchor  # noqa: PLC0415
 
     if anchor_vocabulary is None:
         return 0
