@@ -213,6 +213,42 @@ class TestInitialization:
 # ---------------------------------------------------------------------------
 
 
+class TestAdrRollupTracking:
+    """Per-ADR rollup accessors (#8987) incl. all_adr_rollups (#9622)."""
+
+    def test_all_adr_rollups_empty_by_default(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        assert tracker.all_adr_rollups() == {}
+
+    def test_all_adr_rollups_returns_every_tracked_entry(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_adr_rollup("ADR-0038", issue_number=9418, pr_numbers=[9100, 9101])
+        tracker.set_adr_rollup("ADR-0042", issue_number=8800, pr_numbers=[7000])
+
+        rollups = tracker.all_adr_rollups()
+        assert set(rollups) == {"ADR-0038", "ADR-0042"}
+        assert rollups["ADR-0038"] == {
+            "issue_number": 9418,
+            "pr_numbers": [9100, 9101],
+        }
+        assert rollups["ADR-0042"] == {"issue_number": 8800, "pr_numbers": [7000]}
+
+    def test_all_adr_rollups_reflects_clear(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_adr_rollup("ADR-0038", issue_number=9418, pr_numbers=[9100])
+        tracker.clear_adr_rollup("ADR-0038")
+        assert tracker.all_adr_rollups() == {}
+
+    def test_all_adr_rollups_is_a_copy(self, tmp_path: Path) -> None:
+        """Mutating the returned mapping must not corrupt persisted state."""
+        tracker = make_tracker(tmp_path)
+        tracker.set_adr_rollup("ADR-0038", issue_number=9418, pr_numbers=[9100])
+        rollups = tracker.all_adr_rollups()
+        rollups.pop("ADR-0038")
+        rollups_again = tracker.all_adr_rollups()
+        assert "ADR-0038" in rollups_again
+
+
 class TestLoadSave:
     def test_save_creates_file(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
