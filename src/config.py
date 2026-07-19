@@ -258,6 +258,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("sentry_signal_cooldown_hours", "SENTRY_SIGNAL_COOLDOWN_HOURS", 24),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
+    ("review_orphan_strike_threshold", "HYDRAFLOW_REVIEW_ORPHAN_STRIKE_THRESHOLD", 3),
+    ("review_orphan_max_requeues", "HYDRAFLOW_REVIEW_ORPHAN_MAX_REQUEUES", 3),
     ("repo_wiki_min_batch_files", "HYDRAFLOW_REPO_WIKI_MIN_BATCH_FILES", 8),
     ("repo_wiki_max_batch_age_hours", "HYDRAFLOW_REPO_WIKI_MAX_BATCH_AGE_HOURS", 24),
     ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
@@ -1961,6 +1963,27 @@ class HydraFlowConfig(BaseModel):
         ge=300,
         le=604800,
         description="Seconds between repo wiki lint cycles",
+    )
+    review_orphan_strike_threshold: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Consecutive PR-less sightings of a review-labeled issue before "
+            "it is treated as an orphan and requeued to ready (#9815). "
+            "Below the threshold the review loop keeps waiting for PR "
+            "propagation as before."
+        ),
+    )
+    review_orphan_max_requeues: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description=(
+            "Bounded orphan requeues per issue before escalating to HITL "
+            "instead (#9815). 0 disables orphan requeue entirely (legacy "
+            "wait-forever behavior)."
+        ),
     )
     repo_wiki_min_batch_files: int = Field(
         default=8,
