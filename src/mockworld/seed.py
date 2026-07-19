@@ -117,6 +117,25 @@ class MockWorldSeed:
     # naive duty-cycle estimate would suggest.
     plan_hold_seconds: float = 0.0
 
+    # Prompt self-refinement air-gap seam (#9724). SkillPromptEvalLoop's refine
+    # path spawns two subprocesses that ``runners=fake_llm`` does NOT cover: the
+    # weekly corpus backstop (``_run_corpus`` → ``make trust-adversarial``) and
+    # the one-shot refine synthesis (``_refine_llm_complete`` → a real ``claude``
+    # via ``run_lightweight_agent`` — the s51/#9796 real-claude-wedge class).
+    # A scenario that drives the refine path (s56) scripts the corpus result
+    # list here so ``_run_corpus`` returns a PASS→FAIL regression instead of
+    # shelling out. Each dict carries ``{case_id, skill, expected_catcher,
+    # status, ...}`` (same shape ``make trust-adversarial FORMAT=json`` emits).
+    # Both loaders (sandbox_main + the in-process harness) leave the production
+    # ``_run_corpus`` untouched when this is empty (every other scenario).
+    skill_prompt_corpus_cases: list[dict[str, Any]] = field(default_factory=list)
+
+    # Scripted raw refine-LLM response for the same seam. The loop parses a
+    # ```diff fence out of this text (``parse_patch_response``); a scenario
+    # supplies the full fenced response so refine synthesis never reaches a real
+    # ``claude``. Only consumed when ``skill_prompt_corpus_cases`` is non-empty.
+    skill_prompt_refine_patch: str = ""
+
     def to_json(self) -> str:
         """Serialize to JSON for cross-process transfer."""
         return json.dumps(asdict(self), indent=2)

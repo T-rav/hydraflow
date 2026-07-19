@@ -76,6 +76,31 @@ def test_seed_round_trips_advisor_scripts_through_json() -> None:
     assert isinstance(next(iter(parsed.advisor_scripts.keys())), int)
 
 
+def test_default_seed_has_empty_prompt_refine_seam() -> None:
+    """Back-compat: seeds predating the prompt-refine air-gap seam (#9724)
+    carry no corpus cases and an empty scripted patch."""
+    seed = MockWorldSeed()
+    assert seed.skill_prompt_corpus_cases == []
+    assert seed.skill_prompt_refine_patch == ""
+
+
+def test_seed_round_trips_prompt_refine_seam_through_json() -> None:
+    """The scripted corpus regression + refine patch survive JSON transfer so
+    the docker loader (sandbox_main) rebuilds the s56 refine seam faithfully."""
+    original = MockWorldSeed(
+        skill_prompt_corpus_cases=[
+            {"case_id": "c1", "skill": "diff-sanity", "status": "FAIL"},
+        ],
+        skill_prompt_refine_patch="```diff\n--- a/x\n+++ b/x\n```\n",
+    )
+
+    parsed = MockWorldSeed.from_json(original.to_json())
+
+    assert parsed == original
+    assert parsed.skill_prompt_corpus_cases[0]["status"] == "FAIL"
+    assert parsed.skill_prompt_refine_patch.startswith("```diff")
+
+
 def test_default_seed_has_empty_phase_scripts() -> None:
     """Back-compat: pre-ADR-0063 seeds carry no phase_scripts entry."""
     assert MockWorldSeed().phase_scripts == {}
