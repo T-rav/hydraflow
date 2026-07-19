@@ -27,6 +27,7 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from dedup_store import DedupStore
 from exception_classify import reraise_on_credit_or_bug
+from loop_fitness import FitnessContext, FitnessKind, LoopFitness
 
 if TYPE_CHECKING:
     from ports import PRPort
@@ -193,6 +194,15 @@ class GateHealthLoop(BaseBackgroundLoop):
 
     def _get_default_interval(self) -> int:
         return self._config.gate_health_interval
+
+    def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
+        # Read-only auditor: files evidence issues, owns no proposal/
+        # acceptance lifecycle to score — HOUSEKEEPING per ADR-0093.
+        return LoopFitness(
+            worker_name=self._worker_name,
+            kind=FitnessKind.HOUSEKEEPING,
+            timestamp=ctx.window_end,
+        )
 
     async def _do_work(self) -> dict[str, Any] | None:
         if not self._enabled_cb(self._worker_name):
