@@ -1,8 +1,8 @@
 # ADR-0038: Multi-Repo Architecture Wiring Pattern
 
-**Status:** Accepted
+**Status:** Proposed
 **Date:** 2026-03-08
-**Revised:** 2026-03-15 · realized 2026-07 (gap closed; see Context)
+**Revised:** 2026-03-15 · Context updated 2026-07 (wiring gap closed)
 
 ## Context
 
@@ -27,8 +27,9 @@ since been **closed** — the decision below is the shipped behavior:
   path (`RepoRuntime.create()`) and eliminates the duplicate bare-object construction,
   so the dashboard path no longer bypasses the runtime abstraction.
 
-Because the decision is realized in code, this ADR is now **Accepted** rather than
-Proposed.
+The decision is realized in code; this ADR stays **Proposed** pending formal
+ratification, but its Context now reflects the shipped state rather than the
+original gap.
 
 ## Decision
 
