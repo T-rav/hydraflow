@@ -93,6 +93,12 @@ def _build_diagnosis_prompt(
 class DiagnosticRunner(BaseRunner):
     """Two-stage diagnostic agent: diagnose (read-only), then fix (in worktree)."""
 
+    # #9895: diagnosis agents quote credit-error prose from the failed
+    # issue's transcripts; scanning that prose raised a false global
+    # CreditExhaustedError on essentially every run (the flood that got
+    # this loop kill-switched). Structured/stderr credit signals still fire.
+    CREDIT_PROSE_SCAN = False
+
     _log = logger
 
     def _build_command(self, _worktree_path: Path | None = None) -> list[str]:
