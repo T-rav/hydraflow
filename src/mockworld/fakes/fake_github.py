@@ -672,7 +672,11 @@ class FakeGitHub:
     # --- Loop-required PRPort methods ---
 
     async def list_issues_by_label(self, label: str) -> list[dict[str, Any]]:
-        """Return open issues carrying *label* as GitHubIssueSummary-style dicts."""
+        """Return open issues carrying *label* as GitHubIssueSummary-style dicts.
+
+        ``labels`` mirrors the gh wire shape (#9943) so filters reading
+        ``lbl["name"]`` behave identically under the fake and the adapter.
+        """
         self._maybe_rate_limit()
         return [
             {
@@ -680,6 +684,7 @@ class FakeGitHub:
                 "title": issue.title,
                 "body": issue.body,
                 "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
+                "labels": [{"name": name} for name in issue.labels],
             }
             for issue in self._issues.values()
             if issue.state == "open" and label in issue.labels
