@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,6 +11,7 @@ from pydantic import BaseModel
 
 from dedup_store import DedupStore
 from models import IsoTimestamp, ReviewVerdict
+from text_match import keyword_matches
 
 if TYPE_CHECKING:
     from ports import ObservabilityPort, ReviewInsightStorePort  # noqa: TCH004
@@ -226,19 +226,6 @@ def is_infra_failure_summary(summary: str) -> bool:
     return lowered.startswith(_INFRA_FAILURE_PREFIXES)
 
 
-def _keyword_matches(keyword: str, lowered_summary: str) -> bool:
-    """Whole-word / phrase match of *keyword* against *lowered_summary*.
-
-    Uses ``\\b`` boundaries around the keyword's leading/trailing word
-    characters so the 3-char "test" matches "test"/"tests" but not "latest",
-    and so dropped-but-historically-broad terms can never match inside a
-    larger identifier (e.g. "type" inside ``TypeError``). Non-word characters
-    inside a keyword (``try/except``) are matched literally.
-    """
-    pattern = r"\b" + re.escape(keyword) + r"\b"
-    return re.search(pattern, lowered_summary) is not None
-
-
 def extract_categories(summary: str) -> list[str]:
     """Extract feedback categories from a review summary using keyword matching.
 
@@ -256,7 +243,7 @@ def extract_categories(summary: str) -> list[str]:
     return [
         cat
         for cat, keywords in CATEGORY_KEYWORDS.items()
-        if any(_keyword_matches(kw.lower(), lower) for kw in keywords)
+        if any(keyword_matches(kw.lower(), lower) for kw in keywords)
     ]
 
 
