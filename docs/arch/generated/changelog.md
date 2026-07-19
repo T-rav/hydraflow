@@ -6,7 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W29
 
-- `541f406` — feat(ul): edge-proposer — 81 new edges across 40 terms *(2026-07-18)*
+- `4d20d74` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9926) (#9926) *(2026-07-18)*
+- `cb09ea0` — feat(ul): edge-proposer — 3 new edges across 3 terms (#9912) (#9912) *(2026-07-18)*
+- `15bbcac` — feat(ul): edge-proposer — 81 new edges across 40 terms (#9896) (#9896) *(2026-07-18)*
+- `90114b5` — feat(ul): entry-evidence — 21 new entry links across 14 terms (#9897) (#9897) *(2026-07-18)*
 - `f07fa2f` — feat(ul): entry-evidence — 20 new entry links across 14 terms (#9886) (#9886) *(2026-07-18)*
 - `c540840` — feat(ul): term-proposer batch — 1 drafts (#9864) (#9864) *(2026-07-18)*
 - `c91e35f` — feat(ul): entry-evidence — 15 new entry links across 12 terms (#9880) (#9880) *(2026-07-18)*

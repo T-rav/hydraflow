@@ -55,7 +55,7 @@ graph LR
 ### BotPRPort
 
 - Module: `src.term_proposer_loop`
-- Methods: `open_bot_pr`
+- Methods: `find_open_bot_pr`, `open_bot_pr`
 - Adapters:
   - `OpenAutoPRBotPRPort` (`src.term_proposer_runtime`)
 - Fake: `FakeBotPR` (`mockworld.fakes.fake_bot_pr`)
