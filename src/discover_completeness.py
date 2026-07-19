@@ -39,7 +39,17 @@ def build_discover_completeness_prompt(
     fenced via :func:`fenced_steering_guidance`, which returns ``""``
     when there is no guidance so behavior is unchanged when the feature
     is off.
+
+    Returns "" when *brief* is empty/absent (#9817/#9823): a plain bugfix
+    routed straight to implement never produced a Discover brief, and an
+    empty document trivially fails criterion 1 (missing-section:intent) —
+    a BLOCKING rubric fail that burned real implementation attempts on
+    process. The skill loop treats an empty prompt as "no input data" and
+    passes; the DiscoverRunner path always supplies a non-empty brief, so
+    its behavior is unchanged.
     """
+    if not brief.strip():
+        return ""
     prompt = f"""You are running the Discover Completeness skill for issue #{issue_number}: {issue_title}.
 
 You are evaluating a DISCOVERY BRIEF against the five-criterion rubric

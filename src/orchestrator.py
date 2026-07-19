@@ -1706,12 +1706,17 @@ class HydraFlowOrchestrator:
                 active_in_store, prefetched_issues=[gh_issue]
             )
             if not prs:
-                # PR not visible yet — wait before re-queuing so the
-                # review pool doesn't tight-loop on issues whose PRs
-                # haven't propagated to the GitHub API yet.
+                # PR not visible yet — usually propagation delay, but after a
+                # restart mid-implement the PR may NOT EXIST and the issue
+                # would otherwise sit review-labeled forever (#9815). Count
+                # strikes; at the threshold, requeue with fresh budget
+                # (bounded, then HITL) instead of waiting eternally.
+                if await self._handle_review_orphan(issue):
+                    return False
                 await self._sleep_or_stop(min(self._config.poll_interval, 30))
                 self._svc.store.enqueue_transition(issue, "review")
                 return False
+            self._state.clear_review_orphan_strikes(issue.id)
 
             review_results = await self._svc.reviewer.review_prs(
                 prs, [i.to_task() for i in gh_issues]
@@ -1724,6 +1729,75 @@ class HydraFlowOrchestrator:
             return True
         finally:
             release_batch_in_flight(self._svc.store, {issue.id})
+
+    async def _handle_review_orphan(self, issue: Task) -> bool:
+        """Requeue a review-labeled issue whose agent PR does not exist (#9815).
+
+        Returns True when the issue was requeued (to ready) or escalated (to
+        HITL) — the caller must NOT re-enqueue it to review. Returns False
+        while strikes are below the threshold (normal PR-propagation wait) or
+        when the feature is disabled (``review_orphan_max_requeues=0``).
+        Every gh failure is fail-soft back to the legacy wait path.
+        """
+        if self._config.review_orphan_max_requeues <= 0:
+            return False
+        strikes = self._state.increment_review_orphan_strike(issue.id)
+        if strikes < self._config.review_orphan_strike_threshold:
+            return False
+
+        self._state.clear_review_orphan_strikes(issue.id)
+        requeues = self._state.increment_review_orphan_requeue(issue.id)
+        try:
+            if requeues > self._config.review_orphan_max_requeues:
+                cause = (
+                    f"review-labeled with no agent PR after "
+                    f"{requeues - 1} orphan requeue(s) — needs a human"
+                )
+                self._state.set_hitl_cause(issue.id, cause)
+                await self._svc.prs.swap_pipeline_labels(
+                    issue.id, self._config.hitl_label[0]
+                )
+                await self._svc.prs.post_comment(
+                    issue.id,
+                    "## Review Orphan Escalation\n\n"
+                    f"{cause}. Escalating to HITL (#9815).",
+                )
+                logger.warning(
+                    "Issue #%d: review orphan exhausted %d requeues — HITL",
+                    issue.id,
+                    self._config.review_orphan_max_requeues,
+                )
+                return True
+
+            self._state.reset_issue_attempts(issue.id)
+            self._state.clear_diagnostic_state(issue.id)
+            await self._svc.prs.swap_pipeline_labels(
+                issue.id, self._config.ready_label[0]
+            )
+            await self._svc.prs.post_comment(
+                issue.id,
+                "## Review Orphan Requeue\n\n"
+                "This issue was review-labeled with no open agent PR "
+                "(interrupted implement, e.g. a factory restart). Attempt "
+                f"counters reset; requeued to ready for a fresh build "
+                f"(requeue {requeues}/"
+                f"{self._config.review_orphan_max_requeues}, #9815).",
+            )
+            logger.info(
+                "Issue #%d: review orphan requeued to ready (%d/%d)",
+                issue.id,
+                requeues,
+                self._config.review_orphan_max_requeues,
+            )
+            return True
+        except RuntimeError as exc:
+            logger.warning(
+                "Issue #%d: review orphan handling failed (%s) — keeping "
+                "legacy review wait",
+                issue.id,
+                exc,
+            )
+            return False
 
     async def _sleep_or_stop(self, seconds: int | float) -> None:
         """Sleep for *seconds*, waking early if stop is requested."""

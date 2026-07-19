@@ -1614,11 +1614,11 @@ class PRManager:
         url = parts[1] if len(parts) > 1 else ""
         return (conclusion, url)
 
-    async def close_issue(self, issue_number: int) -> None:
-        """Close a GitHub issue."""
+    async def close_issue(self, issue_number: int) -> bool:
+        """Close a GitHub issue. Returns False when the gh call failed (#9812)."""
         self._assert_repo()
         if self._config.dry_run:
-            return
+            return True
         try:
             await self._run_gh(
                 "gh",
@@ -1634,8 +1634,10 @@ class PRManager:
                 issue_number,
                 exc,
             )
+            return False
+        return True
 
-    async def close_pr(self, pr_number: int) -> None:
+    async def close_pr(self, pr_number: int) -> bool:
         """Close a GitHub pull request without merging it.
 
         ``gh pr close`` (not ``gh issue close`` — the latter resolves only
@@ -1643,7 +1645,7 @@ class PRManager:
         """
         self._assert_repo()
         if self._config.dry_run:
-            return
+            return True
         try:
             await self._run_gh(
                 "gh",
@@ -1659,6 +1661,8 @@ class PRManager:
                 pr_number,
                 exc,
             )
+            return False
+        return True
 
     async def update_issue_body(self, issue_number: int, body: str) -> None:
         """Update the body of a GitHub issue using ``--body-file``."""

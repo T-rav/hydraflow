@@ -103,6 +103,8 @@ class TestInitialization:
             "log_ingest_cursor",
             "sentry_signal_cooldown",
             "trace_runs",
+            "review_orphan_requeues",
+            "review_orphan_strikes",
             "route_back_counts",
             # Trust-arch-hardening mixins (spec §4.1–§4.9 + §12.1)
             "auto_reverts_in_cycle",
