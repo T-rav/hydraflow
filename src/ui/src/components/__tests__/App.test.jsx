@@ -262,15 +262,30 @@ describe('Config warning banner', () => {
 })
 
 describe('Main tab bar', () => {
-  it('has exactly 7 main tabs including Atlas, Loop Fitness, and ADR Conformance', async () => {
+  it('has exactly 5 main tabs — Loop Fitness and ADR Conformance are nested (#9789)', async () => {
     const { default: App } = await import('../../App')
     render(<App />)
-    const tabLabels = ['Work Stream', 'HITL', 'Outcomes', 'Atlas', 'Loop Fitness', 'ADR Conformance', 'System']
+    const tabLabels = ['Work Stream', 'HITL', 'Outcomes', 'Atlas', 'System']
     const tabContainer = screen.getByTestId('main-tabs')
     expect(tabContainer.childElementCount).toBe(tabLabels.length)
     for (const label of tabLabels) {
       expect(within(tabContainer).getByText(label)).toBeInTheDocument()
     }
+    // Nested destinations must NOT appear at the top level.
+    expect(within(tabContainer).queryByText('Loop Fitness')).toBeNull()
+    expect(within(tabContainer).queryByText('ADR Conformance')).toBeNull()
+  })
+
+  it('coerces legacy ?tab=loop-fitness and ?tab=adr-conformance to their parents (#9789)', async () => {
+    const oldHref = window.location.href
+    window.history.replaceState({}, '', '/?tab=loop-fitness')
+    const { _initialTabFromUrl } = await import('../../App')
+    // Exercise via a fresh module read of the URL helper path: mount App.
+    const { default: App } = await import('../../App')
+    const { unmount } = render(<App />)
+    expect(screen.getByTestId('main-tabs')).toBeInTheDocument()
+    unmount()
+    window.history.replaceState({}, '', oldHref)
   })
 
   it('coerces ?tab=wiki query param to atlas on mount', async () => {

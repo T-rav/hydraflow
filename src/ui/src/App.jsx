@@ -10,20 +10,16 @@ import { StreamView } from './components/StreamView'
 import { SessionSidebar } from './components/SessionSidebar'
 import { AtlasExplorer } from './components/atlas/AtlasExplorer'
 import { ProjectView } from './components/ProjectView'
-import { LoopFitnessPanel } from './components/LoopFitnessPanel'
-import { AdrConformancePanel } from './components/AdrConformancePanel'
 import { theme } from './theme'
 import { canonicalRepoSlug } from './constants'
 
-const TABS = ['issues', 'hitl', 'outcomes', 'atlas', 'loop-fitness', 'adr-conformance', 'system']
+const TABS = ['issues', 'hitl', 'outcomes', 'atlas', 'system']
 
 const TAB_LABELS = {
   issues: 'Work Stream',
   outcomes: 'Outcomes',
   hitl: 'HITL',
   atlas: 'Atlas',
-  'loop-fitness': 'Loop Fitness',
-  'adr-conformance': 'ADR Conformance',
   system: 'System',
 }
 
@@ -32,6 +28,10 @@ function _initialTabFromUrl() {
   const params = new URLSearchParams(window.location.search)
   const requested = params.get('tab')
   if (requested === 'wiki') return 'atlas'
+  // #9789: these moved from top-level tabs to sub-tabs; old deep links
+  // land on the parent (the panel reads its own sub param).
+  if (requested === 'loop-fitness') return 'system'
+  if (requested === 'adr-conformance') return 'atlas'
   if (requested && TABS.includes(requested)) return requested
   return 'issues'
 }
@@ -277,8 +277,6 @@ function AppContent() {
               : <div style={idleMessage}>Pipeline is not running — HITL actions are unavailable.</div>
           )}
           {activeTab === 'atlas' && <AtlasExplorer />}
-          {activeTab === 'loop-fitness' && <LoopFitnessPanel />}
-          {activeTab === 'adr-conformance' && <AdrConformancePanel />}
           {activeTab === 'system' && (
             <SystemPanel
               backgroundWorkers={backgroundWorkers}

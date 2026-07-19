@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, lazy, Suspense } from 'react'
+import { LoopFitnessPanel } from './LoopFitnessPanel'
 import { theme } from '../theme'
 import { BACKGROUND_WORKERS, WORKER_GROUPS, INTERVAL_PRESETS, WORKER_PRESETS, EDITABLE_INTERVAL_WORKERS, SYSTEM_WORKER_INTERVALS, UNSTICK_BATCH_OPTIONS, REPO_ALL } from '../constants'
 import { useHydraFlow } from '../context/HydraFlowContext'
@@ -21,6 +22,8 @@ const SUB_TABS = [
   { key: 'insights', label: 'Insights' },
   { key: 'diagnostics', label: 'Diagnostics' },
   { key: 'livestream', label: 'Livestream' },
+  // #9789: nested from the former top-level tab — operational family.
+  { key: 'fitness', label: 'Loop Fitness' },
 ]
 
 function relativeTime(isoString) {
@@ -858,6 +861,7 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWo
           </Suspense>
         )}
         {activeSubTab === 'livestream' && <Livestream events={events} />}
+        {activeSubTab === 'fitness' && <LoopFitnessPanel />}
       </div>
     </div>
   )
