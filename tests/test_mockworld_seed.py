@@ -16,6 +16,7 @@ def test_default_seed_is_empty() -> None:
     assert seed.cycles_to_run == 4
     assert seed.loops_enabled is None
     assert seed.plan_hold_seconds == 0.0
+    assert seed.rulesets == {}
 
 
 def test_seed_round_trips_through_json() -> None:
@@ -48,6 +49,35 @@ def test_seed_round_trips_plan_hold_seconds_through_json() -> None:
 
     assert parsed == original
     assert parsed.plan_hold_seconds == 3.0
+
+
+def test_default_seed_has_empty_rulesets() -> None:
+    """Back-compat: every pre-#9644 scenario seed predates ``rulesets``."""
+    assert MockWorldSeed().rulesets == {}
+
+
+def test_seed_round_trips_rulesets_through_json() -> None:
+    """JSON round-trip preserves the branch-protection ruleset seed (#9644).
+
+    Ruleset names are string object keys and every value is JSON-native
+    (nested dicts/lists), so no ``from_json`` key coercion is required — the
+    equality check guards against a future field that would need it.
+    """
+    original = MockWorldSeed(
+        rulesets={
+            "staging protect": {
+                "name": "staging protect",
+                "target": "branch",
+                "enforcement": "active",
+                "conditions": {"ref_name": {"include": ["refs/heads/staging"]}},
+                "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}],
+            },
+        },
+    )
+
+    parsed = MockWorldSeed.from_json(original.to_json())
+
+    assert parsed == original
 
 
 def test_default_seed_has_empty_advisor_scripts() -> None:
