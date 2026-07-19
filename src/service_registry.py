@@ -62,6 +62,7 @@ from fitness_scorecard_loop import FitnessScorecardLoop
 from flake_tracker_loop import FlakeTrackerLoop
 from gate_activation_check import check_gate_activation
 from gate_activator_loop import GateActivatorLoop  # noqa: TCH001
+from gate_health_loop import GateHealthLoop
 from github_cache_loop import GitHubCacheLoop, GitHubDataCache
 from harness_insights import HarnessInsightStore
 from health_monitor_loop import HealthMonitorLoop
@@ -311,6 +312,7 @@ class ServiceRegistry:
     sentry_loop: SentryLoop
     log_ingest_loop: LogIngestLoop
     stale_issue_gc_loop: StaleIssueGCLoop
+    gate_health_loop: GateHealthLoop
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
     gate_activator_loop: GateActivatorLoop
@@ -1337,6 +1339,11 @@ def build_services(
         state=state,
         deps=loop_deps,
     )
+    gate_health_loop = GateHealthLoop(
+        config=config,
+        pr_manager=prs,
+        deps=loop_deps,
+    )
     ci_monitor_loop = CIMonitorLoop(  # noqa: F841
         config=config,
         pr_manager=prs,
@@ -1863,6 +1870,7 @@ def build_services(
         sentry_loop=sentry_loop,
         log_ingest_loop=log_ingest_loop,
         stale_issue_gc_loop=stale_issue_gc_loop,
+        gate_health_loop=gate_health_loop,
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,
         gate_activator_loop=gate_activator_loop,

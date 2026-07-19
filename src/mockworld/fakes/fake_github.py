@@ -116,6 +116,11 @@ class FakeGitHub:
 
     def __init__(self) -> None:
         self._issues: dict[int, FakeIssue] = {}
+        self._pr_diff_names: dict[int, list[str]] = {}
+        # #9974: seeded workflow-run history for GateHealthLoop scenarios.
+        self._workflow_runs: list[dict[str, Any]] = []
+        self._workflow_jobs: dict[int, list[dict[str, Any]]] = {}
+        self._workflow_artifacts: dict[int, int] = {}
         self._prs: dict[int, FakePR] = {}
         self._pr_counter = 10_000
         self._ci_scripts: dict[int, deque[tuple[bool, str]]] = {}
@@ -584,9 +589,13 @@ class FakeGitHub:
         self._maybe_rate_limit()
         return "abc123"
 
+    def set_pr_diff_names(self, pr_number: int, names: list[str]) -> None:
+        """Seed the changed-file list one PR reports (#9974 blame scenarios)."""
+        self._pr_diff_names[pr_number] = list(names)
+
     async def get_pr_diff_names(self, pr_number: int) -> list[str]:
         self._maybe_rate_limit()
-        return ["src/app.py"]
+        return list(self._pr_diff_names.get(pr_number, ["src/app.py"]))
 
     async def get_pr_recent_commit_diffs(self, pr_number: int, *, n: int = 3) -> str:
         """Return a stub diff block for the last *n* commits on *pr_number*.
@@ -697,6 +706,46 @@ class FakeGitHub:
             issue.number for issue in self._issues.values() if issue.state == "open"
         ]
         return sorted(numbers)[:limit]
+
+    def add_workflow_run(
+        self,
+        run_id: int,
+        *,
+        workflow: str,
+        conclusion: str,
+        created_at: str = "2026-07-01T00:00:00Z",
+        pr_number: int = 0,
+        jobs: list[dict[str, Any]] | None = None,
+        artifact_count: int = 0,
+    ) -> None:
+        """Seed one workflow run (+jobs/artifacts) for gate-health scenarios."""
+        self._workflow_runs.append(
+            {
+                "id": run_id,
+                "workflow": workflow,
+                "conclusion": conclusion,
+                "created_at": created_at,
+                "pr_number": pr_number,
+            }
+        )
+        self._workflow_jobs[run_id] = jobs or []
+        self._workflow_artifacts[run_id] = artifact_count
+
+    async def list_workflow_runs(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Newest-first slice of the seeded run history (#9974)."""
+        self._maybe_rate_limit()
+        newest_first = sorted(
+            self._workflow_runs, key=lambda r: str(r["created_at"]), reverse=True
+        )
+        return [dict(r) for r in newest_first[:limit]]
+
+    async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        self._maybe_rate_limit()
+        return [dict(j) for j in self._workflow_jobs.get(run_id, [])]
+
+    async def count_workflow_run_artifacts(self, run_id: int) -> int:
+        self._maybe_rate_limit()
+        return self._workflow_artifacts.get(run_id, 0)
 
     async def list_closed_issues_by_label(
         self,

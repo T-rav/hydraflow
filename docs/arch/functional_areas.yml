@@ -23,6 +23,7 @@ areas:
       - EntryEvidenceLoop
       - EpicMonitorLoop
       - FitnessScorecardLoop
+      - GateHealthLoop
       - EpicSweeperLoop
       - GitHubCacheLoop
       - HealthMonitorLoop

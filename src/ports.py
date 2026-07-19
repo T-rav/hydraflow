@@ -453,6 +453,23 @@ class PRPort(Protocol):
         """Return the resolved state of a GitHub issue (``'COMPLETED'``, ``'OPEN'``, etc.)."""
         ...
 
+    async def list_workflow_runs(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return recent workflow runs, newest first (#9974, read-only).
+
+        Each dict: ``{"id", "workflow", "conclusion", "created_at",
+        "pr_number"}`` — ``pr_number`` is 0 when the run has no PR
+        association.
+        """
+        ...
+
+    async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        """Return jobs for one run: ``{"name", "conclusion"}`` each (#9974)."""
+        ...
+
+    async def count_workflow_run_artifacts(self, run_id: int) -> int:
+        """Return the number of artifacts a run uploaded (#9974)."""
+        ...
+
     async def get_issue_updated_at(self, issue_number: int) -> str:
         """Return the updated_at timestamp for an issue as ISO string."""
         ...
