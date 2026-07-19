@@ -40,6 +40,7 @@ from phase_utils import (
     log_exception_with_bug_classification,
     release_batch_in_flight,
 )
+from runner_utils import reap_all_tracked_processes
 from service_registry import (
     ServiceRegistry,
     WorkerRegistryCallbacks,
@@ -460,6 +461,17 @@ class HydraFlowOrchestrator:
         self._svc.agents.terminate()
         self._svc.reviewers.terminate()
         self._svc.hitl_runner.terminate()
+        # #9911: the four runner sets above are only part of the picture —
+        # acceptance_criteria / verification_judge / sentry / report_issue
+        # (and any future stream_claude_process caller) register in the
+        # runtime-wide registry; reap the union so nothing reparents to
+        # launchd and burns CPU after "idle".
+        reaped = reap_all_tracked_processes()
+        if reaped:
+            logger.info(
+                "Stop: reaped %d subprocess group(s) beyond the runner-owned sets",
+                reaped,
+            )
 
         # Checkpoint interrupted issues before cancelling tasks
         interrupted = await self._build_interrupted_issues()
@@ -1414,6 +1426,10 @@ class HydraFlowOrchestrator:
             for task in tasks.values():
                 task.cancel()
             await asyncio.gather(*tasks.values(), return_exceptions=True)
+            # #9911: cancelled loop bodies unwind without running their
+            # subprocess cleanup when cancellation lands inside wait_for;
+            # reap whatever the drained loops left behind.
+            reap_all_tracked_processes()
 
     async def _polling_loop(
         self,
@@ -1884,6 +1900,7 @@ class HydraFlowOrchestrator:
         self._svc.agents.terminate()
         self._svc.reviewers.terminate()
         self._svc.hitl_runner.terminate()
+        reap_all_tracked_processes()
 
     async def _sleep_until_resume(self, resume_at: datetime) -> None:
         """Sleep until *resume_at* (interruptible by stop or credit-resume event)."""

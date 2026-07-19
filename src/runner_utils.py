@@ -218,10 +218,9 @@ async def _stream_and_collect(
             and config.on_output(accumulated_text)
         ):
             early_killed = True
-            # The process may have already exited between the last read and
-            # this kill; suppress ProcessLookupError so it does not escape.
-            with contextlib.suppress(ProcessLookupError, OSError):
-                proc.kill()
+            # Group kill (self-suppressing): the early-kill previously
+            # reaped only the direct child, leaking its group (#9911).
+            _kill_proc_group(proc)
             break
 
         # Emit structured activity event (additive — does not replace TRANSCRIPT_LINE)
@@ -315,6 +314,7 @@ async def stream_claude_process(
         start_new_session=True,  # Own process group for reliable cleanup
     )
     active_procs.add(proc)
+    _ALL_TRACKED_PROCS.add(proc)
 
     stderr_task: asyncio.Task[bytes] | None = None
     try:
@@ -357,30 +357,63 @@ async def stream_claude_process(
         # process raises ProcessLookupError out of the cleanup path. Mirror the
         # guard in terminate_processes().
         with contextlib.suppress(ProcessLookupError, OSError):
-            proc.kill()
+            _kill_proc_group(proc)
             await proc.wait()
         raise RuntimeError(f"Agent process timed out after {config.timeout}s") from exc
     except asyncio.CancelledError:
-        # On cancellation the process may already have exited; suppress
-        # ProcessLookupError so it does not escape the cancel path.
-        with contextlib.suppress(ProcessLookupError, OSError):
-            proc.kill()
+        # On cancellation the process may already have exited; the group
+        # kill is self-suppressing (#9911: group, not just the child).
+        _kill_proc_group(proc)
         raise
     finally:
         if stderr_task is not None and not stderr_task.done():
             stderr_task.cancel()
             await asyncio.gather(stderr_task, return_exceptions=True)
         active_procs.discard(proc)
+        _ALL_TRACKED_PROCS.discard(proc)
+
+
+def _kill_proc_group(proc: asyncio.subprocess.Process) -> None:
+    """SIGKILL *proc*'s whole process group (best-effort, never raises).
+
+    Every spawn in this module uses ``start_new_session=True`` so pid ==
+    pgid; a plain ``proc.kill()`` reaps only the direct child and leaks
+    grandchildren (sub-make, pytest workers) to launchd (#9911).
+    """
+    with contextlib.suppress(ProcessLookupError, OSError):
+        if proc.pid is not None:
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
 
 
 def terminate_processes(active_procs: set[asyncio.subprocess.Process]) -> None:
     """Kill all processes in *active_procs* and their process groups."""
     for proc in list(active_procs):
-        with contextlib.suppress(ProcessLookupError, OSError):
-            if proc.pid is not None:
-                os.killpg(proc.pid, signal.SIGKILL)
-            else:
-                proc.kill()
+        _kill_proc_group(proc)
+
+
+# #9911: runtime-wide registry of every live agent subprocess. Per-caller
+# ``active_procs`` ownership is fragmented (four runners the stop path
+# terminates, plus acceptance_criteria / verification_judge / sentry /
+# report_issue sets it never reached — two of those owners have no
+# terminate() at all), so stopping the runtime orphaned their children to
+# launchd for the length of a pytest/make run. stream_claude_process
+# registers every spawn here; the stop/shutdown path reaps the union.
+_ALL_TRACKED_PROCS: set[asyncio.subprocess.Process] = set()
+
+
+def reap_all_tracked_processes() -> int:
+    """SIGKILL the process group of every tracked live subprocess (#9911).
+
+    Returns the number of process groups reaped. Idempotent: group kills
+    are best-effort and already-dead groups are suppressed.
+    """
+    live = [proc for proc in list(_ALL_TRACKED_PROCS) if proc.returncode is None]
+    for proc in live:
+        _kill_proc_group(proc)
+    _ALL_TRACKED_PROCS.clear()
+    return len(live)
 
 
 # ---------------------------------------------------------------------------
