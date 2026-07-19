@@ -37,7 +37,7 @@ class TestTerminate:
         mock_proc.pid = 12345
         runner._active_procs.add(mock_proc)
 
-        with patch("runner_utils.os.killpg") as mock_killpg:
+        with patch("process_group.os.killpg") as mock_killpg:
             runner.terminate()
 
         mock_killpg.assert_called_once()

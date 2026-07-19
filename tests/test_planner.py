@@ -1360,7 +1360,7 @@ def test_terminate_kills_active_processes(config, event_bus):
     mock_proc.pid = 12345
     runner._active_procs.add(mock_proc)
 
-    with patch("runner_utils.os.killpg") as mock_killpg:
+    with patch("process_group.os.killpg") as mock_killpg:
         runner.terminate()
 
     mock_killpg.assert_called_once()
@@ -1372,7 +1372,9 @@ def test_terminate_handles_process_lookup_error(config, event_bus):
     mock_proc.pid = 12345
     runner._active_procs.add(mock_proc)
 
-    with patch("runner_utils.os.killpg", side_effect=ProcessLookupError) as mock_killpg:
+    with patch(
+        "process_group.os.killpg", side_effect=ProcessLookupError
+    ) as mock_killpg:
         runner.terminate()  # Should not raise
     mock_killpg.assert_called_once()
 
