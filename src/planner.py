@@ -537,10 +537,11 @@ Use semantic tools first (before grep):
 ## Required Output
 
 Your plan is a SHORT EXECUTION BRIEF: reviewed-and-ready-to-execute, with
-criteria to check — NOT a specification. Shape: ## Intent (1-2 sentences),
-## Approach (one short paragraph), the file sections, a task-granularity
-## Task Graph, and CHECKABLE ## Acceptance Criteria (each item something
-the implement and review phases can verify true/false).
+criteria to check — NOT a specification. Lead with intent (1-2 sentences)
+and approach (one short paragraph), keep steps at task granularity, and
+make every acceptance criterion CHECKABLE — something the implement and
+review phases can verify true/false. The required sections for this plan
+scale are listed below.
 
 HARD BUDGET: the entire plan must fit in {max_plan_chars} characters.
 Plans over budget are rejected; detail beyond the budget would be truncated
