@@ -358,6 +358,10 @@ jobs:
         run: |
           git fetch --no-tags origin main:refs/remotes/origin/main
           git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+          # P10.6 diffs the PR against its base; make the base ref resolvable.
+          if [ -n "${{ github.base_ref }}" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" || true
+          fi
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
@@ -369,6 +373,9 @@ jobs:
       - name: Run principles audit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # P10.6 per-PR regression gate: empty on push builds, so the gate
+          # is NA there and only the telemetry history scan runs (#9902).
+          HYDRAFLOW_AUDIT_PR_BASE: ${{ github.base_ref }}
         run: make audit
 
   ui-build:

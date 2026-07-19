@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -209,8 +210,9 @@ def _bug_fixes_land_with_regression_tests(ctx: CheckContext) -> Finding:  # noqa
         "P10.3",
         Status.WARN,
         f"{len(missing)}/{len(fix_commits)} fix commits {scope} without a regression test ({sample}) — "
-        "set .hydraflow-audit-baseline to a post-adoption commit or ISO date "
-        "to exclude historical drift",
+        "telemetry only (#9902): this scans MERGED history, so it cannot "
+        "blame the PR under test and never fails PR CI; per-PR enforcement "
+        "is P10.6",
     )
 
 
@@ -277,6 +279,160 @@ def _touched_regressions(root: Path, sha: str) -> bool:
     except (subprocess.TimeoutExpired, OSError):
         return True  # don't false-alarm on errors
     return "tests/regressions/" in result.stdout
+
+
+_SKIP_REGRESSION_RE = re.compile(r"^Skip-Regression:\s*(\S.*)$", re.MULTILINE)
+# UI regression coverage: a test delta under src/ui counts for UI-only fixes.
+_UI_TEST_RE = re.compile(r"^src/ui/.*(?:__tests__/|\.test\.[jt]sx?$)")
+_PR_BASE_ENV = "HYDRAFLOW_AUDIT_PR_BASE"
+
+
+def _resolve_merge_base(root: Path, base: str) -> str | None:
+    """Return the merge-base sha of HEAD and *base* (trying origin/ first)."""
+    for candidate in (f"origin/{base}", base):
+        try:
+            result = subprocess.run(
+                ["git", "merge-base", candidate, "HEAD"],
+                check=False,
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    return None
+
+
+def _pr_fix_shas(root: Path, merge_base: str) -> list[str] | None:
+    """Fix-prefixed, non-test-only commit shas in the PR's own range."""
+    try:
+        result = subprocess.run(
+            ["git", "log", "--no-merges", "--format=%H%x09%s", f"{merge_base}..HEAD"],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    shas = [
+        line.split("\t", 1)[0]
+        for line in result.stdout.splitlines()
+        if "\t" in line and _FIX_COMMIT_RE.match(line.split("\t", 1)[1])
+    ]
+    return [sha for sha in shas if not _is_test_only_commit(root, sha)]
+
+
+def _skip_regression_reason(root: Path, merge_base: str) -> str | None:
+    """Return the first Skip-Regression: trailer justification in the range."""
+    try:
+        result = subprocess.run(
+            ["git", "log", "--no-merges", "--format=%B", f"{merge_base}..HEAD"],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    match = _SKIP_REGRESSION_RE.search(result.stdout)
+    return match.group(1).strip() if match else None
+
+
+def _evaluate_pr_regression_delta(root: Path, merge_base: str) -> Finding:
+    """Judge the PR's own diff for regression coverage (P10.6 core)."""
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", f"{merge_base}..HEAD"],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return finding("P10.6", Status.NA, "git diff failed")
+    paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if any(path.startswith("tests/regressions/") for path in paths):
+        return finding(
+            "P10.6", Status.PASS, "fix PR carries a tests/regressions/ delta"
+        )
+    product = [
+        path
+        for path in paths
+        if not path.startswith(("tests/", "docs/")) and not _UI_TEST_RE.match(path)
+    ]
+    ui_only = bool(product) and all(path.startswith("src/ui/") for path in product)
+    if ui_only and any(_UI_TEST_RE.match(path) for path in paths):
+        return finding(
+            "P10.6",
+            Status.PASS,
+            "UI-only fix carries a UI test delta (accepted as regression "
+            "coverage — no token Python test required)",
+        )
+    return finding(
+        "P10.6",
+        Status.WARN,
+        "fix(...) commits in THIS PR have no regression-test delta — add a "
+        "test under tests/regressions/ (or a src/ui test delta for UI-only "
+        "fixes), or opt out with a `Skip-Regression: <justification>` "
+        "commit trailer when coverage legitimately lives elsewhere",
+    )
+
+
+def _pr_gate_preflight(root: Path) -> tuple[str | None, Finding | None]:
+    """Resolve the PR merge base, or the NA finding explaining why not."""
+    if not (root / ".git").exists():
+        return None, finding("P10.6", Status.NA, "not a git repo")
+    base = os.environ.get(_PR_BASE_ENV, "").strip()
+    if not base:
+        return None, finding(
+            "P10.6", Status.NA, f"not a PR context ({_PR_BASE_ENV} unset)"
+        )
+    merge_base = _resolve_merge_base(root, base)
+    if merge_base is None:
+        return None, finding("P10.6", Status.NA, f"base ref {base!r} not resolvable")
+    return merge_base, None
+
+
+@register("P10.6")
+def _fix_prs_carry_regression_delta(ctx: CheckContext) -> Finding:
+    """Per-PR enforcement of the regression-test principle (#9902).
+
+    Unlike P10.3 (a history-scan TELEMETRY metric that cannot blame the PR
+    under test), this gate reads the PR's OWN merge-base diff and fails
+    only the offending PR. Off-PR contexts (local audits, push builds) are
+    NA — the branch-history metric covers them. The base branch arrives
+    via ``HYDRAFLOW_AUDIT_PR_BASE`` (the CI workflow passes
+    ``github.base_ref``).
+    """
+    merge_base, na = _pr_gate_preflight(ctx.root)
+    if na is not None:
+        return na
+    assert merge_base is not None
+    fix_shas = _pr_fix_shas(ctx.root, merge_base)
+    if fix_shas is None:
+        return finding("P10.6", Status.NA, "git log failed")
+    if not fix_shas:
+        return finding("P10.6", Status.PASS, "no product fix(...) commits in this PR")
+    reason = _skip_regression_reason(ctx.root, merge_base)
+    if reason:
+        return finding(
+            "P10.6",
+            Status.PASS,
+            f"Skip-Regression trailer present: {reason} (justification "
+            "survives into the squash body)",
+        )
+    return _evaluate_pr_regression_delta(ctx.root, merge_base)
 
 
 @register("P10.4")
