@@ -13,6 +13,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+import process_group
 from activity_parser import ActivityParser, get_activity_parser
 from events import EventBus, EventType, HydraFlowEvent
 from execution import SubprocessRunner, get_default_runner
@@ -406,20 +407,16 @@ def terminate_processes(active_procs: set[asyncio.subprocess.Process]) -> None:
 # terminate() at all), so stopping the runtime orphaned their children to
 # launchd for the length of a pytest/make run. stream_claude_process
 # registers every spawn here; the stop/shutdown path reaps the union.
-_ALL_TRACKED_PROCS: set[asyncio.subprocess.Process] = set()
+_ALL_TRACKED_PROCS: set[asyncio.subprocess.Process] = process_group._TRACKED  # type: ignore[assignment]
 
 
 def reap_all_tracked_processes() -> int:
     """SIGKILL the process group of every tracked live subprocess (#9911).
 
-    Returns the number of process groups reaped. Idempotent: group kills
-    are best-effort and already-dead groups are suppressed.
+    Delegates to the shared registry in :mod:`process_group` — run_simple
+    children register there too, so the stop path sees every spawn path.
     """
-    live = [proc for proc in list(_ALL_TRACKED_PROCS) if proc.returncode is None]
-    for proc in live:
-        _kill_proc_group(proc)
-    _ALL_TRACKED_PROCS.clear()
-    return len(live)
+    return process_group.reap_all_tracked()
 
 
 # ---------------------------------------------------------------------------

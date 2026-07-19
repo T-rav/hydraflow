@@ -198,3 +198,54 @@ class TestOrchestratorHooksInvokeReaper:
 
         reap.assert_called_once()
 
+
+
+class TestRunSimpleChildrenAreStopReapable:
+    """#9911 follow-up: run_simple children register in the shared registry,
+    so a stop/shutdown mid-flight reaps them — previously only run_simple's
+    own timeout could, and a Stop during a long make/pytest left the tree
+    running at PPID=1."""
+
+    @pytest.mark.asyncio
+    async def test_in_flight_run_simple_child_is_reaped_by_stop_path(
+        self, tmp_path: Path
+    ) -> None:
+        import process_group
+        from execution import HostRunner
+
+        pidfile = tmp_path / "grandchild.pid"
+        runner_task = asyncio.create_task(
+            HostRunner().run_simple(
+                ["bash", "-c", f"sleep 300 & echo $! > {pidfile}; wait"],
+                timeout=60,
+            )
+        )
+        try:
+            deadline = time.monotonic() + 5
+            while not pidfile.exists() and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            grandchild = int(pidfile.read_text().strip())
+            assert _pid_alive(grandchild)
+
+            reaped = reap_all_tracked_processes()
+
+            assert reaped >= 1
+            deadline = time.monotonic() + 5
+            while _pid_alive(grandchild) and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            assert not _pid_alive(grandchild), (
+                "run_simple grandchild survived the stop-path reap"
+            )
+        finally:
+            runner_task.cancel()
+            await asyncio.gather(runner_task, return_exceptions=True)
+            assert not process_group._TRACKED
+
+    @pytest.mark.asyncio
+    async def test_completed_run_simple_child_is_deregistered(self) -> None:
+        import process_group
+        from execution import HostRunner
+
+        await HostRunner().run_simple(["true"], timeout=10)
+
+        assert not process_group._TRACKED

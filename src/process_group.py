@@ -50,3 +50,35 @@ def kill_process_group(proc: object, sig: signal.Signals = signal.SIGKILL) -> No
             kill = getattr(proc, "kill", None)
             if callable(kill):
                 kill()
+
+
+# ---------------------------------------------------------------------------
+# Runtime-wide registry of live children (#9911 follow-up).
+#
+# stream_claude_process registers its spawns via runner_utils (which aliases
+# this set), and HostRunner.run_simple registers here directly — so the
+# stop/shutdown reaper sees EVERY live child regardless of spawn path. It
+# lives in this module because execution.py cannot import runner_utils
+# (runner_utils imports execution) and this is the shared stdlib-only home.
+# ---------------------------------------------------------------------------
+
+_TRACKED: set[object] = set()
+
+
+def track(proc: object) -> None:
+    """Register a live child for stop-path reaping."""
+    _TRACKED.add(proc)
+
+
+def untrack(proc: object) -> None:
+    """Deregister a child (its spawn path finished normally)."""
+    _TRACKED.discard(proc)
+
+
+def reap_all_tracked(sig: signal.Signals = signal.SIGKILL) -> int:
+    """Group-kill every tracked live child; returns how many were reaped."""
+    live = [proc for proc in list(_TRACKED) if getattr(proc, "returncode", 0) is None]
+    for proc in live:
+        kill_process_group(proc, sig)
+    _TRACKED.clear()
+    return len(live)
