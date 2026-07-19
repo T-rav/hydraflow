@@ -39,6 +39,19 @@ if [ -n "$STAGED_ALL" ]; then
     fi
 fi
 
+# ── Guard: never git-track runtime caches (#9599) ──
+# Runs over ALL staged files BEFORE the short-circuit below — a docs-only commit
+# (e.g. a bot wiki write) must not bypass it. docs/wiki runtime caches were
+# tracked precisely because no gate inspected a docs-only change (#9537).
+if [ -n "$STAGED_ALL" ]; then
+    # shellcheck disable=SC2086 — word-splitting is intended (one arg per path)
+    if ! python3 "$REPO_ROOT/scripts/check_runtime_cache_tracked.py" $STAGED_ALL; then
+        echo "pre-commit: BLOCKED — staged files look like runtime caches (above)." >&2
+        echo "  Untrack + gitignore them, or add to ALLOWLIST with a justification." >&2
+        exit 1
+    fi
+fi
+
 # Detect Python changes (existing) AND arch source changes (new).
 STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM -- '*.py' || true)
 STAGED_ARCH=$(git diff --cached --name-only --diff-filter=ACM \
