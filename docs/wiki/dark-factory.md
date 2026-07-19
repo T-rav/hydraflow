@@ -47,6 +47,15 @@ Every new loop must:
    `src/dashboard_routes/_common.py::_INTERVAL_BOUNDS`,
    `tests/scenarios/catalog/loop_registrations.py` builder + entry.
    Verify with `tests/test_loop_wiring_completeness.py` (regex auto-discovery).
+   Two more gates fire only in FULL `make quality` (learned building
+   GateHealthLoop #9974 — each cost a 15-minute bake to discover):
+   an explicit `loop_fitness` override (`tests/test_loop_fitness_completeness.py`
+   — SCORED via helper or HOUSEKEEPING per ADR-0093; never add to
+   `_GRANDFATHERED`; mirror `adr_conformance_loop.py`), and a
+   `services.<name>_loop = FakeBackgroundLoop()` stub in
+   `tests/orchestrator_integration_utils.py::build_scripted_services`
+   (the orchestrator's `bg_loop_registry` dereferences every registered
+   loop, so four integration tests AttributeError without it).
 
 2. **ADR-0049 in-body kill-switch gate** at the top of `_do_work`:
    ```python
