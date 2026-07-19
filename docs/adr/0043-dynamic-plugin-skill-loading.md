@@ -25,7 +25,7 @@ In practice the system leaks value in three ways:
 
 Do three things together, in one PR:
 
-1. **Install at boot.** `_check_plugins` in `src/preflight.py` shells out to `claude plugin install <name>@<marketplace> --scope user` for each missing Tier‑1 (and language-matched Tier‑2) plugin, then re-verifies. Still FAILs — but only if the install itself fails. Toggleable via `auto_install_plugins: bool = True`.
+1. **Install at boot.** `_check_plugins` in `src/preflight/__init__.py` shells out to `claude plugin install <name>@<marketplace> --scope user` for each missing Tier‑1 (and language-matched Tier‑2) plugin, then re-verifies. Still FAILs — but only if the install itself fails. Toggleable via `auto_install_plugins: bool = True`.
 2. **Rewrite the preamble.** `format_plugin_skills_for_prompt` emits a condensed version of `using-superpowers`: "even at 1% confidence you MUST invoke", process-first priority, a short red-flag reminder. Descriptions still come verbatim from `SKILL.md` frontmatter.
 3. **Per-phase whitelist.** A new `phase_skills: dict[str, list[str]]` config field maps each factory phase (`triage`, `discover`, `shape`, `planner`, `agent`, `reviewer`) to a curated set of qualified skill names. Each runner filters discovery through its whitelist before formatting.
 

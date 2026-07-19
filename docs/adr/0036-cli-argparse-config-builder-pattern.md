@@ -1,9 +1,15 @@
 # ADR-0036: CLI Architecture — argparse with Config Builder Pattern
 
-**Status:** Accepted
+**Status:** Superseded
 **Enforcement:** manual
-**Enforced by:** Code review of `src/cli.py:build_config()` and `src/hf_cli/__main__.py` dispatch wiring during PR review of CLI/config changes.
+**Enforced by:** n/a (decision reverted — CLI removed)
 **Date:** 2026-03-08
+
+> **Superseded 2026-07:** The argparse CLI was removed entirely — there is no
+> `cli.py`, no `build_config()`, and no `hf_cli/` package. The console
+> entrypoint is now `hydraflow = server:main` (see `pyproject.toml`), and
+> runtime control moved to the dashboard `/api/control/*` routes. This decision
+> was reverted rather than replaced; there is no successor ADR.
 
 ## Context
 
@@ -31,7 +37,7 @@ all CLI operations (clean, prep, scaffold, labels, audit).
 ## Decision
 
 Use **argparse** (Python standard library) as the CLI framework, paired with a
-**config builder pattern** implemented in `build_config()` (`src/cli.py`).
+**config builder pattern** implemented in `build_config()` (`cli.py`, since removed).
 
 ### Framework: argparse over Click
 
@@ -107,8 +113,8 @@ without requiring a shared CLI framework.
 ## Related
 
 - Source memory: Issue #2268
-- `src/cli.py` — `build_config()`, `parse_args()`, `main()`
-- `src/hf_cli/__main__.py` — Two-layer CLI dispatcher
+- `cli.py` (removed) — `build_config()`, `parse_args()`, `main()`
+- `hf_cli/__main__.py` (removed) — Two-layer CLI dispatcher
 - `src/config.py` — `HydraFlowConfig` Pydantic model
 - ADR-0004 (agent cli as runtime) — related but distinct: that ADR covers
   agent invocation via CLI subprocesses, this ADR covers HydraFlow's own CLI

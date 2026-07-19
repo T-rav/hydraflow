@@ -201,7 +201,7 @@ as all other pipeline labels.
   engineering)
 - `src/ui/src/constants.js:PRODUCT_TRACK_KEYS` — product track stage set
 - `src/plan_phase.py:_is_product_track_issue` — decomposition enforcement
-- `src/review_phase.py:_is_product_track_pr` — spec-match verification
+- `src/review_phase/_phase.py:_is_product_track_pr` — spec-match verification
 - `src/models.py:TriageResult` — clarity_score and needs_discovery fields
 - `src/models.py:DiscoverResult` — research brief output model
 - `src/models.py:ShapeConversation` — conversation state model
