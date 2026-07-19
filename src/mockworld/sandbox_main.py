@@ -16,7 +16,7 @@ import signal
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from dashboard import HydraFlowDashboard
 from events import EventBus
@@ -80,6 +80,26 @@ def _load_seed() -> MockWorldSeed:
     if not path:
         return MockWorldSeed()
     return MockWorldSeed.from_json(Path(path).read_text())
+
+
+class _SeededRefineLLM:
+    """Air-gapped stand-in for ``SkillPromptEvalLoop``'s one-shot refine client.
+
+    Returns a scenario-scripted raw response (a ```diff fence) so refine
+    synthesis never shells out to a real ``claude`` under the sandbox's
+    air-gapped network — the same escape class that wedged discover/shape in
+    #9796. Structurally satisfies the loop's private ``_RefineLLM`` protocol
+    (a single ``async complete(prompt) -> str``); ``_refine_llm_complete``
+    uses it verbatim once ``sandbox_main`` injects it onto the loop.
+    """
+
+    def __init__(self, response: str) -> None:
+        self._response = response
+
+    async def complete(self, prompt: str) -> str:
+        # ``prompt`` is ignored by design — the response is scenario-scripted.
+        _ = prompt
+        return self._response
 
 
 def _load_phase_script(
@@ -338,6 +358,35 @@ async def main() -> None:
     decompose_council = getattr(svc.auto_agent_preflight_loop, "_council", None)
     if decompose_council is not None:
         decompose_council._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+
+    # Prompt self-refinement (#9724) air-gap seam. SkillPromptEvalLoop's refine
+    # path has two pre-PR escape points that ``runners=fake_llm`` does NOT cover:
+    # ``_run_corpus`` spawns ``make trust-adversarial`` and ``_refine_llm_complete``
+    # spawns a real ``claude`` via run_lightweight_agent (the #9796 real-claude
+    # wedge class). When a scenario (s56) scripts a corpus regression, replace
+    # both with air-gapped stand-ins so refine runs on FakeLLM/FakeGitHub state:
+    # ``_run_corpus`` returns the seeded PASS→FAIL case and ``_refine_llm`` returns
+    # the seeded patch. The seeded patch is crafted to trip ``check_tripwires`` so
+    # the loop exercises the full synth→parse→tripwire chain and returns BEFORE
+    # ``_open_refine_pr`` — whose live-validation ``corpus_runner`` subprocess and
+    # raw git/gh PR-open have no Fake seam and cannot be air-gapped. Empty seed
+    # fields (every other scenario, incl. s17) leave production ``_run_corpus`` /
+    # ``_refine_llm`` untouched.
+    if seed.skill_prompt_corpus_cases:
+        _refine_loop = svc.skill_prompt_eval_loop
+        _seeded_cases: list[dict[str, Any]] = [
+            dict(c) for c in seed.skill_prompt_corpus_cases
+        ]
+
+        async def _seeded_run_corpus(
+            _cases: list[dict[str, Any]] = _seeded_cases,
+        ) -> list[dict[str, Any]]:
+            return [dict(c) for c in _cases]
+
+        # vars() assignment: instance-level seam without tripping the
+        # method-assign checker or ruff's B010 setattr rewrite.
+        vars(_refine_loop)["_run_corpus"] = _seeded_run_corpus
+        _refine_loop._refine_llm = _SeededRefineLLM(seed.skill_prompt_refine_patch)
 
     orch = HydraFlowOrchestrator(
         config,

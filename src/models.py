@@ -2123,6 +2123,13 @@ class StateData(BaseModel):
     flake_attempts: dict[str, int] = Field(default_factory=dict)
     skill_prompt_last_green: dict[str, str] = Field(default_factory=dict)
     skill_prompt_attempts: dict[str, int] = Field(default_factory=dict)
+    # Prompt self-refinement (#9724) — ISO-8601 timestamps of filed refine
+    # proposals, used to enforce a rolling 7-day cap.
+    skill_prompt_refine_proposals: list[str] = Field(default_factory=list)
+    # Telemetry consumption (spec §5) — last week's `PromptTelemetry.
+    # get_source_totals()` snapshot, compared against the current tick's
+    # snapshot to compute per-source cost trend before being overwritten.
+    prompt_efficiency_baseline: dict[str, dict[str, int]] = Field(default_factory=dict)
     fake_coverage_last_known: dict[str, list[str]] = Field(default_factory=dict)
     fake_coverage_attempts: dict[str, int] = Field(default_factory=dict)
     # #8986 — rollup issue tracking: maps "{Fake}:{gap_kind}" → open GH issue
