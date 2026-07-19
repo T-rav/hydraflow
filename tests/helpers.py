@@ -111,6 +111,14 @@ def make_streaming_proc(
     """Build a mock for asyncio.create_subprocess_exec with streaming stdout."""
     mock_proc = MagicMock()
     mock_proc.returncode = returncode
+    # #9911: keep .pid None so any early-kill/timeout reap goes through the
+    # ``proc.pid is None`` branch of runner_utils._kill_proc_group() and calls
+    # the harmless mock ``proc.kill()`` — NOT the real ``os.killpg``. A bare
+    # MagicMock().pid coerces (via __index__) to 1, which would fire
+    # ``os.killpg(1, SIGKILL)`` at init's process group; on Linux CI that
+    # wedged the whole run while passing silently on macOS. Mirrors
+    # docker_runner._FakeProcess, which also defaults pid=None.
+    mock_proc.pid = None
     # stdin.write and stdin.close are sync on StreamWriter; drain is async
     mock_proc.stdin = MagicMock()
     mock_proc.stdin.drain = AsyncMock()
