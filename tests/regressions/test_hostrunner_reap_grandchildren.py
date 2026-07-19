@@ -44,10 +44,6 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="POSIX process groups / os.killpg are not available on Windows.",
-)
 @pytest.mark.asyncio
 async def test_run_simple_timeout_reaps_grandchild(tmp_path: Path) -> None:
     pidfile = tmp_path / "grandchild.pid"
