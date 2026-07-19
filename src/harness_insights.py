@@ -6,6 +6,7 @@ escalations, detects recurring patterns, and generates improvement suggestions.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections import Counter
@@ -519,3 +520,69 @@ async def auto_file_suggestions(
                 )
     except Exception:  # noqa: BLE001
         logger.warning("auto_file_suggestions failed", exc_info=True)
+
+
+def top_failure_categories(
+    failures_path: Path, *, limit: int = 5, max_records: int = 500
+) -> list[tuple[str, int, str]]:
+    """Aggregate the most recurring failure categories from the JSONL tail.
+
+    Reads at most the last *max_records* lines of ``harness_failures.jsonl``
+    (bounded, no full-file load) and returns ``(category, count,
+    sample_detail)`` tuples sorted by count desc. Malformed lines are
+    skipped; a missing file yields []. LLM-free by design (#9858) — this is
+    the read side of the learn→act loop.
+    """
+    if not failures_path.exists():
+        return []
+    try:
+        lines = failures_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    counts: dict[str, int] = {}
+    samples: dict[str, str] = {}
+    for line in lines[-max_records:]:
+        try:
+            row = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(row, dict):
+            continue
+        category = str(row.get("category") or "")
+        if not category:
+            continue
+        counts[category] = counts.get(category, 0) + 1
+        detail = str(row.get("detail") or "").strip()
+        if detail and category not in samples:
+            samples[category] = detail[:160]
+    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:limit]
+    return [(cat, n, samples.get(cat, "")) for cat, n in ranked]
+
+
+def format_known_traps_for_prompt(
+    entries: list[tuple[str, int, str]],
+) -> str:
+    """Render recurring failure categories as a prompt section (#9858).
+
+    Empty string when there is nothing recurring (count < 2 entries are
+    noise, not traps) so the prompt is unchanged for healthy repos.
+    """
+    recurring = [(c, n, d) for c, n, d in entries if n >= 2]
+    if not recurring:
+        return ""
+    lines = [
+        "## Known CI Traps (from this repo's failure history)",
+        "",
+        "These failure classes have recurred in this repo. Do not repeat them:",
+        "",
+    ]
+    for category, count, detail in recurring:
+        sample = f" — e.g. {detail}" if detail else ""
+        lines.append(f"- **{category}** (seen {count}x){sample}")
+    lines.append("")
+    lines.append(
+        "Also: the suppression ratchet only shrinks — never add a `# noqa`; "
+        "regenerate `docs/arch/generated/` (make arch-regen) in the same "
+        "commit as any term/ADR/wiki change."
+    )
+    return "\n".join(lines)

@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import re
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -14,7 +15,12 @@ from adr_utils import is_adr_issue_title, next_adr_number
 from agent import AgentRunner
 from beads_manager import BeadsManager
 from config import HydraFlowConfig
-from harness_insights import FailureCategory, HarnessInsightStore
+from harness_insights import (
+    FailureCategory,
+    HarnessInsightStore,
+    format_known_traps_for_prompt,
+    top_failure_categories,
+)
 from implement_spec_reviewer import (
     SpecComplianceReviewer,
     SpecReviewInput,
@@ -110,6 +116,27 @@ class ImplementPhase:
     @property
     def active_issues(self) -> set[int]:
         return self._active_issues
+
+    def _known_traps_section(self) -> str:
+        """Render the harness-insights Known CI Traps section (#9858).
+
+        Cached per phase instance for one hour — the failure distribution
+        moves slowly and run_batch may spawn many agents per tick. Fails
+        open to "" so a store hiccup never blocks implementation.
+        """
+        now = time.monotonic()
+        cached = getattr(self, "_known_traps_cache", None)
+        if cached is not None and now - cached[0] < 3600:
+            return cached[1]
+        section = ""
+        if self._harness_insights is not None:
+            try:
+                entries = top_failure_categories(self._harness_insights._failures_path)
+                section = format_known_traps_for_prompt(entries)
+            except (OSError, ValueError) as exc:
+                logger.debug("known-traps render failed: %s", exc)
+        self._known_traps_cache = (now, section)
+        return section
 
     def _log_adversarial_carryover(self, issue: Task) -> None:
         """Log CRITICAL/HIGH carryover concerns surfaced during plan phase.
@@ -676,6 +703,10 @@ class ImplementPhase:
             "review_feedback": review_feedback,
             "prior_failure": prior_failure,
             "human_guidance": human_guidance,
+            # #9858: recurring repo failure classes from harness-insights,
+            # rendered once and injected so agents stop re-hitting
+            # documented CI traps (ratchet, arch-regen, ...).
+            "known_traps": self._known_traps_section(),
             # Diverse-retry: the agent frames its strategy-delta directive
             # as "attempt N of M" (rendered only when prior_failure is set).
             "attempt_number": self._state.get_issue_attempts(issue.id),
