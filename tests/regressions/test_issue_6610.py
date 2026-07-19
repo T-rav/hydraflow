@@ -77,10 +77,12 @@ def _make_stale_issue_gc_loop(
     prs.get_issue_updated_at = AsyncMock(return_value=None)
     prs.post_comment = AsyncMock()
     prs.close_issue = AsyncMock()
+    prs.list_open_issue_numbers = AsyncMock(return_value=[])
 
     loop = StaleIssueGCLoop(
         config=deps.config,
         pr_manager=prs,
+        state=MagicMock(),
         deps=deps.loop_deps,
     )
     return loop, prs

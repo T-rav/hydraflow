@@ -1492,6 +1492,39 @@ class PRManager:
             for r in results
         ]
 
+    async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
+        """Return the numbers of ALL open issues (no label filter). #9905.
+
+        Narrow ``--json number`` projection: number is the only field the
+        state-prune keep-set needs, and narrow projections skip the
+        required-fields shape gate by design.
+        """
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            self._repo,
+            "--state",
+            "open",
+            "--json",
+            "number",
+            "--limit",
+            str(limit),
+        )
+        try:
+            rows = json.loads(output or "[]")
+        except ValueError:
+            logger.warning("list_open_issue_numbers: unparseable gh output")
+            return []
+        numbers: list[int] = []
+        for row in rows if isinstance(rows, list) else []:
+            number = row.get("number") if isinstance(row, dict) else None
+            if isinstance(number, int) and number > 0:
+                numbers.append(number)
+        return numbers
+
     async def list_closed_issues_by_label(
         self, label: str, limit: int = 100
     ) -> list[GitHubIssueSummary]:
