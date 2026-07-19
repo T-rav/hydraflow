@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -360,6 +361,91 @@ class TestContextMapRender:
         assert "subgraph builder" in out
         # Edge label encodes the rel kind
         assert "consumes" in out
+
+    @staticmethod
+    def _node_ids(out: str) -> list[str]:
+        """Extract the Mermaid node identifiers from node-declaration lines.
+
+        A declaration looks like `  <id>["<label>"]`; edge lines lack the
+        `[` immediately after the id, so this regex only matches nodes.
+        """
+        return re.findall(r"^\s+([A-Za-z0-9_]+)\[", out, re.MULTILINE)
+
+    def test_colliding_names_get_distinct_node_ids(self) -> None:
+        """Two terms sharing a name must not collapse into one node (#9938)."""
+        terms = [
+            Term(
+                id="01HX0A",
+                name="GitHubCacheLoop",
+                kind=TermKind.LOOP,
+                bounded_context=BoundedContext.CARETAKER,
+                definition="x",
+                code_anchor="src/a.py:GitHubCacheLoop",
+            ),
+            Term(
+                id="01HX0B",
+                name="GitHubCacheLoop",
+                kind=TermKind.LOOP,
+                bounded_context=BoundedContext.CARETAKER,
+                definition="x",
+                code_anchor="src/b.py:GitHubCacheLoop",
+            ),
+        ]
+        out = render_context_map(terms)
+        node_ids = self._node_ids(out)
+        assert len(node_ids) == 2
+        assert len(set(node_ids)) == 2, (
+            f"colliding names produced duplicate node ids: {node_ids}"
+        )
+        # Labels still show the human-readable name for both.
+        assert out.count("GitHubCacheLoop<br/>") == 2
+
+    def test_hyphenated_name_slugified_to_safe_node_id(self) -> None:
+        """A hyphen in a term name must not leak into the node id (#9680)."""
+        terms = [
+            Term(
+                id="01HX0C",
+                name="Set-point",
+                kind=TermKind.CONTROL_ROLE,
+                bounded_context=BoundedContext.SHARED_KERNEL,
+                definition="x",
+                code_anchor="src/setpoint.py:SetPoint",
+            ),
+        ]
+        out = render_context_map(terms)
+        node_ids = self._node_ids(out)
+        assert node_ids, "expected at least one node declaration"
+        assert all("-" not in nid for nid in node_ids), (
+            f"node id contains a bare hyphen: {node_ids}"
+        )
+        # Human-readable label still shows the exact name.
+        assert "Set-point<br/>" in out
+
+    def test_edges_use_slugified_node_ids(self) -> None:
+        """Edges must reference the safe node ids, not the raw name (#9680)."""
+        terms = [
+            Term(
+                id="01HX0D",
+                name="Set-point",
+                kind=TermKind.CONTROL_ROLE,
+                bounded_context=BoundedContext.SHARED_KERNEL,
+                definition="x",
+                code_anchor="src/sp.py:SetPoint",
+                related=[TermRel(kind=TermRelKind.DEPENDS_ON, target="01HX0E")],
+            ),
+            Term(
+                id="01HX0E",
+                name="EventBus",
+                kind=TermKind.SERVICE,
+                bounded_context=BoundedContext.SHARED_KERNEL,
+                definition="x",
+                code_anchor="src/eb.py:EventBus",
+            ),
+        ]
+        out = render_context_map(terms)
+        # The raw hyphenated name must never appear as an edge endpoint.
+        assert "Set-point -->" not in out
+        assert "depends_on" in out
 
 
 class TestTermProvenance:
