@@ -187,8 +187,12 @@ class FakeSubprocessRunner:
                 proc.communicate(input=input), timeout=timeout
             )
         except TimeoutError:
-            proc.kill()
-            await proc.wait()
+            # proc.kill() itself raises ProcessLookupError when the child
+            # already exited — suppress it (and proc.wait()) so the TimeoutError
+            # propagates instead of crashing the caller. (#9794/#9816/#9883)
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+                await proc.wait()
             raise
         return SimpleResult(
             stdout=stdout_bytes.decode(errors="replace").strip()

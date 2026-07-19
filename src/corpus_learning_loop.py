@@ -53,9 +53,7 @@ Kill-switch: :meth:`LoopDeps.enabled_cb` with ``worker_name="corpus_learning"``
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import difflib
-import json
 import logging
 import re
 import time
@@ -102,30 +100,6 @@ DEFAULT_LOOKBACK_DAYS = 30
 #: Spec §4.1 v2 step 5: 3 consecutive self-validation failures on the
 #: same escape issue trigger a `corpus-learning-stuck` escalation.
 _CORPUS_STUCK_ATTEMPTS = 3
-
-#: Hard cap on the ``gh`` reconcile read. A wedged ``gh`` child must not hang
-#: the loop cycle forever and freeze its heartbeat — the #9410 silent-stall
-#: failure class (#9454 / #9508).
-_GH_TIMEOUT_SECONDS = 120
-
-
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process,
-) -> tuple[bytes, bytes]:
-    """``proc.communicate()`` bounded by ``_GH_TIMEOUT_SECONDS``.
-
-    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
-    the caller can treat it as a failed read (rather than hanging the loop
-    cycle indefinitely).
-    """
-    try:
-        return await asyncio.wait_for(proc.communicate(), timeout=_GH_TIMEOUT_SECONDS)
-    except TimeoutError:
-        proc.kill()
-        with contextlib.suppress(ProcessLookupError):
-            await proc.wait()
-        raise
-
 
 #: Parses ``Corpus learning stuck on escape #1234: …`` titles for
 #: reconcile-on-close (spec §3.2 lifecycle).
@@ -772,35 +746,27 @@ class CorpusLearningLoop(BaseBackgroundLoop):
 
         Spec §3.2 lifecycle: an operator closing the escalation issue
         must clear the per-issue counter so the loop will retry on the
-        next tick. Best-effort — gh-list failures or parse errors log
-        and return; reconciliation is bounded by the loop interval.
+        next tick. Best-effort — PRPort failures or parse errors log and
+        return; reconciliation is bounded by the loop interval.
+
+        The closed-escalation read routes through
+        :meth:`PRPort.list_closed_issues_by_label` (#9932) — no longer a raw
+        ``gh issue list`` subprocess, so it stays inside the MockWorld
+        air-gap and uses the hardened ``run_subprocess`` runner. This loop
+        keeps its bespoke reset rather than adopting the shared
+        :class:`EscalationReconciler`: its escalation state is a
+        per-``issue_number`` counter (reset unconditionally on close), not a
+        DedupStore key, so the reconciler's dedup-key-gated ``clear_attempts``
+        does not map onto it.
         """
         if self._state is None or not hasattr(
             self._state, "reset_corpus_validation_attempts"
         ):
             return
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "gh",
-                "issue",
-                "list",
-                "--repo",
-                self._config.repo,
-                "--state",
-                "closed",
-                "--label",
-                "corpus-learning-stuck",
-                "--json",
-                "title",
-                "--limit",
-                "100",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            issues = await self._prs.list_closed_issues_by_label(
+                "corpus-learning-stuck", limit=100
             )
-            out, _ = await _communicate_bounded(proc)
-            if proc.returncode != 0:
-                return
-            issues = json.loads(out or b"[]")
         except Exception as exc:  # noqa: BLE001
             reraise_on_credit_or_bug(exc)
             logger.debug("corpus-learning reconcile: skipped", exc_info=True)

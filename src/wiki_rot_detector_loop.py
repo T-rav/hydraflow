@@ -11,6 +11,17 @@ fences — hints only), and verifies each hard cite against:
   AST verification across every managed repo is out of scope for v1
   and noted below as a follow-up.
 
+A second **shipped-claim pass** (issue #9598) verifies structured
+``fixed_in_pr`` assertions in ``json:entry`` blocks: a claim that a fix
+shipped in ``#NNNN`` is corroborated iff at least one of its ``code_refs``
+resolves against the checked-out source. An uncorroborated claim is the
+#9455-shape drift ("shipped" asserted, no surviving code) and files an
+entry-level finding naming the PR; its dead refs are suppressed from the
+per-cite pass so each stale claim yields one finding, not N. Verifying the
+cited PR actually *merged* (network ``get_pr_merge_state``) is the split-out
+follow-up #9664; auto-memory notes outside the repo are out of CI scope
+(#9935). Self-repo only — corroboration needs AST over real source.
+
 For each broken cite the loop files a ``hydraflow-find`` + ``wiki-rot``
 issue through :class:`PRManager` with a fuzzy-match suggestion (via
 :func:`difflib.get_close_matches`) when the containing module exists.
@@ -34,8 +45,10 @@ from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
 from wiki_rot_citations import (
     Cite,
+    ShippedClaim,
     extract_cites,
     extract_fenced_hints,
+    extract_shipped_claims,
     fuzzy_suggest,
     verify_cite_ast,
     verify_cite_grep,
@@ -236,7 +249,25 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         for title, body, entry_path in entries:
             cites = extract_cites(body)
             hints = extract_fenced_hints(body)
+
+            # Shipped-claim pass (issue #9598): structured ``fixed_in_pr``
+            # claims are corroborated against their own code_refs. Refs of an
+            # *uncorroborated* claim are suppressed from the per-cite pass so a
+            # stale shipped claim yields ONE entry-level finding (naming the
+            # PR + revert/rename remediation) instead of N per-cite findings.
+            # Self-repo only — corroboration needs AST over checked-out source.
+            uncorroborated: list[ShippedClaim] = []
+            suppressed_refs: set[str] = set()
+            if is_self:
+                for claim in extract_shipped_claims(body):
+                    if self._shipped_claim_corroborated(claim, repo_root):
+                        continue
+                    uncorroborated.append(claim)
+                    suppressed_refs.update(claim.code_refs)
+
             for cite in cites:
+                if cite.raw in suppressed_refs:
+                    continue  # covered by the shipped-claim finding below
                 broken, suggestion = self._check_cite(cite, repo_root, is_self)
                 if not broken:
                     continue
@@ -265,6 +296,34 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
                     await self._file_escalation(
                         slug=slug,
                         cite=cite,
+                        attempts=attempts,
+                    )
+                    escalated += 1
+
+            for claim in uncorroborated:
+                subject = f"{slug}:shipped {claim.pr_ref}"
+                # Counted before the dedup guard so a live-but-filed claim
+                # keeps its escalation alive (mirrors the per-cite path).
+                broken_subjects.add(subject)
+                dedup_key = f"wiki_rot_detector:{subject}"
+                if dedup_key in dedup_seen:
+                    continue
+
+                filed += 1
+                await self._file_shipped_find(
+                    slug=slug,
+                    entry_title=title,
+                    entry_path=str(entry_path),
+                    body=body,
+                    claim=claim,
+                )
+                dedup_seen.add(dedup_key)
+
+                attempts = self._state.inc_wiki_rot_attempts(subject)
+                if attempts >= _MAX_ATTEMPTS:
+                    await self._file_shipped_escalation(
+                        slug=slug,
+                        claim=claim,
                         attempts=attempts,
                     )
                     escalated += 1
@@ -343,6 +402,34 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         ok = verify_cite_grep(repo_root, module_path, cite.symbol)
         return (not ok, None)
 
+    def _shipped_claim_corroborated(
+        self,
+        claim: ShippedClaim,
+        repo_root: Path,
+    ) -> bool:
+        """Return ``True`` iff *claim* is backed by live code.
+
+        A ``fixed_in_pr`` claim is corroborated when at least one of its
+        ``code_refs`` resolves against the checked-out source — a
+        ``path.py:symbol`` ref via AST (with a grep fallback for
+        re-exports / non-Python targets), or a bare file ref by existence.
+        A claim with **no** ``code_refs`` is unverifiable offline and
+        therefore uncorroborated — the PR-merge-state network check that
+        would settle it is the split-out follow-up (#9664); auto-memory
+        notes outside the repo are out of scope for CI (#9935).
+        """
+        if not claim.code_refs:
+            return False
+        for ref in claim.code_refs:
+            module_path, sep, symbol = ref.partition(":")
+            if sep and symbol:
+                ok, _ = verify_cite_ast(repo_root, module_path, symbol)
+                if ok or verify_cite_grep(repo_root, module_path, symbol):
+                    return True
+            elif (repo_root / module_path).is_file():
+                return True
+        return False
+
     async def _file_find(
         self,
         *,
@@ -404,6 +491,86 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             "Human: resolve the cite or remove the wiki entry, then "
             "close this issue. The dedup key + attempt counter clear "
             "automatically on close (spec §3.2).\n"
+        )
+        await self._pr.create_issue(
+            title,
+            body,
+            list(_ISSUE_LABELS_ESCALATE),
+        )
+
+    async def _file_shipped_find(
+        self,
+        *,
+        slug: str,
+        entry_title: str,
+        entry_path: str,
+        body: str,
+        claim: ShippedClaim,
+    ) -> None:
+        """File a finding for an uncorroborated ``fixed_in_pr`` claim.
+
+        The entry asserts a fix shipped in ``claim.pr_ref`` but none of its
+        ``code_refs`` resolve at HEAD — the #9455-shape drift: a "shipped"
+        claim with no surviving code. Remediation covers both readings
+        (symbol renamed → update code_refs; reverted / never merged →
+        verify the PR and remove the entry).
+        """
+        title = f"Wiki rot: {entry_title} shipped claim {claim.pr_ref} lacks live code"
+        excerpt = _excerpt_around(body, claim.pr_ref, _EXCERPT_CHARS)
+        refs = ", ".join(f"`{r}`" for r in claim.code_refs) or "(none provided)"
+        lines = [
+            "**Automated detection — WikiRotDetectorLoop shipped-claim pass "
+            "(spec §4.9 / issue #9598).**",
+            "",
+            f"- Repo: `{slug}`",
+            f"- Entry: `{entry_path}` — *{entry_title}*",
+            f"- Shipped claim: `fixed_in_pr = {claim.pr_ref}`",
+            f"- Code references that no longer resolve: {refs}",
+            "",
+            "This entry claims a fix shipped in "
+            f"{claim.pr_ref}, but none of its code references exist at HEAD. "
+            "Either the symbols were renamed (update `code_refs`), or the fix "
+            "was reverted / the PR never merged with content (verify "
+            f"{claim.pr_ref} merged, then correct or remove the entry).",
+            "",
+            "### Entry excerpt",
+            "",
+            "```markdown",
+            excerpt,
+            "```",
+        ]
+        await self._pr.create_issue(
+            title,
+            "\n".join(lines),
+            list(_ISSUE_LABELS_FIND),
+        )
+
+    async def _file_shipped_escalation(
+        self,
+        *,
+        slug: str,
+        claim: ShippedClaim,
+        attempts: int,
+    ) -> None:
+        """Escalate a repeatedly-unresolved shipped claim.
+
+        The title mirrors the per-cite escalation grammar
+        (``... cites missing shipped {pr_ref}``) so the existing
+        :func:`_parse_escalation_subject` reconciler clears its dedup key +
+        attempt counter on close without any parser change.
+        """
+        title = f"Wiki rot stuck: {slug} cites missing shipped {claim.pr_ref}"
+        body = (
+            "**Escalation — WikiRotDetectorLoop shipped-claim pass "
+            "(spec §4.9 / §3.2 / issue #9598).**\n\n"
+            f"- Repo: `{slug}`\n"
+            f"- Shipped claim: `fixed_in_pr = {claim.pr_ref}` — uncorroborated "
+            "by any live code reference.\n"
+            f"- Attempts: `{attempts}` ≥ `{_MAX_ATTEMPTS}` — repair loop "
+            "has not closed the finding within the retry budget.\n\n"
+            f"Human: verify {claim.pr_ref} merged and fix the code references, "
+            "or remove the stale entry, then close this issue. The dedup key "
+            "+ attempt counter clear automatically on close (spec §3.2).\n"
         )
         await self._pr.create_issue(
             title,

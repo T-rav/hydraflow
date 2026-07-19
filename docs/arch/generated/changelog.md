@@ -6,6 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W29
 
+- `8a072c7` — fix(gc): bound events.jsonl growth + prune stranded per-issue state (#9905) (#9905) *(2026-07-19)*
+- `c63f057` — fix(ul): slugify context-map Mermaid node ids (stable + unique) (#9980) (#9980) *(2026-07-19)*
+- `d58fd13` — docs(adr): sync README status cells to ADR files + add consistency guard (#9456) (#9967) (#9967) *(2026-07-18)*
+- `8cda10a` — fix(adr): repoint rotted src citations + add citation-existence ratchet (#9963) (#9963) *(2026-07-18)*
+- `25ba8da` — fix(adr-xref): merge cited modules per ADR number + warn on duplicates (#9505, #9465) (#9960) (#9960) *(2026-07-18)*
 - `90be6dc` — docs(adr): resolve 5 ADR-drift rollups (#9950 #9779 #9781 #9775 #9418) (#9953) (#9953) *(2026-07-18)*
 - `0c27386` — fix(ul): single-flight guard — at most one open UL-graph bot PR across the family (#9893, #9890) (#9939) (#9939) *(2026-07-18)*
 - `4d20d74` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9926) (#9926) *(2026-07-18)*

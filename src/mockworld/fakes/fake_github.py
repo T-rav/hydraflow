@@ -7,6 +7,7 @@ that phases call via PipelineHarness.
 
 from __future__ import annotations
 
+import copy
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -147,6 +148,10 @@ class FakeGitHub:
         # attribute directly when constructing `gh` CLI args via _run_gh.
         # The value never reaches a real GitHub API in the sandbox.
         self._repo: str = "owner/repo"
+        # Branch-protection rulesets keyed by name, served by fetch_rulesets
+        # (ADR-0082, #9644). Mirrors the shape gh_fetch_rulesets returns:
+        # {name: {name, target, enforcement, conditions, rules, ...}}.
+        self._rulesets: dict[str, dict[str, Any]] = {}
 
     @classmethod
     def from_seed(cls, seed: MockWorldSeed) -> FakeGitHub:
@@ -183,6 +188,8 @@ class FakeGitHub:
         conclusion, url = seed.main_branch_ci_status
         if conclusion != "success":
             gh.set_ci_main_status(conclusion, url)
+        for name, cfg in seed.rulesets.items():
+            gh.add_ruleset(name, cfg)
         return gh
 
     # --- Seed API ---
@@ -260,6 +267,17 @@ class FakeGitHub:
     def add_alerts(self, *, branch: str, alerts: list[Any]) -> None:
         """Script code-scanning alerts returned by fetch_code_scanning_alerts."""
         self._alerts[branch] = list(alerts)
+
+    def add_ruleset(self, name: str, config: dict[str, Any]) -> None:
+        """Seed-API helper: register a live branch-protection ruleset by name.
+
+        The stored config is what ``fetch_rulesets`` serves — shaped like
+        GitHub's ``/repos/{repo}/rulesets/{id}`` response so it can be diffed
+        against the canonical contract by ``branch_protection_audit`` (#9644).
+        Stored as a shallow copy so later mutation of the caller's dict does
+        not retroactively alter seeded state.
+        """
+        self._rulesets[name] = dict(config)
 
     def script_ci(self, pr_number: int, results: list[tuple[bool, str]]) -> None:
         self._ci_scripts[pr_number] = deque(results)
@@ -667,6 +685,14 @@ class FakeGitHub:
             if issue.state == "open" and label in issue.labels
         ]
 
+    async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
+        """Return numbers of ALL open issues, mirroring the gh projection (#9905)."""
+        self._maybe_rate_limit()
+        numbers = [
+            issue.number for issue in self._issues.values() if issue.state == "open"
+        ]
+        return sorted(numbers)[:limit]
+
     async def list_closed_issues_by_label(
         self,
         label: str,
@@ -808,6 +834,13 @@ class FakeGitHub:
             state = self._issues[issue_number].state
             return "COMPLETED" if state == "closed" else "OPEN"
         return "OPEN"
+
+    async def get_issue_labels(self, issue_number: int) -> list[str]:
+        """Return the label names on an issue (empty list when unknown)."""
+        self._maybe_rate_limit()
+        if issue_number in self._issues:
+            return list(self._issues[issue_number].labels)
+        return []
 
     async def list_hitl_items(
         self, hitl_labels: list[str], *, concurrency: int = 10
@@ -969,6 +1002,23 @@ class FakeGitHub:
 
     async def apply_staging_branch_protection(self, branch: str) -> dict[str, Any]:
         return {"status": "protected", "branch": branch}
+
+    def fetch_rulesets(self, repo: str) -> dict[str, dict[str, Any]]:
+        """Serve seeded branch-protection rulesets, keyed by ruleset name.
+
+        Sync mirror of ``branch_protection_audit.gh_fetch_rulesets`` (which
+        shells out to ``gh api /repos/{repo}/rulesets``). Injectable verbatim
+        as the ``fetch_rulesets=`` seam of ``branch_protection_audit.audit_repo``
+        so a sandbox / scenario ``branch_protection_auditor`` run observes drift
+        against the canonical contract without a real network fetch — the seam
+        the s41 scenario needs (#9644, ADR-0082).
+
+        ``repo`` is accepted for signature parity with ``gh_fetch_rulesets`` but
+        ignored: the Fake serves one repo's worth of seeded state. Returns a
+        deep copy so a caller mutating the result cannot corrupt seeded state.
+        """
+        _ = repo
+        return copy.deepcopy(self._rulesets)
 
     # --- Concrete-only PRManager methods invoked at orchestrator boot ---
 

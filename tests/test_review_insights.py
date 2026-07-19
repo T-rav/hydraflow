@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models import ReviewVerdict
@@ -133,7 +135,7 @@ class TestExtractCategories:
 
     def test_multiple_categories(self) -> None:
         cats = extract_categories(
-            "Missing test coverage and type annotations, also security issues"
+            "Missing test coverage and type annotations, also a security vulnerability"
         )
         assert "missing_tests" in cats
         assert "type_annotations" in cats
@@ -146,6 +148,219 @@ class TestExtractCategories:
     def test_empty_summary_returns_empty_category_list(self) -> None:
         cats = extract_categories("")
         assert cats == []
+
+
+# ---------------------------------------------------------------------------
+# CATEGORY_KEYWORDS structural ratchet guard (#9658)
+# ---------------------------------------------------------------------------
+#
+# #9545 / #9426 removed the bare single-word keywords ``type`` and ``name`` from
+# CATEGORY_KEYWORDS because, under the old substring matcher, ``type`` matched
+# ``TypeError`` / ``"type":"error"`` and ``name`` matched ``filename`` /
+# ``username`` — so API-error / credit-exhaustion telemetry was mis-categorized
+# as reviewer verdicts and inflated the per-category frequency counts. The fix
+# switched to ``\b``-bounded whole-word matching AND replaced the bare offenders
+# with deficiency phrases. Nothing structurally stopped a future edit from
+# silently re-adding a broad single-word keyword and reintroducing the class of
+# bug. This is the ratchet the issue title flags as missing (#9566 added the
+# equivalent guard for ``harness_insights.SUBCATEGORY_KEYWORDS``).
+
+# Frozen corpus of neutral / praise reviewer summaries. None of these express a
+# code deficiency, so ``extract_categories`` MUST return no categories for any
+# of them. Two entries ("... type of the returned value", "The function name
+# ...") deliberately use the historically-removed offenders ``type`` / ``name``
+# in benign contexts: if either bare word is re-added to CATEGORY_KEYWORDS these
+# cases start matching and the guard fails.
+_NEUTRAL_PRAISE_CORPUS: tuple[str, ...] = (
+    "Looks great, ready to merge.",
+    "LGTM - clean implementation and clear logic.",
+    "Nice work; this reads well and is easy to follow.",
+    "Approved. The change is well scoped and does what the issue asks.",
+    "This changes the type of the returned value from int to str.",
+    "The function name matches the module and reads clearly.",
+    "Ships a small, focused improvement with no concerns.",
+    "Everything checks out; happy to approve.",
+    "Great job on the parser rewrite.",
+    "Solid, production-ready change with a tidy diff.",
+    "The docs read clearly and the examples are helpful.",
+    "Well-structured commit with a descriptive message.",
+)
+
+# Bare single words that were removed by #9545 / #9426 and must never reappear
+# as CATEGORY_KEYWORDS entries — they are the documented over-matching offenders.
+_FORBIDDEN_BARE_KEYWORDS: frozenset[str] = frozenset({"type", "name"})
+
+
+class TestCategoryKeywordRatchet:
+    """Structural ratchet locking the #9545 / #9426 keyword-precision fix (#9658)."""
+
+    @pytest.mark.parametrize("summary", _NEUTRAL_PRAISE_CORPUS)
+    def test_neutral_praise_corpus_yields_no_categories(self, summary: str) -> None:
+        """A curated neutral/praise corpus must yield no categories (#9658).
+
+        If a future edit re-adds a broad single-word keyword (e.g. bare ``type``
+        or ``name``), one of these benign summaries starts matching and this
+        test fails at CI time rather than through silently degraded counts.
+        """
+        assert extract_categories(summary) == [], (
+            f"neutral/praise summary {summary!r} matched categories "
+            f"{extract_categories(summary)}; a broad keyword likely regressed "
+            "CATEGORY_KEYWORDS (see #9545 / #9426 / #9658)"
+        )
+
+    def test_no_keyword_shared_across_categories(self) -> None:
+        """No keyword may appear in two category buckets (#9658).
+
+        A shared keyword would double-count a single summary across categories
+        and bias ``analyze_patterns`` / ``get_escalation_data``.
+        """
+        seen: dict[str, str] = {}
+        collisions: list[tuple[str, str, str]] = []
+        for category, keywords in CATEGORY_KEYWORDS.items():
+            for kw in keywords:
+                key = kw.lower()
+                if key in seen:
+                    collisions.append((key, seen[key], category))
+                else:
+                    seen[key] = category
+
+        assert not collisions, (
+            "keyword(s) shared across CATEGORY_KEYWORDS buckets — each keyword "
+            f"must belong to exactly one category (#9658): {collisions}"
+        )
+
+    def test_historically_removed_bare_words_not_reintroduced(self) -> None:
+        """The bare offenders ``type`` / ``name`` must stay out of the dict (#9658).
+
+        These are the exact single words #9545 / #9426 removed. Whole-phrase
+        forms (``type hint``, ``rename``, ``naming``) are fine; the bare word is
+        the regression this ratchet forbids.
+        """
+        all_keywords = {
+            kw.lower() for keywords in CATEGORY_KEYWORDS.values() for kw in keywords
+        }
+        reintroduced = all_keywords & _FORBIDDEN_BARE_KEYWORDS
+        assert not reintroduced, (
+            "bare over-matching keyword(s) re-added to CATEGORY_KEYWORDS — these "
+            "match unrelated telemetry/identifiers and were removed by "
+            f"#9545 / #9426; qualify them as phrases instead: {reintroduced}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Bare-word precision cleanup (#9918)
+# ---------------------------------------------------------------------------
+#
+# #9658 added a ratchet but grandfathered ~27 bare single-word keywords (test,
+# tests, coverage, security, injection, secret, convention, empty, null, none,
+# complexity, refactor, duplication, lint, format, style, ...). Even with the
+# ``\b`` whole-word matcher, those bare words match neutral/praise review text
+# ("all tests pass", "by convention", "no security issues", "dependency
+# injection"), inflating the per-category counts consumed by analyze_patterns /
+# get_escalation_data / get_common_feedback_section / verify_proposals. #9918
+# qualifies each bare word into a negative-polarity deficiency phrase (or drops
+# it), so benign text no longer matches while genuine findings still do.
+
+# Benign / praise summaries that the OLD bare single-word keywords matched but a
+# precise phrase set must NOT. Each entry names the bare word(s) it used to trip.
+_BENIGN_NO_MATCH_CASES: tuple[str, ...] = (
+    "All tests pass and coverage is at 95%.",  # test/tests/coverage
+    "The security team approved this change.",  # security
+    "This uses dependency injection for the service.",  # injection
+    "By convention this returns None when the list is empty.",  # convention/none/empty
+    "The annotations are thorough and clear.",  # annotation/annotations
+    "It raises a descriptive exception on invalid input.",  # exception
+    "This refactor reduces complexity and duplication.",  # refactor/complexity/duplication
+    "Consistent style and clean formatting throughout.",  # style/format
+    "Ruff and lint checks all pass.",  # ruff/lint
+    "No security issues were found in this change.",  # security
+    "Good naming throughout the module.",  # naming
+)
+
+# Genuine deficiency summaries that MUST still match after the cleanup — recall
+# must not regress. (summary, expected-category)
+_DEFICIENCY_MATCH_CASES: tuple[tuple[str, str], ...] = (
+    ("Missing test coverage for the new function.", "missing_tests"),
+    ("There are no tests for this behavior.", "missing_tests"),
+    ("This code path is untested.", "missing_tests"),
+    ("Insufficient coverage on the error paths.", "missing_tests"),
+    ("Missing type annotations on the public API.", "type_annotations"),
+    ("Potential SQL injection vulnerability here.", "security"),
+    ("This is insecure and should be fixed.", "security"),
+    ("Poor naming convention for the helper.", "naming"),
+    ("Add a null check for the empty input case.", "edge_cases"),
+    ("Unhandled exception in the request handler.", "error_handling"),
+    ("High complexity here — needs refactor.", "code_quality"),
+    ("Code duplication across the modules.", "code_quality"),
+    ("Lint errors were not addressed.", "lint_format"),
+)
+
+
+class TestBareWordPrecision:
+    """Precision/recall for the #9918 bare single-word keyword cleanup."""
+
+    @pytest.mark.parametrize("summary", _BENIGN_NO_MATCH_CASES)
+    def test_benign_text_yields_no_categories(self, summary: str) -> None:
+        """Neutral/praise text that OLD bare keywords tripped must not match (#9918)."""
+        assert extract_categories(summary) == [], (
+            f"benign summary {summary!r} still matched {extract_categories(summary)}; "
+            "a bare single-word keyword is over-matching (see #9918)"
+        )
+
+    @pytest.mark.parametrize(("summary", "category"), _DEFICIENCY_MATCH_CASES)
+    def test_genuine_deficiency_still_matches(
+        self, summary: str, category: str
+    ) -> None:
+        """Genuine deficiency findings must still classify — no recall regression (#9918)."""
+        cats = extract_categories(summary)
+        assert category in cats, (
+            f"deficiency summary {summary!r} no longer matched {category!r}; "
+            f"got {cats}. Cleanup over-pruned a real deficiency phrase (#9918)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# CATEGORY_KEYWORDS phrase-or-allowlist structural ratchet (#9918)
+# ---------------------------------------------------------------------------
+#
+# Mirrors the harness_insights guard from #9566: every keyword must be a phrase
+# (contains a space, "/", or "-", so it cannot appear inside a larger word) OR a
+# small documented deficiency single-word allowlist. This shrinks the #9658
+# grandfathered set to the handful of words that are inherently deficiency
+# signals and fails CI if a broad bare single-word keyword is (re)introduced.
+_SINGLE_WORD_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "untested",
+        "untyped",
+        "insecure",
+        "vulnerability",
+        "unformatted",
+    }
+)
+
+
+def test_category_keywords_are_phrases_or_allowlisted() -> None:
+    """Every CATEGORY_KEYWORDS entry is a phrase or an allowlisted word (#9918).
+
+    A keyword is acceptable if it contains a space, ``/`` or ``-`` (a phrase,
+    which cannot accidentally appear inside a larger identifier), or if it is in
+    the small documented deficiency allowlist. Bare broad single words (test,
+    coverage, security, convention, empty, null, complexity, ...) over-match
+    neutral/praise text and must be qualified as phrases or dropped (#9918).
+    """
+    offenders: list[tuple[str, str]] = []
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        for kw in keywords:
+            is_phrase = any(c in kw for c in (" ", "/", "-"))
+            if not is_phrase and kw.lower() not in _SINGLE_WORD_ALLOWLIST:
+                offenders.append((category, kw))
+
+    assert not offenders, (
+        "bare broad single-word keyword(s) found in CATEGORY_KEYWORDS — these "
+        "match inside neutral/praise text and inflate per-category counts. "
+        f"Qualify them as phrases or add to the deficiency allowlist (#9918): "
+        f"{offenders}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -656,7 +871,7 @@ class TestGetEscalationData:
             for i in range(5)
         ]
         escalations = get_escalation_data(records, top_n=3)
-        cats = {e["category"] for e in escalations}
+        cats = [e["category"] for e in escalations]
         assert "missing_tests" in cats
         assert "error_handling" in cats
 

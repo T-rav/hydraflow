@@ -211,25 +211,38 @@ async def test_escalation_fires_after_three_attempts(loop_env) -> None:
 
 
 async def test_reconcile_closed_escalations_clears_dedup(loop_env, monkeypatch) -> None:
+    """Closed `rc-duration-stuck` escalations clear their dedup key + counter.
+
+    The read routes through ``PRPort.list_closed_issues_by_label`` (shared
+    ``EscalationReconciler``) — never a raw ``gh`` subprocess (#9932). The
+    ``create_subprocess_exec`` guard fails the test if the reconcile path
+    escapes the MockWorld air-gap.
+    """
     cfg, state, pr, dedup = loop_env
     dedup.get.return_value = {"rc_budget:median", "rc_budget:spike"}
     loop = _loop(loop_env)
 
-    class _P:
-        returncode = 0
+    pr.list_closed_issues_by_label.return_value = [
+        {
+            "number": 9700,
+            "title": (
+                "HITL: RC gate duration regression (median) unresolved after 3 attempts"
+            ),
+            "body": "",
+            "updated_at": "",
+        }
+    ]
 
-        async def communicate(self):
-            return (
-                b'[{"title": "HITL: RC gate duration regression (median) '
-                b'unresolved after 3 attempts"}]',
-                b"",
-            )
+    def _no_subprocess(*_args, **_kwargs):
+        raise AssertionError("reconcile must route through the PRPort, not raw gh")
 
-    async def fake_subproc(*args, **kwargs):
-        return _P()
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _no_subprocess)
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
     await loop._reconcile_closed_escalations()
+
+    pr.list_closed_issues_by_label.assert_awaited_once_with(
+        "rc-duration-stuck", limit=100
+    )
     dedup.set_all.assert_called_once()
     remaining = dedup.set_all.call_args.args[0]
     assert "rc_budget:median" not in remaining

@@ -258,6 +258,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("sentry_signal_cooldown_hours", "SENTRY_SIGNAL_COOLDOWN_HOURS", 24),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
+    (
+        "dependabot_update_branch_max_attempts",
+        "HYDRAFLOW_DEPENDABOT_UPDATE_BRANCH_MAX_ATTEMPTS",
+        1,
+    ),
     ("review_orphan_strike_threshold", "HYDRAFLOW_REVIEW_ORPHAN_STRIKE_THRESHOLD", 3),
     ("review_orphan_max_requeues", "HYDRAFLOW_REVIEW_ORPHAN_MAX_REQUEUES", 3),
     (
@@ -599,6 +604,12 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("report_issue_loop_enabled", "HYDRAFLOW_REPORT_ISSUE_LOOP_ENABLED", True),
     ("retrospective_loop_enabled", "HYDRAFLOW_RETROSPECTIVE_LOOP_ENABLED", True),
     ("runs_gc_loop_enabled", "HYDRAFLOW_RUNS_GC_LOOP_ENABLED", True),
+    (
+        "event_log_periodic_rotate_enabled",
+        "HYDRAFLOW_EVENT_LOG_PERIODIC_ROTATE_ENABLED",
+        True,
+    ),
+    ("state_prune_enabled", "HYDRAFLOW_STATE_PRUNE_ENABLED", True),
     ("security_patch_loop_enabled", "HYDRAFLOW_SECURITY_PATCH_LOOP_ENABLED", True),
     ("sentry_loop_enabled", "HYDRAFLOW_SENTRY_LOOP_ENABLED", True),
     ("log_ingest_loop_enabled", "HYDRAFLOW_LOG_INGEST_LOOP_ENABLED", True),
@@ -1969,6 +1980,16 @@ class HydraFlowConfig(BaseModel):
         le=604800,
         description="Seconds between repo wiki lint cycles",
     )
+    dependabot_update_branch_max_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description=(
+            "Bounded update-branch heals per CI-failed bot PR (#9889): a "
+            "behind-base PR gets a fresh merge ref + full CI re-run before "
+            "the failure strategy applies. 0 disables."
+        ),
+    )
     review_orphan_strike_threshold: int = Field(
         default=3,
         ge=1,
@@ -2491,6 +2512,20 @@ class HydraFlowConfig(BaseModel):
             "to the next tick."
         ),
     )
+    wiki_anchor_prune_enabled: bool = Field(
+        default=False,
+        description=(
+            "When True (#9954), RepoWikiLoop runs a deterministic prune pass "
+            "that marks active tracked wiki entries stale when they lack a "
+            "repo-specific anchor (a src/*.py path, ADR number, loop/Port "
+            "class name, or config field) — i.e. generic best-practice "
+            "platitudes. Mark-only (never deletes); the flips ride the "
+            "normal batched maintenance PR. Off by default: enabling it does "
+            "the one-time cleanup of the accumulated platitude backlog. The "
+            "synthesis-time gate that blocks NEW anchor-less entries is "
+            "always on and independent of this flag."
+        ),
+    )
 
     # Paths (auto-detected)
     repo_root: Path = Field(default=Path("."), description="Repository root directory")
@@ -2525,6 +2560,22 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=90,
         description="Days of event history to retain during rotation",
+    )
+    event_log_periodic_rotate_enabled: bool = Field(
+        default=True,
+        description=(
+            "Rotate events.jsonl every RunsGCLoop cycle, not just at boot "
+            "(#9905). The size bound inside rotation guarantees the "
+            "post-rotation file fits event_log_max_size_mb."
+        ),
+    )
+    state_prune_enabled: bool = Field(
+        default=True,
+        description=(
+            "Prune per-issue state.json entries (adversarial states, "
+            "convergence ledgers, attempt counters) for issues that are no "
+            "longer open, during StaleIssueGCLoop cycles (#9905)."
+        ),
     )
 
     # Health monitor
@@ -3349,6 +3400,20 @@ class HydraFlowConfig(BaseModel):
             "otherwise trigger a multi-hour false global pause (#9807). The "
             "probe is ground truth (False only when the API itself confirms "
             "exhaustion). Kill-switch: set False to revert to pause-on-text."
+        ),
+    )
+    auth_failure_require_probe: bool = Field(
+        default=True,
+        description=(
+            "Before halting ALL loops on a GitHub AuthenticationError, "
+            "corroborate the signal with a live `gh auth status` probe. A "
+            "single gh call's stderr can match an auth pattern during a "
+            "transient network/API blip, which used to stop the whole factory "
+            "for hours (#9621). The probe is ground truth (False only when gh "
+            "confirms the credentials are rejected); on a probe-refuted "
+            "(transient) signal the crashed loop is restarted instead of "
+            "stopping the factory. Kill-switch: set False to revert to "
+            "halt-on-signal."
         ),
     )
 

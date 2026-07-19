@@ -1036,3 +1036,38 @@ describe('StageSection reconciled queued count (#9793)', () => {
     expect(queued.textContent).not.toContain('syncing')
   })
 })
+
+describe('PipelineFlow dot cap (#9863)', () => {
+  it('caps a large backlog at 10 dots with a +N overflow badge', () => {
+    const many = Array.from({ length: 67 }, (_, i) => ({
+      issue_number: 1000 + i,
+      title: `Q${i}`,
+      status: 'queued',
+    }))
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: { plan: many },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    const overflow = screen.getByTestId('flow-overflow-plan')
+    expect(overflow.textContent).toBe('+57')
+    // Only the capped dots render (first 10 issue numbers).
+    expect(screen.getByTestId('flow-dot-1009')).toBeTruthy()
+    expect(screen.queryByTestId('flow-dot-1010')).toBeNull()
+  })
+
+  it('renders no overflow badge at or under the cap', () => {
+    const few = Array.from({ length: 10 }, (_, i) => ({
+      issue_number: 2000 + i,
+      title: `Q${i}`,
+      status: 'queued',
+    }))
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: { plan: few },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.queryByTestId('flow-overflow-plan')).toBeNull()
+    expect(screen.getByTestId('flow-dot-2009')).toBeTruthy()
+  })
+})

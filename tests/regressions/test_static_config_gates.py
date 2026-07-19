@@ -363,7 +363,9 @@ def _stale_issue_gc_loop(tmp_path: Path):
     from stale_issue_gc_loop import StaleIssueGCLoop
 
     d = _deps(tmp_path, "stale_issue_gc_loop_enabled")
-    return StaleIssueGCLoop(config=d.config, pr_manager=MagicMock(), deps=d.loop_deps)
+    return StaleIssueGCLoop(
+        config=d.config, pr_manager=MagicMock(), state=MagicMock(), deps=d.loop_deps
+    )
 
 
 def _stale_issue_loop(tmp_path: Path):

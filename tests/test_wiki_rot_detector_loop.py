@@ -257,6 +257,163 @@ async def test_tick_repo_escalates_on_third_attempt(
     assert set(labels_escalate) == {"hitl-escalation", "wiki-rot-stuck"}
 
 
+def _shipped_entry(pr_ref: str, code_refs: list[str]) -> str:
+    """A wiki entry with a structured ``fixed_in_pr`` shipped claim."""
+    import json
+
+    block = json.dumps(
+        {"id": "x", "rule": "r", "code_refs": code_refs, "fixed_in_pr": pr_ref}
+    )
+    return f"# Entry\n\nProse.\n\n```json:entry\n{block}\n```\n"
+
+
+async def test_shipped_claim_fires_when_code_refs_all_dead(
+    tmp_path: Path, loop_env
+) -> None:
+    """A ``fixed_in_pr`` claim whose code_refs no longer resolve is drift."""
+    cfg, state, pr, dedup, wiki_store = loop_env
+    slug = "hydra/hydraflow"
+    wiki_dir = tmp_path / "wiki" / slug
+    wiki_dir.mkdir(parents=True)
+    (wiki_dir / "gotchas.md").write_text(
+        _shipped_entry("#8715", ["src/gone.py:vanished"])
+    )
+    wiki_store.repo_dir.return_value = wiki_dir
+    wiki_store.list_repos.return_value = [slug]
+    (tmp_path / "src").mkdir(exist_ok=True)  # module absent → code_ref dead
+    cfg.repo_root = tmp_path  # type: ignore[misc]
+
+    loop = _loop((cfg, state, pr, dedup, wiki_store))
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    stats = await loop._do_work()
+
+    assert stats["issues_filed"] == 1, stats
+    title, body, labels = pr.create_issue.await_args.args
+    assert "#8715" in title
+    assert "#8715" in body
+    assert set(labels) == {"hydraflow-find", "wiki-rot"}
+
+
+async def test_shipped_claim_clean_when_a_code_ref_resolves(
+    tmp_path: Path, loop_env
+) -> None:
+    """At least one resolving code_ref corroborates the shipped claim."""
+    cfg, state, pr, dedup, wiki_store = loop_env
+    slug = "hydra/hydraflow"
+    wiki_dir = tmp_path / "wiki" / slug
+    wiki_dir.mkdir(parents=True)
+    (wiki_dir / "gotchas.md").write_text(
+        _shipped_entry("#8713", ["src/live.py:present", "src/gone.py:vanished"])
+    )
+    wiki_store.repo_dir.return_value = wiki_dir
+    wiki_store.list_repos.return_value = [slug]
+    (tmp_path / "src").mkdir(exist_ok=True)
+    (tmp_path / "src" / "live.py").write_text("def present():\n    return 1\n")
+    cfg.repo_root = tmp_path  # type: ignore[misc]
+
+    loop = _loop((cfg, state, pr, dedup, wiki_store))
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    await loop._do_work()
+
+    # The resolving code_ref corroborates the claim — but the dead second
+    # code_ref still fires the ordinary per-cite pass. The shipped-claim
+    # finding itself must NOT fire.
+    assert not any("#8713" in c.args[0] for c in pr.create_issue.await_args_list), (
+        pr.create_issue.await_args_list
+    )
+
+
+async def test_shipped_claim_dedups_repeat(tmp_path: Path, loop_env) -> None:
+    cfg, state, pr, dedup, wiki_store = loop_env
+    slug = "hydra/hydraflow"
+    dedup.get.return_value = {f"wiki_rot_detector:{slug}:shipped #8715"}
+    wiki_dir = tmp_path / "wiki" / slug
+    wiki_dir.mkdir(parents=True)
+    (wiki_dir / "gotchas.md").write_text(
+        _shipped_entry("#8715", ["src/gone.py:vanished"])
+    )
+    wiki_store.repo_dir.return_value = wiki_dir
+    wiki_store.list_repos.return_value = [slug]
+    (tmp_path / "src").mkdir(exist_ok=True)
+    cfg.repo_root = tmp_path  # type: ignore[misc]
+
+    loop = _loop((cfg, state, pr, dedup, wiki_store))
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    await loop._do_work()
+
+    assert not any("#8715" in c.args[0] for c in pr.create_issue.await_args_list)
+
+
+async def test_shipped_claim_escalates_on_third_attempt(
+    tmp_path: Path, loop_env
+) -> None:
+    cfg, state, pr, dedup, wiki_store = loop_env
+    slug = "hydra/hydraflow"
+    dedup.get.return_value = set()
+    state.get_wiki_rot_attempts.return_value = 2
+    state.inc_wiki_rot_attempts.return_value = 3
+    wiki_dir = tmp_path / "wiki" / slug
+    wiki_dir.mkdir(parents=True)
+    (wiki_dir / "gotchas.md").write_text(
+        _shipped_entry("#8715", ["src/gone.py:vanished"])
+    )
+    wiki_store.repo_dir.return_value = wiki_dir
+    wiki_store.list_repos.return_value = [slug]
+    (tmp_path / "src").mkdir(exist_ok=True)
+    cfg.repo_root = tmp_path  # type: ignore[misc]
+
+    loop = _loop((cfg, state, pr, dedup, wiki_store))
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    stats = await loop._do_work()
+
+    assert stats["escalations"] == 1, stats
+    escalation = pr.create_issue.await_args_list[-1]
+    title, _body, labels = escalation.args
+    assert set(labels) == {"hitl-escalation", "wiki-rot-stuck"}
+    # Escalation title must parse back to the shipped subject via the
+    # existing reconciler (``... cites missing shipped #8715``).
+    assert "cites missing shipped #8715" in title
+
+
+async def test_shipped_claim_escalation_subject_roundtrips(
+    tmp_path: Path, loop_env
+) -> None:
+    """The shipped escalation title parses back to its dedup subject so the
+    existing close-to-clear reconcile works unchanged."""
+    from wiki_rot_detector_loop import _parse_escalation_subject
+
+    slug = "hydra/hydraflow"
+    title = f"Wiki rot stuck: {slug} cites missing shipped #8715"
+    assert _parse_escalation_subject(title, "") == f"{slug}:shipped #8715"
+
+
+async def test_shipped_claim_skipped_for_managed_repo(tmp_path: Path, loop_env) -> None:
+    """Shipped-claim corroboration uses self-repo AST; managed repos (grep
+    over wiki mirrors) are out of scope and must not fire it."""
+    cfg, state, pr, dedup, wiki_store = loop_env
+    slug = "other/managed"  # != cfg.repo (hydra/hydraflow)
+    managed_dir = tmp_path / "wiki" / slug
+    managed_dir.mkdir(parents=True)
+    (managed_dir / "gotchas.md").write_text(
+        _shipped_entry("#8715", ["src/gone.py:vanished"])
+    )
+    self_dir = tmp_path / "wiki" / "hydra" / "hydraflow"  # empty self wiki
+    self_dir.mkdir(parents=True)
+
+    def _repo_dir(s: str):
+        return managed_dir if s == slug else self_dir
+
+    wiki_store.repo_dir.side_effect = _repo_dir
+    wiki_store.list_repos.return_value = [slug]
+    cfg.repo_root = tmp_path  # type: ignore[misc]
+
+    loop = _loop((cfg, state, pr, dedup, wiki_store))
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    await loop._do_work()
+
+    assert not any("#8715" in c.args[0] for c in pr.create_issue.await_args_list)
+
+
 async def test_reconcile_clears_dedup_and_attempts(
     loop_env,
 ) -> None:
