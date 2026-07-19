@@ -699,6 +699,26 @@ class FakeGitHub:
             if issue.state == "open" and label in issue.labels
         ]
 
+    async def list_open_issues(self) -> list[dict[str, Any]]:
+        """Return ALL open issues (no label filter), mirroring the gh projection.
+
+        Used by IssueGroomerLoop's backlog-wide sweep (#9957). ``labels``
+        mirrors the gh wire shape (fake-fidelity), same as
+        ``list_issues_by_label``.
+        """
+        self._maybe_rate_limit()
+        return [
+            {
+                "number": issue.number,
+                "title": issue.title,
+                "body": issue.body,
+                "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
+                "labels": [{"name": name} for name in issue.labels],
+            }
+            for issue in self._issues.values()
+            if issue.state == "open"
+        ]
+
     async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
         """Return numbers of ALL open issues, mirroring the gh projection (#9905)."""
         self._maybe_rate_limit()

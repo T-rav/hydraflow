@@ -98,6 +98,20 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         stdout = _json.dumps(issues) + "\n"
         return FakeOutput(exit_code=0, stdout=stdout, stderr="")
 
+    if method == "list_open_issues":
+        import json as _json
+
+        # Seed two open issues (one labelled, one not) plus a closed issue
+        # that must be excluded — covers the "no label filter" projection
+        # and both the label-flattening and empty-labels paths.
+        fake.add_issue(101, "Stale doc gap", "docs drifted", labels=["hydraflow-find"])
+        fake.add_issue(102, "Needs triage", "no labels yet")
+        fake.add_issue(103, "Already closed", "done")
+        await fake.close_issue(103)
+        issues = await fake.list_open_issues()
+        stdout = _json.dumps(issues) + "\n"
+        return FakeOutput(exit_code=0, stdout=stdout, stderr="")
+
     if method == "get_issue_labels":
         issue_number = int(args[0])
         # Seed the issue with a deterministic label set so the contract

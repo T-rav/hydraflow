@@ -1,0 +1,28 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_open_issues returns ALL open issues (no label filter) for the
+# backlog groomer's full-repo sweep (#9957). The dispatcher seeds two open
+# issues — one carrying a label, one with none — plus a closed issue that
+# must be excluded, so the contract covers both the label-flattening path
+# (gh wire shape, [{"name": ...}]) and the "no labels" empty-list path.
+# The updated_at field is normalised with timestamps.ISO8601 so replay is
+# stable across time zones.
+adapter: github
+interaction: list_open_issues
+recorded_at: "2026-07-19T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_open_issues
+  args: []
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "[{\"number\": 101, \"title\": \"Stale doc gap\", \"body\": \"docs drifted\",
+    \"updated_at\": \"2026-01-01T00:00:00Z\", \"labels\": [{\"name\":
+    \"hydraflow-find\"}]}, {\"number\": 102, \"title\": \"Needs triage\", \"body\":
+    \"no labels yet\", \"updated_at\": \"2026-01-01T00:00:00Z\", \"labels\": []}]\n"
+  stderr: ""
+normalizers:
+  - timestamps.ISO8601
+baseline_only: true
