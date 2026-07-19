@@ -254,6 +254,60 @@ def evaluate_case(
     }
 
 
+def evaluate_case_for_skill(
+    case_dir: Path, skill_name: str, *, live: bool = False
+) -> dict[str, Any]:
+    """Evaluate one case against ONE skill, building THAT skill's prompt.
+
+    Unlike :func:`evaluate_case` (one transcript, all parsers), this is the
+    validation path for a candidate prompt: the target skill's own
+    ``prompt_builder`` produces the live prompt, and only its parser judges
+    the transcript. Cases whose ``expected_catcher`` is neither *skill_name*
+    nor ``"none"`` return ``SKIPPED``.
+    """
+    case_id = case_dir.name
+    catcher = read_expected_catcher(case_dir)
+    if catcher not in (skill_name, "none"):
+        return {
+            "case_id": case_id,
+            "skill": skill_name,
+            "status": "SKIPPED",
+            "expected_catcher": catcher,
+            "provenance": read_provenance(case_dir),
+        }
+    skill = next(s for s in BUILTIN_SKILLS if s.name == skill_name)
+    diff = synthesize_diff(case_dir / "before", case_dir / "after")
+    prompt = skill.prompt_builder(
+        issue_number=0,
+        issue_title=f"adversarial-corpus::{case_id}",
+        diff=diff,
+        plan_text=load_plan_text(case_dir),
+    )
+    transcript = load_transcript(case_dir, prompt, live=live)
+    if transcript is None:
+        return {
+            "case_id": case_id,
+            "skill": skill_name,
+            "status": "SKIPPED",
+            "expected_catcher": catcher,
+            "provenance": read_provenance(case_dir),
+        }
+    passed, summary, findings = skill.result_parser(transcript)
+    if catcher == "none":
+        status = "PASS" if passed else "FAIL"
+    else:
+        keyword = read_keyword(case_dir / "README.md")
+        haystack = (summary + "\n" + "\n".join(findings)).lower()
+        status = "PASS" if (not passed and keyword.lower() in haystack) else "FAIL"
+    return {
+        "case_id": case_id,
+        "skill": skill_name,
+        "status": status,
+        "expected_catcher": catcher,
+        "provenance": read_provenance(case_dir),
+    }
+
+
 def run_corpus(
     *,
     cases_dir: Path = CASES_DIR,
@@ -285,14 +339,26 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="comma-separated case ids to run (default: all)",
     )
+    parser.add_argument(
+        "--live-skill",
+        default="",
+        help="evaluate only this skill's cases, building its own prompt/parser",
+    )
     args = parser.parse_args(argv)
     live = os.environ.get("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE") == "1"
     case_ids = (
         frozenset(c.strip() for c in args.cases.split(",") if c.strip())
-        if args.cases
+        if args.cases.strip()
         else None
     )
-    results = run_corpus(live=live, strict=False, case_ids=case_ids)
+    if args.live_skill:
+        results = [
+            evaluate_case_for_skill(case_dir, args.live_skill, live=live)
+            for case_dir in discover_cases(CASES_DIR)
+            if case_ids is None or case_dir.name in case_ids
+        ]
+    else:
+        results = run_corpus(live=live, strict=False, case_ids=case_ids)
     if args.json:
         # Only the loop-facing keys belong on stdout (the loop json.loads it).
         slim = [

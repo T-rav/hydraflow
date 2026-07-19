@@ -37,3 +37,20 @@ def test_discover_excludes_holdout_when_asked(tmp_path: Path) -> None:
 def test_seed_holdout_cases_exist_and_are_marked() -> None:
     holdouts = [c for c in discover_cases(CASES) if is_holdout(c)]
     assert len(holdouts) >= 6, [c.name for c in holdouts]
+
+
+def test_evaluate_case_for_skill_uses_target_parser(tmp_path: Path) -> None:
+    from tests.trust.adversarial.corpus_runner import evaluate_case_for_skill
+
+    case = _make_case(tmp_path, "trap-a", holdout=True)
+    (case / "before" / "src").mkdir(parents=True)
+    (case / "before" / "src" / "app.py").write_text("x = 1\n")
+    (case / "after" / "src").mkdir(parents=True)
+    (case / "after" / "src" / "app.py").write_text("x = 2\n")
+    (case / "expected_transcript.txt").write_text(
+        "DIFF_SANITY_RESULT: RETRY\nSUMMARY: sentinel-kw found\nFINDINGS:\n- sentinel-kw\n"
+    )
+    result = evaluate_case_for_skill(case, "diff-sanity", live=False)
+    assert result["status"] == "PASS"  # attack case: skill flagged w/ keyword
+    result_other = evaluate_case_for_skill(case, "test-adequacy", live=False)
+    assert result_other["status"] == "SKIPPED"  # not this skill's case
