@@ -63,11 +63,13 @@ async def test_all_children_fail_keeps_source_open_for_hitl(tmp_path: Path) -> N
         source_task=source, result=_two_child_result()
     )
 
-    # Nothing was superseded: no epic registered, source neither closed nor
-    # marked decomposed — it falls through to human-required.
+    # Nothing was superseded: no epic registered, SOURCE stays open and
+    # unmarked — it falls through to human-required. The just-created epic
+    # itself is closed loudly rather than left as orphan litter (#9855:
+    # 23 childless epics in one day when child labels broke repo-wide).
     assert epic_number is None
     epic_manager.register_epic.assert_not_awaited()
-    prs.close_issue.assert_not_awaited()
+    prs.close_issue.assert_awaited_once_with(500)  # the orphan epic, NOT #42
     assert state.get_issue_status(42) != "decomposed"
 
 

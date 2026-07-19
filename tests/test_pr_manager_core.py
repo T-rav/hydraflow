@@ -1816,6 +1816,7 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         "custom-dup",
         "custom-epic",
         "custom-epic-child",
+        "auto-decomposed-child",  # #9855: decomposer child label now startup-ensured
         "custom-verify",
         "hydraflow-parked",
         "hydraflow-diagnose",
@@ -1825,6 +1826,8 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         "hydraflow-test-helper",
         "hydraflow-fake-coverage-stuck",
         "rc-promotion-stuck",
+        "sandbox-fail-auto-fix",  # #9914 durable startup check
+        "sandbox-hitl",
         "hydraflow-adr-drift",
         "hydraflow-adr-drift-stuck",
         "hydraflow-log-ingest",
