@@ -712,3 +712,120 @@ class TestTriageConvergenceLedger:
         ledger = state.get_convergence_ledger(102)
         assert ledger is not None, "Ledger must be created"
         assert ledger.stage_state["triage"].last_verdict == "LOOP_BACK"
+
+    @pytest.mark.asyncio
+    async def test_bug_not_present_records_advance_verdict(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """bug_not_present early-return site -> ledger triage verdict == 'ADVANCE'.
+
+        Regression guard (issue #9678): the ``bug_not_present`` recording is a
+        SEPARATE call-site from the fall-through one — it lives inside the
+        bug-reproducer block and ``return``s before the fall-through site is
+        reached. The other ledger tests exercise only the fall-through site, so a
+        future edit could silently regress this early-return recording while they
+        stay green. This test pins it.
+        """
+        from models import ReproductionOutcome, ReproductionResult
+
+        phase, state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(
+            id=103,
+            title="Crash in validate_config",
+            body="A" * 100,
+        )
+        # Ready + bug + default clarity (10 >= threshold) routes to 'plan',
+        # which is the only path that reaches the bug-reproducer block.
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=103, ready=True, issue_type="bug"
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        from unittest.mock import MagicMock
+
+        from bug_reproducer import BugReproducer
+        from issue_cache import IssueCache
+
+        # The bug-reproducer block guard requires BOTH _bug_reproducer and
+        # _issue_cache to be non-None (see src/triage_phase.py) — omitting
+        # either would route past the early-return site and pass for the wrong
+        # reason.
+        mock_reproducer = MagicMock(spec=BugReproducer)
+        mock_reproducer.reproduce = AsyncMock(
+            return_value=ReproductionResult(
+                issue_number=103,
+                outcome=ReproductionOutcome.NOT_PRESENT,
+                confidence=0.0,
+                investigation="validate_config does not exist in src/",
+            )
+        )
+        phase._bug_reproducer = mock_reproducer
+
+        mock_cache = MagicMock(spec=IssueCache)
+        mock_cache.record_classification = MagicMock()
+        mock_cache.record_reproduction_stored = MagicMock()
+        phase._issue_cache = mock_cache
+
+        await phase.triage_issues()
+
+        ledger = state.get_convergence_ledger(103)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["triage"].last_verdict == "ADVANCE"
+
+    @pytest.mark.asyncio
+    async def test_discover_routing_records_loop_back_verdict(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Issue routed to discovery -> ledger triage verdict == 'LOOP_BACK'.
+
+        Symmetry coverage for the 'discover' fall-through outcome (distinct from
+        the 'parked' outcome already covered).
+        """
+        phase, state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(id=104, title="Make it better", body="A" * 100)
+
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=104, ready=True, needs_discovery=True
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        await phase.triage_issues()
+
+        ledger = state.get_convergence_ledger(104)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["triage"].last_verdict == "LOOP_BACK"
+
+    @pytest.mark.asyncio
+    async def test_sentry_noise_closed_records_advance_verdict(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Sentry-noise auto-close -> ledger triage verdict == 'ADVANCE'.
+
+        Symmetry coverage for the 'sentry_noise_closed' fall-through outcome: a
+        not-ready Sentry-originated issue is auto-closed and recorded as ADVANCE.
+        """
+        phase, state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(
+            id=105,
+            title="TypeError in worker",
+            body="<!-- [sentry:issue-abc] -->\nAutomated Sentry report.",
+        )
+
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=105,
+                ready=False,
+                reasons=["Transient infrastructure error, not a code bug"],
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        await phase.triage_issues()
+
+        ledger = state.get_convergence_ledger(105)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["triage"].last_verdict == "ADVANCE"
