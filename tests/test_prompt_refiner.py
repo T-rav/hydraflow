@@ -83,3 +83,56 @@ def test_tripwire_accepts_builder_only_patch() -> None:
     mod = SKILL_BUILDER_MODULES["diff-sanity"]
     patch = f"--- a/{mod}\n+++ b/{mod}\n@@ -1 +1 @@\n-a\n+b\n"
     assert check_tripwires(patch, "diff-sanity", Path.cwd()) == []
+
+
+def test_tripwire_rejects_bundled_deletion_of_corpus_file() -> None:
+    """A legit builder hunk bundled with a `+++ /dev/null` deletion section
+    must still be caught — the deleted path is invisible to a +++-b/-only
+    scanner, but the corpus-edit ban must still fire (#9724)."""
+    from prompt_refiner import check_tripwires
+
+    patch = (
+        "--- a/src/diff_sanity.py\n+++ b/src/diff_sanity.py\n@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/tests/trust/adversarial/cases/x/README.md "
+        "b/tests/trust/adversarial/cases/x/README.md\n"
+        "deleted file mode 100644\nindex abc123..0000000\n"
+        "--- a/tests/trust/adversarial/cases/x/README.md\n+++ /dev/null\n"
+        "@@ -1 +0,0 @@\n-content\n"
+    )
+    reasons = check_tripwires(patch, "diff-sanity", Path.cwd())
+    assert any("tests/trust" in r for r in reasons)
+
+
+def test_tripwire_rejects_pure_rename_of_corpus_file() -> None:
+    """A pure rename section carries no ---/+++ lines at all — only
+    `rename from`/`rename to` — and must still be caught (#9724)."""
+    from prompt_refiner import SKILL_BUILDER_MODULES, check_tripwires
+
+    mod = SKILL_BUILDER_MODULES["diff-sanity"]
+    patch = (
+        f"--- a/{mod}\n+++ b/{mod}\n@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/tests/trust/adversarial/cases/x/README.md "
+        "b/tests/trust/adversarial/cases/decoy/README.md\n"
+        "similarity index 100%\n"
+        "rename from tests/trust/adversarial/cases/x/README.md\n"
+        "rename to tests/trust/adversarial/cases/decoy/README.md\n"
+    )
+    reasons = check_tripwires(patch, "diff-sanity", Path.cwd())
+    assert any("tests/trust" in r for r in reasons)
+
+
+def test_tripwire_rejects_bundled_foreign_file_creation() -> None:
+    """A `+++ b/<path>` creation section IS caught by the old regex — this
+    pins that a bundled new-file section against a foreign path still trips
+    the only-touch-the-allowed-module rule (#9724)."""
+    from prompt_refiner import SKILL_BUILDER_MODULES, check_tripwires
+
+    mod = SKILL_BUILDER_MODULES["diff-sanity"]
+    patch = (
+        f"--- a/{mod}\n+++ b/{mod}\n@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/src/evil.py b/src/evil.py\n"
+        "new file mode 100644\nindex 0000000..abc123\n"
+        "--- /dev/null\n+++ b/src/evil.py\n@@ -0,0 +1 @@\n+evil\n"
+    )
+    reasons = check_tripwires(patch, "diff-sanity", Path.cwd())
+    assert any("only" in r and mod in r for r in reasons)

@@ -28,7 +28,21 @@ PROMPT_LENGTH_DRIFT_LIMIT = 0.30
 
 _HOLDOUT_MARKER = "HOLDOUT"
 _DIFF_FENCE = re.compile(r"```diff\n(.*?)```", re.DOTALL)
-_PATCH_TARGET = re.compile(r"^\+\+\+ b/(.+)$", re.MULTILINE)
+
+# A git-format patch can touch a path via several independent line shapes, and
+# a single bundled patch may mix sections that use different shapes. Any ONE
+# of these lines is sufficient evidence that a path is a target of the patch:
+#   - `diff --git a/<old> b/<new>` header: present for every file section,
+#     including pure renames and deletions that carry no ---/+++ hunk lines.
+#   - `--- a/<path>` / `+++ b/<path>`: the classic hunk header shape. When a
+#     side is `/dev/null` (pure add or pure delete) it is a marker, not a
+#     path, and simply fails to match the `a/`/`b/` prefix here.
+#   - `rename from <path>` / `rename to <path>`: a pure rename has no hunk at
+#     all, only these two lines.
+_PATCH_DIFF_GIT_HEADER = re.compile(r"^diff --git a/(\S+) b/(\S+)$", re.MULTILINE)
+_PATCH_OLD_SIDE = re.compile(r"^--- a/(.+)$", re.MULTILINE)
+_PATCH_NEW_SIDE = re.compile(r"^\+\+\+ b/(.+)$", re.MULTILINE)
+_PATCH_RENAME = re.compile(r"^rename (?:from|to) (.+)$", re.MULTILINE)
 
 
 class PatchParseError(ValueError):
@@ -73,14 +87,28 @@ def parse_patch_response(text: str) -> str:
     return m.group(1).strip() + "\n"
 
 
+def _collect_patch_targets(patch_text: str) -> set[str]:
+    """Every path the patch touches, from every line shape a git-format patch
+    may use to name a file — including sections (deletions, pure renames)
+    that carry no `+++ b/<path>` line at all."""
+    targets: set[str] = set()
+    for old, new in _PATCH_DIFF_GIT_HEADER.findall(patch_text):
+        targets.add(old)
+        targets.add(new)
+    targets.update(_PATCH_OLD_SIDE.findall(patch_text))
+    targets.update(_PATCH_NEW_SIDE.findall(patch_text))
+    targets.update(_PATCH_RENAME.findall(patch_text))
+    return targets
+
+
 def check_tripwires(patch_text: str, skill_name: str, repo_root: Path) -> list[str]:
     """Pre-eval hard gates. Empty list means the candidate may proceed to eval."""
     reasons: list[str] = []
     allowed = SKILL_BUILDER_MODULES[skill_name]
-    targets = _PATCH_TARGET.findall(patch_text)
+    targets = _collect_patch_targets(patch_text)
     if not targets:
-        reasons.append("patch has no +++ targets")
-    for t in targets:
+        reasons.append("patch has no recognizable file targets")
+    for t in sorted(targets):
         if t.startswith("tests/trust/"):
             reasons.append(
                 f"patch edits the corpus itself ({t}) — tests/trust/** is off-limits"
