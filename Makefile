@@ -289,6 +289,13 @@ test-sludge-check: deps
 conflict-check:
 	@cd $(HYDRAFLOW_DIR) && python3 scripts/check_conflict_markers.py $(if $(FILES),$(FILES),--tracked)
 
+# Reject git-tracked runtime caches / untracked loop artifacts (#9599). stdlib-only.
+# FILES is space-separated; defaults to a --tracked scan. The mode-b (untracked
+# loop artifact) scan is run second so a local dev checkout catches both.
+cache-check:
+	@cd $(HYDRAFLOW_DIR) && python3 scripts/check_runtime_cache_tracked.py $(if $(FILES),$(FILES),--tracked)
+	@cd $(HYDRAFLOW_DIR) && python3 scripts/check_runtime_cache_tracked.py --untracked
+
 lint-fix: lint
 	@echo "$(GREEN)Auto-repair complete$(RESET)"
 
