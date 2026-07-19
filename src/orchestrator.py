@@ -122,6 +122,8 @@ class HydraFlowOrchestrator:
         self._auth_failed = False
         # Credit pause — set when API credits are exhausted
         self._credits_paused_until: datetime | None = None
+        # Per-source last false-positive suppression (#9888 throttle).
+        self._credit_fp_last: dict[str, datetime] = {}
         self._credit_pause_lock = asyncio.Lock()
         self._credit_resume_event = asyncio.Event()
         # Session tracking
@@ -1107,7 +1109,19 @@ class HydraFlowOrchestrator:
         """
         paused = await self._pause_for_credits(exc, loop_name, tasks, loop_factories)
         if not paused:
-            await self._restart_loop(loop_name, exc, tasks, loop_factories)
+            # Suppressed false positive: restart with a delay so a loop that
+            # re-raises the same quoted-prose signal cannot tight-spin the
+            # supervisor (#9888). The delay lives inside the restarted task,
+            # never blocking supervision of other loops.
+            await self._restart_loop(
+                loop_name,
+                exc,
+                tasks,
+                loop_factories,
+                restart_delay=min(
+                    float(self._config.credit_fp_suppress_cooldown_seconds), 60.0
+                ),
+            )
 
     async def _restart_loop(
         self,
@@ -1115,8 +1129,14 @@ class HydraFlowOrchestrator:
         exc: BaseException,
         tasks: dict[str, asyncio.Task[None]],
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
+        restart_delay: float = 0.0,
     ) -> None:
-        """Log, publish ERROR event, create a new loop task."""
+        """Log, publish ERROR event, create a new loop task.
+
+        ``restart_delay`` > 0 sleeps INSIDE the recreated task before the
+        loop body starts (#9888 suppressed-credit backoff) — the supervisor
+        is never blocked and the task stays tracked in the map.
+        """
         logger.error("Loop %r crashed — restarting: %s", loop_name, exc)
         data: ErrorPayload = {
             "message": f"Loop {loop_name} crashed and was restarted",
@@ -1129,8 +1149,14 @@ class HydraFlowOrchestrator:
             )
         )
         factory_fn = dict(loop_factories)[loop_name]
+
+        async def _run_after_delay() -> None:
+            if restart_delay > 0:
+                await asyncio.sleep(restart_delay)
+            await factory_fn()
+
         tasks[loop_name] = asyncio.create_task(
-            factory_fn(), name=f"hydraflow-{loop_name}"
+            _run_after_delay(), name=f"hydraflow-{loop_name}"
         )
 
     async def restart_loop_task(self, name: str) -> bool:
@@ -1851,10 +1877,28 @@ class HydraFlowOrchestrator:
             # ``credit_pause_require_probe=False`` reverts to pause-on-text.
             # ``and`` short-circuits: with the kill-switch off, the probe is
             # never called (pause-on-text, the legacy behavior).
+            # Throttle repeat false positives from the same source (#9888):
+            # within the cooldown, skip the probe AND the banner — log-only.
+            # Six suppression banners landed in 3ms before this guard.
+            fp_last = self._credit_fp_last.get(source)
+            cooldown = float(self._config.credit_fp_suppress_cooldown_seconds)
+            if (
+                self._config.credit_pause_require_probe
+                and fp_last is not None
+                and (datetime.now(UTC) - fp_last).total_seconds() < cooldown
+            ):
+                logger.debug(
+                    "Credit FP from %r within %.0fs cooldown — suppressed (log-only)",
+                    source,
+                    cooldown,
+                )
+                return False
+
             if (
                 self._config.credit_pause_require_probe
                 and await probe_credit_availability()
             ):
+                self._credit_fp_last[source] = datetime.now(UTC)
                 logger.warning(
                     "Credit-exhaustion signal from %r NOT corroborated by live "
                     "API probe — treating as a false positive (likely quoted "

@@ -260,6 +260,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
     ("review_orphan_strike_threshold", "HYDRAFLOW_REVIEW_ORPHAN_STRIKE_THRESHOLD", 3),
     ("review_orphan_max_requeues", "HYDRAFLOW_REVIEW_ORPHAN_MAX_REQUEUES", 3),
+    (
+        "credit_fp_suppress_cooldown_seconds",
+        "HYDRAFLOW_CREDIT_FP_SUPPRESS_COOLDOWN_SECONDS",
+        300,
+    ),
     ("repo_wiki_min_batch_files", "HYDRAFLOW_REPO_WIKI_MIN_BATCH_FILES", 8),
     ("repo_wiki_max_batch_age_hours", "HYDRAFLOW_REPO_WIKI_MAX_BATCH_AGE_HOURS", 24),
     ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
@@ -3322,6 +3327,17 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         le=30,
         description="Extra minutes to wait after reported credit reset time",
+    )
+    credit_fp_suppress_cooldown_seconds: int = Field(
+        default=300,
+        ge=10,
+        le=3600,
+        description=(
+            "Cooldown after suppressing a false-positive credit signal from a "
+            "source: within it, repeat signals from that source are log-only "
+            "(no probe, no banner) and the raising loop restarts with a delay "
+            "instead of a tight spin (#9888)."
+        ),
     )
     credit_pause_require_probe: bool = Field(
         default=True,
