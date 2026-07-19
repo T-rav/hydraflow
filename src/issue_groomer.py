@@ -23,6 +23,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
+from typing import Any
 
 # Title/body scoring weights and gate. Tuned in the design spec §2 — a pair
 # scores 0.6 on title similarity + 0.4 on body token overlap, and anything
@@ -800,3 +801,185 @@ def render_digest(actions: GroomActions, stats: Mapping[str, object]) -> str:
         lines.append(_NO_ENTRIES)
 
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Open-proposal accumulation (carried across ticks in state)
+# ---------------------------------------------------------------------------
+#
+# The digest's "Operator questions" section must show EVERY still-open question
+# (dup proposal or priority question), not just the current tick's — a pair
+# judged ``likely_dup`` on Monday is still an open question on Tuesday even
+# though its cached verdict means it is never re-judged (and so never
+# re-proposed) while its bodies are unchanged. These pure helpers merge each
+# tick's fresh questions into the persisted set, prune the ones whose issues
+# have left the backlog (or gained a P-label), and rebuild a ``GroomActions``
+# for rendering. Loop-side I/O (state read/write) threads them; spec #9957.
+
+
+def merge_open_proposals(
+    existing: Sequence[Mapping[str, Any]],
+    actions: GroomActions,
+    now_iso: str,
+) -> list[dict[str, Any]]:
+    """Merge this tick's dup proposals + priority questions into *existing*.
+
+    Deduped by unordered pair ``(a, b)`` for dup entries and by issue
+    ``number`` for priority entries: a re-judged pair (or re-scored issue)
+    supersedes its stale record rather than piling a second row on the same
+    subject. ``first_seen`` is preserved from the superseded record when
+    present so the age of a long-standing question survives a re-judge;
+    genuinely new questions stamp *now_iso*.
+    """
+    result: list[dict[str, Any]] = [dict(e) for e in existing]
+
+    for proposal in actions.dup_proposals:
+        pair = {proposal.a, proposal.b}
+        prior = next(
+            (
+                e
+                for e in result
+                if e.get("kind") == "dup" and {e.get("a"), e.get("b")} == pair
+            ),
+            None,
+        )
+        first_seen = str(prior["first_seen"]) if prior else now_iso
+        result = [
+            e
+            for e in result
+            if not (e.get("kind") == "dup" and {e.get("a"), e.get("b")} == pair)
+        ]
+        result.append(
+            {
+                "kind": "dup",
+                "a": proposal.a,
+                "b": proposal.b,
+                "canonical": proposal.verdict.canonical,
+                "verdict": proposal.verdict.verdict,
+                "confidence": proposal.verdict.confidence,
+                "evidence": proposal.verdict.evidence,
+                "first_seen": first_seen,
+            }
+        )
+
+    for question in actions.priority_questions:
+        prior = next(
+            (
+                e
+                for e in result
+                if e.get("kind") == "priority" and e.get("number") == question.number
+            ),
+            None,
+        )
+        first_seen = str(prior["first_seen"]) if prior else now_iso
+        result = [
+            e
+            for e in result
+            if not (e.get("kind") == "priority" and e.get("number") == question.number)
+        ]
+        result.append(
+            {
+                "kind": "priority",
+                "number": question.number,
+                "current": question.current,
+                "proposed": question.proposed,
+                "reason": question.reason,
+                "first_seen": first_seen,
+            }
+        )
+
+    return result
+
+
+def prune_open_proposals(
+    proposals: Sequence[Mapping[str, Any]],
+    current_labels: Mapping[int, str],
+) -> list[dict[str, Any]]:
+    """Drop proposals whose subject has left the backlog or been answered.
+
+    ``current_labels`` maps every live open backlog issue -> its current
+    P-label (``"none"`` if unlabeled); an issue absent from the map is no
+    longer open.
+
+    * A dup record is dropped once EITHER of its issues is no longer open.
+    * A priority record is dropped once its issue is no longer open OR the
+      issue's live P-label no longer matches the ``current`` the question was
+      raised against — i.e. the operator has since acted on it (removed,
+      added, or changed the P-label). This is the priority analogue of "the
+      question was answered", and it deliberately supersedes a naive
+      "prune once it has any P-label" rule, which would drop the sole kind of
+      question the engine actually raises (``propose none`` on an
+      already-P-labelled issue) the very tick it appears.
+
+    Malformed records (missing keys, wrong types) are dropped defensively
+    rather than raising — one bad row must not sink the whole digest.
+    """
+    kept: list[dict[str, Any]] = []
+    for entry in proposals:
+        kind = entry.get("kind")
+        try:
+            if kind == "dup":
+                if int(entry["a"]) in current_labels and int(entry["b"]) in (
+                    current_labels
+                ):
+                    kept.append(dict(entry))
+            elif kind == "priority":
+                number = int(entry["number"])
+                if number in current_labels and current_labels[number] == str(
+                    entry["current"]
+                ):
+                    kept.append(dict(entry))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return kept
+
+
+def open_proposals_to_actions(
+    actions: GroomActions, proposals: Sequence[Mapping[str, Any]]
+) -> GroomActions:
+    """Rebuild a ``GroomActions`` for rendering with accumulated questions.
+
+    Keeps *actions*' this-tick auto-closes / relabels / skipped-rows (those
+    are completed work, not open questions) but replaces its dup proposals and
+    priority questions with the persisted open set, reconstructed from the
+    stored records. Malformed records are skipped defensively.
+    """
+    dup_proposals: list[DigestProposal] = []
+    priority_questions: list[PriorityQuestion] = []
+    for entry in proposals:
+        kind = entry.get("kind")
+        try:
+            if kind == "dup":
+                a = int(entry["a"])
+                b = int(entry["b"])
+                dup_proposals.append(
+                    DigestProposal(
+                        a=a,
+                        b=b,
+                        verdict=DupVerdict(
+                            verdict=str(entry["verdict"]),
+                            canonical=int(entry.get("canonical", min(a, b))),
+                            evidence=str(entry["evidence"]),
+                            confidence=str(entry["confidence"]),
+                        ),
+                    )
+                )
+            elif kind == "priority":
+                priority_questions.append(
+                    PriorityQuestion(
+                        number=int(entry["number"]),
+                        current=str(entry["current"]),
+                        proposed=str(entry["proposed"]),
+                        reason=str(entry["reason"]),
+                    )
+                )
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    return GroomActions(
+        auto_closes=actions.auto_closes,
+        relabels=actions.relabels,
+        dup_proposals=tuple(dup_proposals),
+        priority_questions=tuple(priority_questions),
+        skipped_rows=actions.skipped_rows,
+    )

@@ -37,11 +37,14 @@ from issue_groomer import (
     build_priority_prompt,
     find_dup_candidates,
     is_guarded,
+    merge_open_proposals,
     normalize_title,
+    open_proposals_to_actions,
     pair_key,
     parse_dup_verdict,
     parse_priority_verdict,
     plan_actions,
+    prune_open_proposals,
     render_digest,
 )
 
@@ -708,3 +711,136 @@ class TestRenderDigest:
         assert "#4 vs #5: distinct" in digest
         assert "- backlog: 5" in digest
         assert "- pairs_judged: 2" in digest
+
+
+# ---------------------------------------------------------------------------
+# Open-proposal accumulation (spec #9957, review finding: proposal persistence)
+# ---------------------------------------------------------------------------
+
+_LATER = (_NOW + timedelta(hours=6)).isoformat()
+
+
+def _dup_actions(*proposals: DigestProposal) -> issue_groomer.GroomActions:
+    return issue_groomer.GroomActions(
+        auto_closes=(),
+        relabels=(),
+        dup_proposals=proposals,
+        priority_questions=(),
+    )
+
+
+def _proposal(a: int, b: int, verdict: str = "likely_dup", conf: str = "medium"):
+    return DigestProposal(
+        a=a,
+        b=b,
+        verdict=DupVerdict(
+            verdict=verdict, canonical=a, evidence="overlap", confidence=conf
+        ),
+    )
+
+
+class TestMergeOpenProposals:
+    def test_stamps_first_seen_on_new_dup(self) -> None:
+        merged = merge_open_proposals(
+            [], _dup_actions(_proposal(1, 2)), _NOW.isoformat()
+        )
+
+        assert len(merged) == 1
+        assert merged[0]["kind"] == "dup"
+        assert merged[0]["a"] == 1
+        assert merged[0]["b"] == 2
+        assert merged[0]["first_seen"] == _NOW.isoformat()
+
+    def test_preserves_first_seen_when_pair_re_merged(self) -> None:
+        first = merge_open_proposals(
+            [], _dup_actions(_proposal(1, 2)), _NOW.isoformat()
+        )
+        # Same pair judged again a later tick supersedes but keeps first_seen.
+        second = merge_open_proposals(
+            first, _dup_actions(_proposal(1, 2, conf="low")), _LATER
+        )
+
+        assert len(second) == 1
+        assert second[0]["first_seen"] == _NOW.isoformat()
+        assert second[0]["confidence"] == "low"
+
+    def test_accumulates_distinct_pairs(self) -> None:
+        first = merge_open_proposals(
+            [], _dup_actions(_proposal(1, 2)), _NOW.isoformat()
+        )
+        second = merge_open_proposals(first, _dup_actions(_proposal(3, 4)), _LATER)
+
+        pairs = {(e["a"], e["b"]) for e in second}
+        assert pairs == {(1, 2), (3, 4)}
+
+    def test_merges_priority_questions_by_number(self) -> None:
+        actions = issue_groomer.GroomActions(
+            auto_closes=(),
+            relabels=(),
+            dup_proposals=(),
+            priority_questions=(
+                PriorityQuestion(number=7, current="P1", proposed="none", reason="r"),
+            ),
+        )
+        merged = merge_open_proposals([], actions, _NOW.isoformat())
+
+        assert merged[0]["kind"] == "priority"
+        assert merged[0]["number"] == 7
+        assert merged[0]["current"] == "P1"
+
+
+class TestPruneOpenProposals:
+    def test_drops_dup_when_issue_leaves_backlog(self) -> None:
+        stored = merge_open_proposals(
+            [], _dup_actions(_proposal(1, 2)), _NOW.isoformat()
+        )
+        # Only #1 is still open — the pair can no longer be a live question.
+        kept = prune_open_proposals(stored, {1: "none"})
+
+        assert kept == []
+
+    def test_keeps_dup_when_both_issues_open(self) -> None:
+        stored = merge_open_proposals(
+            [], _dup_actions(_proposal(1, 2)), _NOW.isoformat()
+        )
+        kept = prune_open_proposals(stored, {1: "none", 2: "none"})
+
+        assert len(kept) == 1
+
+    def test_keeps_priority_question_while_current_label_unchanged(self) -> None:
+        actions = issue_groomer.GroomActions(
+            auto_closes=(),
+            relabels=(),
+            dup_proposals=(),
+            priority_questions=(
+                PriorityQuestion(number=7, current="P1", proposed="none", reason="r"),
+            ),
+        )
+        stored = merge_open_proposals([], actions, _NOW.isoformat())
+
+        # Still open, still carries P1 — the "please remove P1" question stands.
+        assert len(prune_open_proposals(stored, {7: "P1"})) == 1
+        # Operator removed the label — question answered, pruned.
+        assert prune_open_proposals(stored, {7: "none"}) == []
+        # Issue closed — pruned.
+        assert prune_open_proposals(stored, {}) == []
+
+
+class TestOpenProposalsToActions:
+    def test_reconstructs_and_renders_accumulated_questions(self) -> None:
+        stored = merge_open_proposals(
+            [], _dup_actions(_proposal(1, 2)), _NOW.isoformat()
+        )
+        # This tick found nothing new, but the earlier open pair must still show.
+        actions = open_proposals_to_actions(_dup_actions(), stored)
+        digest = render_digest(actions, stats={"backlog": 2})
+
+        assert "#1 vs #2: likely_dup" in digest
+
+    def test_drops_malformed_record_without_raising(self) -> None:
+        actions = open_proposals_to_actions(
+            _dup_actions(),
+            [{"kind": "dup", "a": 1}],  # missing b/verdict/...
+        )
+
+        assert actions.dup_proposals == ()

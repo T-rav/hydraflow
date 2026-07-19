@@ -11,10 +11,12 @@ loop threads both in.
 
 Tick pipeline (spec §3, steps 1-6):
 
-1. Fetch the open backlog (``list_open_issues``) and diff it against the
-   persisted change-detection index → the *changed* set (new issues count as
-   changed). A weekly full sweep (``groom_last_full_sweep`` marker) treats
-   every open issue as changed.
+1. Fetch the open backlog (``list_open_issues``), drop the groomer's own
+   rolling digest issue (by stored number AND ``hydraflow-groom-digest``
+   label) so its every-tick self-update never re-triggers a groom, then diff
+   the rest against the persisted change-detection index → the *changed* set
+   (new issues count as changed). A weekly full sweep
+   (``groom_last_full_sweep`` marker) treats every open issue as changed.
 2. Prefilter duplicate-candidate pairs among the changed set, within the
    per-tick ``issue_groomer_pair_budget``; judge each with one structured LLM
    call. An unparseable/failed verdict degrades to a low-confidence digest
@@ -22,13 +24,21 @@ Tick pipeline (spec §3, steps 1-6):
 3. Score priority for changed issues lacking a P-label (all issues on a full
    sweep).
 4. Tier the judged verdicts + priority scores into concrete actions, then
-   apply them: exact-dup/high pairs auto-close (evidence comment +
-   ``groomed-auto`` label + close); safe priority deltas relabel. Every apply
+   apply them: exact-dup/high pairs auto-close, gating every side effect on a
+   still-open re-check + a confirmed close (stale-guard → evidence comment →
+   close → ``groomed-auto`` label); safe priority deltas relabel. Every apply
    is wrapped per-action — one failure never aborts the tick, and credit/auth
-   errors always reraise.
-5. Rewrite the rolling digest issue (created once, updated thereafter).
-6. Persist index + judged-pair cache + full-sweep marker, and publish one
-   ``GROOM_UPDATE`` event for the dashboard.
+   errors always reraise. A failed/stale close leaves the pair un-cached so it
+   re-judges next tick.
+4b. Accumulate still-open operator questions (dup proposals + priority
+    questions) in ``groom_open_proposals``, pruned to the live backlog, so the
+    digest renders EVERY open question, not just this tick's.
+5. Rewrite the rolling digest issue, recovering it if the stored issue was
+   closed (reopen if supported, else mint a fresh one) or if state lost the
+   number but the create-once dedup key survives (adopt the open digest found
+   by label).
+6. Persist index + judged-pair cache + full-sweep marker + open proposals, and
+   publish one ``GROOM_UPDATE`` event for the dashboard.
 
 Kill-switch (ADR-0049): ``_enabled_cb`` AND ``issue_groomer_enabled`` both gate
 the tick at the top. An empty backlog, or no changes with no full sweep due, is
@@ -59,10 +69,13 @@ from issue_groomer import (
     build_priority_prompt,
     find_dup_candidates,
     is_guarded,
+    merge_open_proposals,
+    open_proposals_to_actions,
     pair_key,
     parse_dup_verdict,
     parse_priority_verdict,
     plan_actions,
+    prune_open_proposals,
     render_digest,
 )
 from runner_utils import run_lightweight_agent
@@ -207,9 +220,19 @@ class IssueGroomerLoop(BaseBackgroundLoop):
 
         now = datetime.now(UTC)
 
-        # 1. Fetch backlog.
+        # 1. Fetch backlog. Drop the groomer's own rolling digest issue up front
+        # (by stored number AND by label) so its every-tick self-update never
+        # re-marks it "changed" and drives an endless non-quiet loop — a quiet
+        # tick after a groom must genuinely short-circuit (spec #9957, review
+        # finding: digest self-participation).
         raw_issues = await self._pr.list_open_issues()
-        issues = [self._to_groom_issue(r) for r in raw_issues]
+        digest_number = self._state.get_groom_digest_issue()
+        issues = [
+            groomed
+            for r in raw_issues
+            if (groomed := self._to_groom_issue(r)).number != digest_number
+            and _DIGEST_LABEL not in groomed.labels
+        ]
         if not issues:
             # Empty backlog: prune the index, heartbeat only (no LLM, no event).
             self._state.set_groom_index({})
@@ -309,11 +332,36 @@ class IssueGroomerLoop(BaseBackgroundLoop):
                 )
                 continue
 
-        # 4. Tier + apply.
+        # 4. Tier + apply. A failed/stale auto-close returns the pair so we do
+        # NOT cache it — it must re-judge next tick against fresh content.
         actions = plan_actions(verdicts, priorities, issues_by_number, now)
-        closed, relabeled, failures = await self._apply(actions)
+        closed, relabeled, failures, uncache_pairs = await self._apply(actions)
+        if uncache_pairs:
+            stale_keys = {
+                pair_key(issues_by_number[a], issues_by_number[b])
+                for a, b in uncache_pairs
+                if a in issues_by_number and b in issues_by_number
+            }
+            newly_judged = [k for k in newly_judged if k not in stale_keys]
 
-        # 5. Rolling digest.
+        # 4b. Accumulate open operator questions across ticks: merge this tick's
+        # dup proposals + priority questions into the persisted set, prune the
+        # ones whose issues left the backlog or whose P-label the operator has
+        # since changed, and render the WHOLE open set — a question first raised
+        # earlier stays visible until it is actioned (spec #9957, review finding:
+        # proposal persistence).
+        current_labels = {i.number: self._current_priority_label(i) for i in issues}
+        open_proposals = prune_open_proposals(
+            merge_open_proposals(
+                self._state.get_groom_open_proposals(), actions, now.isoformat()
+            ),
+            current_labels,
+        )
+        self._state.set_groom_open_proposals(open_proposals)
+        digest_actions = open_proposals_to_actions(actions, open_proposals)
+
+        # 5. Rolling digest. Stats measure THIS tick's flow (new work); the
+        # digest's Operator-questions section renders the accumulated open set.
         stats = {
             "backlog": len(issues),
             "changed": len(changed),
@@ -325,10 +373,11 @@ class IssueGroomerLoop(BaseBackgroundLoop):
             "relabeled": relabeled,
             "proposals": len(actions.dup_proposals),
             "priority_questions": len(actions.priority_questions),
+            "open_questions": len(open_proposals),
             "skipped_rows": actions.skipped_rows,
             "apply_failures": len(failures),
         }
-        await self._write_digest(actions, stats, failures)
+        await self._write_digest(digest_actions, stats, failures)
 
         # 6. Persist + publish.
         self._state.set_groom_index(new_index)
@@ -358,16 +407,23 @@ class IssueGroomerLoop(BaseBackgroundLoop):
 
     # --- Apply ----------------------------------------------------------------
 
-    async def _apply(self, actions: GroomActions) -> tuple[int, int, list[str]]:
+    async def _apply(
+        self, actions: GroomActions
+    ) -> tuple[int, int, list[str], list[tuple[int, int]]]:
         """Apply auto-closes + relabels, isolating each action.
 
-        Returns ``(closed, relabeled, failures)``. A single failing action is
-        recorded and surfaced in the digest but never aborts the tick; a
-        credit/auth error always reraises (``reraise_on_credit_or_bug``).
+        Returns ``(closed, relabeled, failures, uncache_pairs)``. A single
+        failing action is recorded and surfaced in the digest but never aborts
+        the tick; a credit/auth error always reraises
+        (``reraise_on_credit_or_bug``). ``uncache_pairs`` are the
+        ``(canonical, duplicate)`` pairs whose close failed or was stale — the
+        caller drops their judged-pair keys so they re-judge next tick rather
+        than being cached against a close that never landed.
         """
         closed = 0
         relabeled = 0
         failures: list[str] = []
+        uncache_pairs: list[tuple[int, int]] = []
 
         for close in actions.auto_closes:
             try:
@@ -379,6 +435,7 @@ class IssueGroomerLoop(BaseBackgroundLoop):
                     "groom auto-close failed for #%d: %s", close.duplicate, exc
                 )
                 failures.append(f"close #{close.duplicate}: {exc}")
+                uncache_pairs.append((close.canonical, close.duplicate))
 
         for relabel in actions.relabels:
             try:
@@ -389,23 +446,41 @@ class IssueGroomerLoop(BaseBackgroundLoop):
                 logger.warning("groom relabel failed for #%d: %s", relabel.number, exc)
                 failures.append(f"relabel #{relabel.number}: {exc}")
 
-        return closed, relabeled, failures
+        return closed, relabeled, failures, uncache_pairs
 
     async def _apply_auto_close(self, close: AutoClose) -> None:
-        """Evidence comment + ``groomed-auto`` label + close the duplicate.
+        """Close the duplicate, gating every side effect on a confirmed close.
 
-        ``close_issue`` returns False (rather than raising) on a gh failure;
-        treat that as a failed action so it surfaces in the digest.
+        Order is stale-guard -> comment -> close -> label:
+
+        * Stale guard (review finding): re-read BOTH the duplicate and the
+          canonical via the port and abort unless both are still ``OPEN`` —
+          another loop or a human may have closed/merged one between the
+          judgment read and now, and closing on a stale verdict is the exact
+          false-positive dedup the fitness scorer punishes.
+        * The ``groomed-auto`` label is added ONLY after the close reaches
+          GitHub, so a failed close never leaves the fitness-attribution label
+          on a still-open issue. ``close_issue`` returns False (rather than
+          raising) on a gh failure; treat that as a failed action.
         """
+        dup_state = await self._pr.get_issue_state(close.duplicate)
+        canon_state = await self._pr.get_issue_state(close.canonical)
+        if dup_state != "OPEN" or canon_state != "OPEN":
+            msg = (
+                "stale judgment — issue state changed mid-tick "
+                f"(#{close.duplicate}={dup_state}, #{close.canonical}={canon_state})"
+            )
+            raise RuntimeError(msg)
+
         await self._pr.post_comment(
             close.duplicate,
             f"**Groom (auto):** duplicate of #{close.canonical} — {close.evidence}",
         )
-        await self._pr.add_labels(close.duplicate, [_GROOMED_AUTO_LABEL])
         ok = await self._pr.close_issue(close.duplicate)
         if not ok:
             msg = f"close_issue returned False for #{close.duplicate}"
             raise RuntimeError(msg)
+        await self._pr.add_labels(close.duplicate, [_GROOMED_AUTO_LABEL])
 
     async def _apply_relabel(self, relabel: RelabelAction) -> None:
         """Add the new P-label and remove the previous one if there was one."""
@@ -418,7 +493,20 @@ class IssueGroomerLoop(BaseBackgroundLoop):
     async def _write_digest(
         self, actions: GroomActions, stats: dict[str, object], failures: list[str]
     ) -> None:
-        """Create the digest issue on first run, else rewrite its body."""
+        """Create the digest issue on first run, else rewrite its body.
+
+        Recovers from two ways the rolling digest can go missing (review
+        finding: digest recovery):
+
+        * The stored issue was CLOSED (a human tidied the backlog, or a stale
+          GC pass closed it). Reopen it if the port supports reopening, else
+          mint a fresh digest and re-point state at it — never silently write
+          the body of a closed issue nobody is watching.
+        * State lost the number (reset to 0) but the create-once dedup key
+          survives, so a real digest is out there. Read-then-adopt: find the
+          open ``hydraflow-groom-digest`` issue by label and reclaim it before
+          creating a duplicate.
+        """
         body = render_digest(actions, stats)
         if failures:
             body += "\n## Apply failures\n" + "\n".join(f"- {f}" for f in failures)
@@ -426,8 +514,19 @@ class IssueGroomerLoop(BaseBackgroundLoop):
 
         digest_number = self._state.get_groom_digest_issue()
         if digest_number > 0:
-            await self._pr.update_issue_body(digest_number, body)
-            return
+            if await self._pr.get_issue_state(digest_number) == "OPEN":
+                await self._pr.update_issue_body(digest_number, body)
+                return
+            if await self._reopen_digest(digest_number):
+                await self._pr.update_issue_body(digest_number, body)
+                return
+            # Closed and un-reopenable — fall through to mint a fresh digest.
+        elif _DIGEST_DEDUP_KEY in self._dedup.get():
+            adopted = await self._find_open_digest_by_label()
+            if adopted > 0:
+                self._state.set_groom_digest_issue(adopted)
+                await self._pr.update_issue_body(adopted, body)
+                return
 
         created = await self._pr.create_issue(_DIGEST_TITLE, body, [_DIGEST_LABEL])
         if created > 0:
@@ -435,6 +534,32 @@ class IssueGroomerLoop(BaseBackgroundLoop):
             dedup = self._dedup.get()
             dedup.add(_DIGEST_DEDUP_KEY)
             self._dedup.set_all(dedup)
+
+    async def _reopen_digest(self, number: int) -> bool:
+        """Reopen the digest issue if the port exposes a ``reopen_issue`` seam.
+
+        Capability-probed rather than assumed: the current ``PRPort`` has no
+        reopen method, so this returns False and the caller mints a fresh
+        digest. Kept as a seam so a port that later grows reopen support
+        reuses the rolling issue instead of churning a new one each recovery.
+        """
+        reopen = getattr(self._pr, "reopen_issue", None)
+        if reopen is None:
+            return False
+        try:
+            result = await reopen(number)
+        except Exception as exc:  # noqa: BLE001 — classify then fail-soft
+            reraise_on_credit_or_bug(exc)
+            logger.warning("groom digest reopen failed for #%d: %s", number, exc)
+            return False
+        return result is not False
+
+    async def _find_open_digest_by_label(self) -> int:
+        """Return the lowest-numbered open ``hydraflow-groom-digest`` issue, or 0."""
+        labeled = await self._pr.list_issues_by_label(_DIGEST_LABEL)
+        numbers = [int(item.get("number", 0)) for item in labeled]
+        open_numbers = [n for n in numbers if n > 0]
+        return min(open_numbers) if open_numbers else 0
 
     async def _publish_groom_event(
         self,
@@ -529,6 +654,17 @@ class IssueGroomerLoop(BaseBackgroundLoop):
     @staticmethod
     def _has_priority_label(issue: GroomIssue) -> bool:
         return any(label in issue.labels for label in _PRIORITY_LABELS)
+
+    @staticmethod
+    def _current_priority_label(issue: GroomIssue) -> str:
+        """The issue's current P-label, or ``"none"``. Mirrors the engine's
+        private ``_current_priority_label`` so the loop can build the
+        live-label map ``prune_open_proposals`` needs without importing a
+        private helper across modules."""
+        for label in _PRIORITY_LABELS:
+            if label in issue.labels:
+                return label
+        return "none"
 
     @staticmethod
     def _count_cache_hits(

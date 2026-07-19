@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from models import StateData
@@ -105,4 +105,22 @@ class IssueGroomerStateMixin:
 
     def set_groom_digest_issue(self, number: int) -> None:
         self._data.groom_digest_issue = number
+        self.save()
+
+    # --- open operator proposals (carried across ticks) ---
+
+    def get_groom_open_proposals(self) -> list[dict[str, Any]]:
+        """Return a copy of the still-open operator questions.
+
+        Each entry is a ``dup`` or ``priority`` record (see ``StateData.
+        groom_open_proposals``). The loop merges this tick's new proposals in,
+        prunes entries whose issues left the backlog, and renders the whole
+        set in the digest so an operator question first raised on an earlier
+        tick keeps showing until it's actioned or its issue closes.
+        """
+        return [dict(p) for p in self._data.groom_open_proposals]
+
+    def set_groom_open_proposals(self, proposals: Iterable[Mapping[str, Any]]) -> None:
+        """Overwrite the persisted open-proposals list with *proposals*."""
+        self._data.groom_open_proposals = [dict(p) for p in proposals]
         self.save()

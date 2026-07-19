@@ -217,3 +217,39 @@ class TestDigestIssue:
         st = _tracker(tmp_path)
         st.set_groom_digest_issue(9958)
         assert st.get_groom_digest_issue() == 9958
+
+
+# ---------------------------------------------------------------------------
+# GroomState — open operator proposals (carried across ticks)
+# ---------------------------------------------------------------------------
+
+
+class TestOpenProposals:
+    def test_defaults_empty(self, tmp_path: Path) -> None:
+        st = _tracker(tmp_path)
+        assert st.get_groom_open_proposals() == []
+
+    def test_roundtrip(self, tmp_path: Path) -> None:
+        st = _tracker(tmp_path)
+        proposals = [
+            {
+                "kind": "dup",
+                "a": 101,
+                "b": 102,
+                "canonical": 101,
+                "verdict": "likely_dup",
+                "confidence": "medium",
+                "evidence": "same reap site",
+                "first_seen": "2026-07-19T00:00:00+00:00",
+            }
+        ]
+        st.set_groom_open_proposals(proposals)
+        assert st.get_groom_open_proposals() == proposals
+
+    def test_get_returns_a_copy(self, tmp_path: Path) -> None:
+        """Mutating the returned list's entries must not leak back into state."""
+        st = _tracker(tmp_path)
+        st.set_groom_open_proposals([{"kind": "priority", "number": 7}])
+        snapshot = st.get_groom_open_proposals()
+        snapshot[0]["number"] = 999
+        assert st.get_groom_open_proposals()[0]["number"] == 7

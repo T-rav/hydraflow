@@ -21,6 +21,7 @@ from config import HydraFlowConfig
 from dedup_store import DedupStore
 from events import EventBus, EventType
 from issue_groomer_loop import (
+    _DIGEST_DEDUP_KEY,
     _DIGEST_LABEL,
     _DIGEST_TITLE,
     _GROOMED_AUTO_LABEL,
@@ -413,3 +414,166 @@ async def test_full_sweep_scores_even_p_labeled(tmp_path) -> None:
 
     assert stats["full_sweep"] is True
     assert llm.priority_nums() == {401, 402}
+
+
+# --- review fixes: stale-close guard, digest self-participation, proposal ----
+# --- persistence, close-gated labeling, digest recovery (#9957) --------------
+
+
+async def test_stale_close_skips_and_leaves_pair_rejudgeable(tmp_path) -> None:
+    """A canonical/duplicate closed between judgment and apply must abort the
+    close, surface a stale-judgment failure, and NOT cache the pair."""
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)  # 101, 102 both open at fetch
+
+    async def _state(number: int) -> str:
+        # #101 was closed out-of-band mid-tick; #102 is still open.
+        return "COMPLETED" if number == 101 else "OPEN"
+
+    gh.get_issue_state = _state
+    llm = ScriptedGroomLLM(
+        dup={frozenset({101, 102}): _dup_json("exact_dup", 101, "high")}
+    )
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    stats = await loop._do_work()
+
+    assert stats["status"] == "ok"
+    assert stats["closed"] == 0
+    assert stats["apply_failures"] == 1
+    # Duplicate untouched — no close, no fitness label.
+    assert gh._issues[102].state == "open"
+    assert _GROOMED_AUTO_LABEL not in gh._issues[102].labels
+    # Not cached: the pair re-judges next tick against fresh content.
+    assert state.get_judged_pairs() == []
+    digest = gh._issues[state.get_groom_digest_issue()]
+    assert "stale judgment" in digest.body
+
+
+async def test_failing_close_adds_no_label_and_leaves_pair_rejudgeable(
+    tmp_path,
+) -> None:
+    """A soft close failure (returns False) must gate the label off and leave
+    the pair un-cached so it re-judges next tick."""
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    gh.close_issue = AsyncMock(return_value=False)
+    llm = ScriptedGroomLLM(
+        dup={frozenset({101, 102}): _dup_json("exact_dup", 101, "high")}
+    )
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    stats = await loop._do_work()
+
+    assert stats["closed"] == 0
+    assert stats["apply_failures"] == 1
+    dup = gh._issues[102]
+    assert dup.state == "open"
+    assert _GROOMED_AUTO_LABEL not in dup.labels  # label gated on a real close
+    assert state.get_judged_pairs() == []  # re-judgeable
+
+
+async def test_quiet_tick_after_groom_is_zero_llm_and_digest_untouched(
+    tmp_path,
+) -> None:
+    """The rolling digest issue must not count as its own change signal: a quiet
+    tick after a groom takes the genuine zero-LLM short-circuit and does not
+    rewrite the digest."""
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    state.set_groom_last_full_sweep(datetime.now(UTC))  # incremental mode
+    llm = ScriptedGroomLLM()
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    # Tick N: grooms the two new issues, creates the digest.
+    await loop._do_work()
+    digest_num = state.get_groom_digest_issue()
+    assert digest_num > 0
+    calls_after_n = len(llm.prompts)
+    assert calls_after_n > 0
+    digest_body_after_n = gh._issues[digest_num].body
+
+    # Tick N+1: nothing else changed; the now-open digest issue must be ignored.
+    stats = await loop._do_work()
+
+    assert stats["changed"] == 0
+    assert len(llm.prompts) == calls_after_n  # zero new LLM calls
+    assert gh._issues[digest_num].body == digest_body_after_n  # untouched
+
+
+async def test_earlier_open_proposal_re_renders_on_later_changed_tick(
+    tmp_path,
+) -> None:
+    """An operator question raised on an earlier tick keeps rendering on a later
+    tick that grooms unrelated changes (the pair itself is cached, not
+    re-judged)."""
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    state.set_groom_last_full_sweep(datetime.now(UTC))
+    llm = ScriptedGroomLLM(
+        dup={frozenset({101, 102}): _dup_json("likely_dup", 101, "medium")}
+    )
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    await loop._do_work()  # tick N: likely_dup -> operator question persisted
+    digest_num = state.get_groom_digest_issue()
+    assert "#101 vs #102" in gh._issues[digest_num].body
+
+    # Tick N+1: an unrelated new issue makes the tick non-quiet; 101/102 unchanged.
+    gh.add_issue(
+        200, "Telemetry export gap on the metrics endpoint", "unrelated", labels=[]
+    )
+    stats = await loop._do_work()
+
+    assert stats["changed"] >= 1
+    # The earlier open proposal is still rendered — not just this tick's.
+    assert "#101 vs #102" in gh._issues[digest_num].body
+
+
+async def test_digest_recreated_when_stored_issue_closed(tmp_path) -> None:
+    """A closed digest issue is not silently written — a fresh one is minted."""
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    state.set_groom_last_full_sweep(datetime.now(UTC))
+    llm = ScriptedGroomLLM()
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    await loop._do_work()  # tick N: create digest
+    old_digest = state.get_groom_digest_issue()
+    assert old_digest > 0
+    gh._issues[old_digest].state = "closed"  # closed out-of-band
+
+    # Tick N+1: change an issue so the tick grooms and writes the digest.
+    gh._issues[101].body = "Rewritten body to force a change and re-groom."
+    gh.set_issue_updated_at(101, "2026-07-19T00:00:00Z")
+    await loop._do_work()
+
+    new_digest = state.get_groom_digest_issue()
+    assert new_digest != old_digest
+    assert gh._issues[new_digest].state == "open"
+    assert _DIGEST_LABEL in gh._issues[new_digest].labels
+
+
+async def test_digest_adopted_by_label_when_state_lost_number(tmp_path) -> None:
+    """State number reset to 0 while the create-once dedup key survives: adopt
+    the open digest found by label instead of minting a duplicate."""
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    state.set_groom_last_full_sweep(datetime.now(UTC))
+    # A real digest exists (open, labeled) but state lost its number...
+    gh.add_issue(9001, _DIGEST_TITLE, "stale digest body", labels=[_DIGEST_LABEL])
+    # ...while the create-once dedup key survived.
+    d = dedup.get()
+    d.add(_DIGEST_DEDUP_KEY)
+    dedup.set_all(d)
+    assert state.get_groom_digest_issue() == 0
+
+    llm = ScriptedGroomLLM()
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+    issue_count_before = len(gh._issues)
+
+    await loop._do_work()
+
+    assert state.get_groom_digest_issue() == 9001  # adopted, not re-created
+    assert len(gh._issues) == issue_count_before  # no duplicate digest
+    assert gh._issues[9001].body != "stale digest body"  # body refreshed

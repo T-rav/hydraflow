@@ -2258,6 +2258,17 @@ class StateData(BaseModel):
     # The groomer's own rolling digest issue number (#8987 rollup pattern);
     # 0 = not yet created.
     groom_digest_issue: int = Field(default=0)
+    # Open operator questions carried across ticks so the digest renders ALL
+    # still-open proposals, not just the current tick's (spec #9957, ratified
+    # controller decision). Each entry is one of two shapes, tagged by "kind":
+    #   dup:      {"kind": "dup", "a", "b", "canonical", "verdict",
+    #              "confidence", "evidence", "first_seen"}
+    #   priority: {"kind": "priority", "number", "current", "proposed",
+    #              "reason", "first_seen"}
+    # Pruned each tick to the live backlog (and, for priority entries, dropped
+    # once the issue gains a P-label). Deduped by unordered pair (dup) / issue
+    # number (priority) so a re-judged pair supersedes its stale entry.
+    groom_open_proposals: list[dict[str, Any]] = Field(default_factory=list)
     last_updated: str | None = None
 
 
