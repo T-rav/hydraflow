@@ -184,8 +184,11 @@ async def _assert_only_module_changed(worktree: Path, module_rel: str) -> None:
             proc.communicate(), timeout=_GIT_STATUS_TIMEOUT_SECONDS
         )
     except TimeoutError:
-        proc.kill()
+        # An already-exited child makes proc.kill() raise ProcessLookupError,
+        # which would otherwise crash the loop cycle instead of surfacing the
+        # TimeoutError (#9794/#9816/#9883 gh-timeout-storm class).
         with contextlib.suppress(ProcessLookupError):
+            proc.kill()
             await proc.wait()
         raise
     if proc.returncode != 0:
@@ -889,8 +892,8 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                 proc.communicate(patch_text.encode()), timeout=60
             )
         except TimeoutError:
-            proc.kill()
             with contextlib.suppress(ProcessLookupError):
+                proc.kill()
                 await proc.wait()
             raise
         if proc.returncode != 0:
