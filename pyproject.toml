@@ -165,6 +165,10 @@ skips = ["B101"]
 # === Pytest ===
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# regression_*.py: 72 legacy tests/regressions/regression_issue_NNNN.py files
+# never matched the default test_*.py glob and silently provided ZERO
+# coverage since creation (#9801/#9872). Collected explicitly here.
+python_files = ["test_*.py", "regression_*.py"]
 asyncio_mode = "auto"
 addopts = [
     "-q",
