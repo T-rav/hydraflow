@@ -509,6 +509,77 @@ def active_lint_tracked(
     return result
 
 
+def flag_generic_entries_stale(
+    tracked_root: Path,
+    repo_slug: str,
+    *,
+    anchor_vocabulary: frozenset[str] | None = None,
+) -> int:
+    """Mark active tracked entries stale when they lack a repo-specific anchor.
+
+    The prune pass for #9954: the gotcha store had accumulated generic
+    coding truisms ("Use ``is None`` for optional sentinels") that dilute
+    the wiki context injected into agent prompts (``max_repo_wiki_chars``
+    truncates, so platitudes crowd out real gotchas). This pass scores
+    every ``status: active`` per-entry file with the same deterministic
+    heuristic the synthesis-time gate uses
+    (:func:`wiki_anchor_gate.has_repo_anchor`) and flips anchor-less ones
+    to ``status: stale`` with a ``stale_reason``.
+
+    Mark-only — never deletes. The flips land as uncommitted diffs the
+    maintenance PR rolls up (reviewable), and the existing age-based prune
+    in :func:`active_lint_tracked` removes them on a later tick. Stale
+    entries are already filtered out of prompt injection, so injection
+    favors anchored entries immediately.
+
+    Returns the number of entries newly flagged stale. No-op (returns 0)
+    when *anchor_vocabulary* is ``None`` so callers opt in explicitly and
+    existing ``active_lint_tracked`` behavior is untouched.
+    """
+    from file_util import atomic_write  # noqa: PLC0415
+    from wiki_anchor_gate import has_repo_anchor  # noqa: PLC0415
+
+    if anchor_vocabulary is None:
+        return 0
+    repo_dir = tracked_root / repo_slug
+    if not repo_dir.is_dir():
+        return 0
+
+    flagged = 0
+    for topic_name in _TRACKED_TOPICS:
+        topic_dir = repo_dir / topic_name
+        if not topic_dir.is_dir():
+            continue
+        for entry_path in sorted(topic_dir.glob("*.md")):
+            try:
+                text = entry_path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            fields, _block, body = _split_tracked_entry(text)
+            if not fields or fields.get("status", "active") != "active":
+                continue
+            # ``body`` carries the ``# Title`` heading plus content — enough
+            # signal for the anchor heuristic.
+            if has_repo_anchor(body, config_fields=anchor_vocabulary):
+                continue
+            updated = _update_tracked_entry_status(
+                text,
+                status="stale",
+                stale_reason="no repo-specific anchor (generic best-practice)",
+            )
+            if updated is None:
+                continue
+            try:
+                atomic_write(entry_path, updated)
+            except OSError:
+                logger.warning(
+                    "flag_generic_entries_stale: failed to rewrite %s", entry_path
+                )
+                continue
+            flagged += 1
+    return flagged
+
+
 class WikiEntry(BaseModel):
     """A single knowledge entry within a topic page."""
 
