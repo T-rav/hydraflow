@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import sys
 from pathlib import Path
 
 SKILL_BUILDER_MODULES: dict[str, str] = {
@@ -178,6 +179,15 @@ def render_builder_prompt(builder_module_path: Path, skill_name: str) -> str:
 
     Raises :class:`PromptRenderError` when the module can't be loaded or defines
     no builder function.
+
+    Suppresses bytecode caching for the duration of the exec: this is a
+    throwaway probe module (never registered in ``sys.modules``, discarded
+    the moment this call returns), and writing its compiled ``.pyc`` into a
+    ``__pycache__`` under *builder_module_path* would leave collateral
+    untracked-file noise in whatever tree it's probing — e.g. the refine
+    loop calls this against a candidate worktree both before and after
+    applying a patch, and a stray ``__pycache__`` there would trip the
+    worktree's changed-set assertion (#9724 review, Finding 1).
     """
     func_name = _builder_func_name(skill_name)
     spec = importlib.util.spec_from_file_location(
@@ -187,11 +197,15 @@ def render_builder_prompt(builder_module_path: Path, skill_name: str) -> str:
         msg = f"cannot load builder module at {builder_module_path}"
         raise PromptRenderError(msg)
     module = importlib.util.module_from_spec(spec)
+    previous_dont_write_bytecode = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
     try:
         spec.loader.exec_module(module)
     except Exception as exc:  # noqa: BLE001 — surface as a render error, uniform handling
         msg = f"failed to exec builder module at {builder_module_path}: {exc}"
         raise PromptRenderError(msg) from exc
+    finally:
+        sys.dont_write_bytecode = previous_dont_write_bytecode
     builder = getattr(module, func_name, None)
     if not callable(builder):
         msg = f"{builder_module_path} defines no callable {func_name}"

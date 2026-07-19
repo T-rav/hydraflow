@@ -33,6 +33,7 @@ from auto_pr import generate_and_open_pr_async
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
+from execution import get_default_runner
 from models import WorkCycleResult
 from prompt_refiner import (
     PROMPT_LENGTH_DRIFT_LIMIT,
@@ -44,6 +45,7 @@ from prompt_refiner import (
     parse_patch_response,
     render_builder_prompt,
 )
+from runner_utils import run_lightweight_agent
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -108,6 +110,11 @@ _REFINE_PR_LABELS = ("skill-prompt-refine",)
 # Hard bound on the one-shot refine LLM synthesis call.
 _REFINE_LLM_TIMEOUT_SECONDS = 300
 
+# Hard bound on the `git status --porcelain` changed-set check. A fast local
+# git call; generous enough to absorb a slow filesystem without masking a
+# genuinely wedged git process.
+_GIT_STATUS_TIMEOUT_SECONDS = 30
+
 # Cases dir, relative to a repo/worktree root, holding the adversarial corpus.
 _CASES_REL = "tests/trust/adversarial/cases"
 
@@ -124,6 +131,75 @@ _REFINE_OUTCOME_NOTES = {
     ),
     "error": "a refinement patch could not be synthesized for this case",
 }
+
+
+async def _assert_only_module_changed(worktree: Path, module_rel: str) -> None:
+    """Assert git's ACTUAL changed-set in *worktree* is exactly ``{module_rel}``.
+
+    Closes the git-apply prefix-differential bypass: ``git apply`` defaults to
+    ``-p1`` (strips ANY single leading path component from every side of every
+    section in the patch), but ``check_tripwires``/``_collect_patch_targets``
+    only recognize the literal ``a/``/``b/`` prefixes. A patch section headed
+    e.g. ``--- x/tests/trust/adversarial/corpus_runner.py`` /
+    ``+++ y/tests/trust/adversarial/corpus_runner.py`` applies cleanly under
+    ``-p1`` yet contributes zero targets to the tripwire scan — a bundled
+    patch that mixes one legit ``a/``/``b/`` section against the allowed
+    builder module with one such section against the validation harness would
+    pass ``check_tripwires``, rewrite the harness on disk, and could forge an
+    all-PASS validation. Whatever prefix scheme the patch itself used,
+    ``git status --porcelain`` reports the ground truth of what changed on
+    disk; comparing that against the single expected target closes the bypass
+    regardless of how the patch tried to name its victim path.
+
+    Call this immediately after applying the patch and before any further
+    gate (length drift, live validation) runs against the worktree.
+
+    Raises ``RuntimeError`` naming the unexpected/missing paths when the
+    touched set is not exactly ``{module_rel}`` — modified, added, and
+    untracked files all count as "touched".
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        "status",
+        "--porcelain",
+        cwd=worktree,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=_GIT_STATUS_TIMEOUT_SECONDS
+        )
+    except TimeoutError:
+        proc.kill()
+        with contextlib.suppress(ProcessLookupError):
+            await proc.wait()
+        raise
+    if proc.returncode != 0:
+        detail = stderr.decode(errors="replace")[:400]
+        msg = f"git status failed (rc={proc.returncode}): {detail}"
+        raise RuntimeError(msg)
+
+    touched: set[str] = set()
+    for line in stdout.decode(errors="replace").splitlines():
+        if not line:
+            continue
+        # Porcelain v1 shape: 2 status chars + a space + the path. A rename
+        # (or copy) carries both sides as "old -> new"; both count as touched.
+        rest = line[3:]
+        old, sep, new = rest.partition(" -> ")
+        if sep:
+            touched.add(old.strip())
+            touched.add(new.strip())
+        else:
+            touched.add(rest.strip())
+
+    if touched != {module_rel}:
+        msg = (
+            f"patch touched unexpected paths: expected only {module_rel!r}, "
+            f"found {sorted(touched)!r}"
+        )
+        raise RuntimeError(msg)
 
 
 class _RefineLLM(Protocol):
@@ -150,9 +226,6 @@ class _CLIRefineLLM:
         self._model = model
 
     async def complete(self, prompt: str) -> str:
-        from execution import get_default_runner  # noqa: PLC0415
-        from runner_utils import run_lightweight_agent  # noqa: PLC0415
-
         result = await run_lightweight_agent(
             runner=get_default_runner(),
             config=self._config,
@@ -485,7 +558,10 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         repair-attempt counter is bumped and the outcome is noted on the open
         drift issue, so a stuck auto-refine still walks the case toward HITL
         escalation. Refinement failure is fully contained here — it never
-        propagates into the drift-issue flow that invoked it.
+        propagates into the drift-issue flow that invoked it. That containment
+        covers the outcome bookkeeping too: a PR-API hiccup while bumping the
+        attempt counter or commenting the outcome must not escape and abort
+        the remaining cases in the caller's tick.
         """
         case_id = str(case.get("case_id", ""))
         try:
@@ -495,8 +571,17 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             logger.warning("refine crashed for %s: %s", case_id, exc)
             outcome = "error"
         if outcome not in ("proposed", "disabled", "capped"):
-            attempts = self._state.inc_skill_prompt_attempts(case_id)
-            await self._comment_refine_outcome(case, outcome, attempts)
+            try:
+                attempts = self._state.inc_skill_prompt_attempts(case_id)
+                await self._comment_refine_outcome(case, outcome, attempts)
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning(
+                    "refine outcome bookkeeping failed for %s (%s): %s",
+                    case_id,
+                    outcome,
+                    exc,
+                )
         return outcome
 
     async def _compute_refine_outcome(self, case: dict[str, Any]) -> str:
@@ -558,7 +643,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         """
         cfg = self._config
         module_rel = SKILL_BUILDER_MODULES[skill_name]
-        flags = {"ok": False, "length_tripwire": False}
+        flags = {"ok": False, "length_tripwire": False, "path_tripwire": False}
 
         async def _generate(worktree: Path) -> None:
             # Validate INSIDE the generate callback so a bad candidate aborts
@@ -568,6 +653,15 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                 render_builder_prompt, module_path, skill_name
             )
             await self._apply_patch_in_worktree(worktree, patch_text)
+            # Git-native ground truth on what the patch actually touched —
+            # closes the git-apply `-p1` prefix-differential bypass that
+            # `check_tripwires`'s literal `a/`/`b/` scan cannot see (#9724
+            # review). Must run before the length gate/validation below.
+            try:
+                await _assert_only_module_changed(worktree, module_rel)
+            except RuntimeError:
+                flags["path_tripwire"] = True
+                raise
             after = await asyncio.to_thread(
                 render_builder_prompt, module_path, skill_name
             )
@@ -601,7 +695,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             self._state.record_refine_proposal(now.isoformat())
             logger.info("refine proposed PR for %s: %s", case_id, result.pr_url)
             return "proposed"
-        if flags["length_tripwire"]:
+        if flags["length_tripwire"] or flags["path_tripwire"]:
             return "tripwire"
         if not flags["ok"]:
             return "validation_failed"
