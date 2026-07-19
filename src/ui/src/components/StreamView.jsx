@@ -164,8 +164,17 @@ function EpicContainer({ epicNumber, issues, children }) {
 }
 
 function StageSection({ stage, issues, workerCount, workerCap, queuedCount, intentMap, onRequestChanges, open, onToggle, enabled, dotColor, workers, prs }) {
-  const failedCount = issues.filter(i => i.overallStatus === 'failed').length
-  const hitlCount = issues.filter(i => i.overallStatus === 'hitl').length
+  const safeIssues = issues || []
+  const failedCount = safeIssues.filter(i => i.overallStatus === 'failed').length
+  const hitlCount = safeIssues.filter(i => i.overallStatus === 'hitl').length
+  // #9793: the header count and the expanded list previously came from two
+  // sources (orchestrator live counters vs the label-derived /api/pipeline
+  // snapshot) — "1 queued" could render zero queued rows. The count shown is
+  // now derived from the SAME rows the expansion renders; when the
+  // orchestrator is ahead of the snapshot the delta is shown honestly as
+  // "syncing" instead of a phantom row count.
+  const listQueuedCount = safeIssues.filter(i => i.overallStatus === 'queued').length
+  const syncingCount = Math.max(0, (queuedCount || 0) - listQueuedCount)
   const hasRole = !!stage.role
 
   return (
@@ -186,7 +195,10 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
         <span style={sectionCountStyles[stage.key]}>
           {hasRole ? (
             <>
-              <span>{queuedCount} queued</span>
+              <span data-testid={`stage-queued-${stage.key}`}>
+                {listQueuedCount} queued
+                {syncingCount > 0 && ` (+${syncingCount} syncing)`}
+              </span>
               {failedCount > 0 && <span style={styles.failedBadge}> · {failedCount} failed</span>}
               {hitlCount > 0 && <span style={styles.hitlBadge}> · {hitlCount} hitl</span>}
               <span>
@@ -196,7 +208,7 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
               </span>
             </>
           ) : (
-            <span>{issues.length} {NO_ROLE_COUNT_LABELS[stage.key] ?? 'merged'}</span>
+            <span>{safeIssues.length} {NO_ROLE_COUNT_LABELS[stage.key] ?? 'merged'}</span>
           )}
         </span>
         <span
@@ -208,7 +220,7 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
         // Group epic children by epicNumber, keep standalone separate
         const epicGroups = {}
         const standalone = []
-        for (const issue of issues) {
+        for (const issue of safeIssues) {
           if (issue.isEpicChild && issue.epicNumber > 0) {
             if (!epicGroups[issue.epicNumber]) epicGroups[issue.epicNumber] = []
             epicGroups[issue.epicNumber].push(issue)

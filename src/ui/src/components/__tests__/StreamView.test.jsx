@@ -996,3 +996,43 @@ describe('StreamView transcript integration', () => {
     expect(screen.queryByTestId('transcript-preview')).not.toBeInTheDocument()
   })
 })
+
+describe('StageSection reconciled queued count (#9793)', () => {
+  it('derives the queued count from the rendered rows, showing snapshot lag as syncing', () => {
+    // Orchestrator says 3 queued, snapshot has 1 row: header must match the
+    // list (1) and surface the lag honestly instead of a phantom count.
+    const ctx = defaultHydraFlowContext({
+      pipelineIssues: {
+        plan: [{ issue_number: 1, title: 'Q1', status: 'queued' }],
+      },
+    })
+    ctx.stageStatus = {
+      ...ctx.stageStatus,
+      plan: { ...(ctx.stageStatus.plan || {}), enabled: true, queuedCount: 3, workerCount: 0 },
+    }
+    mockUseHydraFlow.mockReturnValue(ctx)
+    render(<StreamView {...defaultProps} />)
+
+    const queued = screen.getByTestId('stage-queued-plan')
+    expect(queued.textContent).toContain('1 queued')
+    expect(queued.textContent).toContain('(+2 syncing)')
+  })
+
+  it('shows no syncing suffix when header and list agree', () => {
+    const ctx = defaultHydraFlowContext({
+      pipelineIssues: {
+        plan: [{ issue_number: 2, title: 'Q2', status: 'queued' }],
+      },
+    })
+    ctx.stageStatus = {
+      ...ctx.stageStatus,
+      plan: { ...(ctx.stageStatus.plan || {}), enabled: true, queuedCount: 1, workerCount: 0 },
+    }
+    mockUseHydraFlow.mockReturnValue(ctx)
+    render(<StreamView {...defaultProps} />)
+
+    const queued = screen.getByTestId('stage-queued-plan')
+    expect(queued.textContent).toContain('1 queued')
+    expect(queued.textContent).not.toContain('syncing')
+  })
+})
