@@ -54,12 +54,17 @@ function PipelineFlow({ stageGroups }) {
     return { mergedCount: merged, failedCount: failed }
   }, [stageGroups])
 
+  // #9863: a big backlog (67 queued in PLAN) rendered 67 dots in one
+  // non-wrapping row and blew out the strip. Cap the dots and show the
+  // remainder as a +N badge — the count survives, the layout does too.
+  const FLOW_DOT_CAP = 10
+
   const renderFlowStage = (group) => (
     <div style={styles.flowStage} key={group.stage.key}>
       <span style={flowLabelStyles[group.stage.key]}>{group.stage.label}</span>
       {group.issues.length > 0 && (
         <div style={styles.flowDots}>
-          {group.issues.map(issue => {
+          {group.issues.slice(0, FLOW_DOT_CAP).map(issue => {
             const isEpic = issue.isEpicChild || issue.epicNumber > 0
             const dotStyles = isEpic ? epicFlowDotStyleMap : regularFlowDotStyleMap
             const dotStyle =
@@ -79,6 +84,15 @@ function PipelineFlow({ stageGroups }) {
               </span>
             )
           })}
+          {group.issues.length > FLOW_DOT_CAP && (
+            <span
+              style={styles.flowDotOverflow}
+              title={`${group.issues.length - FLOW_DOT_CAP} more in ${group.stage.label}`}
+              data-testid={`flow-overflow-${group.stage.key}`}
+            >
+              +{group.issues.length - FLOW_DOT_CAP}
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -701,6 +715,13 @@ const styles = {
     display: 'flex',
     gap: 4,
     alignItems: 'center',
+  },
+  flowDotOverflow: {
+    fontSize: 9,
+    fontWeight: 700,
+    color: theme.textMuted,
+    marginLeft: 2,
+    whiteSpace: 'nowrap',
   },
   flowConnector: {
     width: 16,
