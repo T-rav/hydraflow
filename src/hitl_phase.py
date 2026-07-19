@@ -30,6 +30,7 @@ _HITL_ORIGIN_DISPLAY: dict[str, str] = {
     "hydraflow-plan": "from plan",
     "hydraflow-ready": "from implement",
     "hydraflow-review": "from review",
+    "operator-abort": "Operator abort",
 }
 
 
@@ -172,6 +173,18 @@ class HITLPhase:
                     )
                     origin = self._state.get_hitl_origin(issue_number)
 
+                    # Human-on-the-loop continuous steering (ADR-0099 #4): fold
+                    # live operator guidance into the HITL cause-template.
+                    # Reference signal only — never blocking; empty when the
+                    # feature is off or no guidance was posted. Keyed by
+                    # ``issue_number`` (the method parameter) rather than
+                    # ``issue.number`` — test doubles for
+                    # ``fetch_issue_by_number`` return ``Task``-shaped fakes
+                    # that only expose ``.title``/``.body``, not ``.number``.
+                    guidance = (
+                        self._state.get_human_steering(str(issue_number)).guidance or ""
+                    )
+
                     # Get or create worktree
                     branch = self._config.branch_for_issue(issue_number)
                     wt_path = self._config.workspace_path_for_issue(issue_number)
@@ -202,7 +215,7 @@ class HITLPhase:
                     )
                     try:
                         result = await self._hitl_runner.run(
-                            issue, correction, cause, wt_path
+                            issue, correction, cause, wt_path, guidance=guidance
                         )
                     finally:
                         self._hitl_runner.clear_tracing_context()

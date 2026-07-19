@@ -1,6 +1,6 @@
 {
   "name": "hydraflow-ui",
-  "version": "0.9.1",
+  "version": "0.9.7",
   "description": "HydraFlow dashboard — Intent in. Software out.",
   "private": true,
   "engines": {
@@ -9,7 +9,7 @@
   "dependencies": {
     "@xyflow/react": "^12.10.2",
     "d3-force": "^3.0.0",
-    "echarts": "^5.5.1",
+    "echarts": "^6.1.0",
     "echarts-for-react": "^3.0.2",
     "html2canvas": "^1.4.1",
     "lucide-react": "^0.263.1",

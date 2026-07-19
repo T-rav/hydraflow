@@ -24,10 +24,33 @@ HYDRAFLOW_RUN_EVALS=1 uv run pytest tests/evals/
 Without `--run-evals`, collection marks everything skipped — safe to
 include in broad `pytest tests/` runs.
 
+## Comparing model backends (the safety net for the Model-Routing dials)
+
+Each one-shot loop has a `{provider, model}` dial (Settings ▸ Model Routing).
+Before flipping a loop to a cheaper backend, prove quality holds by running its
+eval on both the baseline and the candidate and comparing the reported accuracy:
+
+```bash
+# Baseline — whatever the config dials say (usually claude):
+uv run pytest tests/evals/test_wiki_generalization_evals.py -m evals -v
+
+# Candidate — a cheap OpenRouter model, same corpus:
+HYDRAFLOW_EVAL_PROVIDER=openrouter \
+HYDRAFLOW_EVAL_MODEL=deepseek/deepseek-chat \
+  uv run pytest tests/evals/test_wiki_generalization_evals.py -m evals -v
+```
+
+`HYDRAFLOW_EVAL_PROVIDER` / `HYDRAFLOW_EVAL_MODEL` override the role's dials for
+the run (via `_provider_override.apply_provider_override`, which each eval
+fixture calls); the report header prints the backend under test. If the
+candidate clears the same accuracy bar, flip the dial in the UI. OpenRouter
+needs `OPENROUTER_API_KEY` in the environment.
+
 ## Layout
 
 ```
 tests/evals/
+├── _provider_override.py        # HYDRAFLOW_EVAL_PROVIDER/_MODEL backend swap
 ├── conftest.py                  # opt-in gating
 ├── corpus/
 │   └── generalization/

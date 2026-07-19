@@ -1,0 +1,508 @@
+"""Tests for the pluggable one-shot LLM provider seam in runner_utils.
+
+Covers the OpenAI-compatible HTTP backends (OpenRouter and z.ai) — request/
+response mapping, per-backend base URL + secret-key resolution, credit
+detection, JSON-schema parity — and the provider dispatch inside
+run_lightweight_agent.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import httpx
+
+from runner_utils import (
+    _OPENAI_COMPAT_BACKENDS,
+    _openai_compatible_complete,
+    _telemetry_cmd,
+    provider_key_presence,
+)
+from subprocess_util import CreditExhaustedError
+
+
+class _FakeResp:
+    def __init__(self, *, status_code=200, json_data=None, text=""):
+        self.status_code = status_code
+        self._json = json_data
+        self.text = text
+
+    def json(self):
+        if self._json is None:
+            raise json.JSONDecodeError("no json", "", 0)
+        return self._json
+
+
+class _FakeClient:
+    """Records the request and returns a canned response."""
+
+    calls: list[dict] = []
+
+    def __init__(self, resp, **_kw):
+        self._resp = resp
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_a):
+        return False
+
+    async def post(self, url, *, json=None, headers=None):
+        _FakeClient.calls.append({"url": url, "json": json, "headers": headers})
+        if isinstance(self._resp, Exception):
+            raise self._resp
+        return self._resp
+
+
+def _patch_httpx(monkeypatch, resp):
+    _FakeClient.calls = []
+
+    def _factory(**kw):
+        return _FakeClient(resp, **kw)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _factory)
+
+
+def _ok(content="hello", usage=None):
+    return _FakeResp(
+        json_data={"choices": [{"message": {"content": content}}], "usage": usage or {}}
+    )
+
+
+class TestTelemetryCmd:
+    def test_openrouter_head_is_provider_name(self):
+        assert _telemetry_cmd("openrouter", "claude", "deepseek/x") == [
+            "openrouter",
+            "--model",
+            "deepseek/x",
+        ]
+
+    def test_zai_head_is_provider_name(self):
+        # z.ai gets its own attribution bucket on the cost dashboard.
+        assert _telemetry_cmd("zai", "claude", "glm-4.6") == [
+            "zai",
+            "--model",
+            "glm-4.6",
+        ]
+
+    def test_kimi_head_is_provider_name(self):
+        # kimi (Moonshot) gets its own attribution bucket on the cost dashboard.
+        assert _telemetry_cmd("kimi", "claude", "kimi-k3") == [
+            "kimi",
+            "--model",
+            "kimi-k3",
+        ]
+
+    def test_claude_head_is_tool(self):
+        assert _telemetry_cmd("claude", "claude", "haiku") == [
+            "claude",
+            "--model",
+            "haiku",
+        ]
+
+
+class TestBackendRegistry:
+    """Each OpenAI-compatible backend resolves a base URL (from config) and a
+    secret API key (from the environment only)."""
+
+    def test_openrouter_reads_openrouter_env(self, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-123")
+        assert _OPENAI_COMPAT_BACKENDS["openrouter"].api_key() == "sk-or-123"
+
+    def test_openrouter_falls_back_to_hydraflow_prefixed(self, monkeypatch):
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.setenv("HYDRAFLOW_OPENROUTER_API_KEY", "sk-hf")
+        assert _OPENAI_COMPAT_BACKENDS["openrouter"].api_key() == "sk-hf"
+
+    def test_zai_reads_zai_env(self, monkeypatch):
+        monkeypatch.setenv("ZAI_API_KEY", "sk-zai-123")
+        assert _OPENAI_COMPAT_BACKENDS["zai"].api_key() == "sk-zai-123"
+
+    def test_zai_falls_back_to_hydraflow_prefixed(self, monkeypatch):
+        monkeypatch.delenv("ZAI_API_KEY", raising=False)
+        monkeypatch.setenv("HYDRAFLOW_ZAI_API_KEY", "sk-zai-hf")
+        assert _OPENAI_COMPAT_BACKENDS["zai"].api_key() == "sk-zai-hf"
+
+    def test_kimi_reads_moonshot_env(self, monkeypatch):
+        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-kimi-123")
+        assert _OPENAI_COMPAT_BACKENDS["kimi"].api_key() == "sk-kimi-123"
+
+    def test_kimi_falls_back_to_kimi_then_hydraflow_prefixed(self, monkeypatch):
+        monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+        monkeypatch.setenv("KIMI_API_KEY", "sk-kimi-alias")
+        assert _OPENAI_COMPAT_BACKENDS["kimi"].api_key() == "sk-kimi-alias"
+        monkeypatch.delenv("KIMI_API_KEY", raising=False)
+        monkeypatch.setenv("HYDRAFLOW_KIMI_API_KEY", "sk-kimi-hf")
+        assert _OPENAI_COMPAT_BACKENDS["kimi"].api_key() == "sk-kimi-hf"
+
+    def test_backends_do_not_cross_read_keys(self, monkeypatch):
+        # Each backend's key must satisfy only that backend, never a sibling.
+        for env in (
+            "OPENROUTER_API_KEY",
+            "HYDRAFLOW_OPENROUTER_API_KEY",
+            "MOONSHOT_API_KEY",
+            "KIMI_API_KEY",
+            "HYDRAFLOW_KIMI_API_KEY",
+        ):
+            monkeypatch.delenv(env, raising=False)
+        monkeypatch.setenv("ZAI_API_KEY", "sk-zai-only")
+        assert _OPENAI_COMPAT_BACKENDS["openrouter"].api_key() == ""
+        assert _OPENAI_COMPAT_BACKENDS["kimi"].api_key() == ""
+        assert _OPENAI_COMPAT_BACKENDS["zai"].api_key() == "sk-zai-only"
+
+    def test_empty_when_unset(self, monkeypatch):
+        for env in (
+            "OPENROUTER_API_KEY",
+            "HYDRAFLOW_OPENROUTER_API_KEY",
+            "ZAI_API_KEY",
+            "HYDRAFLOW_ZAI_API_KEY",
+            "MOONSHOT_API_KEY",
+            "KIMI_API_KEY",
+            "HYDRAFLOW_KIMI_API_KEY",
+        ):
+            monkeypatch.delenv(env, raising=False)
+        assert _OPENAI_COMPAT_BACKENDS["openrouter"].api_key() == ""
+        assert _OPENAI_COMPAT_BACKENDS["zai"].api_key() == ""
+        assert _OPENAI_COMPAT_BACKENDS["kimi"].api_key() == ""
+
+    def test_base_url_reads_the_backends_config_field(self):
+        from tests.helpers import ConfigFactory
+
+        config = ConfigFactory.create()
+        assert (
+            _OPENAI_COMPAT_BACKENDS["openrouter"].base_url(config)
+            == config.openrouter_base_url
+        )
+        assert _OPENAI_COMPAT_BACKENDS["zai"].base_url(config) == config.zai_base_url
+        assert _OPENAI_COMPAT_BACKENDS["kimi"].base_url(config) == config.kimi_base_url
+
+
+class TestProviderKeyPresence:
+    """The UI badge source: which backends have their secret key set — booleans
+    only, keyed by provider name, never the value."""
+
+    def _clear(self, monkeypatch):
+        for env in (
+            "OPENROUTER_API_KEY",
+            "HYDRAFLOW_OPENROUTER_API_KEY",
+            "ZAI_API_KEY",
+            "HYDRAFLOW_ZAI_API_KEY",
+            "MOONSHOT_API_KEY",
+            "KIMI_API_KEY",
+            "HYDRAFLOW_KIMI_API_KEY",
+        ):
+            monkeypatch.delenv(env, raising=False)
+
+    def test_reports_a_bool_per_backend(self, monkeypatch):
+        self._clear(monkeypatch)
+        presence = provider_key_presence()
+        assert set(presence) == set(_OPENAI_COMPAT_BACKENDS)
+        assert all(isinstance(v, bool) for v in presence.values())
+
+    def test_true_only_for_the_backend_whose_key_is_set(self, monkeypatch):
+        self._clear(monkeypatch)
+        monkeypatch.setenv("ZAI_API_KEY", "sk-zai")
+        presence = provider_key_presence()
+        assert presence["zai"] is True
+        assert presence["openrouter"] is False
+        assert presence["kimi"] is False
+
+    def test_all_false_when_unset(self, monkeypatch):
+        self._clear(monkeypatch)
+        assert provider_key_presence() == {
+            "openrouter": False,
+            "zai": False,
+            "kimi": False,
+        }
+
+
+@pytest.mark.asyncio
+class TestOpenAICompatibleComplete:
+    async def _run(self, monkeypatch, resp, *, provider="openrouter", **kw):
+        _patch_httpx(monkeypatch, resp)
+        return await _openai_compatible_complete(
+            provider=provider,
+            base_url="https://openrouter.ai/api/v1",
+            api_key="sk-or-test",
+            model="deepseek/deepseek-chat",
+            prompt="classify this",
+            timeout=30.0,
+            **kw,
+        )
+
+    async def test_happy_path_returns_content(self, monkeypatch):
+        result = await self._run(monkeypatch, _ok("VERDICT: ok"))
+        assert result.returncode == 0
+        assert result.stdout == "VERDICT: ok"
+        # Request went to the chat/completions endpoint with the model + prompt.
+        req = _FakeClient.calls[0]
+        assert req["url"].endswith("/chat/completions")
+        assert req["json"]["model"] == "deepseek/deepseek-chat"
+        assert req["json"]["messages"][0]["content"] == "classify this"
+        assert req["headers"]["Authorization"] == "Bearer sk-or-test"
+
+    async def test_zai_happy_path_same_shape(self, monkeypatch):
+        # z.ai speaks the identical OpenAI-compatible shape.
+        result = await self._run(monkeypatch, _ok("glm says hi"), provider="zai")
+        assert result.returncode == 0
+        assert result.stdout == "glm says hi"
+        assert _FakeClient.calls[0]["url"].endswith("/chat/completions")
+
+    async def test_response_schema_sets_json_mode(self, monkeypatch):
+        schema = {"type": "object", "properties": {"ready": {"type": "boolean"}}}
+        await self._run(monkeypatch, _ok("{}"), response_schema=schema)
+        rf = _FakeClient.calls[0]["json"]["response_format"]
+        assert rf["type"] == "json_schema"
+        assert rf["json_schema"]["schema"] == schema
+        assert rf["json_schema"]["strict"] is True
+
+    async def test_no_schema_omits_response_format(self, monkeypatch):
+        await self._run(monkeypatch, _ok())
+        assert "response_format" not in _FakeClient.calls[0]["json"]
+
+    async def test_missing_api_key_soft_fails(self, monkeypatch):
+        _patch_httpx(monkeypatch, _ok())
+        result = await _openai_compatible_complete(
+            provider="zai",
+            base_url="https://x",
+            api_key="",
+            model="m",
+            prompt="p",
+            timeout=5.0,
+        )
+        assert result.returncode == -1
+        # Error is labeled with the provider whose key is missing.
+        assert "zai" in result.stderr
+        assert "API key is not set" in result.stderr
+        assert not _FakeClient.calls  # never made the request
+
+    async def test_429_raises_credit_exhausted(self, monkeypatch):
+        with pytest.raises(CreditExhaustedError):
+            await self._run(monkeypatch, _FakeResp(status_code=429, text="rate limit"))
+
+    async def test_402_raises_credit_exhausted(self, monkeypatch):
+        with pytest.raises(CreditExhaustedError):
+            await self._run(
+                monkeypatch, _FakeResp(status_code=402, text="insufficient credits")
+            )
+
+    async def test_400_with_credit_body_raises(self, monkeypatch):
+        # A non-402/429 error whose body signals exhaustion still pauses.
+        with pytest.raises(CreditExhaustedError):
+            await self._run(
+                monkeypatch,
+                _FakeResp(status_code=400, text="You've hit your usage limit"),
+            )
+
+    async def test_other_http_error_soft_fails_labeled_by_provider(self, monkeypatch):
+        result = await self._run(
+            monkeypatch, _FakeResp(status_code=500, text="server boom"), provider="zai"
+        )
+        assert result.returncode == 500
+        assert "zai http 500" in result.stderr
+
+    async def test_captures_real_token_usage(self, monkeypatch):
+        usage: dict = {}
+        _patch_httpx(
+            monkeypatch,
+            _ok(
+                "hi",
+                usage={
+                    "prompt_tokens": 120,
+                    "completion_tokens": 30,
+                    "total_tokens": 150,
+                },
+            ),
+        )
+        await _openai_compatible_complete(
+            provider="openrouter",
+            base_url="https://x",
+            api_key="k",
+            model="m",
+            prompt="p",
+            timeout=5.0,
+            usage_out=usage,
+        )
+        assert usage == {
+            "input_tokens": 120,
+            "output_tokens": 30,
+            "total_tokens": 150,
+            "usage_available": True,
+        }
+
+    async def test_usage_available_false_when_api_omits_usage(self, monkeypatch):
+        usage: dict = {}
+        _patch_httpx(monkeypatch, _ok("hi", usage={}))
+        await _openai_compatible_complete(
+            provider="openrouter",
+            base_url="https://x",
+            api_key="k",
+            model="m",
+            prompt="p",
+            timeout=5.0,
+            usage_out=usage,
+        )
+        assert usage["usage_available"] is False
+        assert usage["total_tokens"] == 0
+
+    async def test_malformed_response_soft_fails(self, monkeypatch):
+        result = await self._run(monkeypatch, _FakeResp(json_data={"nope": 1}))
+        assert result.returncode == -1
+        assert "malformed" in result.stderr
+
+    async def test_timeout_becomes_timeouterror(self, monkeypatch):
+        with pytest.raises(TimeoutError):
+            await self._run(monkeypatch, httpx.TimeoutException("slow"))
+
+
+@pytest.mark.asyncio
+class TestRunLightweightAgentDispatch:
+    """The seam picks the backend from ``provider`` and still records telemetry
+    with the right (tool, model) descriptor."""
+
+    async def test_openrouter_provider_routes_to_http(self, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        from execution import SimpleResult
+        from runner_utils import run_lightweight_agent
+        from tests.helpers import ConfigFactory
+
+        calls = {"n": 0}
+
+        async def _fake_complete(**kwargs):
+            calls["n"] += 1
+            calls["kwargs"] = kwargs
+            return SimpleResult(stdout="OR-RESULT", returncode=0)
+
+        monkeypatch.setattr("runner_utils._openai_compatible_complete", _fake_complete)
+
+        config = ConfigFactory.create()
+        result = await run_lightweight_agent(
+            runner=AsyncMock(),
+            config=config,
+            tool="claude",
+            model="deepseek/deepseek-chat",
+            prompt="p",
+            source="unit_test",
+            timeout=10.0,
+            provider="openrouter",
+        )
+        assert result.stdout == "OR-RESULT"
+        assert calls["n"] == 1
+        assert calls["kwargs"]["provider"] == "openrouter"
+        assert calls["kwargs"]["base_url"] == config.openrouter_base_url
+        assert calls["kwargs"]["model"] == "deepseek/deepseek-chat"
+
+    async def test_zai_provider_routes_to_http_with_zai_base_url(self, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        from execution import SimpleResult
+        from runner_utils import run_lightweight_agent
+        from tests.helpers import ConfigFactory
+
+        calls = {"n": 0}
+
+        async def _fake_complete(**kwargs):
+            calls["n"] += 1
+            calls["kwargs"] = kwargs
+            return SimpleResult(stdout="ZAI-RESULT", returncode=0)
+
+        monkeypatch.setattr("runner_utils._openai_compatible_complete", _fake_complete)
+
+        config = ConfigFactory.create()
+        result = await run_lightweight_agent(
+            runner=AsyncMock(),
+            config=config,
+            tool="claude",
+            model="glm-4.6",
+            prompt="p",
+            source="unit_test",
+            timeout=10.0,
+            provider="zai",
+        )
+        assert result.stdout == "ZAI-RESULT"
+        assert calls["n"] == 1
+        assert calls["kwargs"]["provider"] == "zai"
+        # The z.ai backend uses its OWN base URL, not openrouter's.
+        assert calls["kwargs"]["base_url"] == config.zai_base_url
+
+    async def test_openrouter_real_usage_flows_to_telemetry(self, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        from execution import SimpleResult
+        from runner_utils import run_lightweight_agent
+        from tests.helpers import ConfigFactory
+
+        async def _fake_complete(*, usage_out=None, **_kw):
+            if usage_out is not None:
+                usage_out.update(
+                    {
+                        "input_tokens": 100,
+                        "output_tokens": 20,
+                        "total_tokens": 120,
+                        "usage_available": True,
+                    }
+                )
+            return SimpleResult(stdout="ok", returncode=0)
+
+        recorded: dict = {}
+
+        def _fake_record(_config, **kw):
+            recorded.update(kw)
+
+        monkeypatch.setattr("runner_utils._openai_compatible_complete", _fake_complete)
+        monkeypatch.setattr("runner_utils._record_inference", _fake_record)
+
+        await run_lightweight_agent(
+            runner=AsyncMock(),
+            config=ConfigFactory.create(),
+            tool="claude",
+            model="deepseek/deepseek-chat",
+            prompt="p",
+            source="unit_test",
+            timeout=10.0,
+            provider="openrouter",
+        )
+        # Real API usage reached the telemetry record → token_source="actual".
+        assert recorded["stats"]["total_tokens"] == 120
+        assert recorded["stats"]["usage_available"] is True
+
+    async def test_default_provider_stays_claude_cli(self, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        from execution import SimpleResult
+        from runner_utils import run_lightweight_agent
+        from tests.helpers import ConfigFactory
+
+        http_called = {"n": 0}
+        cli_called = {"n": 0}
+
+        async def _fake_complete(**_kw):
+            http_called["n"] += 1
+            return SimpleResult(returncode=0)
+
+        async def _fake_cli(**_kw):
+            cli_called["n"] += 1
+            return SimpleResult(stdout="CLI", returncode=0)
+
+        monkeypatch.setattr("runner_utils._openai_compatible_complete", _fake_complete)
+        monkeypatch.setattr("runner_utils._claude_cli_complete", _fake_cli)
+
+        result = await run_lightweight_agent(
+            runner=AsyncMock(),
+            config=ConfigFactory.create(),
+            tool="claude",
+            model="haiku",
+            prompt="p",
+            source="unit_test",
+            timeout=10.0,
+        )
+        assert result.stdout == "CLI"
+        assert cli_called["n"] == 1
+        assert http_called["n"] == 0

@@ -655,3 +655,113 @@ class TestZeroUsageSanityGuard:
         assert row.get("usage_anomaly") is None
         # Real tokens were billed — cost must reflect that, not be zeroed out.
         assert row["estimated_cost_usd"] > 0
+
+
+class TestHashChaining:
+    """CH-1 (#9729): inference telemetry rows are hash-chained."""
+
+    def _record(self, telemetry: PromptTelemetry, *, issue: int = 1) -> None:
+        telemetry.record(
+            source="reviewer",
+            tool="claude",
+            model="sonnet",
+            issue_number=issue,
+            pr_number=None,
+            session_id="s1",
+            prompt_chars=100,
+            transcript_chars=200,
+            duration_seconds=1.0,
+            success=True,
+        )
+
+    def test_record_writes_chained_rows(self, telemetry, tmp_path):
+        from audit_chain import GENESIS_PREV_HASH
+
+        self._record(telemetry, issue=1)
+        self._record(telemetry, issue=2)
+
+        rows = telemetry.load_inferences()
+        assert rows[0]["prev_hash"] == GENESIS_PREV_HASH
+        assert rows[1]["prev_hash"] == rows[0]["record_hash"]
+
+    def test_recorded_chain_verifies(self, telemetry, tmp_path):
+        from audit_chain import AuditChain
+
+        config = ConfigFactory.create(repo_root=tmp_path)
+        self._record(telemetry)
+        self._record(telemetry)
+        result = AuditChain(config.cost_inferences_path).verify()
+        assert result.ok
+        assert result.chained_records == 2
+
+    def test_pr_stats_still_accumulate(self, telemetry):
+        self._record(telemetry)
+        totals = telemetry.get_lifetime_totals()
+        assert totals["inference_calls"] == 1
+
+
+class TestRecordNeverRaises:
+    """Telemetry must never take down the operation it documents.
+
+    ``record`` runs unguarded in BaseRunner._execute's ``finally`` — a raise
+    here converts a SUCCESSFUL agent run into a hard failure and burns
+    attempt budget.
+    """
+
+    def _record_with_stats(self, telemetry, stats: dict[str, object]) -> None:
+        telemetry.record(
+            source="implementer",
+            tool="claude",
+            model="sonnet",
+            issue_number=7,
+            pr_number=None,
+            session_id="sess-nan",
+            prompt_chars=100,
+            transcript_chars=200,
+            duration_seconds=1.0,
+            success=True,
+            stats=stats,
+        )
+
+    def test_non_finite_raw_usage_round_trips_and_lands(self, telemetry):
+        """A NaN in a backend raw_usage payload must not raise AND the record
+        must still land in the stream (evidence-grade: keep the odd value)."""
+        self._record_with_stats(
+            telemetry,
+            {
+                "raw_usage": [
+                    {
+                        "backend": "claude",
+                        "event_type": "result",
+                        "payload": {"tokens_per_second": float("nan")},
+                    }
+                ]
+            },
+        )
+
+        inf_file = telemetry._config.cost_inferences_path
+        rows = [
+            json.loads(ln) for ln in inf_file.read_text().splitlines() if ln.strip()
+        ]
+        assert len(rows) == 1
+        assert rows[0]["raw_usage"][0]["payload"]["tokens_per_second"] == "NaN"
+
+        from audit_chain import AuditChain
+
+        assert AuditChain(inf_file).verify().ok
+
+    def test_value_error_from_chain_append_is_swallowed(
+        self, telemetry, monkeypatch, caplog
+    ):
+        """Belt-and-braces: even an unforeseen ValueError from the append
+        path (e.g. a scrub-path JSONDecodeError) must not propagate."""
+
+        def _boom(_record):
+            raise ValueError("uncanonicalizable payload")
+
+        monkeypatch.setattr(telemetry._chain, "append", _boom)
+
+        with caplog.at_level("WARNING", logger="hydraflow.prompt_telemetry"):
+            self._record_with_stats(telemetry, {})
+
+        assert any("prompt telemetry" in r.getMessage().lower() for r in caplog.records)

@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-06-14T05:09:18.318752+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0001,0002,0003,0004,0005,0006,0007
+superseded_by: 0050
 ---
 
 # Lazy-load memory context on explicit user action, not on list render

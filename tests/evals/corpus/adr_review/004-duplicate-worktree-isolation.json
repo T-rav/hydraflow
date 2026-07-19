@@ -1,0 +1,10 @@
+{
+  "name": "duplicate-worktree-isolation",
+  "adr_number": 74,
+  "adr_title": "Isolate each issue's work in a dedicated git worktree",
+  "adr_content": "# ADR-0074: Isolate each issue's work in a dedicated git worktree\n\n**Status:** Proposed\n\n## Context\n\nRunning multiple issues against a single checkout causes branch and index collisions between concurrent loops.\n\n## Decision\n\nGive every issue its own git worktree under `~/.hydraflow/worktrees/<repo>/issue-<n>/`, created from the base branch and removed after the PR merges, so concurrent work never shares a working tree or index.\n\n## Consequences\n\n- Concurrent issues no longer collide on branch or index state.\n- Disk usage grows with the number of active worktrees.\n",
+  "index_context": "Existing ADRs (number: title [status]):\n- 0001: Five concurrent async loops [Accepted]\n- 0002: Labels as a state machine [Accepted]\n- 0003: Git worktrees for isolation [Accepted]\n- 0021: Persistence architecture and data layout [Accepted]\n- 0029: Caretaker loop pattern [Accepted]\n- 0042: Two-tier branch release promotion [Accepted]\n- 0045: Trust architecture hardening [Accepted]",
+  "duplicate_context": "Potential duplicates detected:\n- ADR-0003: Git worktrees for isolation (similarity: 91%)",
+  "expected_decision": "DUPLICATE",
+  "notes": "This decision restates ADR-0003 (git worktrees for isolation), which is named both in the duplicate warnings and in the existing-ADR index. Per the council protocol, a duplicate takes priority over the ADR's merits, so the final decision should be DUPLICATE."
+}

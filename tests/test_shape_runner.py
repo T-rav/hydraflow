@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from human_steering import fenced_steering_guidance
 from shape_runner import _SHAPE_END, _SHAPE_START, ShapeRunner
 
 
@@ -104,6 +105,53 @@ class TestBuildPrompt:
         prompt = runner._build_advocate_prompt(task, research_brief="")
 
         assert "Discovery Research Brief" not in prompt
+
+
+class TestBuildTurnPrompt:
+    def test_folds_fenced_human_steering_guidance(self, config, event_bus) -> None:
+        """ADR-0099 #4 — live operator guidance is folded in FENCED.
+
+        This is the first of shape's two prompt-construction sites (the
+        second being the ``shape-coherence`` evaluator prompt,
+        ``build_shape_coherence_prompt``). Guidance must reach the
+        prompt only via ``fenced_steering_guidance`` — never as raw
+        comment text (ADR-0092 fence invariant).
+        """
+        from unittest.mock import MagicMock
+
+        from models import ShapeConversation
+
+        runner = ShapeRunner(config, event_bus)
+        task = MagicMock()
+        task.id = 42
+        task.title = "Build a better Calendly"
+        task.body = "I want a scheduling tool"
+        conversation = ShapeConversation(issue_number=42)
+
+        guidance = "Prioritize the enterprise SSO angle over consumer features."
+        prompt = runner._build_turn_prompt(task, conversation, guidance=guidance)
+
+        assert "## Human Steering Guidance" in prompt
+        assert fenced_steering_guidance(guidance) in prompt
+
+    def test_empty_guidance_produces_no_steering_section(
+        self, config, event_bus
+    ) -> None:
+        """No guidance posted -> no steering section (unchanged behavior)."""
+        from unittest.mock import MagicMock
+
+        from models import ShapeConversation
+
+        runner = ShapeRunner(config, event_bus)
+        task = MagicMock()
+        task.id = 42
+        task.title = "Build a better Calendly"
+        task.body = "I want a scheduling tool"
+        conversation = ShapeConversation(issue_number=42)
+
+        prompt = runner._build_turn_prompt(task, conversation, guidance="")
+
+        assert "## Human Steering Guidance" not in prompt
 
 
 class TestCriticPrompt:

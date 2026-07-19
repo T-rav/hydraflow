@@ -6,8 +6,9 @@ configured agent CLI tool (`claude`/`codex`/`gemini`) via the project's
 `wiki_compiler.WikiCompiler._call_model`.
 
 `OpenAutoPRBotPRPort` implements the `BotPRPort` Protocol by writing draft
-files to disk and delegating to `auto_pr.open_automated_pr_async` for the
-worktree → commit → push → `gh pr create` flow.
+files INTO an ephemeral worktree and delegating to
+`auto_pr.generate_and_open_pr_async` for the worktree → commit → push →
+`gh pr create` flow. ``repo_root`` is never mutated (#9539).
 
 Wired into `service_registry.build_services` (replaces the chunk-2
 placeholder clients that raised NotImplementedError on first tick).
@@ -22,63 +23,76 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agent_cli import AgentTool
+from subprocess_util import run_subprocess
 
 if TYPE_CHECKING:
+    from config import HydraFlowConfig
     from execution import SubprocessRunner
 
 logger = logging.getLogger("hydraflow.term_proposer_runtime")
 
 
 class ClaudeCLIClient:
-    """Subprocess-CLI adapter for the LLMClient Protocol.
+    """Subprocess adapter for the LLMClient Protocol.
 
-    Invokes `claude -p` (or another agent tool) one-shot via SubprocessRunner;
-    parses JSON out of stdout. Tolerant of markdown fences around the JSON
-    payload (model output sometimes wraps in ```json ... ```).
+    Routes one-shot draft calls through ``runner_utils.run_lightweight_agent``
+    (the shared no-tools seam) so the spawn is gated (CH-6), telemetried (spend
+    hits the cost cap), and credit-exhaustion aware — and so the backend follows
+    the ``term_proposer_provider`` dial (``claude`` CLI, or ``openrouter``/``zai``
+    over an OpenAI-compatible endpoint). Parses JSON out of the reply, tolerant
+    of markdown fences (``` ```json ... ``` ```).
     """
 
     def __init__(
         self,
         runner: SubprocessRunner,
+        config: HydraFlowConfig,
         *,
         tool: AgentTool = "claude",
-        model: str = "claude-sonnet-4-6",
+        model: str = "sonnet",
         timeout: int = 180,
+        provider: str = "claude",
+        source: str = "term_proposer",
     ) -> None:
         self._runner = runner
+        self._config = config
         self._tool: AgentTool = tool
         self._model = model
         self._timeout = timeout
+        self._provider = provider
+        self._source = source
 
     async def complete_structured(
         self, *, prompt: str, schema: dict[str, Any]
     ) -> dict[str, Any]:
-        """Send prompt to the CLI tool and return the parsed JSON object.
+        """Send prompt through the one-shot seam and return the parsed JSON.
 
-        `schema` is unused by the CLI path (the prompt itself instructs the
-        model on output shape); kept in the signature to satisfy the Protocol.
+        ``schema`` drives native strict-JSON output on the OpenAI-compatible
+        providers (openrouter/zai); the ``claude`` CLI path relies on the prompt
+        instructing output shape, so ``_extract_json`` handles both.
         """
-        del schema
-        from agent_cli import build_lightweight_command  # noqa: PLC0415
-        from runner_utils import raise_if_credit_exhausted  # noqa: PLC0415
+        from runner_utils import run_lightweight_agent  # noqa: PLC0415
 
-        cmd, cmd_input = build_lightweight_command(
+        # A term/entry-evidence drafter reads wiki-term + source files; no
+        # GitHub issue is in scope, so issue_labels=() and the CH-6 gate applies
+        # only the repo-declared data class. Credit-exhaustion is raised inside
+        # the seam (CreditExhaustedError), so no manual scan is needed here.
+        result = await run_lightweight_agent(
+            runner=self._runner,
+            config=self._config,
             tool=self._tool,
             model=self._model,
             prompt=prompt,
-            isolate_user_settings=True,
+            source=self._source,
+            timeout=self._timeout,
+            provider=self._provider,
+            response_schema=schema,
+            issue_labels=(),
         )
-        result = await self._runner.run_simple(
-            cmd, input=cmd_input, timeout=self._timeout
-        )
-        # run_simple surfaces credit-out as rc!=0 text (it never raises), so
-        # scan and convert to CreditExhaustedError — otherwise the billing
-        # signal is misclassified as a generic CLI failure and burns budget.
-        raise_if_credit_exhausted(result.stdout, result.stderr, self._tool)
         if result.returncode != 0:
             raise RuntimeError(
-                f"{self._tool} CLI failed (rc={result.returncode}): "
-                f"{result.stderr[:200]}"
+                f"{self._provider}/{self._tool} draft failed "
+                f"(rc={result.returncode}): {result.stderr[:200]}"
             )
         return self._extract_json(result.stdout)
 
@@ -108,8 +122,9 @@ def regenerate_ubiquitous_language_artifacts(repo_root: Path) -> list[Path]:
     those term files. Committing the term change without refreshing the views
     leaves ``make arch-check`` (run by the pre-push hook) detecting drift, which
     rejects the push and the proposer PR never lands. Regenerating here — after
-    the new term files are written under ``repo_root`` — keeps the views in sync
-    so the same commit passes the drift guard.
+    the new term files are written under ``repo_root`` (an ephemeral worktree
+    root in the bot-PR path, #9539) — keeps the views in sync so the same commit
+    passes the drift guard.
 
     Returns the absolute paths of the regenerated artifacts (for staging). When
     no terms directory exists, returns an empty list (nothing to regenerate).
@@ -147,12 +162,13 @@ def regenerate_ubiquitous_language_artifacts(repo_root: Path) -> list[Path]:
 
 
 class OpenAutoPRBotPRPort:
-    """BotPRPort adapter wrapping auto_pr.open_automated_pr_async.
+    """BotPRPort adapter wrapping auto_pr.generate_and_open_pr_async.
 
-    Writes each draft term file under repo_root, then delegates the full
-    worktree-copy → commit → push → `gh pr create` flow to the existing
-    helper. Sets `auto_merge=False` — DependabotMergeLoop handles auto-merge
-    once the PR carries `hydraflow-ul-proposed`.
+    Writes each draft term file INTO an ephemeral worktree (branched off the
+    base), then delegates the full commit → push → `gh pr create` flow to the
+    generate-in-worktree helper — ``repo_root`` is never mutated (#9539). Sets
+    `auto_merge=False` — DependabotMergeLoop handles auto-merge once the PR
+    carries `hydraflow-ul-proposed`.
     """
 
     def __init__(
@@ -175,31 +191,35 @@ class OpenAutoPRBotPRPort:
         labels: list[str],
         files: dict[str, str],
     ) -> int:
-        """Write files to disk and open a PR. Returns the PR number."""
-        from auto_pr import open_automated_pr_async  # noqa: PLC0415
+        """Generate files in a worktree and open a PR. Returns the PR number."""
+        from auto_pr import generate_and_open_pr_async  # noqa: PLC0415
 
-        written_paths: list[Path] = []
-        wrote_term_file = False
-        for rel_path, content in files.items():
-            abs_path = self._repo_root / rel_path
-            abs_path.parent.mkdir(parents=True, exist_ok=True)
-            abs_path.write_text(content, encoding="utf-8")
-            written_paths.append(abs_path)
-            if Path(rel_path).is_relative_to(_TERMS_REL_DIR):
-                wrote_term_file = True
-
+        path_specs = list(files.keys())
+        wrote_term_file = any(
+            Path(rel_path).is_relative_to(_TERMS_REL_DIR) for rel_path in files
+        )
         # Term changes make the generated ubiquitous-language views stale; the
         # pre-push arch-check drift guard rejects the push unless the refreshed
-        # views ride along in the SAME commit. Regenerate + stage them here.
+        # views ride along in the SAME commit. Stage them alongside the terms.
         if wrote_term_file:
-            written_paths.extend(
-                regenerate_ubiquitous_language_artifacts(self._repo_root)
-            )
+            path_specs.extend((_UL_GLOSSARY_REL, _UL_CONTEXT_MAP_REL))
 
-        result = await open_automated_pr_async(
+        async def _generate(worktree: Path) -> None:
+            # Write every draft file INTO the worktree (never repo_root, #9539).
+            for rel_path, content in files.items():
+                abs_path = worktree / rel_path
+                abs_path.parent.mkdir(parents=True, exist_ok=True)
+                abs_path.write_text(content, encoding="utf-8")
+            # Regenerate the term-derived ubiquitous-language views from the
+            # worktree's term files so the same commit passes the drift guard.
+            if wrote_term_file:
+                regenerate_ubiquitous_language_artifacts(worktree)
+
+        result = await generate_and_open_pr_async(
             repo_root=self._repo_root,
             branch=branch,
-            files=written_paths,
+            generate=_generate,
+            path_specs=path_specs,
             pr_title=title,
             pr_body=body,
             base=self._base,
@@ -211,10 +231,49 @@ class OpenAutoPRBotPRPort:
 
         if result.status != "opened" or result.pr_url is None:
             raise RuntimeError(
-                f"open_automated_pr_async returned status={result.status!r} "
+                f"generate_and_open_pr_async returned status={result.status!r} "
                 f"error={result.error!r}"
             )
         return self._extract_pr_number(result.pr_url)
+
+    async def find_open_bot_pr(self, *, labels: list[str]) -> int | None:
+        """Newest open PR carrying ANY of *labels*, or None (#9893 single-flight).
+
+        Queries ``gh pr list`` from the repo root (30s gh timeout tier). Errors
+        return None with a warning — fail-open: a duplicate PR is recoverable
+        (DependabotMergeLoop supersede/heal paths), a loop starved forever on
+        a persistent query failure is not.
+        """
+        try:
+            out = await run_subprocess(
+                "gh",
+                "pr",
+                "list",
+                "--state",
+                "open",
+                "--limit",
+                "50",
+                "--json",
+                "number,labels",
+                cwd=self._repo_root,
+                gh_token=self._gh_token,
+                timeout=30.0,
+            )
+            rows = json.loads(out or "[]")
+        except (RuntimeError, OSError, ValueError) as exc:
+            logger.warning(
+                "find_open_bot_pr: gh pr list failed (%s) — proceeding unguarded",
+                exc,
+            )
+            return None
+        wanted = set(labels)
+        hits = [
+            int(row["number"])
+            for row in rows
+            if isinstance(row, dict)
+            and wanted & {lb.get("name", "") for lb in (row.get("labels") or [])}
+        ]
+        return max(hits) if hits else None
 
     @staticmethod
     def _extract_pr_number(pr_url: str) -> int:

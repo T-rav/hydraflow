@@ -40,13 +40,15 @@ it via ``inspect.signature`` comparison.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, runtime_checkable
 
 from typing_extensions import Protocol
 
 if TYPE_CHECKING:
+    from adr_conformance import CheckResult  # noqa: TCH004
+    from adr_index import Check  # noqa: TCH004
     from review_insights import ProposalMetadata, ReviewRecord  # noqa: TCH004
 
 from merge_state_watcher import ConflictingPR
@@ -65,6 +67,7 @@ from models import (
 
 __all__ = [
     "AgentPort",
+    "ConformanceRunnerPort",
     "IssueFetcherPort",
     "IssueStorePort",
     "ObservabilityPort",
@@ -301,8 +304,29 @@ class PRPort(Protocol):
 
     # --- Issue management ---
 
-    async def close_issue(self, issue_number: int) -> None:
-        """Close GitHub issue *issue_number*."""
+    async def close_issue(self, issue_number: int) -> bool:
+        """Close GitHub issue *issue_number*.
+
+        Returns True when the close reached GitHub, False when the
+        underlying call failed (fail-soft: no raise). Background callers
+        may ignore the return; INTERACTIVE callers (HITL routes) MUST
+        check it — pretending a failed close succeeded makes the row
+        vanish and reappear on refresh (#9812).
+        """
+        ...
+
+    async def close_pr(self, pr_number: int) -> bool:
+        """Close GitHub pull request *pr_number* without merging.
+
+        Returns True on success, False when the gh call failed (#9812 —
+        same contract as :meth:`close_issue`).
+
+        Distinct from :meth:`close_issue`: a PR and an issue share the
+        repo's number space but are different GraphQL/REST node types, so
+        ``gh issue close`` does not reliably close a PR number. Used by the
+        decompose-to-converge terminal (ADR-0105) to retire a stalled
+        issue's superseded PR once its work has been split into an epic.
+        """
         ...
 
     async def find_existing_issue(self, title: str) -> int:
@@ -646,8 +670,13 @@ class AgentPort(Protocol):
         *,
         on_output: Callable[[str], bool] | None = None,
         telemetry_stats: Mapping[str, object] | None = None,
+        issue_labels: Sequence[str] | None = None,
     ) -> str:
-        """Run the agent subprocess and return the transcript."""
+        """Run the agent subprocess and return the transcript.
+
+        *issue_labels* feeds the CH-6 gate's upward-only ``data-class:``
+        label elevation; callers with issue/PR label context must pass it.
+        """
         ...
 
     async def verify_result(self, worktree_path: Path, branch: str) -> LoopResult:
@@ -700,3 +729,21 @@ class ObservabilityPort(Protocol):
     def set_measurement(self, name: str, value: float, unit: str = "") -> None: ...
 
     def flush(self, timeout_ms: int = 2000) -> bool: ...
+
+
+@runtime_checkable
+class ConformanceRunnerPort(Protocol):
+    """Executes an ADR conformance Check. Injected so the loop stays testable.
+
+    Implemented by: ``adr_conformance_runner.SubprocessConformanceRunner``
+    """
+
+    def run(
+        self, check: Check, *, repo_root: Path, timeout_s: float = 300.0
+    ) -> CheckResult:
+        """Execute *check* (pytest/make/prose) and return its outcome.
+
+        Matches ``adr_conformance_runner.SubprocessConformanceRunner.run``
+        exactly.
+        """
+        ...

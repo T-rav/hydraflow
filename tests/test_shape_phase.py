@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from config import HydraFlowConfig
 from expert_council import CouncilResult, CouncilVote
-from models import ShapeConversation, Task
+from models import ShapeConversation, ShapeTurnResult, Task
 from shape_phase import _SHAPE_OPTIONS_MARKER, ShapePhase
+from state import StateTracker
 
 
 @pytest.fixture
@@ -401,3 +404,263 @@ class TestCouncilVoteRoundThree:
             for call in deps["event_bus"].publish.await_args_list
         ]
         assert "council_diversified_round" in published_actions
+
+
+# ---------------------------------------------------------------------------
+# Convergence ledger recording (Task 3)
+# ---------------------------------------------------------------------------
+
+
+def _make_shape_phase_with_real_state(
+    tmp_path: Path,
+    *,
+    shape_runner: MagicMock | None = None,
+) -> tuple[ShapePhase, StateTracker]:
+    """Build a ShapePhase backed by a real StateTracker for ledger assertions."""
+    from events import EventBus
+
+    cfg = HydraFlowConfig(
+        repo="test/repo",
+        state_file=tmp_path / "state.json",
+    )
+    state = StateTracker(cfg.state_file)
+    bus = EventBus()
+    store = MagicMock()
+    prs = AsyncMock()
+    stop_event = asyncio.Event()
+    phase = ShapePhase(
+        cfg,
+        state,
+        store,
+        prs,
+        bus,
+        stop_event,
+        shape_runner=shape_runner,
+    )
+    return phase, state
+
+
+class TestShapeConvergenceLedger:
+    """Shape phase records boundary verdicts into the ConvergenceLedger (Task 3)."""
+
+    @pytest.mark.asyncio
+    async def test_selection_made_records_advance_verdict(self, tmp_path: Path) -> None:
+        """Selection found in comments -> ledger records 'ADVANCE'."""
+        phase, state = _make_shape_phase_with_real_state(tmp_path)
+        task = Task(id=55, title="Build notifications", body="", labels=[])
+        comments = [
+            f"{_SHAPE_OPTIONS_MARKER} for #55\n\n### Direction A: ...",
+            "Direction A — let's go with this",
+        ]
+        phase._store.enrich_with_comments = AsyncMock(
+            return_value=task.model_copy(update={"comments": comments})
+        )
+
+        await phase._shape_single(task)
+
+        ledger = state.get_convergence_ledger(55)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["shape"].last_verdict == "ADVANCE"
+
+    @pytest.mark.asyncio
+    async def test_waiting_records_loop_back_verdict(self, tmp_path: Path) -> None:
+        """No selection found (still waiting) -> ledger records 'LOOP_BACK'."""
+        phase, state = _make_shape_phase_with_real_state(tmp_path)
+        task = Task(id=56, title="Build search", body="", labels=[])
+        comments = [
+            f"{_SHAPE_OPTIONS_MARKER} for #56\n\n### Direction A: ...",
+            "Hmm, not sure yet...",
+        ]
+        phase._store.enrich_with_comments = AsyncMock(
+            return_value=task.model_copy(update={"comments": comments})
+        )
+
+        await phase._shape_single(task)
+
+        ledger = state.get_convergence_ledger(56)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["shape"].last_verdict == "LOOP_BACK"
+
+    @pytest.mark.asyncio
+    async def test_runner_finalized_records_advance_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        """Runner returns is_final=True -> ledger records 'ADVANCE'."""
+        runner = MagicMock()
+        runner.bind_escalation_deps = MagicMock()
+        runner.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="Final direction", is_final=True)
+        )
+        phase, state = _make_shape_phase_with_real_state(tmp_path, shape_runner=runner)
+        task = Task(id=57, title="Build analytics", body="", labels=[])
+        # No options marker → goes into _shape_with_runner path
+        phase._store.enrich_with_comments = AsyncMock(
+            return_value=task.model_copy(update={"comments": []})
+        )
+        # conv has no turns, so _handle_waiting_state returns proceed=True immediately
+        phase._state.get_shape_conversation = MagicMock(return_value=None)
+        phase._state.set_shape_conversation = MagicMock()
+        phase._state.increment_session_counter = MagicMock()
+        # _handle_waiting_state: conv has no turns, so proceed=True immediately
+        phase._prs.transition = AsyncMock()
+        phase._prs.post_comment = AsyncMock()
+
+        # _process_finalization calls post_comment + transition + increment
+        await phase._shape_with_runner(task)
+
+        ledger = state.get_convergence_ledger(57)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["shape"].last_verdict == "ADVANCE"
+
+    @pytest.mark.asyncio
+    async def test_runner_finalized_with_concerns_records_signatures(
+        self, tmp_path: Path
+    ) -> None:
+        """Adversarial agents with HIGH concerns -> signatures recorded."""
+        from datetime import datetime
+
+        from pending_concerns import AdversarialState, Concern
+
+        runner = MagicMock()
+        runner.bind_escalation_deps = MagicMock()
+        runner.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="Final content", is_final=True)
+        )
+        phase, state = _make_shape_phase_with_real_state(tmp_path, shape_runner=runner)
+        task = Task(id=59, title="Build API gateway", body="", labels=[])
+        phase._store.enrich_with_comments = AsyncMock(
+            return_value=task.model_copy(update={"comments": []})
+        )
+        phase._state.get_shape_conversation = MagicMock(return_value=None)
+        phase._state.set_shape_conversation = MagicMock()
+        phase._state.increment_session_counter = MagicMock()
+        phase._prs.transition = AsyncMock()
+        phase._prs.post_comment = AsyncMock()
+
+        # Plant an adversarial state with a HIGH concern via state
+        concern = Concern(
+            id="c1",
+            raised_in_phase="shape",
+            raised_in_stage="shape_challenger",
+            severity="HIGH",
+            concern="Security risk in API design",
+            raised_at=datetime.now(),
+            must_address_by="plan",
+        )
+        adv = AdversarialState(phase="shape", pending_concerns=[concern])
+        # Wire adversarial agents so the block runs, then override get_adversarial_state
+        mock_challenger = MagicMock()
+        phase._challenger_agent = mock_challenger
+        phase._state.get_adversarial_state = MagicMock(return_value=adv)
+        phase._state.set_adversarial_state = MagicMock()
+
+        # Override _run_shape_challenger to do nothing (concern already in adv)
+        phase._run_shape_challenger = AsyncMock()
+
+        await phase._shape_with_runner(task)
+
+        ledger = state.get_convergence_ledger(59)
+        assert ledger is not None
+        assert ledger.stage_state["shape"].last_verdict == "ADVANCE"
+        assert (
+            "Security risk in API design"
+            in ledger.stage_state["shape"].last_finding_signatures
+        )
+
+    @pytest.mark.asyncio
+    async def test_council_consensus_records_advance_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        """Council reaches consensus (len(turns)==1 + _council set) ->
+        ledger records 'ADVANCE'.
+
+        Uses a stubbed _run_council_vote returning 1 (consensus) so the
+        council-consensus exit in _shape_with_runner is exercised without
+        driving the full multi-round council logic.
+        """
+        runner = MagicMock()
+        runner.bind_escalation_deps = MagicMock()
+        runner.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="Direction proposal", is_final=False)
+        )
+        phase, state = _make_shape_phase_with_real_state(tmp_path, shape_runner=runner)
+        task = Task(id=60, title="Build dashboard", body="", labels=[])
+        phase._store.enrich_with_comments = AsyncMock(
+            return_value=task.model_copy(update={"comments": []})
+        )
+        phase._state.get_shape_conversation = MagicMock(return_value=None)
+        phase._state.set_shape_conversation = MagicMock()
+        phase._state.increment_session_counter = MagicMock()
+        phase._prs.transition = AsyncMock()
+        phase._prs.post_comment = AsyncMock()
+
+        # Stub _run_council_vote to return 1 (consensus reached)
+        phase._council = MagicMock()  # truthy so the if-branch is taken
+        phase._run_council_vote = AsyncMock(return_value=1)
+
+        await phase._shape_with_runner(task)
+
+        ledger = state.get_convergence_ledger(60)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["shape"].last_verdict == "ADVANCE"
+
+
+class TestShapePhaseHumanSteering:
+    """ADR-0099 #4 — live operator guidance threaded to the ShapeRunner.
+
+    ``ShapePhase`` sources guidance via ``StateTracker.get_human_steering``
+    keyed by ``str(issue.id)`` and passes it as the ``guidance=`` kwarg to
+    ``ShapeRunner.run_turn``, which is responsible for fencing it into
+    both of shape's prompt-construction sites (the turn prompt and the
+    shape-coherence evaluator prompt).
+    """
+
+    @pytest.mark.asyncio
+    async def test_shape_with_runner_sources_guidance_and_passes_to_runner(
+        self, deps: dict, sample_task: Task
+    ) -> None:
+        """Non-empty steering guidance is sourced and threaded to the runner."""
+        from models import SteeringState
+
+        deps["state"].get_human_steering.return_value = SteeringState(
+            guidance="Focus on the enterprise SSO angle."
+        )
+        deps["state"].get_shape_conversation = MagicMock(return_value=None)
+        deps["state"].set_shape_conversation = MagicMock()
+        runner = MagicMock()
+        runner.bind_escalation_deps = MagicMock()
+        runner.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="turn content", is_final=False)
+        )
+        deps["shape_runner"] = runner
+        phase = ShapePhase(**deps)
+
+        await phase._shape_with_runner(sample_task)
+
+        deps["state"].get_human_steering.assert_called_with("42")
+        runner.run_turn.assert_awaited_once()
+        _args, kwargs = runner.run_turn.call_args
+        assert kwargs["guidance"] == "Focus on the enterprise SSO angle."
+
+    @pytest.mark.asyncio
+    async def test_shape_with_runner_passes_empty_guidance_when_none_posted(
+        self, deps: dict, sample_task: Task
+    ) -> None:
+        """No steering guidance posted -> runner receives an empty string."""
+        from models import SteeringState
+
+        deps["state"].get_human_steering.return_value = SteeringState(guidance=None)
+        deps["state"].get_shape_conversation = MagicMock(return_value=None)
+        deps["state"].set_shape_conversation = MagicMock()
+        runner = MagicMock()
+        runner.bind_escalation_deps = MagicMock()
+        runner.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="turn content", is_final=False)
+        )
+        deps["shape_runner"] = runner
+        phase = ShapePhase(**deps)
+
+        await phase._shape_with_runner(sample_task)
+
+        _args, kwargs = runner.run_turn.call_args
+        assert kwargs["guidance"] == ""

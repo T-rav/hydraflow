@@ -136,6 +136,38 @@ def test_fix_without_regression_test_warns(tmp_path: Path) -> None:
     assert _run("P10.3", _ctx(tmp_path)).status is Status.WARN
 
 
+def test_test_only_fix_commit_is_excluded(tmp_path: Path) -> None:
+    """A `fix(...)` commit touching ONLY tests/ is test maintenance, not a
+    product bug fix — it must not count against the ratio."""
+    _git_init(tmp_path)
+    _git_commit(tmp_path, "feat: seed", {"README.md": "x\n"})
+    # Only test files touched, no regression test, `fix:` prefix. Pre-fix
+    # this warned (1/1 uncovered); now it's excluded → nothing to audit.
+    _git_commit(
+        tmp_path,
+        "fix: update scenario test for new behaviour",
+        {"tests/scenarios/test_thing.py": "def test_x(): pass\n"},
+    )
+    result = _run("P10.3", _ctx(tmp_path))
+    assert result.status is Status.PASS
+    assert "no fix/bug commits" in (result.message or "")
+
+
+def test_test_only_exclusion_does_not_hide_a_product_fix(tmp_path: Path) -> None:
+    """The exclusion is scoped to test-only commits; a fix that touches
+    product code with no regression test still warns."""
+    _git_init(tmp_path)
+    _git_commit(tmp_path, "feat: seed", {"README.md": "x\n"})
+    _git_commit(tmp_path, "fix: real code bug", {"src/a.py": "def f(): return 2\n"})
+    _git_commit(
+        tmp_path,
+        "fix: tidy a test",
+        {"tests/test_a.py": "def test_f(): pass\n"},
+    )
+    # Only the product-code fix is counted; it lacks a regression test → WARN.
+    assert _run("P10.3", _ctx(tmp_path)).status is Status.WARN
+
+
 def test_no_fix_commits_passes(tmp_path: Path) -> None:
     _git_init(tmp_path)
     _git_commit(tmp_path, "feat: initial", {"README.md": "x\n"})
@@ -144,6 +176,44 @@ def test_no_fix_commits_passes(tmp_path: Path) -> None:
 
 def test_na_outside_git(tmp_path: Path) -> None:
     assert _run("P10.3", _ctx(tmp_path)).status is Status.NA
+
+
+def test_future_date_baseline_excludes_all_fix_commits(tmp_path: Path) -> None:
+    """A date baseline uses --since, so no ancestry/SHA resolution is needed."""
+    _git_init(tmp_path)
+    _git_commit(tmp_path, "fix: old drift", {"src/a.py": "def f(): return 1\n"})
+    _write(tmp_path / ".hydraflow-audit-baseline", "# rule adopted\n2099-01-01\n")
+    result = _run("P10.3", _ctx(tmp_path))
+    assert result.status is Status.PASS
+    assert "no fix/bug commits" in (result.message or "")
+    assert "2099-01-01" in (result.message or "")
+
+
+def test_past_date_baseline_counts_newer_fix_commits(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _git_commit(tmp_path, "fix: typo", {"src/a.py": "def f(): return 1\n"})
+    _write(tmp_path / ".hydraflow-audit-baseline", "2020-01-01\n")
+    assert _run("P10.3", _ctx(tmp_path)).status is Status.WARN
+
+
+def test_timestamp_baseline_supported(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _git_commit(tmp_path, "fix: typo", {"src/a.py": "def f(): return 1\n"})
+    _write(tmp_path / ".hydraflow-audit-baseline", "2099-01-01T00:00:00Z\n")
+    result = _run("P10.3", _ctx(tmp_path))
+    assert result.status is Status.PASS
+    assert "no fix/bug commits" in (result.message or "")
+
+
+def test_baseline_selector_pins_midnight_on_bare_dates() -> None:
+    """git approxidate fills missing time-of-day from the CURRENT clock, so a
+    bare --since=<date> run in the afternoon would exclude that morning's
+    commits; the selector must pin midnight explicitly."""
+    from scripts.hydraflow_audit.checks.p10_tdd import _baseline_selector
+
+    assert _baseline_selector("2026-07-02") == "--since=2026-07-02T00:00:00"
+    assert _baseline_selector("2026-07-02T21:00:00Z") == "--since=2026-07-02T21:00:00Z"
+    assert _baseline_selector("97005928") == "97005928..HEAD"
 
 
 # --- P10.4 ----------------------------------------------------------------

@@ -45,7 +45,15 @@ async def main() -> int:
     credentials = build_credentials(config)
     runner = get_default_runner()
 
-    llm = TermProposerLLM(client=ClaudeCLIClient(runner=runner))
+    llm = TermProposerLLM(
+        client=ClaudeCLIClient(
+            runner=runner,
+            config=config,
+            tool=config.term_proposer_tool,
+            model=config.term_proposer_model,
+            provider=config.term_proposer_provider,
+        )
+    )
 
     pr_port: BotPRPort
     if args.dry_run:
@@ -59,6 +67,10 @@ async def main() -> int:
                 print(f"  files:  {list(files.keys())}")
                 print(f"  body excerpt:\n{body[:400]}")
                 return 999_999
+
+            async def find_open_bot_pr(self, *, labels) -> int | None:
+                print(f"[DRY-RUN] single-flight query for {labels} -> none open")
+                return None
 
         pr_port = _LoggingPort()
     else:

@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 9442
 source_phase: review
 created_at: 2026-06-13T07:10:55.323944+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0044
 ---
 
 # Error-tolerance tests must cover CreditExhaustedError re-raise, not just swallow

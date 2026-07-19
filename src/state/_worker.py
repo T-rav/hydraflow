@@ -107,6 +107,15 @@ class WorkerStateMixin:
         self._data.cost_budget_killed_workers = sorted(names)
         self.save()
 
+    def get_cost_throttled_workers(self) -> dict[str, int | None]:
+        """Workers interval-stretched by the cost watcher → pre-throttle override."""
+        return dict(self._data.cost_throttled_workers)
+
+    def set_cost_throttled_workers(self, priors: dict[str, int | None]) -> None:
+        """Persist the throttle map (empty dict = nothing throttled)."""
+        self._data.cost_throttled_workers = dict(priors)
+        self.save()
+
     # --- background worker states ---
 
     def get_worker_heartbeats(self) -> dict[str, PersistedWorkerHeartbeat]:

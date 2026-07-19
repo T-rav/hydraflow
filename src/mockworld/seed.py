@@ -25,6 +25,14 @@ class MockWorldSeed:
     # Each issue is a dict with keys: number, title, body, labels[].
     issues: list[dict[str, Any]] = field(default_factory=list)
 
+    # Per-issue seeded comments, keyed by issue number. Each entry is a dict
+    # with keys: login, body, created_at (all optional — FakeGitHub.from_seed
+    # fills sensible defaults for callers that only care about body). Lets a
+    # scenario seed comments from distinct authors at distinct timestamps
+    # (e.g. human-steering directive sequences that need a real
+    # created_at high-water-mark), which a bare list[str] can't express.
+    comments: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
+
     # Each PR is a dict with keys: number, issue_number, branch,
     # ci_status, merged, labels[].
     prs: list[dict[str, Any]] = field(default_factory=list)
@@ -68,6 +76,20 @@ class MockWorldSeed:
     # with every pre-W3a/W3b/W4/W5 scenario.
     phase_scripts: dict[str, dict[int, Any]] = field(default_factory=dict)
 
+    # Pre-seed the auto-agent attempt counter per issue → count. Lets a
+    # scenario start an issue at `auto_agent_max_attempts` (exhausted) so the
+    # decompose-or-escalate terminal fires on the first tick, rather than
+    # burning real auto-agent attempts to reach the cap. Applied to state by
+    # sandbox_main. Empty = no pre-seeded counters (default; unaffected).
+    auto_agent_attempts: dict[int, int] = field(default_factory=dict)
+
+    # Caretaker-loop tick interval (seconds) in the sandbox. Default 60 matches
+    # the historical hard-coded cadence; a long multi-hop scenario (e.g. s55's
+    # depth-2 nested decompose) lowers it so its many pipeline stages advance
+    # fast enough to finish within CI's slower runners. Applied by sandbox_main
+    # via WorkerRegistryCallbacks.get_interval.
+    sandbox_loop_interval: int = 60
+
     # How many ticks each enabled loop fires before assertions run.
     cycles_to_run: int = 4
 
@@ -79,6 +101,21 @@ class MockWorldSeed:
     # scenarios are unaffected.  CIMonitorLoop sandbox scenarios set this to
     # ("failure", "<run_url>") to drive the red-CI path.
     main_branch_ci_status: tuple[str, str] = ("success", "")
+
+    # Artificial real-time delay (seconds) inside FakePlannerRunner.plan()
+    # before it returns. Defaults to 0.0 (no-op — every existing scenario's
+    # FakeLLM timing is unaffected). A scenario that needs an issue to stay
+    # inside the real IssueStore "active" window (store_lifecycle's
+    # mark_active/mark_complete bracket, populated while PlanPhase awaits
+    # this call) for a sustained, real wall-clock duration — rather than the
+    # near-instantaneous default — sets this to a positive value. See
+    # s52_human_steering_directive.py, which needs HumanSteeringLoop's
+    # 60-second-interval tick to reliably observe the issue as active;
+    # without an artificial hold the plan-fails-forever tight loop's actual
+    # active window is only milliseconds long even though it dominates the
+    # loop logically, making a live snapshot miss it far more often than a
+    # naive duty-cycle estimate would suggest.
+    plan_hold_seconds: float = 0.0
 
     def to_json(self) -> str:
         """Serialize to JSON for cross-process transfer."""
@@ -104,6 +141,12 @@ class MockWorldSeed:
             data["advisor_scripts"] = {
                 int(issue): by_role
                 for issue, by_role in data["advisor_scripts"].items()
+            }
+        # Same coercion for comments (issue is the OUTER key here).
+        if "comments" in data:
+            data["comments"] = {
+                int(issue): comment_list
+                for issue, comment_list in data["comments"].items()
             }
         # phase_scripts (ADR-0063): outer key is phase name, inner key is
         # issue number (JSON string → int). The ``shape_council`` payload's

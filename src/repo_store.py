@@ -24,7 +24,14 @@ def _normalize_path(path: str | Path) -> str:
 
 @dataclass
 class RepoRecord:
-    """Single persisted repo entry."""
+    """Single persisted repo entry.
+
+    ``data_class`` is the CH-6 data-governance declaration for the repo
+    (``public-code`` | ``internal`` | ``regulated-<name>``, issue #9734).
+    It is threaded into the per-repo ``HydraFlowConfig.repo_data_class`` at
+    registration/restore so ``prompt_gate`` enforces it at every LLM spawn
+    seam; unknown values fail CLOSED at gate time.
+    """
 
     slug: str
     repo: str
@@ -33,6 +40,7 @@ class RepoRecord:
     auto_registered: bool = False
     created_at: str | None = None
     updated_at: str | None = None
+    data_class: str = "internal"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -43,6 +51,7 @@ class RepoRecord:
             "auto_registered": self.auto_registered,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "data_class": self.data_class,
         }
 
     @classmethod
@@ -62,6 +71,9 @@ class RepoRecord:
             auto_registered=bool(data.get("auto_registered", False)),
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
+            # Legacy pre-CH-6 entries carry no data_class key → the
+            # zero-regression default.
+            data_class=str(data.get("data_class") or "internal"),
         )
         return record
 

@@ -6,6 +6,7 @@ import logging
 import re
 import shutil
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import ClassVar
 
@@ -13,6 +14,7 @@ from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventType, HydraFlowEvent
 from exception_classify import exc_detail, reraise_on_credit_or_bug
+from human_steering import fenced_steering_guidance
 from models import NewIssueSpec, PlannerStatus, PlannerUpdatePayload, PlanResult, Task
 from plan_constants import (
     LITE_BODY_THRESHOLD,
@@ -50,6 +52,7 @@ class PlannerRunner(BaseRunner):
         task: Task,
         worker_id: int = 0,
         research_context: str = "",
+        guidance: str = "",
     ) -> PlanResult:
         """Run the planning agent for *task*.
 
@@ -58,6 +61,13 @@ class PlannerRunner(BaseRunner):
         On validation failure the planner is retried once with specific
         feedback.  If the second attempt also fails, the result carries
         ``retry_attempted=True`` so the orchestrator can escalate to HITL.
+
+        ``guidance`` (ADR-0099 #4, human-on-the-loop continuous steering)
+        is live operator guidance for this issue, sourced by
+        :class:`PlanPhase` from ``StateTracker.get_human_steering``. It is
+        folded into the prompt fenced via :func:`fenced_steering_guidance`.
+        Empty string when the feature is off or no guidance was posted —
+        behavior is then unchanged.
         """
         start = time.monotonic()
         result = PlanResult(issue_number=task.id)
@@ -81,6 +91,7 @@ class PlannerRunner(BaseRunner):
                 task,
                 scale=scale,
                 research_context=research_context,
+                guidance=guidance,
             )
 
             def _check_plan_complete(accumulated: str) -> bool:
@@ -105,6 +116,7 @@ class PlannerRunner(BaseRunner):
                 {"issue": task.id, "source": "planner"},
                 on_output=_check_plan_complete,
                 telemetry_stats=prompt_stats,
+                issue_labels=task.tags,
             )
             result.transcript = transcript
 
@@ -171,6 +183,7 @@ class PlannerRunner(BaseRunner):
                         {"issue": task.id, "source": "planner"},
                         on_output=_check_plan_complete,
                         telemetry_stats=retry_stats,
+                        issue_labels=task.tags,
                     )
                     result.transcript += "\n\n--- RETRY ---\n\n" + retry_transcript
 
@@ -303,11 +316,17 @@ class PlannerRunner(BaseRunner):
         *,
         scale: PlanScale = "full",
         research_context: str = "",
+        guidance: str = "",
     ) -> tuple[str, dict[str, object]]:
         """Build the planning prompt and pruning stats.
 
         *scale* is ``"lite"`` or ``"full"``.  The prompt adjusts which
         sections are required and whether to include the pre-mortem step.
+
+        ``guidance`` (ADR-0099 #4) is live operator steering for this
+        issue; folded in fenced via :func:`fenced_steering_guidance`,
+        which returns ``""`` when there is no guidance so behavior is
+        unchanged when the feature is off.
         """
         builder = PromptBuilder()
         comments_section = ""
@@ -578,6 +597,7 @@ This closes the issue automatically. False positives waste significant human tim
         if plugin_skills_section:
             prompt = f"{prompt}\n\n{plugin_skills_section}"
 
+        prompt += fenced_steering_guidance(guidance)
         return prompt, builder.build_stats()
 
     def _detect_plan_scale(self, issue: Task) -> PlanScale:
@@ -988,10 +1008,17 @@ SUMMARY: <brief one-line description of the plan>
         epic_number: int,
         child_plans: dict[int, str],
         child_titles: dict[int, str],
+        *,
+        issue_labels: Sequence[str] = (),
     ) -> str:
         """Run a gap/conflict review across epic children's plans.
 
         Returns the raw transcript for the caller to parse.
+
+        *issue_labels* is the union of the reviewed children's labels: the
+        prompt embeds every child's plan, so the CH-6 gate must see any
+        ``data-class:<class>`` elevation label carried by ANY child (the
+        upward-only merge in ``effective_data_class`` handles conflicts).
         """
         plans_section = "\n\n".join(
             f"### Issue #{num}: {child_titles.get(num, 'Untitled')}\n\n{plan}"
@@ -1028,5 +1055,6 @@ SUMMARY: <brief one-line description of the plan>
             self._config.repo_root,
             {"epic": epic_number, "source": "planner-gap-review"},
             on_output=_check_complete,
+            issue_labels=issue_labels,
         )
         return transcript

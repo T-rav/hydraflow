@@ -537,6 +537,39 @@ class TestGenerate:
         assert path.exists()
 
     @pytest.mark.asyncio
+    async def test_generate_elevates_for_regulated_labeled_issue(
+        self, config: HydraFlowConfig, event_bus
+    ) -> None:
+        """A ``data-class:regulated-*`` issue label redacts AC prompts.
+
+        ``generate()`` embeds ``issue.body`` verbatim, so on an internal repo
+        the issue's labels must reach the CH-6 gate through
+        ``stream_claude_with_telemetry`` (#9734 review finding 2).
+        """
+        cfg = config.model_copy(
+            update={"data_class_allowed_backends": {"regulated-phi": ["claude"]}}
+        )
+        gen, _ = _make_generator(cfg, event_bus)
+        issue = IssueFactory.create(
+            body="patient SSN 123-45-6789 needs a fix",
+            labels=["ready", "data-class:regulated-phi"],
+        )
+
+        with patch(
+            "runner_utils.stream_claude_process",
+            new_callable=AsyncMock,
+            return_value=_make_transcript(),
+        ) as mock_stream:
+            await gen.generate(
+                issue_number=42, pr_number=101, issue=issue, diff=SAMPLE_DIFF
+            )
+
+        assert mock_stream.await_count >= 1
+        prompts = [call[1]["prompt"] for call in mock_stream.call_args_list]
+        assert all("123-45-6789" not in p for p in prompts)
+        assert any("[REDACTED:ssn_like]" in p for p in prompts)
+
+    @pytest.mark.asyncio
     async def test_generate_dry_run_skips(
         self, dry_config: HydraFlowConfig, event_bus
     ) -> None:

@@ -1,8 +1,12 @@
 # ADR-0024: Implementation Retry Recovery Architecture
 
 **Status:** Accepted
-**Enforced by:** tests/test_implement_phase.py, tests/scenarios/fakes/test_prior_failure_propagation.py
 **Date:** 2026-03-08
+**Enforcement:** enforced
+
+**Enforced by:**
+pytest:tests/test_implement_phase.py
+pytest:tests/scenarios/fakes/test_prior_failure_propagation.py
 
 ## Context
 
@@ -71,7 +75,7 @@ by whether review feedback is present.
 
 - The retry recovery changes are scoped to the implement phase
   (`src/implement_phase.py:ImplementPhase`) and its interaction with
-  `src/state.py:StateTracker` and `src/agent.py:AgentRunner`.
+  `src/state/__init__.py:StateTracker` and `src/agent.py:AgentRunner`.
 - The review phase's own retry/escalation logic remains unchanged.
 - The `max_issue_attempts` cap continues to serve as the upper bound for all
   retry paths, preventing infinite retry loops.
@@ -126,4 +130,4 @@ by whether review feedback is present.
 
 - Source memory: [#2258 — Implementation retry recovery architecture](https://github.com/T-rav/hydra/issues/2258)
 - Implementing issue: [#2264](https://github.com/T-rav/hydra/issues/2264)
-- Key files: `src/implement_phase.py:ImplementPhase`, `src/state.py:StateTracker`, `src/agent.py:AgentRunner`
+- Key files: `src/implement_phase.py:ImplementPhase`, `src/state/__init__.py:StateTracker`, `src/agent.py:AgentRunner`

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from term_proposer_runtime import (
+    _UL_CONTEXT_MAP_REL,
+    _UL_GLOSSARY_REL,
     ClaudeCLIClient,
     OpenAutoPRBotPRPort,
     regenerate_ubiquitous_language_artifacts,
@@ -29,63 +30,93 @@ def _term_file_str(name: str) -> str:
     return _render_term_file_str(term)
 
 
-class FakeRunner:
-    def __init__(self, *, returncode: int, stdout: str, stderr: str = "") -> None:
-        self._result = subprocess.CompletedProcess(
-            args=["fake"], returncode=returncode, stdout=stdout, stderr=stderr
-        )
-        self.calls: list[dict] = []
-
-    async def run_simple(
-        self, cmd, *, input=None, timeout=None, **_
-    ) -> subprocess.CompletedProcess[str]:
-        self.calls.append({"cmd": cmd, "input": input, "timeout": timeout})
-        return self._result
-
-
 class TestClaudeCLIClient:
+    """ClaudeCLIClient is a thin adapter over ``run_lightweight_agent`` (the
+    gated + telemetried seam). It threads the term-proposer dials and parses
+    JSON out of the reply; the seam's credit/gate/telemetry behavior is covered
+    by test_llm_provider.py, so here we mock the seam and assert the wiring."""
+
+    def _client(self, monkeypatch, *, stdout="", returncode=0, provider="claude"):
+        """Construct a client whose seam call returns a canned SimpleResult and
+        records the kwargs it was invoked with."""
+        from unittest.mock import AsyncMock
+
+        from execution import SimpleResult
+        from tests.helpers import ConfigFactory
+
+        captured: dict = {}
+
+        async def _fake_seam(**kwargs):
+            captured.update(kwargs)
+            return SimpleResult(stdout=stdout, stderr="boom", returncode=returncode)
+
+        monkeypatch.setattr("runner_utils.run_lightweight_agent", _fake_seam)
+        client = ClaudeCLIClient(
+            runner=AsyncMock(),
+            config=ConfigFactory.create(),
+            tool="claude",
+            model="glm-4.6" if provider != "claude" else "claude-sonnet-4-6",
+            provider=provider,
+            timeout=90,
+        )
+        return client, captured
+
     @pytest.mark.asyncio
-    async def test_returns_parsed_json(self) -> None:
-        runner = FakeRunner(returncode=0, stdout='{"foo": "bar", "n": 1}')
-        client = ClaudeCLIClient(runner=runner)
+    async def test_returns_parsed_json(self, monkeypatch) -> None:
+        client, _ = self._client(monkeypatch, stdout='{"foo": "bar", "n": 1}')
         out = await client.complete_structured(prompt="hi", schema={})
         assert out == {"foo": "bar", "n": 1}
 
     @pytest.mark.asyncio
-    async def test_extracts_json_from_markdown_fence(self) -> None:
-        runner = FakeRunner(
-            returncode=0,
+    async def test_extracts_json_from_markdown_fence(self, monkeypatch) -> None:
+        client, _ = self._client(
+            monkeypatch,
             stdout='Here is the result:\n```json\n{"k": "v"}\n```\nDone.',
         )
-        client = ClaudeCLIClient(runner=runner)
         out = await client.complete_structured(prompt="hi", schema={})
         assert out == {"k": "v"}
 
     @pytest.mark.asyncio
-    async def test_raises_on_nonzero_returncode(self) -> None:
-        runner = FakeRunner(returncode=1, stdout="", stderr="boom")
-        client = ClaudeCLIClient(runner=runner)
-        with pytest.raises(RuntimeError, match="claude CLI failed"):
+    async def test_raises_on_nonzero_returncode(self, monkeypatch) -> None:
+        client, _ = self._client(monkeypatch, returncode=1)
+        with pytest.raises(RuntimeError, match="draft failed"):
             await client.complete_structured(prompt="hi", schema={})
 
     @pytest.mark.asyncio
-    async def test_raises_when_no_json_in_output(self) -> None:
-        runner = FakeRunner(returncode=0, stdout="just prose, no json here")
-        client = ClaudeCLIClient(runner=runner)
+    async def test_raises_when_no_json_in_output(self, monkeypatch) -> None:
+        client, _ = self._client(monkeypatch, stdout="just prose, no json here")
         with pytest.raises(RuntimeError, match="no JSON object"):
             await client.complete_structured(prompt="hi", schema={})
+
+    @pytest.mark.asyncio
+    async def test_threads_dial_and_schema_to_the_seam(self, monkeypatch) -> None:
+        # The provider/model/tool dials + the JSON schema reach the seam, so
+        # flipping term_proposer_provider to zai actually routes the draft there.
+        client, captured = self._client(
+            monkeypatch, stdout='{"ok": true}', provider="zai"
+        )
+        schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
+        await client.complete_structured(prompt="draft this", schema=schema)
+        assert captured["provider"] == "zai"
+        assert captured["model"] == "glm-4.6"
+        assert captured["tool"] == "claude"
+        assert captured["response_schema"] == schema
+        assert captured["source"] == "term_proposer"
 
 
 class TestOpenAutoPRBotPRPort:
     @pytest.mark.asyncio
-    async def test_writes_files_and_returns_pr_number(
+    async def test_generates_in_worktree_and_returns_pr_number(
         self, tmp_path: Path, monkeypatch
     ) -> None:
+        # The bot PR is opened via generate-in-worktree (#9539); repo_root is
+        # never written to. The generate callback is NOT invoked when
+        # generate_and_open_pr_async is mocked, so we assert the call kwargs.
         from auto_pr import AutoPrResult
 
         captured: dict = {}
 
-        async def fake_open_automated_pr_async(**kwargs):
+        async def fake_generate_and_open_pr_async(**kwargs):
             captured.update(kwargs)
             return AutoPrResult(
                 status="opened",
@@ -94,7 +125,7 @@ class TestOpenAutoPRBotPRPort:
             )
 
         monkeypatch.setattr(
-            "auto_pr.open_automated_pr_async", fake_open_automated_pr_async
+            "auto_pr.generate_and_open_pr_async", fake_generate_and_open_pr_async
         )
 
         port = OpenAutoPRBotPRPort(repo_root=tmp_path, gh_token="ghs_x")
@@ -111,17 +142,23 @@ class TestOpenAutoPRBotPRPort:
         )
 
         assert pr_number == 4242
-        # Files written
-        assert (tmp_path / "docs/wiki/terms/foo-loop.md").read_text().startswith("---")
-        assert (tmp_path / "docs/wiki/terms/bar-runner.md").exists()
+        # repo_root stays clean — nothing is written under it (#9539).
+        assert not (tmp_path / "docs/wiki/terms/foo-loop.md").exists()
+        assert not (tmp_path / "docs/arch/generated").exists()
         # auto_pr called with the right args
         assert captured["branch"] == "ul-proposer/abc123"
         assert captured["pr_title"] == "feat(ul): batch"
         assert captured["labels"] == ["hydraflow-ul-proposed"]
         assert captured["auto_merge"] is False  # DependabotMergeLoop handles merge
         assert captured["base"] == "main"  # default (single-tier / pre-staging)
+        assert callable(captured["generate"])
         # 2 term files + the 2 regenerated ubiquitous-language views ride along.
-        assert len(captured["files"]) == 4
+        assert captured["path_specs"] == [
+            "docs/wiki/terms/foo-loop.md",
+            "docs/wiki/terms/bar-runner.md",
+            _UL_GLOSSARY_REL,
+            _UL_CONTEXT_MAP_REL,
+        ]
 
     @pytest.mark.asyncio
     async def test_targets_configured_base_branch(
@@ -135,7 +172,7 @@ class TestOpenAutoPRBotPRPort:
 
         captured: dict = {}
 
-        async def fake_open_automated_pr_async(**kwargs):
+        async def fake_generate_and_open_pr_async(**kwargs):
             captured.update(kwargs)
             return AutoPrResult(
                 status="opened",
@@ -144,7 +181,7 @@ class TestOpenAutoPRBotPRPort:
             )
 
         monkeypatch.setattr(
-            "auto_pr.open_automated_pr_async", fake_open_automated_pr_async
+            "auto_pr.generate_and_open_pr_async", fake_generate_and_open_pr_async
         )
 
         port = OpenAutoPRBotPRPort(repo_root=tmp_path, gh_token="ghs_x", base="staging")
@@ -162,13 +199,13 @@ class TestOpenAutoPRBotPRPort:
     async def test_raises_on_open_failure(self, tmp_path: Path, monkeypatch) -> None:
         from auto_pr import AutoPrResult
 
-        async def fake_open_automated_pr_async(**kwargs):
+        async def fake_generate_and_open_pr_async(**kwargs):
             return AutoPrResult(
                 status="failed", pr_url=None, branch=kwargs["branch"], error="auth"
             )
 
         monkeypatch.setattr(
-            "auto_pr.open_automated_pr_async", fake_open_automated_pr_async
+            "auto_pr.generate_and_open_pr_async", fake_generate_and_open_pr_async
         )
 
         port = OpenAutoPRBotPRPort(repo_root=tmp_path)
@@ -178,18 +215,19 @@ class TestOpenAutoPRBotPRPort:
             )
 
     @pytest.mark.asyncio
-    async def test_stages_regenerated_ul_artifacts_with_term_change(
+    async def test_generate_callback_regenerates_ul_artifacts_in_worktree(
         self, tmp_path: Path, monkeypatch
     ) -> None:
         # A term-proposer PR mutates docs/wiki/terms/ — the generated
         # ubiquitous-language views derive from those files, so the commit MUST
         # also carry the regenerated views or the pre-push arch-check drift
-        # guard rejects the push.
+        # guard rejects the push. The generate callback writes the term file AND
+        # regenerates the views INTO the worktree (never repo_root, #9539).
         from auto_pr import AutoPrResult
 
         captured: dict = {}
 
-        async def fake_open_automated_pr_async(**kwargs):
+        async def fake_generate_and_open_pr_async(**kwargs):
             captured.update(kwargs)
             return AutoPrResult(
                 status="opened",
@@ -198,10 +236,12 @@ class TestOpenAutoPRBotPRPort:
             )
 
         monkeypatch.setattr(
-            "auto_pr.open_automated_pr_async", fake_open_automated_pr_async
+            "auto_pr.generate_and_open_pr_async", fake_generate_and_open_pr_async
         )
 
-        port = OpenAutoPRBotPRPort(repo_root=tmp_path)
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        port = OpenAutoPRBotPRPort(repo_root=repo_root)
         await port.open_bot_pr(
             branch="ul-proposer/abc123",
             title="feat(ul): batch",
@@ -210,13 +250,25 @@ class TestOpenAutoPRBotPRPort:
             files={"docs/wiki/terms/widget-maker.md": _term_file_str("WidgetMaker")},
         )
 
-        staged = {p.relative_to(tmp_path).as_posix() for p in captured["files"]}
-        assert "docs/wiki/terms/widget-maker.md" in staged
-        assert "docs/arch/generated/ubiquitous-language.md" in staged
-        assert "docs/arch/generated/ubiquitous-language-context-map.md" in staged
-        # The regenerated views are actually written to disk so the worktree
-        # copy step has real content to stage.
-        assert (tmp_path / "docs/arch/generated/ubiquitous-language.md").exists()
+        # The term file + the two UL views are staged.
+        assert captured["path_specs"] == [
+            "docs/wiki/terms/widget-maker.md",
+            _UL_GLOSSARY_REL,
+            _UL_CONTEXT_MAP_REL,
+        ]
+        # Drive the generate callback against a real worktree dir: it must write
+        # the term file and regenerate the views THERE — and leave repo_root
+        # untouched (#9539).
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        await captured["generate"](worktree)
+
+        assert (worktree / "docs/wiki/terms/widget-maker.md").exists()
+        assert (worktree / _UL_GLOSSARY_REL).exists()
+        assert (worktree / _UL_CONTEXT_MAP_REL).exists()
+        # repo_root is never touched.
+        assert not (repo_root / "docs/wiki/terms/widget-maker.md").exists()
+        assert not (repo_root / "docs/arch/generated").exists()
 
     @pytest.mark.asyncio
     async def test_skips_regen_when_no_term_files_change(
@@ -227,7 +279,7 @@ class TestOpenAutoPRBotPRPort:
 
         captured: dict = {}
 
-        async def fake_open_automated_pr_async(**kwargs):
+        async def fake_generate_and_open_pr_async(**kwargs):
             captured.update(kwargs)
             return AutoPrResult(
                 status="opened",
@@ -236,7 +288,7 @@ class TestOpenAutoPRBotPRPort:
             )
 
         monkeypatch.setattr(
-            "auto_pr.open_automated_pr_async", fake_open_automated_pr_async
+            "auto_pr.generate_and_open_pr_async", fake_generate_and_open_pr_async
         )
 
         port = OpenAutoPRBotPRPort(repo_root=tmp_path)
@@ -244,9 +296,14 @@ class TestOpenAutoPRBotPRPort:
             branch="x", title="x", body="x", labels=[], files={"docs/other.md": "x"}
         )
 
-        staged = {p.relative_to(tmp_path).as_posix() for p in captured["files"]}
-        assert staged == {"docs/other.md"}
-        assert not (tmp_path / "docs/arch/generated").exists()
+        # Only the non-term file is staged — no UL views ride along.
+        assert captured["path_specs"] == ["docs/other.md"]
+        # Drive the generate callback: it writes only the non-term file, no regen.
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        await captured["generate"](worktree)
+        assert (worktree / "docs/other.md").exists()
+        assert not (worktree / "docs/arch/generated").exists()
 
 
 class TestRegenerateUbiquitousLanguageArtifacts:

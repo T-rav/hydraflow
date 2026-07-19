@@ -7,6 +7,7 @@ import { PipelineControlPanel } from './PipelineControlPanel'
 import { WorkerLogStream } from './WorkerLogStream'
 import { MetricsPanel } from './MetricsPanel'
 import { InsightsPanel } from './InsightsPanel'
+import { RuntimeSettingsPanel } from './RuntimeSettingsPanel'
 
 const DiagnosticsTab = lazy(() =>
   import('./diagnostics/DiagnosticsTab').then(m => ({ default: m.DiagnosticsTab }))
@@ -14,6 +15,7 @@ const DiagnosticsTab = lazy(() =>
 
 const SUB_TABS = [
   { key: 'workers', label: 'Workers' },
+  { key: 'settings', label: 'Settings' },
   { key: 'pipeline', label: 'Pipeline' },
   { key: 'metrics', label: 'Metrics' },
   { key: 'insights', label: 'Insights' },
@@ -848,6 +850,7 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWo
         {activeSubTab === 'metrics' && (
           <MetricsPanel />
         )}
+        {activeSubTab === 'settings' && <RuntimeSettingsPanel />}
         {activeSubTab === 'insights' && <InsightsPanel />}
         {activeSubTab === 'diagnostics' && (
           <Suspense fallback={<div style={styles.diagnosticsLoading}>Loading diagnostics…</div>}>

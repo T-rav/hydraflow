@@ -12,6 +12,12 @@ Accepted
 
 `tests/test_entry_evidence_loop.py`, `tests/scenarios/test_entry_evidence_loop_scenario.py`
 
+**Enforcement:** enforced
+
+**Enforced by:**
+pytest:tests/test_entry_evidence_loop.py
+pytest:tests/scenarios/test_entry_evidence_loop_scenario.py
+
 ## Context
 
 [ADR-0053](0053-ubiquitous-language-as-living-artifact.md) introduced `Term.evidence: list[str]` so each term can carry the wiki-entry IDs that justify it. [ADR-0061](0061-atlas-entries-as-evidence.md) added the Atlas surface that renders those backlinks (entry nodes attached to terms; orphans land in a Discovered bucket).

@@ -11,6 +11,7 @@ graph LR
   end
   subgraph caretaker
     ADRCouncilReviewer["ADRCouncilReviewer<br/><i>service</i>"]
+    ADRPreValidator["ADRPreValidator<br/><i>service</i>"]
     ADRReviewerLoop["ADRReviewerLoop<br/><i>loop</i>"]
     AdrTouchpointAuditorLoop["AdrTouchpointAuditorLoop<br/><i>loop</i>"]
     CIMonitorLoop["CIMonitorLoop<br/><i>loop</i>"]
@@ -22,10 +23,14 @@ graph LR
     EdgeProposerLoop["EdgeProposerLoop<br/><i>loop</i>"]
     EntryEvidenceLoop["EntryEvidenceLoop<br/><i>loop</i>"]
     FakeCoverageAuditorLoop["FakeCoverageAuditorLoop<br/><i>loop</i>"]
+    FitnessContext["FitnessContext<br/><i>value_object</i>"]
+    FitnessScorecardLoop["FitnessScorecardLoop<br/><i>loop</i>"]
+    FitnessScorecardLoop["FitnessScorecardLoop<br/><i>loop</i>"]
     FlakeTrackerLoop["FlakeTrackerLoop<br/><i>loop</i>"]
     GitHubCacheLoop["GitHubCacheLoop<br/><i>loop</i>"]
     GitHubCacheLoop["GitHubCacheLoop<br/><i>loop</i>"]
     LiveCorpusReplayLoop["LiveCorpusReplayLoop<br/><i>loop</i>"]
+    LoopFitness["LoopFitness<br/><i>value_object</i>"]
     MergeStateWatcherLoop["MergeStateWatcherLoop<br/><i>loop</i>"]
     PricingRefreshLoop["PricingRefreshLoop<br/><i>loop</i>"]
     PRUnstickerLoop["PRUnstickerLoop<br/><i>loop</i>"]
@@ -38,31 +43,58 @@ graph LR
     WorkspaceGCLoop["WorkspaceGCLoop<br/><i>loop</i>"]
   end
   subgraph shared-kernel
+    Actuator["Actuator<br/><i>control_role</i>"]
+    ADRIndex["ADRIndex<br/><i>service</i>"]
     AgentPort["AgentPort<br/><i>port</i>"]
     BaseBackgroundLoop["BaseBackgroundLoop<br/><i>loop</i>"]
     BotPRPort["BotPRPort<br/><i>port</i>"]
+    Controller["Controller<br/><i>control_role</i>"]
+    Credentials["Credentials<br/><i>value_object</i>"]
+    DimensionBaseline["DimensionBaseline<br/><i>control_role</i>"]
+    DisturbanceDampenerLoop["DisturbanceDampenerLoop<br/><i>loop</i>"]
+    Error["Error<br/><i>control_role</i>"]
     EventBus["EventBus<br/><i>service</i>"]
+    Governor["Governor<br/><i>control_role</i>"]
+    HumanSteeringLoop["HumanSteeringLoop<br/><i>control_role</i>"]
     HydraFlowConfig["HydraFlowConfig<br/><i>aggregate</i>"]
     IssueFetcherPort["IssueFetcherPort<br/><i>port</i>"]
     IssueStorePort["IssueStorePort<br/><i>port</i>"]
     ObservabilityPort["ObservabilityPort<br/><i>port</i>"]
+    Plant["Plant<br/><i>control_role</i>"]
     PRPort["PRPort<br/><i>port</i>"]
     RepoWikiStore["RepoWikiStore<br/><i>service</i>"]
     ReviewInsightStorePort["ReviewInsightStorePort<br/><i>port</i>"]
     RouteBackCounterPort["RouteBackCounterPort<br/><i>port</i>"]
+    Sensor["Sensor<br/><i>control_role</i>"]
+    Set-point["Set-point<br/><i>control_role</i>"]
     StateTracker["StateTracker<br/><i>service</i>"]
+    SteeringChannel["SteeringChannel<br/><i>control_role</i>"]
+    SteeringState["SteeringState<br/><i>control_role</i>"]
+    TribalWikiStore["TribalWikiStore<br/><i>service</i>"]
+    ViolationDetector["ViolationDetector<br/><i>control_role</i>"]
     WorkspacePort["WorkspacePort<br/><i>port</i>"]
   end
+  Actuator -->|depends_on| Credentials
+  Actuator -->|depends_on| ADRIndex
+  Actuator -->|depends_on| EventBus
+  Actuator -->|depends_on| RepoWikiStore
+  Actuator -->|depends_on| HydraFlowConfig
+  Actuator -->|depends_on| TribalWikiStore
   ADRCouncilReviewer -->|depends_on| EventBus
   ADRCouncilReviewer -->|depends_on| HydraFlowConfig
+  ADRCouncilReviewer -->|depends_on| Credentials
+  ADRCouncilReviewer -->|depends_on| ADRPreValidator
   ADRReviewerLoop -->|depends_on| HydraFlowConfig
   ADRReviewerLoop -->|depends_on| BaseBackgroundLoop
   ADRReviewerLoop -->|implements| BaseBackgroundLoop
   ADRReviewerLoop -->|depends_on| ADRCouncilReviewer
+  ADRReviewerLoop -->|depends_on| Governor
   AdrTouchpointAuditorLoop -->|depends_on| BaseBackgroundLoop
   AdrTouchpointAuditorLoop -->|depends_on| HydraFlowConfig
   AdrTouchpointAuditorLoop -->|depends_on| StateTracker
   AdrTouchpointAuditorLoop -->|implements| BaseBackgroundLoop
+  AdrTouchpointAuditorLoop -->|depends_on| ADRIndex
+  AdrTouchpointAuditorLoop -->|depends_on| Governor
   AgentPort -->|depends_on| Task
   AgentRunner -->|depends_on| PRPort
   AgentRunner -->|depends_on| WorkspacePort
@@ -71,55 +103,105 @@ graph LR
   AgentRunner -->|depends_on| RepoWikiStore
   AgentRunner -->|depends_on| Task
   AgentRunner -->|depends_on| EventBus
+  AgentRunner -->|depends_on| Credentials
+  AgentRunner -->|depends_on| Actuator
+  AgentRunner -->|implements| Actuator
+  AgentRunner -->|depends_on| TribalWikiStore
   BaseBackgroundLoop -->|depends_on| EventBus
   BaseBackgroundLoop -->|depends_on| HydraFlowConfig
+  BaseBackgroundLoop -->|depends_on| FitnessContext
+  BaseBackgroundLoop -->|depends_on| LoopFitness
   BotPRPort -->|depends_on| HydraFlowConfig
   BotPRPort -->|depends_on| BaseBackgroundLoop
+  BotPRPort -->|depends_on| Governor
+  BotPRPort -->|depends_on| FitnessContext
+  BotPRPort -->|depends_on| LoopFitness
   CIMonitorLoop -->|depends_on| HydraFlowConfig
   CIMonitorLoop -->|depends_on| BaseBackgroundLoop
   CIMonitorLoop -->|depends_on| PRPort
   CIMonitorLoop -->|implements| BaseBackgroundLoop
+  CIMonitorLoop -->|depends_on| Governor
   ContractRefreshLoop -->|depends_on| BaseBackgroundLoop
   ContractRefreshLoop -->|depends_on| HydraFlowConfig
   ContractRefreshLoop -->|depends_on| StateTracker
   ContractRefreshLoop -->|implements| BaseBackgroundLoop
+  ContractRefreshLoop -->|depends_on| Governor
+  Controller -->|depends_on| EventBus
+  Controller -->|depends_on| HydraFlowConfig
+  Controller -->|depends_on| Task
   CorpusLearningLoop -->|depends_on| BaseBackgroundLoop
   CorpusLearningLoop -->|depends_on| HydraFlowConfig
   CorpusLearningLoop -->|depends_on| StateTracker
   CorpusLearningLoop -->|implements| BaseBackgroundLoop
+  CorpusLearningLoop -->|depends_on| Governor
   DependabotMergeLoop -->|depends_on| HydraFlowConfig
   DependabotMergeLoop -->|depends_on| BaseBackgroundLoop
   DependabotMergeLoop -->|depends_on| StateTracker
   DependabotMergeLoop -->|depends_on| PRPort
   DependabotMergeLoop -->|implements| BaseBackgroundLoop
+  DependabotMergeLoop -->|depends_on| Governor
   DiagnosticLoop -->|depends_on| BaseBackgroundLoop
   DiagnosticLoop -->|depends_on| PRPort
   DiagnosticLoop -->|depends_on| HydraFlowConfig
   DiagnosticLoop -->|depends_on| StateTracker
   DiagnosticLoop -->|implements| BaseBackgroundLoop
+  DiagnosticLoop -->|depends_on| Governor
   DiagramLoop -->|depends_on| BaseBackgroundLoop
   DiagramLoop -->|depends_on| HydraFlowConfig
   DiagramLoop -->|implements| BaseBackgroundLoop
+  DiagramLoop -->|depends_on| Governor
+  DimensionBaseline -->|depends_on| ViolationDetector
+  DisturbanceDampenerLoop -->|depends_on| Governor
+  DisturbanceDampenerLoop -->|depends_on| BaseBackgroundLoop
+  DisturbanceDampenerLoop -->|depends_on| DimensionBaseline
+  DisturbanceDampenerLoop -->|depends_on| FitnessContext
+  DisturbanceDampenerLoop -->|depends_on| LoopFitness
+  DisturbanceDampenerLoop -->|implements| BaseBackgroundLoop
   EdgeProposerLoop -->|depends_on| BaseBackgroundLoop
   EdgeProposerLoop -->|depends_on| BotPRPort
   EdgeProposerLoop -->|depends_on| HydraFlowConfig
   EdgeProposerLoop -->|implements| BaseBackgroundLoop
+  EdgeProposerLoop -->|depends_on| Governor
+  EdgeProposerLoop -->|depends_on| FitnessContext
+  EdgeProposerLoop -->|depends_on| LoopFitness
   EntryEvidenceLoop -->|depends_on| BaseBackgroundLoop
   EntryEvidenceLoop -->|depends_on| BotPRPort
   EntryEvidenceLoop -->|depends_on| RepoWikiStore
   EntryEvidenceLoop -->|depends_on| HydraFlowConfig
   EntryEvidenceLoop -->|implements| BaseBackgroundLoop
+  EntryEvidenceLoop -->|depends_on| Governor
+  Error -->|depends_on| HydraFlowConfig
+  Error -->|depends_on| ObservabilityPort
   FakeCoverageAuditorLoop -->|depends_on| BaseBackgroundLoop
   FakeCoverageAuditorLoop -->|depends_on| HydraFlowConfig
   FakeCoverageAuditorLoop -->|depends_on| StateTracker
   FakeCoverageAuditorLoop -->|implements| BaseBackgroundLoop
+  FakeCoverageAuditorLoop -->|depends_on| Governor
+  FitnessScorecardLoop -->|depends_on| HydraFlowConfig
+  FitnessScorecardLoop -->|depends_on| Governor
+  FitnessScorecardLoop -->|depends_on| BaseBackgroundLoop
+  FitnessScorecardLoop -->|depends_on| FitnessContext
+  FitnessScorecardLoop -->|depends_on| LoopFitness
+  FitnessScorecardLoop -->|implements| BaseBackgroundLoop
   FlakeTrackerLoop -->|depends_on| HydraFlowConfig
   FlakeTrackerLoop -->|depends_on| BaseBackgroundLoop
   FlakeTrackerLoop -->|depends_on| StateTracker
   FlakeTrackerLoop -->|implements| BaseBackgroundLoop
+  FlakeTrackerLoop -->|depends_on| Governor
   GitHubCacheLoop -->|depends_on| BaseBackgroundLoop
   GitHubCacheLoop -->|depends_on| HydraFlowConfig
   GitHubCacheLoop -->|implements| BaseBackgroundLoop
+  GitHubCacheLoop -->|depends_on| Governor
+  Governor -->|depends_on| EventBus
+  Governor -->|depends_on| HydraFlowConfig
+  Governor -->|depends_on| FitnessContext
+  Governor -->|depends_on| LoopFitness
+  HumanSteeringLoop -->|depends_on| FitnessContext
+  HumanSteeringLoop -->|depends_on| Governor
+  HumanSteeringLoop -->|depends_on| BaseBackgroundLoop
+  HumanSteeringLoop -->|depends_on| LoopFitness
+  HumanSteeringLoop -->|depends_on| SteeringState
+  HumanSteeringLoop -->|implements| BaseBackgroundLoop
   IssueFetcherPort -->|depends_on| IssueStorePort
   IssueFetcherPort -->|depends_on| Task
   IssueStorePort -->|depends_on| Task
@@ -127,55 +209,82 @@ graph LR
   LiveCorpusReplayLoop -->|depends_on| BaseBackgroundLoop
   LiveCorpusReplayLoop -->|depends_on| StateTracker
   LiveCorpusReplayLoop -->|implements| BaseBackgroundLoop
+  LiveCorpusReplayLoop -->|depends_on| Governor
   MergeStateWatcherLoop -->|depends_on| HydraFlowConfig
   MergeStateWatcherLoop -->|depends_on| BaseBackgroundLoop
   MergeStateWatcherLoop -->|depends_on| PRPort
   MergeStateWatcherLoop -->|implements| BaseBackgroundLoop
+  MergeStateWatcherLoop -->|depends_on| Governor
   ObservabilityPort -->|depends_on| Task
   PricingRefreshLoop -->|depends_on| BaseBackgroundLoop
   PricingRefreshLoop -->|depends_on| HydraFlowConfig
   PricingRefreshLoop -->|implements| BaseBackgroundLoop
+  PricingRefreshLoop -->|depends_on| Governor
   PRPort -->|depends_on| Task
   PRUnstickerLoop -->|depends_on| HydraFlowConfig
   PRUnstickerLoop -->|depends_on| BaseBackgroundLoop
   PRUnstickerLoop -->|depends_on| PRPort
   PRUnstickerLoop -->|implements| BaseBackgroundLoop
+  PRUnstickerLoop -->|depends_on| Governor
   RCBudgetLoop -->|depends_on| BaseBackgroundLoop
   RCBudgetLoop -->|depends_on| HydraFlowConfig
   RCBudgetLoop -->|depends_on| StateTracker
   RCBudgetLoop -->|implements| BaseBackgroundLoop
+  RCBudgetLoop -->|depends_on| Governor
   ReportIssueLoop -->|depends_on| BaseBackgroundLoop
   ReportIssueLoop -->|depends_on| HydraFlowConfig
   ReportIssueLoop -->|depends_on| StateTracker
   ReportIssueLoop -->|implements| BaseBackgroundLoop
+  ReportIssueLoop -->|depends_on| Credentials
+  ReportIssueLoop -->|depends_on| Governor
   ReviewInsightStorePort -->|depends_on| Task
   RouteBackCounterPort -->|depends_on| PRPort
   SentryLoop -->|depends_on| BaseBackgroundLoop
   SentryLoop -->|depends_on| HydraFlowConfig
   SentryLoop -->|depends_on| StateTracker
   SentryLoop -->|implements| BaseBackgroundLoop
+  SentryLoop -->|depends_on| Credentials
+  SentryLoop -->|depends_on| Controller
+  SentryLoop -->|depends_on| Governor
+  Set-point -->|depends_on| EventBus
+  Set-point -->|depends_on| HydraFlowConfig
+  Set-point -->|depends_on| Task
   SkillPromptEvalLoop -->|depends_on| BaseBackgroundLoop
   SkillPromptEvalLoop -->|depends_on| HydraFlowConfig
   SkillPromptEvalLoop -->|depends_on| StateTracker
   SkillPromptEvalLoop -->|implements| BaseBackgroundLoop
+  SkillPromptEvalLoop -->|depends_on| Governor
   StaleIssueGCLoop -->|depends_on| HydraFlowConfig
   StaleIssueGCLoop -->|depends_on| BaseBackgroundLoop
   StaleIssueGCLoop -->|depends_on| PRPort
   StaleIssueGCLoop -->|implements| BaseBackgroundLoop
+  StaleIssueGCLoop -->|depends_on| Governor
+  StateTracker -->|depends_on| Plant
+  SteeringChannel -->|depends_on| FitnessContext
+  SteeringChannel -->|depends_on| Governor
+  SteeringChannel -->|depends_on| BaseBackgroundLoop
+  SteeringChannel -->|depends_on| LoopFitness
+  SteeringChannel -->|depends_on| SteeringState
+  SteeringChannel -->|implements| BaseBackgroundLoop
   TermPrunerLoop -->|depends_on| HydraFlowConfig
   TermPrunerLoop -->|depends_on| BaseBackgroundLoop
   TermPrunerLoop -->|depends_on| BotPRPort
   TermPrunerLoop -->|implements| BaseBackgroundLoop
+  TermPrunerLoop -->|depends_on| Governor
+  TribalWikiStore -->|depends_on| RepoWikiStore
   WikiRotDetectorLoop -->|depends_on| BaseBackgroundLoop
   WikiRotDetectorLoop -->|depends_on| RepoWikiStore
   WikiRotDetectorLoop -->|depends_on| HydraFlowConfig
   WikiRotDetectorLoop -->|depends_on| StateTracker
   WikiRotDetectorLoop -->|implements| BaseBackgroundLoop
+  WikiRotDetectorLoop -->|depends_on| Governor
   WorkspaceGCLoop -->|depends_on| HydraFlowConfig
   WorkspaceGCLoop -->|depends_on| BaseBackgroundLoop
   WorkspaceGCLoop -->|depends_on| StateTracker
   WorkspaceGCLoop -->|depends_on| WorkspacePort
   WorkspaceGCLoop -->|depends_on| PRPort
   WorkspaceGCLoop -->|implements| BaseBackgroundLoop
+  WorkspaceGCLoop -->|depends_on| Credentials
+  WorkspaceGCLoop -->|depends_on| Governor
   WorkspacePort -->|depends_on| Task
 ```

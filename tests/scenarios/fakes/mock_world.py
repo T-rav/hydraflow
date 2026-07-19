@@ -440,6 +440,12 @@ class MockWorld:
             "plan": self._llm.script_plan,
             "implement": self._llm.script_implement,
             "review": self._llm.script_review,
+            # "decomposition" isn't a pipeline-phase runner: it queues the raw
+            # council transcripts the DecompositionCouncil seam returns (ADR-0105).
+            # Included here so a sandbox scenario's seed.scripts["decomposition"]
+            # loads in-process too — matching how sandbox_main dispatches
+            # seed.scripts generically via getattr(fake_llm, f"script_{phase}").
+            "decomposition": self._llm.script_decomposition,
         }
         # fix_ci uses a single-result scripting API (the latest call wins);
         # convert per-call here so scenarios can describe it uniformly.
@@ -728,6 +734,14 @@ class MockWorld:
             sleep_fn=_counting_sleep,
         )
         config = bg.config
+        # The caller explicitly asked to run these loops, so enable any
+        # deploy-time kill-switch they gate on (e.g. diagnostic_loop_enabled
+        # defaults OFF, #9895). Otherwise _do_work short-circuits to
+        # config_disabled and the scenario can't exercise the loop.
+        for _name in loops:
+            _flag = f"{_name}_loop_enabled"
+            if hasattr(config, _flag):
+                object.__setattr__(config, _flag, True)
 
         # Persistent ports dict so catalog-allocated mocks survive across calls
         if not hasattr(self, "_loop_ports"):

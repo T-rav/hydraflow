@@ -112,6 +112,36 @@ class TestPatchConfigMaxTriagers:
         assert config.max_triagers == 3
 
 
+class TestMergePolicyKillSwitch:
+    """The CH-3 gate kill-switch must be operable at runtime (review
+    finding): with a corrupt policy failing every merge seam closed, the
+    System tab is the instant global-relief lever — no restart."""
+
+    @pytest.mark.asyncio
+    async def test_patches_merge_policy_enabled(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        patch_config = find_endpoint(router, "/api/control/config")
+        assert patch_config is not None
+        assert config.merge_policy_enabled is True
+        response = await patch_config({"merge_policy_enabled": False})
+        data = json.loads(response.body)
+        assert data["updated"]["merge_policy_enabled"] is False
+        assert config.merge_policy_enabled is False
+
+    @pytest.mark.asyncio
+    async def test_control_status_includes_merge_policy_enabled(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        get_control_status = find_endpoint(router, "/api/control/status")
+        assert get_control_status is not None
+        response = await get_control_status()
+        data = json.loads(response.body)
+        assert data["config"]["merge_policy_enabled"] is True
+
+
 class TestPatchConfigStagingPromotion:
     """PATCH /api/control/config accepts the staging/RC promotion fields."""
 

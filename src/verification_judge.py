@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from agent_cli import build_agent_command
@@ -56,10 +57,16 @@ class VerificationJudge:
         issue_number: int,
         pr_number: int,
         diff: str,
+        *,
+        issue_labels: Sequence[str] = (),
     ) -> JudgeVerdict | None:
         """Run the verification judge for the given issue.
 
         Returns ``None`` if no criteria file exists (graceful skip).
+
+        *issue_labels* feeds the CH-6 gate's upward-only ``data-class:``
+        label elevation for every judge spawn (the prompts embed the PR
+        diff); callers with the issue in scope pass its labels.
         """
         criteria_text = self._read_criteria_file(issue_number)
         if criteria_text is None:
@@ -77,7 +84,7 @@ class VerificationJudge:
 
         criteria_list, instructions_text = self._parse_criteria(criteria_text)
         precheck_context = await self._run_precheck_context(
-            issue_number, criteria_text, diff
+            issue_number, criteria_text, diff, issue_labels=issue_labels
         )
 
         verdict = JudgeVerdict(
@@ -96,7 +103,9 @@ class VerificationJudge:
                     issue_number,
                     precheck_context=precheck_context,
                 )
-                transcript = await self._execute(cmd, code_prompt, issue_number)
+                transcript = await self._execute(
+                    cmd, code_prompt, issue_number, issue_labels=issue_labels
+                )
                 verdict.criteria_results = self._parse_criteria_results(transcript)
                 verdict.all_criteria_pass = (
                     all(
@@ -121,7 +130,9 @@ class VerificationJudge:
                     issue_number,
                     precheck_context=precheck_context,
                 )
-                transcript = await self._execute(cmd, instr_prompt, issue_number)
+                transcript = await self._execute(
+                    cmd, instr_prompt, issue_number, issue_labels=issue_labels
+                )
                 quality, feedback = self._parse_instructions_quality(transcript)
                 verdict.instructions_quality = quality
                 verdict.instructions_feedback = feedback
@@ -132,7 +143,7 @@ class VerificationJudge:
                         instructions_text, feedback, issue_number
                     )
                     refine_transcript = await self._execute(
-                        cmd, refine_prompt, issue_number
+                        cmd, refine_prompt, issue_number, issue_labels=issue_labels
                     )
                     refined = self._extract_refined_instructions(refine_transcript)
                     if refined:
@@ -147,7 +158,7 @@ class VerificationJudge:
                         precheck_context=precheck_context,
                     )
                     revalidate_transcript = await self._execute(
-                        cmd, revalidate_prompt, issue_number
+                        cmd, revalidate_prompt, issue_number, issue_labels=issue_labels
                     )
                     quality2, feedback2 = self._parse_instructions_quality(
                         revalidate_transcript
@@ -369,12 +380,17 @@ Diff excerpt:
 """
 
     async def _run_precheck_context(
-        self, issue_number: int, criteria_text: str, diff: str
+        self,
+        issue_number: int,
+        criteria_text: str,
+        diff: str,
+        *,
+        issue_labels: Sequence[str] = (),
     ) -> str:
         prompt = self._build_precheck_prompt(issue_number, criteria_text, diff)
 
         async def execute(cmd: list[str], p: str) -> str:
-            return await self._execute(cmd, p, issue_number)
+            return await self._execute(cmd, p, issue_number, issue_labels=issue_labels)
 
         return await run_precheck_context(
             config=self._config,
@@ -550,7 +566,14 @@ Diff excerpt:
         except OSError:
             logger.warning("Could not update criteria file %s", path, exc_info=True)
 
-    async def _execute(self, cmd: list[str], prompt: str, issue_number: int) -> str:
+    async def _execute(
+        self,
+        cmd: list[str],
+        prompt: str,
+        issue_number: int,
+        *,
+        issue_labels: Sequence[str] = (),
+    ) -> str:
         """Run the claude judge process."""
         from runner_utils import stream_claude_with_telemetry  # noqa: PLC0415
 
@@ -569,6 +592,7 @@ Diff excerpt:
                 gh_token=self._credentials.gh_token,
             ),
             issue_number=issue_number,
+            issue_labels=issue_labels,
         )
 
     def terminate(self) -> None:

@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
-from term_proposer_loop import BotPRPort, _render_term_file_str
+from loop_fitness import FitnessContext, LoopFitness
+from term_proposer_loop import (
+    BotPRPort,
+    _render_term_file_str,
+    skip_if_family_pr_open,
+)
 from ubiquitous_language import (
     Term,
     TermRel,
@@ -55,6 +60,16 @@ class EdgeProposerLoop(BaseBackgroundLoop):
 
     def _get_default_interval(self) -> int:
         return self._config.edge_proposer_interval
+
+    def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
+        from loop_fitness import proposal_acceptance_fitness  # noqa: PLC0415
+
+        return proposal_acceptance_fitness(
+            ctx,
+            worker_name=self._worker_name,
+            label=EDGE_PROPOSER_PR_LABEL,
+            min_samples=self._config.fitness_min_samples,
+        )
 
     async def _do_work(self) -> dict[str, Any] | None:
         # Canonical operator UI kill-switch (ADR-0049).
@@ -165,6 +180,15 @@ class EdgeProposerLoop(BaseBackgroundLoop):
                 edge_summary.append(
                     f"- `{term.name}` --[{rel.kind.value}]--> `{target_name}`"
                 )
+
+        skipped = await skip_if_family_pr_open(self._pr_port, worker_name=_WORKER_NAME)
+        if skipped is not None:
+            return {
+                **skipped,
+                "checked": len(terms),
+                "edges": sum(len(v) for v in proposals.values()),
+                "terms_touched": len(proposals),
+            }
 
         run_id = secrets.token_hex(4)
         title = (

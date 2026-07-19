@@ -10,8 +10,11 @@ graph LR
     src_arch["src.arch"]
     src_arch_extractors["src.arch.extractors"]
     src_arch_generators["src.arch.generators"]
+    src_auto_tighten["src.auto_tighten"]
     src_contracts["src.contracts"]
     src_dashboard_routes["src.dashboard_routes"]
+    src_disturbance["src.disturbance"]
+    src_disturbance_detectors["src.disturbance.detectors"]
     src_mockworld["src.mockworld"]
     src_mockworld_fakes["src.mockworld.fakes"]
     src_observability["src.observability"]
@@ -24,19 +27,24 @@ graph LR
     src_state["src.state"]
     src_telemetry["src.telemetry"]
     src -- "4" --> src_arch
+    src -- "14" --> src_auto_tighten
     src -- "26" --> src_contracts
     src -- "4" --> src_dashboard_routes
+    src -- "5" --> src_disturbance
     src -- "1" --> src_observability
-    src -- "12" --> src_preflight
+    src -- "13" --> src_preflight
     src -- "1" --> src_review_phase
-    src -- "50" --> src_state
+    src -- "54" --> src_state
     src -- "7" --> src_telemetry
+    src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
-    src_arch_generators -- "11" --> src_arch
+    src_arch_generators -- "14" --> src_arch
     src_dashboard_routes -- "3" --> src_onboarding
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "2" --> src_state
-    src_mockworld_fakes -- "30" --> src_mockworld
+    src_disturbance_detectors -- "1" --> src_arch
+    src_disturbance_detectors -- "5" --> src_disturbance
+    src_mockworld_fakes -- "31" --> src_mockworld
     src_mockworld_fakes -- "1" --> src_telemetry
     src_preflight -- "1" --> src_runners
     src_preflight -- "1" --> src_sentry

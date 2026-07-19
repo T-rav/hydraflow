@@ -1,0 +1,18 @@
+{
+  "name": "novel_xdist_deadlock",
+  "language": "python",
+  "transcript": "assistant: The full `make quality` run hangs, but only under `pytest -n auto`; single-process runs pass. Bisected to `tests/test_dedup_store.py`, whose module-scoped fixture opens the same on-disk dedup JSON under a `filelock.FileLock(...)` held for the whole module. With xdist, two workers get assigned test items from that module and both block acquiring the one shared lock — classic cross-worker deadlock, so the session never finishes.\nassistant: Fix: make the lock path worker-local by appending `PYTEST_XDIST_WORKER` to the filename, so each worker locks its own file. Reran `pytest -n auto tests/test_dedup_store.py` — passes in 1.4s, no hang.\ntool_result: pytest -n auto tests/test_dedup_store.py -q -> 6 passed in 1.42s\nassistant: Root cause — parallel xdist workers deadlocked contending for a single shared file lock. General fix: scope shared file locks per xdist worker (or serialize the offending tests to one worker).",
+  "known_patterns": [
+    {
+      "pattern_name": "truthy_asyncmock",
+      "description": "A bare AsyncMock is always truthy, so an `if mock:` guard never breaks its loop and the cycle spins forever."
+    },
+    {
+      "pattern_name": "unbounded_communicate",
+      "description": "An unbounded `await proc.communicate()` on a long-lived subprocess blocks the async cycle until the watchdog fires."
+    }
+  ],
+  "expect_novel": true,
+  "must_mention": ["xdist", "lock"],
+  "notes": "Root cause = pytest-xdist workers deadlocking on a shared file lock; unrelated to the mock/subprocess patterns known, so novel is expected. A faithful pattern names xdist and the shared lock."
+}

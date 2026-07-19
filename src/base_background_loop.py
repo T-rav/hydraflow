@@ -18,6 +18,7 @@ from typing import Any, ClassVar
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
+from loop_fitness import Confidence, FitnessContext, FitnessKind, LoopFitness
 from models import (
     BackgroundWorkerStatusPayload,
     ErrorPayload,
@@ -123,6 +124,14 @@ class BaseBackgroundLoop(abc.ABC):
         self._timeout_cb = deps.timeout_cb
         self._run_on_startup = run_on_startup
         self._trigger_event = asyncio.Event()
+        # When the current run() task started. Heartbeats only refresh at
+        # cycle COMPLETION, so after a credit-pause resume / orchestrator
+        # restart a freshly created task carries a stale persisted heartbeat;
+        # the stall sweep uses max(heartbeat, run_started_at) so it never
+        # false-restarts a healthy in-flight first cycle. Every task-creation
+        # path (startup, crash restart, credit resume, restart verb) funnels
+        # through run(), making this the single stamp point.
+        self._run_started_at: datetime | None = None
 
     @property
     def name(self) -> str:
@@ -140,6 +149,25 @@ class BaseBackgroundLoop(abc.ABC):
     @abc.abstractmethod
     def _get_default_interval(self) -> int:
         """Return the config-driven default interval in seconds."""
+
+    def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
+        """Return this loop's fitness for the window in ``ctx``.
+
+        Default is HOUSEKEEPING (no normalized score). Loops with a meaningful
+        objective override this to return SCORED fitness. Must be PURE over
+        ``ctx`` — no network, no clock, no mutable ``self`` state — so the same
+        function can score replayed history for the deferred optimizer.
+        ``tests/test_loop_fitness_completeness.py`` forces every new loop to
+        override this.
+        """
+        return LoopFitness(
+            worker_name=self._worker_name,
+            kind=FitnessKind.HOUSEKEEPING,
+            components={},
+            sample_count=0,
+            confidence=Confidence.INSUFFICIENT_DATA,
+            timestamp=ctx.window_end,
+        )
 
     def trigger(self) -> None:
         """Request an immediate execution of the next work cycle.
@@ -343,6 +371,7 @@ class BaseBackgroundLoop(abc.ABC):
 
     async def run(self) -> None:
         """Run the background worker loop until the stop event is set."""
+        self._run_started_at = datetime.now(UTC)
         # Run immediately if configured, or if cycles were missed during downtime
         if self._run_on_startup or self._should_run_catchup():
             try:

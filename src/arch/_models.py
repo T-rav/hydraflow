@@ -104,3 +104,21 @@ class CommitInfo(BaseModel):
     iso_date: str  # YYYY-MM-DD
     subject: str
     pr_number: int | None = None  # parsed from "(#NNNN)" suffix if present
+
+
+class TraceCommitInfo(BaseModel):
+    """One PR-squash-merge commit scanned for requirement traceability (CH-5).
+
+    Population unit for the traceability matrix: commits whose subject
+    carries the ``(#NNNN)`` squash-merge suffix. ``req_ids`` come from
+    line-initial ``Req-ID:`` lines in the message body — bullet prefixes
+    from GitHub squash mangling are tolerated, mid-sentence prose mentions
+    are not (they would mint bogus requirement IDs).
+    """
+
+    sha: str
+    subject: str
+    pr_number: int
+    req_ids: list[str] = Field(default_factory=list)
+    issue_refs: list[int] = Field(default_factory=list)  # from Closes/Fixes #N
+    approvals: list[str] = Field(default_factory=list)  # Reviewed-by/Approved-by

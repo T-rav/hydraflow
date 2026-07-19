@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -71,15 +72,68 @@ _ADR_PAREN_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*\(([^()]*(?:\([^()]*\)[^()]*)*
 # titles that contain dots (e.g. "Pi.dev" in ADR-0004's title).
 _ADR_EMDASH_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*—\s*(.+?)(?:\.\s|,|;|$)")
 
-# Matches source file + symbol citations like `src/config.py:_resolve_paths` or
-# `src/config.py:HydraFlowConfig`.  Group 1 = file path, Group 2 = symbol name.
-# Symbol must start with a letter or underscore (not a digit) to exclude line numbers.
-_SOURCE_SYMBOL_RE = re.compile(r"`(src/[^`:\s]+\.py):([A-Za-z_]\w*)`")
+# Matches source file + symbol citations like `src/config.py:_resolve_paths`,
+# `src/config.py:HydraFlowConfig`, or dotted method-level citations such as
+# `src/config.py:HydraFlowConfig.base_branch`.
+# Group 1 = file path, Group 2 = (possibly dotted) symbol name.
+# Symbol must start with a letter or underscore (not a digit) to exclude line
+# numbers.  The dotted extension is a strict superset: a single-segment symbol
+# still matches byte-for-byte identically.
+_SOURCE_SYMBOL_RE = re.compile(
+    r"`(src/[^`:\s]+\.py):([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)`"
+)
 
 # Matches inline line-number citations in the `src/file.py:DIGITS` format.
 # These are a variant of volatile line citations that embed the number in the
 # symbol position of a source reference.  Group 1 = file path, Group 2 = digits.
 _INLINE_LINE_NUM_RE = re.compile(r"`(src/[^`:\s]+\.py):(\d[\d,]*)`")
+
+# AST node types that introduce a named definition we can resolve a dotted
+# source citation against (e.g. a class, a function, or an async function).
+_NAMED_DEF_NODES = (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _find_named_def(
+    body: list[ast.stmt], name: str
+) -> ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef | None:
+    """Return the class/function/async-function named *name* directly in *body*.
+
+    Only DIRECT members of *body* are considered — this deliberately does not
+    recurse, so each segment of a dotted citation must be a direct child of the
+    previous one.  Returns None when no matching definition is present.
+    """
+    for node in body:
+        if isinstance(node, _NAMED_DEF_NODES) and node.name == name:
+            return node
+    return None
+
+
+def _resolve_dotted_symbol(source: str, dotted: str) -> bool | None:
+    """Resolve a dotted symbol path (e.g. ``Class.method``) against *source*.
+
+    Walks the AST segment-by-segment, confirming each segment is a class or
+    (async) function defined directly inside the previous segment's body.
+
+    Returns:
+        True  — every segment resolved (the symbol exists).
+        False — the source parsed but a segment could not be resolved
+                (a substantiated phantom — safe to flag).
+        None  — the source could not be parsed; the citation cannot be
+                substantiated either way, so the caller must skip it and
+                never flag it.
+    """
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+
+    body: list[ast.stmt] = tree.body
+    for segment in dotted.split("."):
+        node = _find_named_def(body, segment)
+        if node is None:
+            return False
+        body = node.body
+    return True
 
 
 class ADRPreValidator:
@@ -544,6 +598,26 @@ class ADRPreValidator:
             source = file_cache[file_path]
             if source is None:
                 # File doesn't exist or is unreadable — skip silently
+                continue
+
+            if "." in symbol:
+                # Dotted method-level citation (e.g. `Class.method`): resolve it
+                # structurally via the AST, confirming each segment is a direct
+                # member of the previous.  None means the source could not be
+                # parsed — never flag what can't be substantiated.
+                resolved = _resolve_dotted_symbol(source, symbol)
+                if resolved is False:
+                    result.issues.append(
+                        ADRValidationIssue(
+                            code="phantom_source_symbol",
+                            message=(
+                                f"`{file_path}:{symbol}` is cited but "
+                                f"`{symbol}` does not resolve to a class or "
+                                f"function in `{file_path}`"
+                            ),
+                            fixable=False,
+                        )
+                    )
                 continue
 
             # Match both top-level and indented definitions (class methods, async defs)

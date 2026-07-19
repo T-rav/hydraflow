@@ -1101,6 +1101,7 @@ class TestLabelValidation:
             "dup_label",
             "epic_label",
             "epic_child_label",
+            "auto_decomposed_child_label",
             "find_label",
             "planner_label",
             "parked_label",

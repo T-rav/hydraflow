@@ -15,6 +15,7 @@ def test_default_seed_is_empty() -> None:
     assert seed.scripts == {}
     assert seed.cycles_to_run == 4
     assert seed.loops_enabled is None
+    assert seed.plan_hold_seconds == 0.0
 
 
 def test_seed_round_trips_through_json() -> None:
@@ -37,6 +38,16 @@ def test_seed_json_is_valid_json() -> None:
     raw = seed.to_json()
     parsed = json.loads(raw)
     assert parsed["issues"] == [{"number": 1}]
+
+
+def test_seed_round_trips_plan_hold_seconds_through_json() -> None:
+    """Back-compat default (0.0) round-trips; a scenario-set value survives too."""
+    original = MockWorldSeed(plan_hold_seconds=3.0)
+
+    parsed = MockWorldSeed.from_json(original.to_json())
+
+    assert parsed == original
+    assert parsed.plan_hold_seconds == 3.0
 
 
 def test_default_seed_has_empty_advisor_scripts() -> None:

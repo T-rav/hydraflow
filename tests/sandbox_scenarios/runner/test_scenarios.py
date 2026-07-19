@@ -13,8 +13,15 @@ import pytest
 from tests.sandbox_scenarios.runner.loader import load_all_scenarios
 
 # Filter out s00_smoke — that's parity-only (no assert_outcome).
-_SCENARIOS = [s for s in load_all_scenarios() if hasattr(s, "assert_outcome")]
+# An explicit SCENARIO_NAME request (the ``run <name>`` CLI path) overrides
+# quarantine: a human debugging a quarantined scenario must still be able to
+# run it one-off; only COLLECTIVE runs honor the marker.
 _ONLY = os.environ.get("SCENARIO_NAME")
+_SCENARIOS = [
+    s
+    for s in load_all_scenarios(include_quarantined=bool(_ONLY))
+    if hasattr(s, "assert_outcome")
+]
 if _ONLY:
     _SCENARIOS = [s for s in _SCENARIOS if s.NAME == _ONLY]
 

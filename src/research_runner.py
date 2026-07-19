@@ -62,6 +62,7 @@ class ResearchRunner(BaseRunner):
                 self._config.repo_root,
                 {"issue": task.id, "source": "researcher"},
                 on_output=_check_complete,
+                issue_labels=task.tags,
             )
             result.transcript = transcript
 

@@ -1,0 +1,18 @@
+{
+  "name": "dup_truthy_asyncmock",
+  "language": "python",
+  "transcript": "assistant: `tests/test_wait_for_ci.py::test_polls_until_green` never returns under CI. The poll loop is `while not check_complete(): await poll_once()`, and `check_complete` is a bare `AsyncMock()`. Since every AsyncMock is truthy, `not check_complete()` is always False, so the loop exits its condition check but `poll_once()` keeps being awaited — actually the guard never becomes False and the loop spins forever.\nassistant: Fix: `check_complete = AsyncMock(side_effect=[False, False, True])` so the poll terminates, and the production code now reads `status.complete` explicitly rather than the mock's truthiness. Passes instantly.\ntool_result: pytest tests/test_wait_for_ci.py::test_polls_until_green -q -> 1 passed in 0.08s\nassistant: Same truthy-AsyncMock trap as before — a bare AsyncMock used as a boolean guard is always truthy, so the loop never terminates. Standard fix: give the mock a concrete side effect and assert on a real attribute.",
+  "known_patterns": [
+    {
+      "pattern_name": "truthy_asyncmock",
+      "description": "A bare AsyncMock used as a boolean guard is always truthy, so the loop condition never goes falsy and the cycle spins forever; give the mock a concrete side_effect and assert on a real attribute."
+    },
+    {
+      "pattern_name": "xdist_shared_lock_deadlock",
+      "description": "Parallel pytest-xdist workers deadlock contending for one shared file lock held across the whole session."
+    }
+  ],
+  "expect_novel": false,
+  "must_mention": [],
+  "notes": "Root cause = a bare AsyncMock is always truthy — already captured by the known `truthy_asyncmock` pattern, so the model should emit NO_NEW_PATTERN and _reflect_on_fix returns None."
+}

@@ -56,6 +56,16 @@ class IssueStateMixin:
             self._data.active_workspaces.pop(key, None)
         self.save()
 
+    def get_issue_status(self, issue_number: int) -> str:
+        """Return the last status :meth:`mark_issue` recorded for *issue_number*.
+
+        Empty string when nothing has been recorded. Used by the
+        decompose-to-converge terminal (ADR-0105) for idempotency: a
+        ``"decomposed"`` status means ``IssueDecomposer.create_epic_from_result``
+        already ran for this issue, so a retry must not create a second epic.
+        """
+        return self._data.processed_issues.get(self._key(issue_number), "")
+
     # --- PR tracking ---
 
     def mark_pr(self, pr_number: int, status: str) -> None:

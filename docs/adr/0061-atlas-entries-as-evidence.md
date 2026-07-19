@@ -12,6 +12,10 @@ Accepted
 
 `tests/test_atlas_routes.py`, `src/ui/src/components/atlas/__tests__/`
 
+**Enforcement:** enforced
+
+**Enforced by:** pytest:tests/test_atlas_routes.py
+
 ## Context
 
 [ADR-0090](0090-atlas-knowledge-graph-dashboard.md) shipped the Atlas dashboard with a unified `Articles` browser that lists ADRs and wiki entries side-by-side. [ADR-0060](0060-atlas-graph-view-and-provenance.md) added ADR nodes to the graph with `relates_to` edges to terms.

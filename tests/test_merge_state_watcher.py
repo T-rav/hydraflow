@@ -228,8 +228,16 @@ async def test_loop_delegates_to_watcher() -> None:
     pr.update_pr_branch = AsyncMock(return_value=True)
     pr.get_pr_mergeable = AsyncMock(return_value=True)
     pr.add_pr_labels = AsyncMock()
+    # CH-2 (#9730): stub the approval reconciler — the real one talks to gh
+    # at the raw subprocess boundary.
+    reconciler = AsyncMock()
+    reconciler.reconcile = AsyncMock(return_value={"merged_seen": 0, "recorded": 0})
 
-    loop = MergeStateWatcherLoop(config=cfg, prs=pr, deps=deps)
+    loop = MergeStateWatcherLoop(
+        config=cfg, prs=pr, deps=deps, approval_reconciler=reconciler
+    )
     stats = await loop._do_work()
     assert stats["checked"] == 1
     assert stats["rebased"] == 1
+    assert stats["approvals"] == {"merged_seen": 0, "recorded": 0}
+    reconciler.reconcile.assert_awaited_once()

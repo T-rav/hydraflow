@@ -33,6 +33,7 @@ class TermKind(StrEnum):
     POLICY = "policy"
     LOOP = "loop"
     RUNNER = "runner"
+    CONTROL_ROLE = "control_role"
 
 
 class BoundedContext(StrEnum):

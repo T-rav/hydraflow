@@ -19,7 +19,7 @@ asks `Apply? [y/N]`. Use `--apply` to skip the prompt (for CI).
 The script:
 1. Refuses to run on a dirty working tree.
 2. Renders three new files from scripts/scaffold_templates/.
-3. Patches the ten wiring sites (models.py, state/__init__.py, config.py,
+3. Patches the thirteen wiring sites (models.py, state/__init__.py, config.py,
    service_registry.py, orchestrator.py, ui constants, _common.py,
    scenario catalog, functional_areas.yml, tests/helpers.py). The spec's
    "five-checkpoint" terminology refers to the original wiring categories;
@@ -197,7 +197,7 @@ def _compute_patches(names: dict[str, str], description: str) -> list[tuple[Path
             f"    {snake}_loop: {pascal}Loop\n",
         )
     construction = (
-        f"    {snake}_loop = {pascal}Loop(  # noqa: F841\n"
+        f"    {snake}_loop = {pascal}Loop(\n"
         f"        config=config,\n"
         f"        state=state,\n"
         f"        deps=loop_deps,\n"
@@ -278,6 +278,29 @@ def _compute_patches(names: dict[str, str], description: str) -> list[tuple[Path
         )
     patches.append((common_path, common_text))
 
+    # 7b. src/dashboard_routes/_control_routes.py — _bg_worker_defs.
+    # Required by tests/test_loop_wiring_completeness.py
+    # (TestBgWorkerDefsParity) — caught missing on the first scaffold
+    # dogfood (detector_calibration).
+    ctrl_path = REPO_ROOT / "src/dashboard_routes/_control_routes.py"
+    ctrl_text = ctrl_path.read_text()
+    # Anchor after a stable caretaker entry, NOT the list head — the
+    # first seven entries are pipeline workers pinned by
+    # tests/test_bg_worker_status.py (detector_calibration dogfood finding).
+    defs_marker = '        "wiki_rot_detector",\n'
+    if defs_marker in ctrl_text:
+        entry = (
+            f"    (\n"
+            f'        "{snake}",\n'
+            f'        "{name_title}",\n'
+            f'        "{description}",\n'
+            f"    ),\n"
+        )
+        anchor_end = ctrl_text.index(defs_marker)
+        anchor_end = ctrl_text.index("),\n", anchor_end) + len("),\n")
+        ctrl_text = ctrl_text[:anchor_end] + entry + ctrl_text[anchor_end:]
+    patches.append((ctrl_path, ctrl_text))
+
     # 8. tests/scenarios/catalog/loop_registrations.py — _build_NAME + _BUILDERS.
     cat_path = REPO_ROOT / "tests/scenarios/catalog/loop_registrations.py"
     cat_text = cat_path.read_text()
@@ -302,6 +325,34 @@ def _compute_patches(names: dict[str, str], description: str) -> list[tuple[Path
             f'    "{snake}": _build_{snake},',
         )
     patches.append((cat_path, cat_text))
+
+    # 8b. tests/orchestrator_integration_utils.py — fake ServiceRegistry attr.
+    # A new loop missing here AttributeErrors every orchestrator integration
+    # test (detector_calibration dogfood finding).
+    fake_svc_path = REPO_ROOT / "tests/orchestrator_integration_utils.py"
+    fake_svc_text = fake_svc_path.read_text()
+    fake_marker = "    services.wiki_rot_detector_loop = FakeBackgroundLoop()\n"
+    if fake_marker in fake_svc_text:
+        fake_svc_text = fake_svc_text.replace(
+            fake_marker,
+            fake_marker + f"    services.{snake}_loop = FakeBackgroundLoop()\n",
+            1,
+        )
+    patches.append((fake_svc_path, fake_svc_text))
+
+    # 8c. tests/test_state_tracking.py — StateData keys pin. The scaffold
+    # adds {snake}_attempts to StateData (site 1), so the pin must learn it
+    # (detector_calibration dogfood finding).
+    keys_pin_path = REPO_ROOT / "tests/test_state_tracking.py"
+    keys_pin_text = keys_pin_path.read_text()
+    pin_marker = '"cost_budget_killed_workers",\n'
+    if pin_marker in keys_pin_text:
+        keys_pin_text = keys_pin_text.replace(
+            pin_marker,
+            pin_marker + f'            "{snake}_attempts",\n',
+            1,
+        )
+    patches.append((keys_pin_path, keys_pin_text))
 
     # 9. docs/arch/functional_areas.yml — append to the autonomy area's loops list.
     fa_path = REPO_ROOT / "docs/arch/functional_areas.yml"

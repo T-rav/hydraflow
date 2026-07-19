@@ -1,8 +1,9 @@
 # ADR-0023: Require Instantiation Verification for Test-Local Classes
 
 **Status:** Accepted
-**Enforced by:** (process)
 **Date:** 2026-03-08
+**Enforcement:** manual
+**Enforced by:** Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").
 
 ## Context
 

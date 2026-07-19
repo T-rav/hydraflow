@@ -3,7 +3,14 @@
 **Status:** Accepted
 **Accepted on:** 2026-05-12 — promoted after slice #5 audit confirmed live production usage.
 **Date:** 2026-04-04
-**Enforced by:** tests/test_discover_phase.py, tests/test_shape_phase.py, tests/test_discover_runner.py, tests/test_shape_runner.py, tests/architecture/test_functional_area_coverage.py
+**Enforcement:** enforced
+
+**Enforced by:**
+pytest:tests/test_discover_phase.py
+pytest:tests/test_shape_phase.py
+pytest:tests/test_discover_runner.py
+pytest:tests/test_shape_runner.py
+pytest:tests/architecture/test_functional_area_coverage.py
 
 ## Context
 
@@ -194,7 +201,7 @@ as all other pipeline labels.
   engineering)
 - `src/ui/src/constants.js:PRODUCT_TRACK_KEYS` — product track stage set
 - `src/plan_phase.py:_is_product_track_issue` — decomposition enforcement
-- `src/review_phase.py:_is_product_track_pr` — spec-match verification
+- `src/review_phase/_phase.py:_is_product_track_pr` — spec-match verification
 - `src/models.py:TriageResult` — clarity_score and needs_discovery fields
 - `src/models.py:DiscoverResult` — research brief output model
 - `src/models.py:ShapeConversation` — conversation state model

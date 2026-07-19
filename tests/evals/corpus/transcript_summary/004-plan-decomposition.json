@@ -1,0 +1,6 @@
+{
+  "name": "plan-decomposition",
+  "transcript": "Triaged issue #700: 'add multi-tenant support to the dashboard'. Too large for one PR — decomposing.\nBroke it into three subtasks:\n- #701 schema migration: add tenant_id to the users and projects tables.\n- #702 API scoping: filter every query by the caller's tenant_id.\n- #703 UI: a tenant switcher in the top bar.\nOrdered them 701 -> 702 -> 703 since the API and UI depend on the schema.\nFiled the three child issues and labeled the epic hydraflow-decomposed.",
+  "must_include": ["700", "multi-tenant", "schema migration", "API", "three"],
+  "notes": "Summary must capture the epic, the theme (multi-tenant), the decomposition into 3 ordered subtasks, and the key ones (schema/API/UI)."
+}

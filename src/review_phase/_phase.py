@@ -18,9 +18,10 @@ import time
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    from convergence_gate import DetResult, GateResult
     from issue_cache import IssueCache
     from ports import IssueStorePort, PRPort, ReviewInsightStorePort, WorkspacePort
     from precondition_gate import PreconditionGate
@@ -71,6 +72,7 @@ from adr_utils import (
 from baseline_policy import BaselinePolicy
 from comment_formatter import SelfReviewError
 from config import HydraFlowConfig
+from convergence_recording import _normalize_text
 from events import EventBus, EventType, HydraFlowEvent
 from harness_insights import FailureCategory, HarnessInsightStore
 from merge_conflict_resolver import MergeConflictResolver
@@ -131,12 +133,8 @@ from ._common import (
     ReviewGuardContext,
     _AdvisorRole,
     _detect_self_modification_context,
-    _emit_advisor_loop_metric,
     _is_meaningful_verdict,
     _run_fallback_ingest_review,
-    _veto_exhausted_total,
-    _veto_recovered_total,
-    _veto_retries_total,
 )
 
 logger = logging.getLogger("hydraflow.review_phase")
@@ -214,9 +212,8 @@ class ReviewPhase:
 
             self._visual_validator = VisualValidator(config)
 
-        # Per-PR advisor retry counter — incremented on VETO. Bounded by the
-        # blast-radius-stratified post-verify retry budget (R-2; see
-        # review_advisor.post_verify_retry_budget).
+        # Per-PR advisor retry counter — incremented on VETO. Used by
+        # PRContext to pass prior_fix_attempts to the composite trigger.
         self._advisor_attempt: dict[int, int] = {}
         # Per-PR list of advisor PostVerifyResults collected this run. The
         # transcript hand-back to the executor (on VETO) is rendered from
@@ -250,7 +247,8 @@ class ReviewPhase:
         ``.parent`` is the FakeLLM. We extract the issue number from the
         prompt (emitted by ``PostVerifyAdvisor._build_prompt`` when
         ``PostVerifyInput.issue_number`` is set) and pop the scripted advisor
-        result keyed by ``(issue_number, "post_verify")``.
+        result keyed by ``(issue_number, f"post_verify:{lens}")`` (the
+        lens-tagged role, e.g. ``"post_verify:correctness"``).
 
         Dispatch is duck-typed on ``hasattr(self._reviewers, "_execute")``:
         production ``ReviewRunner`` provides it via ``BaseRunner``; the
@@ -1100,12 +1098,11 @@ class ReviewPhase:
         try:
             await self._publish_review_status(pr, idx, "start")
 
-            # Reset per-PR pre-flight plan on every review entry. Like
-            # ``_advisor_attempt`` (cleared inside ``_run_post_verify_advisor``),
-            # the plan is scoped to a single review cycle and must not leak
-            # across reviews of the same PR — reusing a stale plan from the
-            # prior cycle would feed an out-of-date rubric to both the
-            # executor's prompt and the post-verify advisor.
+            # Reset per-PR pre-flight plan on every review entry. The plan is
+            # scoped to a single review cycle and must not leak across reviews
+            # of the same PR — reusing a stale plan from the prior cycle would
+            # feed an out-of-date rubric to both the executor's prompt and the
+            # post-verify advisor.
             self._advisor_pre_flight_plan.pop((surface, pr.number), None)
 
             guards = await self._run_initial_guards(idx, pr, issue_map)
@@ -1252,7 +1249,7 @@ class ReviewPhase:
     ) -> ReviewResult:
         """Handle re-review, visual validation, verdict flow, and cleanup.
 
-        ``surface`` is forwarded to ``_run_post_verify_advisor`` so the
+        ``surface`` is forwarded to the convergence gate's lens judge so the
         post-verify advisor uses the correct surface config (T24.7).
         Defaults to ``"pr_review"`` for back-compat.
         """
@@ -1316,34 +1313,30 @@ class ReviewPhase:
                     }
                 )
 
-        # PostVerifyAdvisor — second-opinion gate on APPROVE verdicts.
-        # On VETO, the advisor hands the disagreement back to the executor
-        # for up to a blast-radius-stratified retry budget (R-2). After the
-        # retry budget is exhausted, the disagreement is escalated to HITL.
-        if result.verdict == ReviewVerdict.APPROVE and pr.number > 0:
-            result, diff = await self._run_post_verify_advisor(
-                pr=pr,
-                task=task,
-                wt_path=wt_path,
-                result=result,
-                diff=diff,
-                worker_id=worker_id,
-                code_scanning_alerts=code_scanning_alerts,
-                surface=surface,
-            )
-
+        # APPROVE-path second opinion.
+        #
+        # The approve decision routes unconditionally through the convergence
+        # HybridGate. The lens judge + outer lap budget own the retry loop.
+        # ADVANCE → merge (recording last_verdict=="ADVANCE", which flips
+        # ledger.converged to True). LOOP_BACK → re-queue to ``ready``
+        # (worktree preserved). ESCALATE → HITL (worktree destroyed).
         skip_worktree_cleanup = False
         if result.verdict == ReviewVerdict.APPROVE and pr.number > 0:
-            await self._handle_approved_merge(
+            skip_worktree_cleanup = await self._handle_approved_review_gated(
                 pr,
                 task,
+                wt_path,
                 result,
                 diff,
                 worker_id,
+                surface=surface,
                 code_scanning_alerts=code_scanning_alerts,
                 visual_decision=pre_review.visual_decision,
             )
-        elif result.verdict in (
+            await self._cleanup_worktree(pr, result, skip_worktree_cleanup)
+            return result
+
+        if result.verdict in (
             ReviewVerdict.REQUEST_CHANGES,
             ReviewVerdict.COMMENT,
         ):
@@ -1436,6 +1429,10 @@ class ReviewPhase:
             log_path=log_path,
             pr_number=pr.number,
         )
+        # Human-on-the-loop continuous steering (ADR-0099 #4): the advisor
+        # reviews the same issue as the executor, so live operator guidance
+        # should reach its prompt too.
+        human_guidance = self._state.get_human_steering(str(task.id)).guidance or ""
         try:
             plan = await advisor.run(
                 PreFlightInput(
@@ -1445,6 +1442,7 @@ class ReviewPhase:
                     related_paths=diff_stats.changed_paths,
                     prior_attempts=self._advisor_attempt.get(pr.number, 0),
                     issue_number=task.id,
+                    human_guidance=human_guidance,
                 )
             )
         except Exception as exc:
@@ -1488,6 +1486,7 @@ class ReviewPhase:
         attempt_number: int = 0,
         issue_number: int,
         log_pr_number: int | None = None,
+        lens: Literal["correctness", "security", "spec"] | None = None,
     ) -> PostVerifyResult | None:
         """Run a single post-verify advisor invocation for ``surface``.
 
@@ -1555,6 +1554,12 @@ class ReviewPhase:
             pr_number=log_key,
             authority_override=authority,
         )
+        # Human-on-the-loop continuous steering (ADR-0099 #4): the advisor
+        # reviews the same issue as the executor, so live operator guidance
+        # should reach its prompt too.
+        human_guidance = (
+            self._state.get_human_steering(str(issue_number)).guidance or ""
+        )
         try:
             return await advisor.run(
                 PostVerifyInput(
@@ -1566,6 +1571,8 @@ class ReviewPhase:
                     pre_flight_plan=pre_flight_plan,
                     attempt_number=attempt_number,
                     issue_number=issue_number,
+                    lens=lens,
+                    human_guidance=human_guidance,
                 )
             )
         except Exception as exc:
@@ -1586,185 +1593,6 @@ class ReviewPhase:
                 exc,
             )
             return None
-
-    async def _run_post_verify_advisor(
-        self,
-        *,
-        pr: PRInfo,
-        task: Task,
-        wt_path: Path,
-        result: ReviewResult,
-        diff: str,
-        worker_id: int,
-        code_scanning_alerts: list[CodeScanningAlert] | None = None,
-        surface: str = "pr_review",
-    ) -> tuple[ReviewResult, str]:
-        """Run PostVerifyAdvisor with bounded VETO retries.
-
-        On APPROVE (or when the surface/role kill-switches are off) returns
-        ``(result, diff)`` unchanged.
-
-        On VETO, hands the full advisor transcript back to ``_attempt_review_fix``
-        so the executor can address the disagreement, then re-runs the advisor.
-        Repeats up to a blast-radius-stratified retry budget (R-2;
-        ``post_verify_retry_budget``). Once the budget is exhausted,
-        escalates to HITL with the full
-        disagreement transcript and returns ``(result, diff)`` flipped to
-        REQUEST_CHANGES so the caller skips the merge branch.
-
-        ``surface`` defaults to ``"pr_review"`` for back-compat (T24.7 prep
-        for Phase 4 multi-surface wiring); other surfaces (``adr_review``,
-        ``visual_gate``, etc.) pass the surface name explicitly. The same
-        surface drives the surface-config lookup, the kill-switch check,
-        the ``PostVerifyInput.surface`` field, and the metric labels.
-
-        Function-local imports keep the dependency on ``review_advisor``
-        contained to where it's used and avoid the auto-lint hook stripping
-        an "unused" top-level import.
-        """
-        from review_advisor import (  # noqa: PLC0415
-            build_surface_config,
-            compute_blast_radius,
-            diff_stats_from_text,
-            is_advisor_enabled,
-            post_verify_retry_budget,
-        )
-
-        surface_cfg = build_surface_config(surface)
-        if not surface_cfg.post_verify_enabled or not is_advisor_enabled(
-            surface, "post_verify"
-        ):
-            return result, diff
-
-        # Reset per-PR advisor state on every entry to this function. Each
-        # call to _run_post_verify_advisor represents a fresh review cycle
-        # with its own retry budget — re-using the previous review's
-        # exhausted counter would cause review #2 to skip straight to
-        # "exhausted" without giving the executor a fresh chance. The
-        # _advisor_results queue is the input to the disagreement transcript
-        # rendered for HITL escalation, so it must be cleared too.
-        self._advisor_attempt[pr.number] = 0
-        self._advisor_results[pr.number] = []
-        attempt_number = 0
-
-        while True:
-            # Each call re-resolves the T29 self-modification authority
-            # override against the current diff (skeleton handles this),
-            # so a fix that introduces or removes a self-modifying path
-            # is picked up on the next pass.
-            pv_result = await self._run_post_verify_for_surface(
-                surface=surface,
-                diff=diff,
-                spec=task.body or None,
-                executor_verdict_summary=(result.summary or result.verdict.value),
-                pre_flight_plan=self._advisor_pre_flight_plan.get((surface, pr.number)),
-                attempt_number=attempt_number,
-                issue_number=task.id,
-                log_pr_number=pr.number,
-            )
-            if pv_result is None:
-                # Degraded path: log and fall through to the executor's
-                # verdict (fail-open; a future task may revisit per
-                # HYDRAFLOW_REVIEW_POSTVERIFY_FAIL_AS_VETO). The skeleton
-                # already re-raised credit/bug errors per
-                # docs/wiki/dark-factory.md §2.2; anything reaching here
-                # is a true degraded path or a freshly-disabled kill-switch
-                # mid-loop. Either way, defer to the executor's verdict.
-                return result, diff
-
-            self._advisor_results[pr.number].append(pv_result)
-
-            if pv_result.verdict == "APPROVE":
-                # If a prior VETO drove a retry that this APPROVE recovered
-                # from, record the recovery in metrics before returning.
-                if attempt_number > 0:
-                    _emit_advisor_loop_metric(
-                        _veto_recovered_total, {"surface": surface}
-                    )
-                return result, diff
-
-            # VETO — either retry or escalate. Refinement R-2: the retry budget
-            # is stratified by the diff's blast radius (low=1, medium=2, high=3)
-            # rather than a flat surface value, so high-blast changes earn more
-            # automated fix attempts before escalating to a human and trivial
-            # ones escalate sooner. Only the veto-authority PR-review surfaces
-            # (pr_review, pre_merge_spec_check) reach this loop; the advisory
-            # wiki_ingest surface and the one-shot visual_gate/adr_review
-            # surfaces never enter it. post_verify_retry_budget derives the
-            # advisory hard-cap (budget 0) from post_verify_authority.
-            _blast = compute_blast_radius(diff_stats_from_text(diff))
-            _retry_budget = post_verify_retry_budget(
-                _blast, surface_cfg.post_verify_authority
-            )
-            if attempt_number >= _retry_budget:
-                _emit_advisor_loop_metric(_veto_exhausted_total, {"surface": surface})
-                _emit_advisor_loop_metric(
-                    _veto_retries_total,
-                    {"surface": surface, "attempt": "exhausted"},
-                )
-                transcript = self._render_advisor_transcript(pr.number)
-                await self._escalate_to_hitl(
-                    HitlEscalation(
-                        issue_number=task.id,
-                        pr_number=pr.number,
-                        cause=(
-                            f"PostVerifyAdvisor vetoed merge after "
-                            f"{attempt_number + 1} attempts"
-                        ),
-                        origin_label=self._config.review_label[0],
-                        comment=(
-                            "## Advisor Veto (retry budget exhausted)\n\n"
-                            f"{pv_result.reasoning}\n\n"
-                            "### Disagreement transcript\n\n"
-                            f"{transcript}\n\n"
-                            "Escalating to human review."
-                        ),
-                        event_cause="advisor_post_verify_veto",
-                        task=task,
-                    )
-                )
-                return (
-                    result.model_copy(
-                        update={
-                            "verdict": ReviewVerdict.REQUEST_CHANGES,
-                            "summary": (result.summary or "")
-                            + "\n\nPostVerifyAdvisor vetoed merge after "
-                            + f"{attempt_number + 1} attempts: "
-                            + pv_result.reasoning,
-                        }
-                    ),
-                    diff,
-                )
-
-            # Hand back to the executor with the full advisor transcript so
-            # the next executor attempt can directly address the disagreement.
-            # Record the retry trigger before mutating attempt_number so the
-            # metric attribute reflects the retry number that's about to run
-            # (1-indexed: first retry is attempt=1).
-            _emit_advisor_loop_metric(
-                _veto_retries_total,
-                {"surface": surface, "attempt": str(attempt_number + 1)},
-            )
-            self._advisor_attempt[pr.number] = attempt_number + 1
-            attempt_number += 1
-            transcript = self._render_advisor_transcript(pr.number)
-            result, diff = await self._attempt_review_fix(
-                pr,
-                task,
-                wt_path,
-                result,
-                diff,
-                worker_id,
-                code_scanning_alerts=code_scanning_alerts,
-                advisor_transcript=transcript,
-                suggested_fix_direction=pv_result.suggested_fix_direction,
-                surface=surface,
-            )
-
-            # If the executor could not produce an APPROVE verdict, abort the
-            # advisor loop — the caller's normal rejection path takes over.
-            if result.verdict != ReviewVerdict.APPROVE:
-                return result, diff
 
     def _render_advisor_transcript(self, pr_number: int) -> str:
         """Render the in-memory advisor disagreement transcript for ``pr_number``.
@@ -2023,6 +1851,10 @@ class ReviewPhase:
             log_path=log_path,
             pr_number=issue.id,
         )
+        # Human-on-the-loop continuous steering (ADR-0099 #4): the advisor
+        # reviews the same issue as the executor, so live operator guidance
+        # should reach its prompt too.
+        human_guidance = self._state.get_human_steering(str(issue.id)).guidance or ""
         try:
             plan = await advisor.run(
                 PreFlightInput(
@@ -2032,6 +1864,7 @@ class ReviewPhase:
                     related_paths=diff_stats.changed_paths,
                     prior_attempts=0,
                     issue_number=issue.id,
+                    human_guidance=human_guidance,
                 )
             )
         except Exception as exc:
@@ -2384,6 +2217,12 @@ class ReviewPhase:
         # Build bead context for per-bead review when beads are enabled
         bead_tasks = self._build_bead_review_context(issue)
 
+        # Human-on-the-loop continuous steering (ADR-0099 #4): fold live
+        # operator guidance into the review prompt. Reference signal only
+        # — never blocking; empty when the feature is off or no guidance
+        # was posted for this issue.
+        human_guidance = self._state.get_human_steering(str(issue.id)).guidance or ""
+
         result = await self._reviewers.review(
             pr,
             issue,
@@ -2394,6 +2233,7 @@ class ReviewPhase:
             bead_tasks=bead_tasks,
             pre_flight_plan=pre_flight_plan,
             surface=surface,
+            human_guidance=human_guidance,
         )
 
         if result.fixes_made:
@@ -2466,6 +2306,12 @@ class ReviewPhase:
             updated_diff = await self._prs.get_pr_diff(pr.number)
             # Thread the pre-flight plan into retries so the executor keeps
             # the same focus rubric across the loop (T24.5 closed I3).
+            # Human-on-the-loop continuous steering (ADR-0099 #4): re-fetch
+            # guidance so a `/steer` posted mid-retry-loop reaches the
+            # re-review prompt too.
+            human_guidance = (
+                self._state.get_human_steering(str(issue.id)).guidance or ""
+            )
             re_result = await self._reviewers.review(
                 pr,
                 issue,
@@ -2475,6 +2321,7 @@ class ReviewPhase:
                 code_scanning_alerts=code_scanning_alerts,
                 pre_flight_plan=self._advisor_pre_flight_plan.get((surface, pr.number)),
                 surface=surface,
+                human_guidance=human_guidance,
             )
             if re_result.fixes_made:
                 await self._prs.push_branch(wt_path, pr.branch)
@@ -2552,6 +2399,10 @@ class ReviewPhase:
         updated_diff = await self._prs.get_pr_diff(pr.number)
         # Thread the pre-flight plan into retries so the executor keeps
         # the same focus rubric across the loop (T24.5 closed I3).
+        # Human-on-the-loop continuous steering (ADR-0099 #4): re-fetch
+        # guidance so a `/steer` posted mid-fix-loop reaches the re-review
+        # prompt too.
+        human_guidance = self._state.get_human_steering(str(task.id)).guidance or ""
         re_result = await self._reviewers.review(
             pr,
             task,
@@ -2561,6 +2412,7 @@ class ReviewPhase:
             code_scanning_alerts=code_scanning_alerts,
             pre_flight_plan=self._advisor_pre_flight_plan.get((surface, pr.number)),
             surface=surface,
+            human_guidance=human_guidance,
         )
 
         if re_result.fixes_made:
@@ -3513,6 +3365,9 @@ class ReviewPhase:
         # Adversarial-threshold re-review is pr_review-track only (it gates
         # PR approval), so we hard-code the surface here. T38 (M7) key:
         # ``(surface, identifier)``.
+        # Human-on-the-loop continuous steering (ADR-0099 #4): re-fetch
+        # guidance so a `/steer` posted mid-loop reaches this re-review too.
+        human_guidance = self._state.get_human_steering(str(issue.id)).guidance or ""
         re_result = await self._reviewers.review(
             pr,
             issue,
@@ -3521,6 +3376,7 @@ class ReviewPhase:
             worker_id=worker_id,
             code_scanning_alerts=code_scanning_alerts,
             pre_flight_plan=self._advisor_pre_flight_plan.get(("pr_review", pr.number)),
+            human_guidance=human_guidance,
         )
 
         # If re-review still under threshold without justification, accept
@@ -3542,6 +3398,235 @@ class ReviewPhase:
 
         return re_result
 
+    # ------------------------------------------------------------------
+    # Approve-path gate helpers (Task 2 — convergence phase 2)
+    # ------------------------------------------------------------------
+
+    _APPROVE_GATE_LENSES: list[Literal["correctness", "security", "spec"]] = [
+        "correctness",
+        "security",
+        "spec",
+    ]
+
+    def _lenses_for(self, n: int) -> list[Literal["correctness", "security", "spec"]]:
+        """Return the first *n* PostVerify lens identifiers.
+
+        Maps blast-radius pass count (1 / 2 / 3) to the ordered lens
+        sequence used by the approve-path :class:`HybridGate` judge.
+        """
+        return self._APPROVE_GATE_LENSES[:n]
+
+    def _approve_deterministic_check(
+        self,
+        code_scanning_alerts: list[Any] | None,
+    ) -> DetResult:
+        """Deterministic gate signal: block when open code-scanning alerts exist.
+
+        Returns a :class:`~convergence_gate.DetResult` with ``ok=True`` when
+        *code_scanning_alerts* is ``None`` or empty; ``ok=False`` with a
+        human-readable failure message when at least one alert is present.
+        """
+        from convergence_gate import DetResult  # noqa: PLC0415
+
+        if not code_scanning_alerts:
+            return DetResult(ok=True)
+        n = len(code_scanning_alerts)
+        return DetResult(ok=False, failures=[f"open code-scanning alerts: {n}"])
+
+    def _post_verify_lens_judge(
+        self,
+        *,
+        pr: Any,
+        task: Any,
+        wt_path: Any,
+        result: Any,
+        diff: str,
+        worker_id: int,
+        surface: str,
+    ) -> Callable[..., Any]:
+        """Return an async ``judge(ctx, i) -> JudgeVerdict`` for the approve gate.
+
+        The returned callable is the *judge* slot of a
+        :class:`~convergence_gate.HybridGate`.  On each invocation it:
+
+        1. Resolves the lens from ``_lenses_for(min_passes)[i]``.
+        2. Calls :meth:`_run_post_verify_for_surface` with that lens.
+        3. Maps ``PostVerifyResult.verdict == "APPROVE"`` →
+           ``JudgeVerdict(approve=True)``; VETO → ``approve=False``.
+        4. On any non-credit/non-bug exception: calls
+           ``reraise_on_credit_or_bug`` first, then returns a degraded
+           ``JudgeVerdict(approve=True, feedback="judge-degraded")``
+           (fail-open, matching the ``HybridGate`` default).
+        """
+        from convergence_gate import JudgeVerdict  # noqa: PLC0415
+        from exception_classify import reraise_on_credit_or_bug  # noqa: PLC0415
+        from review_advisor import min_review_passes_for_blast_radius  # noqa: PLC0415
+
+        async def _judge(ctx: Any, i: int) -> Any:
+            n = min_review_passes_for_blast_radius(ctx.blast_radius)
+            lens = self._lenses_for(n)[i]
+            try:
+                pv = await self._run_post_verify_for_surface(
+                    surface=surface,
+                    diff=diff,
+                    spec=task.body or None,
+                    executor_verdict_summary=(result.summary or result.verdict.value),
+                    pre_flight_plan=self._advisor_pre_flight_plan.get(
+                        (surface, pr.number)
+                    ),
+                    issue_number=task.id,
+                    log_pr_number=pr.number,
+                    lens=lens,
+                )
+            except Exception as exc:  # noqa: BLE001
+                reraise_on_credit_or_bug(exc)
+                return JudgeVerdict(approve=True, feedback="judge-degraded")
+            if pv is None:
+                # Advisor degraded (kill-switch off or runner crash) — fail open.
+                return JudgeVerdict(approve=True, feedback="judge-degraded")
+            # On VETO, record lens:disagreement for each blocking disagreement
+            # so lap signatures reflect the actual disagreement content.
+            sigs: list[str]
+            if pv.verdict != "APPROVE" and pv.disagreements:
+                sigs = sorted(
+                    {f"{lens}:{d.advisor_assessment}" for d in pv.disagreements}
+                )
+            else:
+                sigs = [lens]
+            return JudgeVerdict(
+                approve=pv.verdict == "APPROVE",
+                feedback=pv.suggested_fix_direction,
+                signatures=sigs,
+            )
+
+        return _judge
+
+    async def _convergence_decision(
+        self,
+        *,
+        issue_number: int,
+        review_approved: bool,
+        code_scanning_alerts: list[Any] | None = None,
+        post_verify_judge: Callable[..., Any] | None = None,
+        reject_review_result: Any | None = None,
+    ) -> GateResult:
+        """Run the convergence HybridGate for a review boundary.
+
+        Reads blast radius from the ledger, evaluates the gate, records the
+        decision (verdict + signatures + lap) back into the ledger, enforces
+        the outer lap budget, and persists. Returns the (possibly lap-budget
+        converted) :class:`GateResult`.
+
+        Two boundaries route through here:
+
+        * **reject** (``review_approved=False``): the deterministic check is
+          RED (the verdict itself), so the gate loops back without judging —
+          signatures derived from *reject_review_result.summary* (normalized)
+          are recorded to enable lap-level oscillation detection.
+        * **approve** (``review_approved=True``): the deterministic check is
+          :meth:`_approve_deterministic_check` (RED when open code-scanning
+          alerts exist → LOOP_BACK without judging; GREEN → the injected
+          *post_verify_judge* lens passes run). All-lens APPROVE records
+          ``last_verdict == "ADVANCE"``, which flips ``converged`` to True.
+        """
+        from convergence_gate import (  # noqa: PLC0415
+            DetResult,
+            GateContext,
+            GateDecision,
+            JudgeVerdict,
+            build_review_gate,
+            escalate,
+        )
+
+        radius = self._state.get_review_blast_radius(issue_number) or "low"
+        ledger = self._state.ensure_convergence_ledger(
+            issue_number,
+            blast_radius=radius,  # type: ignore[arg-type]
+        )
+        attempts = ledger.get_attempts("review")
+        max_attempts = self._config.max_review_fix_attempts
+
+        if review_approved:
+            approve_det = self._approve_deterministic_check(code_scanning_alerts)
+
+            async def _det(_ctx: GateContext) -> DetResult:
+                # Approve boundary: deterministic signal is the code-scanning
+                # check. GREEN (no alerts) → the lens judge runs; RED → the
+                # gate loops back without judging.
+                return approve_det
+
+            # The real lens judge is injected by the approve call site. Fall
+            # back to a fail-open stub if a caller omits it.
+            if post_verify_judge is not None:
+                _judge = post_verify_judge
+            else:
+                logger.warning(
+                    "convergence_decision: approve gate for issue #%d is using a "
+                    "fail-open stub judge (post_verify_judge=None). No live caller "
+                    "should reach this path; check call sites if seen in production.",
+                    issue_number,
+                )
+
+                async def _judge(_ctx: GateContext, _i: int) -> JudgeVerdict:
+                    return JudgeVerdict(approve=True)
+        else:
+            # Derive signatures from review result content for lap-signature
+            # discrimination. ReviewResult has no separate comments list;
+            # fall back to summary.
+            _reject_sigs: list[str] = []
+            if reject_review_result is not None:
+                _summary = _normalize_text(reject_review_result.summary)
+                if _summary:
+                    _reject_sigs = [_summary]
+
+            async def _det(_ctx: GateContext) -> DetResult:
+                # Reject boundary: the review verdict itself is the
+                # deterministic signal. review_approved is False, so the gate
+                # never reaches the judge below. Signatures are passed so the
+                # gate records them via loop_back for oscillation detection.
+                return DetResult(ok=review_approved, signatures=_reject_sigs)
+
+            async def _judge(_ctx: GateContext, _i: int) -> JudgeVerdict:
+                # Unreached at the reject boundary (det is RED).
+                return JudgeVerdict(approve=True)
+
+        gate = build_review_gate(deterministic_check=_det, post_verify_judge=_judge)
+        ctx = GateContext(
+            issue_number=issue_number,
+            stage="review",
+            blast_radius=radius,  # type: ignore[arg-type]
+            attempts=attempts,
+            max_attempts=max_attempts,
+        )
+        result = await gate.evaluate(ctx)
+
+        # Persist the decision into the ledger (single source of truth).
+        if result.decision is GateDecision.LOOP_BACK:
+            ledger.increment_attempts("review")
+        ledger.record_gate_result(
+            "review", result.decision.value, result.finding_signatures
+        )
+        ledger.mark_lap()
+
+        # Outer lap budget: a LOOP_BACK that exhausts the lap cap becomes an
+        # ESCALATE so the outer loop can never spin past max_convergence_laps.
+        if (
+            result.decision is GateDecision.LOOP_BACK
+            and ledger.laps >= self._config.max_convergence_laps
+        ):
+            result = escalate(
+                f"outer lap budget exhausted "
+                f"({ledger.laps}/{self._config.max_convergence_laps})",
+                result.finding_signatures,
+            )
+            ledger.record_gate_result(
+                "review", result.decision.value, result.finding_signatures
+            )
+
+        ledger.recompute_converged(["review"])
+        self._state.save_convergence_ledger(issue_number, ledger)
+        return result
+
     async def _handle_rejected_review(
         self,
         pr: PRInfo,
@@ -3549,91 +3634,250 @@ class ReviewPhase:
         result: ReviewResult,
         worker_id: int,
     ) -> bool:
-        """Handle REQUEST_CHANGES or COMMENT verdict with retry logic.
+        """Handle REQUEST_CHANGES or COMMENT verdict via the convergence gate.
 
-        Returns *True* if the worktree should be preserved (retry case),
+        Delegates unconditionally to ``_handle_rejected_review_gated``. The
+        gate is always-on; the legacy retry-vs-escalate path is removed.
+
+        Returns *True* if the worktree should be preserved (loop-back case),
         *False* if the worktree should be destroyed (HITL escalation).
         """
-        max_attempts = self._config.max_review_fix_attempts
-        attempts = self._state.get_review_attempts(pr.issue_number)
+        return await self._handle_rejected_review_gated(pr, task, result, worker_id)
 
-        if attempts < max_attempts:
-            # Under cap: re-queue for implementation with feedback
-            new_count = self._state.increment_review_attempts(pr.issue_number)
-            self._state.set_review_feedback(pr.issue_number, result.summary)
+    async def _handle_rejected_review_gated(
+        self,
+        pr: PRInfo,
+        task: Task,
+        result: ReviewResult,
+        worker_id: int,
+    ) -> bool:
+        """Convergence-gate reject/escalate decision (unconditional, sole path).
 
-            # Swap labels: review → ready (issue and PR)
-            # Activate eager-transition protection before the label swap
+        The review verdict is REQUEST_CHANGES/COMMENT here
+        (``review_approved=False``), so the gate's deterministic check is RED:
+        it loops back (re-queue to ``ready``) until the outer lap budget is
+        exhausted, at which point it escalates to HITL.
+        """
+        from convergence_gate import GateDecision  # noqa: PLC0415
+
+        decision = await self._convergence_decision(
+            issue_number=pr.issue_number,
+            review_approved=False,
+            reject_review_result=result,
+        )
+
+        if decision.decision is GateDecision.LOOP_BACK:
+            # Under cap: re-queue for implementation with feedback.
+            self._state.set_review_feedback(
+                pr.issue_number, decision.feedback or result.summary
+            )
             self._store.enqueue_transition(task, "ready")
             await self._transitioner.transition(
                 pr.issue_number, "ready", pr_number=pr.number
             )
-
             await self._transitioner.post_comment(
                 pr.issue_number,
-                f"**Review requested changes** (attempt {new_count}/{max_attempts}). "
-                f"Re-queuing for implementation with feedback.",
+                "**Review requested changes** — re-queuing for "
+                "implementation with feedback.",
             )
-
             logger.info(
-                "PR #%d: %s verdict — retry %d/%d, re-queuing issue #%d",
+                "PR #%d: %s verdict — convergence loop-back, re-queuing issue #%d",
                 pr.number,
                 result.verdict.value,
-                new_count,
-                max_attempts,
                 pr.issue_number,
             )
             return True  # Preserve worktree
-        else:
-            # Cap exceeded: escalate to HITL
-            logger.warning(
-                "PR #%d: review fix cap (%d) exceeded — escalating issue #%d to HITL",
-                pr.number,
-                max_attempts,
-                pr.issue_number,
-            )
-            review_phase.record_harness_failure(
-                self._harness_insights,
-                pr.issue_number,
-                FailureCategory.HITL_ESCALATION,
-                f"Review fix cap exceeded after {max_attempts} attempt(s)",
-                stage=PipelineStage.REVIEW,
-                pr_number=pr.number,
-            )
-            await self._publish_review_status(pr, worker_id, "escalating")
-            # Pre-store richer context with agent transcript before routing to diagnostic loop
-            from models import EscalationContext  # noqa: PLC0415
 
-            cap_cause = f"Review fix cap exceeded after {max_attempts} attempt(s)"
-            cap_context = EscalationContext(
-                cause=cap_cause,
-                origin_phase="review",
+        # ESCALATE
+        ledger = self._state.get_convergence_ledger(pr.issue_number)
+        oscillating = bool(ledger and ledger.detect_outer_oscillation())
+        cause = (
+            "review convergence oscillation — same findings recurred across laps"
+            if oscillating
+            else (decision.reason or "review convergence cap exceeded")
+        )
+        logger.warning(
+            "PR #%d: review convergence escalation (%s) — escalating issue #%d to HITL",
+            pr.number,
+            cause,
+            pr.issue_number,
+        )
+        review_phase.record_harness_failure(
+            self._harness_insights,
+            pr.issue_number,
+            FailureCategory.HITL_ESCALATION,
+            cause,
+            stage=PipelineStage.REVIEW,
+            pr_number=pr.number,
+        )
+        await self._publish_review_status(pr, worker_id, "escalating")
+        from models import EscalationContext  # noqa: PLC0415
+
+        esc_context = EscalationContext(
+            cause=cause,
+            origin_phase="review",
+            pr_number=pr.number,
+            agent_transcript=result.transcript if result.transcript else None,
+        )
+        self._state.set_escalation_context(pr.issue_number, esc_context)
+        await self._escalate_to_hitl(
+            HitlEscalation(
+                issue_number=pr.issue_number,
                 pr_number=pr.number,
-                agent_transcript=result.transcript if result.transcript else None,
+                cause=cause,
+                origin_label=self._config.review_label[0],
+                comment=(
+                    f"**Review convergence escalation** — {cause}. "
+                    f"Escalating to human review."
+                ),
+                post_on_pr=False,
+                event_cause="review_convergence_escalation",
+                task=task,
             )
-            self._state.set_escalation_context(pr.issue_number, cap_context)
-            await self._escalate_to_hitl(
-                HitlEscalation(
-                    issue_number=pr.issue_number,
-                    pr_number=pr.number,
-                    cause=cap_cause,
-                    origin_label=self._config.review_label[0],
-                    comment=(
-                        f"**Review fix cap exceeded** — {max_attempts} review fix "
-                        f"attempt(s) exhausted. Escalating to human review."
-                    ),
-                    post_on_pr=False,
-                    event_cause="review_fix_cap_exceeded",
-                    task=task,
-                )
+        )
+        # Reset the outer lap budget so a human-fixed, re-queued issue can
+        # loop back through the gate rather than insta-re-escalating (F2).
+        self._state.reset_outer_laps(pr.issue_number)
+        if result.transcript:
+            await self._suggest_memory(
+                result.transcript,
+                "review_convergence_escalation",
+                f"PR #{pr.number}",
             )
-            if result.transcript:
-                await self._suggest_memory(
-                    result.transcript,
-                    "review_fix_cap_exceeded",
-                    f"PR #{pr.number}",
-                )
+        return False  # Destroy worktree
+
+    async def _handle_approved_review_gated(
+        self,
+        pr: PRInfo,
+        task: Task,
+        wt_path: Path,
+        result: ReviewResult,
+        diff: str,
+        worker_id: int,
+        *,
+        surface: str,
+        code_scanning_alerts: list[CodeScanningAlert] | None,
+        visual_decision: VisualValidationDecision | None,
+    ) -> bool:
+        """Convergence-gate APPROVE decision (unconditional, sole path).
+
+        Called when the review verdict is APPROVE. Builds the real lens judge
+        and routes through :meth:`_convergence_decision` with
+        ``review_approved=True``:
+
+        * **ADVANCE** → ``_handle_approved_merge`` (the recorded
+          ``last_verdict == "ADVANCE"`` makes ``recompute_converged`` flip
+          ``ledger.converged`` to True inside ``_convergence_decision`` via
+          ``recompute_converged``, BEFORE control returns here). Worktree
+          destroyed.
+        * **LOOP_BACK** → re-queue to ``ready`` with the gate feedback,
+          mirroring the reject loop-back contract. Worktree preserved.
+        * **ESCALATE** → HITL. Worktree destroyed.
+
+        Returns the ``skip_worktree_cleanup`` flag: True to preserve the
+        worktree (loop-back), False to destroy it (advance/escalate).
+        """
+        from convergence_gate import GateDecision  # noqa: PLC0415
+
+        judge = self._post_verify_lens_judge(
+            pr=pr,
+            task=task,
+            wt_path=wt_path,
+            result=result,
+            diff=diff,
+            worker_id=worker_id,
+            surface=surface,
+        )
+        decision = await self._convergence_decision(
+            issue_number=pr.issue_number,
+            review_approved=True,
+            code_scanning_alerts=code_scanning_alerts,
+            post_verify_judge=judge,
+        )
+
+        if decision.decision is GateDecision.ADVANCE:
+            await self._handle_approved_merge(
+                pr,
+                task,
+                result,
+                diff,
+                worker_id,
+                code_scanning_alerts=code_scanning_alerts,
+                visual_decision=visual_decision,
+            )
             return False  # Destroy worktree
+
+        if decision.decision is GateDecision.LOOP_BACK:
+            self._state.set_review_feedback(
+                pr.issue_number, decision.feedback or result.summary
+            )
+            self._store.enqueue_transition(task, "ready")
+            await self._transitioner.transition(
+                pr.issue_number, "ready", pr_number=pr.number
+            )
+            await self._transitioner.post_comment(
+                pr.issue_number,
+                "**Convergence gate requested changes** — "
+                "re-queuing for implementation.",
+            )
+            logger.info(
+                "PR #%d: approve-gate loop-back — re-queuing issue #%d",
+                pr.number,
+                pr.issue_number,
+            )
+            return True  # Preserve worktree
+
+        # ESCALATE
+        cause = decision.reason or "approve-gate escalation"
+        logger.warning(
+            "PR #%d: approve-gate escalation (%s) — escalating issue #%d to HITL",
+            pr.number,
+            cause,
+            pr.issue_number,
+        )
+        review_phase.record_harness_failure(
+            self._harness_insights,
+            pr.issue_number,
+            FailureCategory.HITL_ESCALATION,
+            cause,
+            stage=PipelineStage.REVIEW,
+            pr_number=pr.number,
+        )
+        await self._publish_review_status(pr, worker_id, "escalating")
+        from models import EscalationContext  # noqa: PLC0415
+
+        esc_context = EscalationContext(
+            cause=cause,
+            origin_phase="review",
+            pr_number=pr.number,
+            agent_transcript=result.transcript if result.transcript else None,
+        )
+        self._state.set_escalation_context(pr.issue_number, esc_context)
+        await self._escalate_to_hitl(
+            HitlEscalation(
+                issue_number=pr.issue_number,
+                pr_number=pr.number,
+                cause=cause,
+                origin_label=self._config.review_label[0],
+                comment=(
+                    f"**Convergence gate escalation.** {cause}. "
+                    f"Escalating to human review."
+                ),
+                post_on_pr=False,
+                event_cause="review_convergence_escalation",
+                task=task,
+            )
+        )
+        # Reset the outer lap budget so a human-fixed, re-queued issue can
+        # loop back through the gate rather than insta-re-escalating (F2).
+        self._state.reset_outer_laps(pr.issue_number)
+        if result.transcript:
+            await self._suggest_memory(
+                result.transcript,
+                "review_convergence_escalation",
+                f"PR #{pr.number}",
+            )
+        return False  # Destroy worktree
 
     # Delegate properties for backward compatibility in tests
     @property

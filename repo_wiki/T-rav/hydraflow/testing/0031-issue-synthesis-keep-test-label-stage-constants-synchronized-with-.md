@@ -4,6 +4,9 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-06-14T05:17:49.831435+00:00
+status: active
+corroborations: 1
+supersedes: 0001,0002,0003,0004,0005,0006
 status: superseded
 corroborations: 1
 supersedes: 0001,0002,0003,0004,0005,0006

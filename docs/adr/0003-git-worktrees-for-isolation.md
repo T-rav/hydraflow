@@ -1,8 +1,12 @@
 # ADR-0003: Git Worktrees for Issue Isolation
 
 **Status:** Accepted
-**Enforced by:** tests/test_integration_worktree.py
 **Date:** 2026-02-26
+**Enforcement:** decision-of-record
+
+Worktree isolation mechanics are exercised incidentally by
+`tests/test_integration_worktree.py`; that coverage is not treated as a
+conformance contract for this ADR (see ADR-0100).
 
 ## Context
 
@@ -55,7 +59,7 @@ Default is a sibling directory to the repo root (e.g., `../hydraflow-worktrees/`
 
 ## Related
 
-- `src/worktree.py:WorktreeManager` — full lifecycle implementation
+- `src/workspace.py:WorkspaceManager` — full lifecycle implementation
 - `src/ports.py:WorkspacePort` — formal interface
 - `CLAUDE.md` — "Always implement issue work on a dedicated git worktree branch"
 - ADR-0001 (Five Concurrent Async Loops) for the concurrency model that makes parallel worktrees necessary

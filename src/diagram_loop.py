@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from disturbance.detectors.traceability import sync_traceability_baseline
 from models import WorkCycleResult
 
 if TYPE_CHECKING:
@@ -112,12 +113,21 @@ class DiagramLoop(BaseBackgroundLoop):
             await asyncio.to_thread(
                 emit, repo_root=worktree, out_dir=worktree / "docs/arch/generated"
             )
+            # Prune the ratchet baseline to the freshly emitted matrix pct so
+            # a regen PR that lowers the pct ships the matching baseline —
+            # otherwise the gate's `resolved` assertion fails on the next
+            # unrelated PR.
+            await asyncio.to_thread(sync_traceability_baseline, worktree)
 
         result = await generate_and_open_pr_async(
             repo_root=self._repo_root,
             branch=_REGEN_BRANCH,
             generate=_generate,
-            path_specs=["docs/arch/generated", "docs/arch/.meta.json"],
+            path_specs=[
+                "docs/arch/generated",
+                "docs/arch/.meta.json",
+                "disturbance/baselines/traceability.yaml",
+            ],
             pr_title=f"{_PR_TITLE_PREFIX} — {today}",
             pr_body=self._build_pr_body(),
             base=self._config.base_branch(),

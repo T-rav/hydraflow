@@ -1,8 +1,9 @@
 # ADR-0017: Auto-Decompose Triage Path Excluded from Session Counter
 
 **Status:** Accepted
-**Enforced by:** tests/test_state_machine.py
 **Date:** 2026-03-01
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_state_machine.py
 
 ## Context
 
@@ -98,6 +99,6 @@ is **intentional and should remain as-is**. The rationale:
 - Source memory: #1729
 - Original implementation: PR #1689 (issue #1542)
 - `src/triage_phase.py` — `_maybe_decompose()`, `triage_issues()`
-- `src/state.py` — `StateTracker.increment_session_counter()`,
+- `src/state/__init__.py:StateTracker` — `StateTracker.increment_session_counter()`,
   `StateTracker.mark_issue()`
 - ADR-0001 (Five concurrent async loops — triage is loop 1)

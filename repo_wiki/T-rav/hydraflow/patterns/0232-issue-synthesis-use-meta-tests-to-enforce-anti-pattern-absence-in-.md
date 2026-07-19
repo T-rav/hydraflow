@@ -1,0 +1,19 @@
+---
+id: 0232
+topic: patterns
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-07-19T01:45:28.222664+00:00
+status: superseded
+corroborations: 1
+supersedes: 0176,0177,0178,0179,0180,0181,0182,0183,0184,0185,0186,0187,0188,0189,0190,0191,0192,0193,0194,0195,0196,0197,0198,0199,0200,0201,0202,0203,0204,0205,0206,0207,0208,0209,0210,0211,0212,0213,0214,0215,0216,0217
+superseded_by: 0260
+---
+
+# Use meta-tests to enforce anti-pattern absence in the test suite
+
+Write meta-tests that scan `tests/test_*.py` for forbidden patterns (e.g., `sys.path.insert`, "Should..." docstrings, AAA comments) and fail CI if any are found.
+
+Example: `assert not any('sys.path.insert' in line for line in test_files)` as a standalone test.
+
+**Why:** Manual review misses anti-patterns introduced across hundreds of test files; a meta-test turns the check into a permanent CI gate.

@@ -103,6 +103,25 @@ class EpicSweeperLoop(BaseBackgroundLoop):
                 return False
             if issue.state != "closed":
                 return False
+            # ADR-0105 / #9757: a decomposed child is closed the moment its
+            # replacement epic is created, but its work lives on there. It is
+            # only resolved once that replacement epic itself closes — otherwise
+            # this epic would close while grandchild work is still open. Check the
+            # replacement epic's GitHub state (source of truth, like every other
+            # sub-issue here) rather than EpicState.closed, which not every close
+            # path sets. The gate chains, so E1→E2→E3 converges level-by-level
+            # across sweeps.
+            replacement = self._state.get_replacement_epic(issue_number)
+            if replacement is not None:
+                rep_issue = await self._fetcher.fetch_issue_by_number(
+                    replacement.epic_number
+                )
+                # A missing replacement issue (fetch → None) is deliberately NOT
+                # treated as blocking: err toward not-hanging the parent (same
+                # posture as an unfetchable ordinary sub-issue). We hold the
+                # parent open only when the replacement is known-open.
+                if rep_issue is not None and rep_issue.state != "closed":
+                    return False
 
         # All sub-issues are closed — update checkboxes, post comment, close
         logger.info(

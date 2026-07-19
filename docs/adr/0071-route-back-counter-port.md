@@ -2,7 +2,8 @@
 
 **Status:** Accepted
 **Date:** 2026-05-19
-**Enforced by:** tests/test_route_back.py
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_route_back.py
 
 ## Context
 
@@ -34,5 +35,5 @@ Production wiring passes `StateTracker`. Tests pass a small in-memory dict imple
 ## Related
 
 - `src/route_back.py:RouteBackCounterPort`, `src/route_back.py:RouteBackCoordinator`
-- `src/state.py:StateTracker` — production implementation
+- `src/state/__init__.py:StateTracker` — production implementation
 - `tests/test_route_back.py` — enforces the rollback invariant

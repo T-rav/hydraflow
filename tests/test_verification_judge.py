@@ -701,6 +701,39 @@ class TestJudgeIntegration:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_issue_labels_reach_the_prompt_gate(self, tmp_path, event_bus):
+        """judge(issue_labels=...) elevates the CH-6 gate for judge spawns.
+
+        The judge prompt embeds the PR diff, so a ``data-class:regulated-*``
+        label on the issue must redact it on an internal repo (#9734 review
+        finding 2).
+        """
+        cfg = ConfigFactory.create(repo_root=tmp_path).model_copy(
+            update={"data_class_allowed_backends": {"regulated-phi": ["claude"]}}
+        )
+        judge = VerificationJudge(cfg, event_bus)
+        criteria_dir = tmp_path / ".hydraflow" / "verification"
+        criteria_dir.mkdir(parents=True)
+        (criteria_dir / "issue-42.md").write_text(SAMPLE_CRITERIA_FILE)
+
+        with patch(
+            "runner_utils.stream_claude_process",
+            new_callable=AsyncMock,
+            return_value=SAMPLE_INSTRUCTIONS_READY_TRANSCRIPT,
+        ) as mock_stream:
+            await judge.judge(
+                issue_number=42,
+                pr_number=101,
+                diff="patient SSN 123-45-6789 leaked in the diff",
+                issue_labels=["data-class:regulated-phi"],
+            )
+
+        assert mock_stream.await_count >= 1
+        prompts = [call[1]["prompt"] for call in mock_stream.call_args_list]
+        assert all("123-45-6789" not in p for p in prompts)
+        assert any("[REDACTED:ssn_like]" in p for p in prompts)
+
+    @pytest.mark.asyncio
     async def test_dry_run_returns_early(self, tmp_path, event_bus):
         cfg = ConfigFactory.create(dry_run=True, repo_root=tmp_path)
         judge = VerificationJudge(cfg, event_bus)
@@ -736,7 +769,7 @@ class TestJudgeIntegration:
 
         call_count = 0
 
-        async def mock_execute(cmd, prompt, issue_number):
+        async def mock_execute(cmd, prompt, issue_number, issue_labels=()):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -763,7 +796,7 @@ class TestJudgeIntegration:
 
         call_count = 0
 
-        async def mock_execute(cmd, prompt, issue_number):
+        async def mock_execute(cmd, prompt, issue_number, issue_labels=()):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -798,7 +831,7 @@ class TestJudgeIntegration:
             SAMPLE_INSTRUCTIONS_READY_TRANSCRIPT,
         ]
 
-        async def mock_execute(cmd, prompt, issue_number):
+        async def mock_execute(cmd, prompt, issue_number, issue_labels=()):
             nonlocal call_count
             call_count += 1
             return responses[call_count - 1]
@@ -831,7 +864,7 @@ class TestJudgeIntegration:
             SAMPLE_INSTRUCTIONS_NEEDS_REFINEMENT_TRANSCRIPT,
         ]
 
-        async def mock_execute(cmd, prompt, issue_number):
+        async def mock_execute(cmd, prompt, issue_number, issue_labels=()):
             nonlocal call_count
             call_count += 1
             return responses[call_count - 1]
@@ -866,7 +899,7 @@ class TestJudgeIntegration:
             SAMPLE_INSTRUCTIONS_READY_TRANSCRIPT,
         ]
 
-        async def mock_execute(cmd, prompt, issue_number):
+        async def mock_execute(cmd, prompt, issue_number, issue_labels=()):
             nonlocal call_count
             call_count += 1
             return responses[call_count - 1]
@@ -888,7 +921,7 @@ class TestJudgeIntegration:
 
         call_count = 0
 
-        async def mock_execute(cmd, prompt, issue_number):
+        async def mock_execute(cmd, prompt, issue_number, issue_labels=()):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -918,7 +951,7 @@ class TestJudgeIntegration:
         criteria_dir.mkdir(parents=True)
         (criteria_dir / "issue-42.md").write_text(SAMPLE_CRITERIA_FILE)
 
-        async def mock_execute(cmd, prompt, issue_number):
+        async def mock_execute(cmd, prompt, issue_number, issue_labels=()):
             return SAMPLE_INSTRUCTIONS_READY_TRANSCRIPT
 
         with patch.object(judge, "_execute", side_effect=mock_execute):
@@ -940,7 +973,7 @@ class TestJudgeIntegration:
         criteria_dir.mkdir(parents=True)
         (criteria_dir / "issue-42.md").write_text(SAMPLE_CRITERIA_FILE)
 
-        async def mock_execute(cmd, prompt, issue_number):
+        async def mock_execute(cmd, prompt, issue_number, issue_labels=()):
             raise RuntimeError("LLM call failed")
 
         with patch.object(judge, "_execute", side_effect=mock_execute):
@@ -963,7 +996,7 @@ class TestJudgeIntegration:
 
         call_count = 0
 
-        async def mock_execute(_cmd, _prompt, _issue_number):
+        async def mock_execute(_cmd, _prompt, _issue_number, issue_labels=()):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -993,7 +1026,7 @@ class TestJudgeIntegration:
             "CRITERIA_RESULTS_END\n"
         )
 
-        async def mock_execute(cmd, prompt, issue_number):
+        async def mock_execute(cmd, prompt, issue_number, issue_labels=()):
             return all_pass
 
         with patch.object(judge, "_execute", side_effect=mock_execute):
@@ -1016,7 +1049,7 @@ class TestJudgeIntegration:
 
         call_count = 0
 
-        async def mock_execute(_cmd, _prompt, _issue_number):
+        async def mock_execute(_cmd, _prompt, _issue_number, issue_labels=()):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1050,7 +1083,7 @@ class TestJudgeIntegration:
             SAMPLE_INSTRUCTIONS_READY_TRANSCRIPT,
         ]
 
-        async def mock_execute(_cmd, _prompt, _issue_number):
+        async def mock_execute(_cmd, _prompt, _issue_number, issue_labels=()):
             nonlocal call_count
             call_count += 1
             return responses[call_count - 1]
@@ -1148,6 +1181,7 @@ class TestReviewPhaseWiring:
         mock_prs.add_labels = AsyncMock()
         mock_prs.post_pr_comment = AsyncMock()
         mock_prs.submit_review = AsyncMock()
+        mock_prs.fetch_code_scanning_alerts = AsyncMock(return_value=None)
 
         mock_judge = AsyncMock()
         mock_judge.judge = AsyncMock(return_value=JudgeVerdict(issue_number=42))
@@ -1204,6 +1238,7 @@ class TestReviewPhaseWiring:
             issue_number=42,
             pr_number=101,
             diff="diff text",
+            issue_labels=["ready"],
         )
 
     @pytest.mark.asyncio
@@ -1238,6 +1273,7 @@ class TestReviewPhaseWiring:
         mock_prs.add_labels = AsyncMock()
         mock_prs.post_pr_comment = AsyncMock()
         mock_prs.submit_review = AsyncMock()
+        mock_prs.fetch_code_scanning_alerts = AsyncMock(return_value=None)
 
         wt_path = config.workspace_path_for_issue(42)
         wt_path.mkdir(parents=True, exist_ok=True)
@@ -1368,7 +1404,9 @@ class TestRunPrecheckContext:
             result = await captured_execute["fn"](["cmd"], "prompt")
 
         assert result == "transcript"
-        mock_self_execute.assert_called_once_with(["cmd"], "prompt", 42)
+        mock_self_execute.assert_called_once_with(
+            ["cmd"], "prompt", 42, issue_labels=()
+        )
 
 
 class TestExecuteGhToken:
