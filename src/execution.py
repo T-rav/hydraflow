@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from process_group import kill_process_group
+from process_group import kill_process_group, track, untrack
 
 
 @dataclass
@@ -140,10 +140,17 @@ class HostRunner:
             # pytest, agent CLIs) fork their own grandchildren. (#9648)
             start_new_session=True,
         )
+        # #9911 follow-up: register with the runtime-wide reap registry so
+        # a stop/shutdown mid-flight reaps this child too (previously only
+        # this method's own timeout could).
+        track(proc)
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(input=input), timeout=timeout
-            )
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(input=input), timeout=timeout
+                )
+            finally:
+                untrack(proc)
         except TimeoutError:
             # Reap the whole process group, not just the direct child. Without
             # this, sub-make / pytest / agent grandchildren are re-parented to
