@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models import ReviewVerdict
@@ -146,6 +148,103 @@ class TestExtractCategories:
     def test_empty_summary_returns_empty_category_list(self) -> None:
         cats = extract_categories("")
         assert cats == []
+
+
+# ---------------------------------------------------------------------------
+# CATEGORY_KEYWORDS structural ratchet guard (#9658)
+# ---------------------------------------------------------------------------
+#
+# #9545 / #9426 removed the bare single-word keywords ``type`` and ``name`` from
+# CATEGORY_KEYWORDS because, under the old substring matcher, ``type`` matched
+# ``TypeError`` / ``"type":"error"`` and ``name`` matched ``filename`` /
+# ``username`` — so API-error / credit-exhaustion telemetry was mis-categorized
+# as reviewer verdicts and inflated the per-category frequency counts. The fix
+# switched to ``\b``-bounded whole-word matching AND replaced the bare offenders
+# with deficiency phrases. Nothing structurally stopped a future edit from
+# silently re-adding a broad single-word keyword and reintroducing the class of
+# bug. This is the ratchet the issue title flags as missing (#9566 added the
+# equivalent guard for ``harness_insights.SUBCATEGORY_KEYWORDS``).
+
+# Frozen corpus of neutral / praise reviewer summaries. None of these express a
+# code deficiency, so ``extract_categories`` MUST return no categories for any
+# of them. Two entries ("... type of the returned value", "The function name
+# ...") deliberately use the historically-removed offenders ``type`` / ``name``
+# in benign contexts: if either bare word is re-added to CATEGORY_KEYWORDS these
+# cases start matching and the guard fails.
+_NEUTRAL_PRAISE_CORPUS: tuple[str, ...] = (
+    "Looks great, ready to merge.",
+    "LGTM - clean implementation and clear logic.",
+    "Nice work; this reads well and is easy to follow.",
+    "Approved. The change is well scoped and does what the issue asks.",
+    "This changes the type of the returned value from int to str.",
+    "The function name matches the module and reads clearly.",
+    "Ships a small, focused improvement with no concerns.",
+    "Everything checks out; happy to approve.",
+    "Great job on the parser rewrite.",
+    "Solid, production-ready change with a tidy diff.",
+    "The docs read clearly and the examples are helpful.",
+    "Well-structured commit with a descriptive message.",
+)
+
+# Bare single words that were removed by #9545 / #9426 and must never reappear
+# as CATEGORY_KEYWORDS entries — they are the documented over-matching offenders.
+_FORBIDDEN_BARE_KEYWORDS: frozenset[str] = frozenset({"type", "name"})
+
+
+class TestCategoryKeywordRatchet:
+    """Structural ratchet locking the #9545 / #9426 keyword-precision fix (#9658)."""
+
+    @pytest.mark.parametrize("summary", _NEUTRAL_PRAISE_CORPUS)
+    def test_neutral_praise_corpus_yields_no_categories(self, summary: str) -> None:
+        """A curated neutral/praise corpus must yield no categories (#9658).
+
+        If a future edit re-adds a broad single-word keyword (e.g. bare ``type``
+        or ``name``), one of these benign summaries starts matching and this
+        test fails at CI time rather than through silently degraded counts.
+        """
+        assert extract_categories(summary) == [], (
+            f"neutral/praise summary {summary!r} matched categories "
+            f"{extract_categories(summary)}; a broad keyword likely regressed "
+            "CATEGORY_KEYWORDS (see #9545 / #9426 / #9658)"
+        )
+
+    def test_no_keyword_shared_across_categories(self) -> None:
+        """No keyword may appear in two category buckets (#9658).
+
+        A shared keyword would double-count a single summary across categories
+        and bias ``analyze_patterns`` / ``get_escalation_data``.
+        """
+        seen: dict[str, str] = {}
+        collisions: list[tuple[str, str, str]] = []
+        for category, keywords in CATEGORY_KEYWORDS.items():
+            for kw in keywords:
+                key = kw.lower()
+                if key in seen:
+                    collisions.append((key, seen[key], category))
+                else:
+                    seen[key] = category
+
+        assert not collisions, (
+            "keyword(s) shared across CATEGORY_KEYWORDS buckets — each keyword "
+            f"must belong to exactly one category (#9658): {collisions}"
+        )
+
+    def test_historically_removed_bare_words_not_reintroduced(self) -> None:
+        """The bare offenders ``type`` / ``name`` must stay out of the dict (#9658).
+
+        These are the exact single words #9545 / #9426 removed. Whole-phrase
+        forms (``type hint``, ``rename``, ``naming``) are fine; the bare word is
+        the regression this ratchet forbids.
+        """
+        all_keywords = {
+            kw.lower() for keywords in CATEGORY_KEYWORDS.values() for kw in keywords
+        }
+        reintroduced = all_keywords & _FORBIDDEN_BARE_KEYWORDS
+        assert not reintroduced, (
+            "bare over-matching keyword(s) re-added to CATEGORY_KEYWORDS — these "
+            "match unrelated telemetry/identifiers and were removed by "
+            f"#9545 / #9426; qualify them as phrases instead: {reintroduced}"
+        )
 
 
 # ---------------------------------------------------------------------------
