@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from events import EventType
+from mockworld.fakes.fake_github import FakeGitHub
 from state import StateTracker
 from tests.helpers import make_bg_loop_deps
 from workspace_gc_loop import _MAX_GC_PER_CYCLE, WorkspaceGCLoop
@@ -391,43 +392,61 @@ class TestWorktreeGCSubprocessArgs:
         assert m.call_args[1]["cwd"] == loop._config.repo_root
 
     @pytest.mark.asyncio
-    async def test_has_open_pr_args(self, tmp_path: Path) -> None:
+    async def test_has_open_pr_queries_port_for_branch(self, tmp_path: Path) -> None:
+        """#9575: _has_open_pr resolves the branch's PR via PRPort, not raw gh."""
         loop, _s, _e = _make_loop(tmp_path)
+        from mockworld.fakes._factories import PRInfoFactory
+
+        branch = loop._config.branch_for_issue(42)
+        loop._prs.find_open_pr_for_branch = AsyncMock(
+            return_value=PRInfoFactory.create(number=7, issue_number=42, branch=branch)
+        )
         with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            m.return_value = "0\n"
             result = await loop._has_open_pr(42)
+        m.assert_not_called()  # no raw subprocess
+        assert result is True
+        loop._prs.find_open_pr_for_branch.assert_awaited_once_with(
+            branch, issue_number=42
+        )
+
+    @pytest.mark.asyncio
+    async def test_has_open_pr_false_on_zero_sentinel(self, tmp_path: Path) -> None:
+        """FakeGitHub signals 'no PR' with PRInfo(number=0) — must read as False."""
+        loop, _s, _e = _make_loop(tmp_path)
+        from mockworld.fakes._factories import PRInfoFactory
+
+        loop._prs.find_open_pr_for_branch = AsyncMock(
+            return_value=PRInfoFactory.create(number=0, issue_number=42, branch="b")
+        )
+        result = await loop._has_open_pr(42)
         assert result is False
-        args = m.call_args[0]
-        assert args[:3] == ("gh", "pr", "list")
-        assert "--head" in args
-        assert "--state" in args
-        assert loop._config.branch_for_issue(42) in args
 
     @pytest.mark.asyncio
     async def test_has_open_pr_returns_true_on_error(self, tmp_path: Path) -> None:
         loop, _s, _e = _make_loop(tmp_path)
-        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            m.side_effect = RuntimeError("gh failed")
-            result = await loop._has_open_pr(42)
-        assert result is True
+        loop._prs.find_open_pr_for_branch = AsyncMock(
+            side_effect=RuntimeError("gh failed")
+        )
+        result = await loop._has_open_pr(42)
+        assert result is True  # fail-closed: assume PR exists on error
 
     @pytest.mark.asyncio
-    async def test_issue_has_pipeline_label_parses_api_output(
+    async def test_issue_has_pipeline_label_reads_labels_via_port(
         self, tmp_path: Path
     ) -> None:
+        """#9575: pipeline-label check reads labels via PRPort, not raw gh."""
         loop, _s, _e = _make_loop(tmp_path)
         loop._issue_has_pipeline_label = (
             WorkspaceGCLoop._issue_has_pipeline_label.__get__(loop)
         )  # type: ignore[attr-defined]
+        loop._prs.get_issue_labels = AsyncMock(
+            return_value=[loop._config.ready_label[0], "other-label"]
+        )
         with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            m.return_value = f"{loop._config.ready_label[0]}\nother-label\n"
             result = await loop._issue_has_pipeline_label(42)
+        m.assert_not_called()  # no raw subprocess
         assert result is True
-        args = m.call_args[0]
-        assert args[0] == "gh"
-        assert args[1] == "api"
-        assert "issues/42" in args[2]
-        assert ".labels[].name" in args
+        loop._prs.get_issue_labels.assert_awaited_once_with(42)
 
     @pytest.mark.asyncio
     async def test_issue_has_pipeline_label_fails_safe_on_api_error(
@@ -437,10 +456,9 @@ class TestWorktreeGCSubprocessArgs:
         loop._issue_has_pipeline_label = (
             WorkspaceGCLoop._issue_has_pipeline_label.__get__(loop)
         )  # type: ignore[attr-defined]
-        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            m.side_effect = RuntimeError("gh failed")
-            result = await loop._issue_has_pipeline_label(42)
-        assert result is True
+        loop._prs.get_issue_labels = AsyncMock(side_effect=RuntimeError("gh failed"))
+        result = await loop._issue_has_pipeline_label(42)
+        assert result is True  # fail-closed: assume pipeline label present
 
 
 class TestWorktreeGCErrorHandling:
@@ -972,23 +990,24 @@ class TestGCReraisesFatalExceptions:
         with pytest.raises(AuthenticationError):
             await loop._is_safe_to_gc(42)
 
-    # -- _issue_has_pipeline_label except block (line 194) --
+    # -- _issue_has_pipeline_label except block --
 
     @pytest.mark.asyncio
     async def test_issue_has_pipeline_label_reraises_auth_error(
         self, tmp_path: Path
     ) -> None:
-        """AuthenticationError from run_subprocess propagates out of _issue_has_pipeline_label."""
+        """AuthenticationError from PRPort.get_issue_labels propagates out."""
         from subprocess_util import AuthenticationError  # noqa: PLC0415
 
         loop, _s, _e = _make_loop(tmp_path)
         loop._issue_has_pipeline_label = (
             WorkspaceGCLoop._issue_has_pipeline_label.__get__(loop)
         )  # type: ignore[attr-defined]
-        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            m.side_effect = AuthenticationError("bad token")
-            with pytest.raises(AuthenticationError):
-                await loop._issue_has_pipeline_label(42)
+        loop._prs.get_issue_labels = AsyncMock(
+            side_effect=AuthenticationError("bad token")
+        )
+        with pytest.raises(AuthenticationError):
+            await loop._issue_has_pipeline_label(42)
 
     # -- _collect_orphaned_dirs except block (line 272) --
 
@@ -1118,3 +1137,104 @@ class TestGCReraisesFatalExceptions:
         loop._is_safe_to_gc = AsyncMock(side_effect=RuntimeError("API failure"))
         pruned = await loop._prune_stale_branch_entries()
         assert pruned == 0  # error was caught, not propagated
+
+
+class TestWorkspaceGCReadsViaPort:
+    """#9575: the open-issue GC branch reads GitHub through PRPort.
+
+    ``_issue_has_pipeline_label`` and ``_has_open_pr`` must resolve issue
+    labels / open-PR status through the injected ``PRPort`` rather than a raw
+    ``gh`` subprocess. Routing through the Port means the air-gapped sandbox
+    ``FakeGitHub`` can serve these reads, so the open-issue GC path becomes
+    exercisable (it previously fail-closed under the sandbox network).
+    """
+
+    def _loop_with_fake(
+        self, tmp_path: Path, fake: FakeGitHub
+    ) -> tuple[WorkspaceGCLoop, StateTracker]:
+        deps = make_bg_loop_deps(tmp_path, enabled=True, workspace_gc_interval=600)
+        state = StateTracker(deps.config.state_file)
+        workspaces = MagicMock()
+        workspaces.destroy = AsyncMock()
+        loop = WorkspaceGCLoop(
+            config=deps.config,
+            workspaces=workspaces,
+            prs=fake,
+            state=state,
+            deps=deps.loop_deps,
+            is_in_pipeline_cb=lambda _n: False,
+        )
+        return loop, state
+
+    @pytest.mark.asyncio
+    async def test_pipeline_label_true_via_port_no_subprocess(
+        self, tmp_path: Path
+    ) -> None:
+        fake = FakeGitHub()
+        loop, _state = self._loop_with_fake(tmp_path, fake)
+        ready = loop._config.ready_label[0]
+        fake.add_issue(42, "t", "b", labels=[ready, "some-other"])
+        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
+            m.return_value = ""  # if it shells out, it would see "no labels"
+            result = await loop._issue_has_pipeline_label(42)
+        m.assert_not_called()
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_pipeline_label_false_via_port_no_subprocess(
+        self, tmp_path: Path
+    ) -> None:
+        fake = FakeGitHub()
+        loop, _state = self._loop_with_fake(tmp_path, fake)
+        fake.add_issue(42, "t", "b", labels=["not-a-pipeline-label"])
+        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
+            m.return_value = "hydraflow-ready\n"  # if it shells out, it'd be True
+            result = await loop._issue_has_pipeline_label(42)
+        m.assert_not_called()
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_has_open_pr_true_via_port_no_subprocess(
+        self, tmp_path: Path
+    ) -> None:
+        fake = FakeGitHub()
+        loop, _state = self._loop_with_fake(tmp_path, fake)
+        branch = loop._config.branch_for_issue(42)
+        fake.add_issue(42, "t", "b")
+        fake.add_pr(number=7, issue_number=42, branch=branch)
+        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
+            m.return_value = "0\n"  # if it shells out, it would see "no PR"
+            result = await loop._has_open_pr(42)
+        m.assert_not_called()
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_has_open_pr_false_via_port_no_subprocess(
+        self, tmp_path: Path
+    ) -> None:
+        fake = FakeGitHub()
+        loop, _state = self._loop_with_fake(tmp_path, fake)
+        fake.add_issue(42, "t", "b")  # no PR for the branch
+        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
+            m.return_value = "1\n"  # if it shells out, it would report a PR
+            result = await loop._has_open_pr(42)
+        m.assert_not_called()
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_open_issue_gc_end_to_end_under_fake(self, tmp_path: Path) -> None:
+        """Open issue with no pipeline labels and no PR is GC'd via the fake port."""
+        fake = FakeGitHub()
+        loop, state = self._loop_with_fake(tmp_path, fake)
+        state.set_workspace(42, "/p/42")
+        fake.add_issue(42, "t", "b")  # open, no labels, no PR
+        # _get_issue_state still shells out (out of #9575 scope); stub to open.
+        loop._get_issue_state = AsyncMock(return_value="open")
+        # Phase 3 shells out for `git branch`; stub so the assertion below can
+        # prove the open-issue *label/PR* reads never touched a subprocess.
+        loop._collect_orphaned_branches = AsyncMock(return_value=0)
+        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
+            result = await loop._do_work()
+        m.assert_not_called()
+        loop._workspaces.destroy.assert_awaited_once_with(42)
+        assert result["collected"] >= 1
