@@ -26,12 +26,14 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from adr_drift import compute_drift_by_adr
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
+from escalation_reconcile import EscalationReconciler
 from models import WorkCycleResult  # noqa: TCH001
 
 if TYPE_CHECKING:
@@ -83,6 +85,17 @@ def _dedup_key(adr_number: int) -> str:
     return f"adr_touchpoint_auditor:{_rollup_key(adr_number)}"
 
 
+# Parses ``_file_drift_escalation`` titles back to the dedup-key subject
+# (the ``ADR-NNNN`` rollup key). Returns ``None`` for titles that aren't ours
+# so the shared ``EscalationReconciler`` skips operator-created issues.
+_ESCALATION_TITLE_RE = re.compile(r"^HITL: ADR drift (.+?) unresolved after ")
+
+
+def _escalation_subject(title: str) -> str | None:
+    m = _ESCALATION_TITLE_RE.match(title)
+    return m.group(1) if m else None
+
+
 def _adr_num_from_key(rollup_key: str) -> int | None:
     """Parse the ADR number out of an ``ADR-NNNN`` rollup key.
 
@@ -124,6 +137,22 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
         self._pr = pr_manager
         self._dedup = dedup
         self._adr_index = adr_index
+        self._escalations = EscalationReconciler(
+            prs=pr_manager,
+            dedup=dedup,
+            key_prefix="adr_touchpoint_auditor",
+            stuck_label=config.adr_drift_stuck_label[0],
+            clear_attempts=self._clear_drift_state,
+            subject_from_title=_escalation_subject,
+        )
+
+    def _clear_drift_state(self, subject: str) -> None:
+        """Clear both the attempt counter and the rollup state for *subject*
+        (an ``ADR-NNNN`` rollup key). The pre-migration reconciler cleared
+        both on a closed escalation; the shared reconciler drives this via a
+        single ``clear_attempts`` callback."""
+        self._state.clear_adr_audit_attempts(subject)
+        self._state.clear_adr_rollup(subject)
 
     def _get_default_interval(self) -> int:
         return self._config.adr_touchpoint_auditor_interval
@@ -319,61 +348,16 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
         )
 
     async def _reconcile_closed_escalations(self) -> None:
-        """Clear dedup keys + attempt counters for closed drift escalations."""
-        cmd = [
-            "gh",
-            "issue",
-            "list",
-            "--repo",
-            self._config.repo,
-            "--state",
-            "closed",
-        ]
-        for label in (
-            *self._config.hitl_escalation_label,
-            *self._config.adr_drift_stuck_label,
-        ):
-            cmd.extend(["--label", label])
-        cmd.extend(
-            [
-                "--author",
-                "@me",
-                "--limit",
-                "100",
-                "--json",
-                "title",
-            ]
-        )
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, _ = await _communicate_bounded(proc)
-        except TimeoutError:
-            return
-        if proc.returncode != 0:
-            return
-        try:
-            closed = json.loads(stdout.decode() or "[]")
-        except json.JSONDecodeError:
-            return
-        current = self._dedup.get()
-        keep = set(current)
-        for issue in closed:
-            title = issue.get("title", "")
-            for key in list(keep):
-                if (
-                    key.startswith("adr_touchpoint_auditor:")
-                    and key.split(":", 1)[1] in title
-                ):
-                    keep.discard(key)
-                    attempt_id = key.split(":", 1)[1]
-                    self._state.clear_adr_audit_attempts(attempt_id)
-                    self._state.clear_adr_rollup(attempt_id)
-        if keep != current:
-            self._dedup.set_all(keep)
+        """Clear dedup keys + attempt counters for closed drift escalations.
+
+        Delegates to the shared :class:`EscalationReconciler` (PRPort-based;
+        replaced the raw ``gh issue list`` subprocess — #9932). Subjects (the
+        ``ADR-NNNN`` rollup key) are parsed from the escalation-title shape
+        ``"HITL: ADR drift <ADR-NNNN> unresolved after N"``; the matching
+        ``adr_touchpoint_auditor:<ADR-NNNN>`` dedup key, attempt counter, and
+        rollup state (:meth:`_clear_drift_state`) are cleared.
+        """
+        await self._escalations.reconcile_closed()
 
     def _adrs_updated_in_diff(self, changed_files: list[str]) -> set[int]:
         """Return ADR numbers whose own markdown file appears in *changed_files*."""

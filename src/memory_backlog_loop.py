@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
+from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
 from memory_backlog_mirror import (
     dedup_key_for,
@@ -43,6 +44,18 @@ logger = logging.getLogger("hydraflow.memory_backlog_loop")
 _MAX_ATTEMPTS = 3
 _MIRROR_SUBPATH = ("docs", "wiki", "memory-feedback")
 _DEDUP_PREFIX = "memory_backlog:"
+
+# Parses ``_file_escalation`` titles back to the slug subject. Returns
+# ``None`` for titles that aren't ours so the shared ``EscalationReconciler``
+# skips operator-created issues untouched. ``(.+?)`` non-greedy up to the
+# `` unresolved after `` sentinel so spaced slugs stay reconcilable.
+_ESCALATION_TITLE_RE = re.compile(r"^HITL: memory backlog (.+?) unresolved after ")
+
+
+def _escalation_subject(title: str) -> str | None:
+    m = _ESCALATION_TITLE_RE.match(title)
+    return m.group(1) if m else None
+
 
 # Hard cap on each ``git``/``gh`` child. A wedged subprocess must not hang the
 # loop cycle forever and freeze its heartbeat — the #9410 silent-stall failure
@@ -95,6 +108,19 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
         self._state = state
         self._pr = pr_manager
         self._dedup = dedup
+        # ``clear_memory_backlog_attempts`` is keyed on the FULL dedup key
+        # (``memory_backlog:<slug>``), not the bare subject — wrap so the
+        # reconciler passes the counter the same key it discards from dedup.
+        self._escalations = EscalationReconciler(
+            prs=pr_manager,
+            dedup=dedup,
+            key_prefix="memory_backlog",
+            stuck_label=config.memory_backlog_stuck_label[0],
+            clear_attempts=lambda subject: state.clear_memory_backlog_attempts(
+                f"{_DEDUP_PREFIX}{subject}"
+            ),
+            subject_from_title=_escalation_subject,
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.memory_backlog_interval_seconds
@@ -265,56 +291,11 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
     async def _reconcile_closed_escalations(self) -> None:
         """Clear dedup keys + attempt counters for closed escalations.
 
-        Mirrors `FakeCoverageAuditorLoop._reconcile_closed_escalations`:
-        scans `gh issue list --state closed` for memory-backlog-stuck
-        escalations the bot filed, then clears the matching dedup key
-        and StateTracker attempt counter so the entry can re-file fresh.
+        Delegates to the shared :class:`EscalationReconciler` (PRPort-based;
+        replaced the raw ``gh issue list`` subprocess — #9932). Subjects are
+        parsed from the escalation-title shape
+        ``"HITL: memory backlog <slug> unresolved after N"``; the matching
+        ``memory_backlog:<slug>`` dedup key + StateTracker attempt counter are
+        cleared so the entry can re-file fresh.
         """
-        stuck_label = self._config.memory_backlog_stuck_label[0]
-        cmd = [
-            "gh",
-            "issue",
-            "list",
-            "--repo",
-            self._config.repo,
-            "--state",
-            "closed",
-            "--label",
-            "hitl-escalation",
-            "--label",
-            stuck_label,
-            "--author",
-            "@me",
-            "--limit",
-            "100",
-            "--json",
-            "title",
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, _ = await _communicate_bounded(proc)
-        except TimeoutError:
-            return
-        if proc.returncode != 0:
-            return
-        try:
-            closed = json.loads(stdout.decode() or "[]")
-        except json.JSONDecodeError:
-            return
-        current = self._dedup.get()
-        keep = set(current)
-        for issue in closed:
-            title = issue.get("title", "")
-            for key in list(keep):
-                if not key.startswith(_DEDUP_PREFIX):
-                    continue
-                slug = key.split(":", 1)[1]
-                if slug in title:
-                    keep.discard(key)
-                    self._state.clear_memory_backlog_attempts(key)
-        if keep != current:
-            self._dedup.set_all(keep)
+        await self._escalations.reconcile_closed()
