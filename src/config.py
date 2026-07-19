@@ -354,7 +354,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     (
         "security_patch_severity_threshold",
         "HYDRAFLOW_SECURITY_PATCH_SEVERITY_THRESHOLD",
-        "high",
+        "medium",
     ),
     ("dashboard_host", "HYDRAFLOW_DASHBOARD_HOST", "127.0.0.1"),
     ("test_command", "HYDRAFLOW_TEST_COMMAND", "make test"),
@@ -1850,7 +1850,7 @@ class HydraFlowConfig(BaseModel):
     )
     security_patch_severity_threshold: Literal["critical", "high", "medium", "low"] = (
         Field(
-            default="high",
+            default="medium",
             description="Minimum severity to file issues for",
         )
     )
