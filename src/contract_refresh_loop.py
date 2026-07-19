@@ -49,6 +49,7 @@ Spec: ``docs/superpowers/specs/2026-04-22-trust-architecture-hardening-design.md
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -510,8 +511,13 @@ class ContractRefreshLoop(BaseBackgroundLoop):
                 proc.communicate(), timeout=_REPLAY_GATE_TIMEOUT_SECONDS
             )
         except TimeoutError:
-            proc.kill()
-            await proc.wait()
+            # proc.kill() itself raises ProcessLookupError when the child
+            # already exited — suppress it (and proc.wait()) so the timeout is
+            # handled as a failure instead of crashing the loop cycle.
+            # (#9794/#9816/#9883)
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+                await proc.wait()
             logger.warning(
                 "Replay gate timed out after %ss; treating as failure",
                 _REPLAY_GATE_TIMEOUT_SECONDS,
