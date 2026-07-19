@@ -35,6 +35,13 @@ from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
 from execution import get_default_runner
 from models import WorkCycleResult
+from prompt_efficiency import (
+    INEFFICIENCY_THRESHOLD,
+    SkillEfficiencyRow,
+    compute_skill_efficiency,
+    format_scorecard,
+    pick_refine_order,
+)
 from prompt_refiner import (
     PROMPT_LENGTH_DRIFT_LIMIT,
     SKILL_BUILDER_MODULES,
@@ -45,6 +52,7 @@ from prompt_refiner import (
     parse_patch_response,
     render_builder_prompt,
 )
+from prompt_telemetry import PromptTelemetry
 from runner_utils import run_lightweight_agent
 
 if TYPE_CHECKING:
@@ -266,6 +274,11 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         self._dedup = dedup
         # Injected fake under test; production lazily builds `_CLIRefineLLM`.
         self._refine_llm = refine_llm
+        # Telemetry consumption (spec §5) — same construction idiom as every
+        # other PromptTelemetry consumer (base_runner, post_merge_handler,
+        # base_subprocess_runner): no injection seam, just `PromptTelemetry
+        # (config)`. Tests seed real records via `loop._telemetry.record(...)`.
+        self._telemetry = PromptTelemetry(config)
         self._escalations = EscalationReconciler(
             prs=pr_manager,
             dedup=dedup,
@@ -440,6 +453,13 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             rng = random.Random(int(time.time() * 1_000_000))
             cases = rng.sample(cases, cap)
 
+        # Telemetry consumption (spec §5) — ranked scorecard + refine-queue
+        # priority ordering + `prompt-inefficiency` issue filing, using the
+        # baseline stored on the *previous* tick for trend comparison.
+        ordered_cases, efficiency_scorecard = await self._consume_efficiency_telemetry(
+            cases
+        )
+
         # Role 1 — backstop. PASS→FAIL regressions.
         last_green = self._state.get_skill_prompt_last_green()
         current: dict[str, str] = {
@@ -452,7 +472,10 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         # Per-tick seed: stable within one invocation, diverse across ticks
         # (matches plan decision #5 — seed-stable per workflow run).
         tick_seed = int(t0 * 1_000_000)
-        for case in cases:
+        # Most cost-inefficient skill's regression gets first crack at the
+        # weekly refine cap (`ordered_cases`, not `cases` — the latter stays
+        # in corpus order for `current`/weak-case sampling below).
+        for case in ordered_cases:
             case_id = case.get("case_id")
             if not case_id:
                 continue
@@ -531,7 +554,65 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             "autoclosed": autoclosed,
             "weak_cases_flagged": weak_flagged,
             "cases_seen": len(cases),
+            "efficiency_scorecard": efficiency_scorecard,
         }
+
+    # --- Telemetry consumption (spec §5) --------------------------------------
+
+    async def _consume_efficiency_telemetry(
+        self, cases: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], str]:
+        """Weekly telemetry rollup: scorecard + refine-priority ordering +
+        inefficiency issue filing, then advance the baseline.
+
+        Trend is computed against the baseline stored on the *previous* tick
+        (trailing-window: current vs. immediately preceding tick — not a
+        multi-week rolling average). The baseline is overwritten with this
+        tick's snapshot only AFTER that comparison, so next tick's trend is
+        relative to what this tick just measured.
+        """
+        totals_by_source = self._telemetry.get_source_totals()
+        baseline = self._state.get_prompt_efficiency_baseline()
+        rows = compute_skill_efficiency(totals_by_source, baseline)
+        scorecard = format_scorecard(rows)
+        ordered_cases = pick_refine_order(cases, rows)
+        for row in rows:
+            if (
+                row.trend_vs_baseline is not None
+                and row.trend_vs_baseline > INEFFICIENCY_THRESHOLD
+            ):
+                await self._file_inefficiency_issue(row)
+        self._state.set_prompt_efficiency_baseline(totals_by_source)
+        return ordered_cases, scorecard
+
+    async def _file_inefficiency_issue(self, row: SkillEfficiencyRow) -> None:
+        """File a deduped `prompt-inefficiency` issue for a degraded source."""
+        dedup = self._dedup.get()
+        key = f"skill_prompt_eval:inefficiency:{row.source}"
+        if key in dedup:
+            return
+        title = f"Prompt inefficiency: {row.source} cost-per-call regressed"
+        trend_pct = (
+            f"{row.trend_vs_baseline:+.0%}"
+            if row.trend_vs_baseline is not None
+            else "n/a"
+        )
+        body = (
+            f"## Cost-per-call regression\n\n"
+            f"Source `{row.source}` cost-per-call is **{trend_pct}** vs. last "
+            f"week's baseline — now ${row.cost_per_call:.4f}/call across "
+            f"{row.calls} calls (${row.est_cost_usd:.4f} total, "
+            f"{row.anomalies} usage anomalies).\n\n"
+            f"_Spec §5c — filed by `skill_prompt_eval` loop's weekly "
+            f"telemetry consumption. Standard repair path: check for "
+            f"context bloat, cache-hit-rate drops, or a model swap for this "
+            f"source._"
+        )
+        await self._pr.create_issue(
+            title, body, ["hydraflow-find", "prompt-inefficiency"]
+        )
+        dedup.add(key)
+        self._dedup.set_all(dedup)
 
     def _emit_trace(self, t0: float, *, cases_seen: int) -> None:
         try:

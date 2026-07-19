@@ -131,6 +131,7 @@ class TestInitialization:
             "skill_prompt_attempts",
             "skill_prompt_last_green",
             "skill_prompt_refine_proposals",
+            "prompt_efficiency_baseline",
             "trust_fleet_sanity_attempts",
             "trust_fleet_sanity_last_run",
             "trust_fleet_sanity_last_seen_counts",

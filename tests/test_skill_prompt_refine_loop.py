@@ -430,3 +430,160 @@ async def test_do_work_refine_failure_double_increments_attempts(
     # One increment from the drift-regression path, one more from
     # `_try_refine`'s tripwire (non-shipping) outcome.
     assert loop._state.get_skill_prompt_attempts("accidental-deletion") == 2
+
+
+# ---------------------------------------------------------------------------
+# Telemetry consumption (Task 7, spec §5) — scorecard appended to the cycle
+# summary, baseline advanced for next tick, and `prompt-inefficiency` issues
+# filed (deduped) when a source's cost-per-call regresses past threshold.
+# ---------------------------------------------------------------------------
+
+
+class _FakeTelemetry:
+    """Minimal `PromptTelemetry.get_source_totals()` double — deterministic
+    totals without going through the real cost-estimation/pricing pipeline."""
+
+    def __init__(self, totals: dict[str, dict[str, int]]) -> None:
+        self._totals = totals
+
+    def get_source_totals(self) -> dict[str, dict[str, int]]:
+        return self._totals
+
+
+def _steady_case(case_id: str = "steady-case") -> dict[str, object]:
+    return {
+        "case_id": case_id,
+        "skill": "diff-sanity",
+        "expected_catcher": "diff-sanity",
+        "status": "PASS",
+    }
+
+
+async def test_do_work_appends_scorecard_and_advances_baseline(
+    refine_loop_factory, monkeypatch
+) -> None:
+    loop = refine_loop_factory()
+    loop._pr.list_issues_by_label = AsyncMock(return_value=[])
+    loop._pr.list_closed_issues_by_label = AsyncMock(return_value=[])
+    loop._telemetry.record(
+        source="diff-sanity",
+        tool="claude",
+        model="sonnet",
+        issue_number=1,
+        pr_number=0,
+        session_id="s1",
+        prompt_chars=100,
+        transcript_chars=50,
+        duration_seconds=0.1,
+        success=True,
+        stats={"total_tokens": 10},
+    )
+
+    async def fake_run_corpus() -> list[dict]:
+        return [_steady_case()]
+
+    monkeypatch.setattr(loop, "_run_corpus", fake_run_corpus)
+
+    stats = await loop._do_work()
+
+    assert stats["efficiency_scorecard"].startswith("| skill ")
+    assert "diff-sanity" in stats["efficiency_scorecard"]
+    # Baseline advances to this tick's snapshot for next week's comparison.
+    baseline = loop._state.get_prompt_efficiency_baseline()
+    assert baseline["diff-sanity"]["inference_calls"] == 1
+
+
+async def test_do_work_files_prompt_inefficiency_issue_past_threshold(
+    refine_loop_factory, monkeypatch
+) -> None:
+    loop = refine_loop_factory()
+    loop._pr.list_issues_by_label = AsyncMock(return_value=[])
+    loop._pr.list_closed_issues_by_label = AsyncMock(return_value=[])
+    loop._pr.create_issue = AsyncMock(return_value=99)
+
+    # Last week: cheap. This week: 10x cost-per-call => trend > 0.5 threshold.
+    loop._state.set_prompt_efficiency_baseline(
+        {
+            "diff-sanity": {
+                "inference_calls": 10,
+                "estimated_cost_microusd": 1_000_000,
+                "usage_unavailable_calls": 0,
+            }
+        }
+    )
+    loop._telemetry = _FakeTelemetry(
+        {
+            "diff-sanity": {
+                "inference_calls": 10,
+                "estimated_cost_microusd": 10_000_000,
+                "usage_unavailable_calls": 0,
+            }
+        }
+    )
+
+    async def fake_run_corpus() -> list[dict]:
+        return [_steady_case()]
+
+    monkeypatch.setattr(loop, "_run_corpus", fake_run_corpus)
+
+    await loop._do_work()
+
+    loop._pr.create_issue.assert_awaited_once()
+    title, _body, labels = loop._pr.create_issue.await_args.args
+    assert "diff-sanity" in title
+    assert "prompt-inefficiency" in labels
+
+    # Second tick, same regressed source: dedup short-circuits, no re-file.
+    loop._pr.create_issue.reset_mock()
+    monkeypatch.setattr(loop, "_run_corpus", fake_run_corpus)
+    await loop._do_work()
+    loop._pr.create_issue.assert_not_awaited()
+
+
+async def test_do_work_iterates_pick_refine_order_not_raw_corpus_order(
+    refine_loop_factory, monkeypatch
+) -> None:
+    """Wiring check: `_do_work` must feed the drift-regression loop from
+    `pick_refine_order`'s output, not the raw `_run_corpus` order."""
+    loop = refine_loop_factory(llm=_FakeRefineLLM(GOOD_PATCH))
+    loop._pr.list_issues_by_label = AsyncMock(return_value=[])
+    loop._pr.list_closed_issues_by_label = AsyncMock(return_value=[])
+    loop._try_refine = AsyncMock(return_value="disabled")
+    loop._state.set_skill_prompt_last_green({"case_a": "PASS", "case_b": "PASS"})
+
+    async def fake_run_corpus() -> list[dict]:
+        return [
+            {
+                "case_id": "case_a",
+                "skill": "diff-sanity",
+                "expected_catcher": "diff-sanity",
+                "status": "FAIL",
+            },
+            {
+                "case_id": "case_b",
+                "skill": "diff-sanity",
+                "expected_catcher": "diff-sanity",
+                "status": "FAIL",
+            },
+        ]
+
+    monkeypatch.setattr(loop, "_run_corpus", fake_run_corpus)
+
+    processed_order: list[str] = []
+
+    async def fake_file_drift_issue(case: dict, _was: str) -> int:
+        processed_order.append(str(case["case_id"]))
+        return 1
+
+    monkeypatch.setattr(loop, "_file_drift_issue", fake_file_drift_issue)
+    # Force pick_refine_order to reverse whatever list it's given, proving
+    # `_do_work` iterates ITS output rather than the untouched corpus order.
+    monkeypatch.setattr(
+        skill_prompt_eval_loop,
+        "pick_refine_order",
+        lambda cases, _rows: list(reversed(cases)),
+    )
+
+    await loop._do_work()
+
+    assert processed_order == ["case_b", "case_a"]

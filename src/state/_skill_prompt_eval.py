@@ -70,3 +70,23 @@ class SkillPromptEvalStateMixin:
             self._data.skill_prompt_refine_proposals = kept
             self.save()
         return len(kept)
+
+    # --- Telemetry consumption baseline (spec §5) ---
+
+    def get_prompt_efficiency_baseline(self) -> dict[str, dict[str, int]]:
+        """Return last tick's `PromptTelemetry.get_source_totals()` snapshot."""
+        return {k: dict(v) for k, v in self._data.prompt_efficiency_baseline.items()}
+
+    def set_prompt_efficiency_baseline(
+        self, snapshot: dict[str, dict[str, int]]
+    ) -> None:
+        """Overwrite the stored baseline with *snapshot* (this tick's totals).
+
+        Call AFTER computing trend vs. the previous baseline — this is a
+        trailing-window comparison (current tick vs. the immediately
+        preceding tick), not a multi-week rolling average.
+        """
+        self._data.prompt_efficiency_baseline = {
+            k: dict(v) for k, v in snapshot.items()
+        }
+        self.save()
