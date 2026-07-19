@@ -258,6 +258,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("sentry_signal_cooldown_hours", "SENTRY_SIGNAL_COOLDOWN_HOURS", 24),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
+    (
+        "dependabot_update_branch_max_attempts",
+        "HYDRAFLOW_DEPENDABOT_UPDATE_BRANCH_MAX_ATTEMPTS",
+        1,
+    ),
     ("review_orphan_strike_threshold", "HYDRAFLOW_REVIEW_ORPHAN_STRIKE_THRESHOLD", 3),
     ("review_orphan_max_requeues", "HYDRAFLOW_REVIEW_ORPHAN_MAX_REQUEUES", 3),
     ("repo_wiki_min_batch_files", "HYDRAFLOW_REPO_WIKI_MIN_BATCH_FILES", 8),
@@ -1963,6 +1968,16 @@ class HydraFlowConfig(BaseModel):
         ge=300,
         le=604800,
         description="Seconds between repo wiki lint cycles",
+    )
+    dependabot_update_branch_max_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description=(
+            "Bounded update-branch heals per CI-failed bot PR (#9889): a "
+            "behind-base PR gets a fresh merge ref + full CI re-run before "
+            "the failure strategy applies. 0 disables."
+        ),
     )
     review_orphan_strike_threshold: int = Field(
         default=3,
