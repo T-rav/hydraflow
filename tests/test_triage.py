@@ -183,11 +183,11 @@ class TestLLMEvaluation:
         stdout = f"{assistant_event}\n{result_event}"
         mock_runner.create_streaming_process = make_streaming_proc(stdout=stdout)
 
-        result = await runner.evaluate(issue)
-        # Parse failures now default to ready=True (pass through to planner)
-        # rather than escalating to HITL — the issue isn't bad, the parse is.
-        assert result.ready is True
-        assert any("parse" in r.lower() for r in result.reasons)
+        # Parse failures are infrastructure errors (#9798): they propagate as
+        # RuntimeError so the issue STAYS QUEUED for retry — the old
+        # ready=True default rubber-stamped ~131 issues past the gate.
+        with pytest.raises(RuntimeError, match="unparseable"):
+            await runner.evaluate(issue)
 
     @pytest.mark.asyncio
     async def test_llm_process_failure_propagates(
@@ -876,8 +876,10 @@ class TestTriageSentryBreadcrumbs:
 
         fake_obs = FakeSentry()
         runner._obs = fake_obs
-        result = await runner.evaluate(issue)
-        assert result.ready is True  # Parse failures default to ready
+        # Parse failures now raise (#9798 — issue stays queued for retry);
+        # the breadcrumb must still land before the raise.
+        with pytest.raises(RuntimeError, match="unparseable"):
+            await runner.evaluate(issue)
         parse_bcs = [
             b for b in fake_obs.breadcrumbs if b["category"] == "triage.parse_failed"
         ]

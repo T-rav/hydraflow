@@ -442,14 +442,16 @@ or for a claim that is demonstrably false / already implemented (the described p
                 )
             return result
 
-        # Fallback: could not parse LLM response.  Rather than escalating
-        # to HITL (which is for genuinely bad issues, not infra failures),
-        # default to passing the issue through.  The triage prompt says
-        # "default to passing issues through" — a parse failure is an
-        # infrastructure problem, not an issue quality problem.
+        # Fallback (#9798): could not parse the LLM response. A parse failure
+        # is an INFRASTRUCTURE problem, and the established contract for
+        # infra failures (see the empty-response check above and the
+        # ``except RuntimeError: raise`` in ``evaluate``) is to propagate so
+        # the issue STAYS IN THE TRIAGE QUEUE for retry. The old behavior —
+        # defaulting to ready=True — rubber-stamped ~131 issues straight past
+        # the gate, making triage a no-op exactly when the parser broke.
         logger.warning(
-            "Issue #%d triage — could not parse LLM response, defaulting to "
-            "ready=True. Transcript snippet: %.200s",
+            "Issue #%d triage — could not parse LLM response; keeping the "
+            "issue queued for retry. Transcript snippet: %.200s",
             issue.id,
             transcript.strip(),
         )
@@ -460,16 +462,9 @@ or for a claim that is demonstrably false / already implemented (the described p
                 level="warning",
                 issue_id=issue.id,
             )
-        return TriageResult(
-            issue_number=issue.id,
-            ready=True,
-            reasons=["Triage parse failed — defaulting to ready"],
-            enrichment=(
-                "## Triage Note\n\n"
-                "Triage evaluation could not parse the LLM response. "
-                "This issue was passed through to planning by default. "
-                "The planner should validate sufficient context."
-            ),
+        raise RuntimeError(
+            "triage verdict unparseable — LLM response contained no "
+            "recognizable JSON verdict (issue stays queued for retry)"
         )
 
     @staticmethod
@@ -554,9 +549,61 @@ or for a claim that is demonstrably false / already implemented (the described p
         2. Extract JSON from markdown code fences
         3. Regex to find a JSON object with ``"ready"`` key
         """
-        # Pre-process: strip Claude Code system/init lines
-        transcript = TriageRunner._strip_system_lines(transcript)
+        # Strategy 0 (#9798): the transcript may be RAW stream-json — one
+        # frame per line, with the verdict escaped INSIDE a ``result`` frame
+        # (``{"type":"result","result":"{\"ready\":...}"}``) or an assistant
+        # content block. None of the text strategies below can see escaped
+        # JSON (the regex looks for an unescaped "ready" key), which is how
+        # ~131 real verdicts fell through to the old rubber-stamp fallback.
+        # Extract the embedded text first and give the strategies real input.
+        stream_text = TriageRunner._extract_stream_json_text(transcript)
+        if stream_text:
+            extracted = TriageRunner._parse_json_strategies(stream_text, issue_number)
+            if extracted is not None:
+                return extracted
 
+        # Pre-process: strip Claude Code system/init lines, then run the
+        # text-level strategies on what remains.
+        transcript = TriageRunner._strip_system_lines(transcript)
+        return TriageRunner._parse_json_strategies(transcript, issue_number)
+
+    @staticmethod
+    def _extract_stream_json_text(transcript: str) -> str | None:
+        """Pull human/verdict text out of a stream-json transcript.
+
+        Collects ``result`` payloads and assistant message text blocks from
+        per-line JSON frames. Returns None when no frame parses (plain-text
+        transcripts fall through to the direct strategies unchanged).
+        """
+        chunks: list[str] = []
+        saw_frame = False
+        for raw_line in transcript.splitlines():
+            candidate = raw_line.strip()
+            if not candidate.startswith("{"):
+                continue
+            try:
+                frame = json.loads(candidate)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if not isinstance(frame, dict):
+                continue
+            saw_frame = True
+            if isinstance(frame.get("result"), str):
+                chunks.append(frame["result"])
+            message = frame.get("message")
+            if isinstance(message, dict):
+                for block in message.get("content") or []:
+                    if isinstance(block, dict) and isinstance(block.get("text"), str):
+                        chunks.append(block["text"])
+        if not saw_frame or not chunks:
+            return None
+        return "\n".join(chunks)
+
+    @staticmethod
+    def _parse_json_strategies(
+        transcript: str, issue_number: int
+    ) -> TriageResult | None:
+        """The original three text-level parse strategies."""
         # Strategy 1: direct parse
         try:
             data = json.loads(transcript.strip())
