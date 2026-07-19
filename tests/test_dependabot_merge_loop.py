@@ -99,14 +99,23 @@ def _make_loop(
     arch_autoheal_max_attempts: int | None = None,
     update_branch_max_attempts: int | None = None,
     update_branch_result: bool = True,
+    mergeable: bool | None = None,
 ) -> tuple[DependabotMergeLoop, asyncio.Event, MagicMock, MagicMock, MagicMock]:
     """Build a DependabotMergeLoop with test-friendly defaults.
 
     Returns (loop, stop_event, cache_mock, prs_mock, state_mock).
+
+    ``mergeable`` feeds ``get_pr_mergeable`` (the #9889 item-2 conflict
+    corroboration read). The harness default ``None`` (= unknown) keeps the
+    legacy merge-failure path in every pre-existing test; conflict-heal tests
+    opt in with ``mergeable=False``.
     """
     deps = make_bg_loop_deps(
         tmp_path, enabled=enabled, dependabot_merge_interval=interval
     )
+    # Isolate the conflict-comment DedupStore under tmp_path (the factory
+    # config's data_root defaults to CWD, which would leak between tests).
+    object.__setattr__(deps.config, "data_root", tmp_path / "data")
     if arch_autoheal_max_attempts is not None:
         object.__setattr__(
             deps.config,
@@ -135,6 +144,8 @@ def _make_loop(
     prs.add_labels = AsyncMock()
     prs.post_comment = AsyncMock()
     prs.close_issue = AsyncMock()
+    prs.close_pr = AsyncMock(return_value=True)
+    prs.get_pr_mergeable = AsyncMock(return_value=mergeable)
     prs.refresh_pr_branch_with_arch_regen = AsyncMock(return_value=arch_refresh_result)
 
     state = _make_state(
@@ -934,3 +945,224 @@ class TestHumanBranchShepherd:
 
         assert result == {"merged": 0, "skipped": 0, "failed": 0}
         prs.wait_for_ci.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Item 2 (#9889): DIRTY content-conflict auto-heal
+# ---------------------------------------------------------------------------
+
+
+class TestConflictHeal:
+    """A CI-green PR whose merge fails on a genuine content conflict
+    (``get_pr_mergeable`` reads False = CONFLICTING) is healed by class:
+    factory-maintenance → close-supersede (the regenerating loop reopens a
+    fresh PR, single-flight #9939); dependabot/bot → one bounded
+    update-branch then the failure strategy; human shepherd-prefix → one
+    dedup-bounded comment, otherwise the author's to fix."""
+
+    @pytest.mark.asyncio
+    async def test_ul_pr_conflict_closed_with_supersede_comment(
+        self, tmp_path: Path
+    ) -> None:
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[
+                _make_pr(50, author="HydraOps-T-rav", branch="ul-proposer/4e3d7b2b")
+            ],
+            merge_result=False,
+            mergeable=False,
+        )
+
+        result = await loop._do_work()
+
+        prs.post_comment.assert_awaited_once()
+        comment = prs.post_comment.await_args.args[1]
+        assert "conflict" in comment.lower()
+        assert "fresh" in comment.lower() or "supersed" in comment.lower()
+        prs.close_pr.assert_awaited_once_with(50)
+        state.add_dependabot_merge_processed.assert_called_once_with(50)
+        prs.update_pr_branch.assert_not_awaited()
+        prs.close_issue.assert_not_awaited()
+        assert result["failed"] == 1
+        assert result["merged"] == 0
+
+    @pytest.mark.parametrize(
+        "branch",
+        [
+            "ul-evidence/5ebff585",
+            "ul-edges/0afc892d",
+            "ul-pruner/9f1c2d3e",
+            "pricing-refresh-auto",
+            "hydraflow/wiki-maint-20260719-0400",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_all_factory_maintenance_prefixes_close_supersede(
+        self, tmp_path: Path, branch: str
+    ) -> None:
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(51, author="HydraOps-T-rav", branch=branch)],
+            merge_result=False,
+            mergeable=False,
+        )
+
+        await loop._do_work()
+
+        prs.close_pr.assert_awaited_once_with(51)
+        state.add_dependabot_merge_processed.assert_called_once_with(51)
+
+    @pytest.mark.asyncio
+    async def test_dependabot_conflict_update_branch_once_then_retry(
+        self, tmp_path: Path
+    ) -> None:
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[
+                _make_pr(
+                    52, author="app/dependabot", branch="dependabot/uv/foo", is_bot=True
+                )
+            ],
+            merge_result=False,
+            mergeable=False,
+            update_branch_max_attempts=1,
+            update_branch_result=True,
+        )
+
+        result = await loop._do_work()
+
+        prs.update_pr_branch.assert_awaited_once_with(52, method="merge")
+        state.bump_dependabot_update_branch_attempts.assert_called_once_with(52)
+        prs.close_pr.assert_not_awaited()
+        prs.post_comment.assert_not_awaited()
+        state.add_dependabot_merge_processed.assert_not_called()
+        assert result["skipped"] == 1
+        assert result["failed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_dependabot_conflict_cap_exhausted_applies_failure_strategy(
+        self, tmp_path: Path
+    ) -> None:
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[
+                _make_pr(
+                    53, author="app/dependabot", branch="dependabot/uv/bar", is_bot=True
+                )
+            ],
+            merge_result=False,
+            mergeable=False,
+            update_branch_max_attempts=1,
+            failure_strategy="hitl",
+        )
+        state.get_dependabot_update_branch_attempts.side_effect = lambda _n: 1
+
+        result = await loop._do_work()
+
+        prs.update_pr_branch.assert_not_awaited()
+        prs.add_labels.assert_awaited_once()
+        prs.post_comment.assert_awaited_once()
+        state.add_dependabot_merge_processed.assert_called_once_with(53)
+        prs.close_pr.assert_not_awaited()
+        assert result["failed"] == 1
+
+    @pytest.mark.asyncio
+    async def test_dependabot_conflict_update_branch_refused_falls_to_strategy(
+        self, tmp_path: Path
+    ) -> None:
+        """update_pr_branch=False (GitHub can't rebase a real conflict) must
+        not burn the attempt budget and must fall through to the strategy."""
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[
+                _make_pr(
+                    54, author="app/dependabot", branch="dependabot/uv/baz", is_bot=True
+                )
+            ],
+            merge_result=False,
+            mergeable=False,
+            update_branch_max_attempts=1,
+            update_branch_result=False,
+            failure_strategy="skip",
+        )
+
+        result = await loop._do_work()
+
+        prs.update_pr_branch.assert_awaited_once_with(54, method="merge")
+        state.bump_dependabot_update_branch_attempts.assert_not_called()
+        assert result["skipped"] == 1  # strategy=skip leaves it open
+        state.add_dependabot_merge_processed.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_human_pr_conflict_single_comment_never_closed(
+        self, tmp_path: Path
+    ) -> None:
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(55, author="T-rav", branch="fix/manual-thing")],
+            merge_result=False,
+            mergeable=False,
+        )
+
+        with patch("dependabot_merge_loop.fetch_pr_labels", AsyncMock(return_value=[])):
+            first = await loop._do_work()
+            second = await loop._do_work()  # PR still open + conflicting
+
+        # Exactly ONE conflict comment across both cycles (DedupStore-bounded).
+        prs.post_comment.assert_awaited_once()
+        comment = prs.post_comment.await_args.args[1]
+        assert "conflict" in comment.lower()
+        # Never closed, never update-branched, never marked processed —
+        # the author keeps full ownership.
+        prs.close_pr.assert_not_awaited()
+        prs.close_issue.assert_not_awaited()
+        prs.update_pr_branch.assert_not_awaited()
+        state.add_dependabot_merge_processed.assert_not_called()
+        assert first["skipped"] == 1
+        assert second["skipped"] == 1
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_off_restores_legacy_give_up(
+        self, tmp_path: Path
+    ) -> None:
+        loop, _, _, prs, state = _make_loop(
+            tmp_path,
+            open_prs=[
+                _make_pr(56, author="HydraOps-T-rav", branch="ul-proposer/deadbeef")
+            ],
+            merge_result=False,
+            mergeable=False,
+        )
+        object.__setattr__(loop._config, "dependabot_conflict_heal_enabled", False)
+
+        result = await loop._do_work()
+
+        prs.get_pr_mergeable.assert_not_awaited()
+        prs.close_pr.assert_not_awaited()
+        prs.post_comment.assert_not_awaited()
+        prs.update_pr_branch.assert_not_awaited()
+        state.add_dependabot_merge_processed.assert_not_called()
+        assert result["failed"] == 1
+
+    @pytest.mark.asyncio
+    async def test_transient_merge_failure_is_not_treated_as_conflict(
+        self, tmp_path: Path
+    ) -> None:
+        """mergeable=None (unknown) and True (clean) both mean the merge
+        failure was NOT a content conflict — legacy give-up, no heal."""
+        for status in (None, True):
+            loop, _, _, prs, state = _make_loop(
+                tmp_path,
+                open_prs=[
+                    _make_pr(57, author="HydraOps-T-rav", branch="ul-edges/cafe")
+                ],
+                merge_result=False,
+                mergeable=status,
+            )
+
+            result = await loop._do_work()
+
+            prs.get_pr_mergeable.assert_awaited_once_with(57)
+            prs.close_pr.assert_not_awaited()
+            prs.post_comment.assert_not_awaited()
+            assert result["failed"] == 1
