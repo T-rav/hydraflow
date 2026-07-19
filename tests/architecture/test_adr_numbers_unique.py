@@ -17,6 +17,11 @@ Invariants:
      ``docs/adr/`` resolves to an existing file whose number matches the link.
   4. README completeness — every ADR file has exactly one README row and no
      number appears twice.
+  5. README status consistency — each README row's Status cell matches its ADR
+     file's own ``**Status:**`` / ``## Status`` word (#9456). Compared against
+     the file's RAW status word, not ``scan_adr_directory``'s normalized status
+     (which buckets ``Rejected`` -> ``Unknown``), so ``Rejected``/``Superseded``
+     round-trip and 0039/0040 are not false-flagged.
 """
 
 from __future__ import annotations
@@ -100,3 +105,46 @@ def test_readme_has_one_row_per_adr(real_repo_root: Path) -> None:
     }
     missing = file_numbers - set(row_numbers)
     assert missing == set(), f"ADR files with no README row: {sorted(missing)}"
+
+
+_README_STATUS_ROW_RE = re.compile(
+    r"^\|\s*\[(\d{4})\]\(\d{4}-[^)]+\.md\)\s*\|[^|]*\|\s*([A-Za-z]+)\s*\|"
+)
+_STATUS_INLINE_RE = re.compile(r"^\*\*Status:\*\*\s*(\w+)", re.MULTILINE)
+_STATUS_H2_RE = re.compile(r"^##\s*Status\s*\n+\s*[-*]?\s*\*?\*?(\w+)", re.MULTILINE)
+
+
+def _file_raw_status(path: Path) -> str | None:
+    """The ADR file's own status WORD (raw, not normalized).
+
+    Handles ``**Status:** X`` and the ``## Status`` section form. ``Superseded
+    by ADR-NNNN`` collapses to ``Superseded``. Returns None if unparseable.
+    """
+    text = path.read_text(encoding="utf-8")
+    m = _STATUS_INLINE_RE.search(text) or _STATUS_H2_RE.search(text)
+    return m.group(1) if m else None
+
+
+def test_readme_status_matches_file(real_repo_root: Path) -> None:
+    """Each README Status cell matches its ADR file's own status word (#9456)."""
+    adr_dir = real_repo_root / "docs" / "adr"
+    readme = (adr_dir / "README.md").read_text(encoding="utf-8")
+
+    drift: list[str] = []
+    for line in readme.split("\n"):
+        m = _README_STATUS_ROW_RE.match(line)
+        if not m:
+            continue
+        num, row_status = m.group(1), m.group(2)
+        files = list(adr_dir.glob(f"{num}-*.md"))
+        if not files:
+            continue  # completeness is covered by test_readme_has_one_row_per_adr
+        file_status = _file_raw_status(files[0])
+        if file_status and file_status.lower() != row_status.lower():
+            drift.append(
+                f"ADR-{num}: README says '{row_status}' but file says '{file_status}'"
+            )
+
+    assert drift == [], "README Status column drifts from ADR files:\n  " + "\n  ".join(
+        drift
+    )
