@@ -1,0 +1,4 @@
+DIFF_SANITY_RESULT: RETRY
+SUMMARY: debug residue left in diff — logs plaintext credentials
+FINDINGS:
+- src/app.py — debug residue: `print("DEBUG: creds", password)` leaks the password argument to stdout; remove before merge

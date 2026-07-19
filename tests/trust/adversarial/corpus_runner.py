@@ -58,11 +58,25 @@ class MissingTranscriptError(RuntimeError):
     """Raised in strict mode when a case has no transcript fixture and live is off."""
 
 
-def discover_cases(cases_dir: Path = CASES_DIR) -> list[Path]:
+HOLDOUT_MARKER = "HOLDOUT"
+
+
+def is_holdout(case_dir: Path) -> bool:
+    """True when *case_dir* is a held-out honeypot (never shown to the refiner)."""
+    return (case_dir / HOLDOUT_MARKER).is_file()
+
+
+def discover_cases(
+    cases_dir: Path = CASES_DIR, *, include_holdout: bool = True
+) -> list[Path]:
     if not cases_dir.is_dir():
         return []
     return sorted(
-        p for p in cases_dir.iterdir() if p.is_dir() and not p.name.startswith(".")
+        p
+        for p in cases_dir.iterdir()
+        if p.is_dir()
+        and not p.name.startswith(".")
+        and (include_holdout or not is_holdout(p))
     )
 
 
@@ -241,12 +255,21 @@ def evaluate_case(
 
 
 def run_corpus(
-    *, cases_dir: Path = CASES_DIR, live: bool = False, strict: bool = False
+    *,
+    cases_dir: Path = CASES_DIR,
+    live: bool = False,
+    strict: bool = False,
+    case_ids: frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Evaluate every discovered case and return the loop-facing result list."""
+    """Evaluate every discovered case and return the loop-facing result list.
+
+    Holdouts are always included (the weekly backstop covers them) — pass
+    *case_ids* to run a targeted subset by directory name.
+    """
     return [
         evaluate_case(case_dir, live=live, strict=strict)
         for case_dir in discover_cases(cases_dir)
+        if case_ids is None or case_dir.name in case_ids
     ]
 
 
@@ -257,9 +280,19 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="emit the loop-facing result list as JSON on stdout",
     )
+    parser.add_argument(
+        "--cases",
+        default="",
+        help="comma-separated case ids to run (default: all)",
+    )
     args = parser.parse_args(argv)
     live = os.environ.get("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE") == "1"
-    results = run_corpus(live=live, strict=False)
+    case_ids = (
+        frozenset(c.strip() for c in args.cases.split(",") if c.strip())
+        if args.cases
+        else None
+    )
+    results = run_corpus(live=live, strict=False, case_ids=case_ids)
     if args.json:
         # Only the loop-facing keys belong on stdout (the loop json.loads it).
         slim = [
