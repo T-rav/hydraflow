@@ -2086,6 +2086,11 @@ class StateData(BaseModel):
     # JSON-compat with the rest of StateData. See route_back.py and
     # state/_route_back.py.
     route_back_counts: dict[str, int] = Field(default_factory=dict)
+    # Review-orphan requeue (#9815): review-labeled issues with no open
+    # agent PR (restart edge case). Strikes count consecutive PR-less
+    # sightings; requeues count bounded ready-relabels before HITL.
+    review_orphan_strikes: dict[str, int] = Field(default_factory=dict)
+    review_orphan_requeues: dict[str, int] = Field(default_factory=dict)
     ci_monitor_settings: CIMonitorSettings = Field(default_factory=CIMonitorSettings)
     ci_monitor_tracked_failures: dict[str, str] = Field(default_factory=dict)
     # Trust fleet — RCBudgetLoop (spec §4.8)

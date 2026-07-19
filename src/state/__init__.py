@@ -49,6 +49,7 @@ from ._principles_audit import PrinciplesAuditStateMixin
 from ._rc_budget import RCBudgetStateMixin
 from ._report import ReportStateMixin
 from ._review import ReviewStateMixin
+from ._review_orphan import ReviewOrphanStateMixin
 from ._rollup_issues import RollupIssueStateMixin
 from ._route_back import RouteBackStateMixin
 from ._sandbox_failure_fixer import SandboxFailureFixerStateMixin
@@ -78,6 +79,7 @@ class StateTracker(
     WorkspaceStateMixin,
     HITLStateMixin,
     ReviewStateMixin,
+    ReviewOrphanStateMixin,
     RouteBackStateMixin,
     EpicStateMixin,
     LifetimeStatsMixin,
