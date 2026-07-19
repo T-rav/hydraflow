@@ -30,6 +30,7 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from adr_drift import compute_drift_by_adr
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
 from models import WorkCycleResult  # noqa: TCH001
 
@@ -453,8 +454,6 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
 
         Returns the number of rollups closed/cleared.
         """
-        from adr_drift import compute_drift_by_adr  # noqa: PLC0415
-
         closed = 0
         for rollup_key, entry in self._state.all_adr_rollups().items():
             adr_num = _adr_num_from_key(rollup_key)
@@ -522,8 +521,6 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
                 "closed": 0,
                 "updated": 0,
             }
-
-        from adr_drift import compute_drift_by_adr  # noqa: PLC0415
 
         # Build (pr_number, changed_files) batch + per-PR metadata.
         pr_meta: dict[int, dict] = {}
