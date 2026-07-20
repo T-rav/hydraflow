@@ -45,7 +45,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0045 | enforced | `pytest:tests/test_trust_fleet_sanity_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/test_trust_fleet_anomaly_detectors.py` |
 | ADR-0047 | enforced | `make:trust-contracts`, `pytest:tests/trust/contracts/test_fake_github_contract.py` |
 | ADR-0049 | enforced | `pytest:tests/test_loop_kill_switch_completeness.py`, `pytest:tests/regressions/test_canonical_killswitch.py` |
-| ADR-0050 | enforced | `pytest:tests/test_auto_agent_preflight_loop.py`, `pytest:tests/scenarios/test_auto_agent_preflight.py`, `pytest:tests/test_loop_wiring_completeness.py` |
+| ADR-0050 | enforced | `pytest:tests/test_auto_agent_preflight_loop.py`, `pytest:tests/scenarios/test_auto_agent_preflight.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/test_auto_agent_hitl_intake.py`, `pytest:tests/test_preflight_decision_hitl_widened.py` |
 | ADR-0051 | manual | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` |
 | ADR-0052 | enforced | `pytest:tests/test_mockworld_fakes_conformance.py`, `pytest:tests/test_sandbox_scenario_contract.py` |
 | ADR-0053 | enforced | `pytest:tests/test_ubiquitous_language_drift.py`, `pytest:tests/test_seed_terms.py` |
@@ -114,6 +114,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_agent_advanced.py` | ADR-0092 |
 | `pytest:tests/test_agent_cli.py` | ADR-0004, ADR-0092 |
 | `pytest:tests/test_atlas_routes.py` | ADR-0060, ADR-0061, ADR-0090 |
+| `pytest:tests/test_auto_agent_hitl_intake.py` | ADR-0050 |
 | `pytest:tests/test_auto_agent_preflight_loop.py` | ADR-0050 |
 | `pytest:tests/test_auto_tighten_invariant.py` | ADR-0104 |
 | `pytest:tests/test_base_runner.py` | ADR-0004 |
@@ -152,6 +153,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_phase_skill_filter.py` | ADR-0043 |
 | `pytest:tests/test_post_merge_handler.py` | ADR-0019 |
 | `pytest:tests/test_precondition_gate.py` | ADR-0041 |
+| `pytest:tests/test_preflight_decision_hitl_widened.py` | ADR-0050 |
 | `pytest:tests/test_preflight_plugins.py` | ADR-0043 |
 | `pytest:tests/test_preflight_untrusted_fencing.py` | ADR-0092 |
 | `pytest:tests/test_release.py` | ADR-0011 |

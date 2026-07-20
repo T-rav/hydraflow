@@ -567,6 +567,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("detector_calibration_enabled", "HYDRAFLOW_DETECTOR_CALIBRATION_ENABLED", True),
     ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
     (
+        "auto_agent_hitl_intake_enabled",
+        "HYDRAFLOW_AUTO_AGENT_HITL_INTAKE_ENABLED",
+        True,
+    ),
+    (
         "implement_two_stage_review_enabled",
         "HYDRAFLOW_IMPLEMENT_TWO_STAGE_REVIEW_ENABLED",
         True,
@@ -3541,6 +3546,16 @@ class HydraFlowConfig(BaseModel):
     auto_agent_preflight_enabled: bool = Field(
         default=True,
         description="UI kill-switch for AutoAgentPreflightLoop (ADR-0049).",
+    )
+    auto_agent_hitl_intake_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for the #9721 widened intake: AutoAgentPreflightLoop "
+            "also intercepts idle pipeline-origin hydraflow-hitl issues "
+            "(attempt-cap exhaustion, quality-gate/zero-diff bails) in "
+            "addition to hitl-escalation. Distinct from "
+            "auto_agent_preflight_enabled, which gates the whole loop."
+        ),
     )
     implement_two_stage_review_enabled: bool = Field(
         default=True,
