@@ -287,7 +287,7 @@ class IssueRefinementLoop(BaseBackgroundLoop):
             prompt = build_dup_judgment_prompt(issue_a, issue_b)
             try:
                 raw = await self._refinement_complete(prompt)
-            except Exception as exc:  # noqa: BLE001 — classify then fail-soft
+            except Exception as exc:  # classify then fail-soft
                 reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "refinement dup judgment failed for #%d/#%d: %s",
@@ -325,7 +325,7 @@ class IssueRefinementLoop(BaseBackgroundLoop):
             prompt = build_priority_prompt(issue)
             try:
                 raw = await self._refinement_complete(prompt)
-            except Exception as exc:  # noqa: BLE001 — classify then fail-soft
+            except Exception as exc:  # classify then fail-soft
                 reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "refinement priority scoring failed for #%d: %s", issue.number, exc
@@ -441,7 +441,7 @@ class IssueRefinementLoop(BaseBackgroundLoop):
             try:
                 await self._apply_auto_close(close)
                 closed += 1
-            except Exception as exc:  # noqa: BLE001 — classify then fail-soft
+            except Exception as exc:  # classify then fail-soft
                 reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "refinement auto-close failed for #%d: %s", close.duplicate, exc
@@ -453,7 +453,7 @@ class IssueRefinementLoop(BaseBackgroundLoop):
             try:
                 await self._apply_relabel(relabel)
                 relabeled += 1
-            except Exception as exc:  # noqa: BLE001 — classify then fail-soft
+            except Exception as exc:  # classify then fail-soft
                 reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "refinement relabel failed for #%d: %s", relabel.number, exc
