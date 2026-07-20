@@ -47,3 +47,51 @@ def test_from_seed_handles_empty_seed() -> None:
     gh = FakeGitHub.from_seed(MockWorldSeed())
     assert gh._issues == {}
     assert gh._prs == {}
+
+
+def test_from_seed_honors_issue_state() -> None:
+    """#9543: a ``state: closed`` seed issue reports COMPLETED from the port."""
+    import asyncio
+
+    seed = MockWorldSeed(
+        issues=[
+            {
+                "number": 7301,
+                "title": "done",
+                "body": "b",
+                "labels": [],
+                "state": "closed",
+            },
+            {"number": 7302, "title": "open one", "body": "b", "labels": []},
+        ],
+    )
+
+    gh = FakeGitHub.from_seed(seed)
+
+    assert asyncio.run(gh.get_issue_state(7301)) == "COMPLETED"
+    # Absent ``state`` key still defaults to open — back-compat preserved.
+    assert asyncio.run(gh.get_issue_state(7302)) == "OPEN"
+
+
+def test_from_seed_honors_pr_mergeable() -> None:
+    """#9543: ``mergeable: false`` seeds a CONFLICTING PR the watcher can act on."""
+    import asyncio
+
+    seed = MockWorldSeed(
+        prs=[
+            {
+                "number": 8801,
+                "issue_number": 8800,
+                "branch": "agent/issue-8800",
+                "mergeable": False,
+            },
+            {"number": 8802, "issue_number": 8803, "branch": "b2"},
+        ],
+    )
+
+    gh = FakeGitHub.from_seed(seed)
+
+    conflicting = asyncio.run(gh.list_conflicting_prs())
+    assert [pr.number for pr in conflicting] == [8801]
+    # Absent ``mergeable`` key still defaults to True — back-compat preserved.
+    assert gh._prs[8802].mergeable is True
