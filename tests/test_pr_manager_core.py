@@ -1826,6 +1826,7 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         "hydraflow-test-helper",
         "hydraflow-fake-coverage-stuck",
         "rc-promotion-stuck",
+        "factory-stale-code",  # #9596 stale-code dead-man-switch
         "sandbox-fail-auto-fix",  # #9914 durable startup check
         "sandbox-hitl",
         "refinement-auto",  # #9957 IssueRefinementLoop auto-close marker
