@@ -205,6 +205,9 @@ async def test_auto_close_path_closes_exactly_one_and_records_digest(
 
     duplicate = world.github.issue(102)
     assert duplicate.state == "closed"
+    # Closed as "not planned" (#10025): a deduped issue was retired, not
+    # resolved — get_issue_state consumers must not read it as COMPLETED.
+    assert await world.github.get_issue_state(102) == "NOT_PLANNED"
     assert _REFINEMENT_AUTO_LABEL in duplicate.labels
     assert any(
         c.body == "**Refinement (auto):** duplicate of #101 — "

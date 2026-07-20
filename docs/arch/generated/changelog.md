@@ -6,6 +6,14 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `6721d98` — feat(sandbox): active-trigger scenarios for six governance loops (s65-s70) (#9543) (#9543) *(2026-07-20)*
+- `14f4a2e` — fix(refinement): v1 follow-ups — not-planned closes, priority budget, fail-closed fake, inefficiency re-file (#10025) (#10066) (#10066) *(2026-07-20)*
+- `1306712` — fix(fitness): cadence-derived min_samples — scorecards can finally score (#9841) (#10056) (#10056) *(2026-07-20)*
+- `8509ee0` — feat(orchestration): v2 IssueDriver runtime phase spec + accept ADR-0099 (#10038) (#10055) (#10055) *(2026-07-20)*
+- `d94945e` — fix(ul): one file per term — delete stale forks, hard-fail uniqueness lint, store-level dedupe (#9938) (#10051) (#10051) *(2026-07-20)*
+- `f4c0d38` — fix(stale-issue): branch-GC reconciler + unpushed-work boot check (#10011) (#10052) (#10052) *(2026-07-20)*
+- `9d6184d` — feat(liveness): external factory watchdog + boot-time down-detection (#10044) (#10044) *(2026-07-20)*
+- `9fa2966` — fix(health-monitor): stale-code dead-man-switch — host in HealthMonitorLoop (#9596) (#10035) (#10035) *(2026-07-20)*
 - `6206f38` — fix(stale-issue): detect regression-test rot — false-close + orphaned-RED (#9597) (#10039) (#10039) *(2026-07-20)*
 - `45ef36f` — fix(wiki): worktree-isolate runtime wiki writes — boot store read-only + queue-routed ingest (#9836) (#10033) (#10033) *(2026-07-20)*
 - `67cc3ce` — fix(file-util): bounded file_lock with FIFO gate + FileLockTimeout (#9661) (#10032) (#10032) *(2026-07-20)*
@@ -13,9 +21,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W29
 
-- `9b1da17` — fix(arch): repair conflict-marker-corrupted generated docs from botched merge resolve *(2026-07-19)*
-- `db7707c` — Merge remote-tracking branch 'origin/staging' into feat/issue-10009-liveness-watchdog *(2026-07-19)*
-- `4e4ff9e` — feat(liveness): external factory watchdog + boot-time down-detection (#10009) (#10009) *(2026-07-19)*
 - `33f8b6f` — feat(refine): prompt self-refinement — honeypot-gated auto-merge prompt-fix PRs + telemetry consumption (#9724) (#10006) (#10006) *(2026-07-19)*
 - `f7c15a9` — fix(audit): split P10.3 enforcement from measurement — per-PR gate + telemetry scan (#9902) (#10008) (#10008) *(2026-07-19)*
 - `79d683c` — feat(gate-health): GateHealthLoop — CI reds as distributions, not events (#9974) (#10003) (#10003) *(2026-07-19)*
@@ -520,7 +525,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `39c6fc9` — feat(principles-audit): ADR-0044 + audit framework + P1 checks (#8386) (#8386) *(2026-04-22)*
 - `57157c8` — feat(audit): prompt audit report + scoring engine (sub-project 1 of 4) (#8376) (#8376) *(2026-04-21)*
 - `046f5fa` — refactor(agent-cli): scan /opt/plugins dynamically instead of hardcoding (#8375) (#8375) *(2026-04-21)*
-- `6b45f82` — feat(skills): boot-time install + prompt alignment + per-phase whitelist (#8374) (#8374) *(2026-04-21)*
 
 
 <!-- arch:generated -->

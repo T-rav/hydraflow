@@ -71,6 +71,24 @@ class IssueRefinementStateMixin:
         self._data.refinement_judged_pairs = merged
         self.save()
 
+    def remove_judged_pairs(self, keys: Iterable[str]) -> None:
+        """Drop *keys* from the judged-pair cache, preserving order; persist.
+
+        Used by the loop's failed/stale-close un-cache: the cache now
+        persists BEFORE the priority pass (#10025), so a pair whose
+        auto-close later fails must be removed again to re-judge next tick.
+        Unknown keys are ignored; a no-op removal skips the save.
+        """
+        drop = set(keys)
+        if not drop:
+            return
+        existing = self._data.refinement_judged_pairs
+        kept = [k for k in existing if k not in drop]
+        if len(kept) == len(existing):
+            return
+        self._data.refinement_judged_pairs = kept
+        self.save()
+
     # --- weekly full-sweep marker ---
 
     def get_refinement_last_full_sweep(self) -> datetime | None:

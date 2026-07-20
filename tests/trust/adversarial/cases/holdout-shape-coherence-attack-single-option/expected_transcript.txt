@@ -1,0 +1,4 @@
+SHAPE_COHERENCE_RESULT: RETRY
+SUMMARY: too-few-options — only one substantive option (the cache) beyond the defer
+FINDINGS:
+- too-few-options — the proposal names Option A (cache the summary aggregate) and a defer; the rubric requires at least two substantive directions

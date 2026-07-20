@@ -73,6 +73,12 @@ SETTINGS: dict[str, SettingSpec] = {
     "test_adequacy_coverage_timeout_secs": SettingSpec(
         "CI & Quality", live=True, order=7
     ),
+    # Live: auto_pr re-reads both via trace_collector.get_active_config()
+    # on every gate run (#10013), so a toggle applies to the next bot PR.
+    "auto_pr_preflight_gate_enabled": SettingSpec("CI & Quality", live=True, order=8),
+    "auto_pr_preflight_stage_timeout_s": SettingSpec(
+        "CI & Quality", live=True, order=9
+    ),
     # --- Scheduling ------------------------------------------------------
     "poll_interval": SettingSpec("Scheduling", live=True, order=0),
     "pr_unstick_interval": SettingSpec("Scheduling", live=True, order=1),
@@ -90,6 +96,28 @@ SETTINGS: dict[str, SettingSpec] = {
     "gh_circuit_breaker_enabled": SettingSpec("Reliability", live=True, order=0),
     "merge_policy_enabled": SettingSpec("Reliability", live=True, order=1),
     "stale_code_alert_threshold": SettingSpec("Reliability", live=True, order=2),
+    # --- Event-Loop Watchdog (thread-level freeze detector, #9552) --------
+    # enabled gates thread startup (captured at orchestrator start) → restart
+    # badge; the other two are re-read by the watchdog thread on every poll /
+    # at trip time (the builder threads them through as live callables).
+    # hard_restart defaults False (notify-default, restart-opt-in) — flipping
+    # it is the operator's explicit consent to supervisor-driven restarts.
+    "event_loop_watchdog_enabled": SettingSpec(
+        "Event-Loop Watchdog", live=False, order=0
+    ),
+    "event_loop_watchdog_stall_seconds": SettingSpec(
+        "Event-Loop Watchdog", live=True, order=1
+    ),
+    "event_loop_watchdog_hard_restart": SettingSpec(
+        "Event-Loop Watchdog", live=True, order=2
+    ),
+    # --- Branch GC (stale agent-branch reconciler, #10011) ----------------
+    # Live: StaleIssueLoop re-reads these each tick, no restart needed.
+    # delete_enabled defaults False (report/comment-only) since deletion is
+    # destructive — this is the knob the operator flips to opt in.
+    "branch_gc_stale_days": SettingSpec("Branch GC", live=True, order=0),
+    "branch_gc_min_delete_age_days": SettingSpec("Branch GC", live=True, order=1),
+    "branch_gc_delete_enabled": SettingSpec("Branch GC", live=True, order=2),
     # --- Memory ----------------------------------------------------------
     "memory_auto_approve": SettingSpec("Memory", live=True, order=0),
     # --- Paths -----------------------------------------------------------
@@ -121,7 +149,10 @@ SETTINGS: dict[str, SettingSpec] = {
     # --- Issue Refinement (backlog dedup + priority scoring, #9957) ----------
     "issue_refinement_enabled": SettingSpec("Issue Refinement", live=True, order=0),
     "issue_refinement_pair_budget": SettingSpec("Issue Refinement", live=True, order=1),
-    "issue_refinement_model": SettingSpec("Issue Refinement", live=True, order=2),
+    "issue_refinement_priority_budget": SettingSpec(
+        "Issue Refinement", live=True, order=2
+    ),
+    "issue_refinement_model": SettingSpec("Issue Refinement", live=True, order=3),
     # --- Prompt Refinement (skill-prompt self-refinement, #9724) ----------
     "skill_prompt_refine_enabled": SettingSpec("Prompt Refinement", live=True, order=0),
     "skill_prompt_refine_max_weekly": SettingSpec(

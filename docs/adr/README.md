@@ -136,13 +136,14 @@ cadence and files remediation issues on drift.
 | [0096](0096-boundary-verdict-recording.md) | Boundary verdict recording (Phase 2b) | Accepted |
 | [0097](0097-attempt-counter-migration-to-ledger.md) | Attempt counter migration into the ledger (Phase 2c) | Accepted |
 | [0098](0098-convergence-oscillation-caretaker.md) | Convergence oscillation caretaker (Phase 2d) | Accepted |
-| [0099](0099-orchestration-as-a-control-system.md) | Orchestration as a Control System | Proposed |
+| [0099](0099-orchestration-as-a-control-system.md) | Orchestration as a Control System | Accepted |
 | [0100](0100-adr-conformance-as-a-measured-contract.md) | ADR conformance as a measured contract | Accepted |
 | [0101](0101-disturbance-dampener.md) | Disturbance Dampener — feedforward ratchet + burn-down loop | Proposed |
 | [0102](0102-convergence-gate-general-availability.md) | Convergence gate general availability (flag removed) | Accepted |
 | [0103](0103-continuous-human-steering-channel.md) | Continuous Human-on-the-Loop Steering Channel | Accepted |
 | [0104](0104-auto-tightening-ratchet.md) | Auto-tightening ratchet | Accepted |
 | [0105](0105-autonomous-convergence-via-decomposition.md) | Autonomous Convergence via Decomposition | Proposed |
+| [0106](0106-thread-level-event-loop-freeze-detector.md) | Thread-level event-loop freeze detector | Accepted |
 
 ## Adding a new ADR
 

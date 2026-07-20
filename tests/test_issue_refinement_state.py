@@ -34,6 +34,7 @@ class TestIssueRefinementConfigDefaults:
         assert cfg.issue_refinement_interval == 86400
         assert cfg.issue_refinement_full_sweep_interval == 604800
         assert cfg.issue_refinement_pair_budget == 24
+        assert cfg.issue_refinement_priority_budget == 50
         assert cfg.issue_refinement_model == ""
 
 
@@ -54,6 +55,22 @@ class TestIssueRefinementConfigBounds:
         with pytest.raises(ValidationError):
             HydraFlowConfig(repo="test/repo", issue_refinement_pair_budget=201)
 
+    def test_priority_budget_accepts_lower_bound(self) -> None:
+        cfg = HydraFlowConfig(repo="test/repo", issue_refinement_priority_budget=0)
+        assert cfg.issue_refinement_priority_budget == 0
+
+    def test_priority_budget_accepts_upper_bound(self) -> None:
+        cfg = HydraFlowConfig(repo="test/repo", issue_refinement_priority_budget=500)
+        assert cfg.issue_refinement_priority_budget == 500
+
+    def test_priority_budget_rejects_below_minimum(self) -> None:
+        with pytest.raises(ValidationError):
+            HydraFlowConfig(repo="test/repo", issue_refinement_priority_budget=-1)
+
+    def test_priority_budget_rejects_above_maximum(self) -> None:
+        with pytest.raises(ValidationError):
+            HydraFlowConfig(repo="test/repo", issue_refinement_priority_budget=501)
+
 
 class TestIssueRefinementConfigEnvOverrides:
     def test_enabled_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -73,6 +90,12 @@ class TestIssueRefinementConfigEnvOverrides:
     def test_pair_budget_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("HYDRAFLOW_ISSUE_REFINEMENT_PAIR_BUDGET", "10")
         assert HydraFlowConfig().issue_refinement_pair_budget == 10
+
+    def test_priority_budget_env_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_ISSUE_REFINEMENT_PRIORITY_BUDGET", "5")
+        assert HydraFlowConfig().issue_refinement_priority_budget == 5
 
     def test_model_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("HYDRAFLOW_ISSUE_REFINEMENT_MODEL", "sonnet")
@@ -153,6 +176,26 @@ class TestJudgedPairs:
         assert len(kept) == 5000
         # The oldest 5 were dropped; the remainder keeps its original order.
         assert kept == keys[5:]
+
+    def test_remove_drops_named_keys_preserving_order(self, tmp_path: Path) -> None:
+        st = _tracker(tmp_path)
+        st.add_judged_pairs(["1:2:aaa:bbb", "3:4:ccc:ddd", "5:6:eee:fff"])
+        st.remove_judged_pairs({"3:4:ccc:ddd"})
+        assert st.get_judged_pairs() == ["1:2:aaa:bbb", "5:6:eee:fff"]
+
+    def test_remove_unknown_keys_is_a_noop(self, tmp_path: Path) -> None:
+        st = _tracker(tmp_path)
+        st.add_judged_pairs(["1:2:aaa:bbb"])
+        st.remove_judged_pairs({"9:9:zzz:zzz"})
+        st.remove_judged_pairs(set())
+        assert st.get_judged_pairs() == ["1:2:aaa:bbb"]
+
+    def test_remove_persists_across_reload(self, tmp_path: Path) -> None:
+        st = _tracker(tmp_path)
+        st.add_judged_pairs(["1:2:aaa:bbb", "3:4:ccc:ddd"])
+        st.remove_judged_pairs({"1:2:aaa:bbb"})
+        reloaded = _tracker(tmp_path)
+        assert reloaded.get_judged_pairs() == ["3:4:ccc:ddd"]
 
     def test_prune_applies_across_multiple_calls(self, tmp_path: Path) -> None:
         st = _tracker(tmp_path)

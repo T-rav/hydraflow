@@ -205,17 +205,26 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         return bool(labels & pipeline_labels)
 
     async def _get_issue_state(self, issue_number: int) -> str:
-        """Query GitHub for the issue state ('open' or 'closed')."""
-        output = await run_subprocess(
-            "gh",
-            "api",
-            f"repos/{self._config.repo}/issues/{issue_number}",
-            "--jq",
-            ".state",
-            cwd=self._config.repo_root,
-            gh_token=self._credentials.gh_token,
-        )
-        return output.strip()
+        """Query the issue state ('open' / 'closed' / 'unknown') via PRPort.
+
+        Routed through ``PRPort.get_issue_state`` so the air-gapped sandbox
+        FakeGitHub can serve the read — the raw ``gh api`` call this replaces
+        failed on every cycle there, fail-closing every GC decision to "skip"
+        and making the closed-issue collect path unreachable in scenarios
+        (#9543; same class as the #9575 open-issue-path port routing).
+
+        The port speaks GitHub's GraphQL-style vocabulary
+        (``COMPLETED``/``NOT_PLANNED``/``OPEN``/``UNKNOWN``/``""``); map it to
+        the REST-style strings ``_is_safe_to_gc`` compares against. Anything
+        unrecognized maps to ``"unknown"``, preserving the fail-closed-on-
+        uncertainty contract (an unknown state is never collected).
+        """
+        port_state = await self._prs.get_issue_state(issue_number)
+        if port_state in ("COMPLETED", "NOT_PLANNED"):
+            return "closed"
+        if port_state == "OPEN":
+            return "open"
+        return "unknown"
 
     async def _has_open_pr(self, issue_number: int) -> bool:
         """Check whether an open PR exists for the issue's branch (via PRPort).

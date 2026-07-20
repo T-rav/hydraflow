@@ -26,9 +26,11 @@ SKILL_BUILDER_MODULES: dict[str, str] = {
     "shape-coherence": "src/shape_coherence.py",
 }
 
-# Skills eligible for auto-merge self-refinement. STRICT SUBSET of
-# SKILL_BUILDER_MODULES: only skills whose adversarial corpus carries held-out
-# honeypot attack cases (a ``HOLDOUT`` marker dir) may be auto-refined.
+# Skills eligible for auto-merge self-refinement. Must stay a SUBSET of
+# SKILL_BUILDER_MODULES, and every member MUST have held-out honeypot attack
+# coverage in the adversarial corpus (a ``HOLDOUT`` marker dir whose
+# ``expected_catcher`` is the skill) — the corpus-runner suite pins this
+# precondition per skill.
 #
 # The overfit precondition: auto-refinement's only guard against a synthesized
 # patch overfitting to the single regressed case is the holdout gate — the
@@ -36,15 +38,21 @@ SKILL_BUILDER_MODULES: dict[str, str] = {
 # never saw (``assemble_refine_context`` refuses holdout input). A skill with
 # NO holdout coverage has no such gate, so an auto-merge candidate for it could
 # silently overfit; we refuse to auto-refine it (outcome ``not_refinable``)
-# until holdouts exist. ``SKILL_BUILDER_MODULES`` stays complete because other
-# code paths resolve builder module paths for skills that are not (yet)
-# refinable.
+# until holdouts exist.
 #
-# Follow-up (#9724): extend held-out honeypot coverage to the remaining
-# builder modules (``plan-compliance``, ``discover-completeness``,
-# ``shape-coherence``) and widen this set as each gains a holdout.
+# #10014 closed the #9724 follow-up: ``plan-compliance``,
+# ``discover-completeness``, and ``shape-coherence`` gained holdout attack
+# honeypots, so every builder skill is now refinable. A NEW skill starts
+# outside this set until its holdout lands.
 REFINABLE_SKILLS: frozenset[str] = frozenset(
-    {"diff-sanity", "scope-check", "test-adequacy"}
+    {
+        "diff-sanity",
+        "scope-check",
+        "plan-compliance",
+        "test-adequacy",
+        "discover-completeness",
+        "shape-coherence",
+    }
 )
 
 PROMPT_LENGTH_DRIFT_LIMIT = 0.30
@@ -83,6 +91,27 @@ class PromptRenderError(RuntimeError):
 _LENGTH_PROBE_DIFF = (
     "--- a/probe.py\n+++ b/probe.py\n@@ -1 +1 @@\n-old_value\n+new_value\n"
 )
+
+# Skill-specific probe inputs for the length gate. The document-judging
+# builders (and ``plan-compliance``) return "" without their input document
+# — under the generic diff-only probe their before/after renders were both
+# empty, so ``length_drift_exceeds`` measured nothing and the ±30% gate was
+# a silent no-op for them (#10014). Fixed stand-in documents make the gate
+# real; content is irrelevant (same fixture feeds both renders), it just has
+# to be non-empty. Keyed per skill so builders without ``**_kwargs`` never
+# receive unexpected keywords.
+_LENGTH_PROBE_DOCUMENT = "length-probe stand-in document body\n"
+_LENGTH_PROBE_EXTRA_KWARGS: dict[str, dict[str, str]] = {
+    "plan-compliance": {"plan_text": "## File Delta\n- Modify `probe.py`\n"},
+    "discover-completeness": {
+        "issue_body": _LENGTH_PROBE_DOCUMENT,
+        "brief": _LENGTH_PROBE_DOCUMENT,
+    },
+    "shape-coherence": {
+        "discover_brief": _LENGTH_PROBE_DOCUMENT,
+        "proposal": _LENGTH_PROBE_DOCUMENT,
+    },
+}
 
 
 def assemble_refine_context(
@@ -233,12 +262,14 @@ def render_builder_prompt(builder_module_path: Path, skill_name: str) -> str:
         raise PromptRenderError(msg)
     # ``builder`` is resolved dynamically (``getattr``), so its return type is
     # opaque to the type-checker; coerce to ``str`` for the length measurement.
-    rendered = builder(
-        issue_number=0,
-        issue_title="refine-length-probe",
-        diff=_LENGTH_PROBE_DIFF,
-        plan_text="",
-    )
+    probe_kwargs: dict[str, object] = {
+        "issue_number": 0,
+        "issue_title": "refine-length-probe",
+        "diff": _LENGTH_PROBE_DIFF,
+        "plan_text": "",
+    }
+    probe_kwargs.update(_LENGTH_PROBE_EXTRA_KWARGS.get(skill_name, {}))
+    rendered = builder(**probe_kwargs)
     return str(rendered)
 
 

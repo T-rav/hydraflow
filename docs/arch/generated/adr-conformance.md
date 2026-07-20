@@ -73,10 +73,12 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0096 | enforced | `pytest:tests/scenarios/test_convergence_pipeline_mockworld.py` |
 | ADR-0097 | enforced | `pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py` |
 | ADR-0098 | enforced | `pytest:tests/scenarios/test_convergence_oscillation_mockworld.py` |
+| ADR-0099 | enforced | `pytest:tests/test_seed_terms.py` |
 | ADR-0100 | enforced | `pytest:tests/test_adr_conformance_coverage.py` |
 | ADR-0102 | enforced | `pytest:tests/test_review_phase_core.py` |
 | ADR-0103 | enforced | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_human_steering_state.py`, `pytest:tests/test_orchestrator_human_steering.py`, `pytest:tests/test_config_env.py` |
 | ADR-0104 | enforced | `pytest:tests/test_auto_tighten_invariant.py` |
+| ADR-0106 | enforced | `pytest:tests/regressions/test_issue_9552.py` |
 
 ## Check → ADRs it protects
 
@@ -97,6 +99,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/architecture/test_term_proposer_wiring.py` | ADR-0054 |
 | `pytest:tests/architecture/test_term_pruner_wiring.py` | ADR-0057 |
 | `pytest:tests/regressions/test_canonical_killswitch.py` | ADR-0049 |
+| `pytest:tests/regressions/test_issue_9552.py` | ADR-0106 |
 | `pytest:tests/regressions/test_otel_disabled_is_noop.py` | ADR-0055 |
 | `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` | ADR-0094, ADR-0095 |
 | `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` | ADR-0024 |
@@ -169,7 +172,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_sandbox_scenario_contract.py` | ADR-0052, ADR-0083 |
 | `pytest:tests/test_screenshot_scanner.py` | ADR-0018 |
 | `pytest:tests/test_secret_scrub.py` | ADR-0085 |
-| `pytest:tests/test_seed_terms.py` | ADR-0053 |
+| `pytest:tests/test_seed_terms.py` | ADR-0053, ADR-0099 |
 | `pytest:tests/test_shape_phase.py` | ADR-0031 |
 | `pytest:tests/test_shape_runner.py` | ADR-0031 |
 | `pytest:tests/test_state_machine.py` | ADR-0002, ADR-0014, ADR-0017, ADR-0034 |

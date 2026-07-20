@@ -2644,6 +2644,12 @@ class ControlStatusConfig(BaseModel):
     max_reviewers: int = 0
     max_hitl_workers: int = 0
     batch_size: int = 0
+    # Work-queue strategy (#10067) — surfaced so the dashboard can show which
+    # algorithm is picking work without opening the settings editor.
+    queue_strategy: str = "weighted_mix"
+    queue_weight_p1: int = 3
+    queue_weight_p2: int = 2
+    queue_weight_unprioritised: int = 1
     model: str = ""
     pr_unstick_batch_size: int = 10
     workspace_base: str = ""
@@ -3140,6 +3146,14 @@ class PipelineSnapshotEntry(TypedDict):
     status: str
     epic_number: NotRequired[int]
     is_epic_child: NotRequired[bool]
+    # Work-queue visualisation (#10067). ``priority`` is the P0/P1/P2 band
+    # (``queue_strategy.band_of``; "none" when unlabelled). ``dispatch_rank`` is
+    # the position ``order_queue`` would pick this entry in under the active
+    # strategy — present only on *queued* entries (an active issue is already
+    # being worked). The wire list stays in arrival order; a client renders
+    # dispatch order by sorting on ``dispatch_rank``.
+    priority: NotRequired[str]
+    dispatch_rank: NotRequired[int]
 
 
 class PipelineSnapshotPayload(TypedDict):

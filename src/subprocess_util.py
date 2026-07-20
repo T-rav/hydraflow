@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
     from circuit_breaker import CircuitBreaker
-    from execution import SubprocessRunner
+    from execution import SimpleResult, SubprocessRunner
 
 logger = logging.getLogger("hydraflow.subprocess")
 
@@ -920,28 +920,41 @@ def make_docker_env(
 _GH_COMMANDS = frozenset({"gh", "git"})
 
 
-async def run_subprocess(
+async def _run_gated(
     *cmd: str,
     cwd: Path | None = None,
     gh_token: str = "",
     timeout: float = 120.0,
     runner: SubprocessRunner | None = None,
-) -> str:
-    """Run a subprocess and return stripped stdout.
+    extra_env: dict[str, str] | None = None,
+    stdin_input: bytes | None = None,
+    check: bool,
+) -> SimpleResult:
+    """Shared gated core for :func:`run_subprocess`/:func:`run_subprocess_result`.
 
-    Strips the ``CLAUDECODE`` key from the environment to prevent
-    nesting detection.  When *gh_token* is non-empty it is injected
-    as ``GH_TOKEN``.
+    Applies identical hardening regardless of *check*: ``gh``/``git`` commands
+    are gated through the global concurrency semaphore, the rate-limit
+    cooldown, and (``gh`` only) the circuit breaker; every call is bounded by
+    *timeout* via the injected/default :class:`SubprocessRunner`, which also
+    supplies process-group registration and reap (``HostRunner.run_simple``,
+    #9911/#10017/#10019) — free to every caller of this helper.
 
-    For ``gh`` and ``git`` commands, execution is gated through a global
-    semaphore to prevent GitHub API rate limiting from concurrent calls.
+    ``check=True`` (used by :func:`run_subprocess`) raises ``RuntimeError`` /
+    ``AuthenticationError`` on a non-zero exit, matching historical
+    ``run_subprocess`` behavior. ``check=False`` (used by
+    :func:`run_subprocess_result`) never raises for a non-zero exit — the
+    caller branches on ``SimpleResult.returncode`` instead. Both raise
+    :class:`SubprocessTimeoutError` on timeout and :class:`CircuitBreakerOpenError`
+    when the breaker is OPEN — those are infrastructure failures, not business
+    outcomes a caretaker loop should have to special-case per call site.
 
-    Raises :class:`SubprocessTimeoutError` if the command exceeds *timeout* seconds.
-    Raises :class:`RuntimeError` on non-zero exit.
+    Module-private: never imported outside this file.
     """
     from execution import get_default_runner
 
     env = make_clean_env(gh_token)
+    if extra_env:
+        env.update(extra_env)
 
     resolved_runner = runner if runner is not None else get_default_runner()
 
@@ -959,13 +972,14 @@ async def run_subprocess(
         else None
     )
 
-    async def _exec() -> str:
+    async def _exec() -> SimpleResult:
         try:
             result = await resolved_runner.run_simple(
                 list(cmd),
                 cwd=str(cwd) if cwd is not None else None,
                 env=env,
                 timeout=timeout,
+                input=stdin_input,
             )
         except TimeoutError as exc:
             if breaker is not None:
@@ -989,24 +1003,30 @@ async def run_subprocess(
                 # Auth failure = bad/again-rejected credentials, not an outage;
                 # opening the breaker wouldn't help (the token is still bad after
                 # the reset window), so it must not count toward it.
-                raise AuthenticationError(msg) from cause
+                if check:
+                    raise AuthenticationError(msg) from cause
+                return result
             if _is_rate_limited(result.stderr):
                 _trigger_rate_limit_cooldown()
                 # A rate limit has its own global cooldown and is not a
                 # GitHub-down signal, so it must NOT count toward the breaker.
-                raise RuntimeError(msg) from cause
+                if check:
+                    raise RuntimeError(msg) from cause
+                return result
             # Count toward the breaker ONLY genuine GitHub/network outages — a
             # 4xx / business-logic non-zero exit (404, "label does not exist",
             # "cannot approve your own pull request", …) is normal control flow
             # and must not accumulate toward an OPEN that halts the factory.
             if breaker is not None and _is_gh_outage_error(result.stderr):
                 breaker.record_failure()
-            raise RuntimeError(msg) from cause
+            if check:
+                raise RuntimeError(msg) from cause
+            return result
         _reset_rate_limit_backoff()
         if breaker is not None:
             breaker.record_success()
         _maybe_sample_shadow(cmd, result.returncode, result.stdout, result.stderr)
-        return result.stdout
+        return result
 
     if use_semaphore:
         if breaker is not None and not breaker.allow_request():
@@ -1022,6 +1042,73 @@ async def run_subprocess(
         async with _get_gh_semaphore():
             return await _exec()
     return await _exec()
+
+
+async def run_subprocess(
+    *cmd: str,
+    cwd: Path | None = None,
+    gh_token: str = "",
+    timeout: float = 120.0,
+    runner: SubprocessRunner | None = None,
+) -> str:
+    """Run a subprocess and return stripped stdout.
+
+    Strips the ``CLAUDECODE`` key from the environment to prevent
+    nesting detection.  When *gh_token* is non-empty it is injected
+    as ``GH_TOKEN``.
+
+    For ``gh`` and ``git`` commands, execution is gated through a global
+    semaphore to prevent GitHub API rate limiting from concurrent calls.
+
+    Raises :class:`SubprocessTimeoutError` if the command exceeds *timeout* seconds.
+    Raises :class:`RuntimeError` on non-zero exit.
+    """
+    result = await _run_gated(
+        *cmd, cwd=cwd, gh_token=gh_token, timeout=timeout, runner=runner, check=True
+    )
+    return result.stdout
+
+
+async def run_subprocess_result(
+    *cmd: str,
+    cwd: Path | None = None,
+    gh_token: str = "",
+    timeout: float = 120.0,
+    runner: SubprocessRunner | None = None,
+    extra_env: dict[str, str] | None = None,
+    stdin_input: bytes | None = None,
+) -> SimpleResult:
+    """Run a subprocess and return the full result, never raising on non-zero exit.
+
+    Sibling of :func:`run_subprocess` for callers that branch on
+    ``proc.returncode`` themselves (e.g. accepting ``rc in {0, 1}`` for
+    ``make``/``rg``, or treating any non-zero as "skip this tick"). Applies
+    identical hardening: timeout bound + process-group reap + registry-join
+    (via the injected/default ``SubprocessRunner``), and for ``gh``/``git``
+    the global concurrency semaphore, rate-limit cooldown, and circuit
+    breaker accounting.
+
+    *extra_env* is merged on top of :func:`make_clean_env`'s output (e.g. to
+    forward a harness-specific env var). *stdin_input*, when provided, is
+    written to the child's stdin (mirrors ``HostRunner.run_simple``'s
+    ``input`` param — renamed here to avoid shadowing the ``input`` builtin).
+
+    Raises :class:`SubprocessTimeoutError` if the command exceeds *timeout*
+    seconds, and :class:`CircuitBreakerOpenError` if the ``gh`` circuit
+    breaker is OPEN — both are infrastructure failures, not business
+    outcomes. Does **not** raise for a non-zero exit (including auth or
+    rate-limit failures): the caller inspects ``result.returncode``.
+    """
+    return await _run_gated(
+        *cmd,
+        cwd=cwd,
+        gh_token=gh_token,
+        timeout=timeout,
+        runner=runner,
+        extra_env=extra_env,
+        stdin_input=stdin_input,
+        check=False,
+    )
 
 
 _RETRYABLE_PATTERNS = (

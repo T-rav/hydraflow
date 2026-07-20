@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -618,3 +619,129 @@ async def test_close_reconcile_clears_dedup(loop_env, monkeypatch) -> None:
     assert "adr_touchpoint_auditor:ADR-0042" in remaining
     state.clear_adr_audit_attempts.assert_called_with(stuck_attempt_key)
     state.clear_adr_rollup.assert_called_with(stuck_attempt_key)
+
+
+# --- #9554/#10028: gh subprocess sites route through run_subprocess_result ---
+
+
+async def test_list_recent_merged_prs_routes_through_bounded_helper(
+    loop_env, monkeypatch
+) -> None:
+    """Success path: parses gh pr list JSON via the shared helper."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup, idx = loop_env
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+
+    captured: dict[str, Any] = {}
+
+    async def fake_result(*cmd: str, **kwargs: Any) -> SimpleResult:
+        captured["cmd"] = cmd
+        captured["timeout"] = kwargs.get("timeout")
+        return SimpleResult(
+            stdout='[{"number": 1, "mergedAt": "2026-05-02T00:00:00Z"}]',
+            stderr="",
+            returncode=0,
+        )
+
+    monkeypatch.setattr(
+        "adr_touchpoint_auditor_loop.run_subprocess_result", fake_result
+    )
+
+    prs = await loop._list_recent_merged_prs("2026-05-01T00:00:00Z")
+
+    assert prs == [{"number": 1, "mergedAt": "2026-05-02T00:00:00Z"}]
+    assert captured["cmd"][0] == "gh"
+    assert captured["timeout"] == 120
+
+
+async def test_list_recent_merged_prs_nonzero_returns_empty(
+    loop_env, monkeypatch
+) -> None:
+    """Non-zero exit (never raised by the helper) yields an empty list."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup, idx = loop_env
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+
+    async def fake_result(*_cmd: str, **_kwargs: Any) -> SimpleResult:
+        return SimpleResult(stdout="", stderr="rate limited", returncode=1)
+
+    monkeypatch.setattr(
+        "adr_touchpoint_auditor_loop.run_subprocess_result", fake_result
+    )
+
+    assert await loop._list_recent_merged_prs("2026-05-01T00:00:00Z") == []
+
+
+async def test_list_recent_merged_prs_timeout_returns_empty(
+    loop_env, monkeypatch
+) -> None:
+    """A timeout from the shared helper is caught locally and yields []."""
+    from subprocess_util import SubprocessTimeoutError
+
+    cfg, state, pr, dedup, idx = loop_env
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+
+    async def fake_result(*_cmd: str, **_kwargs: Any) -> Any:
+        raise SubprocessTimeoutError("timed out")
+
+    monkeypatch.setattr(
+        "adr_touchpoint_auditor_loop.run_subprocess_result", fake_result
+    )
+
+    assert await loop._list_recent_merged_prs("2026-05-01T00:00:00Z") == []
+
+
+async def test_fetch_pr_changed_files_routes_through_bounded_helper(
+    loop_env, monkeypatch
+) -> None:
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup, idx = loop_env
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+
+    async def fake_result(*_cmd: str, **_kwargs: Any) -> SimpleResult:
+        return SimpleResult(
+            stdout='{"files": [{"path": "src/agent.py"}]}', stderr="", returncode=0
+        )
+
+    monkeypatch.setattr(
+        "adr_touchpoint_auditor_loop.run_subprocess_result", fake_result
+    )
+
+    files = await loop._fetch_pr_changed_files(101)
+
+    assert files == ["src/agent.py"]

@@ -143,3 +143,81 @@ async def test_fitness_scorecard_e2e(tmp_path) -> None:
     # Payload returned from _do_work is consistent with what the event carries.
     assert payload["loop_count"] == 2
     assert payload["scored_count"] == 1
+
+
+class _DailyProposer(BaseBackgroundLoop):
+    """Daily-cadence scored loop wired exactly like production (#9841):
+    cadence-derived min_samples from config, no test-only threshold."""
+
+    def _get_default_interval(self) -> int:
+        return 86400
+
+    async def _do_work(self):
+        if not self._enabled_cb(self._worker_name):
+            return {"status": "disabled"}
+        return {}
+
+    def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
+        from loop_fitness import cadence_min_samples, proposal_acceptance_fitness
+
+        return proposal_acceptance_fitness(
+            ctx,
+            worker_name=self._worker_name,
+            label="daily-proposal",
+            min_samples=cadence_min_samples(
+                ctx,
+                interval_seconds=self._get_default_interval(),
+                configured_min=self._config.fitness_min_samples,
+            ),
+        )
+
+
+async def test_daily_cadence_loop_scores_at_default_config(tmp_path) -> None:
+    """#9841 scenario pin: at DEFAULT fitness config, a daily-cadence loop
+    with a week of filed proposals produces a real score through the full
+    producer pipeline (jsonl + artifact + route), not insufficient_data."""
+    d = make_bg_loop_deps(tmp_path)
+    d.bus.load_events_since = AsyncMock(return_value=[])
+
+    async def fetch() -> list[IssueRecord]:
+        return [
+            IssueRecord(
+                number=n,
+                labels=["daily-proposal"],
+                is_pr=True,
+                merged=(n < 4),
+                # Half-day offset keeps the newest record safely BEFORE
+                # window_end (now is captured before fetch runs).
+                created_at=datetime.now(UTC)
+                - timedelta(days=6, hours=12)
+                + timedelta(days=n),
+            )
+            for n in range(7)
+        ]
+
+    producer = FitnessScorecardLoop(
+        config=d.config,
+        deps=d.loop_deps,
+        issue_fetcher=fetch,
+        repo_root=tmp_path,
+    )
+    proposer = _DailyProposer(
+        worker_name="daily_proposer",
+        config=d.config,
+        deps=d.loop_deps,
+    )
+    producer.set_loops({"daily_proposer": proposer})
+
+    payload = await producer._do_work()
+
+    assert payload["scored_count"] == 1
+    latest = latest_fitness_by_worker(d.config)
+    row = latest["daily_proposer"]
+    assert row["kind"] == FitnessKind.SCORED.value
+    assert row["confidence"] == "ok", (
+        f"daily-cadence loop stuck in {row['confidence']} at default config: {row}"
+    )
+    assert row["score"] == pytest.approx(4 / 7)
+
+    artifact = tmp_path / "docs" / "arch" / "generated" / "loop-fitness.md"
+    assert "daily_proposer" in artifact.read_text()

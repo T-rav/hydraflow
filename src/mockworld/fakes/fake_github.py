@@ -81,6 +81,11 @@ class FakeIssue:
     # Empty = "not explicitly seeded": the closed listing falls back to
     # updated_at, mirroring GitHub (closing an issue touches both).
     closed_at: str = ""
+    # Only meaningful once state == "closed"; mirrors gh's stateReason
+    # ("COMPLETED" | "NOT_PLANNED"). Empty = closed without an explicit
+    # reason — get_issue_state falls back to "COMPLETED", matching gh's
+    # default close reason (#10025).
+    state_reason: str = ""
 
 
 @dataclass
@@ -172,6 +177,7 @@ class FakeGitHub:
                 title=issue_dict["title"],
                 body=issue_dict["body"],
                 labels=list(issue_dict.get("labels", [])),
+                state=issue_dict.get("state", "open"),
             )
         for issue_number, comment_dicts in seed.comments.items():
             for comment_dict in comment_dicts:
@@ -190,6 +196,7 @@ class FakeGitHub:
                 merged=pr_dict.get("merged", False),
                 author=pr_dict.get("author", "fake-author"),
                 is_bot=pr_dict.get("is_bot", False),
+                mergeable=pr_dict.get("mergeable", True),
             )
             for label in pr_dict.get("labels", []):
                 gh.add_pr_label(pr_dict["number"], label)
@@ -209,12 +216,20 @@ class FakeGitHub:
         title: str,
         body: str,
         labels: list[str] | None = None,
+        state: str = "open",
     ) -> None:
+        """Seed an issue. ``state`` accepts ``"open"`` (default) or ``"closed"``.
+
+        A closed seed issue reports ``COMPLETED`` from ``get_issue_state``
+        (close-reason defaulting mirrors gh, #10025) — the surface loops like
+        workspace_gc/epic_sweeper consult before acting (#9543).
+        """
         self._issues[number] = FakeIssue(
             number=number,
             title=title,
             body=body,
             labels=labels or [],
+            state=state,
         )
 
     def add_seeded_comment(
@@ -248,12 +263,14 @@ class FakeGitHub:
         merged: bool = False,
         author: str = "fake-author",
         is_bot: bool = False,
+        mergeable: bool = True,
     ) -> None:
         """Directly insert a PR record (sync helper for test seeding).
 
         The async ``create_pr`` handles the production path; this helper
         exists so scenario seeds can set up a fully-populated world
-        synchronously.
+        synchronously. ``mergeable=False`` seeds a CONFLICTING PR that
+        ``list_conflicting_prs`` surfaces to merge_state_watcher (#9543).
         """
         self._prs[number] = FakePR(
             number=number,
@@ -263,6 +280,7 @@ class FakeGitHub:
             ci_status=ci_status,
             author=author,
             is_bot=is_bot,
+            mergeable=mergeable,
         )
 
     def add_pr_label(self, pr_number: int, label: str) -> None:
@@ -486,10 +504,16 @@ class FakeGitHub:
         if issue_number in self._issues:
             self._issues[issue_number].state = "closed"
 
-    async def close_issue(self, issue_number: int) -> bool:
+    async def close_issue(
+        self, issue_number: int, *, reason: str | None = None
+    ) -> bool:
         self._maybe_rate_limit()
         if issue_number in self._issues:
-            self._issues[issue_number].state = "closed"
+            issue = self._issues[issue_number]
+            issue.state = "closed"
+            # Mirror gh: `--reason "not planned"` -> stateReason NOT_PLANNED;
+            # no --reason -> COMPLETED (get_issue_state's empty fallback).
+            issue.state_reason = reason.upper().replace(" ", "_") if reason else ""
         return True
 
     async def close_pr(self, pr_number: int) -> bool:
@@ -689,21 +713,28 @@ class FakeGitHub:
 
     # --- Loop-required PRPort methods ---
 
-    async def list_issues_by_label(self, label: str) -> list[dict[str, Any]]:
-        """Return open issues carrying *label* as GitHubIssueSummary-style dicts.
+    @staticmethod
+    def _issue_summary(issue: FakeIssue) -> dict[str, Any]:
+        """GitHubIssueSummary-style projection of one issue.
 
-        ``labels`` mirrors the gh wire shape (#9943) so filters reading
-        ``lbl["name"]`` behave identically under the fake and the adapter.
+        Shared by ``list_issues_by_label`` / ``list_open_issues`` — previously
+        two byte-identical copies (#10025). ``labels`` mirrors the gh wire
+        shape (``{"name": ...}``, #9943) so filters reading ``lbl["name"]``
+        behave identically under the fake and the adapter.
         """
+        return {
+            "number": issue.number,
+            "title": issue.title,
+            "body": issue.body,
+            "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
+            "labels": [{"name": name} for name in issue.labels],
+        }
+
+    async def list_issues_by_label(self, label: str) -> list[dict[str, Any]]:
+        """Return open issues carrying *label* as GitHubIssueSummary-style dicts."""
         self._maybe_rate_limit()
         return [
-            {
-                "number": issue.number,
-                "title": issue.title,
-                "body": issue.body,
-                "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
-                "labels": [{"name": name} for name in issue.labels],
-            }
+            self._issue_summary(issue)
             for issue in self._issues.values()
             if issue.state == "open" and label in issue.labels
         ]
@@ -711,19 +742,11 @@ class FakeGitHub:
     async def list_open_issues(self) -> list[dict[str, Any]]:
         """Return ALL open issues (no label filter), mirroring the gh projection.
 
-        Used by IssueRefinementLoop's backlog-wide sweep (#9957). ``labels``
-        mirrors the gh wire shape (fake-fidelity), same as
-        ``list_issues_by_label``.
+        Used by IssueRefinementLoop's backlog-wide sweep (#9957).
         """
         self._maybe_rate_limit()
         return [
-            {
-                "number": issue.number,
-                "title": issue.title,
-                "body": issue.body,
-                "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
-                "labels": [{"name": name} for name in issue.labels],
-            }
+            self._issue_summary(issue)
             for issue in self._issues.values()
             if issue.state == "open"
         ]
@@ -918,12 +941,22 @@ class FakeGitHub:
         return ""
 
     async def get_issue_state(self, issue_number: int) -> str:
-        """Return issue state as GitHub GraphQL style (OPEN/COMPLETED)."""
+        """Return issue state as GitHub GraphQL style (OPEN/COMPLETED/NOT_PLANNED).
+
+        An unknown issue returns ``"UNKNOWN"`` — matching prod
+        ``PRManager.get_issue_state``, which fail-closes with ``"UNKNOWN"``
+        when the ``gh`` read errors. The fake previously fail-opened with
+        ``"OPEN"`` here, which made every still-open guard (e.g. the
+        refinement TOCTOU stale-close check) pass vacuously for issues the
+        fake never saw (#10025).
+        """
         self._maybe_rate_limit()
         if issue_number in self._issues:
-            state = self._issues[issue_number].state
-            return "COMPLETED" if state == "closed" else "OPEN"
-        return "OPEN"
+            issue = self._issues[issue_number]
+            if issue.state == "closed":
+                return issue.state_reason or "COMPLETED"
+            return "OPEN"
+        return "UNKNOWN"
 
     async def get_issue_labels(self, issue_number: int) -> list[str]:
         """Return the label names on an issue (empty list when unknown)."""
