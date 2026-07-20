@@ -32,7 +32,6 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
-import sys
 from collections.abc import Sequence
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -173,9 +172,6 @@ def _forking_cmd(pidfile: os.PathLike[str]) -> list[str]:
     pid. ``start_new_session=True`` makes the shell a group leader, so a group
     SIGKILL must reap the backgrounded ``sleep`` too — not just the shell."""
     return ["sh", "-c", f"sleep 30 & echo $! > {pidfile}; wait"]
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
 @_RUN_HOST
 @pytest.mark.asyncio
 async def test_forking_host_command_reaped_on_timeout(run_host, tmp_path) -> None:
@@ -188,9 +184,6 @@ async def test_forking_host_command_reaped_on_timeout(run_host, tmp_path) -> Non
         f"grandchild {grandchild} survived the timeout reap — the host path "
         "did not tear down the whole process group"
     )
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
 @_RUN_HOST
 @pytest.mark.asyncio
 async def test_forking_host_command_reaped_on_cancel(run_host, tmp_path) -> None:
