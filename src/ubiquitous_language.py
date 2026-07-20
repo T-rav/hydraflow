@@ -244,6 +244,18 @@ def _slugify_term_name(name: str) -> str:
     return step4.strip("-")
 
 
+def _updated_at_sort_key(term: Term) -> datetime:
+    """Parse ``updated_at`` for freshest-record comparison; unparseable
+    timestamps sort oldest so a well-formed record always wins."""
+    try:
+        parsed = datetime.fromisoformat(term.updated_at)
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
 class TermStore:
     """File-based store for Term records (one file per term)."""
 
@@ -257,10 +269,30 @@ class TermStore:
         return path
 
     def list(self) -> list[Term]:
+        """Return one Term per id, sorted by name.
+
+        Two files sharing an id are a forked duplicate (#9938/#9981): a
+        hand-authored file whose basename wasn't the canonical slug of its
+        name got re-written by a UL loop at the slug path, stranding the
+        stale original. Collapse such records to the freshest ``updated_at``
+        (ties prefer the canonical-slug file) so renderers and loops never
+        double-count a term. ``lint_term_uniqueness`` rejects the duplicate
+        files themselves at CI time.
+        """
         if not self._root.is_dir():
             return []
+        best: dict[str, tuple[tuple[datetime, bool], Term]] = {}
+        for path in sorted(self._root.glob("*.md")):
+            term = load_term_file(path)
+            rank = (
+                _updated_at_sort_key(term),
+                path.name == f"{_slugify_term_name(term.name)}.md",
+            )
+            current = best.get(term.id)
+            if current is None or rank > current[0]:
+                best[term.id] = (rank, term)
         return sorted(
-            (load_term_file(p) for p in self._root.glob("*.md")),
+            (record for _, record in best.values()),
             key=lambda t: t.name.lower(),
         )
 
@@ -384,6 +416,42 @@ def lint_reverse_coverage(terms: list[Term], src_root: Path) -> list[str]:
             if loc not in covered:
                 uncovered.append(loc)
     return sorted(uncovered)
+
+
+def lint_term_uniqueness(terms_root: Path) -> list[str]:
+    """One file per term: unique id, unique name, canonical filename.
+
+    Returns human-readable failure strings; empty list = clean. Duplicate
+    ids/names across term files corrupt the store (#9938/#9981). The
+    filename check closes the fork mechanism itself: ``TermStore.write``
+    and the UL loops key the file path on ``_slugify_term_name(name)``, so
+    a file parked at any other basename gets forked into a second file on
+    the next loop write — exactly how the fitness-scorecard and
+    github-cache-loop duplicates were minted.
+    """
+    if not terms_root.is_dir():
+        return []
+    failures: list[str] = []
+    by_id: dict[str, list[str]] = {}
+    by_name: dict[str, list[str]] = {}
+    for path in sorted(terms_root.glob("*.md")):
+        term = load_term_file(path)
+        by_id.setdefault(term.id, []).append(path.name)
+        by_name.setdefault(term.name.lower(), []).append(path.name)
+        expected = f"{_slugify_term_name(term.name)}.md"
+        if path.name != expected:
+            failures.append(
+                f"{path.name}: filename is not the canonical slug of "
+                f"name {term.name!r} — expected {expected} (a UL loop "
+                "write would fork a duplicate file)"
+            )
+    for term_id, filenames in sorted(by_id.items()):
+        if len(filenames) > 1:
+            failures.append(f"duplicate term id {term_id}: {', '.join(filenames)}")
+    for name, filenames in sorted(by_name.items()):
+        if len(filenames) > 1:
+            failures.append(f"duplicate term name {name!r}: {', '.join(filenames)}")
+    return failures
 
 
 def render_glossary(terms: list[Term]) -> str:
