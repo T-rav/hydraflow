@@ -89,6 +89,7 @@ SETTINGS: dict[str, SettingSpec] = {
     # --- Reliability -----------------------------------------------------
     "gh_circuit_breaker_enabled": SettingSpec("Reliability", live=True, order=0),
     "merge_policy_enabled": SettingSpec("Reliability", live=True, order=1),
+    "stale_code_alert_threshold": SettingSpec("Reliability", live=True, order=2),
     # --- Memory ----------------------------------------------------------
     "memory_auto_approve": SettingSpec("Memory", live=True, order=0),
     # --- Paths -----------------------------------------------------------
