@@ -427,6 +427,10 @@ class DiscoverRunner(BaseRunner):
                 self._config.repo_root,
                 {"issue": task.id, "source": "discover:evaluator"},
                 issue_labels=task.tags,
+                # #9998: telemetry keys on the skill name so prompt-efficiency
+                # ordering matches the corpus's expected_catcher names; the
+                # event source stays "discover:evaluator" for scenario scripts.
+                telemetry_source=skill.name,
             )
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
