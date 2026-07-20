@@ -167,23 +167,22 @@ async def test_contended_file_lock_does_not_exhaust_thread_pool(
     small_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
     loop.set_default_executor(small_pool)
     try:
-        holder = open(lock_path, "a+", encoding="utf-8")
-        fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
-        try:
+        with lock_path.open("a+", encoding="utf-8") as holder:
+            fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
+            try:
 
-            def _try_acquire() -> None:
-                with file_lock(lock_path, timeout=0.2):
-                    pass
+                def _try_acquire() -> None:
+                    with file_lock(lock_path, timeout=0.2):
+                        pass
 
-            results = await asyncio.gather(
-                *(asyncio.to_thread(_try_acquire) for _ in range(4)),
-                return_exceptions=True,
-            )
-            assert len(results) == 4
-            assert all(isinstance(r, FileLockTimeout) for r in results), results
-        finally:
-            fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
-            holder.close()
+                results = await asyncio.gather(
+                    *(asyncio.to_thread(_try_acquire) for _ in range(4)),
+                    return_exceptions=True,
+                )
+                assert len(results) == 4
+                assert all(isinstance(r, FileLockTimeout) for r in results), results
+            finally:
+                fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
 
         # The pool must not be exhausted: an unrelated to_thread call still
         # completes promptly.
@@ -220,9 +219,8 @@ def test_gate_recovers_after_timeout_abandonment(tmp_path):
         assert entered.wait(timeout=5.0)
         # Second acquirer times out and abandons its ticket while the
         # holder still owns the gate.
-        with pytest.raises(FileLockTimeout):
-            with file_lock(lock_path, timeout=0.1):
-                pass
+        with pytest.raises(FileLockTimeout), file_lock(lock_path, timeout=0.1):
+            pass
     finally:
         release.set()
         holder.join(timeout=10.0)
