@@ -268,6 +268,50 @@ async def test_filing_commits_frontmatter_to_git(env) -> None:
 
 
 @pytest.mark.asyncio
+async def test_commit_mirror_updates_git_add_failure_skips_commit(
+    env, monkeypatch
+) -> None:
+    """git add failure (via the shared helper) logs + returns without
+    attempting the commit — never raises, never calls git commit."""
+    from execution import SimpleResult
+
+    cfg, *_ = env
+    loop = _make_loop(env)
+
+    calls: list[tuple[str, ...]] = []
+
+    async def fake_result(*cmd: str, **_kwargs: object) -> SimpleResult:
+        calls.append(cmd)
+        return SimpleResult(
+            stdout="", stderr="fatal: not a git repository", returncode=128
+        )
+
+    monkeypatch.setattr("memory_backlog_loop.run_subprocess_result", fake_result)
+
+    await loop._commit_mirror_updates([1])
+
+    assert len(calls) == 1  # git add attempted; commit never reached
+    assert calls[0][:2] == ("git", "-C")
+
+
+@pytest.mark.asyncio
+async def test_commit_mirror_updates_timeout_returns_quietly(env, monkeypatch) -> None:
+    """A git-add timeout (SubprocessTimeoutError from the shared helper) is
+    caught locally and does not propagate out of the loop cycle."""
+    from subprocess_util import SubprocessTimeoutError
+
+    cfg, *_ = env
+    loop = _make_loop(env)
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> object:
+        raise SubprocessTimeoutError("timed out")
+
+    monkeypatch.setattr("memory_backlog_loop.run_subprocess_result", fake_result)
+
+    await loop._commit_mirror_updates([1])  # must not raise
+
+
+@pytest.mark.asyncio
 async def test_no_commit_when_nothing_filed(env) -> None:
     """Tick that filed zero issues should NOT make a git commit."""
     _, _, pr, dedup, mirror_dir = env

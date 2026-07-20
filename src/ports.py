@@ -304,8 +304,16 @@ class PRPort(Protocol):
 
     # --- Issue management ---
 
-    async def close_issue(self, issue_number: int) -> bool:
+    async def close_issue(
+        self, issue_number: int, *, reason: str | None = None
+    ) -> bool:
         """Close GitHub issue *issue_number*.
+
+        *reason* maps to ``gh issue close --reason`` (``"completed"`` |
+        ``"not planned"``); ``None`` keeps gh's default, which records
+        ``stateReason=COMPLETED``. Automated dedup/wontfix closes should
+        pass ``"not planned"`` so ``get_issue_state`` consumers don't read
+        them as resolved (#10025).
 
         Returns True when the close reached GitHub, False when the
         underlying call failed (fail-soft: no raise). Background callers

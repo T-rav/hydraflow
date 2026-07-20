@@ -64,6 +64,27 @@ class TestBuildServices:
                 continue
             assert getattr(registry, field_name) is not None, f"{field_name} is None"
 
+    def test_pipeline_label_listener_is_wired_to_the_store(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """#9842: label swaps must reach the in-memory pipeline immediately.
+
+        The wiring is hasattr-gated (sandbox fakes read labels live and skip
+        it), so a rename on either side would silently sever the event-driven
+        card path and quietly reintroduce the 5-minute poll lag — pin it.
+        """
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        stop_event = asyncio.Event()
+        callbacks = _make_callbacks()
+
+        registry = build_services(config, bus, state, stop_event, callbacks)
+
+        listener = registry.prs._pipeline_label_listener
+        assert listener is not None, "pipeline label listener not wired"
+        assert listener.__func__ is type(registry.store).apply_label_transition
+        assert listener.__self__ is registry.store
+
     def test_agents_runner_is_shared(self, config: HydraFlowConfig) -> None:
         """Agents, planners, reviewers, and HITL runner should share the subprocess runner."""
         bus = EventBus()

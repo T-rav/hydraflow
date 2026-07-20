@@ -291,6 +291,74 @@ async def test_auto_close_applies_comment_label_and_close(tmp_path) -> None:
     assert _REFINEMENT_AUTO_LABEL not in gh._issues[101].labels
 
 
+async def test_auto_close_records_not_planned_state_reason(tmp_path) -> None:
+    """An auto-closed duplicate must read as NOT_PLANNED, not COMPLETED —
+    a deduped issue was retired, not resolved (#10025)."""
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    llm = ScriptedRefinementLLM(
+        dup={frozenset({101, 102}): _dup_json("exact_dup", 101, "high")}
+    )
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    await loop._do_work()
+
+    assert gh._issues[102].state == "closed"
+    assert await gh.get_issue_state(102) == "NOT_PLANNED"
+
+
+async def test_priority_budget_caps_full_sweep_scoring(tmp_path) -> None:
+    """A full sweep scores at most `issue_refinement_priority_budget` issues —
+    the priority pass previously had no spend bound analog (#10025)."""
+    gh, state, dedup, bus = _env(tmp_path)
+    # Three dissimilar issues (no dup candidates), all priority targets.
+    gh.add_issue(501, "OAuth login flow returns a blank page", "b1", labels=[])
+    gh.add_issue(502, "Metrics dashboard chart renders upside down", "b2", labels=[])
+    gh.add_issue(503, "Webhook retries hammer the staging deploy hook", "b3", labels=[])
+    llm = ScriptedRefinementLLM()
+    loop = _make_loop(
+        _cfg(tmp_path, issue_refinement_priority_budget=2), gh, state, dedup, bus, llm
+    )
+
+    stats = await loop._do_work()  # first tick = full sweep (no marker)
+
+    assert stats["full_sweep"] is True
+    assert len(llm.priority_nums()) == 2
+
+
+async def test_judged_pairs_and_index_persist_before_priority_pass(tmp_path) -> None:
+    """A watchdog-cancelled tick (cancellation lands mid-priority-pass) must
+    keep the already-paid-for dup judgments: index + judged-pair cache persist
+    BEFORE the priority pass (#10025)."""
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+
+    class CancelOnPriorityLLM(ScriptedRefinementLLM):
+        async def complete(self, prompt: str) -> str:
+            if "for duplicates" not in prompt:
+                raise asyncio.CancelledError
+            return await super().complete(prompt)
+
+    llm = CancelOnPriorityLLM(
+        dup={frozenset({101, 102}): _dup_json("likely_dup", 101, "medium")}
+    )
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    with pytest.raises(asyncio.CancelledError):
+        await loop._do_work()
+
+    judged = state.get_judged_pairs()
+    assert len(judged) == 1
+    assert judged[0].startswith("101:102:")
+    assert set(state.get_refinement_index()) == {"101", "102"}
+
+    # Next tick (fresh LLM): ZERO dup calls — the persisted cache stands.
+    llm2 = ScriptedRefinementLLM(dup=llm.dup)
+    loop2 = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm2)
+    await loop2._do_work()
+    assert llm2.dup_calls() == 0
+
+
 async def test_relabel_adds_new_and_removes_previous(tmp_path) -> None:
     gh, state, dedup, bus = _env(tmp_path)
     gh.add_issue(301, "Investigate the wedged planner phase", "body", labels=["P2"])

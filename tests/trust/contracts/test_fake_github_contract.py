@@ -46,8 +46,18 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
 
     if method == "close_issue":
         issue_number = int(args[0])
+        # Cassette shape (#10025): ["<number>", "--reason", "<reason>"] —
+        # thread the recorded reason through the fake's close, then assert
+        # the state-reason side effect the reason exists to produce.
+        reason = str(args[2]) if len(args) > 2 and args[1] == "--reason" else None
         fake.add_issue(issue_number, "Test Issue", "body")
-        await fake.close_issue(issue_number)
+        await fake.close_issue(issue_number, reason=reason)
+        expected_reason = reason.upper().replace(" ", "_") if reason else "COMPLETED"
+        state = await fake.get_issue_state(issue_number)
+        assert state == expected_reason, (
+            f"close_issue(reason={reason!r}) recorded state {state!r}; "
+            f"expected {expected_reason!r}"
+        )
         return FakeOutput(exit_code=0, stdout="", stderr="")
 
     if method == "close_task":

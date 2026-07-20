@@ -1169,3 +1169,123 @@ async def test_grep_helper_uses_stdlib_fallback_when_ripgrep_absent(
     # Present in a unit test → found via the fallback; absent → not found.
     assert await loop._grep_scenario_for_helper("script_ci") is True
     assert await loop._grep_scenario_for_helper("never_called_helper") is False
+
+
+# --- #9554/#10028: rg/gh subprocess sites route through run_subprocess_result ---
+
+
+async def test_grep_scenario_for_helper_timeout_returns_false(
+    loop_env, tmp_path, monkeypatch
+) -> None:
+    """A rg-scan timeout (via the shared helper) is caught locally as no-match."""
+    from subprocess_util import SubprocessTimeoutError
+
+    cfg, state, pr, dedup = loop_env
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir(parents=True)
+    # Force the rg branch regardless of whether ripgrep is on this machine's
+    # PATH — otherwise the stdlib fallback would silently bypass the patched
+    # helper and this test would pass for the wrong reason.
+    monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/rg")
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> object:
+        raise SubprocessTimeoutError("timed out")
+
+    monkeypatch.setattr("fake_coverage_auditor_loop.run_subprocess_result", fake_result)
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    assert await loop._grep_scenario_for_helper("script_discover") is False
+
+
+async def test_grep_scenario_for_helper_no_match_returns_false(
+    loop_env, tmp_path, monkeypatch
+) -> None:
+    """rg exit=1 (no match, never raised by the shared helper) → False."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup = loop_env
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir(parents=True)
+    monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/rg")
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(stdout="", stderr="", returncode=1)
+
+    monkeypatch.setattr("fake_coverage_auditor_loop.run_subprocess_result", fake_result)
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    assert await loop._grep_scenario_for_helper("script_discover") is False
+
+
+async def test_list_open_rollup_titles_routes_through_bounded_helper(
+    loop_env, monkeypatch
+) -> None:
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup = loop_env
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(
+            stdout='[{"title": "Fake coverage gap: X adapter surface (1 methods)"}]',
+            stderr="",
+            returncode=0,
+        )
+
+    monkeypatch.setattr("fake_coverage_auditor_loop.run_subprocess_result", fake_result)
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    titles = await loop._list_open_rollup_titles()
+
+    assert titles == {"Fake coverage gap: X adapter surface (1 methods)"}
+
+
+async def test_list_open_rollup_titles_nonzero_returns_empty_set(
+    loop_env, monkeypatch
+) -> None:
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup = loop_env
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(stdout="", stderr="boom", returncode=1)
+
+    monkeypatch.setattr("fake_coverage_auditor_loop.run_subprocess_result", fake_result)
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    assert await loop._list_open_rollup_titles() == set()
+
+
+async def test_list_open_rollup_titles_timeout_returns_empty_set(
+    loop_env, monkeypatch
+) -> None:
+    from subprocess_util import SubprocessTimeoutError
+
+    cfg, state, pr, dedup = loop_env
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> object:
+        raise SubprocessTimeoutError("timed out")
+
+    monkeypatch.setattr("fake_coverage_auditor_loop.run_subprocess_result", fake_result)
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    assert await loop._list_open_rollup_titles() == set()

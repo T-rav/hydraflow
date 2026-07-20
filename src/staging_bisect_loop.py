@@ -26,6 +26,11 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from dedup_store import DedupStore
 from process_group import kill_process_group
+from subprocess_util import (
+    SubprocessTimeoutError,
+    run_subprocess,
+    run_subprocess_result,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -175,48 +180,29 @@ class StagingBisectLoop(BaseBackgroundLoop):
         timeout_s = self._config.staging_bisect_runtime_cap_seconds
         cmd = ["make", "bisect-probe"]
         t0 = time.perf_counter()
-        exit_code: int | None = None
-        stderr_excerpt: str | None = None
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                cwd=str(self._config.repo_root),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                # Group leader (pid == pgid) so the timeout reap kills the
-                # whole make → pytest probe subtree, not just the top-level
-                # make (#9579).
-                start_new_session=True,
+            result = await run_subprocess_result(
+                *cmd, cwd=self._config.repo_root, timeout=timeout_s
             )
-            try:
-                stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout_s
-                )
-            except TimeoutError:
-                # Group-kill: a child-only proc.kill() orphaned the sub-make /
-                # pytest grandchildren at PPID=1 (#9579). The guarded
-                # primitive never raises — an already-exited child included —
-                # so the timeout surfaces as a probe failure instead of
-                # crashing the loop. (#9794/#9816/#9883)
-                kill_process_group(proc)
-                with contextlib.suppress(ProcessLookupError):
-                    await proc.wait()
-                exit_code = 124  # bash convention
-                stderr_excerpt = f"timeout after {timeout_s}s"
-                self._emit_trace(t0, cmd, exit_code, stderr_excerpt)
-                return False, f"bisect-probe timed out after {timeout_s}s"
+        except SubprocessTimeoutError:
+            # The shared helper (run_simple) already group-kills the whole
+            # make → pytest probe subtree on timeout (#9579/#9554/#10028) —
+            # this method just surfaces the failure instead of crashing the
+            # loop. (#9794/#9816/#9883)
+            exit_code = 124  # bash convention
+            stderr_excerpt = f"timeout after {timeout_s}s"
+            self._emit_trace(t0, cmd, exit_code, stderr_excerpt)
+            return False, f"bisect-probe timed out after {timeout_s}s"
         except OSError as exc:
             self._emit_trace(t0, cmd, -1, f"exec failed: {exc}")
             return False, f"bisect-probe exec failed: {exc}"
-        combined = (stdout_b or b"").decode(errors="replace") + (
-            stderr_b or b""
-        ).decode(errors="replace")
-        exit_code = proc.returncode if proc.returncode is not None else -1
+        combined = result.stdout + result.stderr
+        exit_code = result.returncode
         self._emit_trace(
             t0,
             cmd,
             exit_code,
-            (stderr_b or b"").decode(errors="replace").strip()[:200] or None,
+            result.stderr.strip()[:200] or None,
         )
         return exit_code == 0, combined
 
@@ -487,7 +473,6 @@ class StagingBisectLoop(BaseBackgroundLoop):
         caller's own enabled-check at ``_do_work`` entry catches the
         next tick.
         """
-        import asyncio  # noqa: PLC0415
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -592,33 +577,21 @@ class StagingBisectLoop(BaseBackgroundLoop):
             await self._cleanup_worktree(worktree_dir)
 
     async def _run_gh(self, cmd: list[str]) -> str:
-        """Run a ``gh`` command and return stdout. Overridable in tests."""
-        import asyncio  # noqa: PLC0415
+        """Run a ``gh`` command and return stdout. Overridable in tests.
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=self._config.repo_root,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        Routes through the shared bounded helper (#9554/#10028) —
+        ``run_subprocess`` raises on non-zero exit (same stdout-or-raise
+        contract as before) and inherits the gh circuit-breaker/rate-limit
+        gating plus process-group registration for free.
+        """
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=_GH_TIMEOUT_SECONDS
+            return await run_subprocess(
+                *cmd, cwd=self._config.repo_root, timeout=_GH_TIMEOUT_SECONDS
             )
-        except TimeoutError as exc:
-            # proc.kill() itself raises ProcessLookupError when the child
-            # already exited — suppress it too, not just proc.wait(), so the
-            # RuntimeError below propagates instead of crashing the loop cycle.
-            # (#9794/#9816/#9883)
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
-                await proc.wait()
+        except SubprocessTimeoutError as exc:
             raise RuntimeError(
                 f"gh timed out after {_GH_TIMEOUT_SECONDS}s: {' '.join(cmd)}"
             ) from exc
-        if proc.returncode != 0:
-            raise RuntimeError(f"gh failed: {stderr.decode()[:500]}")
-        return stdout.decode()
 
     async def _attribute_culprit(self, sha: str) -> tuple[int, str]:
         """Resolve *sha* to ``(pr_number, pr_title)``.

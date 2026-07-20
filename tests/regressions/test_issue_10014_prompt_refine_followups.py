@@ -57,7 +57,7 @@ def test_refinable_skills_include_the_formerly_uncovered_three() -> None:
         "discover-completeness",
         "shape-coherence",
     } <= REFINABLE_SKILLS
-    assert REFINABLE_SKILLS <= set(SKILL_BUILDER_MODULES)
+    assert set(SKILL_BUILDER_MODULES) >= REFINABLE_SKILLS
 
 
 @pytest.mark.parametrize("skill_name", sorted(SKILL_BUILDER_MODULES))
@@ -95,9 +95,7 @@ def test_live_backstop_builds_target_skills_prompt_not_first_skills(
 
     case_name = "holdout-discover-completeness-attack-shallow-known-unknowns"
     case = corpus_runner.CASES_DIR / case_name
-    corpus_runner.run_corpus(
-        live=True, case_ids=frozenset({case_name}), live_budget=1
-    )
+    corpus_runner.run_corpus(live=True, case_ids=frozenset({case_name}), live_budget=1)
 
     assert len(prompts) == 1
     first_skill_prompt = corpus_runner.BUILTIN_SKILLS[0].prompt_builder(
@@ -138,9 +136,7 @@ class _FakeDedup:
         self._keys = set(keys)
 
 
-def _build_loop(
-    tmp_path: Path, *, dedup: object | None = None
-) -> SkillPromptEvalLoop:
+def _build_loop(tmp_path: Path, *, dedup: object | None = None) -> SkillPromptEvalLoop:
     cfg = HydraFlowConfig(data_root=tmp_path, repo="hydra/hydraflow")
     state = MagicMock()
     pr = AsyncMock()
@@ -205,7 +201,11 @@ async def test_closing_inefficiency_issue_clears_dedup_and_refiling_works(
 
     loop._pr.list_closed_issues_by_label = AsyncMock(side_effect=closed_by_label)
 
+    # Mirror `_do_work`'s reconcile sequence: the stuck-escalation pass, then
+    # the inefficiency pass (#10066's wiring — it landed first and owns the
+    # loop-side implementation; this pin keeps the behavior regardless).
     await loop._reconcile_closed_escalations()
+    await loop._inefficiencies.reconcile_closed()
 
     assert key not in dedup.get()
     # A source-name subject must never leak into the drift-case attempt
@@ -233,24 +233,17 @@ async def test_run_corpus_forwards_live_budget_env(tmp_path: Path, monkeypatch) 
     the harness (mirroring MAX_CASES) so the per-skill live path is bounded."""
     captured: dict[str, dict[str, str]] = {}
 
-    async def fake_exec(*_cmd: str, **kwargs: object) -> object:
-        captured["env"] = kwargs["env"]
+    async def fake_run(*_cmd: str, **kwargs: object) -> SimpleNamespace:
+        captured["extra_env"] = kwargs["extra_env"]
+        return SimpleNamespace(returncode=0, stdout="[]", stderr="")
 
-        class _Proc:
-            returncode = 0
-
-            async def communicate(self) -> tuple[bytes, bytes]:
-                return (b"[]", b"")
-
-        return _Proc()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(skill_prompt_eval_loop, "run_subprocess_result", fake_run)
 
     loop = _build_loop(tmp_path)
     result = await loop._run_corpus()
 
     assert result == []
-    budget = captured["env"]["HYDRAFLOW_TRUST_ADVERSARIAL_LIVE_BUDGET"]
+    budget = captured["extra_env"]["HYDRAFLOW_TRUST_ADVERSARIAL_LIVE_BUDGET"]
     assert budget == str(loop._config.skill_prompt_eval_live_case_budget)
     assert loop._config.skill_prompt_eval_live_case_budget == (
         corpus_runner.DEFAULT_LIVE_BUDGET

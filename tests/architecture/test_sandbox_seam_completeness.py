@@ -37,29 +37,40 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # ENTRIES: a new spawn path must declare a seam in SANDBOX_SEAMS (seed seam,
 # sentinel, injected fake, or config-disable) instead. Remove entries as
 # seams are added — the ratchet only shrinks.
+#
+# #9554/#10028: the sites below that used to key off ``create_subprocess_exec``
+# migrated onto the shared bounded helper (``subprocess_util.run_subprocess``/
+# ``run_subprocess_result``) for circuit-breaker/rate-limit/process-group-registry
+# hardening — a DIFFERENT concern than this guard's air-gap seam. They are
+# still real, undeclared subprocess spawns from the sandbox's point of view,
+# so they stay grandfathered here, just re-keyed to the new primitive name
+# (``run_subprocess_result``, or ``run_subprocess`` for the one raising-variant
+# call site, ``staging_bisect_loop._run_gh``). ``staging_bisect_loop._run_git``
+# is unchanged (excluded from that migration — cooperative kill-switch
+# cancellation) and keeps its original ``create_subprocess_exec`` key.
 GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
-    "src/adr_touchpoint_auditor_loop.py::AdrTouchpointAuditorLoop._fetch_pr_changed_files::create_subprocess_exec": 1,
-    "src/adr_touchpoint_auditor_loop.py::AdrTouchpointAuditorLoop._list_recent_merged_prs::create_subprocess_exec": 1,
-    "src/fake_coverage_auditor_loop.py::FakeCoverageAuditorLoop._grep_scenario_for_helper::create_subprocess_exec": 1,
-    "src/fake_coverage_auditor_loop.py::FakeCoverageAuditorLoop._list_open_rollup_titles::create_subprocess_exec": 1,
-    "src/flake_tracker_loop.py::FlakeTrackerLoop._download_junit::create_subprocess_exec": 1,
-    "src/flake_tracker_loop.py::FlakeTrackerLoop._fetch_recent_runs::create_subprocess_exec": 1,
+    "src/adr_touchpoint_auditor_loop.py::AdrTouchpointAuditorLoop._fetch_pr_changed_files::run_subprocess_result": 1,
+    "src/adr_touchpoint_auditor_loop.py::AdrTouchpointAuditorLoop._list_recent_merged_prs::run_subprocess_result": 1,
+    "src/fake_coverage_auditor_loop.py::FakeCoverageAuditorLoop._grep_scenario_for_helper::run_subprocess_result": 1,
+    "src/fake_coverage_auditor_loop.py::FakeCoverageAuditorLoop._list_open_rollup_titles::run_subprocess_result": 1,
+    "src/flake_tracker_loop.py::FlakeTrackerLoop._download_junit::run_subprocess_result": 1,
+    "src/flake_tracker_loop.py::FlakeTrackerLoop._fetch_recent_runs::run_subprocess_result": 1,
     "src/health_monitor_loop.py::HealthMonitorLoop._check_stale_code::run_subprocess": 1,
-    "src/memory_backlog_loop.py::MemoryBacklogLoop._commit_mirror_updates::create_subprocess_exec": 2,
-    "src/principles_audit_loop.py::PrinciplesAuditLoop._run_audit::create_subprocess_exec": 1,
-    "src/principles_audit_loop.py::PrinciplesAuditLoop._run_git::create_subprocess_exec": 1,
-    "src/rc_budget_loop.py::RCBudgetLoop._fetch_job_breakdown::create_subprocess_exec": 1,
-    "src/rc_budget_loop.py::RCBudgetLoop._fetch_junit_tests::create_subprocess_exec": 1,
-    "src/rc_budget_loop.py::RCBudgetLoop._fetch_recent_runs::create_subprocess_exec": 1,
+    "src/memory_backlog_loop.py::MemoryBacklogLoop._commit_mirror_updates::run_subprocess_result": 2,
+    "src/principles_audit_loop.py::PrinciplesAuditLoop._run_audit::run_subprocess_result": 1,
+    "src/principles_audit_loop.py::PrinciplesAuditLoop._run_git::run_subprocess_result": 1,
+    "src/rc_budget_loop.py::RCBudgetLoop._fetch_job_breakdown::run_subprocess_result": 1,
+    "src/rc_budget_loop.py::RCBudgetLoop._fetch_junit_tests::run_subprocess_result": 1,
+    "src/rc_budget_loop.py::RCBudgetLoop._fetch_recent_runs::run_subprocess_result": 1,
     "src/repo_wiki_loop.py::RepoWikiLoop._adopt_open_maintenance_pr::run_subprocess": 1,
     "src/repo_wiki_loop.py::RepoWikiLoop._maintenance_batch_forced_by_age::run_subprocess": 1,
     "src/repo_wiki_loop.py::RepoWikiLoop._poll_and_merge_open_pr::run_subprocess": 3,
-    "src/staging_bisect_loop.py::StagingBisectLoop._run_bisect_probe::create_subprocess_exec": 1,
-    "src/staging_bisect_loop.py::StagingBisectLoop._run_gh::create_subprocess_exec": 1,
+    "src/staging_bisect_loop.py::StagingBisectLoop._run_bisect_probe::run_subprocess_result": 1,
+    "src/staging_bisect_loop.py::StagingBisectLoop._run_gh::run_subprocess": 1,
     "src/staging_bisect_loop.py::StagingBisectLoop._run_git::create_subprocess_exec": 1,
     "src/staging_promotion_loop.py::StagingPromotionLoop._list_merged_promotion_prs::run_subprocess": 1,
-    "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._find_open_escalation::create_subprocess_exec": 1,
-    "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._reconcile_closed_escalations::create_subprocess_exec": 1,
+    "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._find_open_escalation::run_subprocess_result": 1,
+    "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._reconcile_closed_escalations::run_subprocess_result": 1,
     "src/workspace_gc_loop.py::WorkspaceGCLoop._collect_orphaned_branches::run_subprocess": 2,
     "src/workspace_gc_loop.py::WorkspaceGCLoop._get_issue_state::run_subprocess": 1,
 }

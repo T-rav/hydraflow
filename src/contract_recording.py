@@ -281,7 +281,21 @@ def _record_close_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
         )
         return None
 
-    close = _run(["gh", "issue", "close", str(issue_number), "--repo", sandbox_repo])
+    # `--reason "not planned"` exercises the reason-threading path (#10025):
+    # PRManager.close_issue(reason=...) is how automated dedup closes record
+    # stateReason=NOT_PLANNED instead of gh's default COMPLETED.
+    close = _run(
+        [
+            "gh",
+            "issue",
+            "close",
+            str(issue_number),
+            "--repo",
+            sandbox_repo,
+            "--reason",
+            "not planned",
+        ]
+    )
     if not _require_success(close, label="gh issue close"):
         return None
     assert close is not None
@@ -291,7 +305,7 @@ def _record_close_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
         interaction="close_issue",
         fixture_repo=sandbox_repo,
         command="close_issue",
-        args=[str(issue_number)],
+        args=[str(issue_number), "--reason", "not planned"],
         exit_code=close.returncode,
         # Fake-shaped: FakeGitHub.close_issue returns empty stdout/stderr.
         # Real gh CLI may print a confirmation line; we discard it so the

@@ -195,6 +195,86 @@ async def test_reconcile_closed_escalations(loop_env) -> None:
     state.clear_skill_prompt_attempts.assert_called_once_with("case_alpha")
 
 
+async def test_do_work_clears_inefficiency_key_when_issue_closed(
+    loop_env, monkeypatch
+) -> None:
+    """#10025: a closed `prompt-inefficiency` issue clears its dedup key on the
+    next tick (same closed-path reconcile as escalations), so a source that
+    re-degrades after triage re-files instead of hitting a dead dedup key."""
+    from skill_prompt_eval_loop import _INEFFICIENCY_LABEL, _inefficiency_title
+
+    cfg, state, pr, dedup = loop_env
+    key = "skill_prompt_eval:inefficiency:base_runner"
+    dedup.get.return_value = {key}
+
+    async def _closed(label: str, limit: int = 100) -> list[dict]:
+        if label == _INEFFICIENCY_LABEL:
+            return [
+                {
+                    "number": 9701,
+                    "title": _inefficiency_title("base_runner"),
+                    "body": "",
+                    "updated_at": "",
+                }
+            ]
+        return []
+
+    pr.list_closed_issues_by_label.side_effect = _closed
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+    loop._run_corpus = AsyncMock(return_value=[])
+
+    await loop._do_work()
+
+    dedup.set_all.assert_called_once()
+    remaining = dedup.set_all.call_args.args[0]
+    assert key not in remaining
+    # Inefficiency filings have no per-source attempt counter to clear.
+    state.clear_skill_prompt_attempts.assert_not_called()
+
+
+async def test_inefficiency_refiles_after_key_cleared(loop_env) -> None:
+    """With the dedup key cleared, `_file_inefficiency_issue` files again for
+    the same source; with the key present it stays deduped (#10025)."""
+    from prompt_efficiency import SkillEfficiencyRow
+    from skill_prompt_eval_loop import _INEFFICIENCY_LABEL
+
+    cfg, state, pr, dedup = loop_env
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+    row = SkillEfficiencyRow(
+        source="base_runner",
+        calls=120,
+        est_cost_usd=3.6,
+        anomalies=0,
+        cost_per_call=0.03,
+        trend_vs_baseline=0.42,
+    )
+
+    dedup.get.return_value = {"skill_prompt_eval:inefficiency:base_runner"}
+    await loop._file_inefficiency_issue(row)
+    pr.create_issue.assert_not_awaited()  # key present -> deduped
+
+    dedup.get.return_value = set()
+    await loop._file_inefficiency_issue(row)
+    pr.create_issue.assert_awaited_once()
+    labels = pr.create_issue.await_args.args[2]
+    assert _INEFFICIENCY_LABEL in labels
+
+
+def test_inefficiency_title_round_trips_through_subject_parser() -> None:
+    """The reconciler's title parser must invert the filing path's title
+    builder — drift between them orphans the dedup key forever (#10025)."""
+    from skill_prompt_eval_loop import _inefficiency_subject, _inefficiency_title
+
+    assert _inefficiency_subject(_inefficiency_title("base_runner")) == "base_runner"
+    assert _inefficiency_subject("Some operator-created issue title") is None
+
+
 _STALE_ESCALATION = {
     "number": 9618,
     "title": "HITL: skill prompt drift case_shrink_001 unresolved after 3",

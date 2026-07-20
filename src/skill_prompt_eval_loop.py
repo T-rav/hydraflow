@@ -16,11 +16,9 @@ Spec: `docs/superpowers/specs/2026-04-22-trust-architecture-hardening-design.md`
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import math
-import os
 import random
 import re
 import sys
@@ -35,7 +33,6 @@ from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
 from execution import get_default_runner
 from models import WorkCycleResult
-from process_group import kill_process_group
 from prompt_efficiency import (
     INEFFICIENCY_THRESHOLD,
     SkillEfficiencyRow,
@@ -56,6 +53,7 @@ from prompt_refiner import (
 )
 from prompt_telemetry import PromptTelemetry
 from runner_utils import run_lightweight_agent
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -85,20 +83,21 @@ def _escalation_subject(title: str) -> str | None:
     return m.group(1) if m else None
 
 
-# Label on `prompt-inefficiency` issues. Single-sourced (like `_STUCK_LABEL`)
-# so the filing path and the close-reconcile can never drift apart.
+# Marker label + dedup-key prefix for `prompt-inefficiency` filings (spec §5c).
+# Single-sourced so the filing path (`_file_inefficiency_issue`), the title
+# parser, and the closed-issue reconciler can never drift apart (#10025).
 _INEFFICIENCY_LABEL = "prompt-inefficiency"
+_INEFFICIENCY_KEY_PREFIX = "skill_prompt_eval:inefficiency"
 
 
 def _inefficiency_title(source: str) -> str:
-    """Single source for the inefficiency-issue title, so `_file_inefficiency_
-    issue` and `_inefficiency_subject` can never drift apart (#9359 lesson)."""
     return f"Prompt inefficiency: {source} cost-per-call regressed"
 
 
-# Parses `_inefficiency_title` back to the telemetry-source subject so closing
-# the issue clears its dedup key (`skill_prompt_eval:inefficiency:<source>`)
-# and a re-degradation re-files (#10014 item 4).
+# Parses `_inefficiency_title` back to the `source` subject. Non-greedy but
+# anchored on both sides — same rationale as `_ESCALATION_TITLE_RE`: sources
+# are machine-named today, and the anchored capture costs nothing if one ever
+# grows spaces.
 _INEFFICIENCY_TITLE_RE = re.compile(
     r"^Prompt inefficiency: (.+?) cost-per-call regressed$"
 )
@@ -113,34 +112,10 @@ def _inefficiency_subject(title: str) -> str | None:
 # forever and freeze its heartbeat — the #9410 silent-stall failure class
 # (#9454 / #9508). ``make trust-adversarial`` drives an LLM eval harness so it
 # gets a generous bound. (The former ``gh`` reconcile read now goes through
-# the PRPort via the shared ``EscalationReconciler``.)
+# the PRPort via the shared ``EscalationReconciler``.) Bounded (and, via
+# ``run_subprocess_result``, process-group hardened — #9554/#10028) rather
+# than a raw ``create_subprocess_exec``.
 _ADVERSARIAL_TIMEOUT_SECONDS = 3600
-
-
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process, timeout: float
-) -> tuple[bytes, bytes]:
-    """``proc.communicate()`` bounded by *timeout* seconds.
-
-    On timeout the wedged child's whole PROCESS GROUP is reaped and a
-    ``TimeoutError`` propagates so the caller can treat it as a failed read
-    (rather than hanging the loop cycle indefinitely).
-
-    Callers must spawn with ``start_new_session=True`` (child is its own
-    group leader): the corpus/validation spawns fan out sub-make → pytest →
-    LLM-agent grandchildren, and a child-only ``proc.kill()`` re-parented
-    them to init where they kept burning API credits (#9579). The guarded
-    primitive never raises — an already-exited child included — so the
-    TimeoutError (the intended failed-read signal) still propagates
-    (#9794/#9816).
-    """
-    try:
-        return await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except TimeoutError:
-        kill_process_group(proc)
-        with contextlib.suppress(ProcessLookupError):
-            await proc.wait()
-        raise
 
 
 # --- Prompt self-refinement (#9724) ------------------------------------------
@@ -198,40 +173,49 @@ async def _assert_only_module_changed(worktree: Path, module_rel: str) -> None:
 
     Raises ``RuntimeError`` naming the unexpected/missing paths when the
     touched set is not exactly ``{module_rel}`` — modified, added, and
-    untracked files all count as "touched".
+    untracked files all count as "touched". A timeout also raises
+    ``RuntimeError`` (``SubprocessTimeoutError``, via the shared bounded
+    helper) — the caller's ``except RuntimeError`` treats it the same as a
+    path tripwire, a safe default for an unexplained wedged git status.
     """
-    proc = await asyncio.create_subprocess_exec(
-        "git",
-        "status",
-        "--porcelain",
-        cwd=worktree,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=_GIT_STATUS_TIMEOUT_SECONDS
+        result = await run_subprocess_result(
+            "git",
+            "status",
+            "--porcelain",
+            cwd=worktree,
+            timeout=_GIT_STATUS_TIMEOUT_SECONDS,
         )
-    except TimeoutError:
-        # An already-exited child makes proc.kill() raise ProcessLookupError,
-        # which would otherwise crash the loop cycle instead of surfacing the
-        # TimeoutError (#9794/#9816/#9883 gh-timeout-storm class).
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
-            await proc.wait()
-        raise
-    if proc.returncode != 0:
-        detail = stderr.decode(errors="replace")[:400]
-        msg = f"git status failed (rc={proc.returncode}): {detail}"
+    except SubprocessTimeoutError as exc:
+        raise RuntimeError(
+            f"git status timed out after {_GIT_STATUS_TIMEOUT_SECONDS}s"
+        ) from exc
+    if result.returncode != 0:
+        detail = result.stderr[:400]
+        msg = f"git status failed (rc={result.returncode}): {detail}"
         raise RuntimeError(msg)
 
     touched: set[str] = set()
-    for line in stdout.decode(errors="replace").splitlines():
+    for idx, line in enumerate(result.stdout.splitlines()):
         if not line:
             continue
-        # Porcelain v1 shape: 2 status chars + a space + the path. A rename
-        # (or copy) carries both sides as "old -> new"; both count as touched.
-        rest = line[3:]
+        # Porcelain v1 shape: 2 status chars + a space + the path, so the
+        # separator is always at a fixed index 2. BUT `result.stdout` comes
+        # from `run_subprocess_result` -> `HostRunner.run_simple`, whose
+        # `SimpleResult.stdout` is `.strip()`-ped across the WHOLE blob — if
+        # the first status char is itself a space (e.g. " M path", modified
+        # in the worktree but not staged), that leading space is eaten,
+        # shifting the first line left by one and corrupting a fixed
+        # `line[3:]` slice (observed: "src/x.py" -> "rc/x.py"). Detect the
+        # shift instead of assuming a fixed offset: a well-formed
+        # (unshifted) line always has its separator at index 2; only the
+        # shifted first line can have it at index 1.
+        if len(line) > 2 and line[2] == " ":
+            rest = line[3:]
+        elif idx == 0 and len(line) > 1 and line[1] == " ":
+            rest = line[2:]
+        else:
+            rest = line[3:]
         old, sep, new = rest.partition(" -> ")
         if sep:
             touched.add(old.strip())
@@ -361,19 +345,18 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             clear_attempts=state.clear_skill_prompt_attempts,
             subject_from_title=_escalation_subject,
         )
-        # Close-reconcile for `prompt-inefficiency` issues (#10014 item 4):
-        # without it the `skill_prompt_eval:inefficiency:<source>` dedup key
-        # lived forever — one issue per source, ever — so a source that
-        # re-degraded after its issue was fixed and closed never re-filed.
-        # Only `reconcile_closed` is wired; there is no open-side auto-close
-        # (a cost regression has no per-tick "still detected" subject set the
-        # way drift cases do). No attempt counter exists per source → no-op.
-        self._inefficiency_reconcile = EscalationReconciler(
+        # Closed-issue reconcile for `prompt-inefficiency` filings: without it
+        # the dedup key set at filing time never clears, so a source that
+        # re-degrades after its issue was closed could never re-file (#10025).
+        # Only the closed path runs — a cost regression has no "no longer
+        # detected at HEAD" auto-close analog (the weekly window moves on),
+        # and there is no per-source attempt counter to clear.
+        self._inefficiencies = EscalationReconciler(
             prs=pr_manager,
             dedup=dedup,
-            key_prefix="skill_prompt_eval:inefficiency",
+            key_prefix=_INEFFICIENCY_KEY_PREFIX,
             stuck_label=_INEFFICIENCY_LABEL,
-            clear_attempts=lambda _source: None,
+            clear_attempts=lambda _subject: None,
             subject_from_title=_inefficiency_subject,
         )
 
@@ -399,43 +382,33 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         ``HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1``.
         """
         cmd = ["make", "trust-adversarial", "FORMAT=json"]
-        env = {
-            **os.environ,
-            "HYDRAFLOW_TRUST_ADVERSARIAL_MAX_CASES": str(
-                self._config.skill_prompt_eval_max_corpus_cases
-            ),
-            "HYDRAFLOW_TRUST_ADVERSARIAL_LIVE_BUDGET": str(
-                self._config.skill_prompt_eval_live_case_budget
-            ),
-        }
         try:
-            proc = await asyncio.create_subprocess_exec(
+            result = await run_subprocess_result(
                 *cmd,
                 cwd=self._config.repo_root,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-                # Group leader (pid == pgid) so the timeout reap in
-                # _communicate_bounded kills the whole make → pytest →
-                # LLM-agent subtree, not just the top-level make (#9579).
-                start_new_session=True,
-            )
-            stdout, stderr = await _communicate_bounded(
-                proc, timeout=_ADVERSARIAL_TIMEOUT_SECONDS
+                timeout=_ADVERSARIAL_TIMEOUT_SECONDS,
+                extra_env={
+                    "HYDRAFLOW_TRUST_ADVERSARIAL_MAX_CASES": str(
+                        self._config.skill_prompt_eval_max_corpus_cases
+                    ),
+                    "HYDRAFLOW_TRUST_ADVERSARIAL_LIVE_BUDGET": str(
+                        self._config.skill_prompt_eval_live_case_budget
+                    ),
+                },
             )
         except Exception as exc:  # noqa: BLE001
             reraise_on_credit_or_bug(exc)
             logger.warning("trust-adversarial subprocess failed: %s", exc)
             return []
-        if proc.returncode not in (0, 1):  # 1 = failures present; still valid output
+        if result.returncode not in (0, 1):  # 1 = failures present; still valid output
             logger.warning(
                 "trust-adversarial exit=%d: %s",
-                proc.returncode,
-                stderr.decode(errors="replace")[:400],
+                result.returncode,
+                result.stderr[:400],
             )
             return []
         try:
-            return json.loads(stdout.decode() or "[]")
+            return json.loads(result.stdout or "[]")
         except json.JSONDecodeError:
             logger.warning("trust-adversarial non-JSON response")
             return []
@@ -504,17 +477,14 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         )
 
     async def _reconcile_closed_escalations(self) -> None:
-        """Clear dedup keys for closed `skill-prompt-stuck` escalations and
-        closed `prompt-inefficiency` issues.
+        """Clear dedup keys for closed `skill-prompt-stuck` escalations.
 
         Delegates to the shared :class:`EscalationReconciler` (PRPort-based;
         replaced the raw ``gh issue list`` subprocess). Subjects are parsed
         from the escalation title shape
-        ``"HITL: skill prompt drift <case_id> unresolved after N"`` and the
-        inefficiency title shape (see :func:`_inefficiency_title`).
+        ``"HITL: skill prompt drift <case_id> unresolved after N"``.
         """
         await self._escalations.reconcile_closed()
-        await self._inefficiency_reconcile.reconcile_closed()
 
     def _sample_learning_cases(
         self, cases: list[dict[str, Any]], seed: int = 0
@@ -535,6 +505,10 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
 
         t0 = time.perf_counter()
         await self._reconcile_closed_escalations()
+        # Same closed-path reconcile for `prompt-inefficiency` filings: a
+        # closed (triaged) inefficiency issue clears its dedup key so a
+        # re-degradation of the same source re-files fresh (#10025).
+        await self._inefficiencies.reconcile_closed()
 
         cases = await self._run_corpus()
         if not cases:
@@ -695,9 +669,14 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         return ordered_cases, scorecard
 
     async def _file_inefficiency_issue(self, row: SkillEfficiencyRow) -> None:
-        """File a deduped `prompt-inefficiency` issue for a degraded source."""
+        """File a deduped `prompt-inefficiency` issue for a degraded source.
+
+        The dedup key is cleared when the filed issue closes (the
+        `_inefficiencies` reconciler in `_do_work`), so a source that
+        re-degrades after triage re-files fresh (#10025).
+        """
         dedup = self._dedup.get()
-        key = f"skill_prompt_eval:inefficiency:{row.source}"
+        key = f"{_INEFFICIENCY_KEY_PREFIX}:{row.source}"
         if key in dedup:
             return
         title = _inefficiency_title(row.source)
@@ -951,30 +930,26 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         """Apply *patch_text* to *worktree* via ``git apply --whitespace=nowarn -``.
 
         Raises ``RuntimeError`` on a non-zero exit so the caller's generate
-        callback aborts (→ no PR) when a candidate patch doesn't apply cleanly.
+        callback aborts (→ no PR) when a candidate patch doesn't apply
+        cleanly. A timeout also raises ``RuntimeError``
+        (``SubprocessTimeoutError``, via the shared bounded helper) rather
+        than a bare ``TimeoutError``.
         """
-        proc = await asyncio.create_subprocess_exec(
-            "git",
-            "apply",
-            "--whitespace=nowarn",
-            "-",
-            cwd=worktree,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            _, stderr = await asyncio.wait_for(
-                proc.communicate(patch_text.encode()), timeout=60
+            result = await run_subprocess_result(
+                "git",
+                "apply",
+                "--whitespace=nowarn",
+                "-",
+                cwd=worktree,
+                stdin_input=patch_text.encode(),
+                timeout=60,
             )
-        except TimeoutError:
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
-                await proc.wait()
-            raise
-        if proc.returncode != 0:
-            detail = stderr.decode(errors="replace")[:400]
-            msg = f"git apply failed (rc={proc.returncode}): {detail}"
+        except SubprocessTimeoutError as exc:
+            raise RuntimeError("git apply timed out after 60s") from exc
+        if result.returncode != 0:
+            detail = result.stderr[:400]
+            msg = f"git apply failed (rc={result.returncode}): {detail}"
             raise RuntimeError(msg)
 
     async def _validate_candidate(
@@ -1000,25 +975,15 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             "--cases",
             ",".join(case_ids),
         ]
-        env = {
-            **os.environ,
-            "HYDRAFLOW_TRUST_ADVERSARIAL_LIVE": "1",
-            "PYTHONPATH": "src:.",
-        }
         try:
-            proc = await asyncio.create_subprocess_exec(
+            result = await run_subprocess_result(
                 *cmd,
                 cwd=worktree,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-                # Group leader (pid == pgid) so the timeout reap in
-                # _communicate_bounded kills the whole corpus-runner →
-                # LLM-agent subtree, not just the direct child (#9579).
-                start_new_session=True,
-            )
-            stdout, stderr = await _communicate_bounded(
-                proc, timeout=_ADVERSARIAL_TIMEOUT_SECONDS
+                timeout=_ADVERSARIAL_TIMEOUT_SECONDS,
+                extra_env={
+                    "HYDRAFLOW_TRUST_ADVERSARIAL_LIVE": "1",
+                    "PYTHONPATH": "src:.",
+                },
             )
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
@@ -1026,14 +991,14 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                 "refine validation subprocess failed for %s: %s", case_id, exc
             )
             return False
-        if proc.returncode != 0:
+        if result.returncode != 0:
             logger.warning(
                 "refine validation exit=%d: %s",
-                proc.returncode,
-                stderr.decode(errors="replace")[:400],
+                result.returncode,
+                result.stderr[:400],
             )
             return False
-        passed = _all_required_pass(stdout.decode())
+        passed = _all_required_pass(result.stdout)
         if not passed:
             logger.warning(
                 "refine validation for %s: no all-PASS non-SKIPPED result set "
