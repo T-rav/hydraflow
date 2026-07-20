@@ -32,7 +32,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **GateActivatorLoop** | `src.gate_activator_loop` | 604800 | — | — | ADR-0029, ADR-0049, ADR-0082 |
 | **GateHealthLoop** | `src.gate_health_loop` | 604800 | — | — | — |
 | **GitHubCacheLoop** | `src.github_cache_loop` | 300 | — | — | — |
-| **HealthMonitorLoop** | `src.health_monitor_loop` | 7200 | — | — | — |
+| **HealthMonitorLoop** | `src.health_monitor_loop` | 7200 | — | SYSTEM_ALERT | — |
 | **HumanSteeringLoop** | `src.human_steering_loop` | — | — | — | ADR-0099 |
 | **IssueRefinementLoop** | `src.issue_refinement_loop` | 86400 | — | ISSUE_REFINEMENT_UPDATE | — |
 | **LabelDriftWatcherLoop** | `src.label_drift_watcher_loop` | 600 | — | — | — |

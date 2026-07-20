@@ -501,6 +501,7 @@ class TestDoWorkIntegration:
         # Stub out the side-cycle methods that require live infrastructure
         loop._check_sanity_loop_staleness = AsyncMock()
         loop._check_wiki_freshness = AsyncMock()
+        loop._check_stale_code = AsyncMock()
         loop._run_log_ingestion_cycle = AsyncMock(return_value=None)
         loop._run_harness_auto_file_cycle = AsyncMock()
         loop._run_harness_suggestion_ingestion_cycle = AsyncMock()
@@ -580,6 +581,7 @@ class TestDoWorkIntegration:
         loop = HealthMonitorLoop(config=cfg, deps=_deps())
         loop._check_sanity_loop_staleness = AsyncMock()
         loop._check_wiki_freshness = AsyncMock()
+        loop._check_stale_code = AsyncMock()
         loop._run_log_ingestion_cycle = AsyncMock(return_value=None)
         loop._run_harness_auto_file_cycle = AsyncMock()
         loop._run_harness_suggestion_ingestion_cycle = AsyncMock()
@@ -602,6 +604,7 @@ class TestDoWorkIntegration:
         await loop._do_work()
         loop._check_sanity_loop_staleness.assert_awaited_once()
         loop._check_wiki_freshness.assert_awaited_once()
+        loop._check_stale_code.assert_awaited_once()
         loop._run_log_ingestion_cycle.assert_awaited_once()
         loop._run_harness_auto_file_cycle.assert_awaited_once()
         loop._run_harness_suggestion_ingestion_cycle.assert_awaited_once()

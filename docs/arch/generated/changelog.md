@@ -13,6 +13,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W29
 
+- `9b1da17` — fix(arch): repair conflict-marker-corrupted generated docs from botched merge resolve *(2026-07-19)*
 - `db7707c` — Merge remote-tracking branch 'origin/staging' into feat/issue-10009-liveness-watchdog *(2026-07-19)*
 - `4e4ff9e` — feat(liveness): external factory watchdog + boot-time down-detection (#10009) (#10009) *(2026-07-19)*
 - `33f8b6f` — feat(refine): prompt self-refinement — honeypot-gated auto-merge prompt-fix PRs + telemetry consumption (#9724) (#10006) (#10006) *(2026-07-19)*

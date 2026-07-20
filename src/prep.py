@@ -155,6 +155,11 @@ HYDRAFLOW_LITERAL_LABELS: tuple[tuple[str, str, str], ...] = (
     ),
     ("loop-stalled", "e4e669", "Background loop stalled (dead-man switch)"),
     ("wiki-stale", "e4e669", "Wiki freshness dead-man switch fired"),
+    (
+        "factory-stale-code",
+        "e4e669",
+        "Running instance is stale-code behind origin (dead-man switch)",
+    ),
     ("onboarding-blocked", "e4e669", "Onboarding/auto-agent preflight blocked"),
     ("cultural-check", "e4e669", "Principles cultural-check audit label"),
     ("pricing-refresh", "e4e669", "Pricing-refresh loop signal"),

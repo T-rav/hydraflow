@@ -50,6 +50,14 @@ SETTINGS: dict[str, SettingSpec] = {
     "max_reviewers": SettingSpec("Concurrency", live=True, order=3),
     "max_hitl_workers": SettingSpec("Concurrency", live=True, order=4),
     "batch_size": SettingSpec("Concurrency", live=True, order=5),
+    # --- Work Queue (stage-queue ordering, #10037) -----------------------
+    # Live: IssueStore re-reads these on every dequeue, so a change takes
+    # effect on the next phase tick without a restart.
+    "queue_strategy": SettingSpec("Work Queue", live=True, order=0),
+    "queue_weight_p1": SettingSpec("Work Queue", live=True, order=1),
+    "queue_weight_p2": SettingSpec("Work Queue", live=True, order=2),
+    "queue_weight_unprioritised": SettingSpec("Work Queue", live=True, order=3),
+    "queue_starvation_threshold_hours": SettingSpec("Work Queue", live=True, order=4),
     # --- Models ----------------------------------------------------------
     "model": SettingSpec("Models", live=True, order=0),
     "planner_model": SettingSpec("Models", live=True, order=1),
@@ -81,6 +89,7 @@ SETTINGS: dict[str, SettingSpec] = {
     # --- Reliability -----------------------------------------------------
     "gh_circuit_breaker_enabled": SettingSpec("Reliability", live=True, order=0),
     "merge_policy_enabled": SettingSpec("Reliability", live=True, order=1),
+    "stale_code_alert_threshold": SettingSpec("Reliability", live=True, order=2),
     # --- Memory ----------------------------------------------------------
     "memory_auto_approve": SettingSpec("Memory", live=True, order=0),
     # --- Paths -----------------------------------------------------------
