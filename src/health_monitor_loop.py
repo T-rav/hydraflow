@@ -457,7 +457,7 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         # (#9596) relative to origin/<base_branch>.
         try:
             await self._check_stale_code()
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.debug("stale-code check failed", exc_info=True)
 
         # Generic stall sweep: restart-first for any silent registry loop.
