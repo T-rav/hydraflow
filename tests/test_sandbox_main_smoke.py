@@ -251,3 +251,35 @@ def test_sandbox_overrides_disable_approval_records(tmp_path) -> None:
     sandbox_main._apply_sandbox_config_overrides(config)
 
     assert config.approval_records_enabled is False
+
+
+def test_auditor_defaults_to_materialized_canonical_baseline(tmp_path) -> None:
+    """No canonical_dir: the fixed baseline is materialized under data root.
+
+    The sandbox image ships no repo ``docs/`` (Dockerfile.agent copies only
+    src/tests/templates/static), so the default must not depend on it.
+    """
+    import asyncio
+
+    from mockworld.fakes import FakeGitHub
+
+    config = _seed_config(tmp_path)
+    gh = FakeGitHub()
+    gh.add_ruleset(
+        "main protect",
+        {
+            "name": "main protect",
+            "target": "branch",
+            "enforcement": "disabled",
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
+            "rules": [],
+        },
+    )
+    auditor = sandbox_main.build_seeded_branch_protection_auditor(config, gh)
+
+    report = asyncio.run(auditor())
+
+    canonical_dir = config.repo_data_path("sandbox_canonical_rulesets")
+    assert (canonical_dir / "main_ruleset.json").exists()
+    assert (canonical_dir / "staging_ruleset.json").exists()
+    assert not report.clean  # drifted main + missing staging vs the baseline

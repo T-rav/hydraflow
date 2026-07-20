@@ -11,13 +11,17 @@ imports this module — Fakes are unreachable from the production code path.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from branch_protection_audit import AuditReport, audit_repo
 from dashboard import HydraFlowDashboard
 from events import EventBus
 from mockworld.fakes import (
@@ -345,7 +349,6 @@ def materialize_expired_runs(config: HydraFlowConfig, seed: MockWorldSeed) -> No
     name, so materializing ``<runs>/<issue>/<old-timestamp>/`` at boot is all
     an expired artifact takes. Empty ``expired_run_dirs`` creates nothing.
     """
-    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
 
     runs_dir = config.repo_data_path("runs")
     for entry in seed.expired_run_dirs:
@@ -360,10 +363,30 @@ def materialize_expired_runs(config: HydraFlowConfig, seed: MockWorldSeed) -> No
         (run_dir / "transcript.log").write_text("seeded expired run (#9543)\n")
 
 
+@dataclass(frozen=True)
+class SeededActivationProposal:
+    """Duck-typed stand-in for ``scripts.gates.activation.ActivationProposal``.
+
+    GateActivatorLoop touches only these attributes (``_proposal_key`` /
+    ``_issue_body``); its own ``ActivationProposal`` import is
+    TYPE_CHECKING-only. A local mirror keeps the composition root off the
+    ``scripts`` package, which Dockerfile.agent does NOT ship into the
+    sandbox image (only ``src``/``tests``/``templates``/``static`` are
+    copied) — a real import would crash the entrypoint at boot.
+    """
+
+    name: str
+    dimension: str
+    required_on: tuple[str, ...]
+    workflow: str
+    job: str
+    make_target: str
+
+
 def build_seeded_gate_detector(
     gate_activations: list[dict[str, Any]],
 ) -> Callable[[], Any]:
-    """Detector stand-in returning seed-scripted ActivationProposals (#9543).
+    """Detector stand-in returning seed-scripted activation proposals (#9543).
 
     The production detector reads the repo's real gates.toml / workflows /
     Makefile — all steady-state (no planned gates) in the baked sandbox image,
@@ -371,10 +394,8 @@ def build_seeded_gate_detector(
     ``detector=`` injection point for this closure at the composition root is
     the same DI pattern as the ``_mockworld_fake_llm`` sentinel wiring.
     """
-    from scripts.gates.activation import ActivationProposal  # noqa: PLC0415
-
     proposals = [
-        ActivationProposal(
+        SeededActivationProposal(
             name=str(entry["name"]),
             dimension=str(entry.get("dimension", "tests")),
             required_on=tuple(entry.get("required_on", ("main",))),
@@ -385,10 +406,54 @@ def build_seeded_gate_detector(
         for entry in gate_activations
     ]
 
-    async def _detect() -> list[ActivationProposal]:
+    async def _detect() -> list[SeededActivationProposal]:
         return list(proposals)
 
     return _detect
+
+
+# Fixed canonical baseline served to the seeded auditor. Deliberately NOT the
+# repo's real contract: Dockerfile.agent ships no ``docs/`` into the sandbox
+# image, and a copy of the live contract in a seed would rot as gates.toml
+# evolves. The seam tests audit MECHANICS (normalize/diff/missing-ruleset
+# detection + issue filing) through the real ``audit_repo``; a scenario seeds
+# live rulesets against this stable baseline to produce drift (or cleanness).
+_CANONICAL_BASELINE: dict[str, dict[str, Any]] = {
+    "main protect": {
+        "name": "main protect",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+        "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}],
+    },
+    "staging protect": {
+        "name": "staging protect",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["refs/heads/staging"], "exclude": []}},
+        "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}],
+    },
+}
+
+
+def materialize_canonical_rulesets(config: HydraFlowConfig) -> Path:
+    """Write the fixed canonical ruleset baseline to disk; return its dir.
+
+    ``branch_protection_audit.load_canonical`` reads
+    ``main_ruleset.json``/``staging_ruleset.json`` from a directory; both
+    loaders materialize this one under the writable data root so the REAL
+    audit code runs unmodified with no dependency on repo ``docs/`` (absent
+    from the sandbox image). Idempotent.
+    """
+    canonical_dir = config.repo_data_path("sandbox_canonical_rulesets")
+    canonical_dir.mkdir(parents=True, exist_ok=True)
+    (canonical_dir / "main_ruleset.json").write_text(
+        json.dumps(_CANONICAL_BASELINE["main protect"], indent=2)
+    )
+    (canonical_dir / "staging_ruleset.json").write_text(
+        json.dumps(_CANONICAL_BASELINE["staging protect"], indent=2)
+    )
+    return canonical_dir
 
 
 def build_seeded_branch_protection_auditor(
@@ -398,25 +463,17 @@ def build_seeded_branch_protection_auditor(
 ) -> Callable[[], Any]:
     """Auditor stand-in serving live rulesets from FakeGitHub (#9543/#9644).
 
-    Runs the REAL ``audit_repo`` diff against the repo's canonical ruleset
-    contract (baked into the image) — only the live-ruleset fetch is swapped
-    from the raw-``gh`` ``gh_fetch_rulesets`` (unreachable on the air-gapped
-    network) to ``FakeGitHub.fetch_rulesets``, which serves ``seed.rulesets``.
-
-    ``canonical_dir`` defaults to the contract location under
-    ``config.repo_root``; the in-process harness (whose config is tmp-rooted)
-    passes the real repo's contract dir explicitly.
+    Runs the REAL ``audit_repo`` diff — only its two inputs are swapped: the
+    live-ruleset fetch moves from the raw-``gh`` ``gh_fetch_rulesets``
+    (unreachable on the air-gapped network) to ``FakeGitHub.fetch_rulesets``
+    serving ``seed.rulesets``, and ``canonical_dir`` defaults to the
+    materialized fixed baseline (see ``materialize_canonical_rulesets``).
     """
-    import asyncio as _asyncio  # noqa: PLC0415
-
-    from branch_protection_audit import AuditReport, audit_repo  # noqa: PLC0415
-
     if canonical_dir is None:
-        # Mirrors service_registry's ``_bp_canonical_dir`` (contract location).
-        canonical_dir = config.repo_root / "docs" / "standards" / "branch_protection"
+        canonical_dir = materialize_canonical_rulesets(config)
 
     async def _audit() -> AuditReport:
-        return await _asyncio.to_thread(
+        return await asyncio.to_thread(
             audit_repo,
             config.repo,
             canonical_dir,

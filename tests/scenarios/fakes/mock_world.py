@@ -820,20 +820,12 @@ class MockWorld:
                 build_seeded_gate_detector(seed.gate_activations),
             )
         if seed.rulesets:
-            # The run_with_loops config is tmp-rooted; point the audit at the
-            # real repo's canonical ruleset contract, as the baked sandbox
-            # image does via config.repo_root.
-            repo_root = Path(__file__).resolve().parents[3]
+            # Default canonical_dir: the same fixed baseline sandbox_main
+            # materializes under the (tmp-rooted) data root — both tiers
+            # audit seeded live rulesets against one deterministic contract.
             self._loop_ports.setdefault(
                 "branch_protection_audit",
-                build_seeded_branch_protection_auditor(
-                    config,
-                    self._github,
-                    canonical_dir=repo_root
-                    / "docs"
-                    / "standards"
-                    / "branch_protection",
-                ),
+                build_seeded_branch_protection_auditor(config, self._github),
             )
         if seed.expired_run_dirs:
             from run_recorder import RunRecorder  # noqa: PLC0415
