@@ -67,7 +67,8 @@ GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
     "src/repo_wiki_loop.py::RepoWikiLoop._poll_and_merge_open_pr::run_subprocess": 3,
     "src/staging_bisect_loop.py::StagingBisectLoop._run_bisect_probe::run_subprocess_result": 1,
     "src/staging_bisect_loop.py::StagingBisectLoop._run_gh::run_subprocess": 1,
-    "src/staging_bisect_loop.py::StagingBisectLoop._run_git::create_subprocess_exec": 1,
+    # #9577: _run_git migrated off its raw create_subprocess_exec onto
+    # run_simple(cancel_check=...) — the last raw loop spawn is gone.
     "src/staging_promotion_loop.py::StagingPromotionLoop._list_merged_promotion_prs::run_subprocess": 1,
     "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._find_open_escalation::run_subprocess_result": 1,
     "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._reconcile_closed_escalations::run_subprocess_result": 1,
