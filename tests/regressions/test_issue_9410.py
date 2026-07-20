@@ -53,10 +53,15 @@ class _HangingProcess:
         # leak; the stub just records that it happened.
         self.killed = True
 
-    async def communicate(self) -> tuple[bytes, bytes]:
+    async def wait(self) -> int:
+        return -9
+
+    async def communicate(self, **_kwargs: object) -> tuple[bytes, bytes]:
         # Model a wedged `gh issue list` — block effectively forever. A bounded
         # caller (the fix) cancels this via its own timeout; the unbounded
         # caller (current code) waits here until the heat death of the universe.
+        # Accepts **kwargs so it also matches HostRunner.run_simple's
+        # communicate(input=...) call shape (#9554/#10028 migration).
         await asyncio.sleep(1_000_000)
         return b"[]", b""
 

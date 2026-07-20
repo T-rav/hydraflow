@@ -9,32 +9,39 @@ The four heavy-make sites (``skill_prompt_eval_loop``,
 LLM-agent grandchildren re-parented to init (PPID=1) and kept burning API
 credits against an abandoned cycle.
 
-Fix shape (#10017's guarded primitive, no local killpg re-derivation):
+Original fix shape (#10017's guarded primitive, no local killpg
+re-derivation): every heavy spawn passed ``start_new_session=True`` and every
+timeout/cancel reap routed through ``process_group.kill_process_group``
+directly in each loop file.
 
-* every heavy spawn passes ``start_new_session=True`` (child is its own
-  process-group leader, ``pid == pgid``);
-* every timeout/cancel reap routes through
-  ``process_group.kill_process_group`` (guarded: real-int-pid only, mock
-  fakes fall back to child-only ``proc.kill()``, never raises).
+**#9554/#10028 follow-up:** every one of those sites except
+``staging_bisect_loop._run_git`` has since migrated onto the shared bounded
+helper (``subprocess_util.run_subprocess``/``run_subprocess_result``, which
+delegates to ``execution.HostRunner.run_simple``) — the per-file
+``_communicate_bounded`` copies and local raw
+``asyncio.create_subprocess_exec`` + ``start_new_session=True`` +
+``kill_process_group`` triplets are gone. The #9579 guarantee (group-leader
+spawn, group-kill reap on timeout) now lives ONCE in
+``execution.HostRunner.run_simple`` — pinned end-to-end with a real
+subprocess+grandchild by ``tests/regressions/test_hostrunner_reap_grandchildren.py``
+(#9648) — rather than being re-derived per loop. ``staging_bisect_loop._run_git``
+is the sole survivor here: its mid-run ``enabled_cb`` polling for cooperative
+kill-switch cancellation cannot be expressed through the shared helper (see
+``tests/regressions/test_issue_9508.py`` / the #9554 migration notes), so it
+keeps its own local spawn + reap and remains pinned below.
 
-Three layers below:
+Two layers below (for the one surviving raw site):
 
-1. AST pin — the spawn sites carry ``start_new_session=True`` and the reap
-   paths call ``kill_process_group`` (no bare ``proc.kill()`` regression);
-2. behavior pin — the shared ``_communicate_bounded`` helpers invoke the
-   primitive on timeout and still surface ``TimeoutError``;
-3. end-to-end — a REAL child that forks a grandchild into its group is
-   reaped grandchild-and-all by a converted helper.
+1. AST pin — the spawn carries ``start_new_session=True`` and the reap path
+   calls ``kill_process_group`` (no bare ``proc.kill()`` regression);
+2. end-to-end — a REAL child that forks a grandchild into its group is
+   reaped grandchild-and-all.
 """
 
 from __future__ import annotations
 
 import ast
-import asyncio
-import contextlib
-import os
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -43,16 +50,12 @@ SRC_DIR = Path(__file__).resolve().parent.parent.parent / "src"
 sys.path.insert(0, str(SRC_DIR))
 
 # (module, function) → every asyncio.create_subprocess_exec inside must
-# carry start_new_session=True. These are the heavy-make / heavy-subtree
-# spawn sites named by #9579 (staging_bisect._run_git runs
-# `git bisect run make bisect-probe`, a per-step make → pytest subtree).
+# carry start_new_session=True. ``staging_bisect_loop._run_git`` is the sole
+# remaining raw heavy spawn (see module docstring) — every other #9579 site
+# migrated onto the shared bounded helper (#9554/#10028) and is pinned
+# instead by each loop's own test file + tests/test_subprocess_util.py +
+# tests/regressions/test_hostrunner_reap_grandchildren.py.
 _HEAVY_SPAWN_SITES = [
-    ("skill_prompt_eval_loop", "_run_corpus"),
-    ("skill_prompt_eval_loop", "_validate_candidate"),
-    ("principles_audit_loop", "_run_audit"),
-    ("principles_audit_loop", "_run_git"),
-    ("contract_refresh_loop", "_run_replay_gate"),
-    ("staging_bisect_loop", "_run_bisect_probe"),
     ("staging_bisect_loop", "_run_git"),
 ]
 
@@ -60,10 +63,6 @@ _HEAVY_SPAWN_SITES = [
 # the guarded primitive (a `kill_process_group(...)` call) and must not
 # fall back to a child-only bare `proc.kill()`.
 _GROUP_REAP_SITES = [
-    ("skill_prompt_eval_loop", "_communicate_bounded"),
-    ("principles_audit_loop", "_communicate_bounded"),
-    ("contract_refresh_loop", "_run_replay_gate"),
-    ("staging_bisect_loop", "_run_bisect_probe"),
     ("staging_bisect_loop", "_run_git"),
 ]
 
@@ -145,121 +144,23 @@ def test_heavy_reap_sites_use_the_guarded_group_primitive(
     )
 
 
-class _HangingProc:
-    """communicate() outlives any test timeout; pid=None keeps the guarded
-    primitive on its child-only fallback if it is ever reached for real
-    (never signal a fabricated pid — mock .pid → killpg(1) kills CI)."""
-
-    returncode: int | None = None
-    pid: None = None
-
-    def __init__(self) -> None:
-        self.killed = False
-
-    async def communicate(self) -> tuple[bytes, bytes]:
-        await asyncio.sleep(30)
-        return (b"", b"")
-
-    def kill(self) -> None:
-        self.killed = True
-
-    async def wait(self) -> int:
-        return -9
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "module_name", ["skill_prompt_eval_loop", "principles_audit_loop"]
-)
-async def test_communicate_bounded_reaps_the_group_on_timeout(
-    monkeypatch: pytest.MonkeyPatch, module_name: str
-) -> None:
-    """On timeout the shared helper must invoke the GROUP primitive exactly
-    once and still surface TimeoutError (the intended failed-read signal)."""
-    module = __import__(module_name)
-    reaped: list[object] = []
-
-    def _record_reap(proc: object) -> None:
-        reaped.append(proc)
-
-    monkeypatch.setattr(module, "kill_process_group", _record_reap)
-    proc = _HangingProc()
-    with pytest.raises(TimeoutError):
-        await module._communicate_bounded(proc, timeout=0.01)
-    assert reaped == [proc], (
-        "timeout must route through process_group.kill_process_group "
-        "(group reap), not a child-only proc.kill()"
-    )
-    assert not proc.killed, (
-        "child-only proc.kill() was called from the loop helper — the group "
-        "primitive owns the fallback decision (#9579)"
-    )
-
-
-_CHILD_SCRIPT = """
-import subprocess, sys, time
-
-# Grandchild joins THIS child's (new) session/process group — the exact
-# shape of make -> pytest under a caretaker loop.
-grandchild = subprocess.Popen(["sleep", "300"])
-with open(sys.argv[1], "w") as fh:
-    fh.write(str(grandchild.pid))
-time.sleep(300)
-"""
-
-
-@pytest.mark.asyncio
-async def test_timed_out_heavy_subtree_reaps_grandchildren(
-    tmp_path: Path,
-) -> None:
-    """End-to-end #9579: a converted helper must kill the GRANDCHILD, not
-    just the direct child, when the heavy subtree times out."""
-    from principles_audit_loop import _communicate_bounded
-
-    pid_file = tmp_path / "grandchild.pid"
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-c",
-        _CHILD_SCRIPT,
-        str(pid_file),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        start_new_session=True,  # as the production spawn sites now do
-    )
-    grandchild_pid: int | None = None
-    try:
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline:
-            if pid_file.exists() and pid_file.read_text().strip():
-                grandchild_pid = int(pid_file.read_text().strip())
-                break
-            await asyncio.sleep(0.05)
-        assert grandchild_pid is not None, "child never reported its grandchild pid"
-
-        with pytest.raises(TimeoutError):
-            await _communicate_bounded(proc, timeout=0.2)
-
-        # SIGKILL delivery + init reaping are asynchronous — poll briefly.
-        deadline = time.monotonic() + 5.0
-        grandchild_dead = False
-        while time.monotonic() < deadline:
-            try:
-                os.kill(grandchild_pid, 0)
-            except ProcessLookupError:
-                grandchild_dead = True
-                break
-            await asyncio.sleep(0.1)
-        assert grandchild_dead, (
-            f"grandchild sleep(300) [pid {grandchild_pid}] survived the "
-            "timeout reap — the #9579 orphaned-subtree leak is back"
-        )
-    finally:
-        # Belt-and-braces: never leak the subtree out of the test run.
-        from process_group import kill_process_group
-
-        kill_process_group(proc)
-        if grandchild_pid is not None:
-            with contextlib.suppress(ProcessLookupError, OSError):
-                os.kill(grandchild_pid, 9)
-        with contextlib.suppress(ProcessLookupError, OSError):
-            await proc.wait()
+# --- Behavior + end-to-end pins for the migrated sites ---------------------
+#
+# `skill_prompt_eval_loop`/`principles_audit_loop` no longer define a local
+# `_communicate_bounded` (deleted by #9554/#10028 — they route through
+# `subprocess_util.run_subprocess_result`/`run_subprocess`, which delegates to
+# `execution.HostRunner.run_simple`), so the behavior pin that used to live
+# here (timeout -> exactly one `kill_process_group` call, `TimeoutError`
+# still surfaces) and the end-to-end real-grandchild-reap pin both moved to
+# the shared layer they now depend on:
+#
+# * behavior (non-raising timeout -> SubprocessTimeoutError, gh/git hardening
+#   side effects): tests/test_subprocess_util.py::TestRunSubprocessResult
+# * end-to-end (a REAL child that forks a grandchild is reaped
+#   grandchild-and-all on `run_simple`'s own timeout): #9648 —
+#   tests/regressions/test_hostrunner_reap_grandchildren.py
+#
+# `staging_bisect_loop._run_git` (the one surviving raw site) keeps its own
+# bespoke reap path — pinned by `_HEAVY_SPAWN_SITES`/`_GROUP_REAP_SITES`
+# above plus its dedicated cooperative-cancellation tests in
+# tests/test_staging_bisect_loop.py.

@@ -20,8 +20,6 @@ by Plan 6b (§4.11 factory-cost work).
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
 import logging
 import re
@@ -32,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 from trust_fleet_anomaly_detectors import (
     REPAIRED_SUCCESS_KEYS,
     TRUST_LOOP_WORKERS,
@@ -377,24 +376,14 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
             "number,title",
         ]
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
             try:
-                stdout, _ = await asyncio.wait_for(
-                    proc.communicate(), timeout=_RECONCILE_GH_TIMEOUT_SECONDS
+                result = await run_subprocess_result(
+                    *cmd, timeout=_RECONCILE_GH_TIMEOUT_SECONDS
                 )
-            except TimeoutError:
-                # proc.kill() raises ProcessLookupError if the child already
-                # exited — suppress it so the timeout is handled here instead of
-                # crashing the loop cycle. (#9794/#9816/#9883)
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
+            except SubprocessTimeoutError:
                 logger.warning("open-escalation probe timed out — filing anyway")
                 return 0
-            rows = json.loads(stdout.decode() or "[]")
+            rows = json.loads(result.stdout or "[]")
         except (OSError, ValueError, RuntimeError) as exc:
             reraise_on_credit_or_bug(exc)
             logger.debug("open-escalation probe failed: %s", exc)
@@ -476,25 +465,15 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
             "title",
         ]
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
             try:
-                stdout, _ = await asyncio.wait_for(
-                    proc.communicate(), timeout=_RECONCILE_GH_TIMEOUT_SECONDS
+                result = await run_subprocess_result(
+                    *cmd, timeout=_RECONCILE_GH_TIMEOUT_SECONDS
                 )
-            except TimeoutError:
-                # Kill the orphaned `gh` and skip this reconcile pass rather
-                # than hang the cycle forever; the next tick retries. A visible
-                # warning (not debug) is deliberate — the original failure was a
-                # *silent* stall that only the dead-man-switch caught (#9410).
-                # proc.kill() raises ProcessLookupError if the child already
-                # exited — suppress it so the timeout is handled here instead of
-                # crashing the loop cycle. (#9794/#9816/#9883)
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
+            except SubprocessTimeoutError:
+                # Skip this reconcile pass rather than hang the cycle forever;
+                # the next tick retries. A visible warning (not debug) is
+                # deliberate — the original failure was a *silent* stall that
+                # only the dead-man-switch caught (#9410).
                 logger.warning(
                     "gh issue list timed out after %ss; skipping reconcile pass",
                     _RECONCILE_GH_TIMEOUT_SECONDS,
@@ -504,10 +483,10 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
             reraise_on_credit_or_bug(exc)
             logger.debug("gh issue list failed", exc_info=True)
             return
-        if proc.returncode != 0:
+        if result.returncode != 0:
             return
         try:
-            closed = json.loads(stdout.decode() or "[]")
+            closed = json.loads(result.stdout or "[]")
         except json.JSONDecodeError:
             return
         current = self._dedup.get() or set()
