@@ -591,7 +591,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("dependabot_merge_loop_enabled", "HYDRAFLOW_DEPENDABOT_MERGE_LOOP_ENABLED", True),
-    ("diagnostic_loop_enabled", "HYDRAFLOW_DIAGNOSTIC_LOOP_ENABLED", False),
+    ("diagnostic_loop_enabled", "HYDRAFLOW_DIAGNOSTIC_LOOP_ENABLED", True),
     ("diagram_loop_enabled", "HYDRAFLOW_DIAGRAM_LOOP_ENABLED", True),
     ("entry_evidence_enabled", "HYDRAFLOW_ENTRY_EVIDENCE_ENABLED", True),
     ("epic_monitor_loop_enabled", "HYDRAFLOW_EPIC_MONITOR_LOOP_ENABLED", True),
@@ -3667,15 +3667,13 @@ class HydraFlowConfig(BaseModel):
         description="Deploy-time kill-switch for DependabotMergeLoop.",
     )
     diagnostic_loop_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "Deploy-time kill-switch for DiagnosticLoop. Defaulted OFF (#9895): "
-            "the loop analyzes failed-issue transcripts that quote credit-error "
-            "prose, so its streaming runner false-detects credit exhaustion on "
-            "nearly every run — tight-restart flooding the log + starving the "
-            "event loop (#9888), and cost_budget kept re-enabling the runtime "
-            "kill-switch. Re-enable only after #9879/#9888 and the "
-            "transcript-analysis credit-detection fix land."
+            "Deploy-time kill-switch for DiagnosticLoop. Was defaulted OFF "
+            "(#9895) during the credit-flood incident; re-enabled after ALL "
+            "three named blockers landed: #9888 (false-positive cooldown), "
+            "#10001 (CREDIT_PROSE_SCAN opt-out + HITL comment dedup), and "
+            "#9879/#10018 (gate off-thread + bounded diagnosis prompt)."
         ),
     )
     diagram_loop_enabled: bool = Field(
