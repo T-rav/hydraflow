@@ -377,10 +377,17 @@ class BaseBackgroundLoop(abc.ABC):
         every loop's GitHub reads — at the same instant. Each loop now
         delays its first cycle by ``crc32(worker_name) % spread`` seconds:
         deterministic across restarts (no random jitter to reason about),
-        roughly uniform across loops. ``run_on_startup=True`` loops are
-        exempt — ``github_cache`` must populate the shared cache
-        immediately at boot so the staggered readers land on a warm cache.
-        A :meth:`trigger` or stop request cuts the stagger short.
+        roughly uniform across loops. The offset is capped at the loop's
+        own resolved interval (the same :meth:`_get_interval` the run loop
+        sleeps on): a loop that ticks every N seconds gains nothing from
+        delaying its first tick beyond N — spreading within one interval
+        de-synchronizes the herd just as well — and fast-interval
+        environments (the sandbox runs ~6s loops against the production
+        120s spread) keep their end-to-end latency instead of serializing
+        the pipeline. ``run_on_startup=True`` loops are exempt —
+        ``github_cache`` must populate the shared cache immediately at
+        boot so the staggered readers land on a warm cache. A
+        :meth:`trigger` or stop request cuts the stagger short.
         """
         if self._run_on_startup:
             return 0.0
@@ -389,7 +396,17 @@ class BaseBackgroundLoop(abc.ABC):
         # attribute masquerade as a spread.
         if not isinstance(spread, int) or isinstance(spread, bool) or spread <= 0:
             return 0.0
-        return float(zlib.crc32(self._worker_name.encode()) % spread)
+        stagger = float(zlib.crc32(self._worker_name.encode()) % spread)
+        interval = self._get_interval()
+        # Same int-guard posture: interval_cb test doubles may hand back
+        # mocks — only a genuine positive interval caps the offset.
+        if (
+            isinstance(interval, int)
+            and not isinstance(interval, bool)
+            and interval > 0
+        ):
+            stagger = min(stagger, float(interval))
+        return stagger
 
     async def run(self) -> None:
         """Run the background worker loop until the stop event is set."""

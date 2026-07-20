@@ -8,6 +8,11 @@ seconds: deterministic across restarts, spread across the window.
 
 Pins:
 - Offset is deterministic, bounded by the spread, and per-worker.
+- Offset never exceeds the loop's own resolved interval: a loop ticking
+  every N seconds gains nothing from delaying its first tick beyond N,
+  and fast-interval environments (the sandbox runs ~6s loops against the
+  real 120s production spread) must not serialize the pipeline into
+  minutes (s54/s55 sandbox timeouts).
 - Spread 0 disables; ``run_on_startup=True`` loops are exempt (the
   ``github_cache`` poller must warm the shared cache at boot so staggered
   readers land on fresh data).
@@ -40,6 +45,7 @@ class _StaggerProbeLoop(BaseBackgroundLoop):
         deps: LoopDeps,
         worker_name: str = "stagger_probe",
         run_on_startup: bool = False,
+        interval: int = 3600,
     ) -> None:
         super().__init__(
             worker_name=worker_name,
@@ -48,13 +54,14 @@ class _StaggerProbeLoop(BaseBackgroundLoop):
             run_on_startup=run_on_startup,
         )
         self.cycles = 0
+        self._interval = interval
 
     async def _do_work(self) -> dict[str, Any] | None:
         self.cycles += 1
         return None
 
     def _get_default_interval(self) -> int:
-        return 1
+        return self._interval
 
     def loop_fitness(self, ctx):  # pragma: no cover - not a wired loop
         return super().loop_fitness(ctx)
@@ -67,11 +74,15 @@ def _make(
     worker_name: str = "stagger_probe",
     run_on_startup: bool = False,
     max_sleeps: int = 2,
+    interval: int = 3600,
+    interval_cb=None,
+    config: Any = None,
 ):
     """Build a probe loop whose sleep_fn records durations then stops."""
-    config = ConfigFactory.create(
-        repo_root=tmp_path / "repo", loop_startup_stagger_s=spread
-    )
+    if config is None:
+        config = ConfigFactory.create(
+            repo_root=tmp_path / "repo", loop_startup_stagger_s=spread
+        )
     stop_event = asyncio.Event()
     sleeps: list[float] = []
 
@@ -87,12 +98,14 @@ def _make(
         status_cb=lambda *a, **k: None,
         enabled_cb=lambda _name: True,
         sleep_fn=_recording_sleep,
+        interval_cb=interval_cb,
     )
     loop = _StaggerProbeLoop(
         config=config,
         deps=deps,
         worker_name=worker_name,
         run_on_startup=run_on_startup,
+        interval=interval,
     )
     return loop, sleeps, stop_event
 
@@ -125,6 +138,57 @@ class TestStaggerOffset:
         prod = HydraFlowConfig(data_root=tmp_path, repo="hydra/hydraflow")
         assert prod.loop_startup_stagger_s == 120
         assert ConfigFactory.create(repo_root=tmp_path).loop_startup_stagger_s == 0
+
+    def test_offset_never_exceeds_loop_interval_real_config(self, tmp_path) -> None:
+        """The s54/s55 sandbox pin: real production spread, fast loops.
+
+        The sandbox runs a REAL HydraFlowConfig (spread 120s) with ~6s loop
+        intervals; uncapped, every ``run_on_startup=False`` loop's first
+        tick delayed up to ~119s and stage-to-stage the pipeline serialized
+        past the scenarios' waits. A loop ticking every N seconds gains
+        nothing from delaying its first tick beyond N, so the offset is
+        capped at the loop's own resolved interval.
+        """
+        from config import HydraFlowConfig
+
+        config = HydraFlowConfig(data_root=tmp_path, repo="hydra/hydraflow")
+        spread = config.loop_startup_stagger_s
+        interval = 6  # sandbox_loop_interval-style fast tick
+        # Guard: pick a worker whose raw offset would actually exceed the
+        # interval — otherwise this pin tests nothing.
+        assert zlib.crc32(b"flake_tracker") % spread > interval
+
+        loop, _, _ = _make(
+            tmp_path,
+            spread=spread,
+            worker_name="flake_tracker",
+            interval=interval,
+            config=config,
+        )
+        assert loop._startup_stagger_seconds() == float(interval)
+
+    def test_offset_below_interval_passes_through_uncapped(self, tmp_path) -> None:
+        spread = 97
+        raw = float(zlib.crc32(b"flake_tracker") % spread)
+        loop, _, _ = _make(
+            tmp_path, spread=spread, worker_name="flake_tracker", interval=3600
+        )
+        assert loop._startup_stagger_seconds() == raw
+
+    def test_cap_uses_live_interval_override(self, tmp_path) -> None:
+        """The cap keys on the interval the run loop actually uses —
+        the live ``interval_cb`` override, not the static default."""
+        spread = 120
+        interval = 6
+        assert zlib.crc32(b"flake_tracker") % spread > interval
+        loop, _, _ = _make(
+            tmp_path,
+            spread=spread,
+            worker_name="flake_tracker",
+            interval=3600,
+            interval_cb=lambda _name: interval,
+        )
+        assert loop._startup_stagger_seconds() == float(interval)
 
 
 @pytest.mark.asyncio
