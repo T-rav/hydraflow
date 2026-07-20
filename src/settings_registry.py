@@ -73,6 +73,12 @@ SETTINGS: dict[str, SettingSpec] = {
     "test_adequacy_coverage_timeout_secs": SettingSpec(
         "CI & Quality", live=True, order=7
     ),
+    # Live: auto_pr re-reads both via trace_collector.get_active_config()
+    # on every gate run (#10013), so a toggle applies to the next bot PR.
+    "auto_pr_preflight_gate_enabled": SettingSpec("CI & Quality", live=True, order=8),
+    "auto_pr_preflight_stage_timeout_s": SettingSpec(
+        "CI & Quality", live=True, order=9
+    ),
     # --- Scheduling ------------------------------------------------------
     "poll_interval": SettingSpec("Scheduling", live=True, order=0),
     "pr_unstick_interval": SettingSpec("Scheduling", live=True, order=1),

@@ -408,6 +408,17 @@ def _current_config() -> HydraFlowConfig | None:
         return _ACTIVE_CONFIG_SLOT[0]
 
 
+def get_active_config() -> HydraFlowConfig | None:
+    """Public read accessor for the process-wide active config.
+
+    Free-function helpers outside this module (e.g. ``auto_pr``'s pre-flight
+    gate, #10013) use it to resolve live config knobs without threading a
+    config object through every call-site. Returns None when no orchestrator
+    has registered a config (standalone/CLI use, unit tests).
+    """
+    return _current_config()
+
+
 def _slug_for_loop(loop: str) -> str:
     slug = re.sub(r"[^a-z0-9]", "_", (loop or "").lower()).strip("_")
     return slug or "unknown"

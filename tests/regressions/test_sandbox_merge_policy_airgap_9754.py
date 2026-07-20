@@ -29,6 +29,7 @@ def test_sandbox_disables_merge_policy_and_other_external_reachers() -> None:
     # Sanity: these default ON in production, so the overrides are meaningful.
     assert config.merge_policy_enabled is True
     assert config.research_enabled is True
+    assert config.auto_pr_preflight_gate_enabled is True
 
     _apply_sandbox_config_overrides(config)
 
@@ -38,3 +39,7 @@ def test_sandbox_disables_merge_policy_and_other_external_reachers() -> None:
     assert config.transcript_summarization_enabled is False
     assert config.research_enabled is False
     assert config.contract_refresh_external_enabled is False
+    # #10013: the auto_pr pre-flight gate shells out to `uv run …`, which
+    # needs PyPI for its environment sync — unreachable on the air-gap, so
+    # every bot PR a scenario asserts on would be blocked. Gate off.
+    assert config.auto_pr_preflight_gate_enabled is False
