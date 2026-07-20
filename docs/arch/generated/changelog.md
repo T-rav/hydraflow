@@ -4,14 +4,14 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W30
+
+- `ccebee6` — feat(refinement): IssueRefinementLoop — tiered backlog dedup, priority scoring, operator digest (#9957) (#10024) (#10024) *(2026-07-20)*
+
 ## 2026-W29
 
-- `64d6619` — feat(wiring): register IssueRefinementLoop (seven-checkpoint) (#9957) (#9957) *(2026-07-19)*
-- `e38a7e5` — refactor: rename IssueGroomerLoop -> IssueRefinementLoop (operator naming decision) (#9957) (#9957) *(2026-07-19)*
-- `e85b1a9` — feat(loop): IssueGroomerLoop — tiered dedup, priority labels, rolling digest (#9957) (#9957) *(2026-07-19)*
-- `7ab3c52` — Merge remote-tracking branch 'origin/staging' into feat/issue-groomer-loop *(2026-07-19)*
+- `7c660e7` — fix(wiki): worktree-isolate runtime wiki writes — boot store read-only + queue-routed ingest (#9836) (#9836) *(2026-07-19)*
 - `33f8b6f` — feat(refine): prompt self-refinement — honeypot-gated auto-merge prompt-fix PRs + telemetry consumption (#9724) (#10006) (#10006) *(2026-07-19)*
-- `da098c4` — feat(port): list_open_issues atomic triplet — backlog-wide read for the groomer (#9957) (#9957) *(2026-07-19)*
 - `f7c15a9` — fix(audit): split P10.3 enforcement from measurement — per-PR gate + telemetry scan (#9902) (#10008) (#10008) *(2026-07-19)*
 - `79d683c` — feat(gate-health): GateHealthLoop — CI reds as distributions, not events (#9974) (#10003) (#10003) *(2026-07-19)*
 - `5bb06db` — docs(dark-factory): the new-loop checklist is seven checkpoints, not five (#10004) (#10004) *(2026-07-19)*

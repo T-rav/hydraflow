@@ -2828,6 +2828,10 @@ class OrchestratorStatusPayload(TypedDict, total=False):
     status: str
     reset: bool
     credits_paused_until: str
+    # Which backend the active credit pause is scoped to — "anthropic" or a
+    # one-shot backend ("zai"/"kimi"/"openrouter"). Absent for a global/legacy
+    # pause. Lets the UI show which provider is paused (#9807).
+    credits_paused_provider: str
 
 
 class SessionStartPayload(TypedDict):
@@ -2894,6 +2898,9 @@ class SystemAlertPayload(TypedDict, total=False):
     hook_name: str
     issue: int
     resume_at: str
+    # The billing provider a credit pause/false-positive alert refers to —
+    # "anthropic" or a one-shot backend ("zai"/"kimi"/"openrouter") (#9807).
+    provider: str
 
 
 class TranscriptSummaryPayload(TypedDict, total=False):

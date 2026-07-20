@@ -161,7 +161,6 @@ def _make_probe_loop(
     )
 
 
-@pytest.mark.skipif(os.name != "posix", reason="POSIX process groups only")
 class TestWatchdogCancelReapsProcessTree:
     """A watchdog-cancelled cycle reaps the whole OS process group — leader AND
     grandchild — and leaves the tracked registry clean, for both spawn paths."""
