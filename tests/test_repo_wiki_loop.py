@@ -52,6 +52,46 @@ def _make_config(wiki_root: Path) -> MagicMock:
     return config
 
 
+class TestApplyIngestEntryTasks:
+    """`_apply_ingest_entry_tasks` writes queued ingest-entry payloads into
+    the worktree's tracked layout so they ride the maintenance PR (#9836)."""
+
+    def test_writes_entries_into_tracked_layout(self, tmp_path: Path) -> None:
+        from wiki_maint_queue import make_ingest_entry_task
+
+        loop = _make_loop(tmp_path / "wiki")
+        tracked_root = tmp_path / "repo_wiki"
+        entry = WikiEntry(
+            title="Gap insight",
+            content="Watch out for the race.",
+            topic="gotchas",
+            source_type="shipped-with-known-gap",
+            source_issue=505,
+        )
+        tasks = [make_ingest_entry_task("org/repo", entry)]
+
+        applied = loop._apply_ingest_entry_tasks(tracked_root, tasks)
+
+        assert applied == tasks
+        # Lands under the tracked layout (path_specs of the maintenance PR),
+        # nested under owner/repo (no self_slug flattening).
+        files = list((tracked_root / "org" / "repo" / "gotchas").glob("*.md"))
+        assert len(files) == 1
+        assert "Gap insight" in files[0].read_text(encoding="utf-8")
+
+    def test_malformed_payload_is_dropped(self, tmp_path: Path) -> None:
+        from wiki_maint_queue import MaintenanceTask
+
+        loop = _make_loop(tmp_path / "wiki")
+        tracked_root = tmp_path / "repo_wiki"
+        bad = MaintenanceTask(kind="ingest-entry", repo_slug="org/repo", params={})
+
+        applied = loop._apply_ingest_entry_tasks(tracked_root, [bad])
+
+        assert applied == []
+        assert not tracked_root.exists()
+
+
 class TestDefaultInterval:
     def test_returns_config_interval(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path / "wiki")

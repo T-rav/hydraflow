@@ -50,6 +50,7 @@ from state import StateTracker
 from task_source import TaskTransitioner
 from traceability import extract_req_id, missing_required_req_id
 from transcript_summarizer import TranscriptSummarizer
+from wiki_maint_queue import enqueue_wiki_ingest
 
 if TYPE_CHECKING:
     from beads_manager import BeadsManager
@@ -871,12 +872,17 @@ class PlanPhase:
                             decisions=decisions,
                         )
                     else:
-                        self._wiki_store.ingest(repo, entries)
+                        # No issue worktree (git-backed off, or worktree
+                        # gone): the boot store is read-only, so route the
+                        # entries through the maintenance queue for the
+                        # worktree-isolated PR instead of dirtying repo_root
+                        # (#9836).
+                        enqueue_wiki_ingest(self._config, repo, entries)
                     self._wiki_store.mark_ingested(repo, issue_number, "plan")
                     return
 
             # Fallback: mechanical section extraction
-            from repo_wiki_ingest import ingest_from_plan  # noqa: PLC0415
+            from repo_wiki_ingest import build_plan_entries  # noqa: PLC0415
 
             if tracked_store is not None and worktree_path is not None:
                 # Offload the sync write + commit.
@@ -890,7 +896,11 @@ class PlanPhase:
                     path_prefix=self._config.repo_wiki_path,
                 )
             else:
-                ingest_from_plan(self._wiki_store, repo, issue_number, plan_text)
+                enqueue_wiki_ingest(
+                    self._config,
+                    repo,
+                    [e for e, _ in build_plan_entries(issue_number, plan_text)],
+                )
             self._wiki_store.mark_ingested(repo, issue_number, "plan")
         except Exception:  # noqa: BLE001
             logger.warning(
