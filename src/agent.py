@@ -1180,6 +1180,11 @@ SUMMARY: <one-line summary>
         cmd = self._build_pre_quality_review_command()
         summary = ""
         skill_started = time.monotonic()
+        # The finder transcript feeds the verifier's explicit-OK trigger below.
+        # Initialised for the type checker; the attempt loop always runs at
+        # least once (max_attempts <= 0 returns early above), and an empty
+        # transcript can never carry the explicit OK marker.
+        transcript = ""
 
         # Each iteration's _execute call allocates its own subprocess_idx
         # from BaseRunner's monotonic counter, so retries and back-to-back
@@ -1234,6 +1239,21 @@ SUMMARY: <one-line summary>
                     attempts=result.attempts,
                 )
 
+        # Independent verifier (#9546): a second-opinion pass with its own
+        # model, gated on the finder's EXPLICIT OK marker — never on the
+        # no-marker default-pass (empty fake/garbled transcripts must not grow
+        # an extra dispatch). Runs after the deterministic coverage check so a
+        # coverage override skips the extra LLM spend.
+        if (
+            result.passed
+            and skill.verifier is not None
+            and getattr(self._config, skill.verifier.enabled_config_key, False)
+            and skill.verifier.trigger(transcript)
+        ):
+            result = await self._run_skill_verifier(
+                skill, issue, worktree_path, prompt_diff, result
+            )
+
         # Append the skill result to run-N/skill_results.json alongside
         # the parent run. This is the source of truth for skill-effectiveness
         # scoring in trace_rollup.
@@ -1248,6 +1268,95 @@ SUMMARY: <one-line summary>
                 blocking=skill.blocking,
             )
 
+        return result
+
+    async def _run_skill_verifier(
+        self,
+        skill: AgentSkill,
+        issue: Task,
+        worktree_path: Path,
+        prompt_diff: str,
+        finder_result: LoopResult,
+    ) -> LoopResult:
+        """Run the independent second-opinion pass for a skill (#9546).
+
+        Dispatches the verifier prompt with the verifier's own tool/model
+        (independent of ``review_model`` — a shared model would defeat the
+        second opinion) and never discloses the finder's verdict. CONCUR
+        keeps the finder's pass; OVERRIDE flips it to a fail with the
+        verifier's own gap list. Fail-soft by default: a degraded run (empty
+        transcript) keeps the finder's OK unless the fail-closed knob is set.
+        """
+        spec = skill.verifier
+        if spec is None:  # pragma: no cover — caller-gated
+            return finder_result
+
+        verifier_started = time.monotonic()
+        verifier_cmd = build_agent_command(
+            tool=getattr(self._config, spec.tool_config_key),
+            model=getattr(self._config, spec.model_config_key),
+            isolate_user_settings=True,
+        )
+        verifier_prompt = spec.prompt_builder(
+            issue_number=issue.id, issue_title=issue.title, diff=prompt_diff
+        )
+        verifier_transcript = await self._execute(
+            verifier_cmd,
+            verifier_prompt,
+            worktree_path,
+            {"issue": issue.id, "source": "implementer"},
+            issue_labels=issue.tags,
+            telemetry_source=f"{skill.name}-verifier",
+        )
+
+        result = finder_result
+        if not verifier_transcript.strip():
+            # Subprocess soft-failure — nothing to judge. Fail-soft keeps the
+            # finder's OK; the opt-in fail-closed knob flips it to a retry.
+            outcome = "degraded"
+            if getattr(self._config, spec.fail_closed_config_key, False):
+                result = LoopResult(
+                    passed=False,
+                    summary=(
+                        f"{skill.name} verifier produced no output "
+                        "(fail-closed policy treats this as an override)"
+                    ),
+                    attempts=finder_result.attempts,
+                )
+        else:
+            confirmed, v_summary, v_gaps = spec.result_parser(verifier_transcript)
+            if confirmed:
+                outcome = "concur"
+            else:
+                outcome = "override"
+                logger.warning(
+                    "%s verifier overrode OK for #%d: %s",
+                    skill.name,
+                    issue.id,
+                    "; ".join(v_gaps[:5]) or v_summary,
+                )
+                result = LoopResult(
+                    passed=False,
+                    summary=(
+                        f"Independent verifier overrode OK: {v_summary}"
+                        if v_summary
+                        else "Independent verifier found gaps"
+                    ),
+                    attempts=finder_result.attempts,
+                )
+
+        ctx = self._tracing_ctx
+        if ctx is not None:
+            self._append_skill_result(
+                ctx,
+                skill_name=f"{skill.name}-verifier",
+                passed=result.passed,
+                attempts=1,
+                duration_seconds=time.monotonic() - verifier_started,
+                blocking=skill.blocking,
+                role="verifier",
+                outcome=outcome,
+            )
         return result
 
     async def _run_coverage_delta_check(
@@ -1319,8 +1428,15 @@ SUMMARY: <one-line summary>
         attempts: int,
         duration_seconds: float,
         blocking: bool,
+        role: str = "finder",
+        outcome: str | None = None,
     ) -> None:
         """Append a skill result to <run-N>/skill_results.json.
+
+        *role* tags the entry for telemetry (#9546): ``"finder"`` for the
+        skill's own pass/fail loop, ``"verifier"`` for the independent
+        second-opinion pass. *outcome* is verifier-only detail
+        (``concur`` / ``override`` / ``degraded``).
 
         Never raises — tracing must not crash the agent run.
         """
@@ -1351,6 +1467,8 @@ SUMMARY: <one-line summary>
                     "attempts": attempts,
                     "duration_seconds": round(duration_seconds, 3),
                     "blocking": blocking,
+                    "role": role,
+                    "outcome": outcome,
                 }
             )
             atomic_write(results_path, _json.dumps(existing, indent=2))

@@ -73,6 +73,13 @@ SETTINGS: dict[str, SettingSpec] = {
     "test_adequacy_coverage_timeout_secs": SettingSpec(
         "CI & Quality", live=True, order=7
     ),
+    # Independent test-adequacy verifier (#9546). Live: AgentRunner._run_skill
+    # re-reads all three via getattr(config, ...) on every skill dispatch.
+    "test_adequacy_verifier_enabled": SettingSpec("CI & Quality", live=True, order=20),
+    "test_adequacy_verifier_fail_closed": SettingSpec(
+        "CI & Quality", live=True, order=21
+    ),
+    "test_adequacy_verifier_model": SettingSpec("Models", live=True, order=4),
     # Live: auto_pr re-reads both via trace_collector.get_active_config()
     # on every gate run (#10013), so a toggle applies to the next bot PR.
     "auto_pr_preflight_gate_enabled": SettingSpec("CI & Quality", live=True, order=8),
