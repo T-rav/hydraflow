@@ -1,8 +1,9 @@
 # ADR-0099: HydraFlow Orchestration as a Control System
 
-**Status:** Proposed
-**Date:** 2026-06-30
-**Enforced by:** `tests/test_seed_terms.py` (the seven `control_role` glossary terms load, resolve to `main` classes, and ship `accepted`), `(process)` (every orchestration component declares its control role)
+**Status:** Accepted
+**Date:** 2026-06-30 (accepted 2026-07-20, #10038)
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_seed_terms.py
 
 ## Context
 
@@ -91,6 +92,8 @@ flowchart LR
 - ADR-0053's generated glossary (`docs/arch/generated/ubiquitous-language.md`) gains a `control_role` category, rendered on every PR.
 - At the v2 P5 cutover, the representative anchors are re-pointed to the v2 symbols (Plant→`IssueDriver`, Sensor→`SchedulingView`, Controller→`SchedulingPolicy`/`HybridGate`, Governor→`Governor`); this is recorded as a P5 checklist item.
 - This ADR does not change any runtime behavior; the only code touched is the `TermKind` enum.
+- **Enforcement:** `tests/test_seed_terms.py` asserts the seven `control_role` glossary terms load, resolve to their `main` anchor classes, and ship `accepted`. The complementary process expectation — every current and future orchestration component declares its control role(s) — is a manual review discipline carried in the component→role map above, not a machine check.
+- **Acceptance (2026-07-20, #10038).** The control-system framing is now backed by a concrete runtime phase spec — [`docs/superpowers/specs/2026-07-20-issue-driver-v2-runtime-phase-spec-design.md`](../superpowers/specs/2026-07-20-issue-driver-v2-runtime-phase-spec-design.md) — that specifies the P2–P5 phases this ADR referenced but never carried, and resolves the ADR-0002 tension explicitly (the `IssueDriver` writes labels at every phase boundary, so `issue_controller` is an execution-model change only and ADR-0002 survives intact). With that spec written, the conceptual model is accepted; only the ADR-0001 *supersession* still waits for the P5 cutover.
 
 ## Alternatives considered
 
@@ -98,7 +101,7 @@ flowchart LR
 - **Seed role terms phase-by-phase as v2 symbols land.** Rejected: the full mental model is more useful now; anchoring to current `main` classes (re-anchored at P5) delivers the vocabulary immediately without tripping the anchor-drift gate.
 - **Reuse existing `TermKind`s (`policy`/`service`).** Rejected: control roles are architectural roles, not DDD tactical patterns; mis-filing them would confuse the glossary. A dedicated `control_role` kind is honest.
 - **A separate, non-ADR-0053 control glossary.** Rejected: duplicates the living-glossary machinery and loses the drift enforcement and generated rendering.
-- **Supersede ADR-0001 now.** Rejected: the loop-architecture supersession belongs to the v2 P5 ADR set; ADR-0099 is the conceptual anchor that set will cite, and stays Proposed until then.
+- **Supersede ADR-0001 now.** Rejected: the loop-architecture supersession belongs to the v2 P5 ADR set; ADR-0099 is the conceptual anchor that set will cite. This ADR was held Proposed until a concrete runtime phase spec existed to back the framing; with #10038's phase spec written it is now Accepted, but the ADR-0001 supersession itself still defers to the P5 cutover.
 
 ## Related
 
@@ -109,4 +112,5 @@ flowchart LR
 - ADR-0049 (kill-switch convention — the governor's interlock)
 - ADR-0053 (ubiquitous language as a living artifact — the vocabulary discipline this extends)
 - ADR-0094 (`ConvergenceLedger` + `HybridGate` — the servo's error register + inner controller)
-- `src/ubiquitous_language.py:TermKind`, `src/issue_store.py:IssueStore`, `src/base_runner.py:BaseRunner`, `src/base_background_loop.py:LoopDeps`
+- `docs/superpowers/specs/2026-07-20-issue-driver-v2-runtime-phase-spec-design.md` (#10038 — the v2 IssueDriver runtime phase spec this ADR assumes: P2–P5 and the ADR-0002 resolution)
+- `src/ubiquitous_language.py:TermKind`, `src/issue_store.py:IssueStore`, `src/base_runner.py:BaseRunner`, `src/base_background_loop.py:LoopDeps`, `src/state/_driver.py:DriverStateMixin`
