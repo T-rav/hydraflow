@@ -391,7 +391,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ),
     ("fitness_scorecard_interval", "HYDRAFLOW_FITNESS_SCORECARD_INTERVAL", 86400),
     ("fitness_window_days", "HYDRAFLOW_FITNESS_WINDOW_DAYS", 30),
-    ("fitness_min_samples", "HYDRAFLOW_FITNESS_MIN_SAMPLES", 20),
+    ("fitness_min_samples", "HYDRAFLOW_FITNESS_MIN_SAMPLES", 5),
     ("auto_tighten_stability_ticks", "HYDRAFLOW_AUTO_TIGHTEN_STABILITY_TICKS", 3),
     ("auto_tighten_interval", "HYDRAFLOW_AUTO_TIGHTEN_INTERVAL", 86400),
     ("issue_refinement_interval", "HYDRAFLOW_ISSUE_REFINEMENT_INTERVAL", 86400),
@@ -3052,10 +3052,17 @@ class HydraFlowConfig(BaseModel):
         description="Rolling window (days) over which loop fitness is computed",
     )
     fitness_min_samples: int = Field(
-        default=20,
+        default=5,
         ge=1,
         le=10000,
-        description="Min samples before a SCORED loop reports OK confidence",
+        description=(
+            "Min samples before a SCORED loop reports OK confidence. "
+            "Right-sized to observed proposer throughput (6-14 filed per "
+            "30-day window; #9841 — the old default of 20 was unreachable "
+            "and every scorecard row stayed insufficient_data forever). "
+            "Loops additionally cap this at their cadence-achievable sample "
+            "count via loop_fitness.cadence_min_samples."
+        ),
     )
 
     # Trust fleet — FlakeTrackerLoop (spec §4.5)

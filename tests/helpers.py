@@ -434,7 +434,7 @@ class ConfigFactory:
         implement_two_stage_review_enabled: bool = True,
         fitness_scorecard_interval: int = 86400,
         fitness_window_days: int = 30,
-        fitness_min_samples: int = 20,
+        fitness_min_samples: int = 5,
         # Off by default in tests: the injection honeypot spawns a lightweight
         # agent before triage's LLM eval, which most triage tests neither mock
         # nor want. Its own tests opt in. Production default is True.

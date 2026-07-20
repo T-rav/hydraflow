@@ -197,13 +197,17 @@ class IssueRefinementLoop(BaseBackgroundLoop):
         # auto-closed (``refinement-auto`` label) in the window, how many stayed
         # closed rather than being reopened by a human — a reopened auto-close
         # is a false-positive dedup and scores against the loop. Pure over ctx.
-        from loop_fitness import proposal_acceptance_fitness
+        from loop_fitness import cadence_min_samples, proposal_acceptance_fitness
 
         return proposal_acceptance_fitness(
             ctx,
             worker_name=self._worker_name,
             label=_REFINEMENT_AUTO_LABEL,
-            min_samples=self._config.fitness_min_samples,
+            min_samples=cadence_min_samples(
+                ctx,
+                interval_seconds=self._get_default_interval(),
+                configured_min=self._config.fitness_min_samples,
+            ),
         )
 
     # --- LLM seam -------------------------------------------------------------

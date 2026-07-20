@@ -19,7 +19,12 @@ from disturbance.baseline import load_baseline
 from disturbance.burndown import BurndownUnit, select_units
 from disturbance.registry import DIMENSIONS
 from exception_classify import reraise_on_credit_or_bug
-from loop_fitness import FitnessContext, LoopFitness, proposal_acceptance_fitness
+from loop_fitness import (
+    FitnessContext,
+    LoopFitness,
+    cadence_min_samples,
+    proposal_acceptance_fitness,
+)
 
 if TYPE_CHECKING:
     from disturbance.registry import DimensionSpec
@@ -66,7 +71,14 @@ class DisturbanceDampenerLoop(BaseBackgroundLoop):
     def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
         # Burn-down effectiveness: merged fix-PRs / opened fix-PRs (label-scoped).
         return proposal_acceptance_fitness(
-            ctx, worker_name=self._worker_name, label=_DAMPENER_LABEL
+            ctx,
+            worker_name=self._worker_name,
+            label=_DAMPENER_LABEL,
+            min_samples=cadence_min_samples(
+                ctx,
+                interval_seconds=self._get_default_interval(),
+                configured_min=self._config.fitness_min_samples,
+            ),
         )
 
     async def _do_work(self) -> dict[str, Any]:
