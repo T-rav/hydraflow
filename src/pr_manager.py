@@ -1632,14 +1632,28 @@ class PRManager:
         )
 
     async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
-        """Return jobs for one workflow run: name + conclusion (#9974)."""
+        """Return jobs for one workflow run (#9974, enriched #10010).
+
+        Each dict: ``{"name", "conclusion", "started_at", "completed_at",
+        "steps"}``. ``started_at``/``completed_at``/``steps`` feed
+        GateHealthLoop's suspected-hang classifier (duration vs. the
+        workflow's configured timeout-minutes, plus whether a test step
+        ever reached a terminal conclusion) — the jobs API is the only
+        source for a job's *actual* timing and step-level outcomes.
+        """
         self._assert_repo()
         output = await self._run_gh(
             "gh",
             "api",
             f"repos/{self._repo}/actions/runs/{int(run_id)}/jobs?per_page=100",
             "--jq",
-            '[.jobs[] | {name: .name, conclusion: (.conclusion // "")}]',
+            (
+                '[.jobs[] | {name: .name, conclusion: (.conclusion // ""), '
+                'started_at: (.started_at // ""), '
+                'completed_at: (.completed_at // ""), '
+                "steps: [.steps[]? | {name: .name, "
+                'conclusion: (.conclusion // "")}]}]'
+            ),
         )
         try:
             rows = json.loads(output or "[]")

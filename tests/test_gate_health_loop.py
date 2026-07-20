@@ -14,12 +14,123 @@ from gate_health_loop import (
     GateHealthLoop,
     find_born_broken,
     find_missing_artifacts,
+    find_suspected_hangs,
     find_uncorrelated_blame,
     finding_fingerprint,
     is_docs_only,
     tally_job_stats,
 )
 from tests.helpers import make_bg_loop_deps
+
+
+def _cancelled_job(
+    *,
+    name: str = "Tests",
+    run_id: int = 555,
+    pr_number: int = 42,
+    started_at: str = "2026-07-19T00:00:00Z",
+    completed_at: str = "2026-07-19T00:30:05Z",
+    test_step_conclusion: str | None = None,
+) -> dict:
+    """A cancelled job record shaped like ``_collect``'s enriched output.
+
+    Defaults to the #9983/#10002 signature: ~30m duration (matches the
+    ``Tests`` job's real 30-minute timeout-minutes), test step never
+    reaching a terminal conclusion.
+    """
+    return {
+        "name": name,
+        "conclusion": "cancelled",
+        "run_id": run_id,
+        "pr_number": pr_number,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "steps": [
+            {"name": "Install dependencies", "conclusion": "success"},
+            {"name": "Run tests with coverage", "conclusion": test_step_conclusion},
+        ],
+    }
+
+
+class TestFindSuspectedHangs:
+    """#10010: cancelled-at-timeout jobs get their own verdict, not a retry."""
+
+    def test_cancelled_at_timeout_with_unfinished_test_step_is_flagged(self) -> None:
+        job = _cancelled_job()  # ~30m05s duration, test step conclusion=None
+
+        findings = find_suspected_hangs(
+            [job], timeout_minutes_by_job={"Tests": 30}, tolerance_seconds=90
+        )
+
+        assert len(findings) == 1
+        finding = findings[0]
+        assert finding["kind"] == "suspected_hang"
+        assert finding["check"] == "Tests"
+        assert finding["run_id"] == 555
+        assert finding["pr_number"] == 42
+        assert finding["unfinished_step"] == "Run tests with coverage"
+        assert finding["timeout_minutes"] == 30
+
+    def test_cancelled_early_is_not_flagged(self) -> None:
+        # Cancelled 2 minutes in (e.g. a manual abort) — nowhere near the
+        # 30-minute timeout, so this is a normal cancellation, not a hang.
+        job = _cancelled_job(completed_at="2026-07-19T00:02:00Z")
+
+        findings = find_suspected_hangs(
+            [job], timeout_minutes_by_job={"Tests": 30}, tolerance_seconds=90
+        )
+
+        assert findings == []
+
+    def test_failed_normally_is_not_flagged(self) -> None:
+        job = _cancelled_job()
+        job["conclusion"] = "failure"
+
+        findings = find_suspected_hangs(
+            [job], timeout_minutes_by_job={"Tests": 30}, tolerance_seconds=90
+        )
+
+        assert findings == []
+
+    def test_cancelled_at_timeout_with_finished_test_step_is_not_flagged(self) -> None:
+        # Killed at ~timeout, but the test step already reached a verdict
+        # (e.g. cancelled during a later upload/cleanup step, or a
+        # fail-fast sibling) — not the in-flight-hang signature.
+        job = _cancelled_job(test_step_conclusion="success")
+
+        findings = find_suspected_hangs(
+            [job], timeout_minutes_by_job={"Tests": 30}, tolerance_seconds=90
+        )
+
+        assert findings == []
+
+    def test_unknown_job_name_is_not_flagged(self) -> None:
+        job = _cancelled_job(name="Some New Job")
+
+        findings = find_suspected_hangs(
+            [job], timeout_minutes_by_job={"Tests": 30}, tolerance_seconds=90
+        )
+
+        assert findings == []
+
+    def test_missing_timestamps_are_not_flagged(self) -> None:
+        job = _cancelled_job(started_at="", completed_at="")
+
+        findings = find_suspected_hangs(
+            [job], timeout_minutes_by_job={"Tests": 30}, tolerance_seconds=90
+        )
+
+        assert findings == []
+
+    def test_fingerprint_distinguishes_hangs_by_run(self) -> None:
+        a = finding_fingerprint(
+            {"kind": "suspected_hang", "check": "Tests", "run_id": 555}
+        )
+        b = finding_fingerprint(
+            {"kind": "suspected_hang", "check": "Tests", "run_id": 999}
+        )
+        assert a != b  # two distinct incidents on the same check both file
+
 
 # ---------------------------------------------------------------------------
 # Pure engine
@@ -235,4 +346,92 @@ class TestGateHealthLoop:
         result = await loop._do_work()
 
         assert result["findings"] == 0
+        prs.create_issue.assert_not_awaited()
+
+
+class TestSuspectedHangLoopWiring:
+    """End-to-end: cancelled-at-timeout job -> filed issue with the
+    bounded-local/Linux-container playbook, distinct from a retry (#10010).
+    """
+
+    def _write_workflow(self, repo_root: Path) -> None:
+        workflows_dir = repo_root / ".github" / "workflows"
+        workflows_dir.mkdir(parents=True)
+        (workflows_dir / "ci.yml").write_text(
+            "jobs:\n  test:\n    name: Tests\n    timeout-minutes: 30\n"
+        )
+
+    def _run_seed(self, run_id: int, pr_number: int, created_at: str) -> dict:
+        return {
+            "id": run_id,
+            "workflow": "CI",
+            "conclusion": "cancelled",
+            "created_at": created_at,
+            "pr_number": pr_number,
+        }
+
+    @pytest.mark.asyncio
+    async def test_suspected_hang_files_playbook_issue(self, tmp_path: Path) -> None:
+        loop, prs = _make_loop(tmp_path)
+        self._write_workflow(Path(loop._config.repo_root))
+        prs.list_workflow_runs.return_value = [
+            self._run_seed(555, 42, "2026-07-19T00:00:00Z")
+        ]
+        prs.get_workflow_run_jobs.return_value = [_cancelled_job()]
+
+        result = await loop._do_work()
+
+        assert result["filed"] == 1
+        title, body = prs.create_issue.await_args.args[0:2]
+        assert "suspected CI hang" in title
+        assert "#9983" in body
+        assert "#10002" in body
+        assert "killpg" in body
+        assert "Linux container" in body
+        assert "do NOT" in body  # explicit anti-blind-retry directive
+        assert prs.create_issue.await_args.kwargs["labels"] == ["hydraflow-find"]
+
+    @pytest.mark.asyncio
+    async def test_recurring_run_dedupes_but_new_incident_still_files(
+        self, tmp_path: Path
+    ) -> None:
+        loop, prs = _make_loop(tmp_path)
+        self._write_workflow(Path(loop._config.repo_root))
+
+        prs.list_workflow_runs.return_value = [
+            self._run_seed(555, 42, "2026-07-19T00:00:00Z")
+        ]
+        prs.get_workflow_run_jobs.return_value = [_cancelled_job()]
+        first = await loop._do_work()
+        second = await loop._do_work()  # same run seen again -> deduped
+
+        # A DIFFERENT run on the SAME check is a distinct incident and
+        # must file its own issue — the fingerprint must not swallow it.
+        prs.list_workflow_runs.return_value = [
+            self._run_seed(777, 43, "2026-07-19T01:00:00Z")
+        ]
+        prs.get_workflow_run_jobs.return_value = [
+            _cancelled_job(run_id=777, pr_number=43)
+        ]
+        third = await loop._do_work()
+
+        assert first["filed"] == 1
+        assert second["filed"] == 0
+        assert third["filed"] == 1
+        assert prs.create_issue.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_no_workflow_file_means_no_finding(self, tmp_path: Path) -> None:
+        # Timeout-minutes lookup fails closed: no .github/workflows means
+        # no reference timeout, so the classifier can't confirm anything
+        # and stays silent instead of guessing.
+        loop, prs = _make_loop(tmp_path)
+        prs.list_workflow_runs.return_value = [
+            self._run_seed(555, 42, "2026-07-19T00:00:00Z")
+        ]
+        prs.get_workflow_run_jobs.return_value = [_cancelled_job()]
+
+        result = await loop._do_work()
+
+        assert result["filed"] == 0
         prs.create_issue.assert_not_awaited()

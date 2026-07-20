@@ -207,6 +207,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("gate_health_interval", "HYDRAFLOW_GATE_HEALTH_INTERVAL", 604800),
     ("gate_health_run_window", "HYDRAFLOW_GATE_HEALTH_RUN_WINDOW", 50),
     ("gate_health_min_attempts", "HYDRAFLOW_GATE_HEALTH_MIN_ATTEMPTS", 3),
+    (
+        "gate_health_hang_tolerance_seconds",
+        "HYDRAFLOW_GATE_HEALTH_HANG_TOLERANCE_SECONDS",
+        90,
+    ),
     ("adr_review_interval", "HYDRAFLOW_ADR_REVIEW_INTERVAL", 86400),
     ("adr_review_approval_threshold", "HYDRAFLOW_ADR_REVIEW_APPROVAL_THRESHOLD", 2),
     ("adr_review_max_rounds", "HYDRAFLOW_ADR_REVIEW_MAX_ROUNDS", 3),
@@ -1332,6 +1337,17 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Minimum failures before GateHealthLoop flags a check: "
             "born-broken needs N, blame-correlation N-1"
+        ),
+    )
+    gate_health_hang_tolerance_seconds: int = Field(
+        default=90,
+        ge=10,
+        le=600,
+        description=(
+            "GateHealthLoop suspected-hang classifier (#10010): a CANCELLED "
+            "job whose duration lands within this many seconds of its "
+            "workflow's configured timeout-minutes is a candidate hang, "
+            "not a generic cancellation"
         ),
     )
 
