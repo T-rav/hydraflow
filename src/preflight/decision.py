@@ -23,6 +23,9 @@ class PreflightResult:
     cost_usd: float
     wall_clock_s: float
     tokens: int
+    # #9821: True when the model had no pricing entry — render "cost
+    # unknown", never $0.00 (a $0 line reads as "cheap", hiding spend).
+    cost_unknown: bool = False
     prompt_hash: str = ""  # populated from PreflightSpawn for audit traceability
     # Convergence signals (ADR-0084 pillar B): the agent's self-assessed
     # confidence and why it stopped. ``needs_human`` is only honored for a
@@ -176,6 +179,11 @@ async def apply_decision(
     }
 
 
+def _cost_str(result: PreflightResult) -> str:
+    """Render cost for comments — 'cost unknown' beats a lying $0.00 (#9821)."""
+    return "cost unknown" if result.cost_unknown else f"${result.cost_usd:.2f}"
+
+
 def _format_comment(
     sub_label: str,
     result: PreflightResult,
@@ -187,7 +195,7 @@ def _format_comment(
         pr_link = f" PR: {result.pr_url}" if result.pr_url else ""
         return (
             f"**Auto-Agent resolved this issue** (attempt {attempts}, "
-            f"sub-label `{sub_label}`, ${result.cost_usd:.2f}, "
+            f"sub-label `{sub_label}`, {_cost_str(result)}, "
             f"{result.wall_clock_s:.0f}s).{pr_link}\n\n"
             f"{result.diagnosis}"
         )
@@ -198,7 +206,7 @@ def _format_comment(
     )
     return (
         f"**Auto-Agent attempt {attempts} → `{result.status}`** "
-        f"(sub-label `{sub_label}`, ${result.cost_usd:.2f}, "
+        f"(sub-label `{sub_label}`, {_cost_str(result)}, "
         f"{result.wall_clock_s:.0f}s){suffix}.\n\n"
         f"**Diagnosis:**\n{result.diagnosis}"
     )

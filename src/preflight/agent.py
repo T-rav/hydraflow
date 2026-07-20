@@ -39,6 +39,7 @@ class PreflightSpawn:
     cost_usd: float
     tokens: int
     crashed: bool
+    cost_unknown: bool = False
     prompt_hash: str = ""  # hex prefix; populated by spawn_fn for audit traceability
 
 
@@ -138,6 +139,7 @@ async def run_preflight(
             wall_clock_s=wall_s,
             tokens=spawn.tokens,
             prompt_hash=spawn_hash,
+            cost_unknown=spawn.cost_unknown,
         )
 
     # Cap checks (post-hoc — caps were enforced inside spawn_fn or by watchers)
@@ -153,6 +155,7 @@ async def run_preflight(
             wall_clock_s=wall_s,
             tokens=spawn.tokens,
             prompt_hash=spawn_hash,
+            cost_unknown=spawn.cost_unknown,
         )
     if deps.wall_clock_cap_s is not None and wall_s > deps.wall_clock_cap_s:
         return PreflightResult(
@@ -166,6 +169,7 @@ async def run_preflight(
             wall_clock_s=wall_s,
             tokens=spawn.tokens,
             prompt_hash=spawn_hash,
+            cost_unknown=spawn.cost_unknown,
         )
 
     parsed = parse_agent_response(spawn.output_text)
