@@ -30,6 +30,11 @@ import pytest
 
 import subprocess_util
 from audit_chain import AuditChain
+from base_background_loop import LoopDeps
+from config import HydraFlowConfig
+from events import EventBus
+from stale_issue_loop import StaleIssueLoop
+from state import StateTracker
 from tests.scenarios.fakes.mock_world import MockWorld
 from tests.scenarios.helpers.loop_port_seeding import seed_ports as _seed_ports
 
@@ -938,6 +943,68 @@ class TestL23StaleIssueLoop:
 
         assert result is not None
         assert result["closed"] == 0
+
+
+# ---------------------------------------------------------------------------
+# L23b: stale_issue's regression-rot check (#9597) — hosted, not a new loop.
+# Uses direct instantiation (Pattern B) for the same reason as L23: StaleIssueLoop
+# calls prs._run_gh()/prs._repo directly, which FakeGitHub does not implement.
+# ---------------------------------------------------------------------------
+
+
+class TestL23bRegressionRot:
+    """StaleIssueLoop's regression-rot detector: false-close rot end to end."""
+
+    def _make_loop(self, tmp_path):
+        config = HydraFlowConfig(
+            data_root=tmp_path / "data",
+            repo_root=tmp_path / "repo",
+            repo="owner/repo",
+        )
+        regressions_dir = tmp_path / "repo" / "tests" / "regressions"
+        regressions_dir.mkdir(parents=True, exist_ok=True)
+        (regressions_dir / "test_issue_9911.py").write_text(
+            "import pytest\n\n"
+            "@pytest.mark."
+            "xfail(reason='Regression for issue #9911 — fix not "
+            "yet landed', strict=False)\n"
+            "def test_thing():\n"
+            "    assert False\n",
+            encoding="utf-8",
+        )
+
+        from mockworld.fakes.fake_github import FakeGitHub
+
+        fake = FakeGitHub()
+        # The referenced issue is CLOSED while its regression pin stays RED —
+        # the false-close rot shape.
+        fake.add_issue(9911, "stop path orphans", "closed but pin still red")
+        fake._issues[9911].state = "closed"
+
+        deps = LoopDeps(
+            event_bus=EventBus(),
+            stop_event=asyncio.Event(),
+            status_cb=MagicMock(),
+            enabled_cb=lambda _name: True,
+        )
+        state = StateTracker(state_file=tmp_path / "data" / "state.json")
+        return StaleIssueLoop(config=config, prs=fake, state=state, deps=deps), fake
+
+    async def test_closed_issue_with_red_pin_files_one_rollup_issue(self, tmp_path):
+        """A closed issue (#9911) with a still-RED regression pin is surfaced
+        as ONE deduped rollup issue — not a per-finding issue."""
+        loop, fake = self._make_loop(tmp_path)
+
+        result = await loop._do_work()
+
+        assert result["regression_rot_false_close"] == 1
+        rollups = [
+            issue
+            for issue in fake._issues.values()
+            if issue.number != 9911 and "#9911" in issue.body
+        ]
+        assert len(rollups) == 1
+        assert rollups[0].state == "open"
 
 
 # ---------------------------------------------------------------------------
