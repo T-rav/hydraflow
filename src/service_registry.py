@@ -1658,9 +1658,24 @@ def build_services(
     # Validates sample.stdout against contracts.shapes models — shape
     # drift in real gh (renamed/removed/typed-differently fields, new
     # enum values) fires immediately on the next tick.
-    from contracts.shape_dispatchers import gh_shape_validator
+    # One coverage predicate per (adapter, command) key: when a second
+    # validator is chained under ("github", "gh") — e.g. the #8699
+    # gh_mutation_validator — OR-compose its args-coverage into this
+    # single ``covers=`` predicate (gh_shape_covers(args) or
+    # gh_mutation_covers(args)), else record-time pruning drops the
+    # samples the new validator needs (#9803 guard).
+    from contracts.shape_dispatchers import gh_shape_covers, gh_shape_validator
 
-    _live_corpus_replay_loop.register("github", "gh", gh_shape_validator)
+    _live_corpus_replay_loop.register(
+        "github", "gh", gh_shape_validator, covers=gh_shape_covers
+    )
+    # #9633: drop no-opinion samples at record time so they never consume
+    # per-adapter LRU budget. The corpus is constructed before the loop
+    # exists, so the registry-derived predicate late-binds here. Dropping
+    # is reversible — the corpus self-refreshes within one interval once
+    # dispatcher coverage expands.
+    if config.shadow_corpus_coverage_pruning_enabled:
+        shadow_corpus.set_coverage_predicate(_live_corpus_replay_loop.covers)
 
     # Phase 9: thread the live dispatcher registry into the auditor so
     # the cassette retirement audit can flag baseline cassettes whose
