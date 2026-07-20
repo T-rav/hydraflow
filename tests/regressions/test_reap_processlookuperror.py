@@ -81,6 +81,18 @@ async def test_communicate_bounded_surfaces_timeout_not_processlookup(
     monkeypatch, module_name, timeout_attr
 ):
     module = __import__(module_name)
+
+    # #9579 moved the heavy-make loops (skill_prompt_eval, principles_audit)
+    # onto process_group.kill_process_group, which group-kills a REAL int pid
+    # via os.killpg. _DeadProc models an already-reaped child, so patch killpg
+    # to raise ProcessLookupError (group already gone) — and never signal a
+    # live pgid that happens to match the fake pid. Harmless for the loops
+    # still on guarded proc.kill(): they never call killpg.
+    def _dead_killpg(_pgid: int, _sig: int) -> None:
+        raise ProcessLookupError()
+
+    monkeypatch.setattr(os, "killpg", _dead_killpg)
+
     if timeout_attr is None:
         # ``_communicate_bounded(proc, timeout)`` — timeout is a call arg.
         coro = module._communicate_bounded(_DeadProc(), timeout=0.01)
@@ -88,7 +100,7 @@ async def test_communicate_bounded_surfaces_timeout_not_processlookup(
         monkeypatch.setattr(module, timeout_attr, 0.01)
         coro = module._communicate_bounded(_DeadProc())
     # Must raise TimeoutError (caller treats as failed read), never the
-    # ProcessLookupError from the already-dead child's proc.kill().
+    # ProcessLookupError from the already-dead child's reap.
     with pytest.raises(TimeoutError):
         await coro
 

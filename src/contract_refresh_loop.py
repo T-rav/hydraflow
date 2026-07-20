@@ -75,6 +75,7 @@ from contract_recording import (
 )
 from dedup_store import DedupStore
 from models import WorkCycleResult  # noqa: TCH001
+from process_group import kill_process_group
 from rollup_issue_manager import RollupIssueManager
 
 if TYPE_CHECKING:
@@ -523,18 +524,23 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             cwd=str(self._config.repo_root),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # Group leader (pid == pgid) so the timeout reap kills the whole
+            # make → pytest replay subtree, not just the top-level make
+            # (#9579).
+            start_new_session=True,
         )
         try:
             stdout_b, stderr_b = await asyncio.wait_for(
                 proc.communicate(), timeout=_REPLAY_GATE_TIMEOUT_SECONDS
             )
         except TimeoutError:
-            # proc.kill() itself raises ProcessLookupError when the child
-            # already exited — suppress it (and proc.wait()) so the timeout is
-            # handled as a failure instead of crashing the loop cycle.
-            # (#9794/#9816/#9883)
+            # Group-kill: a child-only proc.kill() orphaned the sub-make /
+            # pytest grandchildren at PPID=1 (#9579). The guarded primitive
+            # never raises — an already-exited child included — so the
+            # timeout is handled as a failure instead of crashing the loop
+            # cycle. (#9794/#9816/#9883)
+            kill_process_group(proc)
             with contextlib.suppress(ProcessLookupError):
-                proc.kill()
                 await proc.wait()
             logger.warning(
                 "Replay gate timed out after %ss; treating as failure",
