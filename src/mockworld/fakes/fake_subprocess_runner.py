@@ -9,12 +9,17 @@ The fake Process exposes: stdout/stderr (StreamReader), stdin
 terminate(). pid is None so ``terminate_processes`` in ``runner_utils`` skips
 ``killpg`` (no real process group exists for a fake process).
 
-``run_simple`` dispatches real ``git`` commands to the host (via
-``asyncio.create_subprocess_exec``) so that ``AgentRunner._count_commits`` and
-``_force_commit_uncommitted`` observe the actual worktree state.  All other
-commands (``make``, agent CLI) route through FakeDocker and return its scripted
-default success event; scenarios that need a real ``make quality`` signal must
-extend ``_HOST_COMMANDS`` or script a specific FakeDocker response.
+``run_simple`` dispatches real ``git`` commands to the host so that
+``AgentRunner._count_commits`` and ``_force_commit_uncommitted`` observe the
+actual worktree state.  That host path (``_run_on_host``) delegates straight to
+``HostRunner.run_simple`` (``src/execution.py``) rather than re-implementing the
+spawn/reap dance, so the fake and the real runner share ONE host-process
+lifecycle contract — ``start_new_session=True`` at spawn and the same
+whole-process-group reap on both ``TimeoutError`` and ``asyncio.CancelledError``
+(#9624). All other commands (``make``, agent CLI) route through FakeDocker and
+return its scripted default success event; scenarios that need a real
+``make quality`` signal must extend ``_HOST_COMMANDS`` or script a specific
+FakeDocker response.
 """
 
 from __future__ import annotations
@@ -25,7 +30,7 @@ import json
 from collections.abc import AsyncIterator, Sequence
 from typing import Any, cast
 
-from execution import SimpleResult
+from execution import HostRunner, SimpleResult
 from mockworld.fakes.fake_docker import FakeDocker
 
 # Commands that must run on the real host rather than through FakeDocker.
@@ -172,36 +177,19 @@ class FakeSubprocessRunner:
         timeout: float = 120.0,
         input: bytes | None = None,  # noqa: A002
     ) -> SimpleResult:
-        """Run *cmd* directly on the host via asyncio subprocess."""
-        stdin_pipe = asyncio.subprocess.PIPE if input is not None else None
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=cwd,
-            stdin=stdin_pipe,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(input=input), timeout=timeout
-            )
-        except TimeoutError:
-            # proc.kill() itself raises ProcessLookupError when the child
-            # already exited — suppress it (and proc.wait()) so the TimeoutError
-            # propagates instead of crashing the caller. (#9794/#9816/#9883)
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
-                await proc.wait()
-            raise
-        return SimpleResult(
-            stdout=stdout_bytes.decode(errors="replace").strip()
-            if stdout_bytes
-            else "",
-            stderr=stderr_bytes.decode(errors="replace").strip()
-            if stderr_bytes
-            else "",
-            returncode=proc.returncode if proc.returncode is not None else -1,
+        """Run *cmd* directly on the host, sharing ``HostRunner``'s lifecycle.
+
+        Delegates to ``HostRunner.run_simple`` (``src/execution.py``) instead of
+        re-implementing the spawn/reap dance, so the fake's host path and the
+        real runner cannot diverge (#9624): same ``start_new_session=True``
+        spawn, same stop-registry registration, and the same whole-process-group
+        reap on both ``TimeoutError`` and ``asyncio.CancelledError``. This was
+        previously a near-duplicate that only killed the direct child on timeout
+        and had no cancel handler — so a forking host command (or a cancelled
+        cycle) leaked the grandchildren the real runner reaps.
+        """
+        return await HostRunner().run_simple(
+            cmd, cwd=cwd, env=env, timeout=timeout, input=input
         )
 
     async def cleanup(self) -> None:
