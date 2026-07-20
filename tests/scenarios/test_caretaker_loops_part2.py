@@ -972,11 +972,13 @@ class TestL23bRegressionRot:
             encoding="utf-8",
         )
 
-        prs = MagicMock()
-        prs._repo = "owner/repo"
-        prs._run_gh = AsyncMock(return_value=json.dumps([]))
-        prs.get_issue_state = AsyncMock(return_value="COMPLETED")
-        prs.create_issue = AsyncMock(return_value=42)
+        from mockworld.fakes.fake_github import FakeGitHub
+
+        fake = FakeGitHub()
+        # The referenced issue is CLOSED while its regression pin stays RED —
+        # the false-close rot shape.
+        fake.add_issue(9911, "stop path orphans", "closed but pin still red")
+        fake._issues[9911].state = "closed"
 
         deps = LoopDeps(
             event_bus=EventBus(),
@@ -985,19 +987,23 @@ class TestL23bRegressionRot:
             enabled_cb=lambda _name: True,
         )
         state = StateTracker(state_file=tmp_path / "data" / "state.json")
-        return StaleIssueLoop(config=config, prs=prs, state=state, deps=deps), prs
+        return StaleIssueLoop(config=config, prs=fake, state=state, deps=deps), fake
 
     async def test_closed_issue_with_red_pin_files_one_rollup_issue(self, tmp_path):
         """A closed issue (#9911) with a still-RED regression pin is surfaced
         as ONE deduped rollup issue — not a per-finding issue."""
-        loop, prs = self._make_loop(tmp_path)
+        loop, fake = self._make_loop(tmp_path)
 
         result = await loop._do_work()
 
         assert result["regression_rot_false_close"] == 1
-        prs.create_issue.assert_awaited_once()
-        _, body, _ = prs.create_issue.await_args.args
-        assert "#9911" in body
+        rollups = [
+            issue
+            for issue in fake._issues.values()
+            if issue.number != 9911 and "#9911" in issue.body
+        ]
+        assert len(rollups) == 1
+        assert rollups[0].state == "open"
 
 
 # ---------------------------------------------------------------------------
