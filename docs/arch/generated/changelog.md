@@ -13,12 +13,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W29
 
-- `3c00969` — Merge remote-tracking branch 'origin/staging' into fix/issue-9596-stale-code-alert-v2 *(2026-07-19)*
-- `77feecc` — test: add factory-stale-code to the labels expected set; merge staging (#9596) (#9596) *(2026-07-19)*
-- `877fedb` — Merge remote-tracking branch 'origin/staging' into fix/issue-9596-stale-code-alert-v2 *(2026-07-19)*
-- `5b27952` — fix: drop inert BLE001 noqa — suppression ratchet only shrinks *(2026-07-19)*
-- `72a9e5b` — Merge remote-tracking branch 'origin/staging' into fix/issue-9596-stale-code-alert-v2 *(2026-07-19)*
-- `05a1374` — fix(health-monitor): stale-code dead-man-switch — host in HealthMonitorLoop, consume #9663 tracker (#9596) (#9596) *(2026-07-19)*
+- `9b1da17` — fix(arch): repair conflict-marker-corrupted generated docs from botched merge resolve *(2026-07-19)*
+- `db7707c` — Merge remote-tracking branch 'origin/staging' into feat/issue-10009-liveness-watchdog *(2026-07-19)*
+- `4e4ff9e` — feat(liveness): external factory watchdog + boot-time down-detection (#10009) (#10009) *(2026-07-19)*
 - `33f8b6f` — feat(refine): prompt self-refinement — honeypot-gated auto-merge prompt-fix PRs + telemetry consumption (#9724) (#10006) (#10006) *(2026-07-19)*
 - `f7c15a9` — fix(audit): split P10.3 enforcement from measurement — per-PR gate + telemetry scan (#9902) (#10008) (#10008) *(2026-07-19)*
 - `79d683c` — feat(gate-health): GateHealthLoop — CI reds as distributions, not events (#9974) (#10003) (#10003) *(2026-07-19)*
