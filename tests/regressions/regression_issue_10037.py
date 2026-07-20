@@ -31,12 +31,14 @@ from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 from events import EventBus
 from issue_store import STAGE_READY, IssueStore
 from models import Task
-from queue_strategy import QueueStrategy
+from queue_strategy import BandWeights, QueueStrategy, order_queue
 from tests.helpers import ConfigFactory
 
 
@@ -116,3 +118,34 @@ def test_activating_a_crate_still_gates_out_unmilestoned_work() -> None:
     _enqueue(store, Task(id=1, title="unmilestoned P0", tags=["P0"]))
 
     assert store.get_implementable(1) == []
+
+
+def test_an_unhandled_queue_strategy_raises_rather_than_silently_mixing() -> None:
+    # ``order_queue`` originally ended with a bare ``return _weighted_mix(...)``,
+    # so anything that was not ``fifo`` or ``priority`` was dispatched as
+    # ``weighted_mix``. Nothing invalid reaches it today — HydraFlowConfig
+    # validates the field and PATCH /api/control/config re-validates through
+    # model_validate and 422s — but a NEW member added to QueueStrategy without
+    # a matching branch would have been silently mis-dispatched.
+    #
+    # That is the dangerous shape for a scheduler: it keeps draining the queue
+    # and picking work, just under the wrong discipline, with no error, no log
+    # line, and every existing test still green.
+    with pytest.raises(ValueError, match="unhandled queue strategy"):
+        order_queue(
+            [Task(id=1, title="issue 1")],
+            "not_a_strategy",  # type: ignore[arg-type]
+            BandWeights(p1=3, p2=2, unprioritised=1),
+        )
+
+
+def test_every_declared_queue_strategy_still_dispatches() -> None:
+    # The converse of the guard: it must not have made a real discipline
+    # unreachable. Every enum member still returns the full task set.
+    tasks = [Task(id=1, title="a", tags=["P1"]), Task(id=2, title="b")]
+    weights = BandWeights(p1=3, p2=2, unprioritised=1)
+
+    for strategy in QueueStrategy:
+        ordered = order_queue(tasks, strategy, weights, rng=random.Random(0))
+
+        assert sorted(t.id for t in ordered) == [1, 2], strategy

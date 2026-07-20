@@ -136,13 +136,23 @@ def order_queue(
             task for band in (*PRIORITY_BANDS, UNPRIORITISED) for task in banded[band]
         ]
 
-    return _weighted_mix(
-        banded,
-        weights,
-        rng if rng is not None else random.Random(),
-        now,
-        starvation_threshold_hours,
-    )
+    if strategy == QueueStrategy.WEIGHTED_MIX:
+        return _weighted_mix(
+            banded,
+            weights,
+            rng if rng is not None else random.Random(),
+            now,
+            starvation_threshold_hours,
+        )
+
+    # Explicit rather than falling through to weighted_mix: a strategy added to
+    # QueueStrategy without a branch here would otherwise be dispatched silently
+    # as weighted_mix, and a scheduler quietly running the wrong discipline is
+    # the kind of failure nobody notices — the queue keeps draining, just in the
+    # wrong order. Config and PATCH /api/control/config both validate, so this
+    # is unreachable from the UI or a config file.
+    msg = f"unhandled queue strategy {strategy!r}"
+    raise ValueError(msg)
 
 
 def _partition(tasks: list[Task]) -> dict[str, list[Task]]:
