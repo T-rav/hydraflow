@@ -42,6 +42,71 @@ from service_registry import (
 if TYPE_CHECKING:
     from config import HydraFlowConfig
 
+# --- Air-gap seam registry (#10012) ----------------------------------------
+#
+# Every loop/runner module that can lexically spawn an LLM or a subprocess
+# (run_lightweight_agent / get_default_runner / stream_claude_process /
+# create_subprocess_exec / run_subprocess / run_subprocess_result call sites
+# in src/*_loop.py, src/*_runner.py, and src/runners/**) must either declare
+# here HOW the sandbox air-gaps it, or sit in the shrink-only grandfathered
+# baseline of tests/architecture/test_sandbox_seam_completeness.py. That
+# guard AST-enumerates the call sites and reddens when a NEW spawn path
+# appears without a declaration — turning the next s51/s56/s57 wedged-sandbox
+# incident (#9919, #9925, #10006) into a red unit test at PR time.
+#
+# Keys are module stems (the loop/worker's module name); values are one of
+# SEAM_KINDS:
+#
+# - "fake_llm_runner": the runner instance is rebound wholesale via
+#   ``runners=fake_llm`` in ``build_services`` (triage/plan/implement/review);
+#   remaining BaseRunner constructions thread ``runner=subprocess_runner``,
+#   which main() below injects as FakeSubprocessRunner.
+# - "fake_subprocess_runner": the spawn only happens through the injected
+#   SubprocessRunner; main() passes FakeSubprocessRunner so the real docker/
+#   host dispatch is never constructed.
+# - "mockworld_sentinel": subclasses consult ``_mockworld_fake_llm``
+#   (attached by main() below) in their dispatch method and route to FakeLLM
+#   before reaching the real spawn; ShapeRunner is dropped to None outright.
+# - "seed_seam": main() below injects seed-scripted stand-ins onto the loop
+#   instance when the scenario seeds them (and the scenario is crafted to
+#   stay within the seam's coverage — see the per-loop comments in main()).
+# - "config_disable": ``_apply_sandbox_config_overrides`` turns the spawning
+#   code path off wholesale.
+SEAM_KINDS: frozenset[str] = frozenset(
+    {
+        "fake_llm_runner",
+        "fake_subprocess_runner",
+        "mockworld_sentinel",
+        "seed_seam",
+        "config_disable",
+    }
+)
+
+SANDBOX_SEAMS: dict[str, str] = {
+    # The four phase runners (triage/plan/implement/review) are replaced by
+    # ``runners=fake_llm``; every other build_services BaseRunner gets the
+    # injected FakeSubprocessRunner via ``runner=subprocess_runner``.
+    "base_runner": "fake_llm_runner",
+    # ADR-0063 runners (discover/plan-review/council/spec-review/diagnostic/
+    # decompose) consult the ``_mockworld_fake_llm`` sentinel before their
+    # BaseSubprocessRunner.run spawn; sentinels are attached in main().
+    "base_subprocess_runner": "mockworld_sentinel",
+    # ``get_docker_runner`` is the default only when no ``subprocess_runner``
+    # is injected; main() always injects FakeSubprocessRunner.
+    "docker_runner": "fake_subprocess_runner",
+    # External recorders + replay gate path off via
+    # ``contract_refresh_external_enabled=False`` (s30).
+    "contract_refresh_loop": "config_disable",
+    # s56: ``skill_prompt_corpus_cases`` / ``skill_prompt_refine_patch`` seed
+    # seams replace ``_run_corpus`` and ``_refine_llm``; the seeded patch trips
+    # the tripwire so the loop returns before ``_open_refine_pr``'s raw spawns.
+    "skill_prompt_eval_loop": "seed_seam",
+    # s57: ``issue_refinement_backlog`` / ``issue_refinement_verdicts`` seed
+    # seams replace ``_refinement_llm`` so dup/priority judgments never shell
+    # out to a real ``claude``.
+    "issue_refinement_loop": "seed_seam",
+}
+
 
 def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     """Turn off production code paths that reach services unreachable on the
