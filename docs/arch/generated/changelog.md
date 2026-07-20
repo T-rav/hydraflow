@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `5ae0798` — chore(arch): regen artifacts after staging merge (#9546) (#9546) *(2026-07-20)*
 - `77772e0` — feat(test-adequacy): independent second-opinion verifier gated on explicit OK (#9546) (#9546) *(2026-07-20)*
 - `14f4a2e` — fix(refinement): v1 follow-ups — not-planned closes, priority budget, fail-closed fake, inefficiency re-file (#10025) (#10066) (#10066) *(2026-07-20)*
 - `1306712` — fix(fitness): cadence-derived min_samples — scorecards can finally score (#9841) (#10056) (#10056) *(2026-07-20)*
@@ -525,7 +526,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `39c6fc9` — feat(principles-audit): ADR-0044 + audit framework + P1 checks (#8386) (#8386) *(2026-04-22)*
 - `57157c8` — feat(audit): prompt audit report + scoring engine (sub-project 1 of 4) (#8376) (#8376) *(2026-04-21)*
 - `046f5fa` — refactor(agent-cli): scan /opt/plugins dynamically instead of hardcoding (#8375) (#8375) *(2026-04-21)*
-- `6b45f82` — feat(skills): boot-time install + prompt alignment + per-phase whitelist (#8374) (#8374) *(2026-04-21)*
 
 
 <!-- arch:generated -->
