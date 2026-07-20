@@ -6,11 +6,12 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `45ef36f` — fix(wiki): worktree-isolate runtime wiki writes — boot store read-only + queue-routed ingest (#9836) (#10033) (#10033) *(2026-07-20)*
+- `67cc3ce` — fix(file-util): bounded file_lock with FIFO gate + FileLockTimeout (#9661) (#10032) (#10032) *(2026-07-20)*
 - `ccebee6` — feat(refinement): IssueRefinementLoop — tiered backlog dedup, priority scoring, operator digest (#9957) (#10024) (#10024) *(2026-07-20)*
 
 ## 2026-W29
 
-- `7c660e7` — fix(wiki): worktree-isolate runtime wiki writes — boot store read-only + queue-routed ingest (#9836) (#9836) *(2026-07-19)*
 - `33f8b6f` — feat(refine): prompt self-refinement — honeypot-gated auto-merge prompt-fix PRs + telemetry consumption (#9724) (#10006) (#10006) *(2026-07-19)*
 - `f7c15a9` — fix(audit): split P10.3 enforcement from measurement — per-PR gate + telemetry scan (#9902) (#10008) (#10008) *(2026-07-19)*
 - `79d683c` — feat(gate-health): GateHealthLoop — CI reds as distributions, not events (#9974) (#10003) (#10003) *(2026-07-19)*

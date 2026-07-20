@@ -195,6 +195,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         7200,
     ),
     ("loop_watchdog_llm_seconds", "HYDRAFLOW_LOOP_WATCHDOG_LLM_SECONDS", 14400),
+    (
+        "boot_gap_alert_threshold_seconds",
+        "HYDRAFLOW_BOOT_GAP_ALERT_THRESHOLD_SECONDS",
+        600,
+    ),
     ("collaborator_cache_ttl", "HYDRAFLOW_COLLABORATOR_CACHE_TTL", 600),
     (
         "issue_cache_enrich_ttl_seconds",
@@ -2658,6 +2663,18 @@ class HydraFlowConfig(BaseModel):
             "Rotate events.jsonl every RunsGCLoop cycle, not just at boot "
             "(#9905). The size bound inside rotation guarantees the "
             "post-rotation file fits event_log_max_size_mb."
+        ),
+    )
+    boot_gap_alert_threshold_seconds: int = Field(
+        default=600,
+        ge=60,
+        le=86400,
+        description=(
+            "At boot, if the gap between the last persisted events.jsonl "
+            "entry and process start exceeds this many seconds, publish one "
+            "SYSTEM_ALERT ('factory was down ~Xh') so the dashboard shows the "
+            "outage after the fact (#10009). Default 10 minutes — long enough "
+            "to not fire on a normal quick restart/deploy."
         ),
     )
     state_prune_enabled: bool = Field(

@@ -178,6 +178,104 @@ class TestCadenceGate:
         prs.create_rc_branch.assert_called_once()
 
 
+class TestMissedCadenceBootCheck:
+    """#10009: loud boot-time warning when the RC cadence was missed by a
+    wide margin (factory process was likely down), distinct from the
+    ordinary cadence gate which already cuts immediately once the plain
+    cadence has elapsed."""
+
+    @pytest.mark.asyncio
+    async def test_no_marker_no_warning(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        loop, _ = _make_loop(tmp_path, monkeypatch, rc_cadence_hours=4)
+        assert not loop._cadence_path().exists()
+        with caplog.at_level("WARNING", logger="hydraflow.staging_promotion_loop"):
+            await loop._do_work()
+        assert not any(
+            "missed its RC cadence" in r.getMessage() for r in caplog.records
+        )
+        assert loop._boot_cadence_checked is True
+
+    @pytest.mark.asyncio
+    async def test_recent_marker_no_warning(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        loop, _ = _make_loop(tmp_path, monkeypatch, rc_cadence_hours=4)
+        loop._record_last_rc(datetime.now(UTC) - timedelta(hours=1))
+        with caplog.at_level("WARNING", logger="hydraflow.staging_promotion_loop"):
+            await loop._do_work()
+        assert not any(
+            "missed its RC cadence" in r.getMessage() for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_elapsed_but_below_alert_multiplier_no_loud_warning(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """5h behind a 4h cadence already cuts (elapsed >= cadence) but is
+        below the 1.5x=6h alert threshold — no loud "was likely down" log."""
+        loop, prs = _make_loop(tmp_path, monkeypatch, rc_cadence_hours=4)
+        loop._record_last_rc(datetime.now(UTC) - timedelta(hours=5))
+        with caplog.at_level("WARNING", logger="hydraflow.staging_promotion_loop"):
+            result = await loop._do_work()
+        assert result["status"] == "opened"
+        prs.create_rc_branch.assert_called_once()
+        assert not any(
+            "missed its RC cadence" in r.getMessage() for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_beyond_alert_multiplier_logs_loud_warning_and_cuts(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """20h behind a 4h cadence (>1.5x=6h) — loud warning AND immediate cut."""
+        loop, prs = _make_loop(tmp_path, monkeypatch, rc_cadence_hours=4)
+        loop._record_last_rc(datetime.now(UTC) - timedelta(hours=20))
+        with caplog.at_level("WARNING", logger="hydraflow.staging_promotion_loop"):
+            result = await loop._do_work()
+        assert result["status"] == "opened"
+        prs.create_rc_branch.assert_called_once()
+        warnings = [
+            r.getMessage()
+            for r in caplog.records
+            if "missed its RC cadence" in r.getMessage()
+        ]
+        assert len(warnings) == 1
+        assert "cadence=4h" in warnings[0]
+        assert "likely down" in warnings[0]
+
+    @pytest.mark.asyncio
+    async def test_only_warns_once_per_loop_lifetime(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        loop, _ = _make_loop(tmp_path, monkeypatch, rc_cadence_hours=4)
+        loop._record_last_rc(datetime.now(UTC) - timedelta(hours=20))
+        with caplog.at_level("WARNING", logger="hydraflow.staging_promotion_loop"):
+            await loop._do_work()  # first tick: cuts an RC, records a fresh marker
+            await loop._do_work()  # second tick: marker is now fresh, but even
+            # if it weren't, the boot check must not fire twice
+        warnings = [
+            r for r in caplog.records if "missed its RC cadence" in r.getMessage()
+        ]
+        assert len(warnings) == 1
+
+
 class TestRcBranchNaming:
     @pytest.mark.asyncio
     async def test_rc_branch_uses_prefix_and_timestamp(
