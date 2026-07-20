@@ -22,6 +22,7 @@ import trace_collector
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
+from process_group import kill_process_group
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig, ManagedRepo
@@ -43,19 +44,23 @@ async def _communicate_bounded(
 ) -> tuple[bytes, bytes]:
     """``proc.communicate()`` bounded by *timeout* seconds.
 
-    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
-    the caller ends its cycle (and is restarted by the supervisor) rather than
-    hanging indefinitely.
+    On timeout the wedged child's whole PROCESS GROUP is reaped and a
+    ``TimeoutError`` propagates so the caller ends its cycle (and is
+    restarted by the supervisor) rather than hanging indefinitely.
+
+    Callers must spawn with ``start_new_session=True`` (child is its own
+    group leader): ``make audit-json`` fans out sub-make → pytest → LLM
+    grandchildren, and a child-only ``proc.kill()`` re-parented them to
+    init where they kept burning API credits (#9579). The guarded
+    primitive never raises — an already-exited child included — so the
+    TimeoutError (the intended failed-read signal) still propagates
+    (#9794/#9816).
     """
     try:
         return await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except TimeoutError:
-        # proc.kill() itself raises ProcessLookupError when the child already
-        # exited — suppress it too, not just proc.wait() — so the TimeoutError
-        # (the intended failed-read signal) propagates instead of crashing the
-        # caller with ProcessLookupError. (#9794/#9816)
+        kill_process_group(proc)
         with contextlib.suppress(ProcessLookupError):
-            proc.kill()
             await proc.wait()
         raise
 
@@ -234,6 +239,10 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             cwd=self._config.repo_root,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # Group leader (pid == pgid) so the timeout reap in
+            # _communicate_bounded kills the whole make → pytest → LLM
+            # subtree, not just the top-level make (#9579).
+            start_new_session=True,
         )
         try:
             stdout, stderr = await _communicate_bounded(
@@ -296,6 +305,9 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            # Group leader: _communicate_bounded reaps via killpg, which is
+            # only meaningful when the child owns its group (#9579).
+            start_new_session=True,
         )
         try:
             out, _ = await _communicate_bounded(proc, timeout=_GIT_TIMEOUT_SECONDS)
