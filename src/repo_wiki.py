@@ -34,6 +34,24 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.repo_wiki")
 
+
+class RepoWikiReadOnlyError(RuntimeError):
+    """Raised when a knowledge-content write is attempted on a read-only store.
+
+    The boot-time self-repo store (``service_registry``) is constructed
+    ``read_only=True`` because its ``wiki_root`` / ``tracked_root`` point at
+    the operator's main checkout (``repo_root``). Runtime knowledge writes
+    there dirty the working tree and never ride a PR (the maintenance heal
+    runs in an ephemeral worktree — #9539, #9836). This error makes any such
+    write fail loudly instead of silently corrupting the checkout, so a
+    missed reroute is a caught bug rather than a perpetual-dirt footgun.
+
+    Reads (``query``) and gitignored runtime caches (``mark_ingested``,
+    ``append_log``) remain allowed — only the four content-mutating methods
+    (``ingest``, ``write_entry``, ``mark_superseded``, ``active_lint``) raise.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
@@ -757,6 +775,8 @@ class RepoWikiStore:
         wiki_root: Path,
         tracked_root: Path | None = None,
         self_slug: str | None = None,
+        *,
+        read_only: bool = False,
     ) -> None:
         """Initialise a repo-wiki store.
 
@@ -769,11 +789,38 @@ class RepoWikiStore:
         the running repo's own wiki. The self-repo's pages live directly
         under ``wiki_root`` (no owner/repo nesting); every other slug
         nests under ``wiki_root/owner/repo``.
+
+        ``read_only`` (keyword-only) blocks the four knowledge-content
+        write methods (``ingest``, ``write_entry``, ``mark_superseded``,
+        ``active_lint``) — they raise :class:`RepoWikiReadOnlyError`. Used
+        for the boot-time store whose roots live under the operator's main
+        checkout: runtime content writes there dirty the tree and never
+        ride a PR (#9539, #9836). Reads and gitignored caches stay allowed.
         """
         self._wiki_root = wiki_root
         self._tracked_root = tracked_root
         self._self_slug = self_slug
+        self._read_only = read_only
         self._dedup_stores: dict[str, object] = {}
+
+    @property
+    def is_read_only(self) -> bool:
+        """True when content-write methods are blocked (see ``read_only``)."""
+        return self._read_only
+
+    def _ensure_writable(self, method: str) -> None:
+        """Raise :class:`RepoWikiReadOnlyError` when the store is read-only.
+
+        Called at the top of every knowledge-content write method so a
+        stray write against the main-checkout store fails loudly instead
+        of silently dirtying ``repo_root``.
+        """
+        if self._read_only:
+            raise RepoWikiReadOnlyError(
+                f"RepoWikiStore.{method} is blocked: this store is read-only "
+                f"(wiki_root={self._wiki_root}). Route content writes through the "
+                "worktree-isolated maintenance PR path (see wiki_maint_queue)."
+            )
 
     # -- public API --------------------------------------------------------
 
@@ -787,6 +834,7 @@ class RepoWikiStore:
         Creates the repo wiki directory if it doesn't exist, updates
         topic pages, refreshes the index, and logs the operation.
         """
+        self._ensure_writable("ingest")
         repo_dir = self._ensure_repo_dir(repo_slug)
         result = IngestResult()
 
@@ -997,6 +1045,7 @@ class RepoWikiStore:
 
         Returns the same ``LintResult`` with counts of actions taken.
         """
+        self._ensure_writable("active_lint")
         repo_dir = self._repo_dir(repo_slug)
         result = LintResult()
 
@@ -1086,6 +1135,7 @@ class RepoWikiStore:
         entry was found and updated; False otherwise. Does not delete or
         move the entry. Callers emit events.
         """
+        self._ensure_writable("mark_superseded")
         repo_dir = self._repo_dir(repo_slug)
         if not repo_dir.exists():
             return False
@@ -1206,7 +1256,9 @@ class RepoWikiStore:
             FileExistsError: If the computed path collides with an
                 existing file (same id + slug + issue).  The exclusive
                 open prevents silent overwrite of prior entries.
+            RepoWikiReadOnlyError: If the store was constructed read-only.
         """
+        self._ensure_writable("write_entry")
         repo_dir = self._repo_dir(repo_slug)
         topic_dir = repo_dir / topic
         topic_dir.mkdir(parents=True, exist_ok=True)

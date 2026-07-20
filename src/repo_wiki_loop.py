@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ValidationError
+
 from auto_pr import generate_and_open_pr_async
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import Credentials, HydraFlowConfig
@@ -22,6 +24,7 @@ from repo_wiki import (
     RepoWikiStore,
     WikiEntry,
     active_lint_tracked,
+    classify_topic,
     flag_generic_entries_stale,
 )
 from staleness import evaluate as evaluate_staleness
@@ -44,6 +47,12 @@ logger = logging.getLogger("hydraflow.repo_wiki_loop")
 
 # Terminal outcome types — issues with these outcomes are considered closed.
 _TERMINAL_OUTCOMES = frozenset({"merged", "hitl_closed", "failed", "manual_close"})
+
+# Console-triggered admin task kinds, drained up front for logging. The
+# ``ingest-entry`` kind is handled separately inside the worktree heal so
+# the queued entries are written into the tracked layout and ride the
+# maintenance PR (#9836).
+_ADMIN_KINDS: tuple[str, ...] = ("force-compile", "mark-stale", "rebuild-index")
 
 
 @dataclass
@@ -198,7 +207,12 @@ class RepoWikiLoop(BaseBackgroundLoop):
 
         drained = self._drain_maintenance_queue()
         repos, _ = self._resolve_repos()
-        if not repos:
+        # Pending ingest-entry tasks (reflection bridge, shipped-gap,
+        # plan/review fallback — #9836) must clear the no-repos early
+        # return: the heal writes them into the tracked layout even for a
+        # repo the store has not indexed yet.
+        has_pending_ingest = any(t.kind == "ingest-entry" for t in self._queue.peek())
+        if not repos and not has_pending_ingest:
             return {
                 "repos": 0,
                 "total_entries": 0,
@@ -239,8 +253,11 @@ class RepoWikiLoop(BaseBackgroundLoop):
         Admin actions may target repos the store does not yet see (e.g.
         rebuild-index of a freshly migrated repo), so draining before the
         ``list_repos`` early-return keeps them from piling up in the queue.
+        Only the admin kinds are drained here; ``ingest-entry`` tasks stay
+        queued so the worktree heal can apply them into the tracked layout
+        and roll them into the maintenance PR (#9836).
         """
-        drained = self._queue.drain()
+        drained = self._queue.drain_kinds(_ADMIN_KINDS)
         if drained:
             logger.info(
                 "Wiki maintenance queue drained %d tasks: %s",
@@ -576,6 +593,10 @@ class RepoWikiLoop(BaseBackgroundLoop):
         path_prefix = self._config.repo_wiki_path
         heal_stats: dict[str, Any] = {}
         diff_files: list[str] = []
+        # ingest-entry tasks successfully written into the worktree this
+        # run — re-enqueued if the PR fails to open so the entries are not
+        # lost with the discarded worktree (#9836).
+        applied_ingest: list[MaintenanceTask] = []
 
         async def _generate(worktree: Path) -> None:
             # Heal the worktree's copy of the tracked layout — every write
@@ -616,6 +637,22 @@ class RepoWikiLoop(BaseBackgroundLoop):
             await self._run_generalization_pass(per_repo=store)
             heal_stats.update(s)
 
+            # Apply queued ingest-entry tasks into the tracked layout so
+            # the reflection-bridge / shipped-gap / plan-review-fallback
+            # entries ride this PR instead of dirtying repo_root (#9836).
+            # Only meaningful when git-backed: the maintenance PR commits
+            # ``path_prefix`` (the tracked layout), so a non-git-backed run
+            # leaves the tasks queued for a later git-backed tick.
+            if self._config.repo_wiki_git_backed:
+                tasks = self._queue.drain_kinds(["ingest-entry"])
+                if tasks:
+                    applied = await asyncio.to_thread(
+                        self._apply_ingest_entry_tasks, tracked_root, tasks
+                    )
+                    applied_ingest.extend(applied)
+                    if applied:
+                        heal_stats["ingest_entries_applied"] = len(applied)
+
             # Capture the changed files for the PR body (lazy-resolved after
             # this callback returns).
             try:
@@ -632,13 +669,20 @@ class RepoWikiLoop(BaseBackgroundLoop):
             # cascade). Below the threshold — and inside the age window — we
             # revert the worktree so generate_and_open_pr_async sees no diff
             # and skips the PR; the healed content simply regenerates on a
-            # later tick together with more accumulated entries.
-            if diff_files and await asyncio.to_thread(
-                self._maybe_defer_small_batch,
-                worktree,
-                path_prefix,
-                len(diff_files),
-                force_by_age,
+            # later tick together with more accumulated entries. Explicit
+            # ingest-entry deliveries bypass the defer: they were reverted by
+            # the checkout otherwise, and their source (a merged PR /
+            # completed phase) will not regenerate them.
+            if (
+                not applied_ingest
+                and diff_files
+                and await asyncio.to_thread(
+                    self._maybe_defer_small_batch,
+                    worktree,
+                    path_prefix,
+                    len(diff_files),
+                    force_by_age,
+                )
             ):
                 stats["maintenance_deferred_files"] = len(diff_files)
                 diff_files.clear()
@@ -694,6 +738,63 @@ class RepoWikiLoop(BaseBackgroundLoop):
                 branch,
                 result.error,
             )
+
+        # The worktree (and any ingest-entry files written into it) is
+        # discarded unless a PR opened. Re-enqueue the applied ingest-entry
+        # tasks so their knowledge is delivered on a later tick rather than
+        # lost. Malformed tasks were dropped during apply, so this cannot
+        # loop on a poison payload.
+        if result.status != "opened" and applied_ingest:
+            for task in applied_ingest:
+                self._queue.enqueue(task)
+            logger.info(
+                "Re-enqueued %d ingest-entry task(s) after maintenance PR %s",
+                len(applied_ingest),
+                result.status,
+            )
+
+    def _apply_ingest_entry_tasks(
+        self, tracked_root: Path, tasks: list[MaintenanceTask]
+    ) -> list[MaintenanceTask]:
+        """Write queued ``ingest-entry`` tasks into the worktree's tracked
+        layout so they ride the maintenance PR (#9836).
+
+        Uses a tracked-layout store with no ``self_slug`` so the self-repo
+        nests under ``{tracked_root}/{owner}/{repo}/{topic}/`` — inside the
+        PR's ``path_specs`` — rather than flattening to ``docs/wiki`` (which
+        the PR does not commit). Each task carries a serialized
+        :class:`WikiEntry`; per-task failures are logged and skipped so one
+        malformed payload can't strand the batch. Returns the tasks that
+        were written (the caller re-enqueues these if the PR fails to open).
+        """
+        if not tasks:
+            return []
+        store = RepoWikiStore(wiki_root=tracked_root, tracked_root=tracked_root)
+        applied: list[MaintenanceTask] = []
+        for task in tasks:
+            raw = task.params.get("entry")
+            if not isinstance(raw, dict):
+                logger.warning(
+                    "ingest-entry task for %s has no entry payload; dropping",
+                    task.repo_slug,
+                )
+                continue
+            # Narrow catch (no broad ``except`` here): this is pure file
+            # I/O + model parsing — a bad payload raises ValidationError, a
+            # write raises OSError. There is no credit-bearing call to guard
+            # with ``reraise_on_credit_or_bug``.
+            try:
+                entry = WikiEntry.model_validate(raw)
+                topic = entry.topic or classify_topic(entry)
+                store.write_entry(task.repo_slug, entry, topic=topic)
+                applied.append(task)
+            except (ValidationError, OSError):
+                logger.warning(
+                    "Failed to apply ingest-entry task for %s; dropping",
+                    task.repo_slug,
+                    exc_info=True,
+                )
+        return applied
 
     def _maybe_defer_small_batch(
         self, worktree: Path, path_prefix: str, n_files: int, forced: bool
