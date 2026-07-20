@@ -133,6 +133,40 @@ class PRManager:
         self._max_retries = config.gh_max_retries
         self._label_counts_cache: LabelCounts | None = None
         self._label_counts_ts: float = 0.0
+        # #9842: notified on every successful ``swap_pipeline_labels`` so the
+        # dashboard's in-memory pipeline moves in seconds, not at the 300s
+        # label poll. Wired by service_registry to
+        # ``IssueStore.apply_label_transition``; None outside full wiring.
+        self._pipeline_label_listener: Callable[[int, str], object] | None = None
+
+    def set_pipeline_label_listener(
+        self, listener: Callable[[int, str], object]
+    ) -> None:
+        """Register a ``(issue_number, new_label)`` callback fired after each
+        successful :meth:`swap_pipeline_labels` add (#9842).
+
+        Internal wiring plumbing (like ``IssueStore.set_crate_manager``) —
+        deliberately NOT on :class:`ports.PRPort`; service_registry gates the
+        call on attribute presence so port fakes stay untouched.
+        """
+        self._pipeline_label_listener = listener
+
+    def _notify_pipeline_label_listener(
+        self, issue_number: int, new_label: str
+    ) -> None:
+        """Best-effort listener dispatch — a board-push failure must never
+        fail the GitHub label swap itself."""
+        if self._pipeline_label_listener is None:
+            return
+        try:
+            self._pipeline_label_listener(issue_number, new_label)
+        except Exception:
+            logger.warning(
+                "pipeline label listener failed for issue #%d → %s",
+                issue_number,
+                new_label,
+                exc_info=True,
+            )
 
     def _assert_repo(self) -> None:
         """Raise ``RuntimeError`` if ``self._repo`` is empty or malformed."""
@@ -1982,6 +2016,11 @@ class PRManager:
         await self._add_labels_strict("issue", issue_number, [new_label])
         if pr_number is not None:
             await self._add_labels_strict("pr", pr_number, [new_label])
+
+        # The swap is now real on GitHub (add-first defines the new stage) —
+        # push it to the in-memory pipeline BEFORE the best-effort removal
+        # fan-out so the dashboard card moves in seconds (#9842).
+        self._notify_pipeline_label_listener(issue_number, new_label)
 
         # --- then remove stale labels (best-effort) ---
         all_labels = self._config.all_pipeline_labels
