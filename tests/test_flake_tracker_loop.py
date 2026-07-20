@@ -14,6 +14,12 @@ from events import EventBus
 from flake_tracker_loop import FlakeTrackerLoop, parse_junit_xml
 
 
+def _gh_cache() -> MagicMock:
+    cache = MagicMock()
+    cache.get_rc_workflow_runs = AsyncMock(return_value=[])
+    return cache
+
+
 def _deps(stop: asyncio.Event) -> LoopDeps:
     return LoopDeps(
         event_bus=EventBus(),
@@ -43,7 +49,12 @@ def test_skeleton_worker_name_and_interval(loop_env) -> None:
     cfg, state, pr, dedup = loop_env
     stop = asyncio.Event()
     loop = FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(stop),
+        github_cache=_gh_cache(),
     )
     assert loop._worker_name == "flake_tracker"
     assert loop._get_default_interval() == 14400
@@ -75,7 +86,12 @@ async def test_tally_flakes_counts_mixed_results(loop_env) -> None:
     cfg, state, pr, dedup = loop_env
     stop = asyncio.Event()
     loop = FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(stop),
+        github_cache=_gh_cache(),
     )
     # Spec §4.5 step 2: only tests with a *mixed pass/fail record* count
     # as flaky. Always-pass = healthy; always-fail = broken, not flaky.
@@ -113,7 +129,12 @@ async def test_do_work_files_issue_when_threshold_hit(loop_env, monkeypatch) -> 
     cfg, state, pr, dedup = loop_env
     stop = asyncio.Event()
     loop = FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(stop),
+        github_cache=_gh_cache(),
     )
 
     fake_runs = [
@@ -150,7 +171,12 @@ async def test_escalation_fires_after_three_attempts(loop_env, monkeypatch) -> N
     state.inc_flake_attempts.return_value = 3
     stop = asyncio.Event()
     loop = FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(stop),
+        github_cache=_gh_cache(),
     )
 
     async def fake_fetch():
@@ -189,7 +215,12 @@ async def test_reconcile_closed_escalations_clears_dedup(loop_env) -> None:
     dedup.get.return_value = {"flake_tracker:tests.foo.test_bar"}
     stop = asyncio.Event()
     loop = FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(stop),
+        github_cache=_gh_cache(),
     )
 
     pr.list_closed_issues_by_label.return_value = [
@@ -213,7 +244,12 @@ def _recovery_loop(loop_env, monkeypatch, *, download):
     cfg, state, pr, dedup = loop_env
     stop = asyncio.Event()
     loop = FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(stop),
+        github_cache=_gh_cache(),
     )
 
     async def fake_fetch():
@@ -386,7 +422,12 @@ async def test_kill_switch_short_circuits_do_work(loop_env) -> None:
         enabled_cb=lambda name: name != "flake_tracker",
     )
     loop = FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=deps
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=deps,
+        github_cache=_gh_cache(),
     )
     loop._reconcile_closed_escalations = AsyncMock(return_value=None)
     loop._fetch_recent_runs = AsyncMock(
@@ -407,7 +448,12 @@ def _make_loop(loop_env) -> FlakeTrackerLoop:
     cfg, state, pr, dedup = loop_env
     stop = asyncio.Event()
     return FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(stop),
+        github_cache=_gh_cache(),
     )
 
 

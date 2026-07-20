@@ -15,6 +15,23 @@ from unittest.mock import AsyncMock, MagicMock
 from tests.scenarios.catalog import LoopCatalog, register_loop
 
 
+def _scenario_github_cache(ports: dict[str, Any], config: Any, pr_manager: Any) -> Any:
+    """Shared ``GitHubDataCache`` over the scenario's GitHub port (#9814).
+
+    A REAL cache instance (not a MagicMock) so unseeded scenarios exercise
+    the production read path — loop → cache → FakeGitHub
+    ``list_runs_for_workflow`` — with zero subprocesses. Tests may override
+    by seeding a ``github_cache`` port key.
+    """
+    github_cache = ports.get("github_cache")
+    if github_cache is None:
+        from github_cache_loop import GitHubDataCache  # noqa: PLC0415
+
+        github_cache = GitHubDataCache(config, pr_manager, MagicMock())
+        ports["github_cache"] = github_cache
+    return github_cache
+
+
 def _build_ci_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from ci_monitor_loop import CIMonitorLoop  # noqa: PLC0415
 
@@ -456,6 +473,7 @@ def _build_flake_tracker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         ports["flake_dedup"] = dedup
 
     pr_manager = ports.get("pr_manager") or ports["github"]
+    github_cache = _scenario_github_cache(ports, config, pr_manager)
 
     loop = FlakeTrackerLoop(
         config=config,
@@ -463,6 +481,7 @@ def _build_flake_tracker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         pr_manager=pr_manager,
         dedup=dedup,
         deps=deps,
+        github_cache=github_cache,
     )
 
     # Rewire external I/O to seeded async callables (if provided).
@@ -573,6 +592,7 @@ def _build_rc_budget(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         ports["rc_budget_dedup"] = dedup
 
     pr_manager = ports.get("pr_manager") or ports["github"]
+    github_cache = _scenario_github_cache(ports, config, pr_manager)
 
     loop = RCBudgetLoop(
         config=config,
@@ -580,6 +600,7 @@ def _build_rc_budget(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         pr_manager=pr_manager,
         dedup=dedup,
         deps=deps,
+        github_cache=github_cache,
     )
 
     # Rewire external I/O to seeded async callables (if provided).

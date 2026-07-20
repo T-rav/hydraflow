@@ -213,6 +213,7 @@ def _flake_tracker_loop(tmp_path: Path):
         pr_manager=MagicMock(),
         dedup=MagicMock(),
         deps=d.loop_deps,
+        github_cache=MagicMock(),
     )
 
 
@@ -288,6 +289,7 @@ def _rc_budget_loop(tmp_path: Path):
         pr_manager=MagicMock(),
         dedup=MagicMock(),
         deps=d.loop_deps,
+        github_cache=MagicMock(),
     )
 
 
