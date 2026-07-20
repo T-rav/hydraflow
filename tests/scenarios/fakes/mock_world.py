@@ -250,6 +250,10 @@ class MockWorld:
         self._issues: dict[int, dict[str, Any]] = {}
         self._phase_hooks: list[tuple[str, Callable[[], None]]] = []
         self._ran = False
+        # Last seed given to apply_seed — run_with_loops wires the seed-seam
+        # loop overrides (stale worktrees, gate proposals, rulesets, expired
+        # runs) from it, mirroring sandbox_main's composition root (#9543).
+        self._applied_seed: MockWorldSeed | None = None
         self._dashboard: Any = None
         self._dashboard_url: str | None = None
 
@@ -356,6 +360,7 @@ class MockWorld:
         title: str,
         body: str,
         labels: list[str] | None = None,
+        state: str = "open",
     ) -> MockWorld:
         self._issues[number] = {
             "number": number,
@@ -363,7 +368,7 @@ class MockWorld:
             "body": body,
             "labels": labels or ["hydraflow-find"],
         }
-        self._github.add_issue(number, title, body, labels=labels)
+        self._github.add_issue(number, title, body, labels=labels, state=state)
         return self
 
     def add_repo(
@@ -467,6 +472,7 @@ class MockWorld:
         test code that wants to consume a sandbox scenario's seed() output
         without rewriting it as a fluent chain. Returns self for chaining.
         """
+        self._applied_seed = seed
         for repo_slug, repo_path in seed.repos:
             self.add_repo(repo_slug, repo_path)
         for issue_dict in seed.issues:
@@ -475,6 +481,7 @@ class MockWorld:
                 title=issue_dict["title"],
                 body=issue_dict["body"],
                 labels=list(issue_dict.get("labels", [])),
+                state=issue_dict.get("state", "open"),
             )
         for pr_dict in seed.prs:
             self._github.add_pr(
@@ -483,9 +490,12 @@ class MockWorld:
                 branch=pr_dict["branch"],
                 ci_status=pr_dict.get("ci_status", "pass"),
                 merged=pr_dict.get("merged", False),
+                mergeable=pr_dict.get("mergeable", True),
             )
             for label in pr_dict.get("labels", []):
                 self._github.add_pr_label(pr_dict["number"], label)
+        for name, cfg in seed.rulesets.items():
+            self._github.add_ruleset(name, cfg)
         for phase, by_issue in seed.scripts.items():
             for issue_number, results in by_issue.items():
                 for result in results:
@@ -758,6 +768,11 @@ class MockWorld:
             self._loop_ports["workspace"] = self._workspace
             self._loop_ports["state"] = self._harness.state
 
+        # Mirror sandbox_main's seed-seam composition wiring (#9543) so the
+        # in-process tier exercises the same active-trigger paths the docker
+        # tier does (dual-loader parity).
+        self._wire_seed_loop_seams(config)
+
         loop_instances = []
         for name in loops:
             instance = LoopCatalog.instantiate(
@@ -772,6 +787,72 @@ class MockWorld:
                 results[name] = stats
 
         return results
+
+    def _wire_seed_loop_seams(self, config: Any) -> None:
+        """Wire seed-seam loop overrides from the last applied seed (#9543).
+
+        The dual-loader parity contract: any composition-root seam
+        ``sandbox_main`` wires from a ``MockWorldSeed`` field must be wired
+        here too, so ``test_sandbox_parity`` runs every scenario's active
+        path in-process as well. Reuses sandbox_main's public builders — one
+        implementation, no drift. Empty seed fields (or no ``apply_seed``
+        call at all) leave every port default untouched.
+        """
+        seed = self._applied_seed
+        if seed is None:
+            return
+        from mockworld.sandbox_main import (  # noqa: PLC0415
+            build_seeded_branch_protection_auditor,
+            build_seeded_gate_detector,
+            materialize_expired_runs,
+            seed_stale_workspaces,
+        )
+
+        if seed.stale_workspaces:
+            # Register the worktrees in the REAL harness StateTracker and hand
+            # that tracker to the loop builder (its default is an empty-world
+            # MagicMock, which can never surface a tracked workspace).
+            seed_stale_workspaces(self._harness.state, config, seed)
+            self._loop_ports.setdefault("workspace_gc_state", self._harness.state)
+        if seed.gate_activations:
+            self._loop_ports.setdefault(
+                "gate_activation_detect",
+                build_seeded_gate_detector(seed.gate_activations),
+            )
+        if seed.rulesets:
+            # The run_with_loops config is tmp-rooted; point the audit at the
+            # real repo's canonical ruleset contract, as the baked sandbox
+            # image does via config.repo_root.
+            repo_root = Path(__file__).resolve().parents[3]
+            self._loop_ports.setdefault(
+                "branch_protection_audit",
+                build_seeded_branch_protection_auditor(
+                    config,
+                    self._github,
+                    canonical_dir=repo_root
+                    / "docs"
+                    / "standards"
+                    / "branch_protection",
+                ),
+            )
+        if seed.expired_run_dirs:
+            from run_recorder import RunRecorder  # noqa: PLC0415
+
+            materialize_expired_runs(config, seed)
+            self._loop_ports.setdefault("run_recorder", RunRecorder(config))
+        epic_labels = set(getattr(config, "epic_label", None) or ["hydraflow-epic"])
+        if any(epic_labels & set(i.get("labels", [])) for i in seed.issues):
+            # Give epic_sweeper a real fetcher over the shared FakeGitHub so a
+            # seeded epic (and its closed children) is actually swept; the
+            # builder default is an empty-world MagicMock.
+            from mockworld.fakes.fake_issue_fetcher import (  # noqa: PLC0415
+                FakeIssueFetcher,
+            )
+
+            self._loop_ports.setdefault(
+                "issue_fetcher", FakeIssueFetcher(github=self._github)
+            )
+            self._loop_ports.setdefault("epic_sweeper_state", self._harness.state)
 
     # --- Dashboard lifecycle ---
 

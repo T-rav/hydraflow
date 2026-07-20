@@ -76,3 +76,178 @@ def test_caretaker_enabled_cb_tolerates_extra_args() -> None:
     assert cb_all("workspace_gc", "extra", key="val") is True
     assert cb_subset("workspace_gc", "extra", key="val") is True
     assert cb_subset("other", "extra", key="val") is False
+
+
+# --- #9543 active-trigger seed seams -----------------------------------------
+
+
+def _seed_config(tmp_path):
+    from tests.helpers import make_bg_loop_deps
+
+    return make_bg_loop_deps(tmp_path).config
+
+
+def test_seed_stale_workspaces_populates_state(tmp_path) -> None:
+    from mockworld.seed import MockWorldSeed
+    from state import StateTracker
+
+    config = _seed_config(tmp_path)
+    state = StateTracker(config.state_file)
+    seed = MockWorldSeed(
+        stale_workspaces=[{"number": 7301, "branch": "agent/issue-7301"}]
+    )
+
+    sandbox_main.seed_stale_workspaces(state, config, seed)
+
+    workspaces = state.get_active_workspaces()
+    assert 7301 in workspaces
+    expected = config.workspace_base / config.repo_slug / "issue-7301"
+    assert workspaces[7301] == str(expected)
+    assert state.get_active_branches()[7301] == "agent/issue-7301"
+
+
+def test_seed_stale_workspaces_defaults_branch_and_noops_when_empty(
+    tmp_path,
+) -> None:
+    from mockworld.seed import MockWorldSeed
+    from state import StateTracker
+
+    config = _seed_config(tmp_path)
+    state = StateTracker(config.state_file)
+
+    sandbox_main.seed_stale_workspaces(state, config, MockWorldSeed())
+    assert state.get_active_workspaces() == {}
+
+    seed = MockWorldSeed(stale_workspaces=[{"number": 42}])
+    sandbox_main.seed_stale_workspaces(state, config, seed)
+    assert state.get_active_branches()[42] == "agent/issue-42"
+
+
+def test_materialize_expired_runs_creates_purgeable_dir(tmp_path) -> None:
+    from mockworld.seed import MockWorldSeed
+    from run_recorder import RunRecorder
+
+    config = _seed_config(tmp_path)
+    seed = MockWorldSeed(expired_run_dirs=[{"issue": 7501, "age_days": 3650}])
+
+    sandbox_main.materialize_expired_runs(config, seed)
+
+    issue_dir = config.repo_data_path("runs") / "7501"
+    run_dirs = list(issue_dir.iterdir())
+    assert len(run_dirs) == 1
+    # The materialized run is genuinely expired: a purge cycle removes it.
+    recorder = RunRecorder(config)
+    assert recorder.purge_expired(config.artifact_retention_days) == 1
+    assert not issue_dir.exists()
+
+
+def test_materialize_expired_runs_noops_when_empty(tmp_path) -> None:
+    from mockworld.seed import MockWorldSeed
+
+    config = _seed_config(tmp_path)
+    sandbox_main.materialize_expired_runs(config, MockWorldSeed())
+    assert not (config.repo_data_path("runs")).exists()
+
+
+def test_build_seeded_gate_detector_returns_proposals() -> None:
+    import asyncio
+
+    detector = sandbox_main.build_seeded_gate_detector(
+        [
+            {
+                "name": "mockworld-scenarios",
+                "dimension": "tests",
+                "required_on": ["main", "staging"],
+                "workflow": "test.yml",
+                "job": "scenario-tests",
+                "make_target": "scenario",
+            }
+        ]
+    )
+
+    proposals = asyncio.run(detector())
+
+    assert len(proposals) == 1
+    proposal = proposals[0]
+    assert proposal.name == "mockworld-scenarios"
+    assert proposal.required_on == ("main", "staging")  # tuple-coerced
+    assert proposal.workflow == "test.yml"
+    assert proposal.job == "scenario-tests"
+
+
+def _write_canonical(tmp_path):
+    import json
+
+    canonical = {
+        "name": "main protect",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+        "rules": [{"type": "deletion"}],
+    }
+    staging = dict(canonical, name="staging protect")
+    canonical_dir = tmp_path / "canonical"
+    canonical_dir.mkdir()
+    (canonical_dir / "main_ruleset.json").write_text(json.dumps(canonical))
+    (canonical_dir / "staging_ruleset.json").write_text(json.dumps(staging))
+    return canonical_dir, canonical, staging
+
+
+def test_build_seeded_branch_protection_auditor_reports_drift(tmp_path) -> None:
+    import asyncio
+
+    from mockworld.fakes import FakeGitHub
+
+    config = _seed_config(tmp_path)
+    canonical_dir, _canonical, _staging = _write_canonical(tmp_path)
+    gh = FakeGitHub()
+    gh.add_ruleset(
+        "main protect",
+        {
+            "name": "main protect",
+            "target": "branch",
+            "enforcement": "disabled",  # drifted
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
+            "rules": [],
+        },
+    )
+    auditor = sandbox_main.build_seeded_branch_protection_auditor(
+        config, gh, canonical_dir=canonical_dir
+    )
+
+    report = asyncio.run(auditor())
+
+    assert not report.clean
+    # Both drift signals: the divergent main ruleset and the missing staging one.
+    assert any("staging protect" in d and "missing" in d for d in report.drifts)
+
+
+def test_build_seeded_branch_protection_auditor_clean_when_matching(
+    tmp_path,
+) -> None:
+    import asyncio
+
+    from mockworld.fakes import FakeGitHub
+
+    config = _seed_config(tmp_path)
+    canonical_dir, canonical, staging = _write_canonical(tmp_path)
+    gh = FakeGitHub()
+    gh.add_ruleset("main protect", canonical)
+    gh.add_ruleset("staging protect", staging)
+    auditor = sandbox_main.build_seeded_branch_protection_auditor(
+        config, gh, canonical_dir=canonical_dir
+    )
+
+    report = asyncio.run(auditor())
+
+    assert report.clean
+
+
+def test_sandbox_overrides_disable_approval_records(tmp_path) -> None:
+    """#9543: the CH-2 reconciler's raw ``gh`` boundary is config-disabled."""
+    config = _seed_config(tmp_path)
+    assert config.approval_records_enabled is True  # production default
+
+    sandbox_main._apply_sandbox_config_overrides(config)
+
+    assert config.approval_records_enabled is False

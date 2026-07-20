@@ -22,7 +22,11 @@ class MockWorldSeed:
     # List of (slug, path) pairs registered into RepoRegistryStore.
     repos: list[tuple[str, str]] = field(default_factory=list)
 
-    # Each issue is a dict with keys: number, title, body, labels[].
+    # Each issue is a dict with keys: number, title, body, labels[], and
+    # optionally state ("open" default / "closed"). A closed seed issue lets a
+    # scenario exercise closed-issue reads (e.g. workspace_gc's is-it-safe-to-GC
+    # check, epic_sweeper's are-all-children-done sweep) without driving the
+    # whole pipeline to close it first (#9543).
     issues: list[dict[str, Any]] = field(default_factory=list)
 
     # Per-issue seeded comments, keyed by issue number. Each entry is a dict
@@ -34,7 +38,9 @@ class MockWorldSeed:
     comments: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
 
     # Each PR is a dict with keys: number, issue_number, branch,
-    # ci_status, merged, labels[].
+    # ci_status, merged, labels[], and optionally mergeable (True default).
+    # ``mergeable: false`` seeds a CONFLICTING PR so merge_state_watcher's
+    # rebase/escalate path has something to act on (#9543).
     prs: list[dict[str, Any]] = field(default_factory=list)
 
     # Per-phase scripted LLM responses. Outer key is phase name
@@ -151,6 +157,38 @@ class MockWorldSeed:
     # ``FakeGitHub.fetch_rulesets`` returns ``{}``, leaving every existing seed
     # payload unchanged.
     rulesets: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    # Stale worktrees pre-registered in StateTracker for the ``workspace_gc``
+    # loop (#9543). Each entry is a dict with keys ``number`` (issue number)
+    # and optionally ``branch`` (defaults to ``agent/issue-<number>``). Both
+    # loaders (sandbox_main + the in-process harness) register the worktree in
+    # ``state.active_workspaces``/``active_branches`` at boot, so a GC cycle
+    # sees a tracked workspace whose issue state decides collection. Pair each
+    # entry with a ``state: "closed"`` issue of the same number to drive the
+    # collect path. All values are JSON-native; default empty leaves every
+    # existing seed payload unchanged.
+    stale_workspaces: list[dict[str, Any]] = field(default_factory=list)
+
+    # Scripted gate-activation proposals for the ``gate_activator`` loop
+    # (#9543). Each entry carries ``ActivationProposal`` kwargs (``name`` /
+    # ``dimension`` / ``required_on`` / ``workflow`` / ``job`` /
+    # ``make_target``). In production the detector reads the repo's real
+    # ``gates.toml``/workflows/Makefile — all steady-state (no planned gates)
+    # in the baked sandbox image, so the file-a-proposal path can never fire.
+    # When non-empty, both loaders swap the loop's detector for one returning
+    # these proposals (composition-root DI on the existing ``detector=``
+    # injection point). Default empty: production detector untouched.
+    gate_activations: list[dict[str, Any]] = field(default_factory=list)
+
+    # Expired run-artifact directories materialized at boot for the
+    # ``runs_gc`` loop (#9543). Each entry is a dict with keys ``issue``
+    # (issue number) and optionally ``age_days`` (default 90 — far beyond any
+    # realistic ``artifact_retention_days``). Both loaders create
+    # ``<runs>/<issue>/<timestamp>/`` with the timestamp back-dated by
+    # ``age_days``, so a purge cycle has a genuinely expired artifact to
+    # delete (RunRecorder derives artifact age from the directory name).
+    # Default empty: no directories are created.
+    expired_run_dirs: list[dict[str, Any]] = field(default_factory=list)
 
     # IssueRefinementLoop (spec #9957) air-gap seam. The loop reads the WHOLE
     # open backlog via ``PRPort.list_open_issues`` (Faked) and then spends one

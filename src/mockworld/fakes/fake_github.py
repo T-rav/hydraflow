@@ -177,6 +177,7 @@ class FakeGitHub:
                 title=issue_dict["title"],
                 body=issue_dict["body"],
                 labels=list(issue_dict.get("labels", [])),
+                state=issue_dict.get("state", "open"),
             )
         for issue_number, comment_dicts in seed.comments.items():
             for comment_dict in comment_dicts:
@@ -195,6 +196,7 @@ class FakeGitHub:
                 merged=pr_dict.get("merged", False),
                 author=pr_dict.get("author", "fake-author"),
                 is_bot=pr_dict.get("is_bot", False),
+                mergeable=pr_dict.get("mergeable", True),
             )
             for label in pr_dict.get("labels", []):
                 gh.add_pr_label(pr_dict["number"], label)
@@ -214,12 +216,20 @@ class FakeGitHub:
         title: str,
         body: str,
         labels: list[str] | None = None,
+        state: str = "open",
     ) -> None:
+        """Seed an issue. ``state`` accepts ``"open"`` (default) or ``"closed"``.
+
+        A closed seed issue reports ``COMPLETED`` from ``get_issue_state``
+        (close-reason defaulting mirrors gh, #10025) — the surface loops like
+        workspace_gc/epic_sweeper consult before acting (#9543).
+        """
         self._issues[number] = FakeIssue(
             number=number,
             title=title,
             body=body,
             labels=labels or [],
+            state=state,
         )
 
     def add_seeded_comment(
@@ -253,12 +263,14 @@ class FakeGitHub:
         merged: bool = False,
         author: str = "fake-author",
         is_bot: bool = False,
+        mergeable: bool = True,
     ) -> None:
         """Directly insert a PR record (sync helper for test seeding).
 
         The async ``create_pr`` handles the production path; this helper
         exists so scenario seeds can set up a fully-populated world
-        synchronously.
+        synchronously. ``mergeable=False`` seeds a CONFLICTING PR that
+        ``list_conflicting_prs`` surfaces to merge_state_watcher (#9543).
         """
         self._prs[number] = FakePR(
             number=number,
@@ -268,6 +280,7 @@ class FakeGitHub:
             ci_status=ci_status,
             author=author,
             is_bot=is_bot,
+            mergeable=mergeable,
         )
 
     def add_pr_label(self, pr_number: int, label: str) -> None:
