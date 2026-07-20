@@ -134,13 +134,23 @@ async def test_fake_subprocess_runner_host_reap_surfaces_timeout_not_processlook
     monkeypatch,
 ):
     """The MockWorld fake's host path (git/make run for real) must reap with the
-    same guard — a real reaped child there raises ProcessLookupError too (#9883)."""
+    same guard — a real reaped child there raises ProcessLookupError too (#9883).
+
+    Since #9624 the fake's ``_run_on_host`` delegates to ``HostRunner.run_simple``,
+    so the timeout reap is the shared ``os.killpg`` group-kill. Model the process
+    group as already-gone (killpg raises ProcessLookupError) so the reap never
+    signals a real pgid that happens to match ``_DeadProc.pid``, exactly like the
+    sibling HostRunner test above."""
     from mockworld.fakes.fake_subprocess_runner import FakeSubprocessRunner
 
     async def _fake_create(*_a, **_kw):
         return _DeadProc()
 
+    def _dead_killpg(_pgid: int, _sig: int) -> None:
+        raise ProcessLookupError()
+
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create)
+    monkeypatch.setattr(os, "killpg", _dead_killpg)
     with pytest.raises(TimeoutError):
         await FakeSubprocessRunner._run_on_host(["git", "status"], timeout=0.01)
 
