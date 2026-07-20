@@ -51,6 +51,14 @@ _GH_TIMEOUT_SECONDS = 30.0
 # ``_MERGED_PR_SCAN_LIMIT`` in approval_records.py).
 _MERGED_RC_SCAN_LIMIT = 20
 
+# #10009: multiplier on rc_cadence_hours for the boot-time "missed cadence by
+# a wide margin" warning. The ordinary cadence gate (_cadence_elapsed) already
+# cuts immediately once >= rc_cadence_hours has passed — that's normal
+# steady-state behaviour, not evidence of downtime. Crossing 1.5x is wide
+# enough to signal the factory PROCESS itself was likely down (crash, host
+# reboot, deploy gap) rather than just landing on a routine tick late.
+_MISSED_CADENCE_ALERT_MULTIPLIER = 1.5
+
 
 class StagingPromotionLoop(BaseBackgroundLoop):
     """Periodic staging→main release-candidate promoter. See ADR-0042."""
@@ -80,6 +88,11 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             "policy_deny_alerts",
             config.data_root / "dedup" / "policy_deny_alerts.json",
         )
+        # #10009: fires the missed-cadence boot check at most once per loop
+        # lifetime — the loop's own catch-up cycle already runs _do_work
+        # immediately after downtime (BaseBackgroundLoop._should_run_catchup),
+        # so subsequent steady-state ticks must not re-log the boot warning.
+        self._boot_cadence_checked = False
 
     def _get_default_interval(self) -> int:
         return self._config.staging_promotion_interval
@@ -107,6 +120,9 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         )
 
     async def _do_work(self) -> dict[str, Any] | None:
+        if not self._boot_cadence_checked:
+            self._check_missed_cadence_at_boot()
+
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
 
@@ -666,6 +682,42 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         path = self._cadence_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(when.isoformat())
+
+    def _check_missed_cadence_at_boot(self) -> None:
+        """Log loudly if the last RC cut is more than
+        :data:`_MISSED_CADENCE_ALERT_MULTIPLIER` x ``rc_cadence_hours`` behind
+        (#10009). Runs once per loop lifetime (guarded by
+        ``self._boot_cadence_checked`` in ``_do_work``) — this is a
+        diagnostic signal for "the factory process itself was down", not a
+        behaviour change: :meth:`_cadence_elapsed` already cuts a new RC
+        immediately once the plain cadence has elapsed, on this same first
+        tick.
+        """
+        self._boot_cadence_checked = True
+        path = self._cadence_path()
+        if not path.exists():
+            return  # no prior marker (first-ever run) — nothing was "missed"
+        try:
+            last = datetime.fromisoformat(path.read_text().strip())
+        except ValueError:
+            return
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=UTC)
+        elapsed_hours = (datetime.now(UTC) - last).total_seconds() / 3600
+        threshold_hours = (
+            self._config.rc_cadence_hours * _MISSED_CADENCE_ALERT_MULTIPLIER
+        )
+        if elapsed_hours > threshold_hours:
+            logger.warning(
+                "StagingPromotionLoop missed its RC cadence by a wide "
+                "margin: last RC cut %.1fh ago (cadence=%dh, alert "
+                "threshold=%.1fh) — the factory process was likely down; "
+                "cutting an RC immediately instead of waiting for the next "
+                "cadence tick.",
+                elapsed_hours,
+                self._config.rc_cadence_hours,
+                threshold_hours,
+            )
 
     def _sweep_path(self) -> Path:
         return self._config.data_root / "memory" / ".staging_promotion_last_sweep"

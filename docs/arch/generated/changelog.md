@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `7c83f6d` — fix(stale-issue): branch-GC reconciler + unpushed-work boot check (#10011) (#10011) *(2026-07-20)*
 - `9fa2966` — fix(health-monitor): stale-code dead-man-switch — host in HealthMonitorLoop (#9596) (#10035) (#10035) *(2026-07-20)*
 - `6206f38` — fix(stale-issue): detect regression-test rot — false-close + orphaned-RED (#9597) (#10039) (#10039) *(2026-07-20)*
 - `45ef36f` — fix(wiki): worktree-isolate runtime wiki writes — boot store read-only + queue-routed ingest (#9836) (#10033) (#10033) *(2026-07-20)*
