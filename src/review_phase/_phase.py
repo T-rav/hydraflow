@@ -127,6 +127,7 @@ from reviewer import ReviewRunner
 from state import StateTracker
 from task_source import TaskTransitioner
 from transcript_summarizer import TranscriptSummarizer
+from wiki_maint_queue import enqueue_wiki_ingest
 
 from ._common import (
     PreReviewContext,
@@ -417,12 +418,15 @@ class ReviewPhase:
                             decisions=decisions,
                         )
                     else:
-                        self._wiki_store.ingest(repo, entries)
+                        # No issue worktree: boot store is read-only, so
+                        # route entries through the maintenance queue for
+                        # the worktree-isolated PR (#9836).
+                        enqueue_wiki_ingest(self._config, repo, entries)
                     self._wiki_store.mark_ingested(repo, issue_number, "review")
                     return
 
             # Fallback: mechanical extraction from structured summary
-            from repo_wiki_ingest import ingest_from_review  # noqa: PLC0415
+            from repo_wiki_ingest import build_review_entries  # noqa: PLC0415
 
             if tracked_store is not None and worktree_path is not None:
                 await asyncio.to_thread(
@@ -435,7 +439,11 @@ class ReviewPhase:
                     path_prefix=self._config.repo_wiki_path,
                 )
             else:
-                ingest_from_review(self._wiki_store, repo, issue_number, summary)
+                enqueue_wiki_ingest(
+                    self._config,
+                    repo,
+                    [e for e, _ in build_review_entries(issue_number, summary)],
+                )
             self._wiki_store.mark_ingested(repo, issue_number, "review")
         except Exception:  # noqa: BLE001
             logger.warning(

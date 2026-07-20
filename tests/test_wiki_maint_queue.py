@@ -97,10 +97,102 @@ def test_corrupt_json_returns_empty_queue(tmp_path: Path) -> None:
 
 
 def test_rejects_unknown_kind() -> None:
-    """``kind`` is constrained to the three known action values."""
+    """``kind`` is constrained to the known action values."""
     import pytest
 
     from wiki_maint_queue import MaintenanceTask
 
     with pytest.raises(ValueError, match="kind must be"):
         MaintenanceTask(kind="launch-rocket", repo_slug=REPO, params={})  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# ingest-entry kind + worktree-isolated ingest routing (#9836)
+# ---------------------------------------------------------------------------
+
+
+def _entry():
+    from repo_wiki import WikiEntry
+
+    return WikiEntry(
+        title="An insight",
+        content="Body.",
+        topic="gotchas",
+        source_type="review",
+        source_issue=9,
+    )
+
+
+def test_ingest_entry_task_round_trips(tmp_path: Path) -> None:
+    from repo_wiki import WikiEntry
+    from wiki_maint_queue import MaintenanceQueue, make_ingest_entry_task
+
+    q = MaintenanceQueue(path=tmp_path / "q.json")
+    q.enqueue(make_ingest_entry_task(REPO, _entry()))
+
+    task = q.peek()[0]
+    assert task.kind == "ingest-entry"
+    assert task.repo_slug == REPO
+    # The payload rebuilds into an equivalent WikiEntry.
+    rebuilt = WikiEntry.model_validate(task.params["entry"])
+    assert rebuilt.title == "An insight"
+    assert rebuilt.topic == "gotchas"
+
+
+def test_drain_kinds_is_selective(tmp_path: Path) -> None:
+    from wiki_maint_queue import (
+        MaintenanceQueue,
+        MaintenanceTask,
+        make_ingest_entry_task,
+    )
+
+    q = MaintenanceQueue(path=tmp_path / "q.json")
+    q.enqueue(MaintenanceTask(kind="rebuild-index", repo_slug=REPO, params={}))
+    q.enqueue(make_ingest_entry_task(REPO, _entry()))
+
+    ingest = q.drain_kinds(["ingest-entry"])
+    assert [t.kind for t in ingest] == ["ingest-entry"]
+    # The admin task is untouched.
+    assert [t.kind for t in q.peek()] == ["rebuild-index"]
+
+
+def test_enqueue_visible_across_instances_on_same_path(tmp_path: Path) -> None:
+    """A long-lived instance (loop) must see an enqueue made by a transient
+    instance (merge path) — reload-under-lock, not stale in-memory state."""
+    from wiki_maint_queue import MaintenanceQueue, make_ingest_entry_task
+
+    path = tmp_path / "q.json"
+    loop_view = MaintenanceQueue(path=path)  # constructed first, empty snapshot
+
+    transient = MaintenanceQueue(path=path)
+    transient.enqueue(make_ingest_entry_task(REPO, _entry()))
+
+    drained = loop_view.drain_kinds(["ingest-entry"])
+    assert len(drained) == 1
+
+
+def test_enqueue_wiki_ingest_writes_default_path(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    from wiki_maint_queue import (
+        MaintenanceQueue,
+        default_queue_path,
+        enqueue_wiki_ingest,
+    )
+
+    cfg = MagicMock()
+    cfg.data_path = tmp_path.joinpath
+
+    assert enqueue_wiki_ingest(cfg, REPO, [_entry(), _entry()]) == 2
+    tasks = MaintenanceQueue(path=default_queue_path(cfg)).peek()
+    assert [t.kind for t in tasks] == ["ingest-entry", "ingest-entry"]
+
+
+def test_enqueue_wiki_ingest_noop_without_repo(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    from wiki_maint_queue import enqueue_wiki_ingest
+
+    cfg = MagicMock()
+    cfg.data_path = tmp_path.joinpath
+    assert enqueue_wiki_ingest(cfg, "", [_entry()]) == 0
