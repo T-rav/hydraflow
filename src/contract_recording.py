@@ -235,6 +235,23 @@ def _require_success(
     return True
 
 
+def _gh_api_scalar(argv: list[str], *, label: str) -> str | None:
+    """Run a scalar-returning ``gh api`` call and return its stripped, non-empty
+    stdout — or ``None`` (warn-logged) on a missing binary, non-zero exit, or
+    empty output. Collapses the run → require-success → strip → non-empty guard
+    that every Git-Data-API read/write in ``_provision_scratch_branch`` repeats.
+    """
+    proc = _run(argv)
+    if not _require_success(proc, label=label):
+        return None
+    assert proc is not None
+    value = proc.stdout.strip().strip('"')
+    if not value:
+        logger.warning("contract_recording: %s returned empty output", label)
+        return None
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Public recorders
 # ---------------------------------------------------------------------------
@@ -245,6 +262,27 @@ def _require_success(
 # The recorder captures the real CLI exit code but stores this constant so the
 # replay test compares apples-to-apples (same pattern as record_docker).
 _FAKE_CREATE_ISSUE_STDOUT = "https://github.com/test-org/test-repo/issues/9001\n"
+
+# Fixed scratch branch + synthetic-commit message used by
+# ``_provision_scratch_branch``. The branch name is intentionally constant (not
+# per-run) for determinism: the happy-path ``gh pr merge --delete-branch``
+# removes it, and the best-effort pre-delete in ``_provision_scratch_branch``
+# makes the fixed name idempotent across a prior interrupted tick.
+_SCRATCH_BRANCH = "contract-recorder-scratch"
+_SCRATCH_COMMIT_MESSAGE = "contract recorder scratch commit"
+
+# Stable logical PR/issue numbers written into the merge_pr / close_issue
+# cassettes. The live sandbox numbers are volatile, and
+# ``contract_diff._canonical_payload`` does NOT normalize ``input.args`` (it
+# drops only ``recorded_at``/``recorder_sha`` and runs normalizers on
+# ``stdin``/``stdout``/``stderr`` only). Recording the live number would diff
+# against the committed cassettes' ``args: ["42"]`` and file a phantom
+# ``contract-refresh`` PR on every weekly tick. We store these constants (which
+# match the committed cassettes byte-for-byte) in the cassette and use the live
+# numbers only for the side-effecting CLI calls — mirroring the stable-shape
+# ``_FAKE_CREATE_ISSUE_STDOUT`` pattern.
+_FAKE_MERGE_PR_NUMBER = "42"
+_FAKE_CLOSE_ISSUE_NUMBER = "42"
 
 
 def _parse_trailing_int(url: str) -> int | None:
@@ -305,7 +343,13 @@ def _record_close_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
         interaction="close_issue",
         fixture_repo=sandbox_repo,
         command="close_issue",
-        args=[str(issue_number), "--reason", "not planned"],
+        # STABLE logical arg (#9535) composed with the #10025 reason flags —
+        # the live ``issue_number`` still drives the side-effecting
+        # ``gh issue close`` above, but ``input.args`` is compared verbatim by
+        # the drift layer, so it must equal the committed cassette's
+        # ["42", "--reason", "not planned"] to avoid a phantom refresh PR
+        # every tick.
+        args=[_FAKE_CLOSE_ISSUE_NUMBER, "--reason", "not planned"],
         exit_code=close.returncode,
         # Fake-shaped: FakeGitHub.close_issue returns empty stdout/stderr.
         # Real gh CLI may print a confirmation line; we discard it so the
@@ -381,21 +425,52 @@ def _record_create_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
     return path
 
 
-def _record_merge_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
-    """Create a scratch branch + PR in the sandbox, merge it; write merge_pr cassette."""
-    get_sha = _run(
+def _provision_scratch_branch(sandbox_repo: str, *, branch: str) -> str | None:
+    """Create *branch* in *sandbox_repo* carrying a single tree-identical commit.
+
+    GitHub rejects ``gh pr create`` when the head branch has no commits between
+    it and its base ("No commits between main and <branch>"). The old recorder
+    created the branch ref at ``main``'s SHA with no further commit, so it never
+    produced a mergeable PR. We POST a commit whose tree equals ``main``'s tree
+    (an empty-diff commit) parented on ``main`` and fast-forward the branch ref
+    to it — the PR carries one commit (zero file changes) which GitHub accepts,
+    and the eventual merge leaves ``main``'s tree unchanged, so every refresh
+    tick is idempotent. Mirrors the proven ``PRManager.push_synthetic_commit``.
+
+    Best-effort deletes any stale ref left by a prior interrupted recording so
+    the fixed branch name is re-runnable. Returns the new commit SHA on success,
+    or ``None`` (warn-logged) on any failed step — the recorder degrades to "no
+    cassette written" rather than raising into the background loop.
+
+    This helper deliberately shells out to the real ``gh`` CLI via ``_run``
+    (not ``PRPort``): the whole point of the recorder is to capture the *live*
+    contract, so routing through the fake would defeat it.
+    """
+    # Best-effort cleanup of a stale scratch ref (a prior tick interrupted
+    # before ``gh pr merge --delete-branch``). A 404/422 here is expected and
+    # deliberately NOT gated on ``_require_success``.
+    _run(
+        [
+            "gh",
+            "api",
+            f"repos/{sandbox_repo}/git/refs/heads/{branch}",
+            "--method",
+            "DELETE",
+        ]
+    )
+
+    main_sha = _gh_api_scalar(
         [
             "gh",
             "api",
             f"repos/{sandbox_repo}/git/ref/heads/main",
             "--jq",
             ".object.sha",
-        ]
+        ],
+        label="gh api get main sha",
     )
-    if not _require_success(get_sha, label="gh api get main sha"):
+    if main_sha is None:
         return None
-    assert get_sha is not None
-    sha = get_sha.stdout.strip()
 
     create_branch = _run(
         [
@@ -403,12 +478,79 @@ def _record_merge_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
             "api",
             f"repos/{sandbox_repo}/git/refs",
             "--raw-field",
-            "ref=refs/heads/contract-recorder-scratch",
+            f"ref=refs/heads/{branch}",
             "--raw-field",
-            f"sha={sha}",
+            f"sha={main_sha}",
         ]
     )
     if not _require_success(create_branch, label="gh api create branch"):
+        return None
+
+    tree_sha = _gh_api_scalar(
+        [
+            "gh",
+            "api",
+            f"repos/{sandbox_repo}/git/commits/{main_sha}",
+            "--jq",
+            ".tree.sha",
+        ],
+        label="gh api get main tree",
+    )
+    if tree_sha is None:
+        return None
+
+    # Tree-identical (empty-diff) commit parented on main: the branch gains one
+    # commit (so ``gh pr create`` is accepted) without changing main's tree.
+    commit_sha = _gh_api_scalar(
+        [
+            "gh",
+            "api",
+            f"repos/{sandbox_repo}/git/commits",
+            "--method",
+            "POST",
+            "--raw-field",
+            f"message={_SCRATCH_COMMIT_MESSAGE}",
+            "--raw-field",
+            f"tree={tree_sha}",
+            "--raw-field",
+            f"parents[]={main_sha}",
+            "--jq",
+            ".sha",
+        ],
+        label="gh api create commit",
+    )
+    if commit_sha is None:
+        return None
+
+    patch_ref = _run(
+        [
+            "gh",
+            "api",
+            f"repos/{sandbox_repo}/git/refs/heads/{branch}",
+            "--method",
+            "PATCH",
+            "--raw-field",
+            f"sha={commit_sha}",
+        ]
+    )
+    if not _require_success(patch_ref, label="gh api patch branch ref"):
+        return None
+
+    return commit_sha
+
+
+def _record_merge_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
+    """Provision a scratch branch with a synthetic commit, open + merge a PR;
+    write the merge_pr cassette with STABLE logical args.
+
+    ``_provision_scratch_branch`` puts one tree-identical (empty-diff) commit on
+    the scratch branch so ``gh pr create`` is accepted while the sandbox
+    ``main`` tree never grows. The cassette records the stable logical PR number
+    (``"42"``), never the volatile live sandbox number — ``input.args`` is
+    compared verbatim by the drift layer, so a live number would phantom-drift
+    every tick.
+    """
+    if not _provision_scratch_branch(sandbox_repo, branch=_SCRATCH_BRANCH):
         return None
 
     create_pr = _run(
@@ -419,7 +561,7 @@ def _record_merge_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
             "--repo",
             sandbox_repo,
             "--head",
-            "contract-recorder-scratch",
+            _SCRATCH_BRANCH,
             "--base",
             "main",
             "--title",
@@ -438,6 +580,7 @@ def _record_merge_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
         )
         return None
 
+    # The side-effecting merge targets the LIVE PR number; the cassette does not.
     merge = _run(
         [
             "gh",
@@ -454,15 +597,19 @@ def _record_merge_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
         return None
     assert merge is not None
 
-    # Fake-shaped stdout mirrors FakeGitHub.merge_pr; pr_number normalizer
-    # collapses the sandbox PR number so replay is deterministic.
-    fake_stdout = f"merged pull request https://github.com/_/_/pull/{pr_number}\n"
+    # Fake-shaped stdout mirrors FakeGitHub.merge_pr; the pr_number normalizer
+    # collapses the number so replay is deterministic. Both stdout and args use
+    # the STABLE _FAKE_MERGE_PR_NUMBER — args are compared verbatim by the drift
+    # layer, so they must equal the committed cassette's ["42"].
+    fake_stdout = (
+        f"merged pull request https://github.com/_/_/pull/{_FAKE_MERGE_PR_NUMBER}\n"
+    )
     payload = _build_cassette_payload(
         adapter="github",
         interaction="merge_pr",
         fixture_repo=sandbox_repo,
         command="merge_pr",
-        args=[str(pr_number)],
+        args=[_FAKE_MERGE_PR_NUMBER],
         exit_code=merge.returncode,
         stdout=fake_stdout,
         stderr="",
