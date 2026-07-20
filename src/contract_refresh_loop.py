@@ -180,6 +180,24 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             labels=["hydraflow-find", "fake-drift"],
         )
 
+    def _escalation_rollup(self) -> RollupIssueManager:
+        """One rolling ``fake-repair-stuck`` escalation per adapter (#10015).
+
+        Subjects are adapter names under a namespace SEPARATE from
+        ``contract_refresh`` (which tracks the ``fake_drift`` rollup), so
+        the per-tick ``resolve_all_except`` sweep can close every recovered
+        adapter's escalation without touching the fake-drift issue.
+        Previously escalations were bare ``create_issue`` calls: a clean
+        tick cleared the attempt counter and dedup but left the
+        hitl-escalation issue open forever (the #9867 dead-letter shape).
+        """
+        return RollupIssueManager(
+            pr=self._prs,
+            state=self._state,
+            namespace="contract_refresh_escalations",
+            labels=["hitl-escalation", "fake-repair-stuck"],
+        )
+
     # ------------------------------------------------------------------
     # Recording
     # ------------------------------------------------------------------
@@ -628,12 +646,12 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         ``config.max_fake_repair_attempts``. The HITL operator uses the
         adapter name in the label + title to jump straight to the stuck
         fake.
+
+        #10015: tracked per adapter via :meth:`_escalation_rollup` so the
+        adapter's next clean tick auto-closes the issue. The title is
+        STABLE (rollup contract) — the attempt count lives in the body.
         """
-        labels = ["hitl-escalation", "fake-repair-stuck", f"adapter-{adapter}"]
-        title = (
-            f"Contract refresh stuck: {adapter} has drifted "
-            f"{attempts} consecutive ticks"
-        )
+        title = f"Contract refresh stuck: {adapter} fake repair not converging"
         body = (
             f"`ContractRefreshLoop` has detected drift on the **{adapter}** "
             f"adapter for {attempts} consecutive ticks without the drift "
@@ -645,14 +663,15 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             f"repair the fake in `src/mockworld/fakes/` or adjust the "
             f"cassette normalizers.\n\n"
             f"This issue dedups on the adapter name — the next clean tick "
-            f"for `{adapter}` will clear both the attempt counter and the "
-            f"escalation dedup entry, so a future stuck streak can "
-            f"re-escalate."
+            f"for `{adapter}` clears the attempt counter and the escalation "
+            f"dedup entry and auto-closes this issue (#10015), so a future "
+            f"stuck streak escalates fresh."
         )
-        return await self._prs.create_issue(
+        return await self._escalation_rollup().ensure(
+            adapter,
             title=title,
             body=body,
-            labels=labels,
+            extra_labels=[f"adapter-{adapter}"],
         )
 
     async def _maybe_escalate(self, drifted_adapters: set[str]) -> dict[str, int]:
@@ -831,6 +850,21 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         # per-adapter escalation dedup.
         drifted_adapters: set[str] = {r.adapter for r in fleet.reports}
         self._update_attempt_counters(drifted_adapters)
+
+        # #10015 — auto-close open fake-repair-stuck escalations for every
+        # adapter NOT drifting this tick, mirroring the attempt-counter reset
+        # semantics directly above (a no-signal recorder already resets the
+        # counter, so it closes the escalation too; a genuine re-occurrence
+        # re-escalates fresh once the streak rebuilds). No-op when nothing
+        # is tracked.
+        await self._escalation_rollup().resolve_all_except(
+            drifted_adapters,
+            comment=(
+                "This adapter is no longer drifting — the fake is back in "
+                "sync with its committed cassettes; auto-closing (#10015). "
+                "A future stuck streak escalates fresh."
+            ),
+        )
 
         if not fleet.has_drift:
             return await self._on_clean_tick()

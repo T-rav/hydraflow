@@ -593,6 +593,128 @@ class TestRepeatedFailureEscalation:
         assert state.get_consecutive_rc_failures() == 0
 
 
+class TestEscalationAutoClose:
+    """#10015: the rc-promotion-stuck escalation must auto-close on the next
+    green promotion — mirroring the rc_ci rolling-issue pattern. Before this,
+    the escalation was filed via bare ``create_issue`` with no resolve path:
+    a green promotion only reset the failure counter, and #9867 closed only
+    because an unrelated PR body happened to say "Closes #9867"."""
+
+    ESCALATION_ISSUE = 8002
+    RC_CI_ISSUE = 7001
+
+    def _streak_loop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[StagingPromotionLoop, MagicMock, StateTracker]:
+        monkeypatch.setenv("HYDRAFLOW_RC_CONSECUTIVE_FAILURE_ESCALATION_THRESHOLD", "2")
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(number=70),
+            ci_result=(False, "ci failed: scenario tests"),
+        )
+
+        async def _create_issue(title: str, body: str, labels: list[str]) -> int:
+            if "rc-promotion-stuck" in labels:
+                return self.ESCALATION_ISSUE
+            return self.RC_CI_ISSUE
+
+        prs.create_issue = AsyncMock(side_effect=_create_issue)
+        prs.update_issue_body = AsyncMock()
+        prs.get_pr_head_sha = AsyncMock(return_value="somesha")
+        state = StateTracker(state_file=tmp_path / "s.json")
+        loop._state = state  # type: ignore[attr-defined]
+        return loop, prs, state
+
+    @pytest.mark.asyncio
+    async def test_escalation_is_tracked_as_rollup_subject(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, state = self._streak_loop(tmp_path, monkeypatch)
+
+        await loop._do_work()  # failure 1 — below threshold
+        assert state.get_rollup_issue("staging_promotion:rc_promotion_stuck") is None
+
+        await loop._do_work()  # failure 2 — escalates, tracked as a rollup
+        tracked = state.get_rollup_issue("staging_promotion:rc_promotion_stuck")
+        assert tracked is not None
+        assert tracked["issue_number"] == self.ESCALATION_ISSUE
+
+    @pytest.mark.asyncio
+    async def test_escalation_title_is_stable_and_count_lives_in_body(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Rollup contract: variable content (streak size, latest PR) goes in
+        the BODY; the title must be stable so re-adoption dedup works."""
+        loop, prs, _state = self._streak_loop(tmp_path, monkeypatch)
+
+        await loop._do_work()
+        await loop._do_work()
+
+        escalations = _escalation_calls(prs)
+        assert len(escalations) == 1
+        title, body, labels = escalations[0].args
+        assert "promotion stuck" in title
+        assert "2" not in title  # streak count must NOT be in the title
+        assert "2 times in a row" in body
+        assert "#70" in body
+        assert "hydraflow-hitl-escalation" in labels
+        assert "rc-promotion-stuck" in labels
+
+    @pytest.mark.asyncio
+    async def test_green_promotion_auto_closes_open_escalation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, state = self._streak_loop(tmp_path, monkeypatch)
+
+        await loop._do_work()
+        await loop._do_work()  # escalation filed + tracked
+
+        prs.wait_for_ci.return_value = (True, "ok")
+        prs.merge_promotion_pr = AsyncMock(return_value=True)
+        result = await loop._do_work()
+
+        assert result["status"] == "promoted"
+        prs.close_issue.assert_any_await(self.ESCALATION_ISSUE)
+        assert state.get_rollup_issue("staging_promotion:rc_promotion_stuck") is None
+        assert state.get_consecutive_rc_failures() == 0
+
+    @pytest.mark.asyncio
+    async def test_green_without_open_escalation_is_a_noop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """resolve() is idempotent — a clean green tick with no tracked
+        escalation must not touch GitHub for the escalation subject."""
+        loop, prs, _state = self._streak_loop(tmp_path, monkeypatch)
+        prs.wait_for_ci.return_value = (True, "ok")
+        prs.merge_promotion_pr = AsyncMock(return_value=True)
+
+        result = await loop._do_work()
+
+        assert result["status"] == "promoted"
+        prs.close_issue.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fresh_streak_after_green_files_new_escalation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, _state = self._streak_loop(tmp_path, monkeypatch)
+
+        await loop._do_work()
+        await loop._do_work()  # streak 1 escalates
+        assert len(_escalation_calls(prs)) == 1
+
+        prs.wait_for_ci.return_value = (True, "ok")
+        prs.merge_promotion_pr = AsyncMock(return_value=True)
+        await loop._do_work()  # green — closes + clears tracking
+
+        prs.wait_for_ci.return_value = (False, "ci failed: scenario tests")
+        await loop._do_work()
+        await loop._do_work()  # streak 2 escalates fresh
+
+        assert len(_escalation_calls(prs)) == 2
+
+
 class TestSentinelFidelity:
     @pytest.mark.asyncio
     async def test_producer_timeout_sentinel_is_pending_not_failure(
