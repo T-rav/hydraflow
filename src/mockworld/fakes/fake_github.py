@@ -8,6 +8,7 @@ that phases call via PipelineHarness.
 from __future__ import annotations
 
 import copy
+import logging
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -18,6 +19,8 @@ from models import LabelDrift
 
 if TYPE_CHECKING:
     from mockworld.seed import MockWorldSeed
+
+_diag = logging.getLogger("s55diag")  # DIAG-9925 temporary instrumentation
 
 
 class RateLimitError(Exception):
@@ -436,6 +439,7 @@ class FakeGitHub:
 
     async def add_labels(self, issue_number: int, labels: list[str]) -> None:
         self._maybe_rate_limit()
+        _diag.info("[S55DIAG] add_labels #%d +%r", issue_number, labels)
         if issue_number in self._issues:
             for label in labels:
                 if label not in self._issues[issue_number].labels:
@@ -443,6 +447,7 @@ class FakeGitHub:
 
     async def remove_label(self, issue_number: int, label: str) -> None:
         self._maybe_rate_limit()
+        _diag.info("[S55DIAG] remove_label #%d -%r", issue_number, label)
         if issue_number in self._issues:
             issue = self._issues[issue_number]
             issue.labels = [lbl for lbl in issue.labels if lbl != label]
@@ -479,6 +484,7 @@ class FakeGitHub:
 
     async def close_issue(self, issue_number: int) -> bool:
         self._maybe_rate_limit()
+        _diag.info("[S55DIAG] close_issue #%d", issue_number)
         if issue_number in self._issues:
             self._issues[issue_number].state = "closed"
         return True
@@ -936,6 +942,7 @@ class FakeGitHub:
         self._maybe_rate_limit()
         num = max(self._issues.keys(), default=9000) + 1
         self.add_issue(num, title, body, labels=labels)
+        _diag.info("[S55DIAG] create_issue #%d title=%r labels=%r", num, title, labels)
         return num
 
     async def get_dependabot_alerts(self, **_kw: Any) -> list[dict[str, Any]]:

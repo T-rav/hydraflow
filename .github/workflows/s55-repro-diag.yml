@@ -1,0 +1,61 @@
+# DIAG-9925 (temporary): reproduce the s55_nested_decompose CI-only concurrency
+# race and capture the instrumented [S55DIAG] label/issue-lifecycle timeline.
+# The flake does NOT reproduce locally (19/19 green across 3 slowdown
+# strategies) but reproduced on CI runners on 2026-07-18 (~80% red). This job
+# runs s55 many times on a stock GitHub runner and uploads every run's log
+# (container logs are dumped on every run by a DIAG edit to sandbox_scenario.py,
+# and INFO logging + [S55DIAG] fake mutations are enabled in the code).
+# DELETE this workflow together with the DIAG instrumentation once the race is
+# root-caused and fixed.
+name: s55-repro-diag
+
+on:
+  push:
+    branches: [fix/issue-9925-s55-race]
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "How many s55 runs"
+        default: "12"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  s55-repro:
+    name: s55 repro (capture red timeline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install uv && uv pip install --system -e ".[dev]"
+      - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
+      - name: Run s55 repeatedly, capture each timeline
+        run: |
+          N="${{ github.event.inputs.runs || '12' }}"
+          mkdir -p /tmp/s55-diag
+          pass=0; fail=0
+          for i in $(seq 1 "$N"); do
+            if python scripts/sandbox_scenario.py run s55_nested_decompose > "/tmp/s55-diag/run_${i}.log" 2>&1; then
+              echo "::notice::s55 run $i PASSED"
+              echo "run $i: PASS" >> /tmp/s55-diag/SUMMARY.txt
+              pass=$((pass+1))
+            else
+              echo "::error::s55 run $i FAILED"
+              echo "run $i: FAIL" >> /tmp/s55-diag/SUMMARY.txt
+              fail=$((fail+1))
+            fi
+          done
+          echo "TOTAL: $pass passed, $fail failed of $N" | tee -a /tmp/s55-diag/SUMMARY.txt
+          # Diagnostic job: succeed regardless so artifacts always upload.
+      - name: Upload s55 timelines
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s55-repro-diag-logs
+          path: /tmp/s55-diag/
+          retention-days: 7
