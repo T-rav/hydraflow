@@ -7,12 +7,19 @@ import logging
 import os
 import signal
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from boot_gap_detector import compute_boot_gap_alert, last_event_timestamp
 from config import HydraFlowConfig, build_credentials
+from events import EventType, HydraFlowEvent
 from log import setup_logging
 from prompt_gate import most_restrictive_data_class
 from runtime_config import DEFAULT_LOG_FILE, load_runtime_config
+
+if TYPE_CHECKING:
+    from events import EventBus
 
 logger = logging.getLogger("hydraflow.server")
 
@@ -147,9 +154,36 @@ async def _detect_remote_slug(repo_path: Path) -> str | None:
         return None
 
 
+async def _check_and_publish_boot_gap(config: HydraFlowConfig, bus: EventBus) -> None:
+    """#10009: if events.jsonl's last entry is older than
+    ``config.boot_gap_alert_threshold_seconds``, publish one SYSTEM_ALERT so
+    the dashboard shows "factory was down ~Xh" instead of a silent gap.
+
+    Extracted as its own small async seam — directly unit-testable with a
+    lightweight bus/config — from the surrounding ``_run_with_dashboard``
+    boot sequence, which binds real ports and signal handlers and is
+    intentionally NOT unit-tested end-to-end (see the ``TestRunDispatch``
+    precedent in ``tests/test_server.py``).
+
+    Must be called BEFORE anything else appends a new event (e.g. the
+    PHASE_CHANGE publish below, or the dashboard's own startup events) — the
+    gap has to reflect genuine downtime, not this boot's own activity.
+    """
+    boot_at = datetime.now(UTC)
+    last_event_at = last_event_timestamp(config.event_log_path)
+    alert = compute_boot_gap_alert(
+        last_event_at=last_event_at,
+        boot_at=boot_at,
+        threshold_seconds=config.boot_gap_alert_threshold_seconds,
+    )
+    if alert is not None:
+        logger.warning("Boot-gap detected: %s", alert.get("message", ""))
+        await bus.publish(HydraFlowEvent(type=EventType.SYSTEM_ALERT, data=alert))
+
+
 async def _run_with_dashboard(config: HydraFlowConfig) -> None:
     from dashboard import HydraFlowDashboard  # noqa: PLC0415
-    from events import EventBus, EventLog, EventType, HydraFlowEvent  # noqa: PLC0415
+    from events import EventBus, EventLog  # noqa: PLC0415
     from models import Phase  # noqa: PLC0415
     from repo_runtime import RepoRuntime, RepoRuntimeRegistry  # noqa: PLC0415
     from repo_store import RepoRecord, RepoRegistryStore  # noqa: PLC0415
@@ -162,6 +196,8 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
         config.event_log_retention_days,
     )
     await bus.load_history_from_disk()
+    await _check_and_publish_boot_gap(config, bus)
+
     state = build_state_tracker(config)
 
     repo_store = RepoRegistryStore(config.data_root)
