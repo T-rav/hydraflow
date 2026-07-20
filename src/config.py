@@ -21,6 +21,7 @@ from pydantic import (
 )
 
 import file_util
+from queue_strategy import BandWeights, QueueStrategy
 
 logger = logging.getLogger("hydraflow.config")
 
@@ -795,6 +796,41 @@ class HydraFlowConfig(BaseModel):
     max_hitl_workers: int = Field(
         default=1, ge=1, le=5, description="Concurrent HITL correction agents"
     )
+
+    # Work-queue discipline (#10037) — how IssueStore orders each stage queue.
+    # ``IssueRefinementLoop`` (#9957) produces the P0/P1/P2 labels these read.
+    queue_strategy: QueueStrategy = Field(
+        default=QueueStrategy.WEIGHTED_MIX,
+        description=(
+            "Stage-queue ordering: 'fifo' (oldest first, pre-#10037 behaviour), "
+            "'priority' (strict P0>P1>P2, starves lower bands), or "
+            "'weighted_mix' (P0 preempts, then a starvation-free ratio draw)"
+        ),
+    )
+    # Weights are the per-cycle share each band draws under 'weighted_mix'.
+    # The floor of 1 is deliberate: it makes "a band cannot starve" an
+    # unconditional guarantee rather than a property of the default values.
+    queue_weight_p1: int = Field(
+        default=3, ge=1, le=10, description="P1 items drawn per weighted_mix cycle"
+    )
+    queue_weight_p2: int = Field(
+        default=2, ge=1, le=10, description="P2 items drawn per weighted_mix cycle"
+    )
+    queue_weight_unprioritised: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        description="Unlabelled items drawn per weighted_mix cycle",
+    )
+
+    def band_weights(self) -> BandWeights:
+        """Weighted-mix draw ratio in the form the ordering engine expects."""
+        return BandWeights(
+            p1=self.queue_weight_p1,
+            p2=self.queue_weight_p2,
+            unprioritised=self.queue_weight_unprioritised,
+        )
+
     # Plugin skill registry — see docs/superpowers/specs/2026-04-18-dynamic-plugin-skill-registry-design.md
     required_plugins: list[str] = Field(
         default_factory=lambda: [

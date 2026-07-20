@@ -15,6 +15,7 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from models import PipelineIssueStatus, PipelineSnapshotEntry, QueueStats, Task
+from queue_strategy import order_queue
 from subprocess_util import AuthenticationError
 from task_source import TaskFetcher
 
@@ -505,8 +506,36 @@ class IssueStore:
         """Return the set of HITL issue numbers."""
         return set(self._hitl_numbers)
 
+    def _is_eligible(self, task: Task, stage: IssueStoreStage) -> bool:
+        """Whether *task* may be dispatched from *stage* on this tick."""
+        if task.id in self._active:
+            return False
+        # ``human-required`` issues have been escalated out of the pipeline;
+        # core phases must not re-pull them, or they re-fail and re-escalate
+        # forever. The label is cleared on a successful HITL correction (it is
+        # in ``all_pipeline_labels``), after which the issue re-enters the
+        # queue clean (ADR-0084, pillar C).
+        if "human-required" in task.tags:
+            return False
+        return not (
+            stage != STAGE_FIND
+            and self._crate_manager is not None
+            and self._crate_manager.active_crate_number is not None
+            and not self._crate_manager.is_in_active_crate(task)
+        )
+
     def _take_from_queue(self, stage: IssueStoreStage, max_count: int) -> list[Task]:
-        """Pop up to *max_count* tasks from *stage* queue, skipping active.
+        """Take up to *max_count* eligible tasks from the *stage* queue.
+
+        Which tasks are considered first is decided by the configured queue
+        strategy (#10037), not by arrival order — the pre-#10037 behaviour is
+        still available exactly as ``fifo``. The strategy and its weights are
+        re-read here on every call so the dashboard knob applies on the next
+        phase tick rather than at restart.
+
+        The deque itself stays in arrival order; ordering is a read-time
+        selection concern only, so queue snapshots and stats are unaffected.
+        Ineligible tasks simply keep their place for the next tick.
 
         Safety note: This method is synchronous with no ``await`` points, so
         the GIL guarantees it cannot be interleaved with ``_route_issues``
@@ -515,41 +544,34 @@ class IssueStore:
         call completes atomically, and this synchronous method runs to
         completion within a single event-loop tick.
         """
-        result: list[Task] = []
-        skipped: list[Task] = []
         q = self._queues[stage]
+        ordered = order_queue(
+            list(q),
+            self._config.queue_strategy,
+            self._config.band_weights(),
+        )
 
-        while q and len(result) < max_count:
-            task = q.popleft()
-            self._queue_members[stage].discard(task.id)
-            if (
-                task.id in self._active
-                # ``human-required`` issues have been escalated out of the
-                # pipeline; core phases must not re-pull them, or they re-fail
-                # and re-escalate forever. The label is cleared on a successful
-                # HITL correction (it is in ``all_pipeline_labels``), after which
-                # the issue re-enters the queue clean (ADR-0084, pillar C).
-                or "human-required" in task.tags
-                or (
-                    stage != STAGE_FIND
-                    and self._crate_manager is not None
-                    and self._crate_manager.active_crate_number is not None
-                    and not self._crate_manager.is_in_active_crate(task)
-                )
-            ):
-                skipped.append(task)
-            else:
+        result: list[Task] = []
+        for task in ordered:
+            if len(result) >= max_count:
+                break
+            if self._is_eligible(task, stage):
                 result.append(task)
 
-        # Put skipped tasks back at the front
-        for task in reversed(skipped):
-            q.appendleft(task)
-            self._queue_members[stage].add(task.id)
+        if not result:
+            return []
 
-        if result:
-            for t in result:
-                self._in_flight[t.id] = stage
-            self._publish_queue_update_nowait()
+        taken = {t.id for t in result}
+        remaining = [t for t in q if t.id not in taken]
+        q.clear()
+        q.extend(remaining)
+        members = self._queue_members[stage]
+        members.clear()
+        members.update(t.id for t in remaining)
+
+        for t in result:
+            self._in_flight[t.id] = stage
+        self._publish_queue_update_nowait()
         return result
 
     # ------------------------------------------------------------------

@@ -50,6 +50,13 @@ SETTINGS: dict[str, SettingSpec] = {
     "max_reviewers": SettingSpec("Concurrency", live=True, order=3),
     "max_hitl_workers": SettingSpec("Concurrency", live=True, order=4),
     "batch_size": SettingSpec("Concurrency", live=True, order=5),
+    # --- Work Queue (stage-queue ordering, #10037) -----------------------
+    # Live: IssueStore re-reads these on every dequeue, so a change takes
+    # effect on the next phase tick without a restart.
+    "queue_strategy": SettingSpec("Work Queue", live=True, order=0),
+    "queue_weight_p1": SettingSpec("Work Queue", live=True, order=1),
+    "queue_weight_p2": SettingSpec("Work Queue", live=True, order=2),
+    "queue_weight_unprioritised": SettingSpec("Work Queue", live=True, order=3),
     # --- Models ----------------------------------------------------------
     "model": SettingSpec("Models", live=True, order=0),
     "planner_model": SettingSpec("Models", live=True, order=1),
