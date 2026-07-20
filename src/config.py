@@ -655,6 +655,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_HUMAN_BRANCH_SHEPHERD_ENABLED",
         True,
     ),
+    (
+        "dependabot_conflict_heal_enabled",
+        "HYDRAFLOW_DEPENDABOT_CONFLICT_HEAL_ENABLED",
+        True,
+    ),
     ("stale_issue_loop_enabled", "HYDRAFLOW_STALE_ISSUE_LOOP_ENABLED", True),
     ("triage_retry_loop_enabled", "HYDRAFLOW_TRIAGE_RETRY_LOOP_ENABLED", True),
     (
@@ -2061,6 +2066,19 @@ class HydraFlowConfig(BaseModel):
             "branches (fix/, feat/, docs/, test/, chore/, refactor/) to merge "
             "once CI is green — same path as factory branches. Per-PR opt-out: "
             "the no-auto-merge label."
+        ),
+    )
+    dependabot_conflict_heal_enabled: bool = Field(
+        default=True,
+        description=(
+            "Item 2 (#9889): DependabotMergeLoop heals CI-green PRs whose "
+            "merge fails on a genuine content conflict (mergeable=False). "
+            "Factory-maintenance PRs are closed-superseded (their loop "
+            "regenerates a fresh one, single-flight #9939); other bot PRs get "
+            "one bounded update-branch before the failure strategy; human "
+            "shepherd-prefix PRs get one dedup-bounded conflict comment and "
+            "are otherwise left to their author. False restores the legacy "
+            "log-and-give-up path."
         ),
     )
     review_orphan_strike_threshold: int = Field(
