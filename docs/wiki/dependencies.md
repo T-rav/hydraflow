@@ -181,3 +181,17 @@ Always defer optional package imports to test method level, not file-top. Wrong:
 ```json:entry
 {"id":"01KQNZEVQVRHE57A588EWZXKKV","title":"Never import optional deps at module level in tests","topic":null,"source_type":"compiled","source_issue":null,"source_repo":null,"created_at":"2026-05-03T03:52:34.811886+00:00","updated_at":"2026-05-03T03:52:34.811887+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"medium","stale":false,"corroborations":1}
 ```
+
+
+## External liveness watchdog is an operator-run dependency, not a factory loop
+
+The factory process has no internal loop that notices when the process itself is down (crashed, hung, host rebooted) — a `BaseBackgroundLoop` subclass only runs while the process is alive, so it structurally cannot detect the process being dead. Issue #10009 closes this with `scripts/factory_liveness_watchdog.py`, a stdlib-only, dependency-free script (deliberately NOT importing `src/` — a watchdog that imports the thing it watches can't run when that thing is broken) that checks `/healthz` + `events.jsonl` recency and notifies (macOS `osascript`) or optionally restarts (`launchctl kickstart`, opt-in via a knob file, at most once per down-incident).
+
+**Operator action required — this does not self-install.** Run `scripts/install_liveness_watchdog.py` once per host to render and load `~/Library/LaunchAgents/com.hydraflow.liveness.plist` (`StartInterval=300`). The factory must never invoke this installer itself: a loop cannot install the external thing whose entire purpose is watching for that loop's own process being gone. `--uninstall` removes it; both scripts accept `--dry-run` for a no-launchctl-calls preview. Complementary in-process signals (checked at the *next* boot, since nothing can watch the current one from inside itself): `StagingPromotionLoop` logs loudly if its RC cadence was missed by >1.5x `rc_cadence_hours` (`staging_promotion_loop.py::_check_missed_cadence_at_boot`), and `boot_gap_detector.py` publishes one `SYSTEM_ALERT` ("factory was down ~Xh") when `events.jsonl`'s last entry is older than `boot_gap_alert_threshold_seconds` at boot.
+
+**Why:** A loop can only react while its own process is running; the down-detection signal for "the process itself died" must live outside the process, and the operator (not the factory) is the trust boundary for installing anything that can restart it.
+
+
+```json:entry
+{"id":"EXTERNAL-LIVENESS-WATCHDOG-OPERATOR-INSTALL-001","source_type":"manual","topic":"dependencies","tags":["liveness","launchd","watchdog","operator-install","issue-10009"],"rule":"The external liveness watchdog (scripts/factory_liveness_watchdog.py + scripts/install_liveness_watchdog.py) is installed manually by the operator via the installer script — the factory must never auto-install it, since a loop cannot bootstrap the external thing that watches for that loop's own process being down.","anti_pattern":"A factory loop or startup path calling scripts/install_liveness_watchdog.py automatically","code_refs":["scripts/factory_liveness_watchdog.py","scripts/install_liveness_watchdog.py","src/boot_gap_detector.py","src/staging_promotion_loop.py::_check_missed_cadence_at_boot"],"fixed_in_pr":null,"added":"2026-07-19"}
+```

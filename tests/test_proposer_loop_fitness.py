@@ -17,7 +17,7 @@ For GateActivatorLoop:
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -156,3 +156,88 @@ def test_gate_activator_reports_housekeeping_fitness(tmp_path: Path) -> None:
     assert fit.kind is FitnessKind.HOUSEKEEPING
     assert fit.score is None
     assert fit.worker_name == "gate_activator"
+
+
+def _daily_ctx(label: str, *, filed: int, merged: int) -> FitnessContext:
+    """A 7-day window with one labeled PR filed per day (#9841 shape)."""
+    end = datetime(2026, 7, 20, tzinfo=UTC)
+    return FitnessContext(
+        window_start=end - timedelta(days=7),
+        window_end=end,
+        issues=[
+            IssueRecord(
+                number=i,
+                labels=[label],
+                is_pr=True,
+                merged=(i < merged),
+                created_at=end - timedelta(days=6) + timedelta(days=i),
+            )
+            for i in range(filed)
+        ],
+    )
+
+
+def test_edge_proposer_daily_cadence_scores_with_week_of_samples(
+    tmp_path: Path,
+) -> None:
+    """#9841: at PRODUCTION defaults, a daily-cadence loop that filed one
+    proposal per day for a week must produce a real score — min_samples must
+    not demand more samples than the loop's cadence can supply."""
+    from edge_proposer_loop import EDGE_PROPOSER_PR_LABEL, EdgeProposerLoop
+
+    config = ConfigFactory.create(repo_root=tmp_path / "repo")
+    loop = EdgeProposerLoop(
+        config=config,
+        deps=_deps(),
+        pr_port=AsyncMock(),
+        repo_root=tmp_path / "repo",
+    )
+
+    fit = loop.loop_fitness(_daily_ctx(EDGE_PROPOSER_PR_LABEL, filed=7, merged=4))
+
+    assert fit.confidence is Confidence.OK
+    assert fit.score == pytest.approx(4 / 7)
+    assert fit.sample_count == 7
+
+
+def test_human_steering_threads_config_min_samples(tmp_path: Path) -> None:
+    """#9841: HumanSteeringLoop must honor config.fitness_min_samples instead
+    of the hardcoded proposal_acceptance_fitness default."""
+    from human_steering_loop import HumanSteeringLoop
+
+    config = ConfigFactory.create(repo_root=tmp_path / "repo", fitness_min_samples=2)
+    loop = HumanSteeringLoop(
+        config=config,
+        state=MagicMock(),
+        prs=MagicMock(),
+        deps=_deps(),
+        active_issues_cb=MagicMock(return_value=[]),
+    )
+
+    fit = loop.loop_fitness(_issue_ctx("human-steering"))
+
+    assert fit.kind is FitnessKind.SCORED
+    assert fit.confidence is Confidence.OK
+    assert fit.score == pytest.approx(2 / 3)
+
+
+def test_disturbance_dampener_threads_config_min_samples(tmp_path: Path) -> None:
+    """#9841: DisturbanceDampenerLoop must honor config.fitness_min_samples
+    instead of the hardcoded proposal_acceptance_fitness default."""
+    from disturbance_dampener_loop import DisturbanceDampenerLoop
+
+    config = ConfigFactory.create(repo_root=tmp_path / "repo", fitness_min_samples=2)
+    loop = DisturbanceDampenerLoop(
+        config=config,
+        state=MagicMock(),
+        prs=MagicMock(),
+        dedup=MagicMock(),
+        deps=_deps(),
+        runner=MagicMock(),
+    )
+
+    fit = loop.loop_fitness(_pr_ctx("disturbance-dampener"))
+
+    assert fit.kind is FitnessKind.SCORED
+    assert fit.confidence is Confidence.OK
+    assert fit.score == pytest.approx(2 / 3)

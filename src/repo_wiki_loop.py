@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
-from auto_pr import generate_and_open_pr_async
+from auto_pr import PREFLIGHT_DOCS_ONLY, generate_and_open_pr_async
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import Credentials, HydraFlowConfig
 from events import EventType, HydraFlowEvent
@@ -707,6 +707,9 @@ class RepoWikiLoop(BaseBackgroundLoop):
             path_specs=[path_prefix],
             pr_title=title,
             pr_body=_body,
+            # Wiki maintenance PRs are Markdown-only — a pytest/arch run is
+            # irrelevant, so opt down to the docs-only preflight set (#10013).
+            preflight=PREFLIGHT_DOCS_ONLY,
             base=self._config.base_branch(),
             # Auto-merge is disabled — the loop polls CI on subsequent
             # ticks and calls ``gh pr review --approve`` + ``gh pr merge``

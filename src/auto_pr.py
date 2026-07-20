@@ -23,8 +23,8 @@ import logging
 import re
 import shutil
 import subprocess
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -85,6 +85,9 @@ class AutoPrResult:
     pr_url: str | None
     branch: str
     error: str | None = None
+    # Set when ``status == "failed"`` because the pre-flight quality-lite
+    # gate went red: names the failing stage (#10013). None otherwise.
+    preflight_stage: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +438,173 @@ async def _ensure_labels_async(
     return ensured
 
 
+# ---------------------------------------------------------------------------
+# Pre-flight quality-lite gate (#10013)
+# ---------------------------------------------------------------------------
+#
+# Factory bots kept opening born-red PRs that cheap deterministic local
+# gates would have caught (suppression ratchet, tests/regressions/ guards,
+# ruff, stale arch artifacts) — each burning a full CI cycle before the
+# shepherd loops reacted. The gate runs a bounded subset of those checks
+# INSIDE the ephemeral PR worktree, after generate+stage and before
+# commit/push/``gh pr create``. Red → the PR is not opened and the caller
+# gets a structured failure naming the stage.
+#
+# Stage sets are selectable per call-site via the ``preflight`` parameter:
+# code-adjacent callers keep the full default; docs-only callers (wiki, UL
+# terms, ADR acceptance, arch regen, prompt refine) opt down to
+# ``PREFLIGHT_DOCS_ONLY`` because a pytest run is irrelevant to a Markdown
+# diff. Each stage also self-skips when its target is absent from the
+# worktree (managed repos without HydraFlow's gate targets, no staged
+# ``.py`` files for ruff), so the gate is safe on every repo shape.
+
+PREFLIGHT_FULL: tuple[str, ...] = ("pytest", "arch", "ruff")
+PREFLIGHT_DOCS_ONLY: tuple[str, ...] = ("ruff",)
+
+# pytest stage targets, relative to the worktree. Missing targets are
+# dropped; when none exist the stage self-skips.
+_PREFLIGHT_PYTEST_TARGETS: tuple[str, ...] = (
+    "tests/test_disturbance_ratchet.py",
+    "tests/regressions",
+)
+# Presence marker for the arch stage — ``python -m arch.runner --check``
+# only makes sense in a repo that ships the arch pipeline.
+_PREFLIGHT_ARCH_RUNNER_REL = "src/arch/runner.py"
+# Launcher prefix for the gate's tool invocations. ``uv run`` resolves the
+# WORKTREE's project environment so the checks run against the worktree's
+# own code (mirrors ``refresh_branch_with_arch_regen``). Tests swap it for
+# ``(sys.executable, "-m")`` to run against a scratch repo without uv.
+_PREFLIGHT_RUNNER_PREFIX: tuple[str, ...] = ("uv", "run")
+# Fallback per-stage timeout when no active config is registered
+# (standalone/CLI use). The live knob is
+# ``HydraFlowConfig.auto_pr_preflight_stage_timeout_s``.
+_DEFAULT_PREFLIGHT_STAGE_TIMEOUT_S = 600
+# Keep only the tail of a failing stage's output in the structured error.
+_PREFLIGHT_DETAIL_TAIL_CHARS = 2000
+
+
+@dataclass(frozen=True)
+class PreflightOutcome:
+    """Result of running the pre-flight gate over a worktree."""
+
+    ok: bool
+    failed_stage: str | None = None
+    detail: str = ""
+
+
+def _preflight_settings() -> tuple[bool, float]:
+    """Resolve (enabled, per-stage timeout) from the process-wide config.
+
+    Re-read on every gate run so a System-tab toggle of
+    ``auto_pr_preflight_gate_enabled`` takes effect on the next bot PR
+    without a restart. Falls back to enabled + default timeout when no
+    active config is registered (standalone use, unit tests).
+    """
+    from trace_collector import get_active_config
+
+    cfg = get_active_config()
+    if cfg is None:
+        return True, float(_DEFAULT_PREFLIGHT_STAGE_TIMEOUT_S)
+    return (
+        bool(cfg.auto_pr_preflight_gate_enabled),
+        float(cfg.auto_pr_preflight_stage_timeout_s),
+    )
+
+
+async def _staged_python_files(worktree_path: Path, gh_token: str) -> list[str]:
+    """Repo-relative staged ``.py`` paths (added/changed — not deleted)."""
+    from subprocess_util import run_subprocess
+
+    out = await run_subprocess(
+        "git",
+        "diff",
+        "--cached",
+        "--name-only",
+        "--diff-filter=ACMR",
+        cwd=worktree_path,
+        gh_token=gh_token,
+    )
+    return [ln.strip() for ln in out.splitlines() if ln.strip().endswith(".py")]
+
+
+async def _preflight_stage_command(
+    stage: str, worktree_path: Path, gh_token: str
+) -> tuple[str, ...] | None:
+    """Build the command for *stage*, or None when the stage self-skips."""
+    cmd: tuple[str, ...] | None = None
+    if stage == "pytest":
+        targets = [t for t in _PREFLIGHT_PYTEST_TARGETS if (worktree_path / t).exists()]
+        if targets:
+            cmd = (*_PREFLIGHT_RUNNER_PREFIX, "pytest", *targets, "-q")
+    elif stage == "arch":
+        if (worktree_path / _PREFLIGHT_ARCH_RUNNER_REL).exists():
+            cmd = (
+                *_PREFLIGHT_RUNNER_PREFIX,
+                "python",
+                "-m",
+                "arch.runner",
+                "--check",
+                "--repo-root",
+                str(worktree_path),
+            )
+    elif stage == "ruff":
+        files = await _staged_python_files(worktree_path, gh_token)
+        if files:
+            cmd = (*_PREFLIGHT_RUNNER_PREFIX, "ruff", "check", *files)
+    else:
+        logger.warning("auto_pr preflight: unknown stage %r — skipping", stage)
+    return cmd
+
+
+async def _run_preflight_gate(
+    *,
+    worktree_path: Path,
+    branch: str,
+    stages: Sequence[str],
+    gh_token: str,
+) -> PreflightOutcome:
+    """Run the requested gate stages inside the worktree; stop on first red."""
+    from exception_classify import reraise_on_credit_or_bug
+    from subprocess_util import run_subprocess
+
+    enabled, stage_timeout_s = _preflight_settings()
+    if not enabled:
+        logger.info("auto_pr preflight gate disabled by config for %s", branch)
+        return PreflightOutcome(ok=True)
+    for stage in stages:
+        cmd = await _preflight_stage_command(stage, worktree_path, gh_token)
+        if cmd is None:
+            continue
+        try:
+            await run_subprocess(
+                *cmd, cwd=worktree_path, gh_token=gh_token, timeout=stage_timeout_s
+            )
+        except FileNotFoundError as exc:
+            # Launcher missing on the host (no ``uv``): fail open, matching
+            # the shutil.which-guard convention for local quality gates — a
+            # skipped check must not block the PR on a host-env gap.
+            logger.warning(
+                "auto_pr preflight stage %r skipped — launcher missing: %s",
+                stage,
+                exc,
+            )
+        except RuntimeError as exc:
+            reraise_on_credit_or_bug(exc)
+            # ``run_subprocess``'s message carries stderr only, but pytest and
+            # ruff report failures on STDOUT — recover it from the chained
+            # CalledProcessError so the caller's log names the failing tests.
+            detail = str(exc)
+            cause = exc.__cause__
+            if isinstance(cause, subprocess.CalledProcessError) and cause.output:
+                detail = f"{cause.output}\n{detail}"
+            return PreflightOutcome(
+                ok=False,
+                failed_stage=stage,
+                detail=detail.strip()[-_PREFLIGHT_DETAIL_TAIL_CHARS:],
+            )
+    return PreflightOutcome(ok=True)
+
+
 async def _finalize_pr_from_worktree(
     *,
     worktree_path: Path,
@@ -449,6 +619,7 @@ async def _finalize_pr_from_worktree(
     commit_author_name: str,
     commit_author_email: str,
     fail: Callable[[str], AutoPrResult],
+    preflight: Sequence[str],
     req_id: str | None = None,
 ) -> AutoPrResult:
     """Commit already-staged worktree changes, push, open the PR, auto-merge.
@@ -456,8 +627,8 @@ async def _finalize_pr_from_worktree(
     Shared tail for ``open_automated_pr_async`` (which stages by copying files
     from ``repo_root``) and ``generate_and_open_pr_async`` (which stages content
     generated directly in the worktree). The caller owns worktree creation,
-    staging (``git add``), and teardown (``finally``); this only runs the
-    commit → push → label → pr-create → auto-merge tail.
+    staging (``git add``), and teardown (``finally``); this runs the
+    preflight-gate → commit → push → label → pr-create → auto-merge tail.
     """
     from subprocess_util import run_subprocess  # noqa: PLC0415
 
@@ -470,6 +641,27 @@ async def _finalize_pr_from_worktree(
         return AutoPrResult(status="no-diff", pr_url=None, branch=branch)
     except RuntimeError:
         pass  # non-zero → there IS a diff; proceed.
+
+    # Pre-flight quality-lite gate (#10013): red → the PR is never opened
+    # (no commit, no push, no ``gh pr create``); the caller's existing
+    # failure path surfaces a structured error naming the stage.
+    outcome = await _run_preflight_gate(
+        worktree_path=worktree_path,
+        branch=branch,
+        stages=preflight,
+        gh_token=gh_token,
+    )
+    if not outcome.ok:
+        stage = outcome.failed_stage or "unknown"
+        logger.warning(
+            "auto_pr preflight gate RED (stage=%s) for %s — PR not opened",
+            stage,
+            branch,
+        )
+        failed = fail(
+            f"preflight gate red (stage={stage}) for {branch!r}: {outcome.detail}"
+        )
+        return replace(failed, preflight_stage=stage)
 
     commit_args = _build_commit_args(
         commit_author_name, commit_author_email, commit_message
@@ -561,6 +753,7 @@ async def open_automated_pr_async(  # noqa: PLR0911 — linear step-by-step guar
     commit_author_email: str = BOT_EMAIL,
     labels: list[str] | None = None,
     req_id: str | None = None,
+    preflight: Sequence[str] | None = None,
 ) -> AutoPrResult:
     """Async variant that routes subprocess calls through `run_subprocess`.
 
@@ -605,6 +798,10 @@ async def open_automated_pr_async(  # noqa: PLR0911 — linear step-by-step guar
             ``Req-ID: <id>`` trailer is appended to both the commit message
             and the PR body so the traceability matrix can recover the
             requirement from git history and the PR alike.
+        preflight: Pre-flight gate stages to run in the worktree before the
+            PR is opened (#10013). ``None`` → :data:`PREFLIGHT_FULL`.
+            Docs-only callers pass :data:`PREFLIGHT_DOCS_ONLY`; ``()``
+            disables the gate for this call.
 
     Returns:
         ``AutoPrResult`` describing the outcome.
@@ -712,6 +909,7 @@ async def open_automated_pr_async(  # noqa: PLR0911 — linear step-by-step guar
             commit_author_name=commit_author_name,
             commit_author_email=commit_author_email,
             fail=_fail,
+            preflight=PREFLIGHT_FULL if preflight is None else tuple(preflight),
         )
 
     finally:
@@ -736,6 +934,7 @@ async def generate_and_open_pr_async(
     commit_author_email: str = BOT_EMAIL,
     labels: list[str] | None = None,
     req_id: str | None = None,
+    preflight: Sequence[str] | None = None,
 ) -> AutoPrResult:
     """Open a PR for content GENERATED inside the worktree — never touching repo_root.
 
@@ -764,6 +963,9 @@ async def generate_and_open_pr_async(
         req_id: Optional requirement ID (CH-5 traceability); appends a
             ``Req-ID: <id>`` trailer to the commit message and the resolved
             PR body.
+        preflight: Pre-flight gate stages (#10013); ``None`` →
+            :data:`PREFLIGHT_FULL`, docs-only callers pass
+            :data:`PREFLIGHT_DOCS_ONLY`.
 
     All other args mirror :func:`open_automated_pr_async`.
     """
@@ -854,6 +1056,7 @@ async def generate_and_open_pr_async(
             commit_author_name=commit_author_name,
             commit_author_email=commit_author_email,
             fail=_fail,
+            preflight=PREFLIGHT_FULL if preflight is None else tuple(preflight),
         )
     finally:
         await _remove_worktree_async(repo_root, worktree_path, branch, gh_token)

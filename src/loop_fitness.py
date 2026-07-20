@@ -66,12 +66,43 @@ class LoopFitness(BaseModel):
     timestamp: datetime
 
 
+#: Never derive a requirement below this many samples — a 1-2 sample "score"
+#: is noise, not signal. An operator's explicit lower config still wins.
+MIN_SAMPLES_FLOOR = 3
+
+
+def cadence_min_samples(
+    ctx: FitnessContext,
+    *,
+    interval_seconds: int,
+    configured_min: int,
+) -> int:
+    """Derive a loop's effective min-samples from its own cadence.
+
+    A proposer-archetype loop files at most ~one batch per tick, so the
+    achievable sample ceiling inside ``ctx``'s window is roughly
+    ``window / interval``. A global floor above that ceiling makes
+    INSUFFICIENT_DATA permanent (#9841: ``fitness_min_samples=20`` vs daily
+    loops that filed 6-14 proposals per 30-day window — no loop ever scored).
+
+    The configured value stays the authority: this helper only *lowers* the
+    requirement to what the cadence can actually reach, and the cadence cap
+    never drops below ``MIN_SAMPLES_FLOOR``. Pure over ``ctx`` and its
+    arguments — no clock, no I/O.
+    """
+    window_seconds = (ctx.window_end - ctx.window_start).total_seconds()
+    if interval_seconds <= 0 or window_seconds <= 0:
+        return configured_min
+    achievable = int(window_seconds // interval_seconds)
+    return min(configured_min, max(MIN_SAMPLES_FLOOR, achievable))
+
+
 def proposal_acceptance_fitness(
     ctx: FitnessContext,
     *,
     worker_name: str,
     label: str,
-    min_samples: int = 20,
+    min_samples: int = 5,
 ) -> LoopFitness:
     """Fitness for proposer-archetype loops: merged-or-closed / filed.
 

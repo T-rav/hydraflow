@@ -15,9 +15,6 @@ auto-close via the shared `EscalationReconciler` (#9618 class).
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import json
 import logging
 import re
 import tempfile
@@ -29,10 +26,12 @@ from typing import TYPE_CHECKING, Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from escalation_reconcile import EscalationReconciler
 from models import WorkCycleResult
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
     from dedup_store import DedupStore
+    from github_cache_loop import GitHubDataCache
     from pr_manager import PRManager
     from state import StateTracker
 
@@ -61,30 +60,10 @@ def _escalation_subject(title: str) -> str | None:
 
 # Hard cap on each ``gh`` read/download. A wedged child must not hang the loop
 # cycle forever and freeze its heartbeat — the #9410 silent-stall failure
-# class (#9454 / #9508).
+# class (#9454 / #9508). Bounded (and, via ``run_subprocess_result``,
+# circuit-breaker/rate-limit/process-group hardened — #9554/#10028) rather
+# than a raw ``create_subprocess_exec``.
 _GH_TIMEOUT_SECONDS = 120
-
-
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process,
-) -> tuple[bytes, bytes]:
-    """``proc.communicate()`` bounded by ``_GH_TIMEOUT_SECONDS``.
-
-    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
-    the caller can treat it as a failed read (rather than hanging the loop
-    cycle indefinitely).
-    """
-    try:
-        return await asyncio.wait_for(proc.communicate(), timeout=_GH_TIMEOUT_SECONDS)
-    except TimeoutError:
-        # proc.kill() itself raises ProcessLookupError when the child already
-        # exited — suppress it too, not just proc.wait() — so the TimeoutError
-        # (the intended failed-read signal) propagates instead of crashing the
-        # caller with ProcessLookupError. (#9794/#9814)
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
-            await proc.wait()
-        raise
 
 
 def parse_junit_xml(xml_bytes: bytes) -> dict[str, str]:
@@ -116,6 +95,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         pr_manager: PRManager,
         dedup: DedupStore,
         deps: LoopDeps,
+        github_cache: GitHubDataCache,
     ) -> None:
         super().__init__(
             worker_name="flake_tracker",
@@ -126,6 +106,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         self._state = state
         self._pr = pr_manager
         self._dedup = dedup
+        self._github_cache = github_cache
         self._escalations = EscalationReconciler(
             prs=pr_manager,
             dedup=dedup,
@@ -139,45 +120,25 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         return self._config.flake_tracker_interval
 
     async def _fetch_recent_runs(self) -> list[dict[str, Any]]:
-        """Return metadata for the last 20 RC promotion workflow runs."""
-        cmd = [
-            "gh",
-            "run",
-            "list",
-            "--repo",
-            self._config.repo,
-            "--workflow",
-            "rc-promotion-scenario.yml",
-            "--limit",
-            str(_RUN_WINDOW),
-            "--json",
-            "databaseId,url,conclusion,createdAt",
+        """Return metadata for the last 20 RC promotion workflow runs.
+
+        Served from the shared ``GitHubDataCache`` snapshot (#9814)
+        instead of a per-tick raw ``gh run list`` subprocess, so N loops
+        cost one gh call per freshness window and a gh outage degrades to
+        the stale-snapshot path inside the cache (never a loop crash).
+        Rows keep the legacy gh-CLI key shape the downstream helpers and
+        issue bodies were built on.
+        """
+        rows = await self._github_cache.get_rc_workflow_runs()
+        return [
+            {
+                "databaseId": row.get("id"),
+                "url": row.get("url", ""),
+                "conclusion": row.get("conclusion", ""),
+                "createdAt": row.get("created_at", ""),
+            }
+            for row in rows[:_RUN_WINDOW]
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await _communicate_bounded(proc)
-        except TimeoutError:
-            logger.warning(
-                "gh run list timed out after %ss; returning empty",
-                _GH_TIMEOUT_SECONDS,
-            )
-            return []
-        if proc.returncode != 0:
-            logger.warning(
-                "gh run list exit=%d: %s",
-                proc.returncode,
-                stderr.decode(errors="replace")[:400],
-            )
-            return []
-        try:
-            return json.loads(stdout.decode() or "[]")
-        except json.JSONDecodeError:
-            logger.warning("gh run list non-JSON response; returning empty")
-            return []
 
     async def _download_junit(self, run: dict[str, Any]) -> dict[str, str]:
         """Download the ``junit-scenario`` artifact for a run; return per-test results."""
@@ -197,25 +158,20 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
                 "--dir",
                 td,
             ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
             try:
-                _, stderr = await _communicate_bounded(proc)
-            except TimeoutError:
+                result = await run_subprocess_result(*cmd, timeout=_GH_TIMEOUT_SECONDS)
+            except SubprocessTimeoutError:
                 logger.info(
                     "gh run download timed out after %ss for run %s",
                     _GH_TIMEOUT_SECONDS,
                     run_id,
                 )
                 return {}
-            if proc.returncode != 0:
+            if result.returncode != 0:
                 logger.info(
                     "no junit-scenario artifact for run %s: %s",
                     run_id,
-                    stderr.decode(errors="replace")[:200],
+                    result.stderr[:200],
                 )
                 return {}
             combined: dict[str, str] = {}
@@ -424,7 +380,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         duration_ms = int((time.perf_counter() - t0) * 1000)
         emit_loop_subprocess_trace(
             loop=self._worker_name,
-            command=["gh", "run", "list", "rc-promotion-scenario.yml"],
+            command=["github_cache", "rc_workflow_runs"],
             exit_code=0,
             duration_ms=duration_ms,
             stderr_excerpt=f"runs_seen={runs_seen}",

@@ -32,7 +32,9 @@ Tick pipeline (spec §3, steps 1-6):
    call. An unparseable/failed verdict degrades to a low-confidence digest
    proposal and the pair is still cached (no re-spend next tick).
 3. Score priority for changed issues lacking a P-label (all issues on a full
-   sweep).
+   sweep), capped at ``issue_refinement_priority_budget`` calls per tick. The
+   index + judged-pair cache persist BEFORE this pass, so a watchdog-cancelled
+   tick never repeats its dup judgments (#10025).
 4. Tier the judged verdicts + priority scores into concrete actions, then
    apply them: exact-dup/high pairs auto-close, gating every side effect on a
    still-open re-check + a confirmed close (stale-guard → evidence comment →
@@ -47,8 +49,9 @@ Tick pipeline (spec §3, steps 1-6):
    closed (reopen if supported, else mint a fresh one) or if state lost the
    number but the create-once dedup key survives (adopt the open digest found
    by label).
-6. Persist index + judged-pair cache + full-sweep marker + open proposals, and
-   publish one ``ISSUE_REFINEMENT_UPDATE`` event for the dashboard.
+6. Persist the full-sweep marker (index + judged-pair cache already persisted
+   pre-priority-pass; open proposals in 4b), and publish one
+   ``ISSUE_REFINEMENT_UPDATE`` event for the dashboard.
 
 Kill-switch (ADR-0049): ``_enabled_cb`` AND ``issue_refinement_enabled`` both gate
 the tick at the top. An empty backlog, or no changes with no full sweep due, is
@@ -197,13 +200,17 @@ class IssueRefinementLoop(BaseBackgroundLoop):
         # auto-closed (``refinement-auto`` label) in the window, how many stayed
         # closed rather than being reopened by a human — a reopened auto-close
         # is a false-positive dedup and scores against the loop. Pure over ctx.
-        from loop_fitness import proposal_acceptance_fitness
+        from loop_fitness import cadence_min_samples, proposal_acceptance_fitness
 
         return proposal_acceptance_fitness(
             ctx,
             worker_name=self._worker_name,
             label=_REFINEMENT_AUTO_LABEL,
-            min_samples=self._config.fitness_min_samples,
+            min_samples=cadence_min_samples(
+                ctx,
+                interval_seconds=self._get_default_interval(),
+                configured_min=self._config.fitness_min_samples,
+            ),
         )
 
     # --- LLM seam -------------------------------------------------------------
@@ -319,7 +326,18 @@ class IssueRefinementLoop(BaseBackgroundLoop):
                 )
             newly_judged.append(key)
 
-        # 3. Priority scoring for the changed set (all issues on a full sweep).
+        # 2b. Persist the change-detection index + judged-pair cache BEFORE
+        # the priority pass: a watchdog-cancelled tick (the priority pass is
+        # the long tail on a full sweep) must not lose the dup judgments
+        # already paid for — next tick they'd all re-spend (#10025). A pair
+        # whose auto-close later fails or goes stale is REMOVED again in
+        # step 4 (`remove_judged_pairs`) so it still re-judges next tick.
+        self._state.set_refinement_index(new_index)
+        if newly_judged:
+            self._state.add_judged_pairs(newly_judged)
+
+        # 3. Priority scoring for the changed set (all issues on a full
+        # sweep), bounded by `issue_refinement_priority_budget` per tick.
         priorities: dict[int, PriorityVerdict] = {}
         for issue in self._priority_targets(issues, changed, full_sweep=full_sweep):
             prompt = build_priority_prompt(issue)
@@ -344,8 +362,9 @@ class IssueRefinementLoop(BaseBackgroundLoop):
                 )
                 continue
 
-        # 4. Tier + apply. A failed/stale auto-close returns the pair so we do
-        # NOT cache it — it must re-judge next tick against fresh content.
+        # 4. Tier + apply. A failed/stale auto-close returns the pair so its
+        # (already-persisted) cache entry is dropped below — it must re-judge
+        # next tick against fresh content.
         actions = plan_actions(verdicts, priorities, issues_by_number, now)
         closed, relabeled, failures, uncache_pairs = await self._apply(actions)
         if uncache_pairs:
@@ -355,6 +374,9 @@ class IssueRefinementLoop(BaseBackgroundLoop):
                 if a in issues_by_number and b in issues_by_number
             }
             newly_judged = [k for k in newly_judged if k not in stale_keys]
+            # Already persisted in step 2b — drop the stale keys from the
+            # cache too, so a failed/stale close re-judges next tick.
+            self._state.remove_judged_pairs(stale_keys)
 
         # 4b. Accumulate open operator questions across ticks: merge this tick's
         # dup proposals + priority questions into the persisted set, prune the
@@ -391,10 +413,10 @@ class IssueRefinementLoop(BaseBackgroundLoop):
         }
         await self._write_digest(digest_actions, stats, failures)
 
-        # 6. Persist + publish.
-        self._state.set_refinement_index(new_index)
-        if newly_judged:
-            self._state.add_judged_pairs(newly_judged)
+        # 6. Persist + publish. Index + judged pairs were already persisted in
+        # step 2b (pre-priority-pass); only the sweep marker lands here — a
+        # cancelled sweep re-sweeps next tick to finish its priority pass,
+        # with the judged-pair cache absorbing the dup re-spend.
         if full_sweep:
             self._state.set_refinement_last_full_sweep(now)
 
@@ -490,7 +512,10 @@ class IssueRefinementLoop(BaseBackgroundLoop):
             close.duplicate,
             f"**Refinement (auto):** duplicate of #{close.canonical} — {close.evidence}",
         )
-        ok = await self._pr.close_issue(close.duplicate)
+        # "not planned": gh defaults closes to stateReason=COMPLETED, which
+        # every get_issue_state consumer reads as "resolved" — a deduped
+        # issue was retired, not fixed (#10025).
+        ok = await self._pr.close_issue(close.duplicate, reason="not planned")
         if not ok:
             msg = f"close_issue returned False for #{close.duplicate}"
             raise RuntimeError(msg)
@@ -647,9 +672,20 @@ class IssueRefinementLoop(BaseBackgroundLoop):
         ones). Incremental: changed, unguarded issues that lack a P-label —
         scoring an already-prioritised issue would only spend an LLM call for a
         no-op delta.
+
+        Always capped at ``issue_refinement_priority_budget`` — the priority
+        pass had no spend bound analogous to the dup pass's pair budget, so a
+        full sweep over a large backlog could score hundreds of issues in one
+        tick and blow the loop watchdog (#10025). Issues past the cap are
+        simply scored on a later tick: an unscored issue stays unchanged in
+        the index only if its content is unchanged, and the next full sweep
+        re-offers every issue anyway.
         """
+        budget = self._config.issue_refinement_priority_budget
         targets: list[RefinementIssue] = []
         for issue in issues:
+            if len(targets) >= budget:
+                break
             if is_guarded(issue):
                 continue
             if full_sweep:

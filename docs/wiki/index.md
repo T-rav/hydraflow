@@ -13,7 +13,7 @@ See [ADR-0053](../adr/0053-ubiquitous-language-as-living-artifact.md).
 
 New terms added 2026-06-30 (ADR-0093, `FitnessScorecardLoop`):
 - [`LoopFitness`](terms/loop-fitness.md) — value object returned by every loop's `loop_fitness()` call; carries kind, optional score, components, sample_count, confidence
-- [`FitnessScorecardLoop`](terms/fitness-scorecard.md) — read-only caretaker loop that produces the per-loop `LoopFitness` scorecard
+- [`FitnessScorecardLoop`](terms/fitness-scorecard-loop.md) — read-only caretaker loop that produces the per-loop `LoopFitness` scorecard
 - [`FitnessContext`](terms/fitness-context.md) — frozen, data-only input to `loop_fitness()`; carries no live client (purity constraint)
 
 New terms added 2026-05-19 (wiki-gap backfill):

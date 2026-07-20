@@ -200,25 +200,25 @@ def _install_async_subprocess_stub(
     stdout: bytes,
     stderr: bytes,
 ) -> list[list[str]]:
-    class _FakeProc:
-        def __init__(self) -> None:
-            self.returncode = returncode
+    """Stub the replay gate's shared bounded helper (#9554/#10028).
 
-        async def communicate(self) -> tuple[bytes, bytes]:
-            return stdout, stderr
+    ``_run_replay_gate`` routes through ``subprocess_util.run_subprocess_result``
+    rather than a raw ``asyncio.create_subprocess_exec`` — stub that seam
+    directly so the fake never has to shape-match the real
+    ``HostRunner.run_simple`` call (which always passes ``input=``).
+    """
+    from execution import SimpleResult
 
-        async def wait(self) -> int:
-            return returncode
-
-        def kill(self) -> None:
-            pass
-
-    async def _fake_create_subprocess_exec(*argv: str, **_kwargs: Any) -> _FakeProc:
+    async def _fake_run_subprocess_result(*argv: str, **_kwargs: Any) -> SimpleResult:
         calls.append(list(argv))
-        return _FakeProc()
+        return SimpleResult(
+            stdout=stdout.decode(errors="replace"),
+            stderr=stderr.decode(errors="replace"),
+            returncode=returncode,
+        )
 
     monkeypatch.setattr(
-        crl_module.asyncio, "create_subprocess_exec", _fake_create_subprocess_exec
+        crl_module, "run_subprocess_result", _fake_run_subprocess_result
     )
     return calls
 

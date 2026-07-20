@@ -79,6 +79,7 @@ class DetectorCalibrationLoop(BaseBackgroundLoop):
         state: Any,
         pr_manager: Any,  # PRPort
         deps: LoopDeps,
+        github_cache: Any,  # GitHubDataCache
     ) -> None:
         super().__init__(
             worker_name="detector_calibration",
@@ -88,6 +89,7 @@ class DetectorCalibrationLoop(BaseBackgroundLoop):
         )
         self._state = state
         self._pr = pr_manager
+        self._github_cache = github_cache
         self._dedup = DedupStore(
             "detector_calibration",
             config.data_root / "dedup" / "detector_calibration.json",
@@ -121,8 +123,13 @@ class DetectorCalibrationLoop(BaseBackgroundLoop):
         if not self._config.detector_calibration_enabled:
             return {"status": "config_disabled"}
 
-        closed = await self._pr.list_closed_issues_by_label(
-            "hitl-escalation", limit=_SCAN_LIMIT
+        # #9814: served from the shared GitHubDataCache snapshot instead of
+        # a per-tick `gh issue list`. gh failure degrades to a stale
+        # snapshot (then []) inside the cache — a [] scan simply files
+        # nothing and skips auto-close (scan_was_capped stays False but
+        # churning is empty), never crashes the loop.
+        closed = await self._github_cache.get_issues_by_label(
+            "hitl-escalation", state="closed", limit=_SCAN_LIMIT
         )
         cutoff = datetime.now(UTC) - timedelta(days=_WINDOW_DAYS)
         repeats: dict[str, list[int]] = {}
@@ -149,8 +156,15 @@ class DetectorCalibrationLoop(BaseBackgroundLoop):
         }
 
         filed = await self._file_findings(churning)
+        # An EMPTY scan is as unreliable as a capped one (#9814): the cache
+        # degrades to [] when gh is down past the stale-serve grace, and
+        # auto-closing every open finding because the scan saw nothing
+        # would be the spurious-close failure mode. Findings only exist
+        # because closed escalations churned recently, so a genuine scan
+        # virtually always carries rows (the 500-row scan is not
+        # date-filtered; old closed rows remain visible).
         autoclosed = await self._autoclose_recovered(
-            churning, scan_was_capped=len(closed) >= _SCAN_LIMIT
+            churning, scan_was_capped=len(closed) >= _SCAN_LIMIT or not closed
         )
 
         status = "fired" if filed or autoclosed else "noop"
@@ -211,7 +225,10 @@ class DetectorCalibrationLoop(BaseBackgroundLoop):
         keys = self._dedup.get()
         if not keys:
             return 0
-        open_findings = await self._pr.list_issues_by_label("detector-calibration")
+        # #9814: cached read — same degrade discipline as the closed scan.
+        open_findings = await self._github_cache.get_issues_by_label(
+            "detector-calibration"
+        )
         autoclosed = 0
         for issue in open_findings:
             norm = _extract_norm_key(str(issue.get("body", "")))
