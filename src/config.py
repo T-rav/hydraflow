@@ -872,16 +872,19 @@ class HydraFlowConfig(BaseModel):
 
     # Work-queue discipline (#10037) — how IssueStore orders each stage queue.
     # ``IssueRefinementLoop`` (#9957) produces the P0/P1/P2 labels these read.
-    # Default is 'fifo' — the pre-#10037 ordering — so shipping this PR changes
-    # no behaviour on its own; flipping to 'weighted_mix' is the operator's
-    # System-tab action, keeping the discipline change reviewable in isolation.
+    # Default is 'weighted_mix': priority-driven selection is the intended
+    # out-of-the-box behaviour, so a fresh instance picks by priority rather
+    # than oldest-first. #10045 shipped 'fifo' to make the merge behaviour-
+    # neutral; this makes the deliberate cutover. 'fifo' remains the escape
+    # hatch — a live System-tab dial away, no restart (issue_store re-reads it
+    # on every dequeue) — restoring the pre-#10037 ordering without a deploy.
     queue_strategy: QueueStrategy = Field(
-        default=QueueStrategy.FIFO,
+        default=QueueStrategy.WEIGHTED_MIX,
         description=(
-            "Stage-queue ordering: 'fifo' (oldest first, pre-#10037 behaviour "
-            "and the migration default), 'priority' (strict P0>P1>P2, starves "
-            "lower bands), or 'weighted_mix' (P0 preempts, then a weighted ratio "
-            "draw with an age-based starvation guard)"
+            "Stage-queue ordering: 'weighted_mix' (default — P0 preempts, then "
+            "a weighted ratio draw with an age-based starvation guard), "
+            "'priority' (strict P0>P1>P2, starves lower bands), or 'fifo' "
+            "(oldest first, the pre-#10037 behaviour and escape hatch)"
         ),
     )
     # Weights are the relative share each band draws under 'weighted_mix'.
@@ -3157,6 +3160,20 @@ class HydraFlowConfig(BaseModel):
             "MAX_CASES (pre-spend) and applied as a Python-side sample "
             "(post-output) to bound operator-visible escalation flooding "
             "if the harness misses the env var."
+        ),
+    )
+    skill_prompt_eval_live_case_budget: int = Field(
+        default=12,
+        ge=0,
+        le=500,
+        description=(
+            "Max catcher-skill corpus cases a LIVE weekly backstop run "
+            "evaluates via the per-skill live path (each builds its own "
+            "skill's prompt and makes one real agent-CLI call; round-robin "
+            "across skills). Forwarded to the corpus runner via HYDRAFLOW_"
+            "TRUST_ADVERSARIAL_LIVE_BUDGET; inert unless HYDRAFLOW_TRUST_"
+            "ADVERSARIAL_LIVE=1. 0 disables the per-skill live path. Keep "
+            "aligned with corpus_runner.DEFAULT_LIVE_BUDGET (#10014)."
         ),
     )
 

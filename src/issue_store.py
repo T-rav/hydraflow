@@ -16,7 +16,7 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from models import PipelineIssueStatus, PipelineSnapshotEntry, QueueStats, Task
-from queue_strategy import order_queue
+from queue_strategy import band_of, order_queue
 from subprocess_util import AuthenticationError
 from task_source import TaskFetcher
 
@@ -786,6 +786,25 @@ class IssueStore:
                 entry.update(epic_meta)  # type: ignore[typeddict-item]
         return entry
 
+    def _dispatch_ranks(self, tasks: list[Task]) -> dict[int, int]:
+        """Map issue id -> the position ``order_queue`` would pick it (#10067).
+
+        Used only to annotate the snapshot, so it must NOT touch the live
+        dispatch RNG (``self._queue_rng``) — advancing it here would perturb the
+        real ``_take_from_queue`` draw. A fresh, fixed-seed RNG keeps the
+        preview stable within a frame; the head of the list (P0 + starved) is
+        deterministic regardless of seed.
+        """
+        ordered = order_queue(
+            tasks,
+            self._config.queue_strategy,
+            self._config.band_weights(),
+            rng=random.Random(0),
+            now=datetime.now(UTC),
+            starvation_threshold_hours=self._config.queue_starvation_threshold_hours,
+        )
+        return {task.id: rank for rank, task in enumerate(ordered)}
+
     def _snapshot_queued(self) -> dict[str, list[PipelineSnapshotEntry]]:
         """Return queued tasks grouped by stage."""
         snapshot: dict[str, list[PipelineSnapshotEntry]] = {}
@@ -793,6 +812,7 @@ class IssueStore:
             stage_seen: set[int] = set()
             entries: list[PipelineSnapshotEntry] = []
             duplicate_count = 0
+            ranks = self._dispatch_ranks(list(q))
             for task in q:
                 if task.id in stage_seen:
                     duplicate_count += 1
@@ -803,6 +823,8 @@ class IssueStore:
                     title=task.title,
                     url=task.source_url,
                     status="queued",
+                    priority=band_of(task),
+                    dispatch_rank=ranks[task.id],
                 )
                 epic_meta = self._epic_metadata(task)
                 if epic_meta:
