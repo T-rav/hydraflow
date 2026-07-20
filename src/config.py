@@ -311,6 +311,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("detector_calibration_interval", "HYDRAFLOW_DETECTOR_CALIBRATION_INTERVAL", 3600),
     ("auto_agent_preflight_interval", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_INTERVAL", 120),
     ("auto_agent_max_attempts", "HYDRAFLOW_AUTO_AGENT_MAX_ATTEMPTS", 3),
+    (
+        "auto_pr_preflight_stage_timeout_s",
+        "HYDRAFLOW_AUTO_PR_PREFLIGHT_STAGE_TIMEOUT_S",
+        600,
+    ),
     ("flake_tracker_interval", "HYDRAFLOW_FLAKE_TRACKER_INTERVAL", 14400),
     ("flake_threshold", "HYDRAFLOW_FLAKE_THRESHOLD", 3),
     ("skill_prompt_eval_interval", "HYDRAFLOW_SKILL_PROMPT_EVAL_INTERVAL", 604800),
@@ -582,6 +587,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("detector_calibration_enabled", "HYDRAFLOW_DETECTOR_CALIBRATION_ENABLED", True),
     ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
+    (
+        "auto_pr_preflight_gate_enabled",
+        "HYDRAFLOW_AUTO_PR_PREFLIGHT_GATE_ENABLED",
+        True,
+    ),
     (
         "implement_two_stage_review_enabled",
         "HYDRAFLOW_IMPLEMENT_TWO_STAGE_REVIEW_ENABLED",
@@ -3606,6 +3616,24 @@ class HydraFlowConfig(BaseModel):
     auto_agent_preflight_enabled: bool = Field(
         default=True,
         description="UI kill-switch for AutoAgentPreflightLoop (ADR-0049).",
+    )
+    auto_pr_preflight_gate_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for the auto-PR pre-flight quality-lite gate "
+            "(#10013): ratchet+regressions pytest, arch --check, and ruff on "
+            "staged files run inside the bot-PR worktree before gh pr create; "
+            "a red stage blocks the PR instead of burning a CI cycle."
+        ),
+    )
+    auto_pr_preflight_stage_timeout_s: int = Field(
+        default=600,
+        ge=30,
+        le=3600,
+        description=(
+            "Per-stage timeout in seconds for the auto-PR pre-flight gate "
+            "(#10013). A stage that exceeds it counts as red."
+        ),
     )
     implement_two_stage_review_enabled: bool = Field(
         default=True,

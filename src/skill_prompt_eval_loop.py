@@ -29,7 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from auto_pr import generate_and_open_pr_async
+from auto_pr import PREFLIGHT_DOCS_ONLY, generate_and_open_pr_async
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
@@ -838,6 +838,10 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             repo_root=cfg.repo_root,
             branch=f"bot/prompt-refine-{case_id}",
             generate=_generate,
+            # Prompt-refine PRs stage a single prompt module already vetted by
+            # corpus/holdout validation in `_generate`; ruff on the staged diff
+            # is the relevant check — docs-only preflight set (#10013).
+            preflight=PREFLIGHT_DOCS_ONLY,
             path_specs=[module_rel],
             pr_title=(
                 f"fix(prompt): refine {skill_name} — corpus case {case_id} regressed"
