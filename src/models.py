@@ -3110,7 +3110,10 @@ class GitHubIssueSummary(TypedDict):
 
     ``labels`` uses the gh wire shape (``[{"name": ...}, ...]``) and is only
     populated by the OPEN listing — the closed listing keeps its narrower
-    projection (#9943).
+    projection (#9943). ``closed_at`` is the mirror image: populated by
+    ``list_closed_issues_by_label`` only (#9727 — the detector-calibration
+    churn window keys on close time, since ``updated_at`` moves on ANY
+    issue activity).
     """
 
     number: int
@@ -3118,6 +3121,7 @@ class GitHubIssueSummary(TypedDict):
     body: str
     updated_at: str
     labels: NotRequired[list[dict[str, str]]]
+    closed_at: NotRequired[str]
 
 
 class PipelineSnapshotEntry(TypedDict):

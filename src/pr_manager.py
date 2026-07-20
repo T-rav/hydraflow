@@ -1674,6 +1674,10 @@ class PRManager:
 
         #8786 Phase 10: routed through the contracts boundary helper in
         lenient mode — same pattern as ``list_issues_by_label``.
+
+        #9727: projects ``closedAt`` → ``closed_at`` so the
+        detector-calibration churn window can key on close time
+        (``updated_at`` moves on ANY issue activity).
         """
         from contracts.boundary import parse_list_with_shape  # noqa: PLC0415
         from contracts.shapes import GhIssueListItem  # noqa: PLC0415
@@ -1690,7 +1694,7 @@ class PRManager:
             "--state",
             "closed",
             "--json",
-            "number,title,body,updatedAt",
+            "number,title,body,updatedAt,closedAt",
             "--limit",
             str(limit),
         )
@@ -1703,6 +1707,7 @@ class PRManager:
                 "title": field_or(r, "title", ""),
                 "body": field_or(r, "body", ""),
                 "updated_at": field_or(r, "updated_at", "", dict_key="updatedAt"),
+                "closed_at": field_or(r, "closed_at", "", dict_key="closedAt"),
             }
             for r in results
         ]
