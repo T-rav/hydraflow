@@ -3113,6 +3113,20 @@ class HydraFlowConfig(BaseModel):
             "if the harness misses the env var."
         ),
     )
+    skill_prompt_eval_live_case_budget: int = Field(
+        default=12,
+        ge=0,
+        le=500,
+        description=(
+            "Max catcher-skill corpus cases a LIVE weekly backstop run "
+            "evaluates via the per-skill live path (each builds its own "
+            "skill's prompt and makes one real agent-CLI call; round-robin "
+            "across skills). Forwarded to the corpus runner via HYDRAFLOW_"
+            "TRUST_ADVERSARIAL_LIVE_BUDGET; inert unless HYDRAFLOW_TRUST_"
+            "ADVERSARIAL_LIVE=1. 0 disables the per-skill live path. Keep "
+            "aligned with corpus_runner.DEFAULT_LIVE_BUDGET (#10014)."
+        ),
+    )
 
     # Trust fleet — prompt self-refinement (#9724)
     skill_prompt_refine_enabled: bool = Field(

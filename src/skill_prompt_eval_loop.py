@@ -273,18 +273,30 @@ class _CLIRefineLLM:
     unlike ``ClaudeCLIClient.complete_structured`` (which parses JSON), refine
     output is a unified diff, not a structured object. Never exercised under
     test; the loop's ``refine_llm`` kwarg injects a fake for all unit coverage.
+
+    The model is resolved from config PER CALL, not captured at construction:
+    ``skill_prompt_refine_model`` is a ``live=True`` knob in the settings
+    registry, and the client instance is cached on the loop for its lifetime —
+    freezing the model at first use would silently pin a System-tab change
+    until restart (the load-time-leak class; #10014 item 3).
     """
 
-    def __init__(self, config: HydraFlowConfig, model: str) -> None:
+    def __init__(self, config: HydraFlowConfig) -> None:
         self._config = config
-        self._model = model
+
+    def _resolve_model(self) -> str:
+        return (
+            self._config.skill_prompt_refine_model
+            or self._config.background_model
+            or "sonnet"
+        )
 
     async def complete(self, prompt: str) -> str:
         result = await run_lightweight_agent(
             runner=get_default_runner(),
             config=self._config,
             tool="claude",
-            model=self._model,
+            model=self._resolve_model(),
             prompt=prompt,
             source="skill_prompt_refine",
             timeout=float(_REFINE_LLM_TIMEOUT_SECONDS),
@@ -363,6 +375,11 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         forwarded so the harness can bound LLM spend pre-execution
         when the corpus grows beyond the cap. The Python-side cap
         below is the operator-visible backstop.
+        ``HYDRAFLOW_TRUST_ADVERSARIAL_LIVE_BUDGET`` caps how many
+        catcher-skill cases a LIVE run routes through the per-skill
+        live path (one real agent-CLI call each; #10014 item 2) —
+        inert unless the operator also set
+        ``HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1``.
         """
         cmd = ["make", "trust-adversarial", "FORMAT=json"]
         try:
@@ -373,6 +390,9 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                 extra_env={
                     "HYDRAFLOW_TRUST_ADVERSARIAL_MAX_CASES": str(
                         self._config.skill_prompt_eval_max_corpus_cases
+                    ),
+                    "HYDRAFLOW_TRUST_ADVERSARIAL_LIVE_BUDGET": str(
+                        self._config.skill_prompt_eval_live_case_budget
                     ),
                 },
             )
@@ -895,14 +915,15 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         return "error"
 
     async def _refine_llm_complete(self, prompt: str) -> str:
-        """Complete *prompt* via the injected fake or a lazily-built CLI client."""
+        """Complete *prompt* via the injected fake or a lazily-built CLI client.
+
+        Caching the client is safe: `_CLIRefineLLM` re-resolves its model from
+        the shared config on every `complete` call, so a live System-tab change
+        to `skill_prompt_refine_model` takes effect on the next synthesis
+        without a restart (#10014 item 3).
+        """
         if self._refine_llm is None:
-            model = (
-                self._config.skill_prompt_refine_model
-                or self._config.background_model
-                or "sonnet"
-            )
-            self._refine_llm = _CLIRefineLLM(self._config, model)
+            self._refine_llm = _CLIRefineLLM(self._config)
         return await self._refine_llm.complete(prompt)
 
     async def _apply_patch_in_worktree(self, worktree: Path, patch_text: str) -> None:
