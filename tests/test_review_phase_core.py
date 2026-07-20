@@ -4446,7 +4446,7 @@ class TestWikiIngestAdvisor:
         # Patch the fallback ingest path so we can detect whether ingestion ran.
         ingest_called = MagicMock()
         monkeypatch.setattr(
-            "repo_wiki_ingest.ingest_from_review",
+            "review_phase._phase.enqueue_wiki_ingest",
             ingest_called,
         )
 
@@ -4487,7 +4487,7 @@ class TestWikiIngestAdvisor:
 
         ingest_called = MagicMock()
         monkeypatch.setattr(
-            "repo_wiki_ingest.ingest_from_review",
+            "review_phase._phase.enqueue_wiki_ingest",
             ingest_called,
         )
 
@@ -4530,7 +4530,7 @@ class TestWikiIngestAdvisor:
 
         ingest_called = MagicMock()
         monkeypatch.setattr(
-            "repo_wiki_ingest.ingest_from_review",
+            "review_phase._phase.enqueue_wiki_ingest",
             ingest_called,
         )
 
@@ -4580,7 +4580,7 @@ class TestWikiIngestAdvisor:
 
         ingest_called = MagicMock()
         monkeypatch.setattr(
-            "repo_wiki_ingest.ingest_from_review",
+            "review_phase._phase.enqueue_wiki_ingest",
             ingest_called,
         )
 
@@ -4627,7 +4627,7 @@ class TestWikiIngestAdvisor:
         )
 
         monkeypatch.setattr(
-            "repo_wiki_ingest.ingest_from_review",
+            "review_phase._phase.enqueue_wiki_ingest",
             lambda *a, **kw: None,
         )
 

@@ -6,7 +6,6 @@ import logging
 import re
 from collections.abc import Coroutine
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from acceptance_criteria import AcceptanceCriteriaGenerator
@@ -45,11 +44,11 @@ from models import (
 )
 from prompt_telemetry import PromptTelemetry
 from reflections import clear_reflections, read_reflections
-from repo_wiki import _load_tracked_active_entries
-from repo_wiki_ingest import entries_from_reflections_log, ingest_phase_output
+from repo_wiki_ingest import entries_from_reflections_log
 from retrospective import RetrospectiveCollector
 from state import StateTracker
 from verification_judge import VerificationJudge
+from wiki_maint_queue import enqueue_wiki_ingest
 
 if TYPE_CHECKING:
     from repo_wiki import RepoWikiStore
@@ -60,54 +59,27 @@ logger = logging.getLogger("hydraflow.post_merge_handler")
 _T = TypeVar("_T")
 
 
-async def _compile_tracked_topics_for_merge(
-    *,
-    tracked_root: Path,
-    repo_slug: str,
-    compiler: WikiCompiler | None,
-) -> None:
-    """Run WikiCompiler.compile_topic_tracked for every tracked topic
-    that has ≥2 active entries.
-
-    Runs inline on the post-merge hook chain so the next issue sees a
-    deduplicated wiki instead of waiting for the RepoWikiLoop interval
-    tick. Side effects are file mutations in ``{tracked_root}/{repo}/
-    {topic}/``; those become uncommitted diffs that the existing
-    ``RepoWikiLoop._maybe_open_maintenance_pr`` tick rolls up into a
-    ``chore(wiki): maintenance`` PR.
-
-    No-op when compiler is None, repo_slug is unset (unresolved config),
-    tracked_root is missing, or no topic has enough entries to merit
-    a compile pass.
-    """
-    if compiler is None or not repo_slug:
-        return
-    repo_dir = tracked_root / repo_slug
-    if not repo_dir.is_dir():
-        return
-    for topic_dir in sorted(p for p in repo_dir.iterdir() if p.is_dir()):
-        if len(_load_tracked_active_entries(topic_dir)) < 2:
-            continue
-        await compiler.compile_topic_tracked(
-            tracked_root=tracked_root,
-            repo=repo_slug,
-            topic=topic_dir.name,
-        )
-
-
-async def _bridge_reflections_to_wiki(
+def _bridge_reflections_to_wiki(
     *,
     config: HydraFlowConfig,
     issue_number: int,
     repo: str,
     store: RepoWikiStore | None,
     compiler: WikiCompiler | None,
-    event_bus: EventBus | None = None,
 ) -> None:
-    """On merge: promote the issue's Reflexion log into wiki entries, then clear.
+    """On merge: promote the issue's Reflexion log into queued wiki entries.
+
+    The entries are enqueued as ``ingest-entry`` maintenance tasks (#9836)
+    so the ``RepoWikiLoop`` applies them inside its ephemeral worktree and
+    they ride the ``chore(wiki): maintenance`` PR. Writing them straight to
+    the boot-time ``store`` here would dirty ``repo_root`` — its roots live
+    under the operator's main checkout and it is constructed read-only, so
+    ``ingest`` there would raise (#9539, #9836).
 
     Silent no-op when store or compiler is None (wiki disabled). Swallows
-    wiki failures — we must not block the merge path on wiki trouble.
+    failures — we must not block the merge path on wiki trouble. The
+    reflection log is cleared only after a successful enqueue so a failure
+    leaves it for retry.
     """
     if store is None or compiler is None:
         return
@@ -121,13 +93,7 @@ async def _bridge_reflections_to_wiki(
             log=log, repo=repo, issue_number=issue_number
         )
         if entries:
-            await ingest_phase_output(
-                store=store,
-                repo=repo,
-                entries=entries,
-                compiler=compiler,
-                event_bus=event_bus,
-            )
+            enqueue_wiki_ingest(config, repo, entries)
         clear_reflections(config, issue_number)
         _metrics.increment("reflections_bridged")
     except Exception:  # noqa: BLE001
@@ -669,30 +635,21 @@ class PostMergeHandler:
                     )
 
         if self._wiki_store is not None and self._wiki_compiler is not None:
-            await self._safe_hook(
-                "reflection bridge",
-                _bridge_reflections_to_wiki(
-                    config=self._config,
-                    issue_number=pr.issue_number,
-                    repo=self._config.repo or "",
-                    store=self._wiki_store,
-                    compiler=self._wiki_compiler,
-                    event_bus=self._event_bus,
-                ),
-                pr.issue_number,
-            )
-            # P5: compile the tracked wiki inline so the next issue
-            # sees a deduplicated view instead of waiting for the
-            # RepoWikiLoop interval. File mutations roll into the
-            # existing chore(wiki) maintenance PR flow.
-            await self._safe_hook(
-                "wiki compile on merge",
-                _compile_tracked_topics_for_merge(
-                    tracked_root=(self._config.repo_root / self._config.repo_wiki_path),
-                    repo_slug=self._config.repo or "",
-                    compiler=self._wiki_compiler,
-                ),
-                pr.issue_number,
+            # Enqueue the issue's reflections as ingest-entry tasks. The
+            # RepoWikiLoop applies them inside its ephemeral worktree so
+            # they ride the maintenance PR (#9836). This is a sync,
+            # failure-soft file write (no LLM), so it is called directly
+            # rather than through _safe_hook. On-merge inline tracked
+            # compilation was removed here: it mutated repo_root/repo_wiki
+            # (the main checkout) but the maintenance PR is built in a
+            # worktree, so those edits never committed — they only dirtied
+            # the tree. The loop's periodic Phase-8 compile covers dedup.
+            _bridge_reflections_to_wiki(
+                config=self._config,
+                issue_number=pr.issue_number,
+                repo=self._config.repo or "",
+                store=self._wiki_store,
+                compiler=self._wiki_compiler,
             )
 
         # Adversarial pipeline: emit a SHIPPED_WITH_KNOWN_GAP event when
@@ -817,9 +774,15 @@ class PostMergeHandler:
             len(surviving),
         )
 
-        # Persist a wiki entry inline so the next run has the gap in
-        # context. Bail silently when wiki is disabled (no store) — the
-        # event is still emitted for any future subscriber.
+        # Enqueue a wiki entry so the next run has the gap in context.
+        # Bail silently when wiki is disabled (no store) — the event is
+        # still emitted for any future subscriber. The entry is routed
+        # through the maintenance queue (not written to the boot store)
+        # because the boot store's roots live under the operator's main
+        # checkout: an inline ``ingest`` there would dirty ``repo_root``
+        # and is rejected (``read_only=True``). The RepoWikiLoop applies
+        # the queued entry inside its ephemeral worktree so it rides the
+        # maintenance PR (#9836).
         if self._wiki_store is None:
             return
         repo_slug = self._config.repo or ""
@@ -846,7 +809,7 @@ class PostMergeHandler:
                 updated_at=now_iso,
                 confidence="high",
             )
-            self._wiki_store.ingest(repo_slug, [entry])
+            enqueue_wiki_ingest(self._config, repo_slug, [entry])
         except Exception:  # noqa: BLE001 — never block merge path on wiki I/O
             logger.warning(
                 "shipped-with-known-gap wiki persistence failed for issue #%d",
