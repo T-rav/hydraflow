@@ -143,6 +143,7 @@ cadence and files remediation issues on drift.
 | [0103](0103-continuous-human-steering-channel.md) | Continuous Human-on-the-Loop Steering Channel | Accepted |
 | [0104](0104-auto-tightening-ratchet.md) | Auto-tightening ratchet | Accepted |
 | [0105](0105-autonomous-convergence-via-decomposition.md) | Autonomous Convergence via Decomposition | Proposed |
+| [0106](0106-thread-level-event-loop-freeze-detector.md) | Thread-level event-loop freeze detector | Accepted |
 
 ## Adding a new ADR
 
