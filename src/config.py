@@ -541,6 +541,16 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
 
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
+    (
+        "test_adequacy_verifier_enabled",
+        "HYDRAFLOW_TEST_ADEQUACY_VERIFIER_ENABLED",
+        True,
+    ),
+    (
+        "test_adequacy_verifier_fail_closed",
+        "HYDRAFLOW_TEST_ADEQUACY_VERIFIER_FAIL_CLOSED",
+        False,
+    ),
     ("triage_honeypot_enabled", "HYDRAFLOW_TRIAGE_HONEYPOT_ENABLED", True),
     ("triage_honeypot_enforce", "HYDRAFLOW_TRIAGE_HONEYPOT_ENFORCE", False),
     ("approval_records_enabled", "HYDRAFLOW_APPROVAL_RECORDS_ENABLED", True),
@@ -615,6 +625,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("staging_enabled", "HYDRAFLOW_STAGING_ENABLED", False),
     ("otel_enabled", "HYDRAFLOW_OTEL_ENABLED", False),
+    (
+        "shadow_corpus_coverage_pruning_enabled",
+        "HYDRAFLOW_SHADOW_CORPUS_COVERAGE_PRUNING_ENABLED",
+        True,
+    ),
     ("term_proposer_enabled", "HYDRAFLOW_TERM_PROPOSER_ENABLED", True),
     ("term_pruner_enabled", "HYDRAFLOW_TERM_PRUNER_ENABLED", True),
     ("edge_proposer_enabled", "HYDRAFLOW_EDGE_PROPOSER_ENABLED", True),
@@ -820,6 +835,11 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
     ("HYDRAFLOW_BACKGROUND", "background_tool", "background_model"),
     ("HYDRAFLOW_IMPLEMENT", "implementation_tool", "model"),
     ("HYDRAFLOW_REVIEW", "review_tool", "review_model"),
+    (
+        "HYDRAFLOW_TEST_ADEQUACY_VERIFIER",
+        "test_adequacy_verifier_tool",
+        "test_adequacy_verifier_model",
+    ),
     ("HYDRAFLOW_PLANNER", "planner_tool", "planner_model"),
     ("HYDRAFLOW_TRIAGE", "triage_tool", "triage_model"),
     ("HYDRAFLOW_AC", "ac_tool", "ac_model"),
@@ -1024,6 +1044,37 @@ class HydraFlowConfig(BaseModel):
         description="CLI backend for review agents",
     )
     review_model: str = Field(default="sonnet", description="Model for review agents")
+
+    # Independent test-adequacy verifier (#9546): a second-opinion pass with a
+    # model that MUST stay independent of review_model — a shared model would
+    # defeat the second opinion (the finder grading its own homework).
+    test_adequacy_verifier_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+        default="claude",
+        description="CLI backend for the independent test-adequacy verifier pass",
+    )
+    test_adequacy_verifier_model: str = Field(
+        default="opus",
+        description=(
+            "Model for the independent test-adequacy verifier. Keep distinct "
+            "from review_model — a shared model defeats the second opinion"
+        ),
+    )
+    test_adequacy_verifier_enabled: bool = Field(
+        default=True,
+        description=(
+            "Run the independent verifier pass when the test-adequacy finder "
+            "emits an explicit OK (kill-switch; no-marker default-passes never "
+            "trigger the verifier)"
+        ),
+    )
+    test_adequacy_verifier_fail_closed: bool = Field(
+        default=False,
+        description=(
+            "Treat a degraded verifier run (empty transcript / infra failure) "
+            "as an OVERRIDE instead of keeping the finder's OK (fail-soft is "
+            "the default)"
+        ),
+    )
 
     # CI check configuration
     ci_check_timeout: int = Field(
@@ -2226,6 +2277,15 @@ class HydraFlowConfig(BaseModel):
             "Per-adapter LRU cap on shadow corpus size. Most-recently-"
             "recorded call shapes survive eviction; older shapes are "
             "deleted from disk."
+        ),
+    )
+    shadow_corpus_coverage_pruning_enabled: bool = Field(
+        default=True,
+        description=(
+            "Drop shadow-corpus samples at record time when no registered "
+            "dispatcher branch can form an opinion on them (#9633), so "
+            "no-opinion VOLATILE calls never consume per-adapter LRU "
+            "budget. Disable to record every adapter call."
         ),
     )
     live_corpus_replay_interval: int = Field(
@@ -4617,6 +4677,11 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
     stage_pairs: list[tuple[str, str, str]] = [
         ("implementation", config.implementation_tool, config.model),
         ("review", config.review_tool, config.review_model),
+        (
+            "test_adequacy_verifier",
+            config.test_adequacy_verifier_tool,
+            config.test_adequacy_verifier_model,
+        ),
         ("planner", config.planner_tool, config.planner_model),
         ("triage", config.triage_tool, config.triage_model),
         ("ac", config.ac_tool, config.ac_model),
