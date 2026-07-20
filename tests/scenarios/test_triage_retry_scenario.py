@@ -159,3 +159,44 @@ class TestTriageRetryScenario:
         # Still parked, still not in find.
         assert "hydraflow-parked" in issue.labels
         assert "hydraflow-find" not in issue.labels
+
+    async def test_parked_scan_served_from_cache_without_subprocess(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """#9814 — the parked-issue scan flows loop → GitHubDataCache → fake port.
+
+        A poisoned ``create_subprocess_exec`` proves no raw ``gh issue
+        list`` fires on the tick; the re-dispatch still lands, so the
+        cached read carries the same rows the direct port read did.
+        """
+        import asyncio
+
+        world = MockWorld(tmp_path)
+        world._github.add_issue(
+            number=705,
+            title="Vague bug report",
+            body=_PARKED_BODY,
+            labels=["hydraflow-parked"],
+        )
+
+        state = MagicMock()
+        state.get_triage_retry_attempts.return_value = 0
+        state.inc_triage_retry_attempts.return_value = 1
+        state.get_triage_retry_last_attempt.return_value = ""
+        data = MagicMock()
+        data.triage_retry_attempts = {}
+        state._data = data
+
+        _seed_ports(world, triage_retry_state=state)
+
+        def _no_subprocess(*_a, **_k):
+            raise AssertionError("raw gh subprocess fired for a cached issue read")
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _no_subprocess)
+
+        results = await world.run_with_loops(["triage_retry"], cycles=1)
+
+        assert results["triage_retry"]["retried"] == 1
+        issue = world._github._issues[705]
+        assert "hydraflow-find" in issue.labels
+        assert "hydraflow-parked" not in issue.labels

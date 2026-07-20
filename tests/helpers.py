@@ -434,11 +434,22 @@ class ConfigFactory:
         implement_two_stage_review_enabled: bool = True,
         fitness_scorecard_interval: int = 86400,
         fitness_window_days: int = 30,
-        fitness_min_samples: int = 20,
+        fitness_min_samples: int = 5,
         # Off by default in tests: the injection honeypot spawns a lightweight
         # agent before triage's LLM eval, which most triage tests neither mock
         # nor want. Its own tests opt in. Production default is True.
         triage_honeypot_enabled: bool = False,
+        # 0 in tests (#9814): the startup stagger would consume one
+        # instant_sleep_factory call before the first cycle and shift every
+        # loop test's cycle count. Production default is 120. Stagger tests
+        # opt in explicitly.
+        loop_startup_stagger_s: int = 0,
+        # 0 in tests (#9814): a >0 TTL would serve stale snapshots across
+        # ticks inside a single test, hiding the port-mock mutations tests
+        # make between _do_work calls. 0 = every read refreshes through the
+        # port (still coalesced + degrade-safe). Production default is 900.
+        # Cache-behavior tests opt in explicitly.
+        github_cache_issue_list_ttl_s: float = 0.0,
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -452,6 +463,8 @@ class ConfigFactory:
             return HydraFlowConfig(
                 config_file=config_file,
                 triage_honeypot_enabled=triage_honeypot_enabled,
+                loop_startup_stagger_s=loop_startup_stagger_s,
+                github_cache_issue_list_ttl_s=github_cache_issue_list_ttl_s,
                 ready_label=ready_label if ready_label is not None else ["test-label"],
                 batch_size=batch_size,
                 max_workers=max_workers,

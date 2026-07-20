@@ -77,7 +77,7 @@ Rows below capture the canonical standard status. Full coverage detail
 | `EpicSweeperLoop` | [0081](../../adr/0081-epic-sweeper-loop.md) | architecture-async-control.md | Caretaker loop |
 | `FakeCoverageAuditorLoop` | [0045, 0056, 0057] | [fake-coverage-auditor-loop.md](../../wiki/terms/fake-coverage-auditor-loop.md) | Trust fleet |
 | `FlakeTrackerLoop` | [0045, 0056, 0057, 0065] | [flake-tracker-loop.md](../../wiki/terms/flake-tracker-loop.md) | Trust fleet |
-| `GitHubCacheLoop` | (none) | [github-cache-loop.md](../../wiki/terms/github-cache-loop.md) | Caretaker loop |
+| `GitHubCacheLoop` | (none) | [git-hub-cache-loop.md](../../wiki/terms/git-hub-cache-loop.md) | Caretaker loop |
 | `HealthMonitorLoop` | [0045, 0046] | testing.md | Caretaker loop |
 | `LabelDriftWatcherLoop` | [0056] | (none) | Caretaker loop |
 | `LiveCorpusReplayLoop` | [0086](../../adr/0086-live-corpus-replay-loop.md) | [live-corpus-replay-loop.md](../../wiki/terms/live-corpus-replay-loop.md) | Trust fleet |

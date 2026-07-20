@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 from adr_utils import is_adr_issue_title
 from bg_worker_manager import BGWorkerManager
 from config import HydraFlowConfig
+from event_loop_watchdog import build_event_loop_watchdog
 from events import EventBus, EventType, HydraFlowEvent
 from hitl_controller import HITLController
 from human_steering import apply_steering, resolve_redo_phase
@@ -1053,6 +1054,14 @@ class HydraFlowOrchestrator:
         """
         self._stop_event.clear()
         self._running = True
+        # #9552: arm the thread-level event-loop freeze detector before any
+        # loop starts, so a synchronous block anywhere in the fleet is
+        # observable from OUTSIDE the (then-frozen) event loop. Builder
+        # returns None when disabled or under pytest; start() is a passive
+        # no-op when another orchestrator on this process already armed one.
+        event_loop_watchdog = build_event_loop_watchdog(self._config)
+        if event_loop_watchdog is not None:
+            event_loop_watchdog.start()
         try:
             self._restore_state()
             await self._publish_status()
@@ -1110,6 +1119,12 @@ class HydraFlowOrchestrator:
                 await self._publish_status()
                 logger.info("HydraFlow stopped")
         finally:
+            # #9552: disarm the freeze detector on ANY exit path — the thread
+            # exits within one poll tick of the stop event; a leaked daemon
+            # thread can't wedge teardown, but a prompt stop keeps restarts
+            # (and tests that force=True the builder) clean.
+            if event_loop_watchdog is not None:
+                event_loop_watchdog.stop()
             # Safety net: if run() is cancelled or raises during the setup
             # phase above (before the supervise-loops try-block), the inner
             # finally never executes and the line would stay stuck reporting

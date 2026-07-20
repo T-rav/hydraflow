@@ -59,50 +59,23 @@ class _DeadProc:
         return 0
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "module_name,timeout_attr",
-    [
-        ("flake_tracker_loop", "_GH_TIMEOUT_SECONDS"),
-        ("rc_budget_loop", "_GH_TIMEOUT_SECONDS"),
-        ("fake_coverage_auditor_loop", "_SUBPROCESS_TIMEOUT_SECONDS"),
-        ("adr_touchpoint_auditor_loop", "_GH_TIMEOUT_SECONDS"),
-        # #9883: sibling loops that shared the identical unguarded shape.
-        # (corpus_learning_loop was later migrated off raw gh to PRPort in
-        # #9932, so its _communicate_bounded helper no longer exists.)
-        ("memory_backlog_loop", "_SUBPROCESS_TIMEOUT_SECONDS"),
-        # These two take the timeout as a call argument (no module-level attr),
-        # signalled by timeout_attr=None below.
-        ("skill_prompt_eval_loop", None),
-        ("principles_audit_loop", None),
-    ],
-)
-async def test_communicate_bounded_surfaces_timeout_not_processlookup(
-    monkeypatch, module_name, timeout_attr
-):
-    module = __import__(module_name)
-
-    # #9579 moved the heavy-make loops (skill_prompt_eval, principles_audit)
-    # onto process_group.kill_process_group, which group-kills a REAL int pid
-    # via os.killpg. _DeadProc models an already-reaped child, so patch killpg
-    # to raise ProcessLookupError (group already gone) — and never signal a
-    # live pgid that happens to match the fake pid. Harmless for the loops
-    # still on guarded proc.kill(): they never call killpg.
-    def _dead_killpg(_pgid: int, _sig: int) -> None:
-        raise ProcessLookupError()
-
-    monkeypatch.setattr(os, "killpg", _dead_killpg)
-
-    if timeout_attr is None:
-        # ``_communicate_bounded(proc, timeout)`` — timeout is a call arg.
-        coro = module._communicate_bounded(_DeadProc(), timeout=0.01)
-    else:
-        monkeypatch.setattr(module, timeout_attr, 0.01)
-        coro = module._communicate_bounded(_DeadProc())
-    # Must raise TimeoutError (caller treats as failed read), never the
-    # ProcessLookupError from the already-dead child's reap.
-    with pytest.raises(TimeoutError):
-        await coro
+# #9554/#10028: flake_tracker_loop, rc_budget_loop, fake_coverage_auditor_loop,
+# adr_touchpoint_auditor_loop, memory_backlog_loop, skill_prompt_eval_loop and
+# principles_audit_loop each carried a copy-pasted ``_communicate_bounded``
+# helper (the exact behavior this parametrized test pinned) — all seven were
+# deleted when their raw ``asyncio.create_subprocess_exec`` sites migrated
+# onto the shared bounded helper (``subprocess_util.run_subprocess``/
+# ``run_subprocess_result``, which delegates to
+# ``execution.HostRunner.run_simple``). The ProcessLookupError-vs-TimeoutError
+# guarantee those per-file helpers pinned now lives ONCE in
+# ``execution.HostRunner.run_simple`` — pinned immediately below by
+# ``test_host_runner_run_simple_surfaces_timeout_not_processlookup`` — so this
+# parametrized case was removed rather than updated to import a function that
+# no longer exists in any of those modules. ``staging_bisect_loop._run_git``
+# (the sole remaining raw spawn, excluded for cooperative-cancellation
+# reasons) keeps its own inline reap via ``process_group.kill_process_group``,
+# which never raises ProcessLookupError (guarded internally) — nothing left
+# to pin at the loop layer for it either.
 
 
 @pytest.mark.asyncio
@@ -134,13 +107,23 @@ async def test_fake_subprocess_runner_host_reap_surfaces_timeout_not_processlook
     monkeypatch,
 ):
     """The MockWorld fake's host path (git/make run for real) must reap with the
-    same guard — a real reaped child there raises ProcessLookupError too (#9883)."""
+    same guard — a real reaped child there raises ProcessLookupError too (#9883).
+
+    Since #9624 the fake's ``_run_on_host`` delegates to ``HostRunner.run_simple``,
+    so the timeout reap is the shared ``os.killpg`` group-kill. Model the process
+    group as already-gone (killpg raises ProcessLookupError) so the reap never
+    signals a real pgid that happens to match ``_DeadProc.pid``, exactly like the
+    sibling HostRunner test above."""
     from mockworld.fakes.fake_subprocess_runner import FakeSubprocessRunner
 
     async def _fake_create(*_a, **_kw):
         return _DeadProc()
 
+    def _dead_killpg(_pgid: int, _sig: int) -> None:
+        raise ProcessLookupError()
+
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create)
+    monkeypatch.setattr(os, "killpg", _dead_killpg)
     with pytest.raises(TimeoutError):
         await FakeSubprocessRunner._run_on_host(["git", "status"], timeout=0.01)
 

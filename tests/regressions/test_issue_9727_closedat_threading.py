@@ -140,7 +140,12 @@ class TestFakeGitHubParity:
 
 
 def _loop(tmp_path: Path) -> tuple[DetectorCalibrationLoop, AsyncMock]:
-    cfg = HydraFlowConfig(data_root=tmp_path, repo="hydra/hydraflow")
+    from github_cache_loop import GitHubDataCache
+
+    # TTL 0 (#9814): cached reads pass through the pr mock every tick.
+    cfg = HydraFlowConfig(
+        data_root=tmp_path, repo="hydra/hydraflow", github_cache_issue_list_ttl_s=0
+    )
     pr = AsyncMock()
     pr.create_issue = AsyncMock(return_value=42)
     pr.list_closed_issues_by_label = AsyncMock(return_value=[])
@@ -152,7 +157,11 @@ def _loop(tmp_path: Path) -> tuple[DetectorCalibrationLoop, AsyncMock]:
         enabled_cb=lambda _name: True,
     )
     loop = DetectorCalibrationLoop(
-        config=cfg, state=MagicMock(), pr_manager=pr, deps=deps
+        config=cfg,
+        state=MagicMock(),
+        pr_manager=pr,
+        deps=deps,
+        github_cache=GitHubDataCache(cfg, pr, MagicMock()),
     )
     return loop, pr
 

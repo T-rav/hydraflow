@@ -45,6 +45,9 @@ def env(tmp_path: Path):
         data_root=tmp_path / ".hydraflow",
         repo="hydra/hydraflow",
         repo_root=tmp_path,
+        # TTL 0 (#9814): every cached read refreshes through the pr mock so
+        # per-test return_value mutations stay visible tick-to-tick.
+        github_cache_issue_list_ttl_s=0,
     )
     state = MagicMock()
     state.get_triage_retry_attempts.return_value = 0
@@ -71,11 +74,14 @@ def env(tmp_path: Path):
 
 def _make_loop(env, *, enabled: bool = True) -> TriageRetryLoop:
     cfg, state, pr = env
+    from github_cache_loop import GitHubDataCache
+
     return TriageRetryLoop(
         config=cfg,
         state=state,
         pr_manager=pr,
         deps=_deps(asyncio.Event(), enabled=enabled),
+        github_cache=GitHubDataCache(cfg, pr, MagicMock()),
     )
 
 

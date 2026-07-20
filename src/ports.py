@@ -304,8 +304,16 @@ class PRPort(Protocol):
 
     # --- Issue management ---
 
-    async def close_issue(self, issue_number: int) -> bool:
+    async def close_issue(
+        self, issue_number: int, *, reason: str | None = None
+    ) -> bool:
         """Close GitHub issue *issue_number*.
+
+        *reason* maps to ``gh issue close --reason`` (``"completed"`` |
+        ``"not planned"``); ``None`` keeps gh's default, which records
+        ``stateReason=COMPLETED``. Automated dedup/wontfix closes should
+        pass ``"not planned"`` so ``get_issue_state`` consumers don't read
+        them as resolved (#10025).
 
         Returns True when the close reached GitHub, False when the
         underlying call failed (fail-soft: no raise). Background callers
@@ -484,6 +492,21 @@ class PRPort(Protocol):
         Each dict: ``{"name", "conclusion", "started_at", "completed_at",
         "steps"}`` — the last three feed GateHealthLoop's suspected-hang
         classifier.
+        """
+        ...
+
+    async def list_runs_for_workflow(
+        self, workflow: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Return recent runs of ONE workflow file, newest first (#9814).
+
+        Each dict: ``{"id", "url", "status", "conclusion", "created_at",
+        "run_started_at", "updated_at"}``. Distinct from
+        :meth:`list_workflow_runs` (repo-wide, blame-correlation shape):
+        this is the CI-history read behind
+        ``GitHubDataCache.get_rc_workflow_runs``, which flake_tracker and
+        rc_budget consume instead of per-tick raw ``gh run list``
+        subprocesses.
         """
         ...
 

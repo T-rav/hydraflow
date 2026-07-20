@@ -8,23 +8,22 @@ subsystems take effect.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
 import logging
 import re
 import time
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import trace_collector
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
-from process_group import kill_process_group
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from config import HydraFlowConfig, ManagedRepo
     from pr_manager import PRManager
     from state import StateTracker
@@ -34,35 +33,11 @@ logger = logging.getLogger("hydraflow.principles_audit_loop")
 # Hard caps on subprocess reads. A wedged child must not hang the loop cycle
 # forever and freeze its heartbeat — the #9410 silent-stall failure class
 # (#9454 / #9508). ``make audit-json`` runs a full audit so it gets a longer
-# bound than a plain ``git`` call.
+# bound than a plain ``git`` call. Bounded (and, via ``run_subprocess_result``,
+# process-group hardened — #9554/#10028) rather than a raw
+# ``create_subprocess_exec``.
 _AUDIT_TIMEOUT_SECONDS = 1800
 _GIT_TIMEOUT_SECONDS = 120
-
-
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process, timeout: float
-) -> tuple[bytes, bytes]:
-    """``proc.communicate()`` bounded by *timeout* seconds.
-
-    On timeout the wedged child's whole PROCESS GROUP is reaped and a
-    ``TimeoutError`` propagates so the caller ends its cycle (and is
-    restarted by the supervisor) rather than hanging indefinitely.
-
-    Callers must spawn with ``start_new_session=True`` (child is its own
-    group leader): ``make audit-json`` fans out sub-make → pytest → LLM
-    grandchildren, and a child-only ``proc.kill()`` re-parented them to
-    init where they kept burning API credits (#9579). The guarded
-    primitive never raises — an already-exited child included — so the
-    TimeoutError (the intended failed-read signal) still propagates
-    (#9794/#9816).
-    """
-    try:
-        return await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except TimeoutError:
-        kill_process_group(proc)
-        with contextlib.suppress(ProcessLookupError):
-            await proc.wait()
-        raise
 
 
 _HYDRAFLOW_SELF = "hydraflow-self"
@@ -234,21 +209,11 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         """Invoke ``make audit-json`` → parsed JSON report (spec §4.4)."""
         cmd = ["make", "audit-json", f"DIR={repo_root}"]
         t0 = time.perf_counter()
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=self._config.repo_root,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            # Group leader (pid == pgid) so the timeout reap in
-            # _communicate_bounded kills the whole make → pytest → LLM
-            # subtree, not just the top-level make (#9579).
-            start_new_session=True,
-        )
         try:
-            stdout, stderr = await _communicate_bounded(
-                proc, timeout=_AUDIT_TIMEOUT_SECONDS
+            result = await run_subprocess_result(
+                *cmd, cwd=self._config.repo_root, timeout=_AUDIT_TIMEOUT_SECONDS
             )
-        except TimeoutError as exc:
+        except SubprocessTimeoutError as exc:
             duration_ms = int((time.perf_counter() - t0) * 1000)
             trace_collector.emit_loop_subprocess_trace(
                 loop="principles_audit",
@@ -261,24 +226,23 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
                 f"make audit-json timed out after {_AUDIT_TIMEOUT_SECONDS}s for {slug}"
             ) from exc
         duration_ms = int((time.perf_counter() - t0) * 1000)
-        exit_code = proc.returncode or 0
-        stderr_text = stderr.decode(errors="replace")
+        exit_code = result.returncode
         trace_collector.emit_loop_subprocess_trace(
             loop="principles_audit",
             command=cmd,
             exit_code=exit_code,
             duration_ms=duration_ms,
-            stderr_excerpt=stderr_text if stderr_text else None,
+            stderr_excerpt=result.stderr if result.stderr else None,
         )
         if exit_code not in (0, 1):  # audit uses 1 for "failures present"
             logger.warning(
                 "make audit-json exit=%d for %s: %s",
                 exit_code,
                 slug,
-                stderr_text[:400],
+                result.stderr[:400],
             )
         try:
-            return json.loads(stdout.decode())
+            return json.loads(result.stdout)
         except json.JSONDecodeError as exc:
             raise RuntimeError(
                 f"audit-json emitted non-JSON for {slug}: {exc}"
@@ -300,18 +264,11 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         """Run a git subcommand; returns ``(exit_code, combined_output)``."""
         cmd = ["git", *args]
         t0 = time.perf_counter()
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            # Group leader: _communicate_bounded reaps via killpg, which is
-            # only meaningful when the child owns its group (#9579).
-            start_new_session=True,
-        )
         try:
-            out, _ = await _communicate_bounded(proc, timeout=_GIT_TIMEOUT_SECONDS)
-        except TimeoutError as exc:
+            result = await run_subprocess_result(
+                *cmd, cwd=cwd, timeout=_GIT_TIMEOUT_SECONDS
+            )
+        except SubprocessTimeoutError as exc:
             duration_ms = int((time.perf_counter() - t0) * 1000)
             trace_collector.emit_loop_subprocess_trace(
                 loop="principles_audit",
@@ -324,8 +281,12 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
                 f"git timed out after {_GIT_TIMEOUT_SECONDS}s: {' '.join(cmd)}"
             ) from exc
         duration_ms = int((time.perf_counter() - t0) * 1000)
-        exit_code = proc.returncode or 0
-        combined = out.decode(errors="replace")
+        exit_code = result.returncode
+        # The shared helper returns separate stdout/stderr (no stderr=STDOUT
+        # redirect); reconstruct the combined text this method's contract
+        # promises. Only used for error messages/trace excerpts, so exact
+        # interleaving with the original redirect doesn't matter.
+        combined = "\n".join(p for p in (result.stdout, result.stderr) if p)
         trace_collector.emit_loop_subprocess_trace(
             loop="principles_audit",
             command=cmd,

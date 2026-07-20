@@ -19,6 +19,11 @@ from audit_chain import AuditChain
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import Credentials, HydraFlowConfig
 from dedup_store import DedupStore
+from event_loop_watchdog import (
+    clear_stall_marker,
+    event_loop_stall_marker_path,
+    read_stall_marker,
+)
 from events import EventType, HydraFlowEvent
 from git_revision import get_commits_behind
 from subprocess_util import run_subprocess
@@ -459,6 +464,15 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             await self._check_stale_code()
         except Exception:
             logger.debug("stale-code check failed", exc_info=True)
+
+        # Escalate a prior synchronous event-loop freeze recorded by the
+        # thread-level EventLoopWatchdog (#9552). The watchdog thread cannot
+        # file issues itself — Ports are async and run on the very loop that
+        # froze — so it leaves a marker this (now-healthy) loop consumes.
+        try:
+            await self._check_event_loop_stall()
+        except Exception:
+            logger.debug("event-loop stall check failed", exc_info=True)
 
         # Generic stall sweep: restart-first for any silent registry loop.
         # Deliberately unwrapped (unlike the grandfathered sibling checks
@@ -1377,6 +1391,63 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             )
             keys = keys | {filed_key}
             dedup.set_all(keys)
+
+    async def _check_event_loop_stall(self) -> None:
+        """Escalate a synchronous event-loop freeze recorded by the watchdog.
+
+        ``EventLoopWatchdog`` (#9552) is a daemon THREAD: while the event
+        loop is frozen it can dump stacks and write a marker, but it cannot
+        file a GitHub issue — the async Ports run on the very loop that
+        froze. This check runs once the loop is healthy again (in-place
+        recovery, or the first cycles after a process restart), files one
+        ``hydraflow-find`` + ``loop-stalled`` issue per marker, then consumes
+        the marker. File-then-clear: a failed filing leaves the marker in
+        place so the next tick retries; the marker file itself is the dedup.
+        """
+        prs = self._prs
+        if prs is None:
+            return
+        marker_path = event_loop_stall_marker_path(self._config)
+        marker = read_stall_marker(marker_path)
+        if marker is None:
+            return
+        detected_at = marker.get("detected_at", "unknown")
+        stalled_for = marker.get("stalled_for_seconds", "?")
+        threshold = marker.get("threshold_seconds", "?")
+        dump_path = marker.get("dump_path", "unknown")
+        episodes = marker.get("episode_count", 1)
+        hard_restart = marker.get("hard_restart", False)
+        title = (
+            f"event-loop-stalled: process event loop froze synchronously "
+            f"for {stalled_for}s"
+        )
+        body = (
+            f"## Event-loop freeze detected by the thread-level watchdog "
+            f"(#9552)\n\n"
+            f"The asyncio event loop stopped scheduling tasks for "
+            f"`{stalled_for}s` (threshold `{threshold}s`) — a SYNCHRONOUS "
+            f"block (CPU spin, blocking file I/O, non-async subprocess.run) "
+            f"inside a loop's `_do_work` wedged the entire process. The "
+            f"per-cycle asyncio watchdog cannot see this class; the "
+            f"`EventLoopWatchdog` daemon thread caught it from outside the "
+            f"loop.\n\n"
+            f"- Detected at: `{detected_at}`\n"
+            f"- Freeze episodes before this escalation: `{episodes}`\n"
+            f"- All-thread stack dump: `{dump_path}`\n"
+            f"- Hard restart was enabled at trip time: `{hard_restart}`\n\n"
+            f"### Operator playbook\n"
+            f"1. Open the stack dump above — the frozen loop thread's top "
+            f"Python frame IS the offending synchronous call site.\n"
+            f"2. Move that call off-loop (`asyncio.create_subprocess_exec`, "
+            f"`run_in_executor`) and file/fix accordingly.\n"
+            f"3. For recovery-in-place next time, consider enabling "
+            f"`event_loop_watchdog_hard_restart` in the **System** tab "
+            f"(requires a process supervisor with Restart=always).\n\n"
+            f"_Auto-filed by HydraFlow `health_monitor` (event-loop freeze "
+            f"escalation, #9552)._"
+        )
+        await prs.create_issue(title, body, ["hydraflow-find", "loop-stalled"])
+        clear_stall_marker(marker_path)
 
     async def _check_wiki_freshness(self) -> None:
         """Dead-man-switch for `RepoWikiLoop` via `docs/wiki/log.jsonl` mtime.

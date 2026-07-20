@@ -1,7 +1,8 @@
 """CLI entry point for UL lint + view regeneration.
 
-Exit code 0 = clean. Exit code 1 = anchor resolution failed (hard).
-Paraphrase and reverse-coverage warnings print to stdout but do not fail.
+Exit code 0 = clean. Exit code 1 = anchor resolution or term uniqueness
+failed (hard). Paraphrase and reverse-coverage warnings print to stdout
+but do not fail.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from ubiquitous_language import (  # noqa: E402
     lint_anchor_resolution,
     lint_paraphrases,
     lint_reverse_coverage,
+    lint_term_uniqueness,
     render_context_map,
     render_glossary,
 )
@@ -33,6 +35,7 @@ def main() -> int:
         print("UL: no terms found in docs/wiki/terms/ — skipping")
         return 0
 
+    duplicates = lint_term_uniqueness(TERMS)
     unresolved = lint_anchor_resolution(terms, SRC)
     paraphrases = lint_paraphrases(terms, WIKI)
     uncovered = lint_reverse_coverage(terms, SRC)
@@ -43,11 +46,17 @@ def main() -> int:
 
     print(
         f"UL: {len(terms)} terms, "
+        f"{len(duplicates)} uniqueness failures, "
         f"{len(unresolved)} unresolved anchors, "
         f"{len(paraphrases)} paraphrase warnings, "
         f"{len(uncovered)} uncovered load-bearing symbols"
     )
 
+    if duplicates:
+        print("TERM UNIQUENESS FAILURES (hard fail — one file per term, #9938):")
+        for d in duplicates:
+            print(f"  {d}")
+        return 1
     if unresolved:
         print("UNRESOLVED ANCHORS (hard fail):")
         for u in unresolved:

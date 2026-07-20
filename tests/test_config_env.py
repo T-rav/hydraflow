@@ -748,4 +748,4 @@ class TestEnvVarEnumOverride:
             workspace_base=tmp_path / "wt",
             state_file=tmp_path / "s.json",
         )
-        assert cfg.queue_strategy is QueueStrategy.FIFO
+        assert cfg.queue_strategy is QueueStrategy.WEIGHTED_MIX

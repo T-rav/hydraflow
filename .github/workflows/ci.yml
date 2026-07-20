@@ -39,6 +39,7 @@ jobs:
       compose: ${{ steps.filter.outputs.compose }}
       sandbox_scenarios: ${{ steps.filter.outputs.sandbox_scenarios }}
       dashboard: ${{ steps.filter.outputs.dashboard }}
+      subprocess_signal: ${{ steps.filter.outputs.subprocess_signal }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -91,6 +92,29 @@ jobs:
               - 'src/route_types.py'
               - 'tests/scenarios/browser/**'
               - 'tests/scenarios/fakes/mock_world.py'
+            subprocess_signal:
+              # Signal/reap blast-radius set (#10049, deferred from #10010):
+              # the modules where a mocked `.pid` can reach a real os.killpg
+              # (#9983/#10002), plus their signal-focused test files. Positive
+              # globs ONLY, so this entry is safe in this default-quantifier
+              # step — negations belong exclusively in the core_filter step
+              # below (predicate-quantifier: every; see #9908). Keep this list
+              # in sync with the linux-signal-smoke job's pytest args —
+              # tests/regressions/test_issue_10049_linux_signal_lane.py
+              # guards both directions.
+              - 'src/execution.py'
+              - 'src/runner_utils.py'
+              - 'src/subprocess_util.py'
+              - 'src/process_group.py'
+              - 'tests/test_execution.py'
+              - 'tests/test_runner_utils.py'
+              - 'tests/test_subprocess_util.py'
+              - 'tests/regressions/test_reap_processlookuperror.py'
+              - 'tests/regressions/test_issue_9553.py'
+              - 'tests/regressions/test_issue_9579.py'
+              - 'tests/regressions/test_issue_9911_stop_path_reap.py'
+              - 'tests/regressions/test_issue_9641_unified_group_kill.py'
+              - 'tests/regressions/test_hostrunner_reap_grandchildren.py'
       # core_python lives in its OWN paths-filter step because it is the only
       # filter with `!` negations, and negation semantics depend on the
       # quantifier. Under the default `some`, each `!glob` independently
@@ -343,6 +367,54 @@ jobs:
       - name: Run regression tests
         run: PYTHONPATH=src uv run pytest tests/regressions/ -q
 
+  # Linux signal-context smoke lane (#10049, deferred from #10010). Reruns the
+  # reap/signal-focused test subset INSIDE a plain Linux container as root —
+  # not merely `runs-on: ubuntu-latest`, which the `test` job already is. The
+  # container-as-root process tree is the environment where a mocked `.pid`
+  # reaching the real `os.killpg` hit the container's own PID 1 and wedged the
+  # job until timeout-cancel (#9983/#10002): benign EPERM on a macOS dev box,
+  # fatal on Linux CI — that platform divergence IS the signal this lane
+  # surfaces at PR time instead of at the 30-minute Tests timeout. ADVISORY by
+  # design: no gates.toml record and deliberately NOT in ci-gate's `needs` —
+  # per #9922, an advisory lane must never block RC auto-merge. Keep the
+  # pytest file list in sync with the subprocess_signal filter above
+  # (tests/regressions/test_issue_10049_linux_signal_lane.py guards both
+  # directions).
+  linux-signal-smoke:
+    name: Linux Signal Smoke (advisory)
+    needs: changes
+    if: needs.changes.outputs.subprocess_signal == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run signal/reap test subset in a Linux container as root
+        run: |
+          # --init matters: without it bash is PID 1 and killed grandchildren
+          # zombify unreaped, so the real-process reap tests read them as
+          # still alive and fail spuriously (validated locally). The GitHub
+          # runner VM has a real init, so tini-as-PID-1 is the faithful
+          # container analogue; root + Linux killpg delivery — the #9983
+          # divergence — is unchanged.
+          docker run --rm --init -v "$PWD":/w -w /w \
+            -e UV_PROJECT_ENVIRONMENT=/opt/venv \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -e PYTHONPATH=src \
+            python:3.11-slim bash -c '
+              pip install --quiet uv &&
+              uv sync --all-extras --quiet &&
+              uv run pytest \
+                tests/test_execution.py \
+                tests/test_runner_utils.py \
+                tests/test_subprocess_util.py \
+                tests/regressions/test_reap_processlookuperror.py \
+                tests/regressions/test_issue_9553.py \
+                tests/regressions/test_issue_9579.py \
+                tests/regressions/test_issue_9911_stop_path_reap.py \
+                tests/regressions/test_issue_9641_unified_group_kill.py \
+                tests/regressions/test_hostrunner_reap_grandchildren.py \
+                -q -p no:cacheprovider'
+
   audit:
     name: Principles Audit
     needs: changes
@@ -430,7 +502,7 @@ jobs:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
       - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
-      - name: Run fast subset (s01, s06, s53, s54, s55)
+      - name: Run fast subset (s01, s06, s53, s54, s55, s58, s59)
         run: |
           # Run every scenario and aggregate failures — do NOT early-exit on the
           # first red, or a broken leading scenario (e.g. s01, #9754) silently
@@ -438,9 +510,15 @@ jobs:
           # Keep this list in sync with the scenario-file QUARANTINED markers
           # until the loader drives this step's selection too. s55 was
           # quarantined under #9925 and un-quarantined once the #9796
-          # discover/shape wedge fix (#9919) proved to resolve it.
+          # discover/shape wedge fix (#9919) proved to resolve it. s58 gates the
+          # work-queue strategy dial (#10037): the picker decides what the
+          # factory works on next, and the dial is the only runtime access to
+          # it, so a broken dropdown is worth catching per-PR rather than at
+          # the next collective run. s59 guards the board's strategy badge —
+          # the config→/api/control/status→context→StreamView chain that tells
+          # an operator which algorithm is picking work (#10067).
           rc=0
-          for s in s01_happy_single_issue s06_kill_switch_via_ui s53_model_routing_settings_ui s54_decompose_to_converge s55_nested_decompose; do
+          for s in s01_happy_single_issue s06_kill_switch_via_ui s53_model_routing_settings_ui s54_decompose_to_converge s55_nested_decompose s58_work_queue_settings_ui s59_queue_strategy_board_badge; do
             if python scripts/sandbox_scenario.py run "$s"; then
               echo "::notice::sandbox $s PASSED"
             else
@@ -574,6 +652,8 @@ jobs:
   # skipped required check otherwise reads as "not passed" and blocks forever).
   # Not yet a required check: it must land on the base branch before being
   # required (see docs/standards/branch_protection/ADDING-A-GATE.md).
+  # linux-signal-smoke is EXCLUDED on purpose: it is an advisory lane (#10049)
+  # and must never gate RC auto-merge (#9922) — do not add it to `needs`.
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest

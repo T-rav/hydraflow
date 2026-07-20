@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from queue_strategy import QueueStrategy
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from events import EventBus
@@ -31,6 +33,29 @@ class TestControlStatusMaxTriagers:
         data = json.loads(response.body)
         assert "config" in data
         assert data["config"]["max_triagers"] == config.max_triagers
+
+
+class TestControlStatusQueueStrategy:
+    @pytest.mark.asyncio
+    async def test_control_status_exposes_the_active_queue_strategy(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        # The dashboard reads config.queue_strategy from here to show which
+        # algorithm is picking work (#10067); without it the badge is blind.
+        config.queue_strategy = QueueStrategy.WEIGHTED_MIX
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        get_control_status = find_endpoint(router, "/api/control/status")
+        assert get_control_status is not None
+
+        data = json.loads((await get_control_status()).body)
+
+        assert data["config"]["queue_strategy"] == "weighted_mix"
+        assert data["config"]["queue_weight_p1"] == config.queue_weight_p1
+        assert data["config"]["queue_weight_p2"] == config.queue_weight_p2
+        assert (
+            data["config"]["queue_weight_unprioritised"]
+            == config.queue_weight_unprioritised
+        )
 
 
 class TestControlStatusAppVersion:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -13,6 +12,12 @@ from base_background_loop import LoopDeps
 from config import HydraFlowConfig
 from events import EventBus
 from rc_budget_loop import RCBudgetLoop
+
+
+def _gh_cache() -> MagicMock:
+    cache = MagicMock()
+    cache.get_rc_workflow_runs = AsyncMock(return_value=[])
+    return cache
 
 
 def _deps(stop: asyncio.Event, enabled: bool = True) -> LoopDeps:
@@ -46,6 +51,7 @@ def _loop(env) -> RCBudgetLoop:
         pr_manager=pr,
         dedup=dedup,
         deps=_deps(asyncio.Event()),
+        github_cache=_gh_cache(),
     )
 
 
@@ -250,36 +256,70 @@ async def test_reconcile_closed_escalations_clears_dedup(loop_env, monkeypatch) 
     state.clear_rc_budget_attempts.assert_called_once_with("median")
 
 
+async def test_fetch_recent_runs_nonzero_returns_empty(
+    loop_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """gh run list exit!=0 (never raised by the shared helper) → []."""
+    from execution import SimpleResult
+
+    loop = _loop(loop_env)
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(stdout="", stderr="boom", returncode=1)
+
+    monkeypatch.setattr("rc_budget_loop.run_subprocess_result", fake_result)
+
+    assert await loop._fetch_recent_runs() == []
+
+
+async def test_fetch_recent_runs_timeout_returns_empty(
+    loop_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A gh timeout (SubprocessTimeoutError) is caught locally as []."""
+    from subprocess_util import SubprocessTimeoutError
+
+    loop = _loop(loop_env)
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> object:
+        raise SubprocessTimeoutError("timed out")
+
+    monkeypatch.setattr("rc_budget_loop.run_subprocess_result", fake_result)
+
+    assert await loop._fetch_recent_runs() == []
+
+
 async def test_fetch_job_breakdown_sorts_and_caps_slowest_jobs(
     loop_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    cfg, state, pr, dedup = loop_env
     loop = _loop(loop_env)
-    jobs = [
-        {
-            "name": f"job-{idx}",
-            "startedAt": "2026-04-20T00:00:00Z",
-            "completedAt": f"2026-04-20T00:{idx:02d}:00Z",
-        }
-        for idx in range(1, 13)
-    ]
-
-    class _Proc:
-        returncode = 0
-
-        async def communicate(self):
-            return (json.dumps({"jobs": jobs}).encode(), b"")
+    pr.get_workflow_run_jobs = AsyncMock(
+        return_value=[
+            {
+                "name": f"job-{idx}",
+                "conclusion": "success",
+                "started_at": "2026-04-20T00:00:00Z",
+                "completed_at": f"2026-04-20T00:{idx:02d}:00Z",
+                "steps": [],
+            }
+            for idx in range(1, 13)
+        ]
+    )
 
     async def fake_subproc(*args, **kwargs):
-        assert args[:4] == ("gh", "run", "view", "123")
-        return _Proc()
+        raise AssertionError("job breakdown must read the PRPort, not gh run view")
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    # #10060 moved residual spawns to the bounded helper — poison it too so
+    # the breakdown provably reads the PRPort, not any subprocess path.
+    monkeypatch.setattr("rc_budget_loop.run_subprocess_result", fake_subproc)
 
     result = await loop._fetch_job_breakdown({"databaseId": 123})
 
     assert [job["name"] for job in result[:3]] == ["job-12", "job-11", "job-10"]
     assert len(result) == 10
     assert result[0]["duration_s"] == 720
+    pr.get_workflow_run_jobs.assert_awaited_once_with(123)
 
 
 async def test_fetch_junit_tests_parses_and_caps_slowest_tests(
@@ -287,24 +327,20 @@ async def test_fetch_junit_tests_parses_and_caps_slowest_tests(
 ) -> None:
     loop = _loop(loop_env)
 
-    class _Proc:
-        returncode = 0
+    from execution import SimpleResult
 
-        async def communicate(self):
-            return (b"", b"")
-
-    async def fake_subproc(*args, **kwargs):
-        assert args[:4] == ("gh", "run", "download", "123")
-        out_dir = Path(args[args.index("--dir") + 1])
+    async def fake_result(*cmd: str, **_kwargs: object) -> SimpleResult:
+        assert cmd[:4] == ("gh", "run", "download", "123")
+        out_dir = Path(cmd[cmd.index("--dir") + 1])
         out_dir.mkdir(parents=True, exist_ok=True)
         cases = "\n".join(
             f'<testcase classname="pkg.TestSuite" name="test_{idx}" time="{idx / 10}" />'
             for idx in range(1, 13)
         )
         (out_dir / "junit.xml").write_text(f"<testsuite>{cases}</testsuite>")
-        return _Proc()
+        return SimpleResult(stdout="", stderr="", returncode=0)
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    monkeypatch.setattr("rc_budget_loop.run_subprocess_result", fake_result)
 
     result = await loop._fetch_junit_tests({"databaseId": 123})
 
@@ -362,7 +398,14 @@ async def test_kill_switch_short_circuits_run(loop_env) -> None:
         status_cb=lambda *a, **k: None,
         enabled_cb=lambda name: name != "rc_budget",
     )
-    loop = RCBudgetLoop(config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=deps)
+    loop = RCBudgetLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=deps,
+        github_cache=_gh_cache(),
+    )
     # Belt + braces: a guarded _do_work must not be entered by the dispatcher.
     loop._fetch_recent_runs = AsyncMock(side_effect=AssertionError("must not run"))
 
@@ -419,7 +462,14 @@ async def test_kill_switch_short_circuits_do_work(loop_env) -> None:
         status_cb=lambda *a, **k: None,
         enabled_cb=lambda name: name != "rc_budget",
     )
-    loop = RCBudgetLoop(config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=deps)
+    loop = RCBudgetLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=deps,
+        github_cache=_gh_cache(),
+    )
     loop._reconcile_closed_escalations = AsyncMock(return_value=None)
     loop._fetch_recent_runs = AsyncMock(
         side_effect=AssertionError("must not run when disabled")

@@ -16,7 +16,7 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from models import PipelineIssueStatus, PipelineSnapshotEntry, QueueStats, Task
-from queue_strategy import order_queue
+from queue_strategy import band_of, order_queue
 from subprocess_util import AuthenticationError
 from task_source import TaskFetcher
 
@@ -451,6 +451,33 @@ class IssueStore:
         self._eagerly_transitioned[task.id] = stage
         self._publish_queue_update_nowait()
 
+    def apply_label_transition(self, issue_number: int, new_label: str) -> bool:
+        """Mirror a GitHub pipeline-label swap in-memory immediately (#9842).
+
+        Event-driven bridge for the dashboard board: ``service_registry``
+        injects this as ``PRManager``'s pipeline-label listener, so every
+        ``swap_pipeline_labels`` moves the card within the snapshot debounce
+        (~0.1s) instead of waiting for the ``data_poll_interval`` (300s)
+        refresh to re-read labels. The poll remains the reconciling backstop,
+        and :meth:`enqueue_transition`'s eager protection stops a stale poll
+        (labels up to one cache cycle old) from dragging the card backward.
+
+        Returns ``True`` when the transition was applied. Returns ``False``
+        — leaving reconciliation to the poll — when *new_label* is not a
+        pipeline-stage label (e.g. a dup/parked swap-out; the issue is
+        usually still ``_active`` then, and ``mark_complete`` closes the
+        card) or when the issue was never routed by this store (no cached
+        Task to place in a queue, e.g. right after a restart).
+        """
+        stage = self._build_label_map().get(new_label)
+        if stage is None:
+            return False
+        task = self._issue_cache.get(issue_number)
+        if task is None:
+            return False
+        self.enqueue_transition(task, stage.value)
+        return True
+
     # ------------------------------------------------------------------
     # Queue accessors (non-blocking, return available issues)
     # ------------------------------------------------------------------
@@ -759,6 +786,25 @@ class IssueStore:
                 entry.update(epic_meta)  # type: ignore[typeddict-item]
         return entry
 
+    def _dispatch_ranks(self, tasks: list[Task]) -> dict[int, int]:
+        """Map issue id -> the position ``order_queue`` would pick it (#10067).
+
+        Used only to annotate the snapshot, so it must NOT touch the live
+        dispatch RNG (``self._queue_rng``) — advancing it here would perturb the
+        real ``_take_from_queue`` draw. A fresh, fixed-seed RNG keeps the
+        preview stable within a frame; the head of the list (P0 + starved) is
+        deterministic regardless of seed.
+        """
+        ordered = order_queue(
+            tasks,
+            self._config.queue_strategy,
+            self._config.band_weights(),
+            rng=random.Random(0),
+            now=datetime.now(UTC),
+            starvation_threshold_hours=self._config.queue_starvation_threshold_hours,
+        )
+        return {task.id: rank for rank, task in enumerate(ordered)}
+
     def _snapshot_queued(self) -> dict[str, list[PipelineSnapshotEntry]]:
         """Return queued tasks grouped by stage."""
         snapshot: dict[str, list[PipelineSnapshotEntry]] = {}
@@ -766,6 +812,7 @@ class IssueStore:
             stage_seen: set[int] = set()
             entries: list[PipelineSnapshotEntry] = []
             duplicate_count = 0
+            ranks = self._dispatch_ranks(list(q))
             for task in q:
                 if task.id in stage_seen:
                     duplicate_count += 1
@@ -776,6 +823,8 @@ class IssueStore:
                     title=task.title,
                     url=task.source_url,
                     status="queued",
+                    priority=band_of(task),
+                    dispatch_rank=ranks[task.id],
                 )
                 epic_meta = self._epic_metadata(task)
                 if epic_meta:

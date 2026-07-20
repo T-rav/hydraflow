@@ -1,7 +1,9 @@
 """RCBudgetLoop — 4h RC CI wall-clock regression detector (spec §4.8).
 
-Reads the last 30 days of ``rc-promotion-scenario.yml`` runs via ``gh
-run list``, extracts per-run wall-clock duration, and emits a
+Reads the last 30 days of ``rc-promotion-scenario.yml`` runs from the
+shared ``GitHubDataCache`` run snapshot (#9814 — one staleness-bounded
+gh fetch serves every consumer), extracts per-run wall-clock duration,
+and emits a
 ``hydraflow-find`` + ``rc-duration-regression`` issue when the newest
 run trips either:
 
@@ -21,9 +23,6 @@ Kill-switch: ``LoopDeps.enabled_cb("rc_budget")`` — **no
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import json
 import logging
 import re
 import statistics
@@ -36,11 +35,14 @@ from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
 from escalation_reconcile import EscalationReconciler
+from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult  # noqa: TCH001
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
     from dedup_store import DedupStore
+    from github_cache_loop import GitHubDataCache
     from pr_manager import PRManager
     from state import StateTracker
 
@@ -51,7 +53,9 @@ _WINDOW_DAYS = 30
 _HISTORY_CAP = 60
 _RECENT_N = 5
 _MIN_HISTORY = 5
-_WORKFLOW = "rc-promotion-scenario.yml"
+# The workflow itself is single-sourced as
+# ``github_cache_loop.RC_PROMOTION_WORKFLOW`` (#9814): this loop reads the
+# shared run snapshot, it no longer names the workflow in a gh command.
 
 # Marker label on the HITL escalation issue (paired with ``hitl-escalation``).
 # Single-sourced so the filing path (`_file_escalation`) and the reconciler
@@ -73,28 +77,10 @@ def _escalation_subject(title: str) -> str | None:
 
 # Hard cap on each ``gh`` read/download. A wedged child must not hang the loop
 # cycle forever and freeze its heartbeat — the #9410 silent-stall failure
-# class (#9454 / #9508).
+# class (#9454 / #9508). Bounded (and, via ``run_subprocess_result``,
+# circuit-breaker/rate-limit/process-group hardened — #9554/#10028) rather
+# than a raw ``create_subprocess_exec``.
 _GH_TIMEOUT_SECONDS = 120
-
-
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process,
-) -> tuple[bytes, bytes]:
-    """``proc.communicate()`` bounded by ``_GH_TIMEOUT_SECONDS``.
-
-    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
-    the caller can treat it as a failed read (rather than hanging the loop
-    cycle indefinitely).
-    """
-    try:
-        return await asyncio.wait_for(proc.communicate(), timeout=_GH_TIMEOUT_SECONDS)
-    except TimeoutError:
-        # proc.kill() itself raises ProcessLookupError when the child already
-        # exited — suppress it too so the TimeoutError propagates. (#9794/#9814)
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
-            await proc.wait()
-        raise
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -118,6 +104,7 @@ class RCBudgetLoop(BaseBackgroundLoop):
         pr_manager: PRManager,
         dedup: DedupStore,
         deps: LoopDeps,
+        github_cache: GitHubDataCache,
     ) -> None:
         super().__init__(
             worker_name="rc_budget",
@@ -128,6 +115,7 @@ class RCBudgetLoop(BaseBackgroundLoop):
         self._state = state
         self._pr = pr_manager
         self._dedup = dedup
+        self._github_cache = github_cache
         self._escalations = EscalationReconciler(
             prs=pr_manager,
             dedup=dedup,
@@ -212,57 +200,31 @@ class RCBudgetLoop(BaseBackgroundLoop):
         }
 
     async def _fetch_recent_runs(self) -> list[dict[str, Any]]:
-        """Fetch last 30 days of completed RC runs with per-run wall-clock."""
-        cmd = [
-            "gh",
-            "run",
-            "list",
-            "--repo",
-            self._config.repo,
-            "--workflow",
-            _WORKFLOW,
-            "--limit",
-            "100",
-            "--status",
-            "completed",
-            "--json",
-            "databaseId,url,conclusion,createdAt,updatedAt,startedAt",
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await _communicate_bounded(proc)
-        except TimeoutError:
-            logger.warning(
-                "gh run list timed out after %ss; returning empty",
-                _GH_TIMEOUT_SECONDS,
-            )
-            return []
-        if proc.returncode != 0:
-            logger.warning(
-                "gh run list exit=%d: %s",
-                proc.returncode,
-                stderr.decode(errors="replace")[:400],
-            )
-            return []
-        try:
-            raw = json.loads(stdout.decode() or "[]")
-        except json.JSONDecodeError:
-            return []
+        """Fetch last 30 days of completed RC runs with per-run wall-clock.
+
+        Served from the shared ``GitHubDataCache`` snapshot (#9814)
+        instead of a per-tick raw ``gh run list`` subprocess. The old
+        ``--status completed`` filter becomes a client-side ``status``
+        check on the shared (status-agnostic) snapshot; rows keep the
+        legacy gh-CLI key shape the baselines/issue bodies were built on.
+        """
+        rows = await self._github_cache.get_rc_workflow_runs()
         cutoff = datetime.now(UTC) - timedelta(days=_WINDOW_DAYS)
         out: list[dict[str, Any]] = []
-        for run in raw:
-            created = _parse_iso(run.get("createdAt"))
-            started = _parse_iso(run.get("startedAt") or run.get("createdAt"))
-            updated = _parse_iso(run.get("updatedAt"))
+        for row in rows:
+            if str(row.get("status", "")) != "completed":
+                continue
+            created = _parse_iso(row.get("created_at"))
+            started = _parse_iso(row.get("run_started_at") or row.get("created_at"))
+            updated = _parse_iso(row.get("updated_at"))
             if not created or not started or not updated or created < cutoff:
                 continue
             out.append(
                 {
-                    **run,
+                    "databaseId": row.get("id"),
+                    "url": row.get("url", ""),
+                    "conclusion": row.get("conclusion", ""),
+                    "createdAt": row.get("created_at", ""),
                     "duration_s": max(0, int((updated - started).total_seconds())),
                 }
             )
@@ -301,39 +263,32 @@ class RCBudgetLoop(BaseBackgroundLoop):
         return hits
 
     async def _fetch_job_breakdown(self, run: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return up to 10 slowest jobs for *run* via ``gh run view --json jobs``."""
-        run_id = str(run.get("databaseId", ""))
+        """Return up to 10 slowest jobs for *run* via the PRPort (#9814).
+
+        ``PRPort.get_workflow_run_jobs`` replaced the raw ``gh run view``
+        subprocess; failures stay fail-soft (empty breakdown, the issue
+        body says "unavailable") but billing signals propagate.
+        """
+        try:
+            run_id = int(run.get("databaseId") or 0)
+        except (TypeError, ValueError):
+            return []
         if not run_id:
             return []
-        cmd = [
-            "gh",
-            "run",
-            "view",
-            run_id,
-            "--repo",
-            self._config.repo,
-            "--json",
-            "jobs",
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            stdout, _ = await _communicate_bounded(proc)
-        except TimeoutError:
-            return []
-        if proc.returncode != 0:
-            return []
-        try:
-            payload = json.loads(stdout.decode() or "{}")
-        except json.JSONDecodeError:
+            jobs = await self._pr.get_workflow_run_jobs(run_id)
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "rc_budget: job breakdown unavailable for run %s",
+                run_id,
+                exc_info=True,
+            )
             return []
         out: list[dict[str, Any]] = []
-        for job in payload.get("jobs") or []:
-            s = _parse_iso(job.get("startedAt"))
-            c = _parse_iso(job.get("completedAt"))
+        for job in jobs:
+            s = _parse_iso(job.get("started_at"))
+            c = _parse_iso(job.get("completed_at"))
             if not s or not c:
                 continue
             out.append(
@@ -363,16 +318,11 @@ class RCBudgetLoop(BaseBackgroundLoop):
                 "--dir",
                 td,
             ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
             try:
-                await _communicate_bounded(proc)
-            except TimeoutError:
+                result = await run_subprocess_result(*cmd, timeout=_GH_TIMEOUT_SECONDS)
+            except SubprocessTimeoutError:
                 return []
-            if proc.returncode != 0:
+            if result.returncode != 0:
                 return []
             results: list[tuple[str, float]] = []
             for xml_path in Path(td).rglob("*.xml"):
@@ -480,7 +430,7 @@ class RCBudgetLoop(BaseBackgroundLoop):
         duration_ms = int((time.perf_counter() - t0) * 1000)
         emit_loop_subprocess_trace(
             loop=self._worker_name,
-            command=["gh", "run", "list", _WORKFLOW],
+            command=["github_cache", "rc_workflow_runs"],
             exit_code=0,
             duration_ms=duration_ms,
             stderr_excerpt=f"runs_seen={runs_seen} signals={signals}",

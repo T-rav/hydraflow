@@ -14,7 +14,12 @@ from typing import Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from exception_classify import reraise_on_credit_or_bug
 from human_steering import parse_directives
-from loop_fitness import FitnessContext, LoopFitness, proposal_acceptance_fitness
+from loop_fitness import (
+    FitnessContext,
+    LoopFitness,
+    cadence_min_samples,
+    proposal_acceptance_fitness,
+)
 from models import SteeringState
 
 logger = logging.getLogger("hydraflow.human_steering")
@@ -44,7 +49,14 @@ class HumanSteeringLoop(BaseBackgroundLoop):
 
     def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
         return proposal_acceptance_fitness(
-            ctx, worker_name=self._worker_name, label=_STEERING_LABEL
+            ctx,
+            worker_name=self._worker_name,
+            label=_STEERING_LABEL,
+            min_samples=cadence_min_samples(
+                ctx,
+                interval_seconds=self._get_default_interval(),
+                configured_min=self._config.fitness_min_samples,
+            ),
         )
 
     async def _do_work(self) -> dict[str, Any]:
