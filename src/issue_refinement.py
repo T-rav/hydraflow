@@ -322,7 +322,7 @@ def _fence_issue_content(
 
 
 _DUP_JUDGMENT_RUBRIC = """\
-You are refinement the HydraFlow issue backlog for duplicates. You are given
+You are refining the HydraFlow issue backlog for duplicates. You are given
 two open issues, A and B. Decide whether they describe the same underlying
 problem, and if so, which one should stay open as the canonical issue.
 
@@ -509,11 +509,25 @@ _ESCALATION_LABELS: frozenset[str] = frozenset(
     }
 )
 
+# Diagnostic / parked states (controller-ratified, #9957) — an issue actively
+# being worked by another loop, or waiting on the human who filed it; closing
+# either out from under its owning loop strands that loop. A dup hit on one
+# of these still digests (see plan_actions) — only AutoClose is guarded.
+_DIAGNOSTIC_PARKED_LABELS: frozenset[str] = frozenset(
+    {
+        "hydraflow-diagnose",  # diagnose_label (config.py) — active diagnostic analysis
+        "hydraflow-parked",  # parked_label (config.py) — awaiting author clarification
+    }
+)
+
 # The refinement loop's own rolling digest issue is never a refinement target.
 _REFINEMENT_DIGEST_LABELS: frozenset[str] = frozenset({"hydraflow-refinement-digest"})
 
 GUARDRAIL_SKIP_LABELS: frozenset[str] = (
-    _ACTIVE_PIPELINE_PHASE_LABELS | _ESCALATION_LABELS | _REFINEMENT_DIGEST_LABELS
+    _ACTIVE_PIPELINE_PHASE_LABELS
+    | _ESCALATION_LABELS
+    | _DIAGNOSTIC_PARKED_LABELS
+    | _REFINEMENT_DIGEST_LABELS
 )
 
 SETTLING_WINDOW_MINUTES = 60
@@ -609,7 +623,7 @@ def _parse_updated_at(value: str) -> datetime:
     A value that doesn't parse as ISO-8601 at all returns a sentinel far in
     the past (``datetime.min`` at UTC) instead of raising. Documented
     choice: for the settling-window check this means "age unknown, so
-    treat as settled" — refinement an issue whose timestamp we can't read is
+    treat as settled" — refining an issue whose timestamp we can't read is
     fine (there's no fresher signal we'd be jumping ahead of), whereas
     raising here would crash ``plan_actions`` and discard every
     already-computed action for the whole tick over one bad row.
@@ -643,11 +657,13 @@ def plan_actions(
     """Tier judged dup pairs and priority scores into concrete actions.
 
     Dup tier: ``AutoClose`` only when ``verdict == "exact_dup"``,
-    ``confidence == "high"``, neither issue in the pair is guarded, AND
-    ``canonical`` is one of the two pair members. Every other judged pair
-    becomes a ``DigestProposal`` — an operator question, not a skip; a
-    guarded side or an out-of-pair canonical downgrades to the digest
-    rather than disappearing.
+    ``confidence == "high"``, neither issue in the pair is guarded,
+    ``canonical`` is one of the two pair members, AND both issues are older
+    than ``SETTLING_WINDOW_MINUTES``. Every other judged pair becomes a
+    ``DigestProposal`` — an operator question, not a skip; a guarded side,
+    an out-of-pair canonical, or an unsettled side (change-detection just
+    fed this pair in) downgrades to the digest rather than disappearing —
+    it is re-eligible for AutoClose once both sides settle.
 
     Priority tier: ``RelabelAction`` only when the judged priority differs
     from the issue's current P-label, the issue is unguarded, AND the issue
@@ -685,6 +701,8 @@ def plan_actions(
             and not is_guarded(issue_a)
             and not is_guarded(issue_b)
             and verdict.canonical in (a_num, b_num)
+            and _is_settled(issue_a, now)
+            and _is_settled(issue_b, now)
         )
         if eligible:
             duplicate = b_num if verdict.canonical == a_num else a_num
@@ -845,7 +863,7 @@ def merge_open_proposals(
             ),
             None,
         )
-        first_seen = str(prior["first_seen"]) if prior else now_iso
+        first_seen = str(prior.get("first_seen", now_iso)) if prior else now_iso
         result = [
             e
             for e in result
@@ -873,7 +891,7 @@ def merge_open_proposals(
             ),
             None,
         )
-        first_seen = str(prior["first_seen"]) if prior else now_iso
+        first_seen = str(prior.get("first_seen", now_iso)) if prior else now_iso
         result = [
             e
             for e in result

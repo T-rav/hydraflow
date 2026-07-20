@@ -462,8 +462,27 @@ class TestGuardrails:
             "hydraflow-adr-drift",
             "hitl-escalation",
             "hydraflow-refinement-digest",
+            "hydraflow-diagnose",
+            "hydraflow-parked",
         ):
             assert label in GUARDRAIL_SKIP_LABELS
+
+    def test_dup_label_stays_unguarded(self) -> None:
+        """A dup-labeled issue is exactly what this loop may close (#9957,
+        controller-ratified) — unlike diagnose/parked, it must not be
+        added to the guardrail."""
+        assert "hydraflow-dup" not in GUARDRAIL_SKIP_LABELS
+
+    def test_all_pipeline_labels_stay_within_guardrail_skip_labels(self) -> None:
+        """Config-drift ratchet (#9957): the hardcoded
+        ``_ACTIVE_PIPELINE_PHASE_LABELS`` mirror in issue_refinement.py must
+        never fall behind ``HydraFlowConfig().all_pipeline_labels`` — every
+        current (and future) pipeline label has to be guarded, or a
+        production label rename/addition silently starts feeding live
+        pipeline issues to the auto-close tier."""
+        from config import HydraFlowConfig
+
+        assert set(HydraFlowConfig().all_pipeline_labels) <= GUARDRAIL_SKIP_LABELS
 
     def test_is_guarded_true_when_issue_carries_skip_label(self) -> None:
         issue = _issue(1, "t", labels=("hydraflow-review",))
@@ -492,6 +511,29 @@ class TestPlanActions:
             AutoClose(canonical=1, duplicate=2, evidence="same bug", confidence="high"),
         )
         assert actions.dup_proposals == ()
+
+    def test_unsettled_side_blocks_autoclose_but_downgrades_to_digest(self) -> None:
+        """Settling window on the AUTO-CLOSE tier (#9957): change-detection
+        can feed a freshly-touched issue straight into the dup tier — an
+        exact_dup/high verdict on a pair where either side is still inside
+        ``SETTLING_WINDOW_MINUTES`` must not auto-close. It downgrades to a
+        ``DigestProposal`` (never disappears) and re-earns AutoClose once
+        both sides settle."""
+        five_minutes_old = (
+            (_NOW - timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
+        )
+        issues = {
+            1: _issue(1, "a", updated_at=_STALE),
+            2: _issue(2, "b", updated_at=five_minutes_old),
+        }
+        verdict = DupVerdict(
+            verdict="exact_dup", canonical=1, evidence="same bug", confidence="high"
+        )
+
+        actions = plan_actions({(1, 2): verdict}, {}, issues, now=_NOW)
+
+        assert actions.auto_closes == ()
+        assert actions.dup_proposals == (DigestProposal(a=1, b=2, verdict=verdict),)
 
     def test_likely_dup_goes_to_digest_not_autoclose(self) -> None:
         issues = {1: _issue(1, "a"), 2: _issue(2, "b")}
@@ -642,7 +684,12 @@ class TestPlanActions:
     ) -> None:
         """A priority-tier row that raises unexpectedly must be skipped —
         never propagate and discard the dup tier's already-computed
-        ``AutoClose`` results for the same ``plan_actions`` call."""
+        ``AutoClose`` results for the same ``plan_actions`` call.
+
+        Patches ``_current_priority_label`` (priority-tier-only) rather than
+        ``_is_settled`` — the dup tier now calls ``_is_settled`` too (#9957
+        settled-gate on AutoClose), so booming that helper would no longer
+        isolate the fault to the priority row under test."""
         issues = {
             1: _issue(1, "a", updated_at=_STALE),
             2: _issue(2, "b", updated_at=_STALE),
@@ -653,10 +700,10 @@ class TestPlanActions:
         )
         priorities = {3: PriorityVerdict(priority="P0", reason="throughput blocker")}
 
-        def _boom(issue: RefinementIssue, now: object) -> bool:
+        def _boom(issue: RefinementIssue) -> str:
             raise RuntimeError("simulated malformed row")
 
-        monkeypatch.setattr(issue_refinement, "_is_settled", _boom)
+        monkeypatch.setattr(issue_refinement, "_current_priority_label", _boom)
 
         actions = plan_actions({(1, 2): dup_verdict}, priorities, issues, now=_NOW)
 
