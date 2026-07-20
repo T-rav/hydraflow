@@ -11,13 +11,17 @@ imports this module — Fakes are unreachable from the production code path.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from branch_protection_audit import AuditReport, audit_repo
 from dashboard import HydraFlowDashboard
 from events import EventBus
 from mockworld.fakes import (
@@ -144,6 +148,14 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # Frozen-model bypass (the same write the runtime PATCH route uses) —
     # avoids adding another suppression to the disturbance ratchet.
     object.__setattr__(config, "auto_pr_preflight_gate_enabled", False)
+    # ``approval_records`` (#9543): MergeStateWatcherLoop's CH-2 reconciler
+    # tick reads merged PRs at the raw ``gh`` subprocess boundary
+    # (approval_records._list_recently_merged — deliberately not on PRPort, so
+    # FakeGitHub never sees it). Under the air-gapped network that read raises
+    # every cycle, so ``_do_work`` never returns its conflict-handling stats
+    # and the watcher's active outcome is unobservable. The reconciler has its
+    # own unit tests; the sandbox exercises the conflict watcher.
+    object.__setattr__(config, "approval_records_enabled", False)
 
 
 def _load_seed() -> MockWorldSeed:
@@ -312,6 +324,165 @@ def _build_caretaker_enabled_cb(
     return lambda name, *_a, **_kw: name in allowed
 
 
+def seed_stale_workspaces(
+    state: Any, config: HydraFlowConfig, seed: MockWorldSeed
+) -> None:
+    """Register seeded stale worktrees in StateTracker (#9543).
+
+    WorkspaceGCLoop's phase-1 sweep reads ``state.get_active_workspaces()``;
+    seeding an entry here (path derived from config, mirroring the production
+    WorkspaceManager layout) gives a GC cycle a tracked worktree to judge.
+    Empty ``stale_workspaces`` (every other scenario) touches nothing.
+    """
+    for entry in seed.stale_workspaces:
+        number = int(entry["number"])
+        branch = str(entry.get("branch") or f"agent/issue-{number}")
+        path = config.workspace_base / config.repo_slug / f"issue-{number}"
+        state.set_workspace(number, str(path))
+        state.set_branch(number, branch)
+
+
+def materialize_expired_runs(config: HydraFlowConfig, seed: MockWorldSeed) -> None:
+    """Create back-dated run-artifact dirs for RunsGCLoop to purge (#9543).
+
+    RunRecorder derives a run's age from its ``%Y%m%dT%H%M%SZ`` directory
+    name, so materializing ``<runs>/<issue>/<old-timestamp>/`` at boot is all
+    an expired artifact takes. Empty ``expired_run_dirs`` creates nothing.
+    """
+
+    runs_dir = config.repo_data_path("runs")
+    for entry in seed.expired_run_dirs:
+        issue = int(entry["issue"])
+        age_days = int(entry.get("age_days", 90))
+        stamp = (datetime.now(UTC) - timedelta(days=age_days)).strftime(
+            "%Y%m%dT%H%M%SZ"
+        )
+        run_dir = runs_dir / str(issue) / stamp
+        run_dir.mkdir(parents=True, exist_ok=True)
+        # A marker file so the purged directory is a realistic non-empty run.
+        (run_dir / "transcript.log").write_text("seeded expired run (#9543)\n")
+
+
+@dataclass(frozen=True)
+class SeededActivationProposal:
+    """Duck-typed stand-in for ``scripts.gates.activation.ActivationProposal``.
+
+    GateActivatorLoop touches only these attributes (``_proposal_key`` /
+    ``_issue_body``); its own ``ActivationProposal`` import is
+    TYPE_CHECKING-only. A local mirror keeps the composition root off the
+    ``scripts`` package, which Dockerfile.agent does NOT ship into the
+    sandbox image (only ``src``/``tests``/``templates``/``static`` are
+    copied) — a real import would crash the entrypoint at boot.
+    """
+
+    name: str
+    dimension: str
+    required_on: tuple[str, ...]
+    workflow: str
+    job: str
+    make_target: str
+
+
+def build_seeded_gate_detector(
+    gate_activations: list[dict[str, Any]],
+) -> Callable[[], Any]:
+    """Detector stand-in returning seed-scripted activation proposals (#9543).
+
+    The production detector reads the repo's real gates.toml / workflows /
+    Makefile — all steady-state (no planned gates) in the baked sandbox image,
+    so the file-a-proposal path could never fire. Swapping the loop's existing
+    ``detector=`` injection point for this closure at the composition root is
+    the same DI pattern as the ``_mockworld_fake_llm`` sentinel wiring.
+    """
+    proposals = [
+        SeededActivationProposal(
+            name=str(entry["name"]),
+            dimension=str(entry.get("dimension", "tests")),
+            required_on=tuple(entry.get("required_on", ("main",))),
+            workflow=str(entry.get("workflow", "test.yml")),
+            job=str(entry.get("job", "tests")),
+            make_target=str(entry.get("make_target", "")),
+        )
+        for entry in gate_activations
+    ]
+
+    async def _detect() -> list[SeededActivationProposal]:
+        return list(proposals)
+
+    return _detect
+
+
+# Fixed canonical baseline served to the seeded auditor. Deliberately NOT the
+# repo's real contract: Dockerfile.agent ships no ``docs/`` into the sandbox
+# image, and a copy of the live contract in a seed would rot as gates.toml
+# evolves. The seam tests audit MECHANICS (normalize/diff/missing-ruleset
+# detection + issue filing) through the real ``audit_repo``; a scenario seeds
+# live rulesets against this stable baseline to produce drift (or cleanness).
+_CANONICAL_BASELINE: dict[str, dict[str, Any]] = {
+    "main protect": {
+        "name": "main protect",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+        "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}],
+    },
+    "staging protect": {
+        "name": "staging protect",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["refs/heads/staging"], "exclude": []}},
+        "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}],
+    },
+}
+
+
+def materialize_canonical_rulesets(config: HydraFlowConfig) -> Path:
+    """Write the fixed canonical ruleset baseline to disk; return its dir.
+
+    ``branch_protection_audit.load_canonical`` reads
+    ``main_ruleset.json``/``staging_ruleset.json`` from a directory; both
+    loaders materialize this one under the writable data root so the REAL
+    audit code runs unmodified with no dependency on repo ``docs/`` (absent
+    from the sandbox image). Idempotent.
+    """
+    canonical_dir = config.repo_data_path("sandbox_canonical_rulesets")
+    canonical_dir.mkdir(parents=True, exist_ok=True)
+    (canonical_dir / "main_ruleset.json").write_text(
+        json.dumps(_CANONICAL_BASELINE["main protect"], indent=2)
+    )
+    (canonical_dir / "staging_ruleset.json").write_text(
+        json.dumps(_CANONICAL_BASELINE["staging protect"], indent=2)
+    )
+    return canonical_dir
+
+
+def build_seeded_branch_protection_auditor(
+    config: HydraFlowConfig,
+    github: FakeGitHub,
+    canonical_dir: Path | None = None,
+) -> Callable[[], Any]:
+    """Auditor stand-in serving live rulesets from FakeGitHub (#9543/#9644).
+
+    Runs the REAL ``audit_repo`` diff — only its two inputs are swapped: the
+    live-ruleset fetch moves from the raw-``gh`` ``gh_fetch_rulesets``
+    (unreachable on the air-gapped network) to ``FakeGitHub.fetch_rulesets``
+    serving ``seed.rulesets``, and ``canonical_dir`` defaults to the
+    materialized fixed baseline (see ``materialize_canonical_rulesets``).
+    """
+    if canonical_dir is None:
+        canonical_dir = materialize_canonical_rulesets(config)
+
+    async def _audit() -> AuditReport:
+        return await asyncio.to_thread(
+            audit_repo,
+            config.repo,
+            canonical_dir,
+            fetch_rulesets=github.fetch_rulesets,
+        )
+
+    return _audit
+
+
 async def main() -> None:
     config = load_runtime_config()
     # Disable production code paths that reach services unreachable on the
@@ -378,6 +549,11 @@ async def main() -> None:
     for issue_number, count in seed.auto_agent_attempts.items():
         for _ in range(count):
             state.bump_auto_agent_attempts(int(issue_number))
+
+    # Stale-worktree + expired-run seeding (#9543). Both act on state/disk
+    # before the loops boot; empty seed fields are no-ops.
+    seed_stale_workspaces(state, config, seed)
+    materialize_expired_runs(config, seed)
 
     # Every async-touched ``subprocess.run`` site in production code now
     # specifies ``timeout=`` (PRs #8454, #8456, #8468 — enforced by
@@ -538,6 +714,27 @@ async def main() -> None:
         # the sanctioned seam here, mirroring ``_refine_loop._refine_llm`` above.
         svc.issue_refinement_loop._refinement_llm = _SeededRefinementLLM(
             list(seed.issue_refinement_verdicts)
+        )
+
+    # GateActivatorLoop (#9543) air-gap seam: when the scenario scripts
+    # activation proposals, swap the loop's existing ``detector=`` injection
+    # point for a closure returning them — the same composition-root DI as the
+    # ``_mockworld_fake_llm`` sentinel wiring. ``create_issue`` already routes
+    # through FakeGitHub. Empty seed: production detector untouched.
+    if seed.gate_activations:
+        svc.gate_activator_loop._detector = build_seeded_gate_detector(
+            seed.gate_activations
+        )
+
+    # BranchProtectionAuditorLoop (#9543/#9644) air-gap seam: when the
+    # scenario seeds live rulesets, rebind the auditor so the REAL
+    # ``audit_repo`` diff runs against ``FakeGitHub.fetch_rulesets`` instead
+    # of the raw-``gh`` ``gh_fetch_rulesets`` (which errors every cycle on the
+    # air-gapped network, reducing s41's heartbeat to an ``{'error': True}``
+    # tick). Empty seed: production auditor untouched.
+    if seed.rulesets:
+        svc.branch_protection_auditor_loop._auditor = (
+            build_seeded_branch_protection_auditor(config, shared_github)
         )
 
     orch = HydraFlowOrchestrator(

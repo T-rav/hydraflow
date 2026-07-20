@@ -69,7 +69,8 @@ GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
     "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._find_open_escalation::run_subprocess_result": 1,
     "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._reconcile_closed_escalations::run_subprocess_result": 1,
     "src/workspace_gc_loop.py::WorkspaceGCLoop._collect_orphaned_branches::run_subprocess": 2,
-    "src/workspace_gc_loop.py::WorkspaceGCLoop._get_issue_state::run_subprocess": 1,
+    # _get_issue_state's raw ``gh api`` spawn was routed through
+    # PRPort.get_issue_state in #9543 — entry pruned per the shrink-only rule.
 }
 
 
