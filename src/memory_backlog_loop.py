@@ -13,8 +13,6 @@ gate.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
 import re
 from typing import TYPE_CHECKING
@@ -29,6 +27,7 @@ from memory_backlog_mirror import (
     update_status,
 )
 from models import WorkCycleResult  # noqa: TCH001
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -59,32 +58,10 @@ def _escalation_subject(title: str) -> str | None:
 
 # Hard cap on each ``git``/``gh`` child. A wedged subprocess must not hang the
 # loop cycle forever and freeze its heartbeat — the #9410 silent-stall failure
-# class (#9454 / #9508).
+# class (#9454 / #9508). Bounded (and, via ``run_subprocess_result``,
+# circuit-breaker/rate-limit/process-group hardened — #9554/#10028) rather
+# than a raw ``create_subprocess_exec``.
 _SUBPROCESS_TIMEOUT_SECONDS = 120
-
-
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process,
-) -> tuple[bytes, bytes]:
-    """``proc.communicate()`` bounded by ``_SUBPROCESS_TIMEOUT_SECONDS``.
-
-    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
-    the caller can treat it as a failed read (rather than hanging the loop
-    cycle indefinitely).
-    """
-    try:
-        return await asyncio.wait_for(
-            proc.communicate(), timeout=_SUBPROCESS_TIMEOUT_SECONDS
-        )
-    except TimeoutError:
-        # proc.kill() itself raises ProcessLookupError when the child already
-        # exited — suppress it too, not just proc.wait() — so the TimeoutError
-        # (the intended failed-read signal) propagates instead of crashing the
-        # caller with ProcessLookupError. (#9794/#9816)
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
-            await proc.wait()
-        raise
 
 
 class MemoryBacklogLoop(BaseBackgroundLoop):
@@ -212,28 +189,26 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
             joined = ", ".join(f"#{n}" for n in issue_numbers)
             title = f"chore(memory-backlog): file issues {joined}"
 
-        add_proc = await asyncio.create_subprocess_exec(
-            "git",
-            "-C",
-            repo_root,
-            "add",
-            mirror_relpath,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            _, add_err = await _communicate_bounded(add_proc)
-        except TimeoutError:
+            add_result = await run_subprocess_result(
+                "git",
+                "-C",
+                repo_root,
+                "add",
+                mirror_relpath,
+                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+            )
+        except SubprocessTimeoutError:
             logger.warning(
                 "memory_backlog: git add timed out after %ss",
                 _SUBPROCESS_TIMEOUT_SECONDS,
             )
             return
-        if add_proc.returncode != 0:
+        if add_result.returncode != 0:
             logger.warning(
                 "memory_backlog: git add failed (rc=%s): %s",
-                add_proc.returncode,
-                add_err.decode(errors="replace").strip(),
+                add_result.returncode,
+                add_result.stderr,
             )
             return
 
@@ -243,32 +218,30 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
         if self._config.git_user_name:
             identity_args += ["-c", f"user.name={self._config.git_user_name}"]
 
-        commit_proc = await asyncio.create_subprocess_exec(
-            "git",
-            "-C",
-            repo_root,
-            *identity_args,
-            "commit",
-            "-m",
-            title,
-            "--",
-            mirror_relpath,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            _, commit_err = await _communicate_bounded(commit_proc)
-        except TimeoutError:
+            commit_result = await run_subprocess_result(
+                "git",
+                "-C",
+                repo_root,
+                *identity_args,
+                "commit",
+                "-m",
+                title,
+                "--",
+                mirror_relpath,
+                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+            )
+        except SubprocessTimeoutError:
             logger.warning(
                 "memory_backlog: git commit timed out after %ss",
                 _SUBPROCESS_TIMEOUT_SECONDS,
             )
             return
-        if commit_proc.returncode != 0:
+        if commit_result.returncode != 0:
             logger.warning(
                 "memory_backlog: git commit failed (rc=%s): %s",
-                commit_proc.returncode,
-                commit_err.decode(errors="replace").strip(),
+                commit_result.returncode,
+                commit_result.stderr,
             )
 
     async def _file_backlog_issue(self, entry: MirrorEntry) -> int:

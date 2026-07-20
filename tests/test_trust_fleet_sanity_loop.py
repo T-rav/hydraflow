@@ -282,21 +282,18 @@ async def test_reconcile_closed_escalations_clears_dedup(loop_env, monkeypatch) 
     }
     loop = _loop(loop_env)
 
-    class _P:
-        returncode = 0
+    from execution import SimpleResult
 
-        async def communicate(self):
-            # Only the ci_monitor escalation was closed.
-            return (
-                b'[{"title": "HITL: trust-loop anomaly \xe2\x80\x94 '
-                b'ci_monitor issues_per_hour"}]',
-                b"",
-            )
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        # Only the ci_monitor escalation was closed.
+        return SimpleResult(
+            stdout='[{"title": "HITL: trust-loop anomaly — '
+            'ci_monitor issues_per_hour"}]',
+            stderr="",
+            returncode=0,
+        )
 
-    async def fake_subproc(*args, **kwargs):
-        return _P()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    monkeypatch.setattr("trust_fleet_sanity_loop.run_subprocess_result", fake_result)
     await loop._reconcile_closed_escalations()
     dedup.set_all.assert_called_once()
     remaining = dedup.set_all.call_args.args[0]
@@ -443,10 +440,10 @@ async def test_reconcile_tolerates_subprocess_exception(loop_env, monkeypatch) -
     cfg, state, bg_workers, pr, dedup, bus = loop_env
     dedup.get.return_value = {"trust_fleet_sanity:issues_per_hour:rc_budget"}
 
-    async def boom(*args, **kwargs):
+    async def boom(*_cmd: str, **_kwargs: object) -> object:
         raise OSError("no gh binary")
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", boom)
+    monkeypatch.setattr("trust_fleet_sanity_loop.run_subprocess_result", boom)
     # Must not raise; dedup must not be modified.
     await loop._reconcile_closed_escalations()
     dedup.set_all.assert_not_called()
@@ -454,38 +451,30 @@ async def test_reconcile_tolerates_subprocess_exception(loop_env, monkeypatch) -
 
 async def test_reconcile_tolerates_nonzero_returncode(loop_env, monkeypatch) -> None:
     """gh exits non-zero -> early return, dedup unchanged."""
+    from execution import SimpleResult
+
     loop = _loop(loop_env)
     cfg, state, bg_workers, pr, dedup, bus = loop_env
 
-    class _P:
-        returncode = 1
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(stdout="", stderr="error", returncode=1)
 
-        async def communicate(self):
-            return b"", b"error"
-
-    async def fake_subproc(*a, **k):
-        return _P()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    monkeypatch.setattr("trust_fleet_sanity_loop.run_subprocess_result", fake_result)
     await loop._reconcile_closed_escalations()
     dedup.set_all.assert_not_called()
 
 
 async def test_reconcile_tolerates_invalid_json(loop_env, monkeypatch) -> None:
     """gh returns non-JSON stdout -> JSONDecodeError swallowed, dedup unchanged."""
+    from execution import SimpleResult
+
     loop = _loop(loop_env)
     cfg, state, bg_workers, pr, dedup, bus = loop_env
 
-    class _P:
-        returncode = 0
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(stdout="not valid json{{", stderr="", returncode=0)
 
-        async def communicate(self):
-            return b"not valid json{{", b""
-
-    async def fake_subproc(*a, **k):
-        return _P()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    monkeypatch.setattr("trust_fleet_sanity_loop.run_subprocess_result", fake_result)
     await loop._reconcile_closed_escalations()
     dedup.set_all.assert_not_called()
 
@@ -494,20 +483,20 @@ async def test_reconcile_skips_issues_with_unmatched_title(
     loop_env, monkeypatch
 ) -> None:
     """Closed issue whose title doesn't match _TITLE_RE -> key NOT cleared."""
+    from execution import SimpleResult
+
     loop = _loop(loop_env)
     cfg, state, bg_workers, pr, dedup, bus = loop_env
     dedup.get.return_value = {"trust_fleet_sanity:staleness:rc_budget"}
 
-    class _P:
-        returncode = 0
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(
+            stdout='[{"title": "Some unrelated issue title"}]',
+            stderr="",
+            returncode=0,
+        )
 
-        async def communicate(self):
-            return b'[{"title": "Some unrelated issue title"}]', b""
-
-    async def fake_subproc(*a, **k):
-        return _P()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    monkeypatch.setattr("trust_fleet_sanity_loop.run_subprocess_result", fake_result)
     await loop._reconcile_closed_escalations()
     # No regex match -> set_all never called, existing key preserved.
     dedup.set_all.assert_not_called()
@@ -675,3 +664,60 @@ def test_emit_trace_survives_emission_exception(loop_env, monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "trace_collector", fake_module)
     # Should not raise.
     loop._emit_trace(0.0, anomalies=1)
+
+
+# ---------------------------------------------------------------------------
+# _find_open_escalation — #9554/#10028: routes through run_subprocess_result
+# ---------------------------------------------------------------------------
+
+
+async def test_find_open_escalation_reuses_matching_open_issue(
+    loop_env, monkeypatch
+) -> None:
+    from execution import SimpleResult
+
+    loop = _loop(loop_env)
+
+    async def fake_result(*cmd: str, **_kwargs: object) -> SimpleResult:
+        assert cmd[0] == "gh"
+        return SimpleResult(
+            stdout='[{"number": 555, "title": "HITL: trust-loop anomaly — '
+            'rc_budget staleness"}]',
+            stderr="",
+            returncode=0,
+        )
+
+    monkeypatch.setattr("trust_fleet_sanity_loop.run_subprocess_result", fake_result)
+
+    found = await loop._find_open_escalation("rc_budget", "staleness")
+
+    assert found == 555
+
+
+async def test_find_open_escalation_timeout_fails_open(loop_env, monkeypatch) -> None:
+    """A gh timeout (SubprocessTimeoutError) fails open — filing is safe."""
+    from subprocess_util import SubprocessTimeoutError
+
+    loop = _loop(loop_env)
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> object:
+        raise SubprocessTimeoutError("timed out")
+
+    monkeypatch.setattr("trust_fleet_sanity_loop.run_subprocess_result", fake_result)
+
+    assert await loop._find_open_escalation("rc_budget", "staleness") == 0
+
+
+async def test_find_open_escalation_no_match_returns_zero(
+    loop_env, monkeypatch
+) -> None:
+    from execution import SimpleResult
+
+    loop = _loop(loop_env)
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(stdout="[]", stderr="", returncode=0)
+
+    monkeypatch.setattr("trust_fleet_sanity_loop.run_subprocess_result", fake_result)
+
+    assert await loop._find_open_escalation("rc_budget", "staleness") == 0

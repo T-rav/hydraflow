@@ -20,7 +20,8 @@ Tick body (Tasks 15 + 16 + 20 wired; Tasks 17/18/19 still pending):
    per-adapter slugs, labels ``contract-refresh`` + ``auto-merge``,
    ``auto_merge=True``, ``raise_on_failure=False``.
 5. Post-refresh replay gate (Task 16): invoke ``make trust-contracts``
-   via :func:`subprocess.run`. Pass → clean exit. Fail → the fresh
+   via :func:`subprocess_util.run_subprocess_result` (#9554/#10028 bounded
+   helper). Pass → clean exit. Fail → the fresh
    cassettes have outrun the fakes; file a ``hydraflow-find`` +
    ``fake-drift`` companion issue via ``PRManager.create_issue`` so the
    factory dispatches a fake-repair implementer. Success of the PR's
@@ -49,7 +50,6 @@ Spec: ``docs/superpowers/specs/2026-04-22-trust-architecture-hardening-design.md
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import json
 import logging
@@ -75,8 +75,8 @@ from contract_recording import (
 )
 from dedup_store import DedupStore
 from models import WorkCycleResult  # noqa: TCH001
-from process_group import kill_process_group
 from rollup_issue_manager import RollupIssueManager
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -503,8 +503,12 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         ``_REPLAY_GATE_TIMEOUT_SECONDS`` (5 min). The earlier
         synchronous implementation called ``subprocess.run`` from the
         async ``_do_work`` path, freezing the event loop for the whole
-        duration. Use ``asyncio.create_subprocess_exec`` so other
-        loops keep ticking while the replay gate runs.
+        duration. Routes through the shared bounded helper
+        (:func:`subprocess_util.run_subprocess_result`, #9554/#10028) so
+        other loops keep ticking while the replay gate runs, and the
+        spawn inherits process-group registration + reap (#9911/#10019)
+        for free — on top of the group-kill-on-timeout already wired
+        here (#9579).
 
         Task 20 wraps the call in
         :func:`trace_collector.emit_loop_subprocess_trace` so the
@@ -513,35 +517,20 @@ class ContractRefreshLoop(BaseBackgroundLoop):
 
         Hard timeout defends the orchestrator: a hung recording
         cassette must not stall the entire async event loop. On
-        ``TimeoutError`` we synthesize a non-zero CompletedProcess so
-        the caller routes the timeout through the fake-drift
-        companion path (returncode=124, the bash timeout convention).
+        ``SubprocessTimeoutError`` we synthesize a non-zero
+        CompletedProcess so the caller routes the timeout through the
+        fake-drift companion path (returncode=124, the bash timeout
+        convention).
         """
         cmd = ["make", "trust-contracts"]
         t0 = time.perf_counter()
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(self._config.repo_root),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            # Group leader (pid == pgid) so the timeout reap kills the whole
-            # make → pytest replay subtree, not just the top-level make
-            # (#9579).
-            start_new_session=True,
-        )
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(), timeout=_REPLAY_GATE_TIMEOUT_SECONDS
+            gated = await run_subprocess_result(
+                *cmd,
+                cwd=self._config.repo_root,
+                timeout=_REPLAY_GATE_TIMEOUT_SECONDS,
             )
-        except TimeoutError:
-            # Group-kill: a child-only proc.kill() orphaned the sub-make /
-            # pytest grandchildren at PPID=1 (#9579). The guarded primitive
-            # never raises — an already-exited child included — so the
-            # timeout is handled as a failure instead of crashing the loop
-            # cycle. (#9794/#9816/#9883)
-            kill_process_group(proc)
-            with contextlib.suppress(ProcessLookupError):
-                await proc.wait()
+        except SubprocessTimeoutError:
             logger.warning(
                 "Replay gate timed out after %ss; treating as failure",
                 _REPLAY_GATE_TIMEOUT_SECONDS,
@@ -561,13 +550,11 @@ class ContractRefreshLoop(BaseBackgroundLoop):
                 stderr_excerpt=timeout_proc.stderr,
             )
             return timeout_proc
-        stdout_txt = (stdout_b or b"").decode(errors="replace")
-        stderr_txt = (stderr_b or b"").decode(errors="replace")
         result = subprocess.CompletedProcess(
             args=cmd,
-            returncode=proc.returncode if proc.returncode is not None else -1,
-            stdout=stdout_txt,
-            stderr=stderr_txt,
+            returncode=gated.returncode,
+            stdout=gated.stdout,
+            stderr=gated.stderr,
         )
         duration_ms = int((time.perf_counter() - t0) * 1000)
         trace_collector.emit_loop_subprocess_trace(
@@ -575,7 +562,7 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             command=cmd,
             exit_code=result.returncode,
             duration_ms=duration_ms,
-            stderr_excerpt=stderr_txt.strip() or None,
+            stderr_excerpt=gated.stderr.strip() or None,
         )
         return result
 
