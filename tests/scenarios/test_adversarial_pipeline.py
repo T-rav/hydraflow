@@ -43,6 +43,7 @@ from models import Task
 from state import StateTracker
 from tests.conftest import PlanResultFactory, TaskFactory
 from tests.helpers import supply_once
+from wiki_maint_queue import MaintenanceQueue, default_queue_path
 
 pytestmark = pytest.mark.scenario
 
@@ -441,13 +442,13 @@ class TestS5ShippedWithKnownGapWikiEntry:
         self, mock_world, tmp_path
     ) -> None:
         # Re-create the world with a fake wiki_store so the post_merge
-        # handler has somewhere to persist the entry. ``mock_world``
-        # itself is constructed without one — that's fine; the fake we
-        # build is a thin MagicMock matching RepoWikiStore.ingest.
+        # handler's ``if self._wiki_store is None`` gate passes. Since
+        # #9836 the gap entry is not written to the store — it is enqueued
+        # as an ingest-entry maintenance task the RepoWikiLoop applies in
+        # its worktree — so we assert on the queue, not on a store mock.
         from tests.helpers import PipelineHarness  # noqa: PLC0415
 
         wiki_store = MagicMock()
-        wiki_store.ingest = MagicMock()
         harness = PipelineHarness(tmp_path / "world", wiki_store=wiki_store)
 
         issue_id = 505
@@ -482,13 +483,15 @@ class TestS5ShippedWithKnownGapWikiEntry:
         assert len(gap.data["surviving_concerns"]) == 1
         assert gap.data["surviving_concerns"][0]["id"] == "C-surviving-1"
 
-        # Wiki entry was persisted via wiki_store.ingest(repo, [entry]).
-        assert wiki_store.ingest.called, "wiki_store.ingest was not called"
-        repo_slug, entries = wiki_store.ingest.call_args.args
-        assert repo_slug == harness.config.repo
-        assert len(entries) == 1
-        entry = entries[0]
+        # Wiki entry was enqueued as an ingest-entry maintenance task
+        # (worktree-isolated delivery) rather than written to repo_root.
+        tasks = MaintenanceQueue(path=default_queue_path(harness.config)).peek()
+        ingest_tasks = [t for t in tasks if t.kind == "ingest-entry"]
+        assert len(ingest_tasks) == 1, "shipped-gap entry was not enqueued"
+        task = ingest_tasks[0]
+        assert task.repo_slug == harness.config.repo
+        entry = task.params["entry"]
         # Entry carries the surviving concern's id in the rendered body.
-        assert "C-surviving-1" in entry.content
-        assert entry.source_type == "shipped-with-known-gap"
-        assert entry.topic == "gotchas"
+        assert "C-surviving-1" in entry["content"]
+        assert entry["source_type"] == "shipped-with-known-gap"
+        assert entry["topic"] == "gotchas"

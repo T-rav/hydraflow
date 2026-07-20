@@ -1,154 +1,139 @@
-"""Tests for reflection → wiki bridge in post_merge_handler."""
+"""Tests for reflection → wiki bridge in post_merge_handler.
+
+Since #9836 the bridge no longer writes to the boot-time store (its roots
+live under the operator's main checkout, and it is read-only). Instead it
+enqueues each reflection as an ``ingest-entry`` maintenance task; the
+``RepoWikiLoop`` applies them inside its ephemeral worktree so they ride
+the maintenance PR. These tests assert the enqueue + clear contract.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from reflections import append_reflection, read_reflections
 from repo_wiki import RepoWikiStore
+from wiki_maint_queue import MaintenanceQueue, default_queue_path
 
 
-@pytest.fixture
-def config(tmp_path: Path):
+def _config(tmp_path: Path) -> MagicMock:
     cfg = MagicMock()
     cfg.data_root = tmp_path
+    # enqueue_wiki_ingest resolves the shared queue via config.data_path;
+    # the bound joinpath already accepts *parts, so no lambda is needed.
+    cfg.data_path = tmp_path.joinpath
     return cfg
 
 
-async def test_bridge_reads_appends_and_clears(config, tmp_path):
-    from post_merge_handler import _bridge_reflections_to_wiki
-    from wiki_compiler import ContradictionCheck
+def _queued(cfg: MagicMock) -> list:
+    return MaintenanceQueue(path=default_queue_path(cfg)).peek()
 
+
+def test_bridge_enqueues_reflections_and_clears(tmp_path: Path) -> None:
+    from post_merge_handler import _bridge_reflections_to_wiki
+
+    cfg = _config(tmp_path)
     store = RepoWikiStore(tmp_path / "wiki")
     compiler = AsyncMock()
-    compiler.detect_contradictions = AsyncMock(return_value=ContradictionCheck())
 
     append_reflection(
-        config,
+        cfg,
         42,
         phase="plan",
         content="architecture: use DI for service modules",
     )
+    assert read_reflections(cfg, 42)
 
-    # Before the bridge runs, reflections file exists and is non-empty.
-    assert read_reflections(config, 42)
-
-    await _bridge_reflections_to_wiki(
-        config=config,
+    _bridge_reflections_to_wiki(
+        config=cfg,
         issue_number=42,
         repo="acme/widget",
         store=store,
         compiler=compiler,
     )
 
-    # Reflection content is now in the wiki.
-    out = store.query("acme/widget")
-    assert "DI" in out or "service modules" in out
+    # The reflection was enqueued as an ingest-entry task, not written to
+    # the (read-only) boot store — repo_root stays clean.
+    tasks = _queued(cfg)
+    assert len(tasks) == 1
+    task = tasks[0]
+    assert task.kind == "ingest-entry"
+    assert task.repo_slug == "acme/widget"
+    body = task.params["entry"]["content"]
+    assert "DI" in body or "service modules" in body
 
-    # Reflections file was cleared.
-    assert read_reflections(config, 42) == ""
+    # Reflections file was cleared after a successful enqueue.
+    assert read_reflections(cfg, 42) == ""
 
 
-async def test_bridge_no_ops_when_reflections_empty(config, tmp_path):
+def test_bridge_no_ops_when_reflections_empty(tmp_path: Path) -> None:
     from post_merge_handler import _bridge_reflections_to_wiki
 
+    cfg = _config(tmp_path)
     store = RepoWikiStore(tmp_path / "wiki")
-    compiler = AsyncMock()
 
-    await _bridge_reflections_to_wiki(
-        config=config,
+    _bridge_reflections_to_wiki(
+        config=cfg,
         issue_number=99,
         repo="acme/widget",
         store=store,
-        compiler=compiler,
+        compiler=AsyncMock(),
     )
 
-    # No wiki activity
-    assert store.query("acme/widget") == ""
-    compiler.detect_contradictions.assert_not_called()
+    assert _queued(cfg) == []
 
 
-async def test_bridge_no_ops_when_store_is_none(config, tmp_path):
+def test_bridge_no_ops_when_store_is_none(tmp_path: Path) -> None:
     from post_merge_handler import _bridge_reflections_to_wiki
 
-    append_reflection(config, 42, phase="plan", content="irrelevant")
-    # No exception raised, no clear performed.
-    await _bridge_reflections_to_wiki(
-        config=config,
+    cfg = _config(tmp_path)
+    append_reflection(cfg, 42, phase="plan", content="irrelevant")
+
+    _bridge_reflections_to_wiki(
+        config=cfg,
         issue_number=42,
         repo="acme/widget",
         store=None,
         compiler=None,
     )
-    # The log remains — we did not clear because we did not promote.
-    assert "irrelevant" in read_reflections(config, 42)
+
+    # No enqueue and the log is kept (we did not promote it).
+    assert _queued(cfg) == []
+    assert "irrelevant" in read_reflections(cfg, 42)
 
 
-async def test_scenario_contradicting_reflections_survive_into_wiki(config, tmp_path):
-    """A learning from cycle 1 is superseded by cycle 2's learning after merge."""
-    from unittest.mock import AsyncMock
-
+def test_bridge_enqueues_every_reflection_block(tmp_path: Path) -> None:
+    """Contradiction resolution is deferred to the loop's compile/drift
+    passes now — the bridge just enqueues each reflection block."""
     from post_merge_handler import _bridge_reflections_to_wiki
-    from wiki_compiler import ContradictedEntry, ContradictionCheck
 
+    cfg = _config(tmp_path)
     store = RepoWikiStore(tmp_path / "wiki")
-    compiler = AsyncMock()
 
-    # Cycle 1: first reflection; no prior siblings, so no contradictions.
-    compiler.detect_contradictions = AsyncMock(return_value=ContradictionCheck())
     append_reflection(
-        config,
+        cfg,
         7,
         phase="plan",
         content="architecture: always use Pydantic BaseModel for config.",
     )
-    await _bridge_reflections_to_wiki(
-        config=config,
+    append_reflection(
+        cfg,
+        7,
+        phase="review",
+        content="architecture: prefer dataclasses over Pydantic for config.",
+    )
+
+    _bridge_reflections_to_wiki(
+        config=cfg,
         issue_number=7,
         repo="acme/widget",
         store=store,
-        compiler=compiler,
+        compiler=AsyncMock(),
     )
 
-    # Cycle 2 (different issue, same repo): new reflection contradicts earlier rule.
-    # Stub the compiler to return a contradiction against whatever id cycle-1 wrote.
-    first_on_disk = store.load_topic_entries(
-        store.repo_dir("acme/widget") / "architecture.md"
-    )
-    assert len(first_on_disk) == 1
-    first_id = first_on_disk[0].id
-
-    compiler.detect_contradictions = AsyncMock(
-        return_value=ContradictionCheck(
-            contradicts=[ContradictedEntry(id=first_id, reason="prefer dataclasses")]
-        )
-    )
-    append_reflection(
-        config,
-        8,
-        phase="plan",
-        content="architecture: prefer dataclasses over Pydantic for config.",
-    )
-    await _bridge_reflections_to_wiki(
-        config=config,
-        issue_number=8,
-        repo="acme/widget",
-        store=store,
-        compiler=compiler,
-    )
-
-    # Old entry is on disk but superseded.
-    on_disk = store.load_topic_entries(
-        store.repo_dir("acme/widget") / "architecture.md"
-    )
-    ids = {e.id: e for e in on_disk}
-    assert first_id in ids
-    assert ids[first_id].superseded_by is not None
-
-    # query() returns only the newer rule.
-    out = store.query("acme/widget")
-    assert "dataclasses" in out
-    assert "always use Pydantic" not in out
+    tasks = _queued(cfg)
+    assert len(tasks) == 2
+    bodies = " ".join(t.params["entry"]["content"] for t in tasks)
+    assert "Pydantic" in bodies
+    assert "dataclasses" in bodies

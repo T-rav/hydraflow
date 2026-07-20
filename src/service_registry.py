@@ -690,6 +690,15 @@ def build_services(
         # present so agents read the same wiki that the factory writes.
         tracked_root=config.repo_root / config.repo_wiki_path,
         self_slug=config.repo,
+        # Read-only: this store's roots live under the operator's main
+        # checkout (repo_root). Reads (query) and gitignored caches
+        # (mark_ingested) are fine, but knowledge-content writes here
+        # dirty the tree and never ride a PR — the maintenance heal runs
+        # in an ephemeral worktree (#9539). Runtime write paths route
+        # through the worktree-isolated maintenance PR instead, via
+        # wiki_maint_queue.enqueue_wiki_ingest (#9836). The flag makes any
+        # missed reroute fail loudly rather than silently corrupt the tree.
+        read_only=True,
     )
     from tribal_wiki import TribalWikiStore  # noqa: PLC0415
     from wiki_compiler import WikiCompiler  # noqa: PLC0415

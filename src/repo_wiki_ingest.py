@@ -75,33 +75,20 @@ class IngestWithContradictionsResult(BaseModel):
     contradictions_marked: int = 0
 
 
-def ingest_from_plan(
-    store: RepoWikiStore,
-    repo: str,
+def build_plan_entries(
     issue_number: int,
     plan_text: str,
-    *,
-    git_backed: bool = False,
-) -> int:
-    """Extract knowledge from a completed plan and ingest into the wiki.
+) -> list[tuple[WikiEntry, str]]:
+    """Mechanically extract ``(entry, topic)`` pairs from plan text.
 
-    When ``git_backed`` is True (Phase 3 layout), each entry is written as
-    a per-entry markdown file under the appropriate topic directory via
-    ``store.write_entry``; a per-issue log record is appended via
-    ``store.append_log``; the legacy topic-level ``store.ingest`` path is
-    skipped entirely.  Callers staging these writes in a worktree should
-    follow up with ``store.commit_pending_entries(...)`` to roll the new
-    files into the issue's PR.
-
-    When ``git_backed`` is False, preserves the legacy topic-level ingest.
-
-    Returns the number of entries added/updated.
+    Pure — no store, no I/O. Shared by :func:`ingest_from_plan` (which
+    writes them) and the plan-phase ingest fallback (which enqueues them
+    for the worktree-isolated maintenance PR when no issue worktree is
+    available — #9836). Returns an empty list when nothing qualifies.
     """
-    if not plan_text or not repo:
-        return 0
+    if not plan_text:
+        return []
 
-    # (entry, topic) pairs so each writable entry knows where to land
-    # under the per-entry layout.
     pairs: list[tuple[WikiEntry, str]] = []
     sections = _extract_sections(plan_text)
 
@@ -162,6 +149,36 @@ def ingest_from_plan(
                 )
             )
 
+    return pairs
+
+
+def ingest_from_plan(
+    store: RepoWikiStore,
+    repo: str,
+    issue_number: int,
+    plan_text: str,
+    *,
+    git_backed: bool = False,
+) -> int:
+    """Extract knowledge from a completed plan and ingest into the wiki.
+
+    When ``git_backed`` is True (Phase 3 layout), each entry is written as
+    a per-entry markdown file under the appropriate topic directory via
+    ``store.write_entry``; a per-issue log record is appended via
+    ``store.append_log``; the legacy topic-level ``store.ingest`` path is
+    skipped entirely.  Callers staging these writes in a worktree should
+    follow up with ``store.commit_pending_entries(...)`` to roll the new
+    files into the issue's PR.
+
+    When ``git_backed`` is False, preserves the legacy topic-level ingest.
+
+    Returns the number of entries added/updated.
+    """
+    if not plan_text or not repo:
+        return 0
+
+    pairs = build_plan_entries(issue_number, plan_text)
+
     if not pairs:
         return 0
 
@@ -182,6 +199,36 @@ def ingest_from_plan(
     return total
 
 
+def build_review_entries(
+    issue_number: int,
+    review_feedback: str,
+) -> list[tuple[WikiEntry, str]]:
+    """Mechanically extract ``(entry, topic)`` pairs from review feedback.
+
+    Pure — no store, no I/O. Shared by :func:`ingest_from_review` and the
+    review-phase ingest fallback (#9836). Review feedback lands under the
+    ``patterns`` topic. Returns an empty list when the feedback is too
+    short to be worth an entry.
+    """
+    if not review_feedback or len(review_feedback) <= 100:
+        return []
+    return [
+        (
+            WikiEntry(
+                title=_derive_title(
+                    review_feedback,
+                    kind="Review patterns",
+                    issue_number=issue_number,
+                ),
+                content=review_feedback[:2000],
+                source_type="review",
+                source_issue=issue_number,
+            ),
+            "patterns",
+        )
+    ]
+
+
 def ingest_from_review(
     store: RepoWikiStore,
     repo: str,
@@ -200,23 +247,7 @@ def ingest_from_review(
     if not review_feedback or not repo:
         return 0
 
-    pairs: list[tuple[WikiEntry, str]] = []
-    if len(review_feedback) > 100:
-        pairs.append(
-            (
-                WikiEntry(
-                    title=_derive_title(
-                        review_feedback,
-                        kind="Review patterns",
-                        issue_number=issue_number,
-                    ),
-                    content=review_feedback[:2000],
-                    source_type="review",
-                    source_issue=issue_number,
-                ),
-                "patterns",
-            )
-        )
+    pairs = build_review_entries(issue_number, review_feedback)
 
     if not pairs:
         return 0
