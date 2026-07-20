@@ -90,6 +90,15 @@ class TestSchemaDerivation:
         for r in enum_rows:
             assert r["choices"], f"{r['name']} typed enum but no choices"
 
+    def test_enum_field_from_str_enum_offers_every_queue_discipline(self) -> None:
+        # queue_strategy (#10037) is a StrEnum, not a Literal — a different
+        # branch of _derive_type. It is the operator's only runtime access to
+        # the work picker, and 'fifo' in particular is the escape hatch back to
+        # the pre-#10037 ordering, so a dropped choice strands them.
+        row = self._schema()["queue_strategy"]
+        assert row["type"] == "enum"
+        assert set(row["choices"]) == {"fifo", "priority", "weighted_mix"}
+
     def test_current_value_reflects_config(self) -> None:
         cfg = HydraFlowConfig()
         object.__setattr__(cfg, "max_workers", 7)

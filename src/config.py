@@ -21,6 +21,7 @@ from pydantic import (
 )
 
 import file_util
+from queue_strategy import BandWeights, QueueStrategy
 
 logger = logging.getLogger("hydraflow.config")
 
@@ -383,6 +384,10 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         604800,
     ),
     ("issue_refinement_pair_budget", "HYDRAFLOW_ISSUE_REFINEMENT_PAIR_BUDGET", 24),
+    # Work-queue band-draw weights (#10037); see queue_strategy.BandWeights.
+    ("queue_weight_p1", "HYDRAFLOW_QUEUE_WEIGHT_P1", 3),
+    ("queue_weight_p2", "HYDRAFLOW_QUEUE_WEIGHT_P2", 2),
+    ("queue_weight_unprioritised", "HYDRAFLOW_QUEUE_WEIGHT_UNPRIORITISED", 1),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -442,6 +447,12 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
         60.0,
     ),
     ("auto_tighten_coverage_margin", "HYDRAFLOW_AUTO_TIGHTEN_COVERAGE_MARGIN", 1.0),
+    # Work-queue starvation valve (#10037): hours before weighted_mix promotes.
+    (
+        "queue_starvation_threshold_hours",
+        "HYDRAFLOW_QUEUE_STARVATION_THRESHOLD_HOURS",
+        168.0,
+    ),
 ]
 
 # Optional floats — `None` when env var is missing/empty/invalid.
@@ -697,6 +708,12 @@ _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
     ("release_version_source", "HYDRAFLOW_RELEASE_VERSION_SOURCE"),
 ]
 
+# StrEnum-typed fields, kept separate from _ENV_LITERAL_OVERRIDES because
+# get_args() is empty for an Enum subclass — the choices are the enum members.
+_ENV_ENUM_OVERRIDES: list[tuple[str, str, type[QueueStrategy]]] = [
+    ("queue_strategy", "HYDRAFLOW_QUEUE_STRATEGY", QueueStrategy),
+]
+
 # Deprecated env var aliases (HYDRA_ → HYDRAFLOW_).
 # During the deprecation period, old names are promoted to canonical names
 # with a warning at startup.
@@ -800,6 +817,54 @@ class HydraFlowConfig(BaseModel):
     max_hitl_workers: int = Field(
         default=1, ge=1, le=5, description="Concurrent HITL correction agents"
     )
+
+    # Work-queue discipline (#10037) — how IssueStore orders each stage queue.
+    # ``IssueRefinementLoop`` (#9957) produces the P0/P1/P2 labels these read.
+    # Default is 'fifo' — the pre-#10037 ordering — so shipping this PR changes
+    # no behaviour on its own; flipping to 'weighted_mix' is the operator's
+    # System-tab action, keeping the discipline change reviewable in isolation.
+    queue_strategy: QueueStrategy = Field(
+        default=QueueStrategy.FIFO,
+        description=(
+            "Stage-queue ordering: 'fifo' (oldest first, pre-#10037 behaviour "
+            "and the migration default), 'priority' (strict P0>P1>P2, starves "
+            "lower bands), or 'weighted_mix' (P0 preempts, then a weighted ratio "
+            "draw with an age-based starvation guard)"
+        ),
+    )
+    # Weights are the relative share each band draws under 'weighted_mix'.
+    # The floor of 1 is deliberate: it makes "a band cannot starve" an
+    # unconditional guarantee rather than a property of the default values.
+    queue_weight_p1: int = Field(
+        default=3, ge=1, le=10, description="P1 draw share under weighted_mix"
+    )
+    queue_weight_p2: int = Field(
+        default=2, ge=1, le=10, description="P2 draw share under weighted_mix"
+    )
+    queue_weight_unprioritised: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        description="Unlabelled draw share under weighted_mix",
+    )
+    # Age at which a lower-band item is promoted ahead of the weighted draw so
+    # it cannot languish forever (weighted_mix only). Generous by default: the
+    # ratio draw is the normal path and this is the rarely-hit safety valve.
+    queue_starvation_threshold_hours: float = Field(
+        default=168.0,
+        ge=1.0,
+        le=8760.0,
+        description="Hours before a lower-band item is force-promoted (weighted_mix)",
+    )
+
+    def band_weights(self) -> BandWeights:
+        """Weighted-mix draw ratio in the form the ordering engine expects."""
+        return BandWeights(
+            p1=self.queue_weight_p1,
+            p2=self.queue_weight_p2,
+            unprioritised=self.queue_weight_unprioritised,
+        )
+
     # Plugin skill registry — see docs/superpowers/specs/2026-04-18-dynamic-plugin-skill-registry-design.md
     required_plugins: list[str] = Field(
         default_factory=lambda: [
@@ -4797,6 +4862,23 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                         env_key,
                         env_val,
                         allowed,
+                    )
+
+    # Data-driven env var overrides (StrEnum-typed fields)
+    for field, env_key, enum_cls in _ENV_ENUM_OVERRIDES:
+        field_info = HydraFlowConfig.model_fields[field]
+        if getattr(config, field) == field_info.default:
+            env_val = _get_env(env_key)
+            if env_val is not None:
+                try:
+                    object.__setattr__(config, field, enum_cls(env_val))
+                    config.__pydantic_fields_set__.add(field)
+                except ValueError:
+                    logger.warning(
+                        "Invalid %s=%r; expected one of %s",
+                        env_key,
+                        env_val,
+                        [member.value for member in enum_cls],
                     )
 
     # Backward-compat bridge: promote legacy HYDRAFLOW_DOCKER_ENABLED /
