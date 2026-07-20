@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from dedup_store import DedupStore
+from process_group import kill_process_group
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -182,18 +183,23 @@ class StagingBisectLoop(BaseBackgroundLoop):
                 cwd=str(self._config.repo_root),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                # Group leader (pid == pgid) so the timeout reap kills the
+                # whole make → pytest probe subtree, not just the top-level
+                # make (#9579).
+                start_new_session=True,
             )
             try:
                 stdout_b, stderr_b = await asyncio.wait_for(
                     proc.communicate(), timeout=timeout_s
                 )
             except TimeoutError:
-                # proc.kill() itself raises ProcessLookupError when the child
-                # already exited — suppress it (and proc.wait()) so the timeout
-                # surfaces as a probe failure instead of crashing the loop.
-                # (#9794/#9816/#9883)
+                # Group-kill: a child-only proc.kill() orphaned the sub-make /
+                # pytest grandchildren at PPID=1 (#9579). The guarded
+                # primitive never raises — an already-exited child included —
+                # so the timeout surfaces as a probe failure instead of
+                # crashing the loop. (#9794/#9816/#9883)
+                kill_process_group(proc)
                 with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
                     await proc.wait()
                 exit_code = 124  # bash convention
                 stderr_excerpt = f"timeout after {timeout_s}s"
@@ -488,17 +494,22 @@ class StagingBisectLoop(BaseBackgroundLoop):
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # Group leader (pid == pgid): `git bisect run make bisect-probe`
+            # fans out a make → pytest subtree per step; the reaps below must
+            # kill the whole group, not just the top-level git (#9579).
+            start_new_session=True,
         )
         comm_task = asyncio.create_task(proc.communicate())
         deadline = asyncio.get_event_loop().time() + timeout
         while True:
             remaining = deadline - asyncio.get_event_loop().time()
             if remaining <= 0:
-                # proc.kill() raises ProcessLookupError if the child already
-                # exited — suppress it so the intended TimeoutError propagates
-                # instead of crashing the loop cycle. (#9794/#9816/#9883)
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
+                # Group-kill: a child-only proc.kill() orphaned the per-step
+                # make → pytest grandchildren at PPID=1 (#9579). The guarded
+                # primitive never raises — an already-exited child included —
+                # so the intended TimeoutError propagates instead of crashing
+                # the loop cycle. (#9794/#9816/#9883)
+                kill_process_group(proc)
                 with contextlib.suppress(asyncio.CancelledError):
                     await comm_task
                 raise TimeoutError(f"git command exceeded {timeout}s")
@@ -513,11 +524,10 @@ class StagingBisectLoop(BaseBackgroundLoop):
                     "staging_bisect: kill-switch tripped mid-run — "
                     "terminating git subprocess"
                 )
-                # proc.kill() raises ProcessLookupError if the child already
-                # exited — suppress it so the intended BisectCancelledError
-                # propagates instead of crashing the loop cycle. (#9794/#9816/#9883)
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
+                # Group-kill (#9579) — never raises, so the intended
+                # BisectCancelledError propagates instead of crashing the
+                # loop cycle. (#9794/#9816/#9883)
+                kill_process_group(proc)
                 with contextlib.suppress(asyncio.CancelledError):
                     await comm_task
                 raise BisectCancelledError("kill-switch tripped during git bisect run")
