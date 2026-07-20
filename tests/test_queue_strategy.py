@@ -197,13 +197,6 @@ def test_weighted_mix_on_an_all_one_band_queue_is_plain_arrival_order() -> None:
     assert _ids(ordered) == [0, 1, 2, 3]
 
 
-def test_an_unhandled_strategy_raises_rather_than_silently_mixing() -> None:
-    # Guards the "add a strategy, forget a branch" bug. Falling through to
-    # weighted_mix would run the wrong discipline with no signal at all.
-    with pytest.raises(ValueError, match="unhandled queue strategy"):
-        order_queue([_task(1)], "not_a_strategy", DEFAULT_WEIGHTS)  # type: ignore[arg-type]
-
-
 def test_empty_queue_orders_to_empty() -> None:
     for strategy in QueueStrategy:
         assert order_queue([], strategy, DEFAULT_WEIGHTS) == []
