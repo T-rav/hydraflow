@@ -162,11 +162,9 @@ def cmd_run(name: str) -> int:
 
     if rc != 0:
         print(f"FAILED {name}")
+        _compose("logs", "hydraflow")
     else:
         print(f"PASSED {name}")
-    # DIAG-9925: always dump container logs (not only on failure) so the
-    # [S55DIAG] label/issue lifecycle timeline is captured on green runs too.
-    _compose("logs", "hydraflow")
 
     cmd_down()
     return rc

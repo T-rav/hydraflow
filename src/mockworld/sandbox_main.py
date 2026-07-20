@@ -192,9 +192,6 @@ def _build_caretaker_enabled_cb(
 
 
 async def main() -> None:
-    import logging as _diaglog  # noqa: PLC0415  # DIAG-9925 temporary
-
-    _diaglog.basicConfig(level=_diaglog.INFO, force=True)  # DIAG-9925 temporary
     config = load_runtime_config()
     # Disable production code paths that reach services unreachable on the
     # air-gapped sandbox network (see the helper for the per-flag rationale).
