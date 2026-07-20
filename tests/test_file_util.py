@@ -6,12 +6,16 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
+import time
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from file_util import (
+    DEFAULT_FILE_LOCK_TIMEOUT,
+    FileLockTimeout,
     append_jsonl,
     atomic_write,
     compact_jsonl_latest_by_key,
@@ -143,8 +147,79 @@ class TestFileLock:
             pass
 
         assert len(calls) == 2
-        assert calls[0][1] == fcntl.LOCK_EX
+        assert calls[0][1] == fcntl.LOCK_EX | fcntl.LOCK_NB
         assert calls[1][1] == fcntl.LOCK_UN
+
+    def test_timeout_raises_file_lock_timeout_when_already_held(
+        self, tmp_path: Path
+    ) -> None:
+        """A lock held by another handle must not block a to_thread worker
+        forever (issue #9661 / #9600 fleet-stall root cause)."""
+        lock_path = tmp_path / "hydra.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "a+", encoding="utf-8") as holder:
+            fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
+            try:
+                start = time.monotonic()
+                with pytest.raises(FileLockTimeout), file_lock(lock_path, timeout=0.2):
+                    pass
+                assert time.monotonic() - start < 2.0
+            finally:
+                fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+
+    def test_timeout_message_includes_lock_path(self, tmp_path: Path) -> None:
+        lock_path = tmp_path / "hydra.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "a+", encoding="utf-8") as holder:
+            fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
+            try:
+                with (
+                    pytest.raises(FileLockTimeout, match=re.escape(str(lock_path))),
+                    file_lock(lock_path, timeout=0.1),
+                ):
+                    pass
+            finally:
+                fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+
+    def test_file_lock_timeout_is_timeout_error_and_os_error(self) -> None:
+        """FileLockTimeout must subclass TimeoutError (<= OSError, PEP 3151)
+        so every existing ``except OSError`` caller degrades gracefully
+        instead of propagating an unexpected exception type."""
+        exc = FileLockTimeout("boom")
+        assert isinstance(exc, TimeoutError)
+        assert isinstance(exc, OSError)
+
+    def test_custom_timeout_zero_raises_immediately_when_held(
+        self, tmp_path: Path
+    ) -> None:
+        lock_path = tmp_path / "hydra.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "a+", encoding="utf-8") as holder:
+            fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
+            try:
+                start = time.monotonic()
+                with pytest.raises(FileLockTimeout), file_lock(lock_path, timeout=0):
+                    pass
+                assert time.monotonic() - start < 1.0
+            finally:
+                fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+
+    def test_default_timeout_is_generous_enough_for_large_rotations(self) -> None:
+        """30s+ comfortably bounds even the longest critical section
+        (EventLog._rotate_sync rewriting a large local-FS log)."""
+        assert DEFAULT_FILE_LOCK_TIMEOUT >= 30.0
+
+    def test_uncontended_acquisition_still_yields_and_releases(
+        self, tmp_path: Path
+    ) -> None:
+        lock_path = tmp_path / "hydra.lock"
+        entered = False
+        with file_lock(lock_path, timeout=1.0):
+            entered = True
+        assert entered
+        # Lock must be released: re-acquiring immediately must not block.
+        with file_lock(lock_path, timeout=1.0):
+            pass
 
 
 class TestRotateBackups:
