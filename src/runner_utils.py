@@ -23,6 +23,7 @@ from prompt_gate import PromptGateBlockedError, gate_prompt
 from prompt_telemetry import parse_command_tool_model
 from stream_parser import StreamParser
 from subprocess_util import (
+    PROVIDER_ANTHROPIC,
     CreditExhaustedError,
     is_credit_exhaustion,
     make_clean_env,
@@ -676,6 +677,35 @@ def provider_key_presence() -> dict[str, bool]:
     }
 
 
+def normalize_provider(dial: str) -> str:
+    """Map a per-role provider *dial* value to its billing-provider identity.
+
+    The CLI-harness dial (``"claude"``) and anything unrecognized bill against
+    Anthropic (``"anthropic"``); the OpenAI-compatible one-shot dials
+    (``"openrouter"``/``"zai"``/``"kimi"``) are already their own billing
+    identity and map to themselves. This is the single point that reconciles the
+    config's ``*_provider`` Literal namespace (which spells the harness
+    ``"claude"``) with ``CreditExhaustedError.provider`` (which spells it
+    ``"anthropic"``), so the orchestrator can compare a signal's provider
+    against each loop's routed backend."""
+    if dial in _OPENAI_COMPAT_BACKENDS:
+        return dial
+    return PROVIDER_ANTHROPIC
+
+
+def backend_probe_endpoint(provider: str, config: HydraFlowConfig) -> tuple[str, str]:
+    """Resolve ``(base_url, api_key)`` for a one-shot backend's credit probe.
+
+    Returns ``("", "")`` when *provider* is not a known OpenAI-compatible
+    backend (e.g. ``"anthropic"``), which the probe treats as "cannot probe →
+    fail-open". Reuses the registry's own ``base_url``/``api_key`` resolution so
+    the probe hits exactly the endpoint + key a real spawn would use."""
+    backend = _OPENAI_COMPAT_BACKENDS.get(provider)
+    if backend is None:
+        return "", ""
+    return backend.base_url(config), backend.api_key()
+
+
 def _telemetry_cmd(provider: str, tool: str, model: str) -> list[str]:
     """The ``cmd``-shaped descriptor ``_record_inference`` parses into
     ``(tool, model)``. For an OpenAI-compatible backend the 'tool' is the
@@ -768,11 +798,16 @@ async def _openai_compatible_complete(
         raise TimeoutError(str(exc)) from exc
 
     if resp.status_code in (402, 429):
-        raise CreditExhaustedError(f"{provider} {resp.status_code}: {resp.text[:200]}")
+        # Tag the signal with THIS backend so the orchestrator scopes the pause
+        # to loops routed here — a z.ai/kimi cap must not halt Claude work, and
+        # vice-versa (#9807).
+        raise CreditExhaustedError(
+            f"{provider} {resp.status_code}: {resp.text[:200]}", provider=provider
+        )
     if resp.status_code >= 400:
         body = resp.text or ""
         if is_credit_exhaustion(body):
-            raise CreditExhaustedError(f"{provider}: {body[:200]}")
+            raise CreditExhaustedError(f"{provider}: {body[:200]}", provider=provider)
         return SimpleResult(
             stderr=f"{provider} http {resp.status_code}: {body[:300]}",
             returncode=resp.status_code,
