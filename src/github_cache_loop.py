@@ -25,7 +25,7 @@ from exception_classify import reraise_on_credit_or_bug
 if TYPE_CHECKING:
     from config import HydraFlowConfig
     from issue_fetcher import IssueFetcher
-    from models import HITLItem, LabelCounts, PRListItem
+    from models import GitHubIssueSummary, HITLItem, LabelCounts, PRListItem
     from pr_manager import PRManager
 
 logger = logging.getLogger("hydraflow.github_cache")
@@ -213,7 +213,7 @@ class GitHubDataCache:
         state: str = "open",
         limit: int = 100,
         max_age_seconds: float | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[GitHubIssueSummary]:
         """Return the shared issue-list snapshot for *label* (#9814).
 
         Serves ``PRPort.list_issues_by_label`` (``state="open"``) or
