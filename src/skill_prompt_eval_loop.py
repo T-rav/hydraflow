@@ -83,6 +83,31 @@ def _escalation_subject(title: str) -> str | None:
     return m.group(1) if m else None
 
 
+# Marker label + dedup-key prefix for `prompt-inefficiency` filings (spec §5c).
+# Single-sourced so the filing path (`_file_inefficiency_issue`), the title
+# parser, and the closed-issue reconciler can never drift apart (#10025).
+_INEFFICIENCY_LABEL = "prompt-inefficiency"
+_INEFFICIENCY_KEY_PREFIX = "skill_prompt_eval:inefficiency"
+
+
+def _inefficiency_title(source: str) -> str:
+    return f"Prompt inefficiency: {source} cost-per-call regressed"
+
+
+# Parses `_inefficiency_title` back to the `source` subject. Non-greedy but
+# anchored on both sides — same rationale as `_ESCALATION_TITLE_RE`: sources
+# are machine-named today, and the anchored capture costs nothing if one ever
+# grows spaces.
+_INEFFICIENCY_TITLE_RE = re.compile(
+    r"^Prompt inefficiency: (.+?) cost-per-call regressed$"
+)
+
+
+def _inefficiency_subject(title: str) -> str | None:
+    m = _INEFFICIENCY_TITLE_RE.match(title)
+    return m.group(1) if m else None
+
+
 # Hard cap on the subprocess read. A wedged child must not hang the loop cycle
 # forever and freeze its heartbeat — the #9410 silent-stall failure class
 # (#9454 / #9508). ``make trust-adversarial`` drives an LLM eval harness so it
@@ -248,18 +273,30 @@ class _CLIRefineLLM:
     unlike ``ClaudeCLIClient.complete_structured`` (which parses JSON), refine
     output is a unified diff, not a structured object. Never exercised under
     test; the loop's ``refine_llm`` kwarg injects a fake for all unit coverage.
+
+    The model is resolved from config PER CALL, not captured at construction:
+    ``skill_prompt_refine_model`` is a ``live=True`` knob in the settings
+    registry, and the client instance is cached on the loop for its lifetime —
+    freezing the model at first use would silently pin a System-tab change
+    until restart (the load-time-leak class; #10014 item 3).
     """
 
-    def __init__(self, config: HydraFlowConfig, model: str) -> None:
+    def __init__(self, config: HydraFlowConfig) -> None:
         self._config = config
-        self._model = model
+
+    def _resolve_model(self) -> str:
+        return (
+            self._config.skill_prompt_refine_model
+            or self._config.background_model
+            or "sonnet"
+        )
 
     async def complete(self, prompt: str) -> str:
         result = await run_lightweight_agent(
             runner=get_default_runner(),
             config=self._config,
             tool="claude",
-            model=self._model,
+            model=self._resolve_model(),
             prompt=prompt,
             source="skill_prompt_refine",
             timeout=float(_REFINE_LLM_TIMEOUT_SECONDS),
@@ -308,6 +345,20 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             clear_attempts=state.clear_skill_prompt_attempts,
             subject_from_title=_escalation_subject,
         )
+        # Closed-issue reconcile for `prompt-inefficiency` filings: without it
+        # the dedup key set at filing time never clears, so a source that
+        # re-degrades after its issue was closed could never re-file (#10025).
+        # Only the closed path runs — a cost regression has no "no longer
+        # detected at HEAD" auto-close analog (the weekly window moves on),
+        # and there is no per-source attempt counter to clear.
+        self._inefficiencies = EscalationReconciler(
+            prs=pr_manager,
+            dedup=dedup,
+            key_prefix=_INEFFICIENCY_KEY_PREFIX,
+            stuck_label=_INEFFICIENCY_LABEL,
+            clear_attempts=lambda _subject: None,
+            subject_from_title=_inefficiency_subject,
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.skill_prompt_eval_interval
@@ -324,6 +375,11 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         forwarded so the harness can bound LLM spend pre-execution
         when the corpus grows beyond the cap. The Python-side cap
         below is the operator-visible backstop.
+        ``HYDRAFLOW_TRUST_ADVERSARIAL_LIVE_BUDGET`` caps how many
+        catcher-skill cases a LIVE run routes through the per-skill
+        live path (one real agent-CLI call each; #10014 item 2) —
+        inert unless the operator also set
+        ``HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1``.
         """
         cmd = ["make", "trust-adversarial", "FORMAT=json"]
         try:
@@ -334,6 +390,9 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                 extra_env={
                     "HYDRAFLOW_TRUST_ADVERSARIAL_MAX_CASES": str(
                         self._config.skill_prompt_eval_max_corpus_cases
+                    ),
+                    "HYDRAFLOW_TRUST_ADVERSARIAL_LIVE_BUDGET": str(
+                        self._config.skill_prompt_eval_live_case_budget
                     ),
                 },
             )
@@ -446,6 +505,10 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
 
         t0 = time.perf_counter()
         await self._reconcile_closed_escalations()
+        # Same closed-path reconcile for `prompt-inefficiency` filings: a
+        # closed (triaged) inefficiency issue clears its dedup key so a
+        # re-degradation of the same source re-files fresh (#10025).
+        await self._inefficiencies.reconcile_closed()
 
         cases = await self._run_corpus()
         if not cases:
@@ -606,12 +669,17 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         return ordered_cases, scorecard
 
     async def _file_inefficiency_issue(self, row: SkillEfficiencyRow) -> None:
-        """File a deduped `prompt-inefficiency` issue for a degraded source."""
+        """File a deduped `prompt-inefficiency` issue for a degraded source.
+
+        The dedup key is cleared when the filed issue closes (the
+        `_inefficiencies` reconciler in `_do_work`), so a source that
+        re-degrades after triage re-files fresh (#10025).
+        """
         dedup = self._dedup.get()
-        key = f"skill_prompt_eval:inefficiency:{row.source}"
+        key = f"{_INEFFICIENCY_KEY_PREFIX}:{row.source}"
         if key in dedup:
             return
-        title = f"Prompt inefficiency: {row.source} cost-per-call regressed"
+        title = _inefficiency_title(row.source)
         trend_pct = (
             f"{row.trend_vs_baseline:+.0%}"
             if row.trend_vs_baseline is not None
@@ -629,7 +697,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             f"source._"
         )
         await self._pr.create_issue(
-            title, body, ["hydraflow-find", "prompt-inefficiency"]
+            title, body, ["hydraflow-find", _INEFFICIENCY_LABEL]
         )
         dedup.add(key)
         self._dedup.set_all(dedup)
@@ -847,14 +915,15 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         return "error"
 
     async def _refine_llm_complete(self, prompt: str) -> str:
-        """Complete *prompt* via the injected fake or a lazily-built CLI client."""
+        """Complete *prompt* via the injected fake or a lazily-built CLI client.
+
+        Caching the client is safe: `_CLIRefineLLM` re-resolves its model from
+        the shared config on every `complete` call, so a live System-tab change
+        to `skill_prompt_refine_model` takes effect on the next synthesis
+        without a restart (#10014 item 3).
+        """
         if self._refine_llm is None:
-            model = (
-                self._config.skill_prompt_refine_model
-                or self._config.background_model
-                or "sonnet"
-            )
-            self._refine_llm = _CLIRefineLLM(self._config, model)
+            self._refine_llm = _CLIRefineLLM(self._config)
         return await self._refine_llm.complete(prompt)
 
     async def _apply_patch_in_worktree(self, worktree: Path, patch_text: str) -> None:

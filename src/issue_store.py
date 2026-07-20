@@ -451,6 +451,33 @@ class IssueStore:
         self._eagerly_transitioned[task.id] = stage
         self._publish_queue_update_nowait()
 
+    def apply_label_transition(self, issue_number: int, new_label: str) -> bool:
+        """Mirror a GitHub pipeline-label swap in-memory immediately (#9842).
+
+        Event-driven bridge for the dashboard board: ``service_registry``
+        injects this as ``PRManager``'s pipeline-label listener, so every
+        ``swap_pipeline_labels`` moves the card within the snapshot debounce
+        (~0.1s) instead of waiting for the ``data_poll_interval`` (300s)
+        refresh to re-read labels. The poll remains the reconciling backstop,
+        and :meth:`enqueue_transition`'s eager protection stops a stale poll
+        (labels up to one cache cycle old) from dragging the card backward.
+
+        Returns ``True`` when the transition was applied. Returns ``False``
+        — leaving reconciliation to the poll — when *new_label* is not a
+        pipeline-stage label (e.g. a dup/parked swap-out; the issue is
+        usually still ``_active`` then, and ``mark_complete`` closes the
+        card) or when the issue was never routed by this store (no cached
+        Task to place in a queue, e.g. right after a restart).
+        """
+        stage = self._build_label_map().get(new_label)
+        if stage is None:
+            return False
+        task = self._issue_cache.get(issue_number)
+        if task is None:
+            return False
+        self.enqueue_transition(task, stage.value)
+        return True
+
     # ------------------------------------------------------------------
     # Queue accessors (non-blocking, return available issues)
     # ------------------------------------------------------------------

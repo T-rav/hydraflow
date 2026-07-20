@@ -140,7 +140,10 @@ SETTINGS: dict[str, SettingSpec] = {
     # --- Issue Refinement (backlog dedup + priority scoring, #9957) ----------
     "issue_refinement_enabled": SettingSpec("Issue Refinement", live=True, order=0),
     "issue_refinement_pair_budget": SettingSpec("Issue Refinement", live=True, order=1),
-    "issue_refinement_model": SettingSpec("Issue Refinement", live=True, order=2),
+    "issue_refinement_priority_budget": SettingSpec(
+        "Issue Refinement", live=True, order=2
+    ),
+    "issue_refinement_model": SettingSpec("Issue Refinement", live=True, order=3),
     # --- Prompt Refinement (skill-prompt self-refinement, #9724) ----------
     "skill_prompt_refine_enabled": SettingSpec("Prompt Refinement", live=True, order=0),
     "skill_prompt_refine_max_weekly": SettingSpec(

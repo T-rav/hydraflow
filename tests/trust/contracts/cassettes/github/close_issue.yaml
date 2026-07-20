@@ -7,6 +7,8 @@ input:
   command: close_issue
   args:
     - "42"
+    - "--reason"
+    - "not planned"
   stdin: null
   env: {}
 output:
