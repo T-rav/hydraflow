@@ -1180,6 +1180,11 @@ SUMMARY: <one-line summary>
         cmd = self._build_pre_quality_review_command()
         summary = ""
         skill_started = time.monotonic()
+        # The finder transcript feeds the verifier's explicit-OK trigger below.
+        # Initialised for the type checker; the attempt loop always runs at
+        # least once (max_attempts <= 0 returns early above), and an empty
+        # transcript can never carry the explicit OK marker.
+        transcript = ""
 
         # Each iteration's _execute call allocates its own subprocess_idx
         # from BaseRunner's monotonic counter, so retries and back-to-back
