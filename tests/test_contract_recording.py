@@ -436,12 +436,15 @@ def _mutation_fake_run(
     argv: list[str], **_: object
 ) -> subprocess.CompletedProcess[str]:
     """Simulate gh CLI responses for the three mutation recordings."""
-    # gh api .../git/ref/heads/main  → main SHA
+    # gh api .../git/commits/<sha> --jq .tree.sha  (read main's tree)
+    # gh api .../git/commits (POST synthetic commit) --jq .sha
+    # Both resolve to a non-empty SHA so _provision_scratch_branch proceeds.
+    if "api" in argv and any("git/commits" in a for a in argv):
+        return _completed(argv=argv, stdout="b" * 40 + "\n")
+    # gh api .../git/ref(s)/... → main SHA. The DELETE / create-branch / PATCH
+    # outputs are unused by the recorder (it only checks the exit code).
     if "api" in argv and any("git/ref" in a for a in argv):
         return _completed(argv=argv, stdout=_MAIN_SHA)
-    # gh api .../git/refs (branch creation)
-    if "api" in argv and any("git/refs" in a for a in argv):
-        return _completed(argv=argv, stdout="{}\n")
     # gh issue create → issue URL
     if "issue" in argv and "create" in argv:
         return _completed(argv=argv, stdout=_ISSUE_URL)
@@ -524,6 +527,172 @@ def test_record_github_mutation_writes_merge_pr_cassette(tmp_path: Path) -> None
     assert cassette.output.exit_code == 0
     assert "pr_number" in cassette.normalizers
     assert not cassette.baseline_only
+
+
+def test_record_github_mutation_merge_pr_writes_stable_args(tmp_path: Path) -> None:
+    """merge_pr cassette must store the stable logical args (["42"]) — NOT the
+    live sandbox PR number (the fake returns /pull/7). ``input.args`` is compared
+    verbatim by the drift layer, so a live number would phantom-drift every tick.
+    """
+    with patch("contract_recording.subprocess.run", side_effect=_mutation_fake_run):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    cassette = Cassette.model_validate(_load_yaml(tmp_path / "merge_pr.yaml"))
+    assert cassette.input.args == ["42"], (
+        f"merge_pr args must be stable ['42'], not the live PR number: "
+        f"{cassette.input.args}"
+    )
+    assert (
+        cassette.output.stdout == "merged pull request https://github.com/_/_/pull/42\n"
+    )
+    assert cassette.normalizers == ["pr_number"]
+
+
+def test_record_github_mutation_close_issue_writes_stable_args(tmp_path: Path) -> None:
+    """close_issue cassette must store the stable logical args (["42"]) even
+    though the freshly-created sandbox issue URL ends in a different number."""
+    with patch("contract_recording.subprocess.run", side_effect=_mutation_fake_run):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    cassette = Cassette.model_validate(_load_yaml(tmp_path / "close_issue.yaml"))
+    assert cassette.input.args == ["42"], (
+        f"close_issue args must be stable ['42'], not the live issue number: "
+        f"{cassette.input.args}"
+    )
+
+
+def test_record_merge_pr_posts_synthetic_commit_before_pr_create(
+    tmp_path: Path,
+) -> None:
+    """The recorder must POST a tree-identical synthetic commit (with a
+    ``parents[]`` field) AND fast-forward the scratch ref (PATCH) BEFORE calling
+    ``gh pr create`` — otherwise GitHub rejects the no-diff branch."""
+    calls: list[list[str]] = []
+
+    def capture(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=capture):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    commit_post = [
+        i
+        for i, c in enumerate(calls)
+        if any(str(a).startswith("parents[]=") for a in c)
+    ]
+    patch_ref = [
+        i
+        for i, c in enumerate(calls)
+        if "--method" in c
+        and "PATCH" in c
+        and any("git/refs/heads/contract-recorder-scratch" in a for a in c)
+    ]
+    pr_create = [i for i, c in enumerate(calls) if "pr" in c and "create" in c]
+
+    assert commit_post, "recorder must POST a synthetic commit (parents[]= field)"
+    assert patch_ref, "recorder must PATCH the scratch ref to the new commit"
+    assert pr_create, "recorder must call gh pr create"
+    assert commit_post[0] < pr_create[0], (
+        "synthetic commit POST must precede gh pr create"
+    )
+    assert patch_ref[0] < pr_create[0], "scratch ref PATCH must precede gh pr create"
+
+
+def test_record_merge_pr_pr_create_targets_scratch_branch_and_main(
+    tmp_path: Path,
+) -> None:
+    """``gh pr create`` must open the PR from the scratch branch against main."""
+    calls: list[list[str]] = []
+
+    def capture(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=capture):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    pr_creates = [c for c in calls if "pr" in c and "create" in c]
+    assert len(pr_creates) == 1
+    argv = pr_creates[0]
+    assert (
+        "--head" in argv
+        and argv[argv.index("--head") + 1] == "contract-recorder-scratch"
+    )
+    assert "--base" in argv and argv[argv.index("--base") + 1] == "main"
+
+
+def test_record_merge_pr_best_effort_deletes_stale_scratch_branch(
+    tmp_path: Path,
+) -> None:
+    """A stale scratch branch (from a prior interrupted tick) is best-effort
+    deleted first, and a non-zero DELETE does not abort recording."""
+    calls: list[list[str]] = []
+
+    def capture(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        # Simulate the DELETE failing (ref does not exist) — must be tolerated.
+        if "--method" in argv and "DELETE" in argv:
+            return _completed(argv=argv, returncode=1, stderr="Not Found\n")
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=capture):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    delete_calls = [
+        i
+        for i, c in enumerate(calls)
+        if "--method" in c
+        and "DELETE" in c
+        and any("git/refs/heads/contract-recorder-scratch" in a for a in c)
+    ]
+    assert delete_calls, "recorder must best-effort DELETE the stale scratch ref"
+    assert (tmp_path / "merge_pr.yaml").exists(), (
+        "a failing best-effort DELETE must not abort merge_pr recording"
+    )
+
+
+def test_record_merge_pr_still_merges_live_pr_number(tmp_path: Path) -> None:
+    """The side-effecting ``gh pr merge`` uses the LIVE PR number (7 from the
+    fake URL) even though the cassette records the stable ["42"]."""
+    calls: list[list[str]] = []
+
+    def capture(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=capture):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    merge_calls = [c for c in calls if "pr" in c and "merge" in c]
+    assert len(merge_calls) == 1
+    assert "7" in merge_calls[0], (
+        f"gh pr merge must target the live PR number 7: {merge_calls[0]}"
+    )
+    cassette = Cassette.model_validate(_load_yaml(tmp_path / "merge_pr.yaml"))
+    assert cassette.input.args == ["42"], "cassette must still record the stable arg"
+
+
+def test_record_merge_pr_returns_none_when_synthetic_commit_fails(
+    tmp_path: Path,
+) -> None:
+    """When the synthetic-commit POST exits non-zero, no merge_pr cassette is
+    written and the recorder never raises into the loop (graceful failure)."""
+
+    def failing_commit_post(
+        argv: list[str], **_: object
+    ) -> subprocess.CompletedProcess[str]:
+        # The synthetic-commit POST is the git/commits call carrying parents[].
+        if any(str(a).startswith("parents[]=") for a in argv):
+            return _completed(argv=argv, returncode=1, stderr="422 Unprocessable\n")
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=failing_commit_post):
+        paths = record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    stems = {p.stem for p in paths}
+    assert "merge_pr" not in stems
+    assert not (tmp_path / "merge_pr.yaml").exists()
 
 
 def test_record_github_mutation_returns_empty_when_gh_missing(
