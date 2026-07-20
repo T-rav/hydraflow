@@ -1283,6 +1283,9 @@ class TestTestAdequacyLoop:
         self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         config.max_test_adequacy_attempts = 1
+        # Isolate the finder loop: the explicit OK below would otherwise
+        # trigger the independent verifier pass (#9546).
+        config.test_adequacy_verifier_enabled = False
         runner = AgentRunner(config, event_bus)
         with (
             patch.object(
@@ -1342,6 +1345,9 @@ class TestTestAdequacyLoop:
     ) -> None:
         """_run_test_adequacy_loop should recover if a later attempt returns OK."""
         config.max_test_adequacy_attempts = 2
+        # Isolate the finder loop: the recovery OK would otherwise trigger the
+        # independent verifier (#9546) and exhaust the 2-item side_effect.
+        config.test_adequacy_verifier_enabled = False
         runner = AgentRunner(config, event_bus)
         with (
             patch.object(
@@ -1368,6 +1374,251 @@ class TestTestAdequacyLoop:
             )
         assert result.passed is True
         assert result.attempts == 2
+
+
+# ---------------------------------------------------------------------------
+# Independent test-adequacy verifier (#9546)
+# ---------------------------------------------------------------------------
+
+
+_FINDER_OK = "TEST_ADEQUACY_RESULT: OK\nSUMMARY: adequate"
+_VERIFIER_CONCUR = (
+    "TEST_ADEQUACY_VERIFIER_RESULT: CONCUR\nSUMMARY: independently confirmed"
+)
+_VERIFIER_OVERRIDE = (
+    "TEST_ADEQUACY_VERIFIER_RESULT: OVERRIDE\n"
+    "SUMMARY: untested error path\n"
+    "GAPS:\n"
+    "- src/foo.py:bar — no test for the raise branch\n"
+)
+
+
+class TestTestAdequacyVerifier:
+    """Second-opinion verifier pass gated on the finder's explicit OK (#9546)."""
+
+    def _runner(self, config, event_bus: EventBus) -> AgentRunner:
+        config.max_test_adequacy_attempts = 1
+        return AgentRunner(config, event_bus)
+
+    def _patches(self, runner: AgentRunner, execute_mock: AsyncMock):
+        return (
+            patch.object(
+                runner, "_count_commits", new_callable=AsyncMock, return_value=1
+            ),
+            patch.object(
+                runner,
+                "_get_branch_diff",
+                new_callable=AsyncMock,
+                return_value="+def foo(): pass\n",
+            ),
+            patch.object(runner, "_execute", execute_mock),
+        )
+
+    async def _run(self, runner: AgentRunner, agent_task, tmp_path: Path):
+        return await runner._run_skill(
+            BUILTIN_SKILLS[3], agent_task, tmp_path, "branch", worker_id=0
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_marker_default_pass_never_triggers_verifier(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """Explicit-OK gate: the no-marker default-pass must NOT dispatch a verifier.
+
+        Empty-transcript FakeLLM scenarios rely on default-pass; triggering the
+        verifier on any pass would grow every scenario an extra subprocess slot.
+        """
+        runner = self._runner(config, event_bus)
+        execute = AsyncMock(return_value="agent chatter, no marker at all")
+        p1, p2, p3 = self._patches(runner, execute)
+        with p1, p2, p3:
+            result = await self._run(runner, agent_task, tmp_path)
+        assert result.passed is True
+        assert execute.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_disabled_knob_skips_verifier_on_explicit_ok(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        config.test_adequacy_verifier_enabled = False
+        runner = self._runner(config, event_bus)
+        execute = AsyncMock(return_value=_FINDER_OK)
+        p1, p2, p3 = self._patches(runner, execute)
+        with p1, p2, p3:
+            result = await self._run(runner, agent_task, tmp_path)
+        assert result.passed is True
+        assert execute.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_explicit_ok_triggers_verifier_and_concur_keeps_pass(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        runner = self._runner(config, event_bus)
+        execute = AsyncMock(side_effect=[_FINDER_OK, _VERIFIER_CONCUR])
+        p1, p2, p3 = self._patches(runner, execute)
+        with p1, p2, p3:
+            result = await self._run(runner, agent_task, tmp_path)
+        assert result.passed is True
+        assert execute.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_verifier_override_flips_pass_to_fail(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        runner = self._runner(config, event_bus)
+        execute = AsyncMock(side_effect=[_FINDER_OK, _VERIFIER_OVERRIDE])
+        p1, p2, p3 = self._patches(runner, execute)
+        with p1, p2, p3:
+            result = await self._run(runner, agent_task, tmp_path)
+        assert result.passed is False
+        assert "untested error path" in result.summary
+
+    @pytest.mark.asyncio
+    async def test_finder_fail_never_dispatches_verifier(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        runner = self._runner(config, event_bus)
+        execute = AsyncMock(
+            return_value="TEST_ADEQUACY_RESULT: RETRY\nSUMMARY: missing tests"
+        )
+        p1, p2, p3 = self._patches(runner, execute)
+        with p1, p2, p3:
+            result = await self._run(runner, agent_task, tmp_path)
+        assert result.passed is False
+        assert execute.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_coverage_override_skips_verifier_spend(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """A deterministic coverage fail must short-circuit the verifier dispatch."""
+        runner = self._runner(config, event_bus)
+        execute = AsyncMock(return_value=_FINDER_OK)
+        p1, p2, p3 = self._patches(runner, execute)
+        with (
+            p1,
+            p2,
+            p3,
+            patch.object(
+                runner,
+                "_run_coverage_delta_check",
+                new_callable=AsyncMock,
+                return_value=["src/foo.py:3"],
+            ),
+        ):
+            result = await self._run(runner, agent_task, tmp_path)
+        assert result.passed is False
+        assert execute.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_degraded_verifier_run_fails_soft_by_default(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """Empty verifier transcript keeps the finder's OK (fail-soft default)."""
+        runner = self._runner(config, event_bus)
+        execute = AsyncMock(side_effect=[_FINDER_OK, "   "])
+        p1, p2, p3 = self._patches(runner, execute)
+        with p1, p2, p3:
+            result = await self._run(runner, agent_task, tmp_path)
+        assert result.passed is True
+
+    @pytest.mark.asyncio
+    async def test_degraded_verifier_run_fails_closed_when_opted_in(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        config.test_adequacy_verifier_fail_closed = True
+        runner = self._runner(config, event_bus)
+        execute = AsyncMock(side_effect=[_FINDER_OK, ""])
+        p1, p2, p3 = self._patches(runner, execute)
+        with p1, p2, p3:
+            result = await self._run(runner, agent_task, tmp_path)
+        assert result.passed is False
+        assert "fail-closed" in result.summary
+
+    @pytest.mark.asyncio
+    async def test_verifier_no_marker_transcript_concurs_fail_soft(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """A non-empty verifier transcript without markers keeps the finder's OK."""
+        runner = self._runner(config, event_bus)
+        execute = AsyncMock(side_effect=[_FINDER_OK, "rambling with no marker"])
+        p1, p2, p3 = self._patches(runner, execute)
+        with p1, p2, p3:
+            result = await self._run(runner, agent_task, tmp_path)
+        assert result.passed is True
+
+    @pytest.mark.asyncio
+    async def test_verifier_uses_its_own_model_not_review_model(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """Model-independence pin: a shared model defeats the second opinion."""
+        config.review_model = "sonnet"
+        config.test_adequacy_verifier_model = "opus"
+        runner = self._runner(config, event_bus)
+        execute = AsyncMock(side_effect=[_FINDER_OK, _VERIFIER_CONCUR])
+        p1, p2, p3 = self._patches(runner, execute)
+        with p1, p2, p3:
+            await self._run(runner, agent_task, tmp_path)
+        assert execute.await_count == 2
+        finder_cmd = execute.await_args_list[0].args[0]
+        verifier_cmd = execute.await_args_list[1].args[0]
+        assert "sonnet" in finder_cmd
+        assert "opus" in verifier_cmd
+        assert "sonnet" not in verifier_cmd
+
+    @pytest.mark.asyncio
+    async def test_verifier_prompt_does_not_disclose_finder_verdict(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        runner = self._runner(config, event_bus)
+        execute = AsyncMock(side_effect=[_FINDER_OK, _VERIFIER_CONCUR])
+        p1, p2, p3 = self._patches(runner, execute)
+        with p1, p2, p3:
+            await self._run(runner, agent_task, tmp_path)
+        verifier_prompt = execute.await_args_list[1].args[1]
+        assert "TEST_ADEQUACY_RESULT: OK" not in verifier_prompt
+        assert "NOT been" in verifier_prompt  # "you have NOT been shown its verdict"
+
+    @pytest.mark.asyncio
+    async def test_skill_results_carry_finder_and_verifier_roles(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """Telemetry: skill_results.json entries are role-tagged (#9546)."""
+        import json
+
+        from tracing_context import TracingContext
+
+        config.data_root = tmp_path / "data"
+        runner = self._runner(config, event_bus)
+        runner._tracing_ctx = TracingContext(
+            issue_number=agent_task.id,
+            phase="implement",
+            source="implementer",
+            run_id=1,
+        )
+        execute = AsyncMock(side_effect=[_FINDER_OK, _VERIFIER_OVERRIDE])
+        p1, p2, p3 = self._patches(runner, execute)
+        with p1, p2, p3:
+            await self._run(runner, agent_task, tmp_path)
+
+        results_path = (
+            config.data_root
+            / "traces"
+            / str(agent_task.id)
+            / "implement"
+            / "run-1"
+            / "skill_results.json"
+        )
+        entries = json.loads(results_path.read_text())
+        by_name = {e["skill_name"]: e for e in entries}
+        finder = by_name["test-adequacy"]
+        verifier = by_name["test-adequacy-verifier"]
+        assert finder["role"] == "finder"
+        assert verifier["role"] == "verifier"
+        assert verifier["outcome"] == "override"
+        assert verifier["passed"] is False
+        # The override propagates to the finder's recorded result too.
+        assert finder["passed"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -1484,6 +1735,8 @@ class TestCoverageDeltaIntegration:
         from skill_registry import BUILTIN_SKILLS
 
         config.max_test_adequacy_attempts = 1
+        # Isolate coverage-delta behaviour from the independent verifier (#9546).
+        config.test_adequacy_verifier_enabled = False
         self._write_coverage_xml(
             tmp_path / "coverage.xml",
             source=str(tmp_path),
@@ -1613,6 +1866,8 @@ class TestCoverageDeltaIntegration:
         from skill_registry import BUILTIN_SKILLS
 
         config.max_test_adequacy_attempts = 1
+        # Isolate coverage-delta behaviour from the independent verifier (#9546).
+        config.test_adequacy_verifier_enabled = False
 
         runner = AgentRunner(config, event_bus)
         with (

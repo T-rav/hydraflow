@@ -138,10 +138,21 @@ async def test_run_subprocess_call_lands_in_corpus(
     """The seam works end-to-end: build registry → call run_subprocess
     with the injected runner → corpus has a file with the captured shape."""
     _build_real_registry(_config)
-    runner = _StubRunner(stdout='{"number":1,"state":"OPEN"}\n')
+    # #9633: only shapes the dispatcher has a real OPINION on are recorded
+    # now (a narrow projection like number,state gets only a skip-verdict and
+    # is pruned). Use a covered projection so the end-to-end seam still lands.
+    runner = _StubRunner(
+        stdout='{"number":1,"state":"OPEN","mergeable":"MERGEABLE","isDraft":false}\n'
+    )
 
     stdout = await run_subprocess(
-        "gh", "pr", "view", "1", "--json", "number,state", runner=runner
+        "gh",
+        "pr",
+        "view",
+        "1",
+        "--json",
+        "number,state,mergeable,isDraft",
+        runner=runner,
     )
     assert "OPEN" in stdout  # production-path return semantics preserved
 
@@ -165,7 +176,9 @@ async def test_replay_loop_processes_real_captured_sample(
     LiveCorpusReplayLoop ticks against the real captured sample and
     completes without raising."""
     svc = _build_real_registry(_config)
-    runner = _StubRunner(stdout='{"number":1,"state":"OPEN","mergeable":"MERGEABLE"}\n')
+    runner = _StubRunner(
+        stdout='{"number":1,"state":"OPEN","mergeable":"MERGEABLE","isDraft":false}\n'
+    )
 
     await run_subprocess(
         "gh",
@@ -173,7 +186,7 @@ async def test_replay_loop_processes_real_captured_sample(
         "view",
         "1",
         "--json",
-        "number,state,mergeable",
+        "number,state,mergeable,isDraft",
         runner=runner,
     )
 
@@ -215,7 +228,7 @@ async def test_drifted_call_files_hydraflow_find_via_real_chain(
         "view",
         "99",
         "--json",
-        "number,state,mergeable",
+        "number,state,mergeable,isDraft",
         runner=runner,
     )
 

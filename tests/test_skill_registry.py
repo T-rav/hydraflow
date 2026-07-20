@@ -52,6 +52,80 @@ class TestAgentSkill:
             skill.name = "mutated"  # type: ignore[misc]
 
 
+class TestVerifierSpec:
+    """Independent second-opinion verifier attached to test-adequacy (#9546)."""
+
+    def _ta_verifier(self):
+        skill = next(s for s in BUILTIN_SKILLS if s.name == "test-adequacy")
+        assert skill.verifier is not None
+        return skill.verifier
+
+    def test_only_test_adequacy_has_a_verifier(self):
+        for skill in BUILTIN_SKILLS:
+            if skill.name == "test-adequacy":
+                assert skill.verifier is not None
+            else:
+                assert skill.verifier is None, (
+                    f"{skill.name} unexpectedly grew a verifier"
+                )
+
+    def test_config_keys_name_real_hydraflow_config_fields(self):
+        """Typo guard: getattr(config, key) at dispatch time must never miss.
+
+        A misspelled key would silently disable the verifier (enabled_config_key
+        falls back to False) or crash the dispatch (tool/model keys).
+        """
+        from config import HydraFlowConfig
+
+        spec = self._ta_verifier()
+        fields = set(HydraFlowConfig.model_fields)
+        for attr in (
+            "tool_config_key",
+            "model_config_key",
+            "enabled_config_key",
+            "fail_closed_config_key",
+        ):
+            key = getattr(spec, attr)
+            assert key in fields, (
+                f"VerifierSpec.{attr}={key!r} is not a HydraFlowConfig field"
+            )
+
+    def test_trigger_is_the_explicit_ok_gate(self):
+        from test_adequacy import finder_asserted_adequate
+
+        spec = self._ta_verifier()
+        assert spec.trigger is finder_asserted_adequate
+        assert spec.trigger("TEST_ADEQUACY_RESULT: OK") is True
+        assert spec.trigger("no marker default-pass") is False
+
+    def test_model_key_is_independent_of_review_model(self):
+        """A shared model would defeat the second opinion (pin, #9546)."""
+        from config import HydraFlowConfig
+
+        spec = self._ta_verifier()
+        assert spec.model_config_key == "test_adequacy_verifier_model"
+        assert spec.model_config_key != "review_model"
+        cfg = HydraFlowConfig()
+        assert cfg.test_adequacy_verifier_model != cfg.review_model
+
+    def test_prompt_builder_and_parser_are_the_verifier_pair(self):
+        from test_adequacy import (
+            build_test_adequacy_verifier_prompt,
+            parse_test_adequacy_verifier_result,
+        )
+
+        spec = self._ta_verifier()
+        assert spec.prompt_builder is build_test_adequacy_verifier_prompt
+        assert spec.result_parser is parse_test_adequacy_verifier_result
+
+    def test_verifier_spec_is_frozen(self):
+        import pytest
+
+        spec = self._ta_verifier()
+        with pytest.raises(AttributeError):
+            spec.enabled_config_key = "mutated"  # type: ignore[misc]
+
+
 class TestGetSkills:
     def test_returns_copy(self):
         skills = get_skills()
