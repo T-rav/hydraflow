@@ -2644,6 +2644,12 @@ class ControlStatusConfig(BaseModel):
     max_reviewers: int = 0
     max_hitl_workers: int = 0
     batch_size: int = 0
+    # Work-queue strategy (#10067) — surfaced so the dashboard can show which
+    # algorithm is picking work without opening the settings editor.
+    queue_strategy: str = "weighted_mix"
+    queue_weight_p1: int = 3
+    queue_weight_p2: int = 2
+    queue_weight_unprioritised: int = 1
     model: str = ""
     pr_unstick_batch_size: int = 10
     workspace_base: str = ""
