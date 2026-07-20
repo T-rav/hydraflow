@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `3130b1b` — Merge remote-tracking branch 'origin/staging' into feat/9546-adequacy-verifier *(2026-07-20)*
+- `aee928c` — feat(sandbox): active-trigger scenarios for six governance loops (s65-s70) (#9543) (#10074) (#10074) *(2026-07-20)*
 - `27852d9` — Merge remote-tracking branch 'origin/staging' into feat/9546-adequacy-verifier *(2026-07-20)*
 - `64fc05d` — feat(watchdog): thread-level event-loop freeze detector (#9552) (#10070) (#10070) *(2026-07-20)*
 - `5ae0798` — chore(arch): regen artifacts after staging merge (#9546) (#9546) *(2026-07-20)*

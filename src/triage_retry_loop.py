@@ -43,6 +43,7 @@ from exception_classify import reraise_on_credit_or_bug
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
+    from github_cache_loop import GitHubDataCache
     from models import GitHubIssueSummary
     from pr_manager import PRManager
     from state import StateTracker
@@ -83,6 +84,7 @@ class TriageRetryLoop(BaseBackgroundLoop):
         state: StateTracker,
         pr_manager: PRManager,
         deps: LoopDeps,
+        github_cache: GitHubDataCache,
     ) -> None:
         super().__init__(
             worker_name="triage_retry",
@@ -92,6 +94,7 @@ class TriageRetryLoop(BaseBackgroundLoop):
         )
         self._state = state
         self._pr = pr_manager
+        self._github_cache = github_cache
 
     def _get_default_interval(self) -> int:
         return self._config.triage_retry_interval
@@ -129,12 +132,17 @@ class TriageRetryLoop(BaseBackgroundLoop):
             )
 
         parked_label = self._config.parked_label[0]
+        # #9814: served from the shared GitHubDataCache snapshot instead of
+        # a per-tick `gh issue list`. The cache refreshes at most once per
+        # TTL, honors the gh circuit breaker via the port, and degrades to
+        # a stale snapshot (then []) on gh failure — so this read never
+        # crashes the loop. Writes below still go straight to the port.
         try:
-            issues = await self._pr.list_issues_by_label(parked_label)
+            issues = await self._github_cache.get_issues_by_label(parked_label)
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
             logger.warning(
-                "triage_retry: list_issues_by_label(%s) failed",
+                "triage_retry: cached issue list for %s failed",
                 parked_label,
                 exc_info=True,
             )

@@ -148,6 +148,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_merge_conflict_fix_attempts", "HYDRAFLOW_MAX_MERGE_CONFLICT_FIX_ATTEMPTS", 3),
     ("max_ci_timeout_fix_attempts", "HYDRAFLOW_MAX_CI_TIMEOUT_FIX_ATTEMPTS", 2),
     ("data_poll_interval", "HYDRAFLOW_DATA_POLL_INTERVAL", 300),
+    ("loop_startup_stagger_s", "HYDRAFLOW_LOOP_STARTUP_STAGGER_S", 120),
     ("max_sessions_per_repo", "HYDRAFLOW_MAX_SESSIONS_PER_REPO", 10),
     ("max_transcript_summary_chars", "HYDRAFLOW_MAX_TRANSCRIPT_SUMMARY_CHARS", 50_000),
     ("pr_unstick_interval", "HYDRAFLOW_PR_UNSTICK_INTERVAL", 3600),
@@ -472,6 +473,11 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
         "gh_circuit_breaker_reset_timeout_s",
         "HYDRAFLOW_GH_CIRCUIT_BREAKER_RESET_TIMEOUT_S",
         60.0,
+    ),
+    (
+        "github_cache_issue_list_ttl_s",
+        "HYDRAFLOW_GITHUB_CACHE_ISSUE_LIST_TTL_S",
+        900.0,
     ),
     ("auto_tighten_coverage_margin", "HYDRAFLOW_AUTO_TIGHTEN_COVERAGE_MARGIN", 1.0),
     # Work-queue starvation valve (#10037): hours before weighted_mix promotes.
@@ -1230,6 +1236,31 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Seconds the gh/git circuit breaker stays OPEN before probing "
             "(HALF_OPEN); it auto-recovers so it can't halt the factory forever"
+        ),
+    )
+    github_cache_issue_list_ttl_s: float = Field(
+        default=900.0,
+        ge=0.0,
+        le=86400.0,
+        description=(
+            "Freshness bound (seconds) for the shared issue-list-by-label "
+            "snapshots in GitHubDataCache (#9814). A read younger than this "
+            "is served with no gh call; 0 disables caching (every read "
+            "refreshes, still coalesced + degrade-safe). On refresh failure "
+            "a stale snapshot is served while younger than 3x this bound."
+        ),
+    )
+    loop_startup_stagger_s: int = Field(
+        default=120,
+        ge=0,
+        le=3600,
+        description=(
+            "Spread window (seconds) for deterministic background-loop "
+            "first-tick staggering (#9814). Each loop delays its first cycle "
+            "by hash(worker_name) % this value so a restart doesn't fire "
+            "every loop's GitHub reads at once. 0 disables. Loops with "
+            "run_on_startup=True (e.g. github_cache) are exempt so the "
+            "shared cache still populates immediately at boot."
         ),
     )
 

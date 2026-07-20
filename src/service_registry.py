@@ -1322,6 +1322,7 @@ def build_services(
         state=state,
         pr_manager=prs,
         deps=loop_deps,
+        github_cache=gh_cache,
     )
     convergence_oscillation_loop = ConvergenceOscillationLoop(
         config=config,
@@ -1461,6 +1462,7 @@ def build_services(
         pr_manager=prs,
         dedup=flake_tracker_dedup,
         deps=loop_deps,
+        github_cache=gh_cache,
     )
     skill_prompt_eval_dedup = DedupStore(
         "skill_prompt_eval",
@@ -1612,6 +1614,7 @@ def build_services(
         pr_manager=prs,
         dedup=rc_budget_dedup,
         deps=loop_deps,
+        github_cache=gh_cache,
     )
 
     wiki_rot_dedup = DedupStore(
@@ -1698,6 +1701,7 @@ def build_services(
         state=state,
         pr_manager=prs,
         deps=loop_deps,
+        github_cache=gh_cache,
     )
 
     auto_agent_audit_store = PreflightAuditStore(config.data_root)
