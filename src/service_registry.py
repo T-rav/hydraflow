@@ -1266,6 +1266,7 @@ def build_services(
         retrospective_queue=retrospective_queue,
         state=state,
         observability=observability,
+        credentials=credentials,
         # bg_workers is injected post-construction by the orchestrator
         # (chicken-and-egg with BGWorkerManager); see orchestrator.py.
     )

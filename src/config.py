@@ -248,6 +248,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ),
     ("health_monitor_interval", "HYDRAFLOW_HEALTH_MONITOR_INTERVAL", 7200),
     ("wiki_freshness_stale_days", "HYDRAFLOW_WIKI_FRESHNESS_STALE_DAYS", 7),
+    ("stale_code_alert_threshold", "HYDRAFLOW_STALE_CODE_ALERT_THRESHOLD", 10),
     ("stale_issue_interval", "HYDRAFLOW_STALE_ISSUE_INTERVAL", 86400),
     ("auditor_finding_max_age_days", "HYDRAFLOW_AUDITOR_FINDING_MAX_AGE_DAYS", 14),
     ("triage_max_turns", "HYDRAFLOW_TRIAGE_MAX_TURNS", 3),
@@ -2684,6 +2685,19 @@ class HydraFlowConfig(BaseModel):
             "Wiki-freshness threshold (days). HealthMonitorLoop files a "
             "`wiki-stale` issue when docs/wiki/log.jsonl has not moved in "
             "this many days, surfacing silent RepoWikiLoop stalls."
+        ),
+    )
+    stale_code_alert_threshold: int = Field(
+        default=10,
+        ge=1,
+        le=1000,
+        description=(
+            "Commits-behind threshold (#9596). HealthMonitorLoop files a "
+            "`factory-stale-code` issue when the running instance's boot "
+            "SHA is at least this many commits behind origin/<base_branch> "
+            "(git_revision.get_commits_behind, #9663), surfacing a process "
+            "that is still running old bytecode after a `git pull` without "
+            "a restart."
         ),
     )
 
