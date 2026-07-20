@@ -301,6 +301,83 @@ def _is_likely_disconnect(exc: BaseException) -> bool:
     }
 
 
+async def _client_gone(ws: WebSocket) -> None:
+    """Resolve once the WebSocket client has gone away.
+
+    The dashboard's ``/ws`` feeds are server-push only — a healthy client never
+    sends frames — so the streaming loop parks on ``queue.get()``. Without a
+    concurrent ``receive()`` the handler can never observe a vanished client on
+    a quiet bus: no events flow, so no send ever fails, and the ASGI task sits
+    on ``queue.get()`` forever. That leaks the bus subscription for every
+    closed browser tab, and in-process harnesses (browser scenarios) then
+    wedge at event-loop close: the orphaned handler survives shutdown, and
+    uvicorn's ``run_asgi`` swallows the loop-close ``CancelledError``
+    (``except BaseException``) before awaiting an event nobody will ever set
+    (#10071).
+
+    Stray client frames are drained and ignored; any receive failure is
+    treated as "client gone" (fail-closed — a live client would reconnect,
+    while the alternative is a permanent leak). ``CancelledError`` is never
+    swallowed here.
+
+    The loop continues ONLY for a genuine client data frame
+    (``{"type": "websocket.receive"}``); anything else — disconnect, a
+    non-dict, an unknown type — returns immediately. Post-accept, real
+    Starlette only ever yields ``websocket.receive`` / ``websocket.disconnect``
+    dicts, so production behavior is unchanged; the guard exists because a
+    stubbed socket (``AsyncMock``) resolves ``receive()`` instantly with a
+    ``Mock``, and an unguarded loop then spins without ever suspending —
+    unbounded CPU plus unbounded mock call history (OOM-killed CI runners).
+    """
+    with contextlib.suppress(Exception):
+        while True:
+            message = await ws.receive()
+            if not isinstance(message, dict):
+                return
+            if message.get("type") != "websocket.receive":
+                return
+
+
+async def _stream_queue_to_ws(
+    ws: WebSocket, queue: asyncio.Queue[HydraFlowEvent]
+) -> None:
+    """Forward live *queue* events to *ws* until the client disconnects.
+
+    Races ``queue.get()`` against a disconnect watcher (``_client_gone``) so a
+    closed tab ends the handler promptly even when no events are flowing.
+    Returns on disconnect; send errors propagate to the caller's
+    disconnect-aware ``except`` blocks unchanged.
+
+    Cleanup awaits each child task individually rather than via
+    ``asyncio.gather``: a ``GatheringFuture`` whose members already finished
+    refuses cancellation (``cancel()`` returns ``False``), which corrupts the
+    cancellation bookkeeping that anyio's TestClient cancel-scope relies on to
+    absorb its own cancel. Both children cancel instantly (bare ``get`` /
+    ``receive`` awaits), so the per-task awaits are bounded; a pending outer
+    cancellation still propagates after the ``finally`` completes.
+    """
+    watcher = asyncio.create_task(_client_gone(ws))
+    getter: asyncio.Task[HydraFlowEvent] | None = None
+    try:
+        while True:
+            getter = asyncio.create_task(queue.get())
+            done, _ = await asyncio.wait(
+                {watcher, getter}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if watcher in done:
+                return
+            event = getter.result()
+            getter = None
+            await ws.send_text(event.model_dump_json())
+    finally:
+        for task in (watcher, getter):
+            if task is None:
+                continue
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
 # Per-bus subscriber queue depth; the merged ``repo=__all__`` socket sizes its
 # shared fan-in queue at ``N × this`` so a busy line can't starve the others.
 _WS_MERGED_PER_BUS_QUEUE = 500
@@ -402,9 +479,7 @@ async def _serve_merged_ws(ws: WebSocket, runtimes: list[_Runtime]) -> None:
         try:
             for event in history:
                 await ws.send_text(event.model_dump_json())
-            while True:
-                event = await out_queue.get()
-                await ws.send_text(event.model_dump_json())
+            await _stream_queue_to_ws(ws, out_queue)
         except WebSocketDisconnect:
             pass
         except Exception as exc:  # noqa: BLE001
@@ -420,11 +495,15 @@ async def _serve_merged_ws(ws: WebSocket, runtimes: list[_Runtime]) -> None:
                     exc_info=True,
                 )
         finally:
-            for task in forwarders:
-                task.cancel()
             # Await the cancellations so the buses are unsubscribed (AsyncExitStack
             # exit) only after their forwarders have actually stopped reading.
-            await asyncio.gather(*forwarders, return_exceptions=True)
+            # Per-task awaits, not asyncio.gather: a GatheringFuture whose members
+            # already finished refuses cancellation, which corrupts the outer
+            # cancel-scope bookkeeping (see _stream_queue_to_ws / #10071).
+            for task in forwarders:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
 
 @dataclass
@@ -2450,11 +2529,11 @@ def create_router(
                         )
                     return
 
-            # Stream live events
+            # Stream live events until the client disconnects. A concurrent
+            # disconnect watcher (not a failing send) ends the loop for a
+            # vanished client on a quiet bus — see _stream_queue_to_ws (#10071).
             try:
-                while True:
-                    event: HydraFlowEvent = await queue.get()
-                    await ws.send_text(event.model_dump_json())
+                await _stream_queue_to_ws(ws, queue)
             except WebSocketDisconnect:
                 pass
             except Exception as exc:
