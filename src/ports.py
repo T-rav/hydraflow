@@ -474,7 +474,12 @@ class PRPort(Protocol):
         ...
 
     async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
-        """Return jobs for one run: ``{"name", "conclusion"}`` each (#9974)."""
+        """Return jobs for one run (#9974, enriched #10010).
+
+        Each dict: ``{"name", "conclusion", "started_at", "completed_at",
+        "steps"}`` — the last three feed GateHealthLoop's suspected-hang
+        classifier.
+        """
         ...
 
     async def count_workflow_run_artifacts(self, run_id: int) -> int:

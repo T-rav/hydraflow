@@ -512,6 +512,43 @@ class TestL20bGateHealthLoop:
         assert stats["gate_health"]["findings"] == 0
         assert len(world.github._issues) == before
 
+    async def test_suspected_hang_scenario_files_playbook_issue(self, tmp_path):
+        """#10010: cancelled-at-timeout job -> suspected-hang, not a retry."""
+        world = MockWorld(tmp_path)
+        workflows_dir = tmp_path / "repo" / ".github" / "workflows"
+        workflows_dir.mkdir(parents=True, exist_ok=True)
+        (workflows_dir / "ci.yml").write_text(
+            "jobs:\n  test:\n    name: Tests\n    timeout-minutes: 30\n"
+        )
+        world.github.add_workflow_run(
+            555,
+            workflow="CI",
+            conclusion="cancelled",
+            created_at="2026-07-19T00:00:00Z",
+            pr_number=42,
+            jobs=[
+                {
+                    "name": "Tests",
+                    "conclusion": "cancelled",
+                    "started_at": "2026-07-19T00:00:00Z",
+                    "completed_at": "2026-07-19T00:30:05Z",
+                    "steps": [
+                        {"name": "Install dependencies", "conclusion": "success"},
+                        {"name": "Run tests with coverage", "conclusion": None},
+                    ],
+                }
+            ],
+        )
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        assert stats["gate_health"]["filed"] == 1
+        filed = self._issues_titled(world, "suspected CI hang")
+        assert len(filed) == 1
+        assert "#9983" in filed[0].body
+        assert "#10002" in filed[0].body
+        assert "Linux container" in filed[0].body
+
 
 # ---------------------------------------------------------------------------
 # L21: sentry — no credentials and project polling paths
