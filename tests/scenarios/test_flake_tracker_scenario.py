@@ -108,3 +108,51 @@ class TestFlakeTracker:
 
         await world.run_with_loops(["flake_tracker"], cycles=1)
         assert await world.github.list_issues_by_label("flaky-test") == []
+
+    async def test_run_reads_served_from_cache_without_subprocess(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """#9814 — unseeded run fetch flows loop → GitHubDataCache → fake port.
+
+        ``flake_fetch_runs`` is deliberately NOT seeded: the loop's real
+        ``_fetch_recent_runs`` must serve the run window from the shared
+        cache (backed by FakeGitHub's ``list_runs_for_workflow``) while a
+        poisoned ``create_subprocess_exec`` proves no raw ``gh run list``
+        fires on the tick.
+        """
+        import asyncio
+
+        from github_cache_loop import RC_PROMOTION_WORKFLOW
+
+        world = MockWorld(tmp_path)
+        for i in range(20):
+            world.github.add_workflow_run(
+                i,
+                workflow=RC_PROMOTION_WORKFLOW,
+                conclusion="success",
+                created_at=f"2026-04-{i + 1:02d}T00:00:00Z",
+                url=f"https://example/run/{i}",
+            )
+
+        def make_run_results(i: int) -> dict[str, str]:
+            bad = i in {1, 5, 8, 12}
+            return {"tests.scenarios.test_cached": "fail" if bad else "pass"}
+
+        _seed_ports(
+            world,
+            flake_download_junit=AsyncMock(
+                side_effect=lambda run: make_run_results(run["databaseId"])
+            ),
+            flake_reconcile_closed=AsyncMock(return_value=None),
+        )
+
+        def _no_subprocess(*_a, **_k):
+            raise AssertionError("raw gh subprocess fired for a cached run read")
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _no_subprocess)
+
+        await world.run_with_loops(["flake_tracker"], cycles=1)
+
+        issues = await world.github.list_issues_by_label("flaky-test")
+        assert len(issues) == 1
+        assert "test_cached" in world.github.issue(issues[0]["number"]).title

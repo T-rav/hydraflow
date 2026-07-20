@@ -1657,6 +1657,43 @@ class PRManager:
             else []
         )
 
+    async def list_runs_for_workflow(
+        self, workflow: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Return recent runs of ONE workflow file, newest first (#9814).
+
+        Uses the workflow-scoped REST runs endpoint so a single fetch
+        covers the RC-history consumers' windows without pulling every
+        workflow's runs. ``run_started_at`` falls back to ``created_at``
+        for runs that never started (rc_budget's duration math needs a
+        timestamp either way).
+        """
+        self._assert_repo()
+        per_page = max(1, min(int(limit), 100))
+        output = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/actions/workflows/{workflow}/runs?per_page={per_page}",
+            "--jq",
+            (
+                '[.workflow_runs[] | {id: .id, url: (.html_url // ""), '
+                'status: (.status // ""), conclusion: (.conclusion // ""), '
+                'created_at: (.created_at // ""), '
+                'run_started_at: (.run_started_at // .created_at // ""), '
+                'updated_at: (.updated_at // "")}]'
+            ),
+        )
+        try:
+            rows = json.loads(output or "[]")
+        except ValueError:
+            logger.warning("list_runs_for_workflow: unparseable gh output")
+            return []
+        return (
+            [row for row in rows if isinstance(row, dict)]
+            if isinstance(rows, list)
+            else []
+        )
+
     async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
         """Return jobs for one workflow run (#9974, enriched #10010).
 

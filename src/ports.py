@@ -495,6 +495,21 @@ class PRPort(Protocol):
         """
         ...
 
+    async def list_runs_for_workflow(
+        self, workflow: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Return recent runs of ONE workflow file, newest first (#9814).
+
+        Each dict: ``{"id", "url", "status", "conclusion", "created_at",
+        "run_started_at", "updated_at"}``. Distinct from
+        :meth:`list_workflow_runs` (repo-wide, blame-correlation shape):
+        this is the CI-history read behind
+        ``GitHubDataCache.get_rc_workflow_runs``, which flake_tracker and
+        rc_budget consume instead of per-tick raw ``gh run list``
+        subprocesses.
+        """
+        ...
+
     async def count_workflow_run_artifacts(self, run_id: int) -> int:
         """Return the number of artifacts a run uploaded (#9974)."""
         ...

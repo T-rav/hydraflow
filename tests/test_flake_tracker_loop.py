@@ -14,6 +14,12 @@ from events import EventBus
 from flake_tracker_loop import FlakeTrackerLoop, parse_junit_xml
 
 
+def _gh_cache() -> MagicMock:
+    cache = MagicMock()
+    cache.get_rc_workflow_runs = AsyncMock(return_value=[])
+    return cache
+
+
 def _deps(stop: asyncio.Event) -> LoopDeps:
     return LoopDeps(
         event_bus=EventBus(),
@@ -43,7 +49,12 @@ def test_skeleton_worker_name_and_interval(loop_env) -> None:
     cfg, state, pr, dedup = loop_env
     stop = asyncio.Event()
     loop = FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(stop),
+        github_cache=_gh_cache(),
     )
     assert loop._worker_name == "flake_tracker"
     assert loop._get_default_interval() == 14400
@@ -75,7 +86,12 @@ async def test_tally_flakes_counts_mixed_results(loop_env) -> None:
     cfg, state, pr, dedup = loop_env
     stop = asyncio.Event()
     loop = FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(stop),
+        github_cache=_gh_cache(),
     )
     # Spec §4.5 step 2: only tests with a *mixed pass/fail record* count
     # as flaky. Always-pass = healthy; always-fail = broken, not flaky.
@@ -113,7 +129,12 @@ async def test_do_work_files_issue_when_threshold_hit(loop_env, monkeypatch) -> 
     cfg, state, pr, dedup = loop_env
     stop = asyncio.Event()
     loop = FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(stop),
+        github_cache=_gh_cache(),
     )
 
     fake_runs = [
@@ -150,7 +171,12 @@ async def test_escalation_fires_after_three_attempts(loop_env, monkeypatch) -> N
     state.inc_flake_attempts.return_value = 3
     stop = asyncio.Event()
     loop = FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(stop),
+        github_cache=_gh_cache(),
     )
 
     async def fake_fetch():
@@ -189,7 +215,12 @@ async def test_reconcile_closed_escalations_clears_dedup(loop_env) -> None:
     dedup.get.return_value = {"flake_tracker:tests.foo.test_bar"}
     stop = asyncio.Event()
     loop = FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(stop),
+        github_cache=_gh_cache(),
     )
 
     pr.list_closed_issues_by_label.return_value = [
@@ -213,7 +244,12 @@ def _recovery_loop(loop_env, monkeypatch, *, download):
     cfg, state, pr, dedup = loop_env
     stop = asyncio.Event()
     loop = FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(stop),
+        github_cache=_gh_cache(),
     )
 
     async def fake_fetch():
@@ -386,7 +422,12 @@ async def test_kill_switch_short_circuits_do_work(loop_env) -> None:
         enabled_cb=lambda name: name != "flake_tracker",
     )
     loop = FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=deps
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=deps,
+        github_cache=_gh_cache(),
     )
     loop._reconcile_closed_escalations = AsyncMock(return_value=None)
     loop._fetch_recent_runs = AsyncMock(
@@ -407,7 +448,12 @@ def _make_loop(loop_env) -> FlakeTrackerLoop:
     cfg, state, pr, dedup = loop_env
     stop = asyncio.Event()
     return FlakeTrackerLoop(
-        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(stop),
+        github_cache=_gh_cache(),
     )
 
 
@@ -574,52 +620,54 @@ async def test_download_junit_only_malformed_xml_returns_empty(
 
 
 # ---------------------------------------------------------------------------
-# _fetch_recent_runs — unit tests (#9554/#10028: routes through the shared
-# bounded helper instead of a raw create_subprocess_exec)
+# _fetch_recent_runs — unit tests. #9554/#10028 moved the read off raw
+# create_subprocess_exec; #9814 then replaced the subprocess entirely with
+# the shared GitHubDataCache snapshot. The guard below pins BOTH: no raw
+# spawn AND no bounded-helper call — the run window comes from the cache.
+# Row-mapping + degrade behavior live in
+# tests/regressions/test_issue_9814_cached_run_reads.py.
 # ---------------------------------------------------------------------------
 
 
-async def test_fetch_recent_runs_success_parses_json(loop_env, monkeypatch) -> None:
-    from execution import SimpleResult
+async def test_fetch_recent_runs_reads_cache_never_subprocess(
+    loop_env, monkeypatch
+) -> None:
+    cfg, state, pr, dedup = loop_env
+    cache = MagicMock()
+    cache.get_rc_workflow_runs = AsyncMock(
+        return_value=[
+            {
+                "id": 1,
+                "url": "https://example/run/1",
+                "conclusion": "success",
+                "created_at": "2026-04-01T00:00:00Z",
+            }
+        ]
+    )
+    loop = FlakeTrackerLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=_deps(asyncio.Event()),
+        github_cache=cache,
+    )
 
-    loop = _make_loop(loop_env)
+    async def fake_subproc(*_a, **_k):
+        raise AssertionError("run fetch must read the shared cache, not gh")
 
-    async def fake_result(*cmd: str, **kwargs: object) -> SimpleResult:
-        assert cmd[0] == "gh"
-        assert kwargs["timeout"] == 120
-        return SimpleResult(
-            stdout='[{"databaseId": 1, "conclusion": "success"}]',
-            stderr="",
-            returncode=0,
-        )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    monkeypatch.setattr("flake_tracker_loop.run_subprocess_result", fake_subproc)
 
-    monkeypatch.setattr("flake_tracker_loop.run_subprocess_result", fake_result)
     result = await loop._fetch_recent_runs()
-    assert result == [{"databaseId": 1, "conclusion": "success"}]
-
-
-async def test_fetch_recent_runs_nonzero_returns_empty(loop_env, monkeypatch) -> None:
-    from execution import SimpleResult
-
-    loop = _make_loop(loop_env)
-
-    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
-        return SimpleResult(stdout="", stderr="rate limited", returncode=1)
-
-    monkeypatch.setattr("flake_tracker_loop.run_subprocess_result", fake_result)
-    assert await loop._fetch_recent_runs() == []
-
-
-async def test_fetch_recent_runs_timeout_returns_empty(loop_env, monkeypatch) -> None:
-    from subprocess_util import SubprocessTimeoutError
-
-    loop = _make_loop(loop_env)
-
-    async def fake_result(*_cmd: str, **_kwargs: object) -> object:
-        raise SubprocessTimeoutError("timed out")
-
-    monkeypatch.setattr("flake_tracker_loop.run_subprocess_result", fake_result)
-    assert await loop._fetch_recent_runs() == []
+    assert result == [
+        {
+            "databaseId": 1,
+            "url": "https://example/run/1",
+            "conclusion": "success",
+            "createdAt": "2026-04-01T00:00:00Z",
+        }
+    ]
 
 
 async def test_reconcile_open_round_trips_spaced_test_id(loop_env) -> None:

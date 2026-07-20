@@ -769,8 +769,18 @@ class FakeGitHub:
         pr_number: int = 0,
         jobs: list[dict[str, Any]] | None = None,
         artifact_count: int = 0,
+        url: str = "",
+        status: str = "completed",
+        run_started_at: str = "",
+        updated_at: str = "",
     ) -> None:
-        """Seed one workflow run (+jobs/artifacts) for gate-health scenarios."""
+        """Seed one workflow run (+jobs/artifacts) for gate-health scenarios.
+
+        ``url``/``status``/``run_started_at``/``updated_at`` (#9814) feed
+        :meth:`list_runs_for_workflow`; the timestamps default to
+        ``created_at`` — mirroring the adapter's ``run_started_at``
+        fallback — so duration-math consumers see 0s, never a crash.
+        """
         self._workflow_runs.append(
             {
                 "id": run_id,
@@ -778,18 +788,59 @@ class FakeGitHub:
                 "conclusion": conclusion,
                 "created_at": created_at,
                 "pr_number": pr_number,
+                "url": url,
+                "status": status,
+                "run_started_at": run_started_at or created_at,
+                "updated_at": updated_at or created_at,
             }
         )
         self._workflow_jobs[run_id] = jobs or []
         self._workflow_artifacts[run_id] = artifact_count
 
     async def list_workflow_runs(self, limit: int = 50) -> list[dict[str, Any]]:
-        """Newest-first slice of the seeded run history (#9974)."""
+        """Newest-first slice of the seeded run history (#9974).
+
+        Projects exactly the repo-wide blame-correlation shape — the
+        #9814 seed extras stay out so pre-existing consumers see the
+        same rows as before.
+        """
         self._maybe_rate_limit()
         newest_first = sorted(
             self._workflow_runs, key=lambda r: str(r["created_at"]), reverse=True
         )
-        return [dict(r) for r in newest_first[:limit]]
+        return [
+            {
+                "id": r["id"],
+                "workflow": r["workflow"],
+                "conclusion": r["conclusion"],
+                "created_at": r["created_at"],
+                "pr_number": r["pr_number"],
+            }
+            for r in newest_first[:limit]
+        ]
+
+    async def list_runs_for_workflow(
+        self, workflow: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Newest-first runs of ONE workflow file in the port shape (#9814)."""
+        self._maybe_rate_limit()
+        matching = sorted(
+            (r for r in self._workflow_runs if r["workflow"] == workflow),
+            key=lambda r: str(r["created_at"]),
+            reverse=True,
+        )
+        return [
+            {
+                "id": r["id"],
+                "url": r["url"],
+                "status": r["status"],
+                "conclusion": r["conclusion"],
+                "created_at": r["created_at"],
+                "run_started_at": r["run_started_at"],
+                "updated_at": r["updated_at"],
+            }
+            for r in matching[:limit]
+        ]
 
     async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
         self._maybe_rate_limit()
