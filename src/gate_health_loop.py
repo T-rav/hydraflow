@@ -11,7 +11,7 @@ GateHealthLoop computes those distributions on a weekly cadence from the
 last N workflow runs and files evidence-rich ``hydraflow-find`` issues.
 Human-gated calls ship as a "Consent package" section (evidence +
 recommendation + exact command) — the digest contract for the #9957
-groomer. STRICTLY read-only (ADR-0029 caretaker): it opens no PRs and
+refinement loop. STRICTLY read-only (ADR-0029 caretaker): it opens no PRs and
 mutates no gates; issue filing is its only write.
 """
 

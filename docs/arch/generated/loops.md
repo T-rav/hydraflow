@@ -34,6 +34,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **GitHubCacheLoop** | `src.github_cache_loop` | 300 | — | — | — |
 | **HealthMonitorLoop** | `src.health_monitor_loop` | 7200 | — | — | — |
 | **HumanSteeringLoop** | `src.human_steering_loop` | — | — | — | ADR-0099 |
+| **IssueRefinementLoop** | `src.issue_refinement_loop` | 86400 | — | ISSUE_REFINEMENT_UPDATE | — |
 | **LabelDriftWatcherLoop** | `src.label_drift_watcher_loop` | 600 | — | — | — |
 | **LiveCorpusReplayLoop** | `src.live_corpus_replay_loop` | 900 | — | — | — |
 | **LogIngestLoop** | `src.log_ingest_loop` | 14400 | — | — | — |

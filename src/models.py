@@ -2241,6 +2241,34 @@ class StateData(BaseModel):
     adversarial_states: dict[str, AdversarialState] = Field(default_factory=dict)
     # Continuous human-steering reference, keyed by str(issue_id) (ADR-0099 #4).
     human_steering: dict[str, SteeringState] = Field(default_factory=dict)
+    # IssueRefinementLoop (spec #9957) — small change-detection projection, NOT
+    # the engine's richer runtime RefinementIssue view (src/issue_refinement.py). Keyed
+    # by issue number (str); value is {"title_hash", "body_hash", "updated_at"}.
+    # The loop rebuilds full RefinementIssue views from live backlog fetches each
+    # tick — this index only tells it which issues changed since last time.
+    refinement_index: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # Judged dup-pair cache keys (issue_refinement.pair_key format), newest-5000
+    # cap enforced by IssueRefinementStateMixin.add_judged_pairs. Prevents
+    # re-spending an LLM call on a pair already judged since either side's
+    # body last changed (the pair_key embeds both bodies' hashes).
+    refinement_judged_pairs: list[str] = Field(default_factory=list)
+    # ISO-8601 timestamp of the last weekly full-sweep tick (changed=all
+    # issues, not just the incremental diff). Empty string = never run.
+    refinement_last_full_sweep: str = Field(default="")
+    # The refinement loop's own rolling digest issue number (#8987 rollup pattern);
+    # 0 = not yet created.
+    refinement_digest_issue: int = Field(default=0)
+    # Open operator questions carried across ticks so the digest renders ALL
+    # still-open proposals, not just the current tick's (spec #9957, ratified
+    # controller decision). Each entry is one of two shapes, tagged by "kind":
+    #   dup:      {"kind": "dup", "a", "b", "canonical", "verdict",
+    #              "confidence", "evidence", "first_seen"}
+    #   priority: {"kind": "priority", "number", "current", "proposed",
+    #              "reason", "first_seen"}
+    # Pruned each tick to the live backlog (and, for priority entries, dropped
+    # once the issue gains a P-label). Deduped by unordered pair (dup) / issue
+    # number (priority) so a re-judged pair supersedes its stale entry.
+    refinement_open_proposals: list[dict[str, Any]] = Field(default_factory=list)
     last_updated: str | None = None
 
 

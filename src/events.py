@@ -107,6 +107,8 @@ class EventType(StrEnum):
     CONCERN_FORWARDED = "concern_forwarded"
     CONCERN_ADDRESSED = "concern_addressed"
     SHIPPED_WITH_KNOWN_GAP = "shipped_with_known_gap"
+    # IssueRefinementLoop tick summary for the dashboard (#9957)
+    ISSUE_REFINEMENT_UPDATE = "issue_refinement_update"
 
 
 #: Event types delivered live-only — fanned out to connected subscribers but

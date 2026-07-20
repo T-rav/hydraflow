@@ -1510,6 +1510,63 @@ class PRManager:
             )
         return summaries
 
+    async def list_open_issues(self) -> list[GitHubIssueSummary]:
+        """Return ALL open issues (no label filter) as a list of dicts.
+
+        Used by the backlog refinement loop (``IssueRefinementLoop``, #9957) for a
+        full-repo sweep. Same contracts-boundary lenient-parse pattern as
+        ``list_issues_by_label`` — labels ride along in gh wire shape
+        (#9943) since refinement needs to reason about existing labels.
+        """
+        from contracts.boundary import parse_list_with_shape
+        from contracts.shapes import GhIssueListItem
+
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            self._repo,
+            "--state",
+            "open",
+            "--json",
+            "number,title,body,labels,updatedAt",
+            "--limit",
+            "500",
+        )
+        from contracts.boundary import field_or
+
+        results = parse_list_with_shape(output or "[]", GhIssueListItem)
+        summaries: list[GitHubIssueSummary] = []
+        for r in results:
+            if r.model_instance is not None:
+                labels = [
+                    {"name": lbl.name} for lbl in r.model_instance.labels if lbl.name
+                ]
+            else:
+                entry = r.payload if isinstance(r.payload, dict) else {}
+                labels = [
+                    {"name": str(lbl.get("name", ""))}
+                    for lbl in (entry.get("labels") or [])
+                    if isinstance(lbl, dict) and lbl.get("name")
+                ]
+            summaries.append(
+                {
+                    "number": field_or(r, "number", 0),
+                    "title": field_or(r, "title", ""),
+                    "body": field_or(r, "body", ""),
+                    "updated_at": field_or(r, "updated_at", "", dict_key="updatedAt"),
+                    "labels": labels,
+                }
+            )
+        if len(summaries) == 500:
+            logger.warning(
+                "list_open_issues returned exactly 500 rows — backlog may be"
+                " truncated; raise the limit"
+            )
+        return summaries
+
     async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
         """Return the numbers of ALL open issues (no label filter). #9905.
 

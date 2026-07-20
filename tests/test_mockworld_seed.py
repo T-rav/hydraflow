@@ -177,3 +177,43 @@ def test_seed_round_trips_phase_scripts_through_json() -> None:
     assert all(isinstance(k, int) for k in parsed.phase_scripts["discover"])
     # shape_council round keys must also be ints (used for direct lookup).
     assert all(isinstance(rk, int) for rk in parsed.phase_scripts["shape_council"][3])
+
+
+def test_default_seed_has_empty_issue_refinement_seam() -> None:
+    """Back-compat: seeds predating the issue-refinement air-gap seam (#9957)
+    carry no backlog and no scripted verdicts."""
+    seed = MockWorldSeed()
+    assert seed.issue_refinement_backlog == []
+    assert seed.issue_refinement_verdicts == []
+
+
+def test_seed_round_trips_issue_refinement_seam_through_json() -> None:
+    """The seeded backlog + scripted dup verdicts survive JSON transfer so the
+    docker loader (sandbox_main) rebuilds the s57 refinement seam faithfully.
+
+    Backlog issue numbers are JSON VALUES (not object keys), so they stay ``int``
+    across the wire with no ``from_json`` coercion — the equality check guards a
+    future shape that would need it.
+    """
+    original = MockWorldSeed(
+        issue_refinement_backlog=[
+            {
+                "number": 7101,
+                "title": "t",
+                "body": "b",
+                "labels": [],
+                "updated_at": "2026-06-01T00:00:00Z",
+            },
+        ],
+        issue_refinement_verdicts=[
+            '{"verdict": "likely_dup", "canonical": 7101, '
+            '"evidence": "e", "confidence": "medium"}',
+        ],
+    )
+
+    parsed = MockWorldSeed.from_json(original.to_json())
+
+    assert parsed == original
+    assert parsed.issue_refinement_backlog[0]["number"] == 7101
+    assert isinstance(parsed.issue_refinement_backlog[0]["number"], int)
+    assert parsed.issue_refinement_verdicts[0].startswith('{"verdict"')

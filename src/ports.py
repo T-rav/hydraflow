@@ -417,6 +417,17 @@ class PRPort(Protocol):
         """Return open issues with the given label as a list of typed dicts."""
         ...
 
+    async def list_open_issues(self) -> list[GitHubIssueSummary]:
+        """Return ALL open issues (no label filter) as a list of typed dicts.
+
+        Used by the backlog refinement loop (``IssueRefinementLoop``, #9957) for a
+        full-repo sweep. Unlike ``list_issues_by_label`` this is unfiltered;
+        unlike ``list_open_issue_numbers`` it carries the full projection
+        (title/body/labels) refinement needs to reason about content, not
+        just identity.
+        """
+        ...
+
     async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
         """Return the numbers of ALL open issues (no label filter).
 

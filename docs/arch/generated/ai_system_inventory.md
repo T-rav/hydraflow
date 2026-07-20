@@ -54,7 +54,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_REPORT_ISSUE` | `report_issue_tool` | `report_issue_model` |
 | `HYDRAFLOW_TERM_PROPOSER` | `term_proposer_tool` | `term_proposer_model` |
 
-## Background loops (55)
+## Background loops (56)
 
 | Worker | Loop class | Area | Model role(s) | Long LLM cycle | Oversight | Purpose |
 |---|---|---|---|---|---|---|
@@ -86,6 +86,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `github_cache` | `GitHubCacheLoop` | Caretaking | — | — | HITL escalation | Single-poller cache for GitHub data; serves all dashboard + loop consumers from one shared snapshot to avoid rate-limit fan-out. |
 | `health_monitor` | `HealthMonitorLoop` | Caretaking | — | — | HITL escalation | Analyzes pipeline trends, auto-tunes parameters, detects knowledge gaps, and ingests log patterns. |
 | `human_steering` | `HumanSteeringLoop` | Auto-Agent (HITL Pre-Flight) | — | — | — | Senses per-issue GitHub-comment steering directives (/steer, /pause, /resume, /redo, /abort) each tick and writes the steering reference (ADR-0099 #4). |
+| `issue_refinement` | `IssueRefinementLoop` | Caretaking | `background_model`, `issue_refinement_model` | ✅ | — | Backlog-wide duplicate detection, priority scoring, and a rolling operator digest issue. |
 | `label_drift_watcher` | `LabelDriftWatcherLoop` | Caretaking | — | — | — | Periodic scan for cross-entity issue/PR label drift (e.g., issue at hydraflow-ready while linked PR at hydraflow-review with commits); reconciles via per-entity swap_pipeline_labels. See ADR-0088. |
 | `live_corpus_replay` | `LiveCorpusReplayLoop` | Trust Fleet | — | — | HITL escalation | Diffs fresh shadow-corpus samples against fake-adapter outputs to catch value-level drift between real and fake adapters; files one hydraflow-find issue per unique drift signature. See #8786 / ADR-0045. |
 | `log_ingest` | `LogIngestLoop` | Caretaking | — | — | — | Clusters and dedups recurring errors/warnings in HydraFlow's own server log and files them as fix-issues for the pipeline. |

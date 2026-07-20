@@ -152,6 +152,38 @@ class MockWorldSeed:
     # payload unchanged.
     rulesets: dict[str, dict[str, Any]] = field(default_factory=dict)
 
+    # IssueRefinementLoop (spec #9957) air-gap seam. The loop reads the WHOLE
+    # open backlog via ``PRPort.list_open_issues`` (Faked) and then spends one
+    # structured LLM call per duplicate candidate / priority target — and THAT
+    # call shells out to a real ``claude`` via ``run_lightweight_agent`` in
+    # production (the #9796 real-claude-wedge class that hangs the air-gapped
+    # sandbox). A scenario (s57) seeds a backlog here so the refinement loop has
+    # real issues to reason about, and scripts the raw dup-verdict JSON in
+    # ``issue_refinement_verdicts`` so judgment never reaches a real ``claude``.
+    #
+    # Each backlog entry is a dict with keys ``number`` / ``title`` / ``body`` /
+    # ``labels`` / ``updated_at`` (all JSON-native — no ``from_json`` coercion
+    # needed). ``sandbox_main`` seeds them into FakeGitHub as open issues when
+    # non-empty; empty (every other scenario) leaves the backlog untouched.
+    #
+    # Note: kept distinct from the generic ``issues`` field on purpose — those
+    # feed the whole pipeline (triage/discover/...) when they carry lifecycle
+    # labels, whereas a refinement backlog is deliberately label-free so ONLY
+    # the backlog-wide refinement sweep sees it (the pipeline's store refresh
+    # pulls only ``hydraflow-*``-labelled issues).
+    issue_refinement_backlog: list[dict[str, Any]] = field(default_factory=list)
+
+    # Scripted raw dup-judgment LLM responses for the same seam, consumed FIFO
+    # (one per judged dup candidate; the last is reused if the loop asks for
+    # more). Each is the full raw text the loop's ``refinement_llm.complete``
+    # would return — a JSON verdict object; a ```json fence is fine, since
+    # ``parse_dup_verdict`` is fence-tolerant. Only consumed when
+    # ``issue_refinement_backlog`` is non-empty. Priority-scoring calls on the
+    # SAME seam are answered with a benign ``{"priority":"none"}`` no-op inside
+    # ``sandbox_main`` (an unlabelled issue skips a ``none`` verdict), so a
+    # scenario's observable is a single dup proposal, not a relabel storm.
+    issue_refinement_verdicts: list[str] = field(default_factory=list)
+
     def to_json(self) -> str:
         """Serialize to JSON for cross-process transfer."""
         return json.dumps(asdict(self), indent=2)

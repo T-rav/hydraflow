@@ -19,6 +19,7 @@ flowchart LR
         caretaking_GateHealthLoop([GateHealthLoop])
         caretaking_GitHubCacheLoop([GitHubCacheLoop])
         caretaking_HealthMonitorLoop([HealthMonitorLoop])
+        caretaking_IssueRefinementLoop([IssueRefinementLoop])
         caretaking_LabelDriftWatcherLoop([LabelDriftWatcherLoop])
         caretaking_LogIngestLoop([LogIngestLoop])
         caretaking_MemoryBacklogLoop([MemoryBacklogLoop])
@@ -114,6 +115,7 @@ Autonomous background loops that maintain the system without human input — wik
 - `GateHealthLoop` — `src.gate_health_loop`
 - `GitHubCacheLoop` — `src.github_cache_loop`
 - `HealthMonitorLoop` — `src.health_monitor_loop`
+- `IssueRefinementLoop` — `src.issue_refinement_loop`
 - `LabelDriftWatcherLoop` — `src.label_drift_watcher_loop`
 - `LogIngestLoop` — `src.log_ingest_loop`
 - `MemoryBacklogLoop` — `src.memory_backlog_loop`

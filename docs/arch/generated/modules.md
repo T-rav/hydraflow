@@ -28,13 +28,13 @@ graph LR
     src_telemetry["src.telemetry"]
     src -- "4" --> src_arch
     src -- "14" --> src_auto_tighten
-    src -- "26" --> src_contracts
+    src -- "29" --> src_contracts
     src -- "4" --> src_dashboard_routes
     src -- "5" --> src_disturbance
     src -- "1" --> src_observability
     src -- "13" --> src_preflight
     src -- "1" --> src_review_phase
-    src -- "55" --> src_state
+    src -- "56" --> src_state
     src -- "7" --> src_telemetry
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch

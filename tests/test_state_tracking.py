@@ -173,6 +173,14 @@ class TestInitialization:
             "adversarial_states",
             # HumanSteeringLoop per-issue steering reference (ADR-0099 #4)
             "human_steering",
+            # IssueRefinementLoop (spec #9957) — change-detection index, judged-
+            # pair cache, weekly full-sweep marker, rolling digest issue,
+            # cross-tick open operator questions.
+            "refinement_index",
+            "refinement_judged_pairs",
+            "refinement_last_full_sweep",
+            "refinement_digest_issue",
+            "refinement_open_proposals",
         }
         assert set(d.keys()) == expected_keys
 
