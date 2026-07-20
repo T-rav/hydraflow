@@ -103,7 +103,16 @@ def order_queue(
             task for band in (*PRIORITY_BANDS, UNPRIORITISED) for task in banded[band]
         ]
 
-    return _weighted_interleave(banded, weights)
+    if strategy == QueueStrategy.WEIGHTED_MIX:
+        return _weighted_interleave(banded, weights)
+
+    # Explicit rather than falling through to weighted_mix: a strategy added to
+    # the enum without a branch here would otherwise be silently mis-dispatched
+    # as weighted_mix, and a scheduler quietly running the wrong discipline is
+    # exactly the kind of failure nobody notices. Config and the settings route
+    # both validate, so this is unreachable from the UI or a config file.
+    msg = f"unhandled queue strategy {strategy!r}"
+    raise ValueError(msg)
 
 
 def _partition(tasks: list[Task]) -> dict[str, list[Task]]:
