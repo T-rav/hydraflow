@@ -102,6 +102,53 @@ class _SeededRefineLLM:
         return self._response
 
 
+class _SeededRefinementLLM:
+    """Air-gapped stand-in for ``IssueRefinementLoop``'s one-shot judgment client.
+
+    The refinement loop makes two kinds of structured LLM call per tick — a
+    duplicate judgment (``build_dup_judgment_prompt``) and a priority score
+    (``build_priority_prompt``) — and BOTH shell out to a real ``claude`` via
+    ``run_lightweight_agent`` in production (the #9796 real-claude-wedge class
+    that wedged discover/shape on the air-gapped sandbox). This stand-in answers
+    both from scenario data so nothing escapes the air-gapped network:
+
+    * Dup-judgment prompts — identified by the fixed ``Canonical-selection
+      rubric`` header the loop's prompt template always emits (never issue
+      content, so a crafted body can't spoof the dispatch) — return the next
+      scripted verdict from ``seed.issue_refinement_verdicts``, consumed FIFO
+      and reusing the last once exhausted.
+    * Priority prompts get a benign ``{"priority": "none"}`` — a deliberate
+      no-op: the loop skips a ``none`` verdict on an unlabelled issue, so the
+      scenario's only observable action is the dup proposal, not a relabel.
+
+    Structurally satisfies the loop's private ``_RefinementLLM`` protocol (a
+    single ``async complete(prompt) -> str``); ``_refinement_complete`` uses it
+    verbatim once ``sandbox_main`` injects it onto ``svc.issue_refinement_loop``.
+    """
+
+    # Unique to the dup-judgment rubric (issue_refinement._DUP_JUDGMENT_RUBRIC);
+    # absent from the priority rubric and from any issue title/body.
+    _DUP_MARKER = "Canonical-selection rubric"
+    _PRIORITY_NOOP = '{"priority": "none", "reason": "sandbox no-op"}'
+
+    def __init__(self, verdicts: list[str]) -> None:
+        self._verdicts = list(verdicts)
+        self._next = 0
+
+    async def complete(self, prompt: str) -> str:
+        if self._DUP_MARKER not in prompt:
+            # A priority-scoring prompt — answer with the deliberate no-op.
+            return self._PRIORITY_NOOP
+        if not self._verdicts:
+            # Defensive: no dup verdict scripted (a scenario always provides at
+            # least one). Degrade to the no-op rather than IndexError; the loop
+            # treats an unparseable dup verdict as a low-confidence proposal.
+            return self._PRIORITY_NOOP
+        idx = min(self._next, len(self._verdicts) - 1)
+        self._next += 1
+        return self._verdicts[idx]
+
+
 def _load_phase_script(
     fake_llm: FakeLLM, phase_name: str, issue_number: int, payload: object
 ) -> None:
@@ -387,6 +434,37 @@ async def main() -> None:
         # method-assign checker or ruff's B010 setattr rewrite.
         vars(_refine_loop)["_run_corpus"] = _seeded_run_corpus
         _refine_loop._refine_llm = _SeededRefineLLM(seed.skill_prompt_refine_patch)
+
+    # IssueRefinementLoop (#9957) air-gap seam. The loop reads the whole open
+    # backlog via PRPort (Faked) and then spends one structured LLM call per dup
+    # candidate / priority target — the judgment call shells out to a real
+    # ``claude`` via run_lightweight_agent in production (the #9796
+    # real-claude-wedge class). When a scenario (s57) seeds a backlog, populate
+    # the shared FakeGitHub with it as open issues (label-free, so the pipeline's
+    # ``hydraflow-*``-only store refresh never picks them up — only the
+    # backlog-wide refinement sweep sees them) and inject a scripted refinement
+    # LLM so judgment/priority never reach a real ``claude``. The scripted dup
+    # verdict is a likely_dup/medium PROPOSE (not an auto-close), so the tick
+    # renders an operator digest without any GitHub close write. Empty seed
+    # (every other scenario, incl. s16/s56) leaves production ``_refinement_llm``
+    # untouched.
+    if seed.issue_refinement_backlog:
+        for entry in seed.issue_refinement_backlog:
+            number = int(entry["number"])
+            shared_github.add_issue(
+                number=number,
+                title=str(entry.get("title", "")),
+                body=str(entry.get("body", "")),
+                labels=list(entry.get("labels", []) or []),
+            )
+            updated_at = entry.get("updated_at")
+            if updated_at:
+                shared_github.set_issue_updated_at(number, str(updated_at))
+        # Instance-level data attribute (not a method) — a plain assignment is
+        # the sanctioned seam here, mirroring ``_refine_loop._refine_llm`` above.
+        svc.issue_refinement_loop._refinement_llm = _SeededRefinementLLM(
+            list(seed.issue_refinement_verdicts)
+        )
 
     orch = HydraFlowOrchestrator(
         config,
