@@ -28,14 +28,15 @@ from mockworld.seed import MockWorldSeed
 
 NAME = "s55_nested_decompose"
 
-# Born-racy: the review-convergence escalation → hop-2 decompose handoff is
-# nondeterministic (~80% red 2026-07-18; blocked every rc/* promotion and all
-# staging code PRs). Full evidence dossier, mitigation design, and the
-# real-fix acceptance bar (10 consecutive green docker runs) live in #9925.
-# REMOVING this marker is part of #9925's acceptance criteria — do not remove
-# it without the race fix. Collective runs (run-all, CI fast subset) exclude
-# this scenario LOUDLY; explicit `run s55_nested_decompose` still works.
-QUARANTINED = "#9925"
+# Was quarantined under #9925 (born-racy, ~80% red 2026-07-18). Root cause was
+# NOT a decompose/review race (the issue's original diagnosis) but the #9796
+# DiscoverRunner/ShapeRunner air-gapped-sandbox wedge: with no discover/shape
+# script seeded, those runners spawned a real `claude` and ran to agent_timeout,
+# freezing the discover/shape phase loop so a child never reached
+# review→escalate→decompose and the epic stalled at 50%. #9919 fixed that wedge
+# (landed 28 min AFTER the quarantine, so nobody noticed it also fixed s55).
+# Un-quarantined here after 31/31 consecutive green docker runs (19 local across
+# plain/host-stress/CPU-cap + 12 on GitHub CI runners). See #9925.
 DESCRIPTION = (
     "Depth-2 nested decompose: a stalled decomposed child re-decomposes and the "
     "root epic converges via epic-to-epic lineage."

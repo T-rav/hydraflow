@@ -35,6 +35,7 @@ from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
 from execution import get_default_runner
 from models import WorkCycleResult
+from process_group import kill_process_group
 from prompt_efficiency import (
     INEFFICIENCY_THRESHOLD,
     SkillEfficiencyRow,
@@ -97,19 +98,23 @@ async def _communicate_bounded(
 ) -> tuple[bytes, bytes]:
     """``proc.communicate()`` bounded by *timeout* seconds.
 
-    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
-    the caller can treat it as a failed read (rather than hanging the loop
-    cycle indefinitely).
+    On timeout the wedged child's whole PROCESS GROUP is reaped and a
+    ``TimeoutError`` propagates so the caller can treat it as a failed read
+    (rather than hanging the loop cycle indefinitely).
+
+    Callers must spawn with ``start_new_session=True`` (child is its own
+    group leader): the corpus/validation spawns fan out sub-make → pytest →
+    LLM-agent grandchildren, and a child-only ``proc.kill()`` re-parented
+    them to init where they kept burning API credits (#9579). The guarded
+    primitive never raises — an already-exited child included — so the
+    TimeoutError (the intended failed-read signal) still propagates
+    (#9794/#9816).
     """
     try:
         return await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except TimeoutError:
-        # proc.kill() itself raises ProcessLookupError when the child already
-        # exited — suppress it too, not just proc.wait() — so the TimeoutError
-        # (the intended failed-read signal) propagates instead of crashing the
-        # caller with ProcessLookupError. (#9794/#9816)
+        kill_process_group(proc)
         with contextlib.suppress(ProcessLookupError):
-            proc.kill()
             await proc.wait()
         raise
 
@@ -351,6 +356,10 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                # Group leader (pid == pgid) so the timeout reap in
+                # _communicate_bounded kills the whole make → pytest →
+                # LLM-agent subtree, not just the top-level make (#9579).
+                start_new_session=True,
             )
             stdout, stderr = await _communicate_bounded(
                 proc, timeout=_ADVERSARIAL_TIMEOUT_SECONDS
@@ -936,6 +945,10 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                # Group leader (pid == pgid) so the timeout reap in
+                # _communicate_bounded kills the whole corpus-runner →
+                # LLM-agent subtree, not just the direct child (#9579).
+                start_new_session=True,
             )
             stdout, stderr = await _communicate_bounded(
                 proc, timeout=_ADVERSARIAL_TIMEOUT_SECONDS
