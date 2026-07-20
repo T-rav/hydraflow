@@ -804,10 +804,42 @@ class MockWorld:
         from mockworld.sandbox_main import (  # noqa: PLC0415
             build_seeded_branch_protection_auditor,
             build_seeded_gate_detector,
+            materialize_epic_states,
             materialize_expired_runs,
+            materialize_health_metrics,
+            materialize_worker_heartbeats,
             seed_stale_workspaces,
         )
 
+        if seed.epic_states:
+            # Materialize into the REAL harness StateTracker and hand the loop
+            # builder a real EpicManager over the shared FakeGitHub (its
+            # default is a MagicMock whose check_stale_epics can never flag
+            # anything) — same dual-loader parity as sandbox_main, which gets
+            # a real EpicManager from build_services over the same state.
+            from epic import EpicManager  # noqa: PLC0415
+            from mockworld.fakes.fake_issue_fetcher import (  # noqa: PLC0415
+                FakeIssueFetcher,
+            )
+
+            materialize_epic_states(self._harness.state, seed)
+            self._loop_ports.setdefault(
+                "epic_manager",
+                EpicManager(
+                    config,
+                    self._harness.state,
+                    self._github,
+                    FakeIssueFetcher(github=self._github),
+                    self._harness.bus,
+                ),
+            )
+        if seed.health_metrics:
+            # Written via the run config: its memory_dir/repo_memory_dir are
+            # the paths the catalog-built HealthMonitorLoop reads (both derive
+            # from the same tmp repo_root as harness.config).
+            materialize_health_metrics(config, seed)
+        if seed.worker_heartbeats:
+            materialize_worker_heartbeats(self._harness.state, seed)
         if seed.stale_workspaces:
             # Register the worktrees in the REAL harness StateTracker and hand
             # that tracker to the loop builder (its default is an empty-world

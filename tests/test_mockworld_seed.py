@@ -227,6 +227,56 @@ def test_default_seed_has_empty_active_trigger_seams() -> None:
     assert seed.expired_run_dirs == []
 
 
+def test_default_seed_has_empty_state_materializer_fields() -> None:
+    """#9643 state/JSONL materializer seed fields default empty (back-compat)."""
+    seed = MockWorldSeed()
+    assert seed.epic_states == []
+    assert seed.health_metrics == {}
+    assert seed.worker_heartbeats == {}
+
+
+def test_seed_round_trips_state_materializer_fields_through_json() -> None:
+    """The #9643 materializer payloads survive JSON transfer intact.
+
+    All three fields are JSON-native (list-of-dict / string-keyed dicts —
+    worker names and artifact names are strings on both sides of the wire),
+    so no ``from_json`` coercion is required; the equality check guards a
+    future shape that would need it. Ages are RELATIVE offsets
+    (``last_activity_age_days`` / ``age_seconds``) so seeds stay
+    time-independent — the materializer, not the seed, mints timestamps.
+    """
+    original = MockWorldSeed(
+        epic_states=[
+            {
+                "epic_number": 7601,
+                "title": "Epic: long-forgotten rollup",
+                "last_activity_age_days": 3650,
+                "child_issues": [],
+            },
+        ],
+        health_metrics={
+            "outcomes": [{"outcome": "failure"}, {"outcome": "success"}],
+            "item_scores": {"pattern-1": {"score": 0.8, "appearances": 3}},
+            "harness_failures": [{"category": "hitl_escalation"}],
+        },
+        worker_heartbeats={
+            "epic_monitor": {
+                "status": "running",
+                "age_seconds": 7200,
+                "details": {"stale_count": 0},
+            },
+        },
+    )
+
+    parsed = MockWorldSeed.from_json(original.to_json())
+
+    assert parsed == original
+    assert parsed.epic_states[0]["epic_number"] == 7601
+    assert isinstance(parsed.epic_states[0]["epic_number"], int)
+    assert parsed.health_metrics["outcomes"][0] == {"outcome": "failure"}
+    assert parsed.worker_heartbeats["epic_monitor"]["age_seconds"] == 7200
+
+
 def test_seed_round_trips_active_trigger_seams_through_json() -> None:
     original = MockWorldSeed(
         issues=[

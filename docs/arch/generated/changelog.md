@@ -6,12 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
-- `3130b1b` — Merge remote-tracking branch 'origin/staging' into feat/9546-adequacy-verifier *(2026-07-20)*
+- `ee15f26` — feat(test-adequacy): independent second-opinion verifier gated on explicit OK (#9546) (#10076) (#10076) *(2026-07-20)*
+- `fa5e02e` — feat(gh-load): cached CI-run + issue-list reads and first-tick stagger — cut direct-gh load (#9814) (#10075) (#10075) *(2026-07-20)*
 - `aee928c` — feat(sandbox): active-trigger scenarios for six governance loops (s65-s70) (#9543) (#10074) (#10074) *(2026-07-20)*
-- `27852d9` — Merge remote-tracking branch 'origin/staging' into feat/9546-adequacy-verifier *(2026-07-20)*
 - `64fc05d` — feat(watchdog): thread-level event-loop freeze detector (#9552) (#10070) (#10070) *(2026-07-20)*
-- `5ae0798` — chore(arch): regen artifacts after staging merge (#9546) (#9546) *(2026-07-20)*
-- `77772e0` — feat(test-adequacy): independent second-opinion verifier gated on explicit OK (#9546) (#9546) *(2026-07-20)*
 - `14f4a2e` — fix(refinement): v1 follow-ups — not-planned closes, priority budget, fail-closed fake, inefficiency re-file (#10025) (#10066) (#10066) *(2026-07-20)*
 - `1306712` — fix(fitness): cadence-derived min_samples — scorecards can finally score (#9841) (#10056) (#10056) *(2026-07-20)*
 - `8509ee0` — feat(orchestration): v2 IssueDriver runtime phase spec + accept ADR-0099 (#10038) (#10055) (#10055) *(2026-07-20)*

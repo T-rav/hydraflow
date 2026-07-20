@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pytest
 
+from events import EventType
 from tests.sandbox_scenarios.scenarios import (
     s65_workspace_gc_collects_stale as s65,
 )
@@ -30,6 +31,12 @@ from tests.sandbox_scenarios.scenarios import (
 )
 from tests.sandbox_scenarios.scenarios import (
     s70_merge_state_watcher_rebases_conflict as s70,
+)
+from tests.sandbox_scenarios.scenarios import (
+    s71_epic_monitor_stale_alert as s71,
+)
+from tests.sandbox_scenarios.scenarios import (
+    s72_health_monitor_adjusts_attempts as s72,
 )
 
 
@@ -97,3 +104,41 @@ async def test_s70_merge_state_watcher_rebases_conflicting_pr(mock_world) -> Non
     assert stats["merge_state_watcher"]["checked"] >= 1
     assert stats["merge_state_watcher"]["rebased"] >= 1
     assert mock_world._github._prs[s70._PR].mergeable is True
+
+
+@pytest.mark.asyncio
+async def test_s71_epic_monitor_flags_seeded_stale_epic(mock_world) -> None:
+    _seed, stats = await _run(mock_world, s71)
+
+    assert stats["epic_monitor"]["stale_count"] >= 1
+    # The world shows the side effects, not just the counter: the stale
+    # warning landed on the epic issue and the alert reached the bus.
+    warning_comments = [
+        body
+        for number, body in mock_world._github._comments
+        if number == s71._EPIC and "Stale epic warning" in body
+    ]
+    assert warning_comments, "expected the stale-warning comment on the epic"
+    alerts = [
+        e
+        for e in mock_world._harness.bus.get_history()
+        if e.type == EventType.SYSTEM_ALERT and e.data.get("source") == "epic_monitor"
+    ]
+    assert any(a.data.get("epic_number") == s71._EPIC for a in alerts)
+
+
+@pytest.mark.asyncio
+async def test_s72_health_monitor_adjusts_on_seeded_low_first_pass(
+    mock_world,
+) -> None:
+    _seed, stats = await _run(mock_world, s72)
+
+    assert stats["health_monitor"]["first_pass_rate"] < 0.2
+    assert stats["health_monitor"]["total_outcomes"] == 10
+    assert stats["health_monitor"]["adjustments_made"] >= 1
+    # Both flat-memory_dir artifacts were read from the seeded files.
+    assert stats["health_monitor"]["avg_memory_score"] == 0.8
+    # The auto-adjust decision reached the hash-chained trail on disk.
+    decisions = mock_world._harness.config.memory_dir / "decisions.jsonl"
+    assert decisions.exists()
+    assert "max_quality_fix_attempts" in decisions.read_text(encoding="utf-8")

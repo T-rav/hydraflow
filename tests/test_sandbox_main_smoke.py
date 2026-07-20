@@ -149,6 +149,161 @@ def test_materialize_expired_runs_noops_when_empty(tmp_path) -> None:
     assert not (config.repo_data_path("runs")).exists()
 
 
+# --- #9643 state/JSONL materializer seams ------------------------------------
+
+
+def test_materialize_epic_states_backdates_relative_age(tmp_path) -> None:
+    """``last_activity_age_days`` becomes a tz-aware back-dated timestamp.
+
+    Relative offsets keep seeds time-independent, and the materializer-minted
+    timestamp is always tz-aware — a naive one would make
+    ``EpicManager._is_stale`` swallow a ``TypeError`` and read the epic as
+    fresh (the s71 silent-timeout footgun).
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from mockworld.seed import MockWorldSeed
+    from state import StateTracker
+
+    config = _seed_config(tmp_path)
+    state = StateTracker(config.state_file)
+    seed = MockWorldSeed(
+        epic_states=[
+            {"epic_number": 7601, "last_activity_age_days": 3650, "child_issues": []}
+        ]
+    )
+
+    sandbox_main.materialize_epic_states(state, seed)
+
+    epic = state.get_epic_state(7601)
+    assert epic is not None
+    last = datetime.fromisoformat(epic.last_activity)
+    assert last.tzinfo is not None
+    assert last < datetime.now(UTC) - timedelta(days=3000)
+    # The seed-only age key never leaks into the persisted model.
+    assert not hasattr(epic, "last_activity_age_days")
+
+
+def test_materialize_epic_states_passthrough_and_noop(tmp_path) -> None:
+    """No age key → the payload reaches ``model_validate`` untouched; an
+    empty seed writes no state."""
+    from mockworld.seed import MockWorldSeed
+    from state import StateTracker
+
+    config = _seed_config(tmp_path)
+    state = StateTracker(config.state_file)
+
+    sandbox_main.materialize_epic_states(state, MockWorldSeed())
+    assert state.get_all_epic_states() == {}
+
+    stamp = "2020-01-01T00:00:00+00:00"
+    seed = MockWorldSeed(
+        epic_states=[{"epic_number": 42, "title": "t", "last_activity": stamp}]
+    )
+    sandbox_main.materialize_epic_states(state, seed)
+    epic = state.get_epic_state(42)
+    assert epic is not None
+    assert epic.last_activity == stamp
+    assert epic.title == "t"
+
+
+def test_materialize_health_metrics_writes_loop_read_paths(tmp_path) -> None:
+    """Each artifact lands exactly where HealthMonitorLoop reads it.
+
+    ``outcomes.jsonl`` + ``item_scores.json`` are FLAT under ``memory_dir``;
+    ``harness_failures.jsonl`` is repo-scoped under ``repo_memory_dir`` —
+    a wrong root yields a silently-idle loop reading zero metrics.
+    """
+    from health_monitor_loop import compute_trend_metrics
+    from mockworld.seed import MockWorldSeed
+
+    config = _seed_config(tmp_path)
+    outcomes = [{"outcome": "failure"} for _ in range(9)] + [{"outcome": "success"}]
+    seed = MockWorldSeed(
+        health_metrics={
+            "outcomes": outcomes,
+            "item_scores": {"pattern-1": {"score": 0.8, "appearances": 3}},
+            "harness_failures": [{"category": "hitl_escalation"}],
+        }
+    )
+
+    sandbox_main.materialize_health_metrics(config, seed)
+
+    assert (config.memory_dir / "outcomes.jsonl").exists()
+    assert (config.memory_dir / "item_scores.json").exists()
+    assert (config.repo_memory_dir / "harness_failures.jsonl").exists()
+    metrics = compute_trend_metrics(
+        config.memory_dir / "outcomes.jsonl",
+        config.memory_dir / "item_scores.json",
+        config.repo_memory_dir / "harness_failures.jsonl",
+    )
+    assert metrics.total_outcomes == 10
+    assert metrics.first_pass_rate == 0.1  # < 0.2 → first_pass_rate_low fires
+    assert metrics.avg_memory_score == 0.8
+    assert metrics.hitl_escalation_rate == 1.0
+
+
+def test_materialize_health_metrics_unknown_key_fails_closed(tmp_path) -> None:
+    import pytest
+
+    from mockworld.seed import MockWorldSeed
+
+    config = _seed_config(tmp_path)
+    seed = MockWorldSeed(health_metrics={"outcoms": [{"outcome": "failure"}]})
+
+    with pytest.raises(ValueError, match="outcoms"):
+        sandbox_main.materialize_health_metrics(config, seed)
+
+
+def test_materialize_health_metrics_noops_when_empty(tmp_path) -> None:
+    from mockworld.seed import MockWorldSeed
+
+    config = _seed_config(tmp_path)
+
+    sandbox_main.materialize_health_metrics(config, MockWorldSeed())
+
+    assert not (config.memory_dir / "outcomes.jsonl").exists()
+    assert not (config.memory_dir / "item_scores.json").exists()
+    assert not (config.repo_memory_dir / "harness_failures.jsonl").exists()
+
+
+def test_materialize_worker_heartbeats_backdates_last_run(tmp_path) -> None:
+    """``age_seconds`` becomes a tz-aware back-dated ``last_run``; empty
+    seeds write nothing (#9643/#9904)."""
+    from datetime import UTC, datetime, timedelta
+
+    from mockworld.seed import MockWorldSeed
+    from state import StateTracker
+
+    config = _seed_config(tmp_path)
+    state = StateTracker(config.state_file)
+
+    sandbox_main.materialize_worker_heartbeats(state, MockWorldSeed())
+    assert state.get_worker_heartbeats() == {}
+
+    seed = MockWorldSeed(
+        worker_heartbeats={
+            "epic_monitor": {
+                "status": "running",
+                "age_seconds": 7200,
+                "details": {"stale_count": 0},
+            },
+            "runs_gc": {},  # all defaults: running, age 0, no details
+        }
+    )
+    sandbox_main.materialize_worker_heartbeats(state, seed)
+
+    beats = state.get_worker_heartbeats()
+    aged = beats["epic_monitor"]
+    assert aged["status"] == "running"
+    assert aged["details"] == {"stale_count": 0}
+    last_run = datetime.fromisoformat(aged["last_run"])
+    assert last_run.tzinfo is not None
+    assert last_run < datetime.now(UTC) - timedelta(seconds=7000)
+    fresh = datetime.fromisoformat(beats["runs_gc"]["last_run"])
+    assert fresh > datetime.now(UTC) - timedelta(seconds=60)
+
+
 def test_build_seeded_gate_detector_returns_proposals() -> None:
     import asyncio
 
