@@ -108,6 +108,52 @@ async def test_ws_handler_ignores_stray_client_frames_but_ends_on_disconnect(
     assert any('"phase_change"' in msg or "phase_change" in msg for msg in client.sent)
 
 
+async def test_watcher_is_bounded_on_garbage_receive_stub(
+    config, event_bus: EventBus, state, tmp_path
+) -> None:
+    # A stubbed socket (AsyncMock-style) resolves receive() instantly with a
+    # Mock, not a Starlette message dict. The watcher must read that as
+    # "client gone" and return after ONE call — the unguarded loop spun
+    # without ever suspending, growing mock call history until CI runners
+    # were OOM-killed (~7GB in 3 minutes locally).
+    from unittest.mock import MagicMock
+
+    endpoint = _ws_endpoint(config, event_bus, state, tmp_path)
+
+    class _GarbageSocket(_ServerPushClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.receive_calls = 0
+
+        async def receive(self) -> Any:
+            # Yield once so a regressed spin still trips wait_for instead of
+            # wedging the loop outright.
+            await asyncio.sleep(0)
+            self.receive_calls += 1
+            return MagicMock()
+
+    client = _GarbageSocket()
+    await asyncio.wait_for(endpoint(client), timeout=5)
+
+    assert client.receive_calls == 1, "watcher must stop on the FIRST garbage frame"
+    assert event_bus._subscribers == []
+
+
+async def test_watcher_treats_unknown_message_type_as_client_gone(
+    config, event_bus: EventBus, state, tmp_path
+) -> None:
+    # Dict messages with any type other than websocket.receive also end the
+    # stream (post-accept Starlette only yields receive/disconnect, so this is
+    # production-neutral and fail-closed).
+    endpoint = _ws_endpoint(config, event_bus, state, tmp_path)
+    client = _ServerPushClient()
+    client._frames.put_nowait({"type": "websocket.mystery"})
+
+    await asyncio.wait_for(asyncio.create_task(endpoint(client)), timeout=5)
+
+    assert event_bus._subscribers == []
+
+
 async def test_merged_ws_returns_on_disconnect_without_any_traffic(
     config, event_bus: EventBus, state, tmp_path
 ) -> None:

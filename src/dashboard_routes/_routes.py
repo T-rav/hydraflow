@@ -319,11 +319,22 @@ async def _client_gone(ws: WebSocket) -> None:
     treated as "client gone" (fail-closed — a live client would reconnect,
     while the alternative is a permanent leak). ``CancelledError`` is never
     swallowed here.
+
+    The loop continues ONLY for a genuine client data frame
+    (``{"type": "websocket.receive"}``); anything else — disconnect, a
+    non-dict, an unknown type — returns immediately. Post-accept, real
+    Starlette only ever yields ``websocket.receive`` / ``websocket.disconnect``
+    dicts, so production behavior is unchanged; the guard exists because a
+    stubbed socket (``AsyncMock``) resolves ``receive()`` instantly with a
+    ``Mock``, and an unguarded loop then spins without ever suspending —
+    unbounded CPU plus unbounded mock call history (OOM-killed CI runners).
     """
     with contextlib.suppress(Exception):
         while True:
             message = await ws.receive()
-            if message["type"] == "websocket.disconnect":
+            if not isinstance(message, dict):
+                return
+            if message.get("type") != "websocket.receive":
                 return
 
 
