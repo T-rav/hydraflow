@@ -26,9 +26,10 @@ The loop's external surfaces are handled as follows:
   ``generate`` callback is not invoked while the helper is mocked, so the
   scenario asserts the call kwargs (branch, labels, path_specs, callable
   generate) rather than written cassette bytes.
-* :func:`subprocess.run` (the replay gate) is monkey-patched at the
-  module level for the drift scenario so the loop's
-  ``make trust-contracts`` call does not spawn a real make.
+* :func:`subprocess_util.run_subprocess_result` (the replay gate's shared
+  bounded helper, #9554/#10028) is monkey-patched at the module level for
+  the drift scenario so the loop's ``make trust-contracts`` call does not
+  spawn a real make.
 
 The committed cassette is written under ``config.repo_root / tests /
 trust / contracts / cassettes / git`` so the real
@@ -42,7 +43,6 @@ stays inside the MockWorld's ``tmp_path`` sandbox.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -202,16 +202,25 @@ class TestContractRefreshScenario:
                 pr_url="https://github.com/hydra/hydraflow/pull/42",
             )
 
-        # Replay gate: stub ``subprocess.run`` on the loop's module
-        # so ``make trust-contracts`` does not actually spawn.
+        # Replay gate: stub the shared bounded helper
+        # (``subprocess_util.run_subprocess_result``) on the loop's module so
+        # ``make trust-contracts`` does not actually spawn. The loop's
+        # ``_run_replay_gate`` uses ``asyncio.create_subprocess_exec`` (via
+        # ``run_subprocess_result``, #9554/#10028) — the previous stub here
+        # patched ``subprocess.run``, which the loop never calls, so it was a
+        # no-op and a real ``make trust-contracts`` spawned in-scenario
+        # (#9647).
         import contract_refresh_loop as _module
+        from execution import SimpleResult
 
-        def _fake_run(argv: Any, *_a: Any, **_k: Any) -> subprocess.CompletedProcess:
-            return subprocess.CompletedProcess(
-                args=argv, returncode=0, stdout="OK\n", stderr=""
-            )
+        async def _fake_run_subprocess_result(
+            *_argv: Any, **_kwargs: Any
+        ) -> SimpleResult:
+            return SimpleResult(stdout="OK\n", stderr="", returncode=0)
 
-        monkeypatch.setattr(_module.subprocess, "run", _fake_run)
+        monkeypatch.setattr(
+            _module, "run_subprocess_result", _fake_run_subprocess_result
+        )
 
         _seed_ports(
             world,

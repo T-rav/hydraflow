@@ -319,7 +319,21 @@ def _record_close_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
         )
         return None
 
-    close = _run(["gh", "issue", "close", str(issue_number), "--repo", sandbox_repo])
+    # `--reason "not planned"` exercises the reason-threading path (#10025):
+    # PRManager.close_issue(reason=...) is how automated dedup closes record
+    # stateReason=NOT_PLANNED instead of gh's default COMPLETED.
+    close = _run(
+        [
+            "gh",
+            "issue",
+            "close",
+            str(issue_number),
+            "--repo",
+            sandbox_repo,
+            "--reason",
+            "not planned",
+        ]
+    )
     if not _require_success(close, label="gh issue close"):
         return None
     assert close is not None
@@ -329,11 +343,13 @@ def _record_close_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
         interaction="close_issue",
         fixture_repo=sandbox_repo,
         command="close_issue",
-        # STABLE logical arg — the live ``issue_number`` still drives the
-        # side-effecting ``gh issue close`` above, but ``input.args`` is
-        # compared verbatim by the drift layer, so it must equal the committed
-        # cassette's ["42"] to avoid a phantom refresh PR every tick.
-        args=[_FAKE_CLOSE_ISSUE_NUMBER],
+        # STABLE logical arg (#9535) composed with the #10025 reason flags —
+        # the live ``issue_number`` still drives the side-effecting
+        # ``gh issue close`` above, but ``input.args`` is compared verbatim by
+        # the drift layer, so it must equal the committed cassette's
+        # ["42", "--reason", "not planned"] to avoid a phantom refresh PR
+        # every tick.
+        args=[_FAKE_CLOSE_ISSUE_NUMBER, "--reason", "not planned"],
         exit_code=close.returncode,
         # Fake-shaped: FakeGitHub.close_issue returns empty stdout/stderr.
         # Real gh CLI may print a confirmation line; we discard it so the

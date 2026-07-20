@@ -1,0 +1,5 @@
+PLAN_COMPLIANCE_RESULT: RETRY
+SUMMARY: planned test file tests/test_forms.py is missing from the diff
+SCORE: 55
+FINDINGS:
+- tests/test_forms.py — listed in the plan's File Delta (Add) but absent from the diff; the validate_email test specs are uncovered

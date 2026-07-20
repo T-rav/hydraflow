@@ -555,9 +555,10 @@ def test_record_github_mutation_close_issue_writes_stable_args(tmp_path: Path) -
         record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
 
     cassette = Cassette.model_validate(_load_yaml(tmp_path / "close_issue.yaml"))
-    assert cassette.input.args == ["42"], (
-        f"close_issue args must be stable ['42'], not the live issue number: "
-        f"{cassette.input.args}"
+    assert cassette.input.args == ["42", "--reason", "not planned"], (
+        f"close_issue args must be the stable ['42', '--reason', 'not planned'] "
+        f"(stable #9535 arg composed with the #10025 reason flags), not the "
+        f"live issue number: {cassette.input.args}"
     )
 
 

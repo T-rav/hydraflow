@@ -840,6 +840,18 @@ def build_services(
     if hasattr(store, "set_crate_manager"):
         store.set_crate_manager(crate_manager)
 
+    # #9842: event-driven workstream cards. Every successful
+    # ``swap_pipeline_labels`` is applied to the in-memory pipeline
+    # immediately, so the existing coalesced PIPELINE_SNAPSHOT push moves the
+    # board within ~1s instead of at the 300s ``data_poll_interval`` label
+    # re-read (which stays as the reconciling backstop). hasattr-gated like
+    # ``set_crate_manager``: sandbox fakes (FakeGitHub / FakeIssueStore) read
+    # labels live and need no bridge.
+    if hasattr(prs, "set_pipeline_label_listener") and hasattr(
+        store, "apply_label_transition"
+    ):
+        prs.set_pipeline_label_listener(store.apply_label_transition)
+
     # Local JSONL issue cache (append-only mirror; see src/issue_cache.py and #6422)
     issue_cache = IssueCache(
         config.data_path("cache"),

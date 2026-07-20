@@ -3,12 +3,11 @@
 Two invariants that a future change to ``IssueStore._take_from_queue`` could
 silently break:
 
-1. **``fifo`` is a behaviour pin.** The whole safety story of #10037 is that the
-   new default (``fifo``, the migration default) reproduces the pre-#10037
-   oldest-first ordering *exactly*, so shipping the feature changes nothing
-   until an operator flips the knob. If ``fifo`` ever stops being a faithful
-   arrival-order pass-through, the "no behaviour change on merge" guarantee is
-   gone.
+1. **``fifo`` is a behaviour pin.** ``fifo`` is the escape hatch back to the
+   pre-#10037 oldest-first ordering (the default is now ``weighted_mix``). Its
+   whole value is being a *faithful* arrival-order pass-through: an operator
+   setting ``fifo`` must get exactly the pre-#10037 behaviour with no
+   reordering. If that ever drifts, the escape hatch silently stops being one.
 
 2. **The crate (milestone) gate was absorbed, not retired, and unmilestoned
    repos keep flowing.** #10037 folded the dormant crate scope-filter

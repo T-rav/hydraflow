@@ -250,6 +250,38 @@ async def test_reconcile_closed_escalations_clears_dedup(loop_env, monkeypatch) 
     state.clear_rc_budget_attempts.assert_called_once_with("median")
 
 
+async def test_fetch_recent_runs_nonzero_returns_empty(
+    loop_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """gh run list exit!=0 (never raised by the shared helper) → []."""
+    from execution import SimpleResult
+
+    loop = _loop(loop_env)
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(stdout="", stderr="boom", returncode=1)
+
+    monkeypatch.setattr("rc_budget_loop.run_subprocess_result", fake_result)
+
+    assert await loop._fetch_recent_runs() == []
+
+
+async def test_fetch_recent_runs_timeout_returns_empty(
+    loop_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A gh timeout (SubprocessTimeoutError) is caught locally as []."""
+    from subprocess_util import SubprocessTimeoutError
+
+    loop = _loop(loop_env)
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> object:
+        raise SubprocessTimeoutError("timed out")
+
+    monkeypatch.setattr("rc_budget_loop.run_subprocess_result", fake_result)
+
+    assert await loop._fetch_recent_runs() == []
+
+
 async def test_fetch_job_breakdown_sorts_and_caps_slowest_jobs(
     loop_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -263,17 +295,13 @@ async def test_fetch_job_breakdown_sorts_and_caps_slowest_jobs(
         for idx in range(1, 13)
     ]
 
-    class _Proc:
-        returncode = 0
+    from execution import SimpleResult
 
-        async def communicate(self):
-            return (json.dumps({"jobs": jobs}).encode(), b"")
+    async def fake_result(*cmd: str, **_kwargs: object) -> SimpleResult:
+        assert cmd[:4] == ("gh", "run", "view", "123")
+        return SimpleResult(stdout=json.dumps({"jobs": jobs}), stderr="", returncode=0)
 
-    async def fake_subproc(*args, **kwargs):
-        assert args[:4] == ("gh", "run", "view", "123")
-        return _Proc()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    monkeypatch.setattr("rc_budget_loop.run_subprocess_result", fake_result)
 
     result = await loop._fetch_job_breakdown({"databaseId": 123})
 
@@ -287,24 +315,20 @@ async def test_fetch_junit_tests_parses_and_caps_slowest_tests(
 ) -> None:
     loop = _loop(loop_env)
 
-    class _Proc:
-        returncode = 0
+    from execution import SimpleResult
 
-        async def communicate(self):
-            return (b"", b"")
-
-    async def fake_subproc(*args, **kwargs):
-        assert args[:4] == ("gh", "run", "download", "123")
-        out_dir = Path(args[args.index("--dir") + 1])
+    async def fake_result(*cmd: str, **_kwargs: object) -> SimpleResult:
+        assert cmd[:4] == ("gh", "run", "download", "123")
+        out_dir = Path(cmd[cmd.index("--dir") + 1])
         out_dir.mkdir(parents=True, exist_ok=True)
         cases = "\n".join(
             f'<testcase classname="pkg.TestSuite" name="test_{idx}" time="{idx / 10}" />'
             for idx in range(1, 13)
         )
         (out_dir / "junit.xml").write_text(f"<testsuite>{cases}</testsuite>")
-        return _Proc()
+        return SimpleResult(stdout="", stderr="", returncode=0)
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    monkeypatch.setattr("rc_budget_loop.run_subprocess_result", fake_result)
 
     result = await loop._fetch_junit_tests({"databaseId": 123})
 

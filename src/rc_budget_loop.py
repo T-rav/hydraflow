@@ -21,8 +21,6 @@ Kill-switch: ``LoopDeps.enabled_cb("rc_budget")`` — **no
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
 import logging
 import re
@@ -37,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
 from escalation_reconcile import EscalationReconciler
 from models import WorkCycleResult  # noqa: TCH001
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -73,28 +72,10 @@ def _escalation_subject(title: str) -> str | None:
 
 # Hard cap on each ``gh`` read/download. A wedged child must not hang the loop
 # cycle forever and freeze its heartbeat — the #9410 silent-stall failure
-# class (#9454 / #9508).
+# class (#9454 / #9508). Bounded (and, via ``run_subprocess_result``,
+# circuit-breaker/rate-limit/process-group hardened — #9554/#10028) rather
+# than a raw ``create_subprocess_exec``.
 _GH_TIMEOUT_SECONDS = 120
-
-
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process,
-) -> tuple[bytes, bytes]:
-    """``proc.communicate()`` bounded by ``_GH_TIMEOUT_SECONDS``.
-
-    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
-    the caller can treat it as a failed read (rather than hanging the loop
-    cycle indefinitely).
-    """
-    try:
-        return await asyncio.wait_for(proc.communicate(), timeout=_GH_TIMEOUT_SECONDS)
-    except TimeoutError:
-        # proc.kill() itself raises ProcessLookupError when the child already
-        # exited — suppress it too so the TimeoutError propagates. (#9794/#9814)
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
-            await proc.wait()
-        raise
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -228,28 +209,23 @@ class RCBudgetLoop(BaseBackgroundLoop):
             "--json",
             "databaseId,url,conclusion,createdAt,updatedAt,startedAt",
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            stdout, stderr = await _communicate_bounded(proc)
-        except TimeoutError:
+            result = await run_subprocess_result(*cmd, timeout=_GH_TIMEOUT_SECONDS)
+        except SubprocessTimeoutError:
             logger.warning(
                 "gh run list timed out after %ss; returning empty",
                 _GH_TIMEOUT_SECONDS,
             )
             return []
-        if proc.returncode != 0:
+        if result.returncode != 0:
             logger.warning(
                 "gh run list exit=%d: %s",
-                proc.returncode,
-                stderr.decode(errors="replace")[:400],
+                result.returncode,
+                result.stderr[:400],
             )
             return []
         try:
-            raw = json.loads(stdout.decode() or "[]")
+            raw = json.loads(result.stdout or "[]")
         except json.JSONDecodeError:
             return []
         cutoff = datetime.now(UTC) - timedelta(days=_WINDOW_DAYS)
@@ -315,19 +291,14 @@ class RCBudgetLoop(BaseBackgroundLoop):
             "--json",
             "jobs",
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            stdout, _ = await _communicate_bounded(proc)
-        except TimeoutError:
+            result = await run_subprocess_result(*cmd, timeout=_GH_TIMEOUT_SECONDS)
+        except SubprocessTimeoutError:
             return []
-        if proc.returncode != 0:
+        if result.returncode != 0:
             return []
         try:
-            payload = json.loads(stdout.decode() or "{}")
+            payload = json.loads(result.stdout or "{}")
         except json.JSONDecodeError:
             return []
         out: list[dict[str, Any]] = []
@@ -363,16 +334,11 @@ class RCBudgetLoop(BaseBackgroundLoop):
                 "--dir",
                 td,
             ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
             try:
-                await _communicate_bounded(proc)
-            except TimeoutError:
+                result = await run_subprocess_result(*cmd, timeout=_GH_TIMEOUT_SECONDS)
+            except SubprocessTimeoutError:
                 return []
-            if proc.returncode != 0:
+            if result.returncode != 0:
                 return []
             results: list[tuple[str, float]] = []
             for xml_path in Path(td).rglob("*.xml"):

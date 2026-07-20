@@ -53,14 +53,22 @@ _REPO = Path(__file__).resolve().parent.parent.parent
 # ``gh`` reconcile read moved behind the PRPort (shared EscalationReconciler),
 # so the module no longer spawns subprocesses at all — same shape as the
 # ``wiki_rot_detector_loop.py`` exclusion above.
+#
+# ``memory_backlog_loop.py``/``adr_touchpoint_auditor_loop.py``/
+# ``rc_budget_loop.py``/``skill_prompt_eval_loop.py``/
+# ``principles_audit_loop.py``/``fake_coverage_auditor_loop.py``/
+# ``flake_tracker_loop.py`` left the list with #9554/#10028: every raw
+# ``asyncio.create_subprocess_exec`` + ``proc.communicate()`` site in these
+# modules migrated onto the shared bounded helper
+# (``subprocess_util.run_subprocess``/``run_subprocess_result``, which owns
+# its own internal, already-hardened ``communicate()`` inside
+# ``execution.HostRunner.run_simple``) — same false-positive shape as the
+# two exclusions above: no direct ``proc.communicate()`` remains to flag.
+# ``staging_bisect_loop.py`` stays: ``_run_git`` (cooperative kill-switch
+# cancellation) is deliberately excluded from that migration and still calls
+# ``proc.communicate()`` directly (bounded via the ``create_task`` +
+# deadline-loop form below).
 _UNHARDENED_COMMUNICATE_MODULES = [
-    "src/memory_backlog_loop.py",
-    "src/adr_touchpoint_auditor_loop.py",
-    "src/rc_budget_loop.py",
-    "src/skill_prompt_eval_loop.py",
-    "src/principles_audit_loop.py",
-    "src/fake_coverage_auditor_loop.py",
-    "src/flake_tracker_loop.py",
     "src/staging_bisect_loop.py",
 ]
 
