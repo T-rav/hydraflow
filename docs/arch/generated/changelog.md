@@ -6,11 +6,13 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `45ef36f` — fix(wiki): worktree-isolate runtime wiki writes — boot store read-only + queue-routed ingest (#9836) (#10033) (#10033) *(2026-07-20)*
 - `67cc3ce` — fix(file-util): bounded file_lock with FIFO gate + FileLockTimeout (#9661) (#10032) (#10032) *(2026-07-20)*
 - `ccebee6` — feat(refinement): IssueRefinementLoop — tiered backlog dedup, priority scoring, operator digest (#9957) (#10024) (#10024) *(2026-07-20)*
 
 ## 2026-W29
 
+- `ccf627f` — Merge remote-tracking branch 'origin/staging' into fix/issue-9597-orphaned-red *(2026-07-19)*
 - `18b4976` — Merge remote-tracking branch 'origin/staging' into fix/issue-9597-orphaned-red *(2026-07-19)*
 - `a168c9e` — fix(stale-issue): detect regression-test rot — false-close + orphaned-RED (#9597) (#9597) *(2026-07-19)*
 - `33f8b6f` — feat(refine): prompt self-refinement — honeypot-gated auto-merge prompt-fix PRs + telemetry consumption (#9724) (#10006) (#10006) *(2026-07-19)*
