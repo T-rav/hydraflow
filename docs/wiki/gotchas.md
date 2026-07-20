@@ -831,3 +831,18 @@ git rebase --continue
 ```json:entry
 {"id":"STACKED-PR-REBASE-001","title":"Stacked PRs: rebase onto base branch after parent merges","topic":"git","source_type":"compiled","source_issue":41,"source_repo":null,"created_at":"2026-05-31T00:00:00+00:00","updated_at":"2026-05-31T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":3}
 ```
+
+
+## `asyncio.to_thread` work must be self-bounding
+
+`asyncio.wait_for()` / `asyncio.timeout()` only cancel the *awaiting coroutine* — they cannot cancel a running worker thread. A function dispatched via `asyncio.to_thread()` that blocks on an unbounded syscall (a blocking `fcntl.flock(LOCK_EX)`, a network-FS `open()`, an unbounded synchronous read) can pin a `ThreadPoolExecutor` worker forever even if the caller wraps the `await` in a timeout. Enough pinned workers eventually exhaust the default pool and hang every later `to_thread` call process-wide — a silent, whole-process stall with no traceback.
+
+**Rule:** any function dispatched via `asyncio.to_thread()` must bound *itself* — it cannot rely on the caller's timeout to free the worker. For advisory file locks, use `file_util.file_lock()`, which polls a non-blocking `fcntl.flock(LOCK_EX | LOCK_NB)` against a monotonic deadline and raises `FileLockTimeout` (a `TimeoutError` / `OSError`) instead of blocking indefinitely. For subprocesses, see the equivalent `communicate()`-bounding convention documented against issue #9508.
+
+**Why not `signal.alarm`:** `signal.alarm` only delivers to the main thread; `to_thread` work runs on worker threads, so signal-based timeouts silently never fire there.
+
+Example: `#9600` — a wedged `fcntl.flock(LOCK_EX)` inside `EventLog._append_sync` (itself run via `asyncio.to_thread`) pinned worker after worker until the shared default `ThreadPoolExecutor` was exhausted, hanging every subsequent `to_thread` call across the whole process.
+
+```json:entry
+{"id":"TO-THREAD-SELF-BOUNDING-001","source_type":"manual","topic":"async_control","tags":["asyncio","to_thread","thread-pool-exhaustion","file_lock","ADR-0001"],"rule":"Functions dispatched via asyncio.to_thread() must bound themselves (e.g. LOCK_NB poll-loop + deadline) — asyncio.wait_for/timeout cannot cancel a running worker thread.","anti_pattern":"fcntl.flock(fd, fcntl.LOCK_EX) inside a to_thread-dispatched function, relying on the caller's asyncio.wait_for to bound it","code_refs":["src/file_util.py:file_lock"],"fixed_in_pr":"#9661","added":"2026-07-19"}
+```
