@@ -1996,6 +1996,22 @@ class ConvergenceLedger(BaseModel):
         self.policy_log.append(event)
 
 
+class AutoAgentRedriveState(BaseModel):
+    """Escalation TTL re-drive marker for one issue (#9719).
+
+    ``exhausted_at`` is the ISO-8601 UTC timestamp of the exhaustion
+    transition that armed the marker; ``None`` means disarmed. Arming is
+    idempotent — re-running the exhaustion branch on a re-confirmation tick
+    must never refresh the timestamp (the #9716 restart-once marker lesson),
+    or the marker never ages and re-drive never fires. ``redrive_count``
+    persists across disarm/re-arm so ``auto_agent_redrive_max_attempts``
+    bounds total re-drives per issue.
+    """
+
+    exhausted_at: str | None = None
+    redrive_count: int = 0
+
+
 class StateData(BaseModel):
     """Typed schema for the JSON-backed crash-recovery state."""
 
@@ -2108,6 +2124,10 @@ class StateData(BaseModel):
     # Auto-Agent — AutoAgentPreflightLoop (spec §3.6)
     # NOTE: auto_agent_attempts migrated to convergence_ledgers["N"].stage_state["auto_agent"].attempts
     auto_agent_daily_spend: dict[str, float] = Field(default_factory=dict)
+    # Escalation TTL re-drive markers (#9719): str(issue) → marker. Armed at
+    # the auto-agent exhaustion transition; cleared on issue close (reconcile)
+    # or when the issue drops out of the human-required set.
+    auto_agent_redrive: dict[str, AutoAgentRedriveState] = Field(default_factory=dict)
     # Trust fleet — TrustFleetSanityLoop (spec §12.1)
     trust_fleet_sanity_attempts: dict[str, int] = Field(default_factory=dict)
     trust_fleet_sanity_last_run: str | None = None
