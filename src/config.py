@@ -852,16 +852,19 @@ class HydraFlowConfig(BaseModel):
 
     # Work-queue discipline (#10037) — how IssueStore orders each stage queue.
     # ``IssueRefinementLoop`` (#9957) produces the P0/P1/P2 labels these read.
-    # Default is 'fifo' — the pre-#10037 ordering — so shipping this PR changes
-    # no behaviour on its own; flipping to 'weighted_mix' is the operator's
-    # System-tab action, keeping the discipline change reviewable in isolation.
+    # Default is 'weighted_mix': priority-driven selection is the intended
+    # out-of-the-box behaviour, so a fresh instance picks by priority rather
+    # than oldest-first. #10045 shipped 'fifo' to make the merge behaviour-
+    # neutral; this makes the deliberate cutover. 'fifo' remains the escape
+    # hatch — a live System-tab dial away, no restart (issue_store re-reads it
+    # on every dequeue) — restoring the pre-#10037 ordering without a deploy.
     queue_strategy: QueueStrategy = Field(
-        default=QueueStrategy.FIFO,
+        default=QueueStrategy.WEIGHTED_MIX,
         description=(
-            "Stage-queue ordering: 'fifo' (oldest first, pre-#10037 behaviour "
-            "and the migration default), 'priority' (strict P0>P1>P2, starves "
-            "lower bands), or 'weighted_mix' (P0 preempts, then a weighted ratio "
-            "draw with an age-based starvation guard)"
+            "Stage-queue ordering: 'weighted_mix' (default — P0 preempts, then "
+            "a weighted ratio draw with an age-based starvation guard), "
+            "'priority' (strict P0>P1>P2, starves lower bands), or 'fifo' "
+            "(oldest first, the pre-#10037 behaviour and escape hatch)"
         ),
     )
     # Weights are the relative share each band draws under 'weighted_mix'.
