@@ -377,19 +377,64 @@ class TestWorktreeGCOrphanedBranches:
 
 class TestWorktreeGCSubprocessArgs:
     @pytest.mark.asyncio
-    async def test_get_issue_state_args(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("port_state", "expected"),
+        [
+            ("COMPLETED", "closed"),
+            ("NOT_PLANNED", "closed"),
+            ("OPEN", "open"),
+            ("UNKNOWN", "unknown"),
+            ("", "unknown"),
+        ],
+    )
+    async def test_get_issue_state_maps_port_vocabulary(
+        self, tmp_path: Path, port_state: str, expected: str
+    ) -> None:
+        """#9543: issue state reads route via PRPort, not raw gh.
+
+        The port speaks GraphQL-style (COMPLETED/NOT_PLANNED/OPEN/UNKNOWN);
+        the mapping preserves the REST-style strings _is_safe_to_gc compares
+        against, and anything unrecognized fails closed to "unknown".
+        """
         loop, _s, _e = _make_loop(tmp_path)
+        loop._prs.get_issue_state = AsyncMock(return_value=port_state)
         with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            m.return_value = "closed\n"
             result = await loop._get_issue_state(42)
-        assert result == "closed"
-        args = m.call_args[0]
-        assert args[0] == "gh"
-        assert args[1] == "api"
-        assert "issues/42" in args[2]
-        assert "--jq" in args
-        assert ".state" in args
-        assert m.call_args[1]["cwd"] == loop._config.repo_root
+        m.assert_not_called()  # no raw subprocess
+        assert result == expected
+        loop._prs.get_issue_state.assert_awaited_once_with(42)
+
+    @pytest.mark.asyncio
+    async def test_gc_collects_closed_issue_via_fake_github(
+        self, tmp_path: Path
+    ) -> None:
+        """#9543 e2e slice: a FakeGitHub-closed issue's worktree is collected.
+
+        Exercises the real _get_issue_state → PRPort.get_issue_state chain
+        against FakeGitHub (the adapter the air-gapped sandbox serves), not a
+        mocked _get_issue_state — proving the seeded-closed-issue collect path
+        the s59 sandbox scenario asserts.
+        """
+        loop, state, _e = _make_loop(tmp_path, active_workspaces={7301: "/p/7301"})
+        gh = FakeGitHub()
+        gh.add_issue(7301, "done", "body", state="closed")
+        loop._prs = gh
+        result = await loop._do_work()
+        assert result is not None
+        assert result["collected"] == 1
+        assert 7301 not in state.get_active_workspaces()
+        loop._workspaces.destroy.assert_awaited_once_with(7301)
+
+    @pytest.mark.asyncio
+    async def test_gc_skips_issue_unknown_to_fake_github(self, tmp_path: Path) -> None:
+        """An issue FakeGitHub never saw reports UNKNOWN → fail-closed skip."""
+        loop, state, _e = _make_loop(tmp_path, active_workspaces={7301: "/p/7301"})
+        loop._prs = FakeGitHub()  # issue 7301 not seeded → UNKNOWN
+        result = await loop._do_work()
+        assert result is not None
+        assert result["collected"] == 0
+        assert result["skipped"] == 1
+        assert 7301 in state.get_active_workspaces()
 
     @pytest.mark.asyncio
     async def test_has_open_pr_queries_port_for_branch(self, tmp_path: Path) -> None:
