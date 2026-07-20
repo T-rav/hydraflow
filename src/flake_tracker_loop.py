@@ -15,7 +15,6 @@ auto-close via the shared `EscalationReconciler` (#9618 class).
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import tempfile
@@ -32,6 +31,7 @@ from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 if TYPE_CHECKING:
     from config import HydraFlowConfig
     from dedup_store import DedupStore
+    from github_cache_loop import GitHubDataCache
     from pr_manager import PRManager
     from state import StateTracker
 
@@ -95,6 +95,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         pr_manager: PRManager,
         dedup: DedupStore,
         deps: LoopDeps,
+        github_cache: GitHubDataCache,
     ) -> None:
         super().__init__(
             worker_name="flake_tracker",
@@ -105,6 +106,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         self._state = state
         self._pr = pr_manager
         self._dedup = dedup
+        self._github_cache = github_cache
         self._escalations = EscalationReconciler(
             prs=pr_manager,
             dedup=dedup,
@@ -118,40 +120,25 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         return self._config.flake_tracker_interval
 
     async def _fetch_recent_runs(self) -> list[dict[str, Any]]:
-        """Return metadata for the last 20 RC promotion workflow runs."""
-        cmd = [
-            "gh",
-            "run",
-            "list",
-            "--repo",
-            self._config.repo,
-            "--workflow",
-            "rc-promotion-scenario.yml",
-            "--limit",
-            str(_RUN_WINDOW),
-            "--json",
-            "databaseId,url,conclusion,createdAt",
+        """Return metadata for the last 20 RC promotion workflow runs.
+
+        Served from the shared ``GitHubDataCache`` snapshot (#9814)
+        instead of a per-tick raw ``gh run list`` subprocess, so N loops
+        cost one gh call per freshness window and a gh outage degrades to
+        the stale-snapshot path inside the cache (never a loop crash).
+        Rows keep the legacy gh-CLI key shape the downstream helpers and
+        issue bodies were built on.
+        """
+        rows = await self._github_cache.get_rc_workflow_runs()
+        return [
+            {
+                "databaseId": row.get("id"),
+                "url": row.get("url", ""),
+                "conclusion": row.get("conclusion", ""),
+                "createdAt": row.get("created_at", ""),
+            }
+            for row in rows[:_RUN_WINDOW]
         ]
-        try:
-            result = await run_subprocess_result(*cmd, timeout=_GH_TIMEOUT_SECONDS)
-        except SubprocessTimeoutError:
-            logger.warning(
-                "gh run list timed out after %ss; returning empty",
-                _GH_TIMEOUT_SECONDS,
-            )
-            return []
-        if result.returncode != 0:
-            logger.warning(
-                "gh run list exit=%d: %s",
-                result.returncode,
-                result.stderr[:400],
-            )
-            return []
-        try:
-            return json.loads(result.stdout or "[]")
-        except json.JSONDecodeError:
-            logger.warning("gh run list non-JSON response; returning empty")
-            return []
 
     async def _download_junit(self, run: dict[str, Any]) -> dict[str, str]:
         """Download the ``junit-scenario`` artifact for a run; return per-test results."""
@@ -393,7 +380,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         duration_ms = int((time.perf_counter() - t0) * 1000)
         emit_loop_subprocess_trace(
             loop=self._worker_name,
-            command=["gh", "run", "list", "rc-promotion-scenario.yml"],
+            command=["github_cache", "rc_workflow_runs"],
             exit_code=0,
             duration_ms=duration_ms,
             stderr_excerpt=f"runs_seen={runs_seen}",

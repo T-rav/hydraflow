@@ -54,14 +54,11 @@ GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
     "src/fake_coverage_auditor_loop.py::FakeCoverageAuditorLoop._grep_scenario_for_helper::run_subprocess_result": 1,
     "src/fake_coverage_auditor_loop.py::FakeCoverageAuditorLoop._list_open_rollup_titles::run_subprocess_result": 1,
     "src/flake_tracker_loop.py::FlakeTrackerLoop._download_junit::run_subprocess_result": 1,
-    "src/flake_tracker_loop.py::FlakeTrackerLoop._fetch_recent_runs::run_subprocess_result": 1,
     "src/health_monitor_loop.py::HealthMonitorLoop._check_stale_code::run_subprocess": 1,
     "src/memory_backlog_loop.py::MemoryBacklogLoop._commit_mirror_updates::run_subprocess_result": 2,
     "src/principles_audit_loop.py::PrinciplesAuditLoop._run_audit::run_subprocess_result": 1,
     "src/principles_audit_loop.py::PrinciplesAuditLoop._run_git::run_subprocess_result": 1,
-    "src/rc_budget_loop.py::RCBudgetLoop._fetch_job_breakdown::run_subprocess_result": 1,
     "src/rc_budget_loop.py::RCBudgetLoop._fetch_junit_tests::run_subprocess_result": 1,
-    "src/rc_budget_loop.py::RCBudgetLoop._fetch_recent_runs::run_subprocess_result": 1,
     "src/repo_wiki_loop.py::RepoWikiLoop._adopt_open_maintenance_pr::run_subprocess": 1,
     "src/repo_wiki_loop.py::RepoWikiLoop._maintenance_batch_forced_by_age::run_subprocess": 1,
     "src/repo_wiki_loop.py::RepoWikiLoop._poll_and_merge_open_pr::run_subprocess": 3,
@@ -78,7 +75,8 @@ GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
     "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._find_open_escalation::run_subprocess_result": 1,
     "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._reconcile_closed_escalations::run_subprocess_result": 1,
     "src/workspace_gc_loop.py::WorkspaceGCLoop._collect_orphaned_branches::run_subprocess": 2,
-    "src/workspace_gc_loop.py::WorkspaceGCLoop._get_issue_state::run_subprocess": 1,
+    # _get_issue_state's raw ``gh api`` spawn was routed through
+    # PRPort.get_issue_state in #9543 — entry pruned per the shrink-only rule.
 }
 
 

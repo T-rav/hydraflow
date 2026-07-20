@@ -643,3 +643,29 @@ describe('StreamCard repo badge', () => {
     expect(screen.queryByTestId('repo-badge-42')).toBeNull()
   })
 })
+
+describe('priority band chip (#10067)', () => {
+  it('renders the P0 chip for a P0 issue', () => {
+    render(<StreamCard issue={makeIssue({ issueNumber: 7, priority: 'P0' })} />)
+    const chip = screen.getByTestId('priority-badge-7')
+    expect(chip.textContent).toBe('P0')
+    expect(chip.style.color).toBe(theme.red)
+  })
+
+  it('renders the P1 chip in the accent color', () => {
+    render(<StreamCard issue={makeIssue({ issueNumber: 8, priority: 'P1' })} />)
+    expect(screen.getByTestId('priority-badge-8').style.color).toBe(theme.accent)
+  })
+
+  it('renders no chip for an unprioritised issue', () => {
+    render(<StreamCard issue={makeIssue({ issueNumber: 9, priority: 'none' })} />)
+    expect(screen.queryByTestId('priority-badge-9')).toBeNull()
+  })
+
+  it('renders no chip when priority is absent (old payloads)', () => {
+    const issue = makeIssue({ issueNumber: 10 })
+    delete issue.priority
+    render(<StreamCard issue={issue} />)
+    expect(screen.queryByTestId('priority-badge-10')).toBeNull()
+  })
+})

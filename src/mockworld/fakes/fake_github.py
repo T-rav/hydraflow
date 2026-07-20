@@ -177,6 +177,7 @@ class FakeGitHub:
                 title=issue_dict["title"],
                 body=issue_dict["body"],
                 labels=list(issue_dict.get("labels", [])),
+                state=issue_dict.get("state", "open"),
             )
         for issue_number, comment_dicts in seed.comments.items():
             for comment_dict in comment_dicts:
@@ -195,6 +196,7 @@ class FakeGitHub:
                 merged=pr_dict.get("merged", False),
                 author=pr_dict.get("author", "fake-author"),
                 is_bot=pr_dict.get("is_bot", False),
+                mergeable=pr_dict.get("mergeable", True),
             )
             for label in pr_dict.get("labels", []):
                 gh.add_pr_label(pr_dict["number"], label)
@@ -214,12 +216,20 @@ class FakeGitHub:
         title: str,
         body: str,
         labels: list[str] | None = None,
+        state: str = "open",
     ) -> None:
+        """Seed an issue. ``state`` accepts ``"open"`` (default) or ``"closed"``.
+
+        A closed seed issue reports ``COMPLETED`` from ``get_issue_state``
+        (close-reason defaulting mirrors gh, #10025) — the surface loops like
+        workspace_gc/epic_sweeper consult before acting (#9543).
+        """
         self._issues[number] = FakeIssue(
             number=number,
             title=title,
             body=body,
             labels=labels or [],
+            state=state,
         )
 
     def add_seeded_comment(
@@ -253,12 +263,14 @@ class FakeGitHub:
         merged: bool = False,
         author: str = "fake-author",
         is_bot: bool = False,
+        mergeable: bool = True,
     ) -> None:
         """Directly insert a PR record (sync helper for test seeding).
 
         The async ``create_pr`` handles the production path; this helper
         exists so scenario seeds can set up a fully-populated world
-        synchronously.
+        synchronously. ``mergeable=False`` seeds a CONFLICTING PR that
+        ``list_conflicting_prs`` surfaces to merge_state_watcher (#9543).
         """
         self._prs[number] = FakePR(
             number=number,
@@ -268,6 +280,7 @@ class FakeGitHub:
             ci_status=ci_status,
             author=author,
             is_bot=is_bot,
+            mergeable=mergeable,
         )
 
     def add_pr_label(self, pr_number: int, label: str) -> None:
@@ -756,8 +769,18 @@ class FakeGitHub:
         pr_number: int = 0,
         jobs: list[dict[str, Any]] | None = None,
         artifact_count: int = 0,
+        url: str = "",
+        status: str = "completed",
+        run_started_at: str = "",
+        updated_at: str = "",
     ) -> None:
-        """Seed one workflow run (+jobs/artifacts) for gate-health scenarios."""
+        """Seed one workflow run (+jobs/artifacts) for gate-health scenarios.
+
+        ``url``/``status``/``run_started_at``/``updated_at`` (#9814) feed
+        :meth:`list_runs_for_workflow`; the timestamps default to
+        ``created_at`` — mirroring the adapter's ``run_started_at``
+        fallback — so duration-math consumers see 0s, never a crash.
+        """
         self._workflow_runs.append(
             {
                 "id": run_id,
@@ -765,18 +788,59 @@ class FakeGitHub:
                 "conclusion": conclusion,
                 "created_at": created_at,
                 "pr_number": pr_number,
+                "url": url,
+                "status": status,
+                "run_started_at": run_started_at or created_at,
+                "updated_at": updated_at or created_at,
             }
         )
         self._workflow_jobs[run_id] = jobs or []
         self._workflow_artifacts[run_id] = artifact_count
 
     async def list_workflow_runs(self, limit: int = 50) -> list[dict[str, Any]]:
-        """Newest-first slice of the seeded run history (#9974)."""
+        """Newest-first slice of the seeded run history (#9974).
+
+        Projects exactly the repo-wide blame-correlation shape — the
+        #9814 seed extras stay out so pre-existing consumers see the
+        same rows as before.
+        """
         self._maybe_rate_limit()
         newest_first = sorted(
             self._workflow_runs, key=lambda r: str(r["created_at"]), reverse=True
         )
-        return [dict(r) for r in newest_first[:limit]]
+        return [
+            {
+                "id": r["id"],
+                "workflow": r["workflow"],
+                "conclusion": r["conclusion"],
+                "created_at": r["created_at"],
+                "pr_number": r["pr_number"],
+            }
+            for r in newest_first[:limit]
+        ]
+
+    async def list_runs_for_workflow(
+        self, workflow: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Newest-first runs of ONE workflow file in the port shape (#9814)."""
+        self._maybe_rate_limit()
+        matching = sorted(
+            (r for r in self._workflow_runs if r["workflow"] == workflow),
+            key=lambda r: str(r["created_at"]),
+            reverse=True,
+        )
+        return [
+            {
+                "id": r["id"],
+                "url": r["url"],
+                "status": r["status"],
+                "conclusion": r["conclusion"],
+                "created_at": r["created_at"],
+                "run_started_at": r["run_started_at"],
+                "updated_at": r["updated_at"],
+            }
+            for r in matching[:limit]
+        ]
 
     async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
         self._maybe_rate_limit()

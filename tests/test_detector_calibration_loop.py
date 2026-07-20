@@ -49,14 +49,24 @@ def _closed(number: int, title: str, age_days: int = 1) -> dict:
 
 @pytest.fixture
 def loop_env(tmp_path: Path):
-    cfg = HydraFlowConfig(data_root=tmp_path, repo="hydra/hydraflow")
+    from github_cache_loop import GitHubDataCache
+
+    # TTL 0 (#9814): every cached read refreshes through the pr mock so
+    # per-test return_value mutations stay visible tick-to-tick.
+    cfg = HydraFlowConfig(
+        data_root=tmp_path, repo="hydra/hydraflow", github_cache_issue_list_ttl_s=0
+    )
     state = MagicMock()
     pr = AsyncMock()
     pr.create_issue = AsyncMock(return_value=42)
     pr.list_closed_issues_by_label = AsyncMock(return_value=[])
     pr.list_issues_by_label = AsyncMock(return_value=[])
     loop = DetectorCalibrationLoop(
-        config=cfg, state=state, pr_manager=pr, deps=_deps(asyncio.Event())
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        deps=_deps(asyncio.Event()),
+        github_cache=GitHubDataCache(cfg, pr, MagicMock()),
     )
     return loop, pr
 
@@ -147,8 +157,14 @@ async def test_recovery_autocloses_when_churn_stops(loop_env) -> None:
     ]
     await loop._do_work()
     filed_body = pr.create_issue.await_args.args[1]
-    # Churn stops: the window rolls past the pair.
-    pr.list_closed_issues_by_label.return_value = []
+    # Churn stops: the window rolls past the pair. The rows STAY in the
+    # scan (the 500-row closed scan is not date-filtered — only the in-loop
+    # cutoff excludes them); an empty scan now means "gh degraded" and
+    # skips auto-close entirely (#9814).
+    pr.list_closed_issues_by_label.return_value = [
+        _closed(101, "HITL: fake coverage gap X unresolved after 3", age_days=45),
+        _closed(102, "HITL: fake coverage gap X unresolved after 6", age_days=45),
+    ]
     pr.list_issues_by_label.return_value = [
         {"number": 77, "title": "whatever", "body": filed_body, "updated_at": ""}
     ]
@@ -166,12 +182,18 @@ async def test_recovery_autocloses_when_churn_stops(loop_env) -> None:
 
 
 async def test_kill_switch_short_circuits(tmp_path: Path) -> None:
-    cfg = HydraFlowConfig(data_root=tmp_path, repo="hydra/hydraflow")
+    from github_cache_loop import GitHubDataCache
+
+    cfg = HydraFlowConfig(
+        data_root=tmp_path, repo="hydra/hydraflow", github_cache_issue_list_ttl_s=0
+    )
+    pr = AsyncMock()
     loop = DetectorCalibrationLoop(
         config=cfg,
         state=MagicMock(),
-        pr_manager=AsyncMock(),
+        pr_manager=pr,
         deps=_deps(asyncio.Event(), enabled=False),
+        github_cache=GitHubDataCache(cfg, pr, MagicMock()),
     )
     stats = await loop._do_work()
     assert stats == {"status": "disabled"}

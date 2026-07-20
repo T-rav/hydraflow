@@ -1071,3 +1071,67 @@ describe('PipelineFlow dot cap (#9863)', () => {
     expect(screen.getByTestId('flow-dot-2009')).toBeTruthy()
   })
 })
+
+describe('work-queue strategy visualisation (#10067)', () => {
+  it('shows the active strategy badge from config', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      config: { queue_strategy: 'weighted_mix' },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    const badge = screen.getByTestId('queue-strategy-badge')
+    expect(badge.textContent).toContain('weighted')
+  })
+
+  it('shows fifo when the escape hatch is active', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      config: { queue_strategy: 'fifo' },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.getByTestId('queue-strategy-badge').textContent).toContain('fifo')
+  })
+
+  it('renders no strategy badge when config lacks the field (old backend)', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({ config: {} }))
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.queryByTestId('queue-strategy-badge')).toBeNull()
+  })
+
+  it('orders queued cards by dispatch_rank, not arrival order', () => {
+    // Arrival order is 91, 92, 93; the backend says dispatch order is 93, 91, 92
+    // (e.g. a P0 that arrived last). The board must reflect dispatch order so the
+    // top card is what the factory works next.
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        implement: [
+          { issue_number: 91, title: 'first in', status: 'queued', priority: 'P2', dispatch_rank: 1 },
+          { issue_number: 92, title: 'second in', status: 'queued', priority: 'none', dispatch_rank: 2 },
+          { issue_number: 93, title: 'last in, picked first', status: 'queued', priority: 'P0', dispatch_rank: 0 },
+        ],
+      },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    const cards = screen.getAllByTestId(/^stream-card-9[123]$/)
+    const order = cards.map(c => Number(c.getAttribute('data-testid').replace('stream-card-', '')))
+    expect(order).toEqual([93, 91, 92])
+  })
+
+  it('keeps active cards ahead of queued ones regardless of rank', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        implement: [
+          { issue_number: 81, title: 'queued, rank 0', status: 'queued', priority: 'P0', dispatch_rank: 0 },
+          { issue_number: 82, title: 'active', status: 'active', priority: 'P2' },
+        ],
+      },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    const cards = screen.getAllByTestId(/^stream-card-8[12]$/)
+    const order = cards.map(c => Number(c.getAttribute('data-testid').replace('stream-card-', '')))
+    expect(order).toEqual([82, 81])
+  })
+})

@@ -217,3 +217,54 @@ def test_seed_round_trips_issue_refinement_seam_through_json() -> None:
     assert parsed.issue_refinement_backlog[0]["number"] == 7101
     assert isinstance(parsed.issue_refinement_backlog[0]["number"], int)
     assert parsed.issue_refinement_verdicts[0].startswith('{"verdict"')
+
+
+def test_default_seed_has_empty_active_trigger_seams() -> None:
+    """#9543 governance active-trigger seed fields default empty (back-compat)."""
+    seed = MockWorldSeed()
+    assert seed.stale_workspaces == []
+    assert seed.gate_activations == []
+    assert seed.expired_run_dirs == []
+
+
+def test_seed_round_trips_active_trigger_seams_through_json() -> None:
+    original = MockWorldSeed(
+        issues=[
+            {
+                "number": 7301,
+                "title": "done",
+                "body": "b",
+                "labels": [],
+                "state": "closed",
+            }
+        ],
+        prs=[
+            {
+                "number": 8801,
+                "issue_number": 8800,
+                "branch": "agent/issue-8800",
+                "mergeable": False,
+            }
+        ],
+        stale_workspaces=[{"number": 7301, "branch": "agent/issue-7301"}],
+        gate_activations=[
+            {
+                "name": "mockworld-scenarios",
+                "dimension": "tests",
+                "required_on": ["main"],
+                "workflow": "test.yml",
+                "job": "scenario-tests",
+                "make_target": "scenario",
+            }
+        ],
+        expired_run_dirs=[{"issue": 7501, "age_days": 3650}],
+    )
+
+    restored = MockWorldSeed.from_json(original.to_json())
+
+    assert restored == original
+    assert restored.issues[0]["state"] == "closed"
+    assert restored.prs[0]["mergeable"] is False
+    assert restored.stale_workspaces == original.stale_workspaces
+    assert restored.gate_activations == original.gate_activations
+    assert restored.expired_run_dirs == original.expired_run_dirs

@@ -6,10 +6,21 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `d3dc758` — Merge remote-tracking branch 'origin/staging' into feat/9814-gh-load-cache *(2026-07-20)*
+- `aee928c` — feat(sandbox): active-trigger scenarios for six governance loops (s65-s70) (#9543) (#10074) (#10074) *(2026-07-20)*
+- `6354746` — chore(arch): regen artifacts after second staging merge (#9814) (#9814) *(2026-07-20)*
+- `1f394b1` — Merge remote-tracking branch 'origin/staging' into feat/9814-gh-load-cache *(2026-07-20)*
+- `64fc05d` — feat(watchdog): thread-level event-loop freeze detector (#9552) (#10070) (#10070) *(2026-07-20)*
+- `4415e11` — chore(arch): regen artifacts after staging merge (#9814) (#9814) *(2026-07-20)*
+- `296bd71` — Merge remote-tracking branch 'origin/staging' into feat/9814-gh-load-cache *(2026-07-20)*
+- `d60cf59` — chore(arch): regen artifacts + shrink spawn baseline for cache-routed reads (#9814) (#9814) *(2026-07-20)*
+- `14f4a2e` — fix(refinement): v1 follow-ups — not-planned closes, priority budget, fail-closed fake, inefficiency re-file (#10025) (#10066) (#10066) *(2026-07-20)*
+- `ca1e95d` — Merge branch 'fix/cached-gh-reads' into feat/9814-gh-load-cache *(2026-07-20)*
 - `1306712` — fix(fitness): cadence-derived min_samples — scorecards can finally score (#9841) (#10056) (#10056) *(2026-07-20)*
 - `8509ee0` — feat(orchestration): v2 IssueDriver runtime phase spec + accept ADR-0099 (#10038) (#10055) (#10055) *(2026-07-20)*
 - `d94945e` — fix(ul): one file per term — delete stale forks, hard-fail uniqueness lint, store-level dedupe (#9938) (#10051) (#10051) *(2026-07-20)*
 - `f4c0d38` — fix(stale-issue): branch-GC reconciler + unpushed-work boot check (#10011) (#10052) (#10052) *(2026-07-20)*
+- `1839f1f` — fix(gh-load): serve flake_tracker/rc_budget CI-run reads from the shared cache *(2026-07-20)*
 - `9d6184d` — feat(liveness): external factory watchdog + boot-time down-detection (#10044) (#10044) *(2026-07-20)*
 - `9fa2966` — fix(health-monitor): stale-code dead-man-switch — host in HealthMonitorLoop (#9596) (#10035) (#10035) *(2026-07-20)*
 - `6206f38` — fix(stale-issue): detect regression-test rot — false-close + orphaned-RED (#9597) (#10039) (#10039) *(2026-07-20)*
@@ -522,8 +533,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `1b79b45` — feat(adr): require Enforced-by linkage on Accepted ADRs (P3) (#8398) (#8398) *(2026-04-23)*
 - `39c6fc9` — feat(principles-audit): ADR-0044 + audit framework + P1 checks (#8386) (#8386) *(2026-04-22)*
 - `57157c8` — feat(audit): prompt audit report + scoring engine (sub-project 1 of 4) (#8376) (#8376) *(2026-04-21)*
-- `046f5fa` — refactor(agent-cli): scan /opt/plugins dynamically instead of hardcoding (#8375) (#8375) *(2026-04-21)*
-- `6b45f82` — feat(skills): boot-time install + prompt alignment + per-phase whitelist (#8374) (#8374) *(2026-04-21)*
 
 
 <!-- arch:generated -->

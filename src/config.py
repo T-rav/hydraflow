@@ -148,6 +148,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_merge_conflict_fix_attempts", "HYDRAFLOW_MAX_MERGE_CONFLICT_FIX_ATTEMPTS", 3),
     ("max_ci_timeout_fix_attempts", "HYDRAFLOW_MAX_CI_TIMEOUT_FIX_ATTEMPTS", 2),
     ("data_poll_interval", "HYDRAFLOW_DATA_POLL_INTERVAL", 300),
+    ("loop_startup_stagger_s", "HYDRAFLOW_LOOP_STARTUP_STAGGER_S", 120),
     ("max_sessions_per_repo", "HYDRAFLOW_MAX_SESSIONS_PER_REPO", 10),
     ("max_transcript_summary_chars", "HYDRAFLOW_MAX_TRANSCRIPT_SUMMARY_CHARS", 50_000),
     ("pr_unstick_interval", "HYDRAFLOW_PR_UNSTICK_INTERVAL", 3600),
@@ -472,6 +473,11 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
         "gh_circuit_breaker_reset_timeout_s",
         "HYDRAFLOW_GH_CIRCUIT_BREAKER_RESET_TIMEOUT_S",
         60.0,
+    ),
+    (
+        "github_cache_issue_list_ttl_s",
+        "HYDRAFLOW_GITHUB_CACHE_ISSUE_LIST_TTL_S",
+        900.0,
     ),
     ("auto_tighten_coverage_margin", "HYDRAFLOW_AUTO_TIGHTEN_COVERAGE_MARGIN", 1.0),
     # Work-queue starvation valve (#10037): hours before weighted_mix promotes.
@@ -857,16 +863,19 @@ class HydraFlowConfig(BaseModel):
 
     # Work-queue discipline (#10037) — how IssueStore orders each stage queue.
     # ``IssueRefinementLoop`` (#9957) produces the P0/P1/P2 labels these read.
-    # Default is 'fifo' — the pre-#10037 ordering — so shipping this PR changes
-    # no behaviour on its own; flipping to 'weighted_mix' is the operator's
-    # System-tab action, keeping the discipline change reviewable in isolation.
+    # Default is 'weighted_mix': priority-driven selection is the intended
+    # out-of-the-box behaviour, so a fresh instance picks by priority rather
+    # than oldest-first. #10045 shipped 'fifo' to make the merge behaviour-
+    # neutral; this makes the deliberate cutover. 'fifo' remains the escape
+    # hatch — a live System-tab dial away, no restart (issue_store re-reads it
+    # on every dequeue) — restoring the pre-#10037 ordering without a deploy.
     queue_strategy: QueueStrategy = Field(
-        default=QueueStrategy.FIFO,
+        default=QueueStrategy.WEIGHTED_MIX,
         description=(
-            "Stage-queue ordering: 'fifo' (oldest first, pre-#10037 behaviour "
-            "and the migration default), 'priority' (strict P0>P1>P2, starves "
-            "lower bands), or 'weighted_mix' (P0 preempts, then a weighted ratio "
-            "draw with an age-based starvation guard)"
+            "Stage-queue ordering: 'weighted_mix' (default — P0 preempts, then "
+            "a weighted ratio draw with an age-based starvation guard), "
+            "'priority' (strict P0>P1>P2, starves lower bands), or 'fifo' "
+            "(oldest first, the pre-#10037 behaviour and escape hatch)"
         ),
     )
     # Weights are the relative share each band draws under 'weighted_mix'.
@@ -1181,6 +1190,31 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Seconds the gh/git circuit breaker stays OPEN before probing "
             "(HALF_OPEN); it auto-recovers so it can't halt the factory forever"
+        ),
+    )
+    github_cache_issue_list_ttl_s: float = Field(
+        default=900.0,
+        ge=0.0,
+        le=86400.0,
+        description=(
+            "Freshness bound (seconds) for the shared issue-list-by-label "
+            "snapshots in GitHubDataCache (#9814). A read younger than this "
+            "is served with no gh call; 0 disables caching (every read "
+            "refreshes, still coalesced + degrade-safe). On refresh failure "
+            "a stale snapshot is served while younger than 3x this bound."
+        ),
+    )
+    loop_startup_stagger_s: int = Field(
+        default=120,
+        ge=0,
+        le=3600,
+        description=(
+            "Spread window (seconds) for deterministic background-loop "
+            "first-tick staggering (#9814). Each loop delays its first cycle "
+            "by hash(worker_name) % this value so a restart doesn't fire "
+            "every loop's GitHub reads at once. 0 disables. Loops with "
+            "run_on_startup=True (e.g. github_cache) are exempt so the "
+            "shared cache still populates immediately at boot."
         ),
     )
 
@@ -2667,6 +2701,51 @@ class HydraFlowConfig(BaseModel):
             "Env: HYDRAFLOW_LOOP_WATCHDOG_LLM_SECONDS."
         ),
     )
+    # -- thread-level event-loop freeze detector (#9552) ----------------------
+    # The asyncio cycle watchdog above cannot see a SYNCHRONOUS block inside a
+    # cycle (CPU spin, blocking file I/O, non-async subprocess.run): such a
+    # block freezes the whole event loop, including every asyncio-scheduled
+    # watcher. EventLoopWatchdog (src/event_loop_watchdog.py) is the
+    # out-of-loop complement: a daemon thread wall-clocks a 1s asyncio beacon.
+    # Knobs are System-tab editable via settings_registry — deliberately NOT
+    # in the env-override tables (knobs→System; secrets stay .env).
+    event_loop_watchdog_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable the thread-level event-loop freeze detector (#9552). A "
+            "daemon watchdog thread checks a 1s asyncio liveness beacon; when "
+            "the beacon goes stale past event_loop_watchdog_stall_seconds it "
+            "dumps all thread stacks (faulthandler — names the blocking call "
+            "site) and leaves a stall marker the health monitor escalates as "
+            "a hydraflow-find issue. Detection + dump + notify only; process "
+            "restart is the separate opt-in hard-restart knob. Captured at "
+            "orchestrator startup (restart to apply)."
+        ),
+    )
+    event_loop_watchdog_stall_seconds: int = Field(
+        default=120,
+        ge=30,
+        le=3600,
+        description=(
+            "Beacon staleness (seconds) before the event loop is declared "
+            "frozen (default 120 ≈ 120 missed 1s beacons — generous, so a "
+            "briefly-blocking legitimate call never trips it; a true "
+            "synchronous wedge is multi-minute). Re-read by the watchdog "
+            "thread on every poll, so changes apply live."
+        ),
+    )
+    event_loop_watchdog_hard_restart: bool = Field(
+        default=False,
+        description=(
+            "OPT-IN hard recovery for a frozen event loop: after the stack "
+            "dump and stall marker, exit the process with code 75 "
+            "(EX_TEMPFAIL) so systemd/docker/launchd restarts it. Default "
+            "OFF — notify-default, restart-opt-in, mirroring branch-GC and "
+            "the external liveness watchdog (#10009). Enable only where a "
+            "supervisor with Restart=always is in place; without one this "
+            "turns a frozen process into a dead one. Re-read at trip time."
+        ),
+    )
     staging_bisect_flake_reruns: int = Field(
         default=2,
         ge=1,
@@ -3111,6 +3190,20 @@ class HydraFlowConfig(BaseModel):
             "MAX_CASES (pre-spend) and applied as a Python-side sample "
             "(post-output) to bound operator-visible escalation flooding "
             "if the harness misses the env var."
+        ),
+    )
+    skill_prompt_eval_live_case_budget: int = Field(
+        default=12,
+        ge=0,
+        le=500,
+        description=(
+            "Max catcher-skill corpus cases a LIVE weekly backstop run "
+            "evaluates via the per-skill live path (each builds its own "
+            "skill's prompt and makes one real agent-CLI call; round-robin "
+            "across skills). Forwarded to the corpus runner via HYDRAFLOW_"
+            "TRUST_ADVERSARIAL_LIVE_BUDGET; inert unless HYDRAFLOW_TRUST_"
+            "ADVERSARIAL_LIVE=1. 0 disables the per-skill live path. Keep "
+            "aligned with corpus_runner.DEFAULT_LIVE_BUDGET (#10014)."
         ),
     )
 
