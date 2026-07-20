@@ -406,6 +406,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         604800,
     ),
     ("issue_refinement_pair_budget", "HYDRAFLOW_ISSUE_REFINEMENT_PAIR_BUDGET", 24),
+    (
+        "issue_refinement_priority_budget",
+        "HYDRAFLOW_ISSUE_REFINEMENT_PRIORITY_BUDGET",
+        50,
+    ),
     # Work-queue band-draw weights (#10037); see queue_strategy.BandWeights.
     ("queue_weight_p1", "HYDRAFLOW_QUEUE_WEIGHT_P1", 3),
     ("queue_weight_p2", "HYDRAFLOW_QUEUE_WEIGHT_P2", 2),
@@ -4053,6 +4058,16 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Max duplicate-candidate pairs judged by an LLM call per "
             "IssueRefinementLoop tick."
+        ),
+    )
+    issue_refinement_priority_budget: int = Field(
+        default=50,
+        ge=0,
+        le=500,
+        description=(
+            "Max issues priority-scored by an LLM call per "
+            "IssueRefinementLoop tick — bounds full-sweep spend, where every "
+            "unguarded open issue is otherwise a scoring target (#10025)."
         ),
     )
     issue_refinement_model: str = Field(

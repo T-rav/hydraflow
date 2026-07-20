@@ -14,7 +14,7 @@ import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 from urllib.parse import quote
 
 import ci_sentinels
@@ -44,10 +44,53 @@ from subprocess_util import run_subprocess, run_subprocess_with_retry
 from telemetry.spans import port_span  # noqa: E402
 from traceability import append_req_trailer, extract_req_id
 
+if TYPE_CHECKING:
+    from contracts.boundary import BoundaryParseResult
+    from contracts.shapes import GhIssueListItem
+
 logger = logging.getLogger("hydraflow.pr_manager")
 
 # Cache TTL for label-count queries (seconds).
 _LABEL_CACHE_TTL: int = 30
+
+
+def _project_issue_summaries(
+    results: list[BoundaryParseResult[GhIssueListItem]],
+) -> list[GitHubIssueSummary]:
+    """Project lenient-parsed gh issue rows into ``GitHubIssueSummary`` dicts.
+
+    Shared by ``list_issues_by_label`` / ``list_open_issues`` — previously two
+    byte-identical copies (#10025). ``labels`` ride along in gh wire shape
+    (``{"name": ...}``, #9943) so consumers like the preflight human-required
+    filter see real data whether the row validated or fell back to the raw
+    payload.
+    """
+    # Local import keeps the module-load contract identical when the
+    # contracts subsystem isn't imported elsewhere yet.
+    from contracts.boundary import field_or  # noqa: PLC0415
+
+    summaries: list[GitHubIssueSummary] = []
+    for r in results:
+        if r.model_instance is not None:
+            labels = [{"name": lbl.name} for lbl in r.model_instance.labels if lbl.name]
+        else:
+            entry = r.payload if isinstance(r.payload, dict) else {}
+            labels = [
+                {"name": str(lbl.get("name", ""))}
+                for lbl in (entry.get("labels") or [])
+                if isinstance(lbl, dict) and lbl.get("name")
+            ]
+        summaries.append(
+            {
+                "number": field_or(r, "number", 0),
+                "title": field_or(r, "title", ""),
+                "body": field_or(r, "body", ""),
+                "updated_at": field_or(r, "updated_at", "", dict_key="updatedAt"),
+                "labels": labels,
+            }
+        )
+    return summaries
+
 
 _JSONValue = TypeVar("_JSONValue")
 
@@ -1479,36 +1522,8 @@ class PRManager:
             "--limit",
             "100",
         )
-        from contracts.boundary import field_or  # noqa: PLC0415
-
         results = parse_list_with_shape(output or "[]", GhIssueListItem)
-        summaries: list[GitHubIssueSummary] = []
-        for r in results:
-            # #9943: labels ride along in gh wire shape ({"name": ...}) so
-            # consumers like the preflight human-required filter see real
-            # data — the old projection omitted labels and the filter was
-            # a silent no-op.
-            if r.model_instance is not None:
-                labels = [
-                    {"name": lbl.name} for lbl in r.model_instance.labels if lbl.name
-                ]
-            else:
-                entry = r.payload if isinstance(r.payload, dict) else {}
-                labels = [
-                    {"name": str(lbl.get("name", ""))}
-                    for lbl in (entry.get("labels") or [])
-                    if isinstance(lbl, dict) and lbl.get("name")
-                ]
-            summaries.append(
-                {
-                    "number": field_or(r, "number", 0),
-                    "title": field_or(r, "title", ""),
-                    "body": field_or(r, "body", ""),
-                    "updated_at": field_or(r, "updated_at", "", dict_key="updatedAt"),
-                    "labels": labels,
-                }
-            )
-        return summaries
+        return _project_issue_summaries(results)
 
     async def list_open_issues(self) -> list[GitHubIssueSummary]:
         """Return ALL open issues (no label filter) as a list of dicts.
@@ -1535,31 +1550,8 @@ class PRManager:
             "--limit",
             "500",
         )
-        from contracts.boundary import field_or
-
         results = parse_list_with_shape(output or "[]", GhIssueListItem)
-        summaries: list[GitHubIssueSummary] = []
-        for r in results:
-            if r.model_instance is not None:
-                labels = [
-                    {"name": lbl.name} for lbl in r.model_instance.labels if lbl.name
-                ]
-            else:
-                entry = r.payload if isinstance(r.payload, dict) else {}
-                labels = [
-                    {"name": str(lbl.get("name", ""))}
-                    for lbl in (entry.get("labels") or [])
-                    if isinstance(lbl, dict) and lbl.get("name")
-                ]
-            summaries.append(
-                {
-                    "number": field_or(r, "number", 0),
-                    "title": field_or(r, "title", ""),
-                    "body": field_or(r, "body", ""),
-                    "updated_at": field_or(r, "updated_at", "", dict_key="updatedAt"),
-                    "labels": labels,
-                }
-            )
+        summaries = _project_issue_summaries(results)
         if len(summaries) == 500:
             logger.warning(
                 "list_open_issues returned exactly 500 rows — backlog may be"
@@ -1833,11 +1825,19 @@ class PRManager:
         url = parts[1] if len(parts) > 1 else ""
         return (conclusion, url)
 
-    async def close_issue(self, issue_number: int) -> bool:
-        """Close a GitHub issue. Returns False when the gh call failed (#9812)."""
+    async def close_issue(
+        self, issue_number: int, *, reason: str | None = None
+    ) -> bool:
+        """Close a GitHub issue. Returns False when the gh call failed (#9812).
+
+        *reason* maps to ``gh issue close --reason`` (``"completed"`` |
+        ``"not planned"``); ``None`` omits the flag, so gh records its
+        default ``stateReason=COMPLETED`` (#10025).
+        """
         self._assert_repo()
         if self._config.dry_run:
             return True
+        reason_args = ("--reason", reason) if reason else ()
         try:
             await self._run_gh(
                 "gh",
@@ -1846,6 +1846,7 @@ class PRManager:
                 str(issue_number),
                 "--repo",
                 self._repo,
+                *reason_args,
             )
         except RuntimeError as exc:
             logger.warning(

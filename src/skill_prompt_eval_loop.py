@@ -83,6 +83,31 @@ def _escalation_subject(title: str) -> str | None:
     return m.group(1) if m else None
 
 
+# Marker label + dedup-key prefix for `prompt-inefficiency` filings (spec §5c).
+# Single-sourced so the filing path (`_file_inefficiency_issue`), the title
+# parser, and the closed-issue reconciler can never drift apart (#10025).
+_INEFFICIENCY_LABEL = "prompt-inefficiency"
+_INEFFICIENCY_KEY_PREFIX = "skill_prompt_eval:inefficiency"
+
+
+def _inefficiency_title(source: str) -> str:
+    return f"Prompt inefficiency: {source} cost-per-call regressed"
+
+
+# Parses `_inefficiency_title` back to the `source` subject. Non-greedy but
+# anchored on both sides — same rationale as `_ESCALATION_TITLE_RE`: sources
+# are machine-named today, and the anchored capture costs nothing if one ever
+# grows spaces.
+_INEFFICIENCY_TITLE_RE = re.compile(
+    r"^Prompt inefficiency: (.+?) cost-per-call regressed$"
+)
+
+
+def _inefficiency_subject(title: str) -> str | None:
+    m = _INEFFICIENCY_TITLE_RE.match(title)
+    return m.group(1) if m else None
+
+
 # Hard cap on the subprocess read. A wedged child must not hang the loop cycle
 # forever and freeze its heartbeat — the #9410 silent-stall failure class
 # (#9454 / #9508). ``make trust-adversarial`` drives an LLM eval harness so it
@@ -308,6 +333,20 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             clear_attempts=state.clear_skill_prompt_attempts,
             subject_from_title=_escalation_subject,
         )
+        # Closed-issue reconcile for `prompt-inefficiency` filings: without it
+        # the dedup key set at filing time never clears, so a source that
+        # re-degrades after its issue was closed could never re-file (#10025).
+        # Only the closed path runs — a cost regression has no "no longer
+        # detected at HEAD" auto-close analog (the weekly window moves on),
+        # and there is no per-source attempt counter to clear.
+        self._inefficiencies = EscalationReconciler(
+            prs=pr_manager,
+            dedup=dedup,
+            key_prefix=_INEFFICIENCY_KEY_PREFIX,
+            stuck_label=_INEFFICIENCY_LABEL,
+            clear_attempts=lambda _subject: None,
+            subject_from_title=_inefficiency_subject,
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.skill_prompt_eval_interval
@@ -446,6 +485,10 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
 
         t0 = time.perf_counter()
         await self._reconcile_closed_escalations()
+        # Same closed-path reconcile for `prompt-inefficiency` filings: a
+        # closed (triaged) inefficiency issue clears its dedup key so a
+        # re-degradation of the same source re-files fresh (#10025).
+        await self._inefficiencies.reconcile_closed()
 
         cases = await self._run_corpus()
         if not cases:
@@ -606,12 +649,17 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         return ordered_cases, scorecard
 
     async def _file_inefficiency_issue(self, row: SkillEfficiencyRow) -> None:
-        """File a deduped `prompt-inefficiency` issue for a degraded source."""
+        """File a deduped `prompt-inefficiency` issue for a degraded source.
+
+        The dedup key is cleared when the filed issue closes (the
+        `_inefficiencies` reconciler in `_do_work`), so a source that
+        re-degrades after triage re-files fresh (#10025).
+        """
         dedup = self._dedup.get()
-        key = f"skill_prompt_eval:inefficiency:{row.source}"
+        key = f"{_INEFFICIENCY_KEY_PREFIX}:{row.source}"
         if key in dedup:
             return
-        title = f"Prompt inefficiency: {row.source} cost-per-call regressed"
+        title = _inefficiency_title(row.source)
         trend_pct = (
             f"{row.trend_vs_baseline:+.0%}"
             if row.trend_vs_baseline is not None
@@ -629,7 +677,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             f"source._"
         )
         await self._pr.create_issue(
-            title, body, ["hydraflow-find", "prompt-inefficiency"]
+            title, body, ["hydraflow-find", _INEFFICIENCY_LABEL]
         )
         dedup.add(key)
         self._dedup.set_all(dedup)
