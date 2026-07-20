@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Iterable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
@@ -40,7 +40,11 @@ from phase_utils import (
     log_exception_with_bug_classification,
     release_batch_in_flight,
 )
-from runner_utils import reap_all_tracked_processes
+from runner_utils import (
+    backend_probe_endpoint,
+    normalize_provider,
+    reap_all_tracked_processes,
+)
 from service_registry import (
     ServiceRegistry,
     WorkerRegistryCallbacks,
@@ -50,6 +54,7 @@ from service_registry import (
 from state import StateTracker
 from state_restorer import StateRestorer
 from subprocess_util import (
+    PROVIDER_ANTHROPIC,
     AuthenticationError,
     CreditExhaustedError,
     probe_auth_availability,
@@ -90,6 +95,24 @@ _POST_MERGE_DELAY: int = 5
 # guarded against on the credit false-positive path. The delay lives inside the
 # recreated task, so it never blocks supervision of the other loops (#9621).
 _AUTH_TRANSIENT_RESTART_DELAY_S: float = 30.0
+
+# Loops whose primary LLM work routes through a per-role provider dial (the
+# one-shot OpenAI-compatible backends — z.ai / kimi / openrouter). Maps each
+# such loop to the ``HydraFlowConfig`` field holding its dial. EVERY other loop
+# runs on the Claude harness and bills against Anthropic; only these can route
+# elsewhere, so only these can survive an Anthropic credit pause (or be the sole
+# casualty of a backend cap). See :meth:`HydraFlowOrchestrator._loop_providers`.
+# A loop that does MIXED work (dial'd one-shot + some harness spawns, e.g.
+# pr_unsticker's HITL analysis) self-heals: while it survives an Anthropic pause
+# its harness sub-call re-raises an ``anthropic`` signal that the already-active
+# pause absorbs. Keep in sync with the ``*_provider`` dials in config.py.
+_BACKEND_WORKER_LOOPS: dict[str, str] = {
+    "repo_wiki": "wiki_compilation_provider",
+    "adr_reviewer": "adr_review_provider",
+    "pr_unsticker": "pr_unstick_provider",
+    "term_proposer": "term_proposer_provider",
+    "entry_evidence": "term_proposer_provider",
+}
 
 
 class HydraFlowOrchestrator:
@@ -132,6 +155,13 @@ class HydraFlowOrchestrator:
         self._auth_failed = False
         # Credit pause — set when API credits are exhausted
         self._credits_paused_until: datetime | None = None
+        # Which billing provider the active pause is scoped to (#9807): a backend
+        # name ("zai"/"kimi"/"openrouter") pauses only loops routed there;
+        # "anthropic" pauses everything except surviving backend workers; ``None``
+        # is the global fallback (unknown provider → pause all). Purely for
+        # status/UI + observability; the affected-loop set is computed at pause
+        # time and threaded through resume.
+        self._credit_paused_provider: str | None = None
         # Per-source last false-positive suppression (#9888 throttle).
         self._credit_fp_last: dict[str, datetime] = {}
         self._credit_pause_lock = asyncio.Lock()
@@ -400,9 +430,19 @@ class HydraFlowOrchestrator:
             return self._credits_paused_until
         return None
 
+    @property
+    def credits_paused_provider(self) -> str | None:
+        """The billing provider the ACTIVE credit pause is scoped to, or ``None``
+        (no active pause, or a global/legacy pause). Surfaced in the status
+        payload so the UI can show *which* backend is paused (#9807)."""
+        if self.credits_paused_until is not None:
+            return self._credit_paused_provider
+        return None
+
     def clear_credit_pause(self) -> None:
         """Clear a credit pause early, waking ``_sleep_until_resume``."""
         self._credits_paused_until = None
+        self._credit_paused_provider = None
         self._credit_resume_event.set()
 
     @property
@@ -540,6 +580,7 @@ class HydraFlowOrchestrator:
         self._running = False
         self._auth_failed = False
         self._credits_paused_until = None
+        self._credit_paused_provider = None
         # ``clear_active`` is orchestrator-only — not on IssueStorePort.
         cast("IssueStore", self._svc.store).clear_active()
         self._svc.implementer.active_issues.clear()
@@ -764,6 +805,8 @@ class HydraFlowOrchestrator:
         data: OrchestratorStatusPayload = {"status": self.run_status}
         if self.credits_paused_until:
             data["credits_paused_until"] = self.credits_paused_until.isoformat()
+            if self.credits_paused_provider is not None:
+                data["credits_paused_provider"] = self.credits_paused_provider
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.ORCHESTRATOR_STATUS,
@@ -1885,6 +1928,45 @@ class HydraFlowOrchestrator:
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(self._stop_event.wait(), timeout=seconds)
 
+    def _loop_providers(self, loop_names: Iterable[str]) -> dict[str, str]:
+        """Map each loop name to the billing provider its LLM work routes to.
+
+        Loops in ``_BACKEND_WORKER_LOOPS`` read their configured ``*_provider``
+        dial (normalized: the harness dial ``"claude"`` → ``"anthropic"``); every
+        other loop runs on the Claude harness → ``"anthropic"``. Read from live
+        config so an operator's dial change takes effect on the next pause."""
+        providers: dict[str, str] = {}
+        for name in loop_names:
+            dial_field = _BACKEND_WORKER_LOOPS.get(name)
+            if dial_field is None:
+                providers[name] = PROVIDER_ANTHROPIC
+            else:
+                providers[name] = normalize_provider(getattr(self._config, dial_field))
+        return providers
+
+    def _affected_loops(
+        self, provider: str, loop_names: Iterable[str], source: str
+    ) -> tuple[set[str], bool]:
+        """Which loops a *provider* exhaustion must pause, + whether to terminate
+        the shared Claude-harness runner pools.
+
+        - Unknown provider (``normalize_provider`` changes it) → GLOBAL fallback:
+          pause every loop and terminate the runner pools (today's behavior).
+        - ``"anthropic"`` → pause every anthropic-routed loop (all but the
+          surviving backend workers) and terminate the harness pools.
+        - A backend (``"zai"``/``"kimi"``/``"openrouter"``) → pause only loops
+          routed there (always including *source*, which demonstrably routes to
+          it since it raised the signal) and leave the harness pools running."""
+        names = list(loop_names)
+        provider_map = self._loop_providers(names)
+        if normalize_provider(provider) != provider:
+            # Provider the registry doesn't recognize — fail safe to a global pause.
+            return set(names), True
+        affected = {n for n, p in provider_map.items() if p == provider}
+        if provider != PROVIDER_ANTHROPIC and source in provider_map:
+            affected.add(source)
+        return affected, provider == PROVIDER_ANTHROPIC
+
     def _compute_resume_time(self, exc: CreditExhaustedError) -> datetime:
         """Compute the UTC datetime at which credit pause should end."""
         buffer = timedelta(minutes=self._config.credit_pause_buffer_minutes)
@@ -1894,17 +1976,32 @@ class HydraFlowOrchestrator:
         return now + timedelta(hours=5) + buffer
 
     async def _cancel_all_loops_and_runners(
-        self, tasks: dict[str, asyncio.Task[None]]
+        self,
+        tasks: dict[str, asyncio.Task[None]],
+        affected: set[str] | None = None,
+        *,
+        terminate_runners: bool = True,
     ) -> None:
-        """Cancel all loop tasks and terminate active subprocesses."""
-        for task in tasks.values():
+        """Cancel the *affected* loop tasks and (optionally) terminate the
+        Claude-harness subprocess pools.
+
+        *affected* ``None`` means every loop (the global / Anthropic pause).
+        A backend-scoped pause (z.ai/kimi/openrouter) passes only the loops
+        routed to that backend and ``terminate_runners=False`` so the shared
+        harness runner pools — which bill against Anthropic and belong to the
+        surviving loops — are left untouched (#9807)."""
+        to_cancel = (
+            tasks if affected is None else {n: tasks[n] for n in affected if n in tasks}
+        )
+        for task in to_cancel.values():
             task.cancel()
-        await asyncio.gather(*tasks.values(), return_exceptions=True)
-        self._svc.planners.terminate()
-        self._svc.agents.terminate()
-        self._svc.reviewers.terminate()
-        self._svc.hitl_runner.terminate()
-        reap_all_tracked_processes()
+        await asyncio.gather(*to_cancel.values(), return_exceptions=True)
+        if terminate_runners:
+            self._svc.planners.terminate()
+            self._svc.agents.terminate()
+            self._svc.reviewers.terminate()
+            self._svc.hitl_runner.terminate()
+            reap_all_tracked_processes()
 
     async def _sleep_until_resume(self, resume_at: datetime) -> None:
         """Sleep until *resume_at* (interruptible by stop or credit-resume event)."""
@@ -1948,6 +2045,13 @@ class HydraFlowOrchestrator:
             ):
                 return True
 
+            # Which backend hit the limit (#9807). Default "anthropic" — the
+            # Claude harness — so every legacy raise site stays global-scoped;
+            # the one-shot backends (z.ai/kimi/openrouter) tag their own signal.
+            provider = (
+                getattr(exc, "provider", PROVIDER_ANTHROPIC) or PROVIDER_ANTHROPIC
+            )
+
             # Corroborate the text-detected signal with a live API probe before
             # committing a GLOBAL pause. ``is_credit_exhaustion`` matches
             # credit-error PROSE, so a diagnostic/reviewer run that merely quotes
@@ -1976,16 +2080,26 @@ class HydraFlowOrchestrator:
                 )
                 return False
 
+            # Probe the AFFECTED backend, not always Anthropic (#9807): a z.ai
+            # 429 is corroborated against z.ai's endpoint, a Claude cap against
+            # Anthropic. Endpoint (base_url/api_key) resolves from the provider
+            # registry; anthropic → ("","") which the probe ignores.
+            probe_base_url, probe_api_key = backend_probe_endpoint(
+                provider, self._config
+            )
             if (
                 self._config.credit_pause_require_probe
-                and await probe_credit_availability()
+                and await probe_credit_availability(
+                    provider, base_url=probe_base_url, api_key=probe_api_key
+                )
             ):
                 self._credit_fp_last[source] = datetime.now(UTC)
                 logger.warning(
-                    "Credit-exhaustion signal from %r NOT corroborated by live "
-                    "API probe — treating as a false positive (likely quoted "
-                    "credit-error prose); not pausing.",
+                    "Credit-exhaustion signal from %r (provider=%s) NOT "
+                    "corroborated by live API probe — treating as a false "
+                    "positive (likely quoted credit-error prose); not pausing.",
                     source,
+                    provider,
                 )
                 await self._bus.publish(
                     HydraFlowEvent(
@@ -1996,6 +2110,7 @@ class HydraFlowOrchestrator:
                                 "— ignoring as a false positive."
                             ),
                             "source": source,
+                            "provider": provider,
                             # Benign: a false positive was suppressed, nothing
                             # paused. Render yellow, not the red critical banner.
                             "severity": "warning",
@@ -2006,19 +2121,32 @@ class HydraFlowOrchestrator:
 
             resume_at = self._compute_resume_time(exc)
             self._credits_paused_until = resume_at
+            self._credit_paused_provider = provider
             pause_seconds = max((resume_at - datetime.now(UTC)).total_seconds(), 0)
 
+            # Scope the pause to the loops routed to this backend. Anthropic (or
+            # an unrecognized provider) still pauses the whole factory except the
+            # surviving backend workers; a z.ai/kimi cap pauses only its own
+            # loops and leaves Claude work running (#9807).
+            affected, terminate_runners = self._affected_loops(
+                provider, tasks.keys(), source
+            )
+            scope = "all loops" if terminate_runners else f"{provider} loops"
+
             logger.warning(
-                "Credit limit reached (detected in %r). "
-                "Pausing all loops until %s (%.0f minutes).",
+                "Credit limit reached (detected in %r, provider=%s). "
+                "Pausing %s until %s (%.0f minutes).",
                 source,
+                provider,
+                scope,
                 resume_at.isoformat(),
                 pause_seconds / 60,
             )
 
             data: SystemAlertPayload = {
-                "message": "Credit limit reached. Pausing all loops.",
+                "message": f"Credit limit reached ({provider}). Pausing {scope}.",
                 "source": source,
+                "provider": provider,
                 "resume_at": resume_at.isoformat(),
             }
             await self._bus.publish(
@@ -2028,16 +2156,21 @@ class HydraFlowOrchestrator:
                 )
             )
 
-            await self._cancel_all_loops_and_runners(tasks)
+            await self._cancel_all_loops_and_runners(
+                tasks, affected, terminate_runners=terminate_runners
+            )
 
         await self._sleep_until_resume(resume_at)
 
         if self._stop_event.is_set():
             self._credits_paused_until = None
+            self._credit_paused_provider = None
             self._credit_resume_event.clear()
             return True
 
-        await self._resume_loops_after_credit_pause(tasks, loop_factories, source)
+        await self._resume_loops_after_credit_pause(
+            tasks, loop_factories, source, affected
+        )
         return True
 
     async def _resume_loops_after_credit_pause(
@@ -2045,15 +2178,25 @@ class HydraFlowOrchestrator:
         tasks: dict[str, asyncio.Task[None]],
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
         source: str,
+        affected: set[str] | None = None,
     ) -> None:
-        """Clear pause state and restart all loops after credit pause."""
+        """Clear pause state and restart the loops paused for this credit pause.
+
+        *affected* ``None`` restarts every loop (global/legacy). A scoped pause
+        passes the same set it cancelled so only those loops are recreated —
+        the surviving backend/harness loops were never touched (#9807)."""
+        provider = self._credit_paused_provider
         self._credits_paused_until = None
+        self._credit_paused_provider = None
         self._credit_resume_event.clear()
-        logger.info("Credit pause ended — restarting all loops")
+        scope = "all loops" if affected is None else f"{len(affected)} loop(s)"
+        logger.info("Credit pause ended — restarting %s", scope)
         data: SystemAlertPayload = {
-            "message": "Credit pause ended. Resuming all loops.",
+            "message": "Credit pause ended. Resuming loops.",
             "source": source,
         }
+        if provider is not None:
+            data["provider"] = provider
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.SYSTEM_ALERT,
@@ -2061,6 +2204,8 @@ class HydraFlowOrchestrator:
             )
         )
         for loop_name, factory in loop_factories:
+            if affected is not None and loop_name not in affected:
+                continue
             tasks[loop_name] = asyncio.create_task(
                 factory(), name=f"hydraflow-{loop_name}"
             )

@@ -312,6 +312,14 @@ class CircuitBreakerOpenError(RuntimeError):
     """
 
 
+#: The billing-provider identity of the default (Claude CLI / harness) backend.
+#: One-shot OpenAI-compatible backends carry their own registry name
+#: ("openrouter"/"zai"/"kimi"); everything routed through the harness bills
+#: against Anthropic. Used as ``CreditExhaustedError.provider``'s default so a
+#: signal is scoped to Anthropic unless a backend classifies itself otherwise.
+PROVIDER_ANTHROPIC = "anthropic"
+
+
 class CreditExhaustedError(RuntimeError):
     """Raised when a subprocess fails because API credits are exhausted.
 
@@ -320,11 +328,26 @@ class CreditExhaustedError(RuntimeError):
     resume_at:
         The datetime (UTC) when credits are expected to reset, or ``None``
         if no reset time could be parsed from the error output.
+    provider:
+        The billing-provider identity that hit the limit — ``"anthropic"``
+        (the Claude CLI / harness, the default) or a one-shot OpenAI-compatible
+        backend name (``"openrouter"``/``"zai"``/``"kimi"``). The orchestrator
+        scopes the credit pause to loops routed to this provider so a Claude cap
+        never halts z.ai/kimi background workers, and vice-versa (#9807). Kept
+        defaulting to ``"anthropic"`` so every existing raise site — all of
+        which are harness paths — stays Anthropic-scoped without change.
     """
 
-    def __init__(self, message: str = "", *, resume_at: datetime | None = None) -> None:
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        resume_at: datetime | None = None,
+        provider: str = PROVIDER_ANTHROPIC,
+    ) -> None:
         super().__init__(message)
         self.resume_at = resume_at
+        self.provider = provider
 
 
 _AUTH_PATTERNS = ("401", "not logged in", "authentication required", "auth token")
@@ -554,12 +577,8 @@ def _parse_weekly_resume_time(text: str) -> datetime | None:
     return _parse_weekly_month_day(text) or _parse_weekly_weekday(text)
 
 
-async def probe_credit_availability() -> bool:
-    """Make a lightweight Anthropic API call to check if credits are available.
-
-    Returns ``True`` if credits appear available (or if the check cannot be
-    performed), ``False`` if the API responds with a credit-exhaustion error.
-    """
+async def _probe_anthropic() -> bool:
+    """Lightweight Anthropic API call — the ground-truth credit probe."""
     import os
 
     import httpx
@@ -595,6 +614,63 @@ async def probe_credit_availability() -> bool:
         # here — they propagate so they surface in logs instead of silently
         # returning False.
         return True
+
+
+async def probe_openai_compatible_availability(base_url: str, api_key: str) -> bool:
+    """Cheap credit probe for an OpenAI-compatible one-shot backend (z.ai / kimi
+    / openrouter). A ``GET {base_url}/models`` costs no tokens and reflects the
+    same key/billing the real spawn uses.
+
+    Mirrors :func:`_probe_anthropic`'s contract exactly: returns ``True`` when
+    credits appear available OR the probe cannot be performed (no key/base_url,
+    transient network error — fail-open per #6381/#9869 so a flaky probe delays
+    a real pause by at most one detection cycle rather than masking it), and
+    ``False`` only when the backend confirms exhaustion (HTTP 402/429 or a
+    credit-exhaustion body).
+    """
+    import httpx
+
+    if not api_key or not base_url:
+        # Cannot probe (backend not wired) — assume available; scoping falls
+        # back to pausing on the text signal alone.
+        return True
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{base_url.rstrip('/')}/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if resp.status_code == 200:
+                return True
+            if resp.status_code in (402, 429):
+                return False
+            # Any other status: only a credit-exhaustion body counts as exhausted
+            # (a 401/404 is an auth/routing problem, not a spent balance).
+            return not is_credit_exhaustion(resp.text)
+    except (httpx.HTTPError, OSError):
+        return True
+
+
+async def probe_credit_availability(
+    provider: str = PROVIDER_ANTHROPIC,
+    *,
+    base_url: str = "",
+    api_key: str = "",
+) -> bool:
+    """Corroborate a credit-exhaustion signal against the AFFECTED backend.
+
+    ``provider`` selects which backend to probe: the default ``"anthropic"``
+    hits the Anthropic API; a one-shot OpenAI-compatible backend name
+    (``"openrouter"``/``"zai"``/``"kimi"``) probes ``{base_url}/models`` with
+    ``base_url``/``api_key`` (resolved by the caller from the provider registry).
+
+    Returns ``True`` if credits appear available (or the check cannot be
+    performed — fail-open), ``False`` only when the backend confirms exhaustion.
+    Back-compat: called with no args it probes Anthropic exactly as before.
+    """
+    if provider == PROVIDER_ANTHROPIC:
+        return await _probe_anthropic()
+    return await probe_openai_compatible_availability(base_url, api_key)
 
 
 # Ground-truth auth-rejection phrases in ``gh auth status`` output. These

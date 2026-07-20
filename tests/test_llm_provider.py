@@ -300,6 +300,35 @@ class TestOpenAICompatibleComplete:
                 _FakeResp(status_code=400, text="You've hit your usage limit"),
             )
 
+    async def test_429_tags_signal_with_this_backend(self, monkeypatch):
+        # #9807: the raised signal carries THIS backend so the orchestrator can
+        # scope the pause to z.ai/kimi loops instead of halting Claude work.
+        with pytest.raises(CreditExhaustedError) as exc_info:
+            await self._run(
+                monkeypatch,
+                _FakeResp(status_code=429, text="rate limit"),
+                provider="zai",
+            )
+        assert exc_info.value.provider == "zai"
+
+    async def test_402_tags_signal_with_this_backend(self, monkeypatch):
+        with pytest.raises(CreditExhaustedError) as exc_info:
+            await self._run(
+                monkeypatch,
+                _FakeResp(status_code=402, text="insufficient credits"),
+                provider="kimi",
+            )
+        assert exc_info.value.provider == "kimi"
+
+    async def test_400_credit_body_tags_signal_with_this_backend(self, monkeypatch):
+        with pytest.raises(CreditExhaustedError) as exc_info:
+            await self._run(
+                monkeypatch,
+                _FakeResp(status_code=400, text="You've hit your usage limit"),
+                provider="openrouter",
+            )
+        assert exc_info.value.provider == "openrouter"
+
     async def test_other_http_error_soft_fails_labeled_by_provider(self, monkeypatch):
         result = await self._run(
             monkeypatch, _FakeResp(status_code=500, text="server boom"), provider="zai"
