@@ -399,6 +399,13 @@ def _build_stale_issue(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         # a MagicMock — prevents TypeError in timedelta() during parity tests.
         state.get_stale_issue_settings.return_value = StaleIssueSettings()
         state.get_stale_issue_closed.return_value = set()
+        # Regression-rot rollup (#9597) uses RollupIssueManager against this
+        # same state mock — mirrors _build_security_patch's guard so an
+        # unstubbed MagicMock().get_rollup_issue() (truthy) doesn't make
+        # RollupIssueManager.ensure/resolve think a rollup issue already
+        # exists.
+        state.get_rollup_issue.return_value = None
+        state.get_rollup_issue_keys.return_value = []
         ports["stale_issue_state"] = state
     return StaleIssueLoop(config=config, prs=ports["github"], state=state, deps=deps)
 

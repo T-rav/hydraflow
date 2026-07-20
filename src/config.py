@@ -249,6 +249,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("health_monitor_interval", "HYDRAFLOW_HEALTH_MONITOR_INTERVAL", 7200),
     ("wiki_freshness_stale_days", "HYDRAFLOW_WIKI_FRESHNESS_STALE_DAYS", 7),
     ("stale_issue_interval", "HYDRAFLOW_STALE_ISSUE_INTERVAL", 86400),
+    (
+        "stale_issue_regression_rot_stale_days",
+        "HYDRAFLOW_STALE_ISSUE_REGRESSION_ROT_STALE_DAYS",
+        14,
+    ),
     ("auditor_finding_max_age_days", "HYDRAFLOW_AUDITOR_FINDING_MAX_AGE_DAYS", 14),
     ("triage_max_turns", "HYDRAFLOW_TRIAGE_MAX_TURNS", 3),
     ("triage_retry_interval", "HYDRAFLOW_TRIAGE_RETRY_INTERVAL", 86400),
@@ -1233,6 +1238,20 @@ class HydraFlowConfig(BaseModel):
         ge=60,
         le=604800,
         description="Stale issue check interval (seconds)",
+    )
+    stale_issue_regression_rot_stale_days: int = Field(
+        default=14,
+        ge=1,
+        le=365,
+        description=(
+            "Regression-rot threshold (days, #9597). StaleIssueLoop's "
+            "regression-rot check flags a still-OPEN issue whose "
+            "`tests/regressions/` pin has been `xfail` RED for longer than "
+            "this many days as 'orphaned-RED' (a written-but-unimplemented "
+            "contract). A closed issue with a still-RED pin ('false-close "
+            "rot') is always flagged regardless of age. "
+            "Env: HYDRAFLOW_STALE_ISSUE_REGRESSION_ROT_STALE_DAYS."
+        ),
     )
     triage_retry_interval: int = Field(
         default=86400,
