@@ -502,7 +502,7 @@ jobs:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
       - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
-      - name: Run fast subset (s01, s06, s53, s54, s55, s58)
+      - name: Run fast subset (s01, s06, s53, s54, s55, s58, s59)
         run: |
           # Run every scenario and aggregate failures — do NOT early-exit on the
           # first red, or a broken leading scenario (e.g. s01, #9754) silently
@@ -514,9 +514,11 @@ jobs:
           # work-queue strategy dial (#10037): the picker decides what the
           # factory works on next, and the dial is the only runtime access to
           # it, so a broken dropdown is worth catching per-PR rather than at
-          # the next collective run.
+          # the next collective run. s59 guards the board's strategy badge —
+          # the config→/api/control/status→context→StreamView chain that tells
+          # an operator which algorithm is picking work (#10067).
           rc=0
-          for s in s01_happy_single_issue s06_kill_switch_via_ui s53_model_routing_settings_ui s54_decompose_to_converge s55_nested_decompose s58_work_queue_settings_ui; do
+          for s in s01_happy_single_issue s06_kill_switch_via_ui s53_model_routing_settings_ui s54_decompose_to_converge s55_nested_decompose s58_work_queue_settings_ui s59_queue_strategy_board_badge; do
             if python scripts/sandbox_scenario.py run "$s"; then
               echo "::notice::sandbox $s PASSED"
             else

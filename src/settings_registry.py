@@ -102,6 +102,21 @@ SETTINGS: dict[str, SettingSpec] = {
     # Live: GitHubDataCache.get_issues_by_label re-reads the bound on every
     # call (#9814), so a change applies to the next cached read.
     "github_cache_issue_list_ttl_s": SettingSpec("Reliability", live=True, order=3),
+    # --- Event-Loop Watchdog (thread-level freeze detector, #9552) --------
+    # enabled gates thread startup (captured at orchestrator start) → restart
+    # badge; the other two are re-read by the watchdog thread on every poll /
+    # at trip time (the builder threads them through as live callables).
+    # hard_restart defaults False (notify-default, restart-opt-in) — flipping
+    # it is the operator's explicit consent to supervisor-driven restarts.
+    "event_loop_watchdog_enabled": SettingSpec(
+        "Event-Loop Watchdog", live=False, order=0
+    ),
+    "event_loop_watchdog_stall_seconds": SettingSpec(
+        "Event-Loop Watchdog", live=True, order=1
+    ),
+    "event_loop_watchdog_hard_restart": SettingSpec(
+        "Event-Loop Watchdog", live=True, order=2
+    ),
     # --- Branch GC (stale agent-branch reconciler, #10011) ----------------
     # Live: StaleIssueLoop re-reads these each tick, no restart needed.
     # delete_enabled defaults False (report/comment-only) since deletion is

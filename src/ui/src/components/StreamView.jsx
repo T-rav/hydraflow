@@ -33,6 +33,13 @@ const TERMINAL_STAGE_KEYS = new Set(
   PIPELINE_STAGES.filter(s => !s.role && !s.configKey).map(s => s.key)
 )
 
+// Human-readable labels for the work-queue strategy badge (#10067).
+const QUEUE_STRATEGY_LABELS = {
+  weighted_mix: 'weighted',
+  priority: 'priority',
+  fifo: 'fifo',
+}
+
 function PendingIntentCard({ intent }) {
   return (
     <div style={styles.pendingCard}>
@@ -45,7 +52,7 @@ function PendingIntentCard({ intent }) {
   )
 }
 
-function PipelineFlow({ stageGroups }) {
+function PipelineFlow({ stageGroups, queueStrategy }) {
   const { mergedCount, failedCount } = useMemo(() => {
     const merged = stageGroups.find(g => g.stage.key === 'merged')?.issues.length || 0
     const failed = stageGroups.reduce(
@@ -111,6 +118,15 @@ function PipelineFlow({ stageGroups }) {
   return (
     <div style={styles.flowContainer} data-testid="pipeline-flow">
       <span style={styles.flowTitle}>Pipeline Flow</span>
+      {queueStrategy && (
+        <span
+          style={styles.queueStrategyBadge}
+          data-testid="queue-strategy-badge"
+          title={`work-queue strategy: ${queueStrategy} — the algorithm choosing which issue the factory works next`}
+        >
+          ⚡ {QUEUE_STRATEGY_LABELS[queueStrategy] || queueStrategy}
+        </span>
+      )}
       <div style={styles.flowConnector} />
       {triageGroup && renderFlowStage(triageGroup)}
       {productGroups.length > 0 && (
@@ -328,6 +344,12 @@ export function toStreamIssue(pipeIssue, stageKey, prs) {
     epicNumber: pipeIssue.epic_number || 0,
     isEpicChild: pipeIssue.is_epic_child || false,
     repo: pipeIssue.repo || '',
+    // Work-queue visualisation (#10067): the P0/P1/P2 band and the position the
+    // active strategy would dispatch this issue in. dispatch_rank is present
+    // only on queued entries; default to a large sentinel so active/unranked
+    // items sort after ranked ones.
+    priority: pipeIssue.priority || 'none',
+    dispatchRank: pipeIssue.dispatch_rank ?? Number.MAX_SAFE_INTEGER,
   }
 }
 
@@ -519,11 +541,15 @@ export function StreamView({ intents, expandedStages, onToggleStage, onRequestCh
     return PIPELINE_STAGES.map(stage => {
       const stageIssues = (pipelineIssues[stage.key] || [])
         .map(pi => toStreamIssue(pi, stage.key, prs))
-      // Sort active-first
+      // Active-first, then queued issues in DISPATCH order (#10067): the
+      // backend stamps each queued entry with dispatch_rank — the position the
+      // active queue strategy would pick it — so the top queued card is the one
+      // the factory works next, instead of arrival order.
       stageIssues.sort((a, b) => {
         const aActive = a.overallStatus === 'active' ? 1 : 0
         const bActive = b.overallStatus === 'active' ? 1 : 0
-        return bActive - aActive
+        if (aActive !== bActive) return bActive - aActive
+        return a.dispatchRank - b.dispatchRank
       })
       return { stage, issues: stageIssues }
     })
@@ -542,7 +568,7 @@ export function StreamView({ intents, expandedStages, onToggleStage, onRequestCh
         <PendingIntentCard key={`pending-${i}`} intent={intent} />
       ))}
 
-      <PipelineFlow stageGroups={stageGroups} />
+      <PipelineFlow stageGroups={stageGroups} queueStrategy={config?.queue_strategy} />
 
       <EpicOverviewPanel epics={epics} config={config} />
 
@@ -767,6 +793,16 @@ const styles = {
     color: theme.textMuted,
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+  },
+  queueStrategyBadge: {
+    fontSize: 9,
+    fontWeight: 600,
+    color: theme.accent,
+    background: theme.accentSubtle,
+    padding: '1px 6px',
+    borderRadius: 8,
     flexShrink: 0,
     whiteSpace: 'nowrap',
   },
