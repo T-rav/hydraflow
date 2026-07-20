@@ -1154,8 +1154,14 @@ def _build_detector_calibration(ports: dict[str, Any], config: Any, deps: Any) -
 
     state = ports.get("detector_calibration_state") or MagicMock()
     ports.setdefault("detector_calibration_state", state)
+    pr_manager = ports.get("pr_manager") or ports["github"]
+    github_cache = _scenario_github_cache(ports, config, pr_manager)
     return DetectorCalibrationLoop(
-        config=config, state=state, pr_manager=ports["github"], deps=deps
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        deps=deps,
+        github_cache=github_cache,
     )
 
 
@@ -1726,12 +1732,14 @@ def _build_triage_retry(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         ports["triage_retry_state"] = state
 
     pr_manager = ports.get("pr_manager") or ports["github"]
+    github_cache = _scenario_github_cache(ports, config, pr_manager)
 
     return TriageRetryLoop(
         config=config,
         state=state,
         pr_manager=pr_manager,
         deps=deps,
+        github_cache=github_cache,
     )
 
 

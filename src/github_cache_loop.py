@@ -44,8 +44,11 @@ _RC_RUNS_FETCH_LIMIT = 100
 # this multiple of the caller's bound — the same x3 convention the
 # dashboard uses to call the PR snapshots stale (``data_poll_interval *
 # 3``). Beyond it, consumers get ``[]`` and skip the tick rather than
-# make decisions on ancient run history.
-_RC_RUNS_STALE_SERVE_MULTIPLIER = 3.0
+# make decisions on ancient run history. Shared by the RC-runs and
+# issue-list datasets (#9814).
+_STALE_SERVE_MULTIPLIER = 3.0
+# Back-compat alias — the RC-runs slice landed under this name.
+_RC_RUNS_STALE_SERVE_MULTIPLIER = _STALE_SERVE_MULTIPLIER
 
 
 @dataclass
@@ -99,6 +102,12 @@ class GitHubDataCache:
         # loop first-ticks coalesces on one gh call.
         self._rc_workflow_runs = CacheSnapshot()
         self._rc_workflow_runs_lock = asyncio.Lock()
+        # Shared issue-list-by-label snapshots (#9814): keyed by
+        # ``state:label:limit``, demand-refreshed like the RC runs. One
+        # lock for all keys — refreshes are rare (one per key per TTL) and
+        # serializing them is itself a gh-load reduction.
+        self._issue_lists: dict[str, CacheSnapshot] = {}
+        self._issue_lists_lock = asyncio.Lock()
 
         # Load persisted cache on construction
         self._load_from_disk()
@@ -182,7 +191,7 @@ class GitHubDataCache:
                 )
             except Exception as exc:
                 reraise_on_credit_or_bug(exc)
-                grace = max_age_seconds * _RC_RUNS_STALE_SERVE_MULTIPLIER
+                grace = max_age_seconds * _STALE_SERVE_MULTIPLIER
                 serve_stale = snap.data is not None and snap.age_seconds <= grace
                 logger.warning(
                     "rc_workflow_runs refresh failed (age=%.0fs); %s",
@@ -196,6 +205,79 @@ class GitHubDataCache:
             )
             self._save_to_disk()
             return list(runs)
+
+    async def get_issues_by_label(
+        self,
+        label: str,
+        *,
+        state: str = "open",
+        limit: int = 100,
+        max_age_seconds: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return the shared issue-list snapshot for *label* (#9814).
+
+        Serves ``PRPort.list_issues_by_label`` (``state="open"``) or
+        ``PRPort.list_closed_issues_by_label`` (``state="closed"``) results
+        through the same demand-refreshed, staleness-bounded discipline as
+        :meth:`get_rc_workflow_runs`:
+
+        - snapshot younger than the bound → served with no gh call;
+        - otherwise one refresh through the port (which honors the gh
+          circuit breaker), with concurrent callers coalescing on the lock
+          so a restart thundering-herd costs one gh call per key;
+        - refresh failure → the stale snapshot is served while younger
+          than 3x the bound (with a staleness log line), else ``[]`` so
+          consumer loops skip the tick instead of crashing;
+        - billing/bug signals always propagate
+          (``reraise_on_credit_or_bug``).
+
+        The default bound is the ``github_cache_issue_list_ttl_s`` knob
+        (re-read on every call — live-tunable from the System tab). A bound
+        of 0 disables caching: every read refreshes, still single-flight
+        and degrade-safe. Snapshots are keyed by ``state:label:limit`` and
+        disk-persisted for restart recovery.
+
+        Rows keep the port's ``GitHubIssueSummary`` dict shape (``number``,
+        ``title``, ``body``, ``updated_at``, plus ``labels`` for open /
+        ``closed_at`` for closed).
+        """
+        if state not in ("open", "closed"):
+            msg = f"get_issues_by_label: unsupported state {state!r}"
+            raise ValueError(msg)
+        if max_age_seconds is None:
+            max_age_seconds = float(self._config.github_cache_issue_list_ttl_s)
+        key = f"{state}:{label}:{limit}"
+        snap = self._issue_lists.get(key, CacheSnapshot())
+        if snap.data is not None and snap.age_seconds <= max_age_seconds:
+            return list(snap.data)
+        async with self._issue_lists_lock:
+            snap = self._issue_lists.get(key, CacheSnapshot())
+            if snap.data is not None and snap.age_seconds <= max_age_seconds:
+                return list(snap.data)
+            try:
+                if state == "open":
+                    rows = await self._prs.list_issues_by_label(label)
+                else:
+                    rows = await self._prs.list_closed_issues_by_label(
+                        label, limit=limit
+                    )
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                grace = max_age_seconds * _STALE_SERVE_MULTIPLIER
+                serve_stale = snap.data is not None and snap.age_seconds <= grace
+                logger.warning(
+                    "issue_lists[%s] refresh failed (age=%.0fs); %s",
+                    key,
+                    snap.age_seconds,
+                    "serving stale snapshot" if serve_stale else "returning empty",
+                    exc_info=True,
+                )
+                return list(snap.data) if serve_stale else []
+            self._issue_lists[key] = CacheSnapshot(
+                data=list(rows), fetched_at=datetime.now(UTC)
+            )
+            self._save_to_disk()
+            return list(rows)
 
     # --- Poll (called by GitHubCacheLoop) ---
 
@@ -279,6 +361,10 @@ class GitHubDataCache:
 
         If *dataset* is None, invalidate all datasets.
         """
+        if dataset in (None, "issue_lists"):
+            self._issue_lists = {}
+            if dataset == "issue_lists":
+                return
         targets = (
             [f"_{dataset}"]
             if dataset
@@ -327,6 +413,18 @@ class GitHubDataCache:
                 data["collaborators"] = sorted(self._collaborators.data)
             if self._rc_workflow_runs.data is not None:
                 data["rc_workflow_runs"] = self._rc_workflow_runs.data
+            issue_lists: dict[str, Any] = {
+                key: {
+                    "rows": snap.data,
+                    "fetched_at": (
+                        snap.fetched_at.isoformat() if snap.fetched_at else None
+                    ),
+                }
+                for key, snap in self._issue_lists.items()
+                if snap.data is not None
+            }
+            if issue_lists:
+                data["issue_lists"] = issue_lists
             data["fetched_at"] = datetime.now(UTC).isoformat()
             self._cache_file.write_text(json.dumps(data, indent=2))
         except Exception:
@@ -378,6 +476,20 @@ class GitHubDataCache:
                     data=[r for r in raw["rc_workflow_runs"] if isinstance(r, dict)],
                     fetched_at=fetched_at,
                 )
+            if isinstance(raw.get("issue_lists"), dict):
+                for key, entry in raw["issue_lists"].items():
+                    if not isinstance(entry, dict):
+                        continue
+                    rows = entry.get("rows")
+                    if not isinstance(rows, list):
+                        continue
+                    entry_ts = entry.get("fetched_at")
+                    self._issue_lists[key] = CacheSnapshot(
+                        data=[r for r in rows if isinstance(r, dict)],
+                        fetched_at=(
+                            datetime.fromisoformat(entry_ts) if entry_ts else None
+                        ),
+                    )
             logger.info("Loaded github cache from disk (%s)", self._cache_file)
         except Exception:
             logger.debug("Failed to load github cache from disk", exc_info=True)

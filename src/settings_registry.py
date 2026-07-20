@@ -83,6 +83,9 @@ SETTINGS: dict[str, SettingSpec] = {
     "poll_interval": SettingSpec("Scheduling", live=True, order=0),
     "pr_unstick_interval": SettingSpec("Scheduling", live=True, order=1),
     "pr_unstick_batch_size": SettingSpec("Scheduling", live=True, order=2),
+    # Restart-required: each loop reads the stagger window once, at the top
+    # of its run() task (#9814).
+    "loop_startup_stagger_s": SettingSpec("Scheduling", live=False, order=3),
     # --- PR Unsticker ----------------------------------------------------
     "unstick_auto_merge": SettingSpec("PR Unsticker", live=True, order=0),
     "unstick_all_causes": SettingSpec("PR Unsticker", live=True, order=1),
@@ -96,6 +99,9 @@ SETTINGS: dict[str, SettingSpec] = {
     "gh_circuit_breaker_enabled": SettingSpec("Reliability", live=True, order=0),
     "merge_policy_enabled": SettingSpec("Reliability", live=True, order=1),
     "stale_code_alert_threshold": SettingSpec("Reliability", live=True, order=2),
+    # Live: GitHubDataCache.get_issues_by_label re-reads the bound on every
+    # call (#9814), so a change applies to the next cached read.
+    "github_cache_issue_list_ttl_s": SettingSpec("Reliability", live=True, order=3),
     # --- Branch GC (stale agent-branch reconciler, #10011) ----------------
     # Live: StaleIssueLoop re-reads these each tick, no restart needed.
     # delete_enabled defaults False (report/comment-only) since deletion is

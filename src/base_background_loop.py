@@ -11,6 +11,7 @@ import abc
 import asyncio
 import contextlib
 import logging
+import zlib
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -369,9 +370,38 @@ class BaseBackgroundLoop(abc.ABC):
             # best-effort — don't break the loop, but leave a breadcrumb
             logger.debug("%s: timestamp write failed", self._worker_name, exc_info=True)
 
+    def _startup_stagger_seconds(self) -> float:
+        """Deterministic first-tick offset within the configured spread (#9814).
+
+        A restart used to fire every loop's first cycle — and therefore
+        every loop's GitHub reads — at the same instant. Each loop now
+        delays its first cycle by ``crc32(worker_name) % spread`` seconds:
+        deterministic across restarts (no random jitter to reason about),
+        roughly uniform across loops. ``run_on_startup=True`` loops are
+        exempt — ``github_cache`` must populate the shared cache
+        immediately at boot so the staggered readers land on a warm cache.
+        A :meth:`trigger` or stop request cuts the stagger short.
+        """
+        if self._run_on_startup:
+            return 0.0
+        spread = getattr(self._config, "loop_startup_stagger_s", 0)
+        # int-guard: test doubles pass MagicMock configs — never let a mock
+        # attribute masquerade as a spread.
+        if not isinstance(spread, int) or isinstance(spread, bool) or spread <= 0:
+            return 0.0
+        return float(zlib.crc32(self._worker_name.encode()) % spread)
+
     async def run(self) -> None:
         """Run the background worker loop until the stop event is set."""
         self._run_started_at = datetime.now(UTC)
+        stagger = self._startup_stagger_seconds()
+        if stagger > 0:
+            logger.debug(
+                "%s: staggering first tick by %.0fs", self._worker_name, stagger
+            )
+            await self._sleep_or_trigger(stagger)
+            if self._stop_event.is_set():
+                return
         # Run immediately if configured, or if cycles were missed during downtime
         if self._run_on_startup or self._should_run_catchup():
             try:
