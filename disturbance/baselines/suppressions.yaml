@@ -16,12 +16,16 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ +decompose-to-converge PLC0415 lazy imports (decomposition_council/issue_decomposer/decompose_terminal/decomposition_docs\
   \ deferred run_lightweight_agent + models imports \u2014 circular-safe convention).\
   \ re-snapshot 2026-07-12: +1 sandbox_main type-ignore[attr-defined] (6\u21927) for\
-  \ the s54 DecompositionCouncil fake-LLM sentinel attach \u2014 same dynamic-attach idiom\
-  \ as the 6 existing sentinel wirings; -1 decision.py PLC0415 (the deferred\
+  \ the s54 DecompositionCouncil fake-LLM sentinel attach \u2014 same dynamic-attach\
+  \ idiom as the 6 existing sentinel wirings; -1 decision.py PLC0415 (the deferred\
   \ decompose_terminal imports no longer need the noqa after the b8ed6d8f cast fix).\
-  \ re-snapshot 2026-07-13: +1 sandbox_main type-ignore[misc] (3->4) — _apply_sandbox_config_overrides\
+  \ re-snapshot 2026-07-13: +1 sandbox_main type-ignore[misc] (3->4) \u2014 _apply_sandbox_config_overrides\
   \ sets config.merge_policy_enabled=False for the air-gap (#9754), same frozen-field\
-  \ assignment idiom as the 3 sibling overrides it now sits beside."
+  \ assignment idiom as the 3 sibling overrides it now sits beside. re-snapshot 2026-07-19:\
+  \ -2 staging_bisect_loop.py PLC0415 (#9554/#10028 \u2014 _run_bisect_probe/_run_gh\
+  \ migrated onto the shared subprocess_util.run_subprocess_result/run_subprocess\
+  \ bounded helper; each dropped a now-redundant local 'import asyncio' re-import\
+  \ that shadowed the module-level import)."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -296,7 +300,7 @@ entries:
   src/skill_prompt_eval_loop.py::noqa:BLE001: 1
   src/skill_prompt_eval_loop.py::noqa:PLC0415: 1
   src/staging_bisect_loop.py::noqa:BLE001: 3
-  src/staging_bisect_loop.py::noqa:PLC0415: 14
+  src/staging_bisect_loop.py::noqa:PLC0415: 12
   src/staging_bisect_loop.py::noqa:PLR0911: 2
   src/staging_promotion_loop.py::noqa:BLE001: 4
   src/state/_convergence.py::noqa:PLC0415: 1
