@@ -30,6 +30,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.github_cache")
 
+# Workflow file whose CI-run history the shared cache serves (#9814).
+# Single-sourced here so the cache and its consumers (flake_tracker,
+# rc_budget) can never drift on which workflow they read.
+RC_PROMOTION_WORKFLOW = "rc-promotion-scenario.yml"
+
+# One snapshot fetch covers every consumer's window: rc_budget previously
+# ran ``gh run list --limit 100`` (30-day window), flake_tracker ``--limit
+# 20``. Also the REST runs endpoint's per_page cap.
+_RC_RUNS_FETCH_LIMIT = 100
+
+# On refresh failure a stale snapshot is still served while younger than
+# this multiple of the caller's bound — the same x3 convention the
+# dashboard uses to call the PR snapshots stale (``data_poll_interval *
+# 3``). Beyond it, consumers get ``[]`` and skip the tick rather than
+# make decisions on ancient run history.
+_RC_RUNS_STALE_SERVE_MULTIPLIER = 3.0
+
 
 @dataclass
 class CacheSnapshot:
@@ -77,6 +94,11 @@ class GitHubDataCache:
         self._hitl_items = CacheSnapshot()
         self._label_counts = CacheSnapshot()
         self._collaborators = CacheSnapshot()
+        # RC-promotion CI runs (#9814): demand-refreshed, not polled — see
+        # get_rc_workflow_runs. Single-flight lock so a thundering herd of
+        # loop first-ticks coalesces on one gh call.
+        self._rc_workflow_runs = CacheSnapshot()
+        self._rc_workflow_runs_lock = asyncio.Lock()
 
         # Load persisted cache on construction
         self._load_from_disk()
@@ -115,6 +137,65 @@ class GitHubDataCache:
         if isinstance(snap, CacheSnapshot):
             return snap.age_seconds
         return float("inf")
+
+    async def get_rc_workflow_runs(
+        self, *, max_age_seconds: float | None = None
+    ) -> list[dict[str, Any]]:
+        """Return the shared RC-promotion workflow-run snapshot (#9814).
+
+        The read carries an explicit staleness bound (default
+        ``data_poll_interval * 3`` — the same multiplier the dashboard
+        uses to call the PR snapshots stale):
+
+        - snapshot younger than the bound → served with no gh call;
+        - otherwise one refresh via ``PRPort.list_runs_for_workflow``,
+          with concurrent callers coalescing on the lock so a restart
+          thundering-herd costs one gh call, not one per loop;
+        - refresh failure → the stale snapshot is served while younger
+          than 3x the bound, else ``[]`` so decision loops skip the tick
+          instead of acting on ancient run history.
+
+        Demand-refreshed rather than fetched in :meth:`poll`: the
+        consumers (``flake_tracker``, ``rc_budget``) tick every 4h, so
+        polling runs every ``data_poll_interval`` would multiply gh load
+        ~50x instead of cutting it. This is also why the dashboard's
+        cache-health staleness check must NOT include this dataset — a
+        4h-cadence snapshot is healthy at ages that convention calls
+        stale.
+
+        Rows use the port's shape: ``{"id", "url", "status",
+        "conclusion", "created_at", "run_started_at", "updated_at"}``,
+        newest first.
+        """
+        if max_age_seconds is None:
+            max_age_seconds = float(self._config.data_poll_interval * 3)
+        snap = self._rc_workflow_runs
+        if snap.data is not None and snap.age_seconds <= max_age_seconds:
+            return list(snap.data)
+        async with self._rc_workflow_runs_lock:
+            snap = self._rc_workflow_runs
+            if snap.data is not None and snap.age_seconds <= max_age_seconds:
+                return list(snap.data)
+            try:
+                runs = await self._prs.list_runs_for_workflow(
+                    RC_PROMOTION_WORKFLOW, limit=_RC_RUNS_FETCH_LIMIT
+                )
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                grace = max_age_seconds * _RC_RUNS_STALE_SERVE_MULTIPLIER
+                serve_stale = snap.data is not None and snap.age_seconds <= grace
+                logger.warning(
+                    "rc_workflow_runs refresh failed (age=%.0fs); %s",
+                    snap.age_seconds,
+                    "serving stale snapshot" if serve_stale else "returning empty",
+                    exc_info=True,
+                )
+                return list(snap.data) if serve_stale else []
+            self._rc_workflow_runs = CacheSnapshot(
+                data=runs, fetched_at=datetime.now(UTC)
+            )
+            self._save_to_disk()
+            return list(runs)
 
     # --- Poll (called by GitHubCacheLoop) ---
 
@@ -207,6 +288,7 @@ class GitHubDataCache:
                 "_hitl_items",
                 "_label_counts",
                 "_collaborators",
+                "_rc_workflow_runs",
             ]
         )
         for attr in targets:
@@ -243,6 +325,8 @@ class GitHubDataCache:
                 )
             if self._collaborators.data is not None:
                 data["collaborators"] = sorted(self._collaborators.data)
+            if self._rc_workflow_runs.data is not None:
+                data["rc_workflow_runs"] = self._rc_workflow_runs.data
             data["fetched_at"] = datetime.now(UTC).isoformat()
             self._cache_file.write_text(json.dumps(data, indent=2))
         except Exception:
@@ -288,6 +372,11 @@ class GitHubDataCache:
             if "collaborators" in raw:
                 self._collaborators = CacheSnapshot(
                     data=set(raw["collaborators"]), fetched_at=fetched_at
+                )
+            if "rc_workflow_runs" in raw:
+                self._rc_workflow_runs = CacheSnapshot(
+                    data=[r for r in raw["rc_workflow_runs"] if isinstance(r, dict)],
+                    fetched_at=fetched_at,
                 )
             logger.info("Loaded github cache from disk (%s)", self._cache_file)
         except Exception:
