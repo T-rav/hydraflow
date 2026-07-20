@@ -22,8 +22,6 @@ keys are ``adr_touchpoint_auditor:ADR-NNNN`` (no PR component).
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
 import logging
 import re
@@ -35,6 +33,7 @@ from adr_drift import compute_drift_by_adr
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
 from escalation_reconcile import EscalationReconciler
 from models import WorkCycleResult  # noqa: TCH001
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
     from adr_drift import DriftFinding
@@ -51,30 +50,10 @@ _DEFAULT_PR_LIMIT = 50  # gh pr list page size per tick
 
 # Hard cap on each ``gh`` read. A wedged ``gh`` child (auth prompt, network
 # black-hole) must not hang the loop cycle forever and freeze its heartbeat —
-# the #9410 silent-stall failure class (#9454 / #9508).
+# the #9410 silent-stall failure class (#9454 / #9508). Bounded (and, via
+# ``run_subprocess_result``, circuit-breaker/rate-limit/process-group
+# hardened — #9554/#10028) rather than a raw ``create_subprocess_exec``.
 _GH_TIMEOUT_SECONDS = 120
-
-
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process,
-) -> tuple[bytes, bytes]:
-    """``proc.communicate()`` bounded by ``_GH_TIMEOUT_SECONDS``.
-
-    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
-    the caller can treat it as a failed read (rather than hanging the loop
-    cycle indefinitely).
-    """
-    try:
-        return await asyncio.wait_for(proc.communicate(), timeout=_GH_TIMEOUT_SECONDS)
-    except TimeoutError:
-        # proc.kill() itself raises ProcessLookupError when the child already
-        # exited — suppress it too, not just proc.wait() — so the TimeoutError
-        # (the intended failed-read signal) propagates instead of crashing the
-        # caller with ProcessLookupError. (#9794/#9814)
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
-            await proc.wait()
-        raise
 
 
 def _rollup_key(adr_number: int) -> str:
@@ -177,28 +156,23 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
         ]
         if cursor:
             cmd.extend(["--search", f"merged:>{cursor}"])
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            stdout, stderr = await _communicate_bounded(proc)
-        except TimeoutError:
+            result = await run_subprocess_result(*cmd, timeout=_GH_TIMEOUT_SECONDS)
+        except SubprocessTimeoutError:
             logger.warning(
                 "gh pr list timed out after %ss; skipping tick",
                 _GH_TIMEOUT_SECONDS,
             )
             return []
-        if proc.returncode != 0:
+        if result.returncode != 0:
             logger.warning(
                 "gh pr list failed (rc=%s): %s",
-                proc.returncode,
-                stderr.decode(errors="replace").strip(),
+                result.returncode,
+                result.stderr,
             )
             return []
         try:
-            payload = json.loads(stdout.decode() or "[]")
+            payload = json.loads(result.stdout or "[]")
         except json.JSONDecodeError:
             logger.warning("gh pr list returned non-JSON")
             return []
@@ -223,30 +197,25 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             "--json",
             "files",
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            stdout, stderr = await _communicate_bounded(proc)
-        except TimeoutError:
+            result = await run_subprocess_result(*cmd, timeout=_GH_TIMEOUT_SECONDS)
+        except SubprocessTimeoutError:
             logger.warning(
                 "gh pr view %s timed out after %ss; treating as no files",
                 pr_number,
                 _GH_TIMEOUT_SECONDS,
             )
             return []
-        if proc.returncode != 0:
+        if result.returncode != 0:
             logger.warning(
                 "gh pr view %s failed (rc=%s): %s",
                 pr_number,
-                proc.returncode,
-                stderr.decode(errors="replace").strip(),
+                result.returncode,
+                result.stderr,
             )
             return []
         try:
-            payload = json.loads(stdout.decode() or "{}")
+            payload = json.loads(result.stdout or "{}")
         except json.JSONDecodeError:
             logger.warning("gh pr view %s returned non-JSON", pr_number)
             return []

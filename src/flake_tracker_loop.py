@@ -15,8 +15,6 @@ auto-close via the shared `EscalationReconciler` (#9618 class).
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
 import logging
 import re
@@ -29,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from escalation_reconcile import EscalationReconciler
 from models import WorkCycleResult
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -61,30 +60,10 @@ def _escalation_subject(title: str) -> str | None:
 
 # Hard cap on each ``gh`` read/download. A wedged child must not hang the loop
 # cycle forever and freeze its heartbeat — the #9410 silent-stall failure
-# class (#9454 / #9508).
+# class (#9454 / #9508). Bounded (and, via ``run_subprocess_result``,
+# circuit-breaker/rate-limit/process-group hardened — #9554/#10028) rather
+# than a raw ``create_subprocess_exec``.
 _GH_TIMEOUT_SECONDS = 120
-
-
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process,
-) -> tuple[bytes, bytes]:
-    """``proc.communicate()`` bounded by ``_GH_TIMEOUT_SECONDS``.
-
-    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
-    the caller can treat it as a failed read (rather than hanging the loop
-    cycle indefinitely).
-    """
-    try:
-        return await asyncio.wait_for(proc.communicate(), timeout=_GH_TIMEOUT_SECONDS)
-    except TimeoutError:
-        # proc.kill() itself raises ProcessLookupError when the child already
-        # exited — suppress it too, not just proc.wait() — so the TimeoutError
-        # (the intended failed-read signal) propagates instead of crashing the
-        # caller with ProcessLookupError. (#9794/#9814)
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
-            await proc.wait()
-        raise
 
 
 def parse_junit_xml(xml_bytes: bytes) -> dict[str, str]:
@@ -153,28 +132,23 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
             "--json",
             "databaseId,url,conclusion,createdAt",
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            stdout, stderr = await _communicate_bounded(proc)
-        except TimeoutError:
+            result = await run_subprocess_result(*cmd, timeout=_GH_TIMEOUT_SECONDS)
+        except SubprocessTimeoutError:
             logger.warning(
                 "gh run list timed out after %ss; returning empty",
                 _GH_TIMEOUT_SECONDS,
             )
             return []
-        if proc.returncode != 0:
+        if result.returncode != 0:
             logger.warning(
                 "gh run list exit=%d: %s",
-                proc.returncode,
-                stderr.decode(errors="replace")[:400],
+                result.returncode,
+                result.stderr[:400],
             )
             return []
         try:
-            return json.loads(stdout.decode() or "[]")
+            return json.loads(result.stdout or "[]")
         except json.JSONDecodeError:
             logger.warning("gh run list non-JSON response; returning empty")
             return []
@@ -197,25 +171,20 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
                 "--dir",
                 td,
             ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
             try:
-                _, stderr = await _communicate_bounded(proc)
-            except TimeoutError:
+                result = await run_subprocess_result(*cmd, timeout=_GH_TIMEOUT_SECONDS)
+            except SubprocessTimeoutError:
                 logger.info(
                     "gh run download timed out after %ss for run %s",
                     _GH_TIMEOUT_SECONDS,
                     run_id,
                 )
                 return {}
-            if proc.returncode != 0:
+            if result.returncode != 0:
                 logger.info(
                     "no junit-scenario artifact for run %s: %s",
                     run_id,
-                    stderr.decode(errors="replace")[:200],
+                    result.stderr[:200],
                 )
                 return {}
             combined: dict[str, str] = {}
