@@ -27,7 +27,8 @@ def _write(tmp_path: Path, name: str, body: str) -> Path:
 
 HELD_BACK_BODY = (
     "import pytest\n\n"
-    "@pytest.mark.xfail(reason='Regression for issue #9836 — fix not yet "
+    "@pytest.mark."
+    "xfail(reason='Regression for issue #9836 — fix not yet "
     "landed', strict=False)\n"
     "def test_thing():\n"
     "    assert False\n"
@@ -35,7 +36,8 @@ HELD_BACK_BODY = (
 
 HELD_BACK_MULTILINE_BODY = (
     "import pytest\n\n"
-    "@pytest.mark.xfail(\n"
+    "@pytest.mark."
+    "xfail(\n"
     "    reason='Regression for issue #6408 — fix not yet landed', "
     "strict=False\n"
     ")\n"

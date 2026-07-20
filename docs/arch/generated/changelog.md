@@ -12,6 +12,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W29
 
+- `42bfd77` — chore(arch): regen mockworld usage map (scenario now drives FakeGitHub) *(2026-07-19)*
 - `ccf627f` — Merge remote-tracking branch 'origin/staging' into fix/issue-9597-orphaned-red *(2026-07-19)*
 - `18b4976` — Merge remote-tracking branch 'origin/staging' into fix/issue-9597-orphaned-red *(2026-07-19)*
 - `a168c9e` — fix(stale-issue): detect regression-test rot — false-close + orphaned-RED (#9597) (#9597) *(2026-07-19)*

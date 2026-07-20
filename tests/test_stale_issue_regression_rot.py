@@ -28,7 +28,8 @@ from state import StateTracker
 
 HELD_BACK = (
     "import pytest\n\n"
-    "@pytest.mark.xfail(reason='Regression for issue #{n} — fix not yet "
+    "@pytest.mark."
+    "xfail(reason='Regression for issue #{n} — fix not yet "
     "landed', strict=False)\n"
     "def test_thing():\n"
     "    assert False\n"

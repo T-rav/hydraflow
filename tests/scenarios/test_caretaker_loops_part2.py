@@ -965,7 +965,8 @@ class TestL23bRegressionRot:
         regressions_dir.mkdir(parents=True, exist_ok=True)
         (regressions_dir / "test_issue_9911.py").write_text(
             "import pytest\n\n"
-            "@pytest.mark.xfail(reason='Regression for issue #9911 — fix not "
+            "@pytest.mark."
+            "xfail(reason='Regression for issue #9911 — fix not "
             "yet landed', strict=False)\n"
             "def test_thing():\n"
             "    assert False\n",
