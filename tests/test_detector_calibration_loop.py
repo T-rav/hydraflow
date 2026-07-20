@@ -35,8 +35,16 @@ def _deps(stop: asyncio.Event, enabled: bool = True) -> LoopDeps:
 
 
 def _closed(number: int, title: str, age_days: int = 1) -> dict:
+    """Adapter-shaped closed-issue row: the churn window keys on
+    ``closed_at`` (#9727); ``updated_at`` rides along for shape fidelity."""
     stamp = (datetime.now(UTC) - timedelta(days=age_days)).isoformat()
-    return {"number": number, "title": title, "body": "", "updated_at": stamp}
+    return {
+        "number": number,
+        "title": title,
+        "body": "",
+        "updated_at": stamp,
+        "closed_at": stamp,
+    }
 
 
 @pytest.fixture

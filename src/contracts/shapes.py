@@ -137,14 +137,17 @@ class GhIssueSummary(BaseModel):
 
 
 class GhIssueListItem(BaseModel):
-    """``gh issue list --json number,title,body,updatedAt[,labels]`` element shape.
+    """``gh issue list --json number,title,body,updatedAt[,labels][,closedAt]``
+    element shape.
 
     Narrower than :class:`GhIssueSummary` — list invocations typically
     omit ``state`` (the filter is already applied by ``--state open|closed``).
     ``labels`` is projected by the OPEN listing only (#9943: the preflight
-    human-required filter needs it); the closed listing omits it and the
-    default keeps that parse valid. A separate shape so the broader summary
-    keeps its drift-detection bite on view invocations.
+    human-required filter needs it); ``closedAt`` by the CLOSED listing only
+    (#9727: detector calibration windows on close time, not last activity).
+    Each defaults so the other listing's narrower projection stays valid.
+    A separate shape so the broader summary keeps its drift-detection bite
+    on view invocations.
     """
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -154,6 +157,7 @@ class GhIssueListItem(BaseModel):
     body: str | None = None
     updated_at: str | None = Field(default=None, alias="updatedAt")
     labels: list[GhLabel] = Field(default_factory=list)
+    closed_at: str | None = Field(default=None, alias="closedAt")
 
 
 class GhPromotionPR(BaseModel):

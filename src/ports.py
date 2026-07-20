@@ -439,7 +439,12 @@ class PRPort(Protocol):
     async def list_closed_issues_by_label(
         self, label: str, limit: int = 100
     ) -> list[GitHubIssueSummary]:
-        """Return closed issues with the given label as a list of typed dicts."""
+        """Return closed issues with the given label as a list of typed dicts.
+
+        Rows carry ``closed_at`` (gh ``closedAt``, #9727) in addition to
+        ``updated_at`` — window filters over closed issues must key on
+        ``closed_at``, since ``updated_at`` moves on ANY issue activity.
+        """
         ...
 
     async def list_prs_by_label(self, label: str) -> list[PRInfo]:

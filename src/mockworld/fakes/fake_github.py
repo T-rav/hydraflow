@@ -77,6 +77,10 @@ class FakeIssue:
     # because FakeComment *is* a str.
     comments: list[FakeComment] = field(default_factory=list)
     updated_at: str = "2026-01-01T00:00:00Z"
+    # Only meaningful once state == "closed"; mirrors gh's closedAt (#9727).
+    # Empty = "not explicitly seeded": the closed listing falls back to
+    # updated_at, mirroring GitHub (closing an issue touches both).
+    closed_at: str = ""
 
 
 @dataclass
@@ -336,6 +340,11 @@ class FakeGitHub:
         """Set the updated_at timestamp on a seeded issue."""
         if issue_number in self._issues:
             self._issues[issue_number].updated_at = updated_at
+
+    def set_issue_closed_at(self, issue_number: int, closed_at: str) -> None:
+        """Set the closed_at timestamp on a seeded issue (#9727)."""
+        if issue_number in self._issues:
+            self._issues[issue_number].closed_at = closed_at
 
     def set_rate_limit_mode(
         self,
@@ -773,7 +782,12 @@ class FakeGitHub:
         *,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """Return closed issues carrying *label* (most recent up to *limit*)."""
+        """Return closed issues carrying *label* (most recent up to *limit*).
+
+        ``closed_at`` mirrors the adapter's ``closedAt`` projection (#9727)
+        so churn windows keyed on close time behave identically under the
+        fake and the real port.
+        """
         self._maybe_rate_limit()
         rows = [
             {
@@ -781,6 +795,8 @@ class FakeGitHub:
                 "title": issue.title,
                 "body": issue.body,
                 "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
+                "closed_at": getattr(issue, "closed_at", "")
+                or getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
             }
             for issue in self._issues.values()
             if issue.state != "open" and label in issue.labels
