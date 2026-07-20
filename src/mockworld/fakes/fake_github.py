@@ -78,7 +78,9 @@ class FakeIssue:
     comments: list[FakeComment] = field(default_factory=list)
     updated_at: str = "2026-01-01T00:00:00Z"
     # Only meaningful once state == "closed"; mirrors gh's closedAt (#9727).
-    closed_at: str = "2026-01-01T00:00:00Z"
+    # Empty = "not explicitly seeded": the closed listing falls back to
+    # updated_at, mirroring GitHub (closing an issue touches both).
+    closed_at: str = ""
 
 
 @dataclass
@@ -793,7 +795,8 @@ class FakeGitHub:
                 "title": issue.title,
                 "body": issue.body,
                 "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
-                "closed_at": getattr(issue, "closed_at", "2026-01-01T00:00:00Z"),
+                "closed_at": getattr(issue, "closed_at", "")
+                or getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
             }
             for issue in self._issues.values()
             if issue.state != "open" and label in issue.labels

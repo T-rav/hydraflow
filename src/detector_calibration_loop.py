@@ -130,7 +130,12 @@ class DetectorCalibrationLoop(BaseBackgroundLoop):
             # Window keys on closed_at (#9727): updated_at moves on ANY
             # activity — a comment on an old closed escalation would pull
             # it back into the window and fabricate a repeat.
-            ts = _parse_ts(str(issue.get("closed_at", "")))
+            # Fall back to updated_at only when closed_at is absent entirely
+            # (pre-#9727 rows) — the fabricated-repeat FP mode returns only
+            # for those legacy rows, and findings stay advisory/auto-close.
+            ts = _parse_ts(str(issue.get("closed_at", ""))) or _parse_ts(
+                str(issue.get("updated_at", ""))
+            )
             number = issue.get("number")
             if ts is None or ts < cutoff or not number:
                 continue
