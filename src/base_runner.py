@@ -159,11 +159,21 @@ class BaseRunner:
         on_output: Callable[[str], bool] | None = None,
         telemetry_stats: Mapping[str, object] | None = None,
         issue_labels: Sequence[str] | None = None,
+        telemetry_source: str | None = None,
     ) -> str:
         """Run a claude subprocess and stream its output.
 
         Retries up to ``_AUTH_RETRY_MAX`` times on transient authentication
         failures (OAuth token refresh blips) with exponential backoff.
+
+        *telemetry_source* overrides the ``PromptTelemetry.record`` source
+        attribution only (#9998: skill spawns tag their skill name — e.g.
+        ``"diff-sanity"`` — so ``get_source_totals()`` keys match the
+        adversarial corpus's ``expected_catcher`` names and
+        ``pick_refine_order`` gets real per-skill signal). It deliberately
+        does NOT touch ``event_data["source"]``: that phase tag is
+        load-bearing for scenario transcript scripting and the dashboard
+        event stream.
 
         *issue_labels* feeds the CH-6 data-governance gate's upward-only
         ``data-class:`` label override. The contract is NOT optional: every
@@ -300,7 +310,7 @@ class BaseRunner:
             raise
         finally:
             duration = time.monotonic() - start
-            source = str(event_data.get("source", "unknown"))
+            source = telemetry_source or str(event_data.get("source", "unknown"))
             issue_number = event_data.get("issue")
             pr_number = event_data.get("pr")
             tool, model = parse_command_tool_model(cmd)

@@ -1191,6 +1191,10 @@ SUMMARY: <one-line summary>
                 worktree_path,
                 {"issue": issue.id, "source": "implementer"},
                 issue_labels=issue.tags,
+                # #9998: tag telemetry with the skill name (not the coarse
+                # phase source) so prompt-efficiency ordering keys match the
+                # adversarial corpus's expected_catcher names.
+                telemetry_source=skill.name,
             )
             passed, summary, findings = skill.result_parser(transcript)
             if passed:
