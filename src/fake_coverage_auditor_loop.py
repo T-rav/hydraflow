@@ -619,6 +619,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
 
         filed = 0
         updated = 0
+        rollups_closed = 0
         escalated = 0
         dedup = self._dedup.get()
         all_known: dict[str, list[str]] = {}
@@ -693,7 +694,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
             else:
                 # Gap closed — clear attempts + drop the rollup mapping so
                 # the next regression re-files cleanly.
-                await self._clear_rollup_state(
+                rollups_closed += await self._clear_rollup_state(
                     fake, "adapter-surface", dedup, recovered=recovered_surface
                 )
 
@@ -715,7 +716,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 elif action == "updated":
                     updated += 1
             else:
-                await self._clear_rollup_state(
+                rollups_closed += await self._clear_rollup_state(
                     fake, "test-helper", dedup, recovered=recovered_helpers
                 )
 
@@ -747,6 +748,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
             "status": "ok",
             "filed": filed,
             "updated": updated,
+            "rollups_closed": rollups_closed,
             "escalated": escalated,
             "autoclosed": autoclosed,
             "fakes_seen": len(catalog),
@@ -842,31 +844,43 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         kind: str,
         dedup: set[str],
         recovered: list[str] | None = None,
-    ) -> None:
+    ) -> int:
         """Reset rollup tracking when the gap closes (no uncovered methods).
 
         Drops the attempt counter, dedup key, and rollup-issue mapping so
-        a future regression re-files cleanly. When the previous tick had
-        an actual gap (``recovered`` is non-empty) AND a rollup issue is
-        tracked, repaint the body with the "all covered" view first so
-        humans looking at the open issue see the resolution rather than
-        a stale list of methods. The issue itself is left open for humans
-        to close.
+        a future regression re-files cleanly (fresh number, fresh
+        3-strikes clock). When the previous tick had an actual gap
+        (``recovered`` non-empty) AND a rollup issue is tracked, repaint
+        the body with the recovery trajectory, comment, and CLOSE the
+        issue (#9541) — leaving it open for a human was the #9183
+        dead-letter shape every other caretaker rollup has since dropped
+        (#9359, #10015/#10022 precedents). Returns 1 when a rollup was
+        auto-closed, else 0.
         """
         key = f"{fake}:{kind}"  # shared key for attempts + rollup mapping
         dedup_key = f"fake_coverage_auditor:{fake}:{kind}"
         tracked_number = self._state.get_fake_coverage_rollup_issue(key)
+        closed = 0
         if tracked_number and recovered:
             if kind == "adapter-surface":
                 body = self._render_surface_body(fake, [], recovered)
             else:
                 body = self._render_helper_body(fake, [], recovered)
             await self._pr.update_issue_body(tracked_number, body)
+            await self._pr.post_comment(
+                tracked_number,
+                f"All {len(recovered)} {kind} method(s) recovered — coverage "
+                "restored, auto-closing (#9541). A future regression files a "
+                "FRESH rollup with a fresh escalation clock.",
+            )
+            await self._pr.close_issue(tracked_number)
+            closed = 1
         self._state.clear_fake_coverage_attempts(key)
         self._state.clear_fake_coverage_rollup_issue(key)
         if dedup_key in dedup:
             dedup.discard(dedup_key)
             self._dedup.set_all(dedup)
+        return closed
 
     async def _audit_retirement(self, cassette_root: Path) -> int:
         """Find baseline_only cassettes covered by live dispatchers; file

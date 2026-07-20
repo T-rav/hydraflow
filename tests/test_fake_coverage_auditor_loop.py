@@ -394,7 +394,12 @@ async def test_do_work_keeps_escalation_for_live_gap(
     )
     stuck_key = "fake_coverage_auditor:FakeGitHub:adapter-surface"
     dedup.get.return_value = {stuck_key}
-    state.get_fake_coverage_rollup_issue.return_value = 42
+    # Per-kind tracking — only adapter-surface has a tracked rollup; the
+    # test-helper kind (no gap in this fake) must not alias to it now that
+    # _clear_rollup_state auto-closes tracked rollups on recovery (#9541).
+    state.get_fake_coverage_rollup_issue.side_effect = lambda k: (
+        42 if k == "FakeGitHub:adapter-surface" else None
+    )
     pr.list_issues_by_label.return_value = [
         {
             "number": 9618,
@@ -908,6 +913,103 @@ async def test_rollup_body_updated_when_gap_fully_closes(
     assert "missing" in body
     # State was cleared after the body update.
     state.clear_fake_coverage_rollup_issue.assert_any_call("FakeGitHub:adapter-surface")
+
+
+async def test_rollup_autocloses_when_gap_fully_recovers(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """#9541: full recovery closes the tracked rollup issue, not just the body.
+
+    Before this, ``_clear_rollup_state`` repainted the body to the
+    "all covered" view and cleared tracking but left the GitHub issue OPEN
+    forever (the #9183 dead-letter shape) — mirror the #10015
+    resolve-on-clean-tick precedent instead.
+    """
+    cfg, state, pr, dedup = loop_env
+    state.get_fake_coverage_rollup_issue.side_effect = lambda k: (
+        5050 if k == "FakeGitHub:adapter-surface" else None
+    )
+    state.get_fake_coverage_last_known.return_value = {
+        "FakeGitHub": ["missing"],
+        "__uncovered__:FakeGitHub:adapter-surface": ["missing"],
+    }
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n    async def missing(self): ...\n"
+    )
+    cassette_dir = tmp_path / "tests" / "trust" / "contracts" / "cassettes" / "github"
+    cassette_dir.mkdir(parents=True)
+    (cassette_dir / "missing.yaml").write_text(
+        yaml.safe_dump({"input": {"command": "missing"}, "output": {}})
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_reconcile():
+        return None
+
+    async def fake_list_titles():
+        return set()
+
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    stats = await loop._do_work()
+
+    # The rollup issue was commented and closed — no more human-only close.
+    pr.close_issue.assert_awaited_once_with(5050)
+    pr.post_comment.assert_awaited_once()
+    assert pr.post_comment.await_args.args[0] == 5050
+    assert stats["rollups_closed"] == 1
+    # Body repaint (the "all covered" view) still lands before the close.
+    assert pr.update_issue_body.await_args_list[0].args[0] == 5050
+    # Tracking fully cleared so a future regression re-files fresh.
+    state.clear_fake_coverage_rollup_issue.assert_any_call("FakeGitHub:adapter-surface")
+    state.clear_fake_coverage_attempts.assert_any_call("FakeGitHub:adapter-surface")
+
+
+async def test_rollup_autoclose_noop_when_untracked(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """#9541: a clean tick with no tracked rollup must not close anything —
+    the auto-close is keyed strictly on the tracked rollup-issue number, so
+    operator-owned issues (e.g. HITL escalations) are never swept up."""
+    cfg, state, pr, dedup = loop_env
+    state.get_fake_coverage_rollup_issue.return_value = None
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n    async def covered(self): ...\n"
+    )
+    cassette_dir = tmp_path / "tests" / "trust" / "contracts" / "cassettes" / "github"
+    cassette_dir.mkdir(parents=True)
+    (cassette_dir / "covered.yaml").write_text(
+        yaml.safe_dump({"input": {"command": "covered"}, "output": {}})
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_reconcile():
+        return None
+
+    async def fake_list_titles():
+        return set()
+
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    stats = await loop._do_work()
+
+    pr.close_issue.assert_not_awaited()
+    pr.post_comment.assert_not_awaited()
+    assert stats["rollups_closed"] == 0
 
 
 async def test_helper_rollup_same_shape(loop_env, monkeypatch, tmp_path) -> None:
