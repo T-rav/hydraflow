@@ -6,8 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `f9be269` — Merge remote-tracking branch 'origin/staging' into fix/ul-mermaid-dedup *(2026-07-20)*
 - `0b83b6b` — docs: repoint links from deleted term forks to the canonical keepers (#9938) (#9938) *(2026-07-20)*
 - `f332430` — fix(ul): one file per term — uniqueness lint, store dedupe, drop forked duplicates *(2026-07-20)*
+- `9d6184d` — feat(liveness): external factory watchdog + boot-time down-detection (#10044) (#10044) *(2026-07-20)*
 - `9fa2966` — fix(health-monitor): stale-code dead-man-switch — host in HealthMonitorLoop (#9596) (#10035) (#10035) *(2026-07-20)*
 - `6206f38` — fix(stale-issue): detect regression-test rot — false-close + orphaned-RED (#9597) (#10039) (#10039) *(2026-07-20)*
 - `45ef36f` — fix(wiki): worktree-isolate runtime wiki writes — boot store read-only + queue-routed ingest (#9836) (#10033) (#10033) *(2026-07-20)*

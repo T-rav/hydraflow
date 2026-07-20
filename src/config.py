@@ -266,6 +266,12 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_STALE_ISSUE_REGRESSION_ROT_STALE_DAYS",
         14,
     ),
+    ("branch_gc_stale_days", "HYDRAFLOW_BRANCH_GC_STALE_DAYS", 3),
+    (
+        "branch_gc_min_delete_age_days",
+        "HYDRAFLOW_BRANCH_GC_MIN_DELETE_AGE_DAYS",
+        14,
+    ),
     ("auditor_finding_max_age_days", "HYDRAFLOW_AUDITOR_FINDING_MAX_AGE_DAYS", 14),
     ("triage_max_turns", "HYDRAFLOW_TRIAGE_MAX_TURNS", 3),
     ("triage_retry_interval", "HYDRAFLOW_TRIAGE_RETRY_INTERVAL", 86400),
@@ -550,6 +556,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "enable_fresh_branch_rebuild",
         "HYDRAFLOW_ENABLE_FRESH_BRANCH_REBUILD",
         True,
+    ),
+    (
+        "branch_gc_delete_enabled",
+        "HYDRAFLOW_BRANCH_GC_DELETE_ENABLED",
+        False,
     ),
     ("collaborator_check_enabled", "HYDRAFLOW_COLLABORATOR_CHECK_ENABLED", True),
     ("memory_auto_approve", "HYDRAFLOW_MEMORY_AUTO_APPROVE", False),
@@ -1327,6 +1338,43 @@ class HydraFlowConfig(BaseModel):
             "contract). A closed issue with a still-RED pin ('false-close "
             "rot') is always flagged regardless of age. "
             "Env: HYDRAFLOW_STALE_ISSUE_REGRESSION_ROT_STALE_DAYS."
+        ),
+    )
+    branch_gc_stale_days: int = Field(
+        default=3,
+        ge=1,
+        le=90,
+        description=(
+            "Stale agent-branch GC threshold (days, #10011). StaleIssueLoop's "
+            "branch-GC reconciler flags an `agent/issue-*` or `fix/*` remote "
+            "branch carrying a `Fixes #N`-style commit as needing a truth "
+            "comment once it has sat unmerged (no open PR, referenced issue "
+            "still OPEN) for this many days. Posting the comment is deduped "
+            "per branch regardless of this threshold. "
+            "Env: HYDRAFLOW_BRANCH_GC_STALE_DAYS."
+        ),
+    )
+    branch_gc_min_delete_age_days: int = Field(
+        default=14,
+        ge=1,
+        le=365,
+        description=(
+            "Never delete a stale agent/fix branch younger than this many "
+            "days (#10011), even when `branch_gc_delete_enabled=True` — a "
+            "generous floor independent of `branch_gc_stale_days` since "
+            "branch deletion is destructive. "
+            "Env: HYDRAFLOW_BRANCH_GC_MIN_DELETE_AGE_DAYS."
+        ),
+    )
+    branch_gc_delete_enabled: bool = Field(
+        default=False,
+        description=(
+            "Allow StaleIssueLoop's branch-GC reconciler to actually delete "
+            "stale unmerged `agent/issue-*` / `fix/*` branches past "
+            "`branch_gc_min_delete_age_days` (#10011). Defaults to False — "
+            "report/comment-only — because branch deletion is destructive; "
+            "the operator opts in via the System tab. "
+            "Env: HYDRAFLOW_BRANCH_GC_DELETE_ENABLED."
         ),
     )
     triage_retry_interval: int = Field(
