@@ -36,7 +36,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev factory dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial
+.PHONY: help run dev factory dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -61,8 +61,9 @@ help:
 	@echo "  make lint-fix       Auto-repair formatting/lint issues"
 	@echo "  make typecheck      Run Pyright type checks"
 	@echo "  make security       Run Bandit security scan"
+	@echo "  make test-ui        Run UI vitest suite (skips with warning if node/node_modules missing)"
 	@echo "  make quality-lite   Lint + typecheck + security (parallel)"
-	@echo "  make quality        quality-lite + test (parallel)"
+	@echo "  make quality        quality-lite + test + UI vitest (parallel)"
 	@echo "  make ensure-labels  Create HydraFlow labels in GitHub repo (API with offline fallback)"
 	@echo "  make prep           Sync agent assets then run full prep (API with offline fallback)"
 	@echo "  make scaffold       Generate baseline tests and CI configuration (API with offline fallback)"
@@ -354,9 +355,31 @@ init:
 		$(ARGS)
 
 
+# UI vitest stage (#9875): CI's "Dashboard Build" job runs the src/ui vitest
+# suite, but `make quality` historically did not — a stale UI test could pass
+# every local gate and only go red at the PR check (the UNSTABLE merge behind
+# #9617). Parity fix: quality runs the same suite through the same entry point
+# CI uses (`npm test` -> src/ui/scripts/run-vitest.cjs; NOT raw `npx vitest`,
+# which skips the wrapper's jsdom patch + encoding shim). Node is an optional
+# local tool, so machines without node or an installed src/ui/node_modules
+# degrade LOUDLY-but-green: the stage prints a SKIPPED warning instead of
+# failing quality — CI's Dashboard Build job still gates the merge either way.
+# Single definition shared by `make test-ui` and the quality parallel block.
+# Kept inline (no $(MAKE) recursion) so `make -n quality` stays a pure dry-run:
+# recipe lines containing $(MAKE) execute even under -n.
+UI_TEST_CMD = if command -v node >/dev/null 2>&1 && [ -d $(HYDRAFLOW_DIR)src/ui/node_modules ]; then \
+		(cd $(HYDRAFLOW_DIR)src/ui && node ./scripts/run-vitest.cjs run) && echo "[ui-tests OK]"; \
+	else \
+		echo "$(YELLOW)[ui-tests SKIPPED] node or src/ui/node_modules missing — UI vitest suite NOT run locally; CI Dashboard Build still runs it. Fix: install Node 20.19+/22.12+ then run npm ci in src/ui$(RESET)"; \
+	fi
+
+test-ui:
+	@$(UI_TEST_CMD)
+
 # Lint runs first, serially — ensures a failing lint aborts quality before
 # spending time on tests, and guarantees the same verdict as `make lint-check`.
-# pyright, bandit, and pytest are parallelised after lint passes.
+# pyright, bandit, pytest, and the UI vitest suite are parallelised after lint
+# passes.
 quality: deps lint-ul
 	@echo "$(BLUE)Running quality checks in parallel...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && $(UV) ruff check . && $(UV) ruff format . --check && echo "[lint OK]"
@@ -365,12 +388,17 @@ quality: deps lint-ul
 		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
 		PYTHONPATH=src $(UV) pytest tests/ && echo "[tests OK]" & \
 		PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -q && echo "[scenarios OK]" & \
+		( $(UI_TEST_CMD) ) & \
 		wait_result=0; \
 		for job in $$(jobs -p); do wait $$job || wait_result=1; done; \
 		exit $$wait_result; \
 	)
 	@echo "$(GREEN)HydraFlow quality pipeline passed$(RESET)"
 
+# The UI vitest stage (#9875) is deliberately NOT part of quality-lite: this is
+# the pre-push gate and must stay fast (lint + typecheck + security only, no
+# test suites of any kind). UI drift is still caught by `make quality` locally
+# and by CI's Dashboard Build job on every PR.
 quality-lite: deps
 	@echo "$(BLUE)Running lightweight quality checks...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && ( \
