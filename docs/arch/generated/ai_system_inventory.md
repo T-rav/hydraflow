@@ -44,6 +44,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_BACKGROUND` | `background_tool` | `background_model` |
 | `HYDRAFLOW_IMPLEMENT` | `implementation_tool` | `model` |
 | `HYDRAFLOW_REVIEW` | `review_tool` | `review_model` |
+| `HYDRAFLOW_TEST_ADEQUACY_VERIFIER` | `test_adequacy_verifier_tool` | `test_adequacy_verifier_model` |
 | `HYDRAFLOW_PLANNER` | `planner_tool` | `planner_model` |
 | `HYDRAFLOW_TRIAGE` | `triage_tool` | `triage_model` |
 | `HYDRAFLOW_AC` | `ac_tool` | `ac_model` |
@@ -67,7 +68,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `ci_monitor` | `CIMonitorLoop` | Quality Gates | — | — | — | Detects failing CI on main and files/auto-closes issues. |
 | `contract_refresh` | `ContractRefreshLoop` | Trust Fleet | — | — | HITL escalation; PR review + merge gate | Re-records fake-adapter cassettes and opens refresh PRs when committed cassettes drift from live behavior. |
 | `convergence_oscillation` | `ConvergenceOscillationLoop` | Auto-Agent (HITL Pre-Flight) | — | — | HITL escalation | Scans issue convergence ledgers for cross-boundary oscillation (repeated LOOP_BACK across triage/shape/plan or recurring review-lap findings) and escalates stuck issues to HITL, once each. See ADR-0098. |
-| `corpus_learning` | `CorpusLearningLoop` | Trust Fleet | `corpus_learning_synthesis_model` | — | HITL escalation; PR review + merge gate | Synthesizes adversarial cases from skill/discover/shape escape signals and opens corpus-update PRs. |
+| `corpus_learning` | `CorpusLearningLoop` | Trust Fleet | `corpus_learning_synthesis_model`, `review_model`, `test_adequacy_verifier_model` | — | HITL escalation; PR review + merge gate | Synthesizes adversarial cases from skill/discover/shape escape signals and opens corpus-update PRs. |
 | `cost_budget_watcher` | `CostBudgetWatcherLoop` | Caretaking | — | — | — | Polls rolling-24h LLM spend; disables caretaker loops when daily cap exceeded. Default unlimited. |
 | `dependabot_merge` | `DependabotMergeLoop` | Caretaking | — | — | HITL escalation | Auto-merges dependency update PRs from configured bots after CI passes. |
 | `detector_calibration` | `DetectorCalibrationLoop` | Auto-Agent (HITL Pre-Flight) | — | — | HITL escalation | Mines closed escalations for repeat-offender subjects — churn means the detector is miscalibrated, not the code. |
@@ -121,7 +122,7 @@ Dashboard workers that are not background loops: the label-routed pipeline phase
 
 | Worker | Model role(s) | Oversight | Purpose |
 |---|---|---|---|
-| `implement` | `model`, `planner_model`, `review_model`, `transcript_summary_model` | HITL escalation; PR review + merge gate | Runs coding agents to implement planned issues and open pull requests. |
+| `implement` | `model`, `planner_model`, `review_model`, `test_adequacy_verifier_model`, `transcript_summary_model` | HITL escalation; PR review + merge gate | Runs coding agents to implement planned issues and open pull requests. |
 | `pipeline_poller` | — | — | Refreshes live pipeline snapshots for dashboard queue/status rendering. |
 | `plan` | `planner_model`, `transcript_summary_model`, `wiki_compilation_model` | HITL escalation | Builds implementation plans for triaged issues that are ready to execute. |
 | `review` | `review_model`, `transcript_summary_model`, `wiki_compilation_model` | HITL escalation | Reviews PRs, applies fixes, and merges approved work when checks pass. |

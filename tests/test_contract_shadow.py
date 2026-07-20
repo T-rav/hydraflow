@@ -460,3 +460,147 @@ def test_exclude_mutating_still_records_deterministic(tmp_path: Path) -> None:
     )
     assert path is not None
     assert path.exists()
+
+
+# ---------------------------------------------------------------------------
+# covers_cb coverage gate (#9633) — drops samples no dispatcher can
+# form an opinion on, before they consume per-adapter LRU budget
+# ---------------------------------------------------------------------------
+
+
+def test_covers_cb_false_drops_sample_and_writes_nothing(tmp_path: Path) -> None:
+    """A False coverage verdict skips persistence entirely."""
+    from contracts.shadow import ShadowCorpus
+
+    corpus = ShadowCorpus(tmp_path, covers_cb=lambda _a, _c, _args: False)
+    path = corpus.record(
+        adapter="git",
+        command="git",
+        args=["ls-remote"],
+        stdout="abc123\trefs/heads/main\n",
+        stderr="",
+        exit_code=0,
+    )
+    assert path is None
+    assert not list(tmp_path.rglob("*.yaml"))
+
+
+def test_covers_cb_true_persists_sample(tmp_path: Path) -> None:
+    from contracts.shadow import ShadowCorpus
+
+    corpus = ShadowCorpus(tmp_path, covers_cb=lambda _a, _c, _args: True)
+    path = corpus.record(
+        adapter="github",
+        command="gh",
+        args=["pr", "view", "42", "--json", "number,title,state"],
+        stdout='{"number":42,"title":"x","state":"OPEN"}\n',
+        stderr="",
+        exit_code=0,
+    )
+    assert path is not None
+    assert path.exists()
+
+
+def test_covers_cb_receives_adapter_command_args(tmp_path: Path) -> None:
+    """The predicate sees the full call identity so it can key on all three."""
+    from contracts.shadow import ShadowCorpus
+
+    seen: list[tuple[str, str, list[str]]] = []
+
+    def cb(adapter: str, command: str, args: list[str]) -> bool:
+        seen.append((adapter, command, args))
+        return True
+
+    corpus = ShadowCorpus(tmp_path, covers_cb=cb)
+    corpus.record(
+        adapter="git",
+        command="git",
+        args=["status"],
+        stdout="",
+        stderr="",
+        exit_code=0,
+    )
+    assert seen == [("git", "git", ["status"])]
+
+
+def test_covers_cb_default_none_records_everything(tmp_path: Path) -> None:
+    """Backward compatibility: no predicate means no coverage gate."""
+    from contracts.shadow import ShadowCorpus
+
+    corpus = ShadowCorpus(tmp_path)
+    path = corpus.record(
+        adapter="git",
+        command="git",
+        args=["ls-remote"],
+        stdout="abc123\trefs/heads/main\n",
+        stderr="",
+        exit_code=0,
+    )
+    assert path is not None
+
+
+def test_set_coverage_predicate_late_binding_honored(tmp_path: Path) -> None:
+    """The composition root wires the predicate after construction; the
+    next record() call must honor it."""
+    from contracts.shadow import ShadowCorpus
+
+    corpus = ShadowCorpus(tmp_path)
+    corpus.set_coverage_predicate(lambda _a, _c, _args: False)
+    path = corpus.record(
+        adapter="git",
+        command="git",
+        args=["ls-remote"],
+        stdout="",
+        stderr="",
+        exit_code=0,
+    )
+    assert path is None
+
+
+def test_covers_cb_composes_with_exclude_mutating(tmp_path: Path) -> None:
+    """A MUTATING sample is dropped by exclude_mutating even when the
+    coverage predicate says keep."""
+    from contracts.shadow import ShadowCorpus
+
+    corpus = ShadowCorpus(
+        tmp_path, exclude_mutating=True, covers_cb=lambda _a, _c, _args: True
+    )
+    path = corpus.record(
+        adapter="github",
+        command="gh",
+        args=["issue", "create", "--title", "x"],
+        stdout="https://github.com/x/y/issues/1\n",
+        stderr="",
+        exit_code=0,
+    )
+    assert path is None
+
+
+def test_uncovered_samples_never_occupy_lru_budget(tmp_path: Path) -> None:
+    """N covered + M uncovered recordings leave exactly N files — dead
+    weight never evicts a covered sample (issue #9633)."""
+    from contracts.shadow import ShadowCorpus
+
+    def covered_only(_adapter: str, _command: str, args: list[str]) -> bool:
+        return args[:2] == ["pr", "view"]
+
+    corpus = ShadowCorpus(tmp_path, max_per_adapter=10, covers_cb=covered_only)
+    for n in range(3):
+        corpus.record(
+            adapter="github",
+            command="gh",
+            args=["pr", "view", str(n), "--json", "number,title,state"],
+            stdout=f'{{"number":{n},"title":"x","state":"OPEN"}}\n',
+            stderr="",
+            exit_code=0,
+        )
+    for n in range(7):
+        corpus.record(
+            adapter="github",
+            command="gh",
+            args=["api", f"search/issues?page={n}", "--jq", ".total_count"],
+            stdout=str(n),
+            stderr="",
+            exit_code=0,
+        )
+    assert len(list((tmp_path / "github").glob("*.yaml"))) == 3

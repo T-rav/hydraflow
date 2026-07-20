@@ -222,3 +222,67 @@ async def test_shape_failure_dict_uses_shape_verdict_key_constant(
     assert result is not None
     assert SHAPE_VERDICT_KEY in result
     assert result[SHAPE_VERDICT_KEY] is True
+
+
+# ---------------------------------------------------------------------------
+# gh_shape_covers (#9633) — record-time coverage predicate derived from the
+# same _select_shape helper the validator dispatches through, so coverage
+# and dispatcher opinion can never drift apart.
+# ---------------------------------------------------------------------------
+
+
+COVERED_ARGS: list[list[str]] = [
+    ["pr", "view", "42", "--json", "number,title,state"],
+    ["pr", "list", "--json", "number,title,state"],
+    ["pr", "view", "42", "--json", "number,mergeable,headRefName"],
+    ["issue", "view", "7", "--json", "number,state"],
+    ["issue", "list", "--json", "number,title"],
+    ["pr", "checks", "42", "--json", "name,state"],
+]
+
+UNCOVERED_ARGS: list[list[str]] = [
+    ["api", "search/issues", "--jq", ".total_count"],
+    ["pr", "view", "42", "--json", "number,title,state", "--jq", ".number"],
+    ["pr", "view", "42", "--json", "headRefOid"],
+    ["pr", "view", "42"],
+    ["pr", "create", "--title", "x"],
+    ["issue", "create", "--title", "x"],
+    ["repo", "clone", "x"],
+    ["status"],
+]
+
+
+@pytest.mark.parametrize("args", COVERED_ARGS, ids=" ".join)
+def test_gh_shape_covers_true_for_dispatcher_covered_args(args: list[str]) -> None:
+    """Every args shape _select_shape picks a model for is covered."""
+    from contracts.shape_dispatchers import gh_shape_covers
+
+    assert gh_shape_covers(args) is True
+
+
+@pytest.mark.parametrize("args", UNCOVERED_ARGS, ids=" ".join)
+def test_gh_shape_covers_false_for_no_opinion_args(args: list[str]) -> None:
+    """--jq transforms, narrow projections, mutations, and unknown
+    subcommands can never produce a dispatcher opinion."""
+    from contracts.shape_dispatchers import gh_shape_covers
+
+    assert gh_shape_covers(args) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("args", UNCOVERED_ARGS, ids=" ".join)
+async def test_uncovered_args_imply_validator_has_no_opinion(
+    tmp_path: Path, args: list[str]
+) -> None:
+    """Consistency property: gh_shape_covers(args) is False ⇒ the validator
+    returns None for those args, whatever the stdout. Coverage pruning can
+    never drop a sample the validator would have validated."""
+    from contracts.shape_dispatchers import gh_shape_covers
+
+    assert gh_shape_covers(args) is False
+    sample = _sample(
+        tmp_path,
+        args=args,
+        stdout='{"number": 1, "title": "x", "state": "OPEN"}\n',
+    )
+    assert await gh_shape_validator(sample) is None
