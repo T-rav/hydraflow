@@ -15,6 +15,7 @@ from exception_classify import reraise_on_credit_or_bug
 from models import AttemptRecord, Severity
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from diagnostic_runner import DiagnosisResult, DiagnosticRunner
@@ -128,7 +129,18 @@ class DiagnosticLoop(BaseBackgroundLoop):
                 continue
             issue_title = raw_issue.get("title", "")
             issue_body = raw_issue.get("body", "") or ""
-            outcome = await self._process_issue(issue_number, issue_title, issue_body)
+            # CH-6 (#10000): thread the issue's labels down to the runner so
+            # a data-class:<class> label elevates the prompt gate for the
+            # diagnose/fix spawns. Labels ride the gh wire shape
+            # ([{"name": ...}]) on the OPEN listing (#9943).
+            issue_labels = tuple(
+                label["name"]
+                for label in raw_issue.get("labels") or []
+                if isinstance(label, dict) and label.get("name")
+            )
+            outcome = await self._process_issue(
+                issue_number, issue_title, issue_body, issue_labels
+            )
             processed += 1
             if outcome == "fixed":
                 fixed += 1
@@ -149,6 +161,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
         issue_number: int,
         issue_title: str,
         issue_body: str,
+        issue_labels: Sequence[str] = (),
     ) -> str:
         """Run the full diagnostic pipeline for a single issue.
 
@@ -172,7 +185,9 @@ class DiagnosticLoop(BaseBackgroundLoop):
             context = context.model_copy(update={"previous_attempts": attempts})
 
         # --- Stage 1: Diagnose ---
-        diagnosis = await self._diagnose(issue_number, issue_title, issue_body, context)
+        diagnosis = await self._diagnose(
+            issue_number, issue_title, issue_body, context, issue_labels
+        )
         diagnosis_comment = _format_diagnosis_comment(diagnosis)
 
         # --- Gates: not-fixable / attempts exhausted both escalate ---
@@ -190,6 +205,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
             diagnosis,
             attempts,
             diagnosis_comment,
+            issue_labels,
         )
 
     async def _escalate_missing_context(self, issue_number: int) -> None:
@@ -217,6 +233,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
         issue_title: str,
         issue_body: str,
         context: EscalationContext,
+        issue_labels: Sequence[str] = (),
     ) -> DiagnosisResult:
         """Stage 1: run the diagnose agent and persist the severity."""
         logger.info(
@@ -224,7 +241,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
         )
         await self._publish_update(issue_number, "diagnosing")
         diagnosis = await self._runner.diagnose(
-            issue_number, issue_title, issue_body, context
+            issue_number, issue_title, issue_body, context, issue_labels=issue_labels
         )
         self._state.set_diagnosis_severity(issue_number, diagnosis.severity)
         return diagnosis
@@ -269,6 +286,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
         diagnosis: DiagnosisResult,
         attempts: list[AttemptRecord],
         diagnosis_comment: str,
+        issue_labels: Sequence[str] = (),
     ) -> str:
         """Stage 2: provision a workspace, run the fix, and finalize the outcome.
 
@@ -287,7 +305,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
             return "escalated"
 
         success, transcript = await self._run_fix(
-            issue_number, issue_title, issue_body, diagnosis, wt_path
+            issue_number, issue_title, issue_body, diagnosis, wt_path, issue_labels
         )
         self._record_attempt(issue_number, attempts, success, transcript)
         return await self._finalize_fix_outcome(
@@ -323,6 +341,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
         issue_body: str,
         diagnosis: DiagnosisResult,
         wt_path: Path,
+        issue_labels: Sequence[str] = (),
     ) -> tuple[bool, str]:
         """Run the fix agent and clean up the workspace on failure.
 
@@ -331,7 +350,12 @@ class DiagnosticLoop(BaseBackgroundLoop):
         """
         try:
             success, transcript = await self._runner.fix(
-                issue_number, issue_title, issue_body, diagnosis, str(wt_path)
+                issue_number,
+                issue_title,
+                issue_body,
+                diagnosis,
+                str(wt_path),
+                issue_labels=issue_labels,
             )
         except Exception as exc:
             # Infra-level failures (auth, credit, OS permission/IO) propagate

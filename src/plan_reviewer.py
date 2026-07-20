@@ -240,6 +240,7 @@ class PlanReviewer(BaseRunner):
             self._config.repo_root,
             {"issue": task.id, "source": "plan_reviewer"},
             on_output=_check_review_complete,
+            issue_labels=task.tags,
         )
 
     def _build_command(self, _worktree_path: Path | None = None) -> list[str]:

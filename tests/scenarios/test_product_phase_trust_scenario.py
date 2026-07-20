@@ -123,8 +123,9 @@ def _build_execute_stub(
         event_data: dict[str, Any],
         *,
         on_output: Any = None,
+        **kwargs: Any,
     ) -> str:
-        _ = on_output
+        _ = on_output, kwargs  # issue_labels et al (#10000) — stub ignores
         source = str(event_data.get("source", ""))
         call_log.append(source)
         # Pick the queue whose key is a prefix of the source tag. Sources

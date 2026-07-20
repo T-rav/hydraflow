@@ -421,6 +421,7 @@ or for a claim that is demonstrably false / already implemented (the described p
             self._config.repo_root,
             {"issue": issue.id, "source": "triage"},
             telemetry_stats=prompt_stats,
+            issue_labels=issue.tags,
         )
         self._save_transcript("triage-issue", issue.id, transcript)
 
@@ -676,6 +677,7 @@ or for a claim that is demonstrably false / already implemented (the described p
                 prompt,
                 self._config.repo_root,
                 {"issue": task.id, "source": "decomposition"},
+                issue_labels=task.tags,
             )
         except Exception as exc:
             reraise_on_credit_or_bug(exc)

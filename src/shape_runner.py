@@ -181,6 +181,7 @@ class ShapeRunner(BaseRunner):
                 self._config.repo_root,
                 {"issue": task.id, "source": f"shape:attempt-{attempt}"},
                 on_output=_check_complete,
+                issue_labels=task.tags,
             )
             result.transcript = transcript
 
@@ -260,6 +261,7 @@ class ShapeRunner(BaseRunner):
                 prompt,
                 self._config.repo_root,
                 {"issue": task.id, "source": "shape:evaluator"},
+                issue_labels=task.tags,
             )
         except Exception as exc:
             reraise_on_credit_or_bug(exc)

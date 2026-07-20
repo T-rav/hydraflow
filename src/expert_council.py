@@ -375,6 +375,7 @@ The experts will read this before revoting.
                 self._config.repo_root,
                 {"issue": task.id, "source": "council-mediator"},
                 on_output=_check,
+                issue_labels=task.tags,
             )
             # Extract the useful content (strip stream wrappers)
             from triage import TriageRunner  # noqa: PLC0415
@@ -408,6 +409,7 @@ The experts will read this before revoting.
                 "source": f"council-{expert['name'].lower().replace(' ', '-')}",
             },
             on_output=_check_complete,
+            issue_labels=task.tags,
         )
 
         return self._parse_vote(transcript, expert["name"])
