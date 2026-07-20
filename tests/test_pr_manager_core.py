@@ -2412,6 +2412,32 @@ class TestCloseIssue:
         assert config.repo in args
 
     @pytest.mark.asyncio
+    async def test_close_issue_without_reason_omits_flag(self, config, event_bus):
+        manager = make_pr_manager(config, event_bus)
+        mock_create = SubprocessMockBuilder().with_stdout("").build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            await manager.close_issue(42)
+
+        args = mock_create.call_args[0]
+        assert "--reason" not in args
+
+    @pytest.mark.asyncio
+    async def test_close_issue_reason_passes_gh_reason_flag(self, config, event_bus):
+        """#10025: reason threads to `gh issue close --reason "not planned"` so
+        automated dedup closes record stateReason=NOT_PLANNED, not COMPLETED."""
+        manager = make_pr_manager(config, event_bus)
+        mock_create = SubprocessMockBuilder().with_stdout("").build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            await manager.close_issue(42, reason="not planned")
+
+        args = mock_create.call_args[0]
+        assert "--reason" in args
+        assert "not planned" in args
+        assert args.index("--reason") + 1 == args.index("not planned")
+
+    @pytest.mark.asyncio
     async def test_close_issue_dry_run_skips_command(self, dry_config, event_bus):
         manager = make_pr_manager(dry_config, event_bus)
         mock_create = SubprocessMockBuilder().build()
