@@ -102,6 +102,11 @@ SETTINGS: dict[str, SettingSpec] = {
     "staging_branch": SettingSpec("Branching & Release", live=False, order=1),
     "main_branch": SettingSpec("Branching & Release", live=False, order=2),
     "rc_cadence_hours": SettingSpec("Branching & Release", live=True, order=3),
+    # Live: StagingBisectLoop reads the cap from config at the start of every
+    # bisect run (#9580 — was PATCH-mutable-in-principle but operator-invisible).
+    "staging_bisect_runtime_cap_seconds": SettingSpec(
+        "Branching & Release", live=True, order=4
+    ),
     # --- Reliability -----------------------------------------------------
     "gh_circuit_breaker_enabled": SettingSpec("Reliability", live=True, order=0),
     "merge_policy_enabled": SettingSpec("Reliability", live=True, order=1),
@@ -166,6 +171,15 @@ SETTINGS: dict[str, SettingSpec] = {
         "Issue Refinement", live=True, order=2
     ),
     "issue_refinement_model": SettingSpec("Issue Refinement", live=True, order=3),
+    # --- Trust Fleet (heavy-make subprocess caps, #9555) ------------------
+    # Live: each loop re-reads the cap from the live config at the start of
+    # every heavy `make` invocation, and PATCH /api/control/config mutates
+    # that same config instance in-place — an in-flight subprocess keeps its
+    # original bound (correct semantics), the next one picks up the change.
+    "skill_prompt_eval_adversarial_timeout_seconds": SettingSpec(
+        "Trust Fleet", live=True, order=0
+    ),
+    "principles_audit_timeout_seconds": SettingSpec("Trust Fleet", live=True, order=1),
     # --- Prompt Refinement (skill-prompt self-refinement, #9724) ----------
     "skill_prompt_refine_enabled": SettingSpec("Prompt Refinement", live=True, order=0),
     "skill_prompt_refine_max_weekly": SettingSpec(
