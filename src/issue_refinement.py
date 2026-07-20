@@ -83,9 +83,11 @@ def normalize_title(title: str) -> str:
 
 
 def body_hash(body: str) -> str:
-    """Sha1 of the normalized body, truncated to the first 12 hex chars."""
+    """Sha1 (cache key, not security) of the normalized body, first 12 hex chars."""
     normalized = _WHITESPACE_RE.sub(" ", body.lower()).strip()
-    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1(normalized.encode("utf-8"), usedforsecurity=False).hexdigest()[
+        :12
+    ]
 
 
 def pair_key(a: RefinementIssue, b: RefinementIssue) -> str:
