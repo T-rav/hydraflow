@@ -90,6 +90,13 @@ SETTINGS: dict[str, SettingSpec] = {
     "gh_circuit_breaker_enabled": SettingSpec("Reliability", live=True, order=0),
     "merge_policy_enabled": SettingSpec("Reliability", live=True, order=1),
     "stale_code_alert_threshold": SettingSpec("Reliability", live=True, order=2),
+    # --- Branch GC (stale agent-branch reconciler, #10011) ----------------
+    # Live: StaleIssueLoop re-reads these each tick, no restart needed.
+    # delete_enabled defaults False (report/comment-only) since deletion is
+    # destructive — this is the knob the operator flips to opt in.
+    "branch_gc_stale_days": SettingSpec("Branch GC", live=True, order=0),
+    "branch_gc_min_delete_age_days": SettingSpec("Branch GC", live=True, order=1),
+    "branch_gc_delete_enabled": SettingSpec("Branch GC", live=True, order=2),
     # --- Memory ----------------------------------------------------------
     "memory_auto_approve": SettingSpec("Memory", live=True, order=0),
     # --- Paths -----------------------------------------------------------

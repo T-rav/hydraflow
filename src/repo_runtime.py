@@ -15,6 +15,7 @@ from events import EventBus, EventLog
 from orchestrator import HydraFlowOrchestrator
 from service_registry import build_state_tracker
 from state import StateTracker
+from unpushed_branch_alert import check_and_alert_unpushed_branches
 
 logger = logging.getLogger("hydraflow.repo_runtime")
 
@@ -59,7 +60,10 @@ class RepoRuntime:
         """Construct a runtime and perform async initialization.
 
         Rotates the event log and loads persisted event history before
-        returning the ready-to-start runtime.
+        returning the ready-to-start runtime. Also runs the boot-time
+        committed-but-unpushed local branch check (#10011) — a no-network,
+        local-only ``git`` scan that logs + alerts once per boot rather than
+        blocking startup.
         """
         runtime = cls(config)
         await runtime._event_bus.rotate_log(
@@ -67,6 +71,12 @@ class RepoRuntime:
             config.event_log_retention_days,
         )
         await runtime._event_bus.load_history_from_disk()
+        try:
+            await check_and_alert_unpushed_branches(config, runtime._event_bus)
+        except Exception:
+            logger.warning(
+                "Unpushed-branch boot check failed for %r", runtime._slug, exc_info=True
+            )
         return runtime
 
     @classmethod

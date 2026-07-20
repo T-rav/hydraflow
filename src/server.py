@@ -13,6 +13,7 @@ from config import HydraFlowConfig, build_credentials
 from log import setup_logging
 from prompt_gate import most_restrictive_data_class
 from runtime_config import DEFAULT_LOG_FILE, load_runtime_config
+from unpushed_branch_alert import check_and_alert_unpushed_branches
 
 logger = logging.getLogger("hydraflow.server")
 
@@ -173,6 +174,16 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
     # start/stop resolve through the registry uniformly — no special-casing.
     host_runtime = RepoRuntime.from_shared(config, bus, state)
     registry.add(host_runtime)
+
+    # Boot-time committed-but-unpushed local branch check (#10011). The host
+    # runtime uses from_shared (reusing the already-built bus/state) rather
+    # than RepoRuntime.create, so it doesn't get the check for free the way
+    # headless mode and restored/added repos do — run it explicitly here.
+
+    try:
+        await check_and_alert_unpushed_branches(config, bus)
+    except Exception:
+        logger.warning("Unpushed-branch boot check failed for host repo", exc_info=True)
 
     # Restore previously registered repos into the runtime registry.
     # The repo store persists to disk, but the registry is in-memory —
