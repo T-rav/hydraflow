@@ -818,6 +818,93 @@ class TestPipelineSnapshotPush:
         )
 
 
+# ── Label-driven eager transitions (#9842) ───────────────────────────
+
+
+class TestApplyLabelTransition:
+    """``apply_label_transition`` mirrors a GitHub label swap in-memory.
+
+    #9842: phase transitions swap GitHub labels immediately, but the board
+    only re-read labels at the ``data_poll_interval`` (300s) refresh — cards
+    lagged up to 5 minutes. ``apply_label_transition`` is the event-driven
+    bridge: PRManager notifies the store on every ``swap_pipeline_labels``,
+    the store applies the move eagerly, and the existing coalesced
+    PIPELINE_SNAPSHOT push carries it to the dashboard within ~1s.
+    """
+
+    def test_moves_cached_issue_to_the_swapped_stage(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=11, tags=["hydraflow-find"])
+        store._route_issues([issue])
+
+        applied = store.apply_label_transition(11, "hydraflow-review")
+
+        assert applied is True
+        assert store._queue_members[STAGE_REVIEW] == {11}
+        assert 11 not in store._queue_members[STAGE_FIND]
+
+    def test_hitl_label_moves_issue_to_hitl_set(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=12, tags=["hydraflow-review"])
+        store._route_issues([issue])
+
+        applied = store.apply_label_transition(12, "hydraflow-hitl")
+
+        assert applied is True
+        assert 12 in store.get_hitl_issues()
+        assert 12 not in store._queue_members[STAGE_REVIEW]
+
+    def test_non_stage_label_is_ignored(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=13, tags=["hydraflow-find"])
+        store._route_issues([issue])
+
+        applied = store.apply_label_transition(13, "hydraflow-duplicate")
+
+        assert applied is False
+        assert store._queue_members[STAGE_FIND] == {13}
+
+    def test_uncached_issue_is_ignored(self) -> None:
+        store = _make_store()
+
+        applied = store.apply_label_transition(999, "hydraflow-review")
+
+        assert applied is False
+        assert store._queue_members[STAGE_REVIEW] == set()
+
+    @pytest.mark.asyncio
+    async def test_pushes_pipeline_snapshot_with_the_new_stage(self, event_bus) -> None:
+        store = _make_store(event_bus=event_bus)
+        capture = _SnapshotCapture(event_bus)
+        issue = TaskFactory.create(id=14, tags=["test-label"])
+        store._route_issues([issue])
+
+        store.apply_label_transition(14, "hydraflow-review")
+        await _drain_snapshot_flush(store)
+
+        snap = capture.snapshots()[-1]
+        review_numbers = [e["issue_number"] for e in snap.data["stages"]["review"]]
+        implement_numbers = [
+            e["issue_number"] for e in snap.data["stages"]["implement"]
+        ]
+        assert 14 in review_numbers
+        assert 14 not in implement_numbers
+
+    def test_stale_refresh_does_not_move_the_issue_backward(self) -> None:
+        """The reconciling poll may still carry pre-swap labels — the eager
+        transition must hold until GitHub labels catch up."""
+        store = _make_store()
+        issue = TaskFactory.create(id=15, tags=["test-label"])
+        store._route_issues([issue])
+
+        store.apply_label_transition(15, "hydraflow-review")
+        # Stale poll data: labels still say ready.
+        store._route_issues([TaskFactory.create(id=15, tags=["test-label"])])
+
+        assert store._queue_members[STAGE_REVIEW] == {15}
+        assert 15 not in store._queue_members[STAGE_READY]
+
+
 # ── Lifecycle ────────────────────────────────────────────────────────
 
 
