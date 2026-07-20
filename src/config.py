@@ -620,6 +620,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("staging_enabled", "HYDRAFLOW_STAGING_ENABLED", False),
     ("otel_enabled", "HYDRAFLOW_OTEL_ENABLED", False),
+    (
+        "shadow_corpus_coverage_pruning_enabled",
+        "HYDRAFLOW_SHADOW_CORPUS_COVERAGE_PRUNING_ENABLED",
+        True,
+    ),
     ("term_proposer_enabled", "HYDRAFLOW_TERM_PROPOSER_ENABLED", True),
     ("term_pruner_enabled", "HYDRAFLOW_TERM_PRUNER_ENABLED", True),
     ("edge_proposer_enabled", "HYDRAFLOW_EDGE_PROPOSER_ENABLED", True),
@@ -2267,6 +2272,15 @@ class HydraFlowConfig(BaseModel):
             "Per-adapter LRU cap on shadow corpus size. Most-recently-"
             "recorded call shapes survive eviction; older shapes are "
             "deleted from disk."
+        ),
+    )
+    shadow_corpus_coverage_pruning_enabled: bool = Field(
+        default=True,
+        description=(
+            "Drop shadow-corpus samples at record time when no registered "
+            "dispatcher branch can form an opinion on them (#9633), so "
+            "no-opinion VOLATILE calls never consume per-adapter LRU "
+            "budget. Disable to record every adapter call."
         ),
     )
     live_corpus_replay_interval: int = Field(
