@@ -2670,6 +2670,51 @@ class HydraFlowConfig(BaseModel):
             "Env: HYDRAFLOW_LOOP_WATCHDOG_LLM_SECONDS."
         ),
     )
+    # -- thread-level event-loop freeze detector (#9552) ----------------------
+    # The asyncio cycle watchdog above cannot see a SYNCHRONOUS block inside a
+    # cycle (CPU spin, blocking file I/O, non-async subprocess.run): such a
+    # block freezes the whole event loop, including every asyncio-scheduled
+    # watcher. EventLoopWatchdog (src/event_loop_watchdog.py) is the
+    # out-of-loop complement: a daemon thread wall-clocks a 1s asyncio beacon.
+    # Knobs are System-tab editable via settings_registry — deliberately NOT
+    # in the env-override tables (knobs→System; secrets stay .env).
+    event_loop_watchdog_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable the thread-level event-loop freeze detector (#9552). A "
+            "daemon watchdog thread checks a 1s asyncio liveness beacon; when "
+            "the beacon goes stale past event_loop_watchdog_stall_seconds it "
+            "dumps all thread stacks (faulthandler — names the blocking call "
+            "site) and leaves a stall marker the health monitor escalates as "
+            "a hydraflow-find issue. Detection + dump + notify only; process "
+            "restart is the separate opt-in hard-restart knob. Captured at "
+            "orchestrator startup (restart to apply)."
+        ),
+    )
+    event_loop_watchdog_stall_seconds: int = Field(
+        default=120,
+        ge=30,
+        le=3600,
+        description=(
+            "Beacon staleness (seconds) before the event loop is declared "
+            "frozen (default 120 ≈ 120 missed 1s beacons — generous, so a "
+            "briefly-blocking legitimate call never trips it; a true "
+            "synchronous wedge is multi-minute). Re-read by the watchdog "
+            "thread on every poll, so changes apply live."
+        ),
+    )
+    event_loop_watchdog_hard_restart: bool = Field(
+        default=False,
+        description=(
+            "OPT-IN hard recovery for a frozen event loop: after the stack "
+            "dump and stall marker, exit the process with code 75 "
+            "(EX_TEMPFAIL) so systemd/docker/launchd restarts it. Default "
+            "OFF — notify-default, restart-opt-in, mirroring branch-GC and "
+            "the external liveness watchdog (#10009). Enable only where a "
+            "supervisor with Restart=always is in place; without one this "
+            "turns a frozen process into a dead one. Re-read at trip time."
+        ),
+    )
     staging_bisect_flake_reruns: int = Field(
         default=2,
         ge=1,
