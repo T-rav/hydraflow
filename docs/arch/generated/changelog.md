@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `77772e0` — feat(test-adequacy): independent second-opinion verifier gated on explicit OK (#9546) (#9546) *(2026-07-20)*
 - `14f4a2e` — fix(refinement): v1 follow-ups — not-planned closes, priority budget, fail-closed fake, inefficiency re-file (#10025) (#10066) (#10066) *(2026-07-20)*
 - `1306712` — fix(fitness): cadence-derived min_samples — scorecards can finally score (#9841) (#10056) (#10056) *(2026-07-20)*
 - `8509ee0` — feat(orchestration): v2 IssueDriver runtime phase spec + accept ADR-0099 (#10038) (#10055) (#10055) *(2026-07-20)*
