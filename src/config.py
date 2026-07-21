@@ -343,6 +343,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         14400,
     ),
     (
+        "adr_drift_fleet_batch_threshold",
+        "HYDRAFLOW_ADR_DRIFT_FLEET_BATCH_THRESHOLD",
+        4,
+    ),
+    (
         "adr_conformance_interval",
         "HYDRAFLOW_ADR_CONFORMANCE_INTERVAL",
         86400,
@@ -3308,6 +3313,16 @@ class HydraFlowConfig(BaseModel):
     adr_drift_stuck_label: list[str] = Field(
         default=["hydraflow-adr-drift-stuck"],
         description="Labels for stuck ADR drift escalations (paired with hitl_escalation_label)",
+    )
+    adr_drift_fleet_batch_threshold: int = Field(
+        default=4,
+        ge=2,
+        le=100,
+        description=(
+            "Distinct-ADR count at which a single PR's drift findings collapse "
+            "into ONE batched fleet rollup issue instead of N per-ADR rollups "
+            "(#9662 cross-cutting caretaker-fleet sweeps)"
+        ),
     )
 
     # Trust fleet — AdrConformanceLoop (ADR-0100)
