@@ -11,16 +11,31 @@ fences — hints only), and verifies each hard cite against:
   AST verification across every managed repo is out of scope for v1
   and noted below as a follow-up.
 
+Wiki entries are read via the same authoritative parse ``RepoWikiStore``
+uses for itself (:func:`repo_wiki.parse_topic_page`, issue #9936): each
+``.md`` file under the wiki root is parsed into its per-entry ``WikiEntry``
+objects — one row per ``## Title`` section, carrying that entry's own
+``content``, ``source_type``, and ``source_issue`` — instead of a single
+regex pass over the whole file mislabeled under the file's ``# Heading``.
+A file that yields no structured entries (glossary/feedback mirrors that
+aren't in the topic-page shape, or hand-edited pages missing a
+``json:entry`` block) falls back to the legacy whole-file regex parse so
+non-``WikiEntry`` markdown keeps working unchanged.
+
 A second **shipped-claim pass** (issue #9598) verifies structured
-``fixed_in_pr`` assertions in ``json:entry`` blocks: a claim that a fix
-shipped in ``#NNNN`` is corroborated iff at least one of its ``code_refs``
-resolves against the checked-out source. An uncorroborated claim is the
-#9455-shape drift ("shipped" asserted, no surviving code) and files an
-entry-level finding naming the PR; its dead refs are suppressed from the
-per-cite pass so each stale claim yields one finding, not N. Verifying the
-cited PR actually *merged* (network ``get_pr_merge_state``) is the split-out
-follow-up #9664; auto-memory notes outside the repo are out of CI scope
-(#9935). Self-repo only — corroboration needs AST over real source.
+``fixed_in_pr`` assertions: for structured entries this reads
+``WikiEntry.fixed_in_pr`` / ``WikiEntry.code_refs`` directly (issue #9936
+added these as modeled fields — previously silently dropped as unmodeled
+extras on parse); the raw-fallback path still regexes embedded
+``json:entry`` blocks via :func:`wiki_rot_citations.extract_shipped_claims`.
+A claim that a fix shipped in ``#NNNN`` is corroborated iff at least one of
+its ``code_refs`` resolves against the checked-out source. An uncorroborated
+claim is the #9455-shape drift ("shipped" asserted, no surviving code) and
+files an entry-level finding naming the PR; its dead refs are suppressed
+from the per-cite pass so each stale claim yields one finding, not N.
+Verifying the cited PR actually *merged* (network ``get_pr_merge_state``) is
+the split-out follow-up #9664; auto-memory notes outside the repo are out of
+CI scope (#9935). Self-repo only — corroboration needs AST over real source.
 
 For each broken cite the loop files a ``hydraflow-find`` + ``wiki-rot``
 issue through :class:`PRManager` with a fuzzy-match suggestion (via
@@ -36,6 +51,7 @@ Kill-switch: :meth:`LoopDeps.enabled_cb` with ``worker_name="wiki_rot_detector"`
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
@@ -43,6 +59,7 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
+from repo_wiki import parse_topic_page
 from wiki_rot_citations import (
     Cite,
     ShippedClaim,
@@ -70,6 +87,25 @@ class _TickResult(TypedDict):
     filed: int
     escalated: int
     broken_subjects: set[str]
+
+
+@dataclass(frozen=True)
+class _WikiScanEntry:
+    """One cite-checkable unit produced by :meth:`_load_wiki_entries`.
+
+    Either an authoritative per-entry ``WikiEntry`` parse (``source_type``
+    is not ``None``) or a raw-file fallback row for markdown that isn't in
+    the ``WikiEntry`` topic-page shape (``source_type`` is ``None``) —
+    callers key behavior off that distinction (issue #9936).
+    """
+
+    title: str
+    body: str
+    path: Path
+    source_type: str | None
+    source_issue: int | None
+    fixed_in_pr: str | None
+    code_refs: tuple[str, ...]
 
 
 _MAX_ATTEMPTS = 3
@@ -246,7 +282,10 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         repo_root = Path(self._config.repo_root)
         dedup_seen = self._dedup.get()
 
-        for title, body, entry_path in entries:
+        for scan_entry in entries:
+            title = scan_entry.title
+            body = scan_entry.body
+            entry_path = scan_entry.path
             cites = extract_cites(body)
             hints = extract_fenced_hints(body)
 
@@ -259,7 +298,7 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             uncorroborated: list[ShippedClaim] = []
             suppressed_refs: set[str] = set()
             if is_self:
-                for claim in extract_shipped_claims(body):
+                for claim in self._shipped_claims_for(scan_entry, body):
                     if self._shipped_claim_corroborated(claim, repo_root):
                         continue
                     uncorroborated.append(claim)
@@ -288,6 +327,8 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
                     cite=cite,
                     suggestion=suggestion,
                     hints=hints,
+                    source_type=scan_entry.source_type,
+                    source_issue=scan_entry.source_issue,
                 )
                 dedup_seen.add(dedup_key)
 
@@ -316,6 +357,8 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
                     entry_path=str(entry_path),
                     body=body,
                     claim=claim,
+                    source_type=scan_entry.source_type,
+                    source_issue=scan_entry.source_issue,
                 )
                 dedup_seen.add(dedup_key)
 
@@ -340,11 +383,25 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
     def _load_wiki_entries(
         self,
         slug: str,
-    ) -> list[tuple[str, str, Path]]:
-        """Return ``[(title, body, path), ...]`` for every markdown entry
-        in the repo's wiki — supports both the legacy topic-file layout
-        and the Phase 3 per-entry layout.  Title defaults to the file
-        stem when no ``# Heading`` is present.
+    ) -> list[_WikiScanEntry]:
+        """Return one row per cite-checkable unit in the repo's wiki —
+        supports both the legacy topic-file layout and the Phase 3
+        per-entry layout.
+
+        Topic pages are parsed via :func:`repo_wiki.parse_topic_page` —
+        the same authoritative parse ``RepoWikiStore`` uses on itself
+        (issue #9936) — yielding one row per ``## Title`` entry with its
+        own ``content``/``source_type``/``source_issue``/``fixed_in_pr``/
+        ``code_refs``, instead of one row per FILE keyed under the file's
+        ``# Heading`` (which misattributed every finding in a topic page to
+        the same title and let cross-entry fenced-code hints leak into
+        unrelated findings).
+
+        Any ``.md`` file that doesn't parse into at least one structured
+        entry — glossary/feedback mirrors nested under the wiki root, or
+        hand-edited pages without a ``json:entry`` block — falls back to
+        the legacy whole-file regex row so that markdown keeps working
+        exactly as before.
         """
         try:
             repo_dir = self._wiki.repo_dir(slug)
@@ -355,17 +412,82 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         if not repo_dir.is_dir():
             return []
 
-        out: list[tuple[str, str, Path]] = []
+        out: list[_WikiScanEntry] = []
         for md_path in sorted(repo_dir.rglob("*.md")):
             if md_path.name in {"index.md", "log.md"}:
+                continue
+            structured = self._load_structured_entries(md_path)
+            if structured:
+                out.extend(structured)
                 continue
             try:
                 text = md_path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
             title = _first_heading(text) or md_path.stem
-            out.append((title, text, md_path))
+            out.append(
+                _WikiScanEntry(
+                    title=title,
+                    body=text,
+                    path=md_path,
+                    source_type=None,
+                    source_issue=None,
+                    fixed_in_pr=None,
+                    code_refs=(),
+                )
+            )
         return out
+
+    def _load_structured_entries(self, md_path: Path) -> list[_WikiScanEntry]:
+        """Parse *md_path* via the authoritative ``WikiEntry`` model.
+
+        Returns ``[]`` (never raises) for files that aren't in the
+        topic-page shape — the caller falls back to raw-file parsing.
+        """
+        try:
+            entries = parse_topic_page(md_path)
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
+            logger.debug("parse_topic_page(%s) failed", md_path, exc_info=True)
+            return []
+        return [
+            _WikiScanEntry(
+                title=entry.title,
+                body=entry.content,
+                path=md_path,
+                source_type=entry.source_type,
+                source_issue=entry.source_issue,
+                fixed_in_pr=entry.fixed_in_pr,
+                code_refs=entry.code_refs,
+            )
+            for entry in entries
+        ]
+
+    def _shipped_claims_for(
+        self,
+        scan_entry: _WikiScanEntry,
+        body: str,
+    ) -> list[ShippedClaim]:
+        """Return shipped-claim candidates for one scanned entry.
+
+        Structured entries (``source_type is not None``) carry
+        ``fixed_in_pr`` / ``code_refs`` as authoritative ``WikiEntry``
+        fields (issue #9936) — no need to re-parse the ``json:entry`` block
+        RepoWikiStore already parsed once. The raw-fallback path (markdown
+        that isn't in the topic-page shape) still regexes *body* for
+        embedded ``json:entry`` blocks, unchanged from before #9936.
+        """
+        if scan_entry.source_type is not None:
+            if not scan_entry.fixed_in_pr:
+                return []
+            return [
+                ShippedClaim(
+                    pr_ref=scan_entry.fixed_in_pr,
+                    code_refs=scan_entry.code_refs,
+                    raw=scan_entry.body,
+                )
+            ]
+        return extract_shipped_claims(body)
 
     def _check_cite(
         self,
@@ -440,6 +562,8 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         cite: Cite,
         suggestion: str | None,
         hints: list[Cite],
+        source_type: str | None = None,
+        source_issue: int | None = None,
     ) -> None:
         title = f"Wiki rot: {entry_title} cites missing {cite.raw}"
         excerpt = _excerpt_around(body, cite.raw, _EXCERPT_CHARS)
@@ -450,6 +574,9 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             f"- Entry: `{entry_path}` — *{entry_title}*",
             f"- Broken cite: `{cite.raw}` ({cite.style})",
         ]
+        provenance = _entry_provenance(source_type, source_issue)
+        if provenance:
+            lines.append(f"- Entry source: {provenance}")
         if suggestion:
             lines.append(f"- Did you mean: {suggestion}?")
         if hints:
@@ -506,6 +633,8 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         entry_path: str,
         body: str,
         claim: ShippedClaim,
+        source_type: str | None = None,
+        source_issue: int | None = None,
     ) -> None:
         """File a finding for an uncorroborated ``fixed_in_pr`` claim.
 
@@ -526,6 +655,11 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             f"- Entry: `{entry_path}` — *{entry_title}*",
             f"- Shipped claim: `fixed_in_pr = {claim.pr_ref}`",
             f"- Code references that no longer resolve: {refs}",
+        ]
+        provenance = _entry_provenance(source_type, source_issue)
+        if provenance:
+            lines.append(f"- Entry source: {provenance}")
+        lines += [
             "",
             "This entry claims a fix shipped in "
             f"{claim.pr_ref}, but none of its code references exist at HEAD. "
@@ -643,6 +777,20 @@ def _parse_escalation_subject(title: str, body: str) -> str | None:
     if not slug or not cite:
         return None
     return f"{slug}:{cite}"
+
+
+def _entry_provenance(source_type: str | None, source_issue: int | None) -> str | None:
+    """Render ``#N (source_type)`` for a structured entry, or ``None``.
+
+    ``source_type`` is only populated for entries parsed via the
+    authoritative :func:`repo_wiki.parse_topic_page` (issue #9936) — the
+    raw-fallback row for non-``WikiEntry`` markdown has no provenance to
+    report, so callers must skip the line entirely in that case.
+    """
+    if source_type is None:
+        return None
+    issue_tag = f"#{source_issue}" if source_issue is not None else "no issue"
+    return f"{issue_tag} ({source_type})"
 
 
 def _first_heading(text: str) -> str | None:
