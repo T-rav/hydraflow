@@ -98,6 +98,7 @@ from ports import (
 )
 from post_merge_handler import PostMergeHandler
 from pr_manager import PRManager
+from pr_red_repair_loop import PrRedRepairLoop
 from pr_unsticker import PRUnsticker
 from pr_unsticker_loop import PRUnstickerLoop
 from precondition_gate import PreconditionGate
@@ -314,6 +315,7 @@ class ServiceRegistry:
     log_ingest_loop: LogIngestLoop
     stale_issue_gc_loop: StaleIssueGCLoop
     gate_health_loop: GateHealthLoop
+    pr_red_repair_loop: PrRedRepairLoop
     issue_refinement_loop: IssueRefinementLoop
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
@@ -1374,6 +1376,12 @@ def build_services(
         pr_manager=prs,
         deps=loop_deps,
     )
+    pr_red_repair_loop = PrRedRepairLoop(
+        config=config,
+        pr_manager=prs,
+        state=state,
+        deps=loop_deps,
+    )
     issue_refinement_dedup = DedupStore(
         "issue_refinement",
         config.data_root / "dedup" / "issue_refinement.json",
@@ -1930,6 +1938,7 @@ def build_services(
         log_ingest_loop=log_ingest_loop,
         stale_issue_gc_loop=stale_issue_gc_loop,
         gate_health_loop=gate_health_loop,
+        pr_red_repair_loop=pr_red_repair_loop,
         issue_refinement_loop=issue_refinement_loop,
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,
