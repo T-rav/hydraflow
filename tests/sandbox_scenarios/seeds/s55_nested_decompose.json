@@ -172,6 +172,9 @@
   "stale_workspaces": [],
   "gate_activations": [],
   "expired_run_dirs": [],
+  "epic_states": [],
+  "health_metrics": {},
+  "worker_heartbeats": {},
   "issue_refinement_backlog": [],
   "issue_refinement_verdicts": []
 }
