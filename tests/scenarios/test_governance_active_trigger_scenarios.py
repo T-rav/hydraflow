@@ -38,6 +38,9 @@ from tests.sandbox_scenarios.scenarios import (
 from tests.sandbox_scenarios.scenarios import (
     s72_health_monitor_adjusts_attempts as s72,
 )
+from tests.sandbox_scenarios.scenarios import (
+    s75_worker_stall_escalation as s75,
+)
 
 
 async def _run(mock_world, scenario):
@@ -142,3 +145,35 @@ async def test_s72_health_monitor_adjusts_on_seeded_low_first_pass(
     decisions = mock_world._harness.config.memory_dir / "decisions.jsonl"
     assert decisions.exists()
     assert "max_quality_fix_attempts" in decisions.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_s75_health_monitor_escalates_stalled_registered_worker(
+    mock_world,
+) -> None:
+    """#10086 — a seeded registered worker + a stale heartbeat together
+    reach the generic dead-man-switch escalation, not just a heartbeat read.
+
+    Before ``registered_workers``, a seeded ``worker_heartbeats`` entry alone
+    could never traverse ``_check_worker_staleness``'s ``name not in
+    registered`` filter (no ``BGWorkerManager`` reaches
+    ``HealthMonitorLoop`` from a seed at all) — the restart/escalate branch
+    was unreachable end-to-end. (``run_with_loops`` builds a throwaway
+    per-call ``EventBus`` for loop deps — see its docstring — so the
+    ``worker_stall`` ``SYSTEM_ALERT`` this scenario also publishes isn't
+    observable here; the sandbox Tier-2 run asserts that side via
+    ``/api/events``, where ``sandbox_main`` shares one real bus everywhere.)
+    """
+    _seed, _stats = await _run(mock_world, s75)
+
+    # The world shows the side effect, not just the loop's own stats: a
+    # loop-stalled issue was actually filed for the seeded stalled worker.
+    filed = await mock_world.github.list_issues_by_label("loop-stalled")
+    assert filed, "expected a loop-stalled issue for the seeded stalled worker"
+    stall_issues = [i for i in filed if s75._STALLED_WORKER in i["title"]]
+    assert stall_issues, (
+        f"expected a loop-stalled issue mentioning {s75._STALLED_WORKER!r}; "
+        f"filed: {filed!r}"
+    )
+    issue = mock_world._github._issues[stall_issues[0]["number"]]
+    assert "Auto-restart attempted: `False`" in issue.body

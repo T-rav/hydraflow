@@ -233,6 +233,7 @@ def test_default_seed_has_empty_state_materializer_fields() -> None:
     assert seed.epic_states == []
     assert seed.health_metrics == {}
     assert seed.worker_heartbeats == {}
+    assert seed.registered_workers == {}
 
 
 def test_seed_round_trips_state_materializer_fields_through_json() -> None:
@@ -266,6 +267,9 @@ def test_seed_round_trips_state_materializer_fields_through_json() -> None:
                 "details": {"stale_count": 0},
             },
         },
+        registered_workers={
+            "workspace_gc": {"interval_seconds": 5, "cycle_timeout_seconds": 5},
+        },
     )
 
     parsed = MockWorldSeed.from_json(original.to_json())
@@ -275,6 +279,30 @@ def test_seed_round_trips_state_materializer_fields_through_json() -> None:
     assert isinstance(parsed.epic_states[0]["epic_number"], int)
     assert parsed.health_metrics["outcomes"][0] == {"outcome": "failure"}
     assert parsed.worker_heartbeats["epic_monitor"]["age_seconds"] == 7200
+    assert parsed.registered_workers["workspace_gc"]["interval_seconds"] == 5
+
+
+def test_default_seed_has_empty_registered_workers() -> None:
+    """#10086 BGWorkerManager registered-loop-set seed field defaults empty."""
+    seed = MockWorldSeed()
+    assert seed.registered_workers == {}
+
+
+def test_seed_round_trips_registered_workers_through_json() -> None:
+    """Registered-worker entries are JSON-native string-keyed dicts — no
+    ``from_json`` coercion is required (#10086)."""
+    original = MockWorldSeed(
+        registered_workers={
+            "workspace_gc": {"interval_seconds": 5, "cycle_timeout_seconds": 5},
+            "runs_gc": {},
+        },
+    )
+
+    parsed = MockWorldSeed.from_json(original.to_json())
+
+    assert parsed == original
+    assert parsed.registered_workers["workspace_gc"]["interval_seconds"] == 5
+    assert parsed.registered_workers["runs_gc"] == {}
 
 
 def test_seed_round_trips_active_trigger_seams_through_json() -> None:

@@ -1264,6 +1264,9 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         raises — but a loop that goes *silent* (task wedged outside the
         watchdog window) shows only as a stale heartbeat (#9650). Restart
         it once per stall event; escalate with a ``loop-stalled`` issue
+        (plus a ``worker_stall`` ``SYSTEM_ALERT`` event, #10086 — the only
+        observable signal of a genuine escalation, since this sweep never
+        surfaces per-worker results through ``_do_work()``'s returned stats)
         only when the restart didn't clear it. Recovery auto-closes the
         issue (title-filtered — the label is shared across loops) and
         clears both markers so a future stall restarts fresh.
@@ -1384,10 +1387,29 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                 f"_Auto-filed by HydraFlow `health_monitor` (generic "
                 f"loop-stall dead-man-switch)._"
             )
-            await prs.create_issue(
+            issue_number = await prs.create_issue(
                 title,
                 body,
                 ["hydraflow-find", "loop-stalled"],
+            )
+            # SYSTEM_ALERT alongside the filed issue (mirrors the sibling
+            # stale-code dead-man-switch below) — the sweep itself never
+            # surfaces escalation through ``_do_work()``'s returned stats (it
+            # runs across an arbitrary number of registered workers, not one
+            # fixed metric), so this is the only observable signal that a
+            # stall genuinely escalated rather than merely heartbeated (#10086).
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    data={
+                        "kind": "worker_stall",
+                        "source": "health_monitor",
+                        "worker": name,
+                        "issue": issue_number,
+                        "elapsed_seconds": int(elapsed_s),
+                        "threshold_seconds": int(threshold_s),
+                    },
+                )
             )
             keys = keys | {filed_key}
             dedup.set_all(keys)

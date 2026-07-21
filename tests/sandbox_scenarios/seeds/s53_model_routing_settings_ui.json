@@ -25,5 +25,6 @@
   "health_metrics": {},
   "worker_heartbeats": {},
   "issue_refinement_backlog": [],
-  "issue_refinement_verdicts": []
+  "issue_refinement_verdicts": [],
+  "registered_workers": {}
 }
