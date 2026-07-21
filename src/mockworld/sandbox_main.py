@@ -950,25 +950,21 @@ async def main() -> None:
     # subprocess-dispatch method; setting the attribute here lets sandbox
     # scenarios drive failure-path recovery without producing synthetic
     # subprocess transcripts.
-    discover_runner = getattr(svc.discover_phase, "_runner", None)
+    # ADR-0107: Discover/Shape are planner-invoked engines now (svc.discover_runner
+    # / svc.shape_runner), not standalone phases. Route both through the fake-LLM
+    # sentinel so that if the planner's decision gate invokes them, their
+    # ``discover`` / ``run_turn`` subprocess dispatch consults the sentinel
+    # instead of spawning a real ``claude`` process that would wedge the
+    # air-gapped sandbox (#9796).
+    discover_runner = getattr(svc, "discover_runner", None)
     if discover_runner is not None:
         discover_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    shape_runner = getattr(svc, "shape_runner", None)
+    if shape_runner is not None:
+        shape_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
     plan_reviewer = getattr(svc.planner_phase, "_plan_reviewer", None)
     if plan_reviewer is not None:
         plan_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-    expert_council = getattr(svc.shape_phase, "_council", None)
-    if expert_council is not None:
-        expert_council._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-    # ShapeRunner post-dates the ``runners=fake_llm`` rebinding seam (which
-    # covers only triage/plan/implement/review), so build_services constructs
-    # a REAL one whose ``run_turn`` subprocess wedges the air-gapped sandbox
-    # exactly like the DiscoverRunner spawn (#9796 — froze the shape loop
-    # heartbeat once discover was unblocked). Drop it to None: ShapePhase's
-    # no-runner path posts stub Direction A/B options and the scripted
-    # ExpertCouncil (sentinel attached above) selects the direction —
-    # mirroring the Tier-1 in-process harness, which wires no shape runner
-    # either (tests/scenarios/fakes/mock_world.py).
-    svc.shape_phase._runner = None
     spec_reviewer = getattr(svc.implementer, "_spec_reviewer", None)
     if spec_reviewer is not None:
         spec_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]

@@ -860,8 +860,6 @@ class HydraFlowOrchestrator:
         # Map stage keys to config worker caps
         stage_caps: dict[str, int] = {
             "triage": self._config.max_triagers,
-            "discover": self._config.max_triagers,
-            "shape": self._config.max_triagers,
             "plan": self._config.max_planners,
             "implement": self._config.max_workers,
             "review": self._config.max_reviewers,
@@ -880,8 +878,6 @@ class HydraFlowOrchestrator:
         # Map IssueStore stage names to our stage keys
         store_stage_map: dict[str, str] = {
             "find": "triage",
-            "discover": "discover",
-            "shape": "shape",
             "plan": "plan",
             "ready": "implement",
             "review": "review",
@@ -892,8 +888,6 @@ class HydraFlowOrchestrator:
         session_counters = self._state.get_session_counters()
         session_counter_map: dict[str, str] = {
             "triage": "triaged",
-            "discover": "discovered",
-            "shape": "shaped",
             "plan": "planned",
             "implement": "implemented",
             "review": "reviewed",
@@ -903,8 +897,6 @@ class HydraFlowOrchestrator:
         stages: dict[str, StageStats] = {}
         for stage_key in (
             "triage",
-            "discover",
-            "shape",
             "plan",
             "implement",
             "review",
@@ -1388,8 +1380,6 @@ class HydraFlowOrchestrator:
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]] = [
             ("store", _store_loop),
             ("triage", self._triage_loop),
-            ("discover", self._discover_loop),
-            ("shape", self._shape_loop),
             ("plan", self._plan_loop),
             ("implement", self._implement_loop),
             ("review", self._review_loop),
@@ -1649,38 +1639,6 @@ class HydraFlowOrchestrator:
             _work,
             self._config.poll_interval,
             enabled_name="triage",
-            is_pipeline=True,
-        )
-
-    async def _discover_loop(self) -> None:
-        """Continuously poll for discover-labeled issues."""
-
-        async def _work() -> object:
-            return await self._pipeline_work_wrapper(
-                self._config.repo, self._svc.discover_phase.discover_issues
-            )
-
-        await self._polling_loop(
-            "discover",
-            _work,
-            self._config.poll_interval,
-            enabled_name="discover",
-            is_pipeline=True,
-        )
-
-    async def _shape_loop(self) -> None:
-        """Continuously poll for shape-labeled issues awaiting direction selection."""
-
-        async def _work() -> object:
-            return await self._pipeline_work_wrapper(
-                self._config.repo, self._svc.shape_phase.shape_issues
-            )
-
-        await self._polling_loop(
-            "shape",
-            _work,
-            self._config.poll_interval,
-            enabled_name="shape",
             is_pipeline=True,
         )
 

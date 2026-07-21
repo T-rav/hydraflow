@@ -48,7 +48,6 @@ _TRIAGE_VERDICT_MAP: dict[str, str] = {
     "already_addressed": "ADVANCE",
     "epic_decomposed": "ADVANCE",
     "bug_not_present": "ADVANCE",
-    "discover": "LOOP_BACK",
     "parked": "LOOP_BACK",
 }
 
@@ -334,28 +333,13 @@ class TriagePhase:
             return 1
 
         routing_outcome: str = "unknown"
-        # ADR-0107: when collapse_discover_shape is enabled, Triage stops
-        # emitting the hydraflow-discover transition entirely. Ready issues go
-        # straight to Plan and the discovery/shaping decision moves into the
-        # planner's gate. The clarity_score / needs_discovery signals survive on
-        # the TriageResult as planner hints rather than a triage routing verdict.
-        route_to_discovery = not self._config.collapse_discover_shape and (
-            result.needs_discovery
-            or (result.ready and result.clarity_score < self._config.clarity_threshold)
-        )
-        if route_to_discovery:
-            # Vague or broad issue — route to product discovery track
-            self._store.enqueue_transition(issue, "discover")
-            await self._transitioner.transition(issue.id, "discover")
-            self._state.increment_session_counter("triaged")
-            routing_outcome = "discover"
-            logger.info(
-                "Issue #%d triaged → %s (needs product discovery, clarity=%d)",
-                issue.id,
-                self._config.discover_label[0],
-                result.clarity_score,
-            )
-        elif result.ready:
+        # ADR-0107: Triage routes ready issues straight to Plan — there is no
+        # standalone Discover/Shape fork. The clarity_score / needs_discovery
+        # signals survive on the TriageResult and are recorded on the issue's
+        # classification record below as HINTS for the planner's on-demand
+        # discover/shape decision gate (plan_phase.py:_should_discover_helper),
+        # not as a triage-time routing verdict.
+        if result.ready:
             if not await self._maybe_decompose(issue, result):
                 if result.enrichment:
                     await self._transitioner.post_comment(issue.id, result.enrichment)
@@ -446,14 +430,14 @@ class TriagePhase:
         # Mirror classification into the local JSONL cache with the
         # final routing outcome captured. Writing AFTER the routing
         # decision prevents the READY-stage precondition gate from
-        # accepting a classification whose issue was parked or sent
-        # to discover — the gate checks routing_outcome == "plan".
+        # accepting a classification whose issue was parked — the gate
+        # checks routing_outcome == "plan".
         # Best-effort: cache failures never raise into the domain layer.
         #
         # clarity_score / needs_discovery (ADR-0107) ride along so the
-        # planner's decision gate can read them back as HINTS via
-        # ``IssueCache.latest_classification`` when collapse_discover_shape
-        # is on — see plan_phase.py:_should_discover_helper.
+        # planner's on-demand discover/shape decision gate can read them
+        # back as HINTS via ``IssueCache.latest_classification`` — see
+        # plan_phase.py:_should_discover_helper.
         if self._issue_cache is not None:
             self._issue_cache.record_classification(
                 issue.id,
@@ -535,9 +519,9 @@ class TriagePhase:
         # Deferred plan-stage label swap. Now that the classification
         # record + reproduction record (if applicable) are written, the
         # implement loop's READY gate has data to check when the issue
-        # eventually transitions through plan → ready. The discover/
-        # parked/sentry paths swapped their labels inline above because
-        # they have no race window with downstream consumers.
+        # eventually transitions through plan → ready. The parked/sentry
+        # paths swapped their labels inline above because they have no
+        # race window with downstream consumers.
         if routing_outcome == "plan":
             self._store.enqueue_transition(issue, "plan")
             await self._transitioner.transition(issue.id, "plan")

@@ -5,7 +5,7 @@
 **Date:** 2026-07-21
 **Enforcement:** decision-of-record
 **Supersedes:** ADR-0031 (Product Track Architecture — Discover and Shape Phases)
-**Amends:** ADR-0002 (GitHub Labels as the Pipeline State Machine)
+**Amends:** ADR-0002 (GitHub Labels as the Pipeline State Machine); ADR-0064 (Earlier-Adversarial Pipeline — removes the Discover/Shape adversarial stages)
 
 ## Context
 
@@ -43,8 +43,9 @@ The planner already contains the seams this decision needs:
 `plan_phase.py:_should_research` gates a research pre-pass (escalated or cycled
 issues) via an injected research runner, and `plan_phase.py:_is_product_track_issue`
 detects product-track provenance. The discover/shape logic is likewise already
-factored into callable engines (`discover_phase.py:DiscoverPhase._discover_single`,
-`shape_phase.py:ShapePhase`) rather than being welded to their loops.
+factored into callable engines (`discover_runner.py:DiscoverRunner`,
+`shape_runner.py:ShapeRunner`) rather than being welded to their loops — the
+planner invokes these runners directly.
 
 ## Decision
 
@@ -108,9 +109,12 @@ labels. This ADR is the amending record for that shrink.
 
 `_discover_loop` and `_shape_loop` are removed from the orchestrator
 `loop_factories`. Discover/shape work no longer has a standalone supervised
-loop; it runs inside the plan loop's tick via the gate. `DiscoverPhase` /
-`ShapePhase` (and their council/challenger/coherence helpers) survive as
-planner-invoked engines.
+loop; it runs inside the plan loop's tick via the gate. The
+`DiscoverRunner` / `ShapeRunner` engines (and their expander / completeness /
+coherence helpers) survive as planner-invoked helpers; the standalone
+`DiscoverPhase` / `ShapePhase` wrappers — and their loop-only council /
+challenger machinery (`ExpertCouncil`, `DiscoveryCouncil`, `ShapeChallenger`,
+`ShapeExpertCouncil`, `ComplexityGate`) — are removed with the loops.
 
 ### Config migration
 
@@ -122,27 +126,29 @@ planner-invoked engines.
 - `clarity_threshold` is repurposed as the planner gate's default
   discovery-hint threshold rather than the triage routing threshold.
 
-### Rollout (flag-gated)
+### Rollout (completed)
 
-Because this change removes load-bearing pipeline stages that ~50 scenario and
-unit suites assert, it lands incrementally behind a single lever,
-`config.py:collapse_discover_shape` (env `HYDRAFLOW_COLLAPSE_DISCOVER_SHAPE`),
-mirroring the flag-gated rollout precedent of ADR-0042
-(`HYDRAFLOW_STAGING_ENABLED`):
+Because this change removed load-bearing pipeline stages that ~50 scenario and
+unit suites asserted, it landed incrementally behind a single lever,
+`collapse_discover_shape` (env `HYDRAFLOW_COLLAPSE_DISCOVER_SHAPE`), mirroring
+the flag-gated rollout precedent of ADR-0042 (`HYDRAFLOW_STAGING_ENABLED`):
 
-1. **Landed with this ADR:** the flag (default `False`), and the flag-gated
-   Triage→Plan-direct routing. With the flag off, behavior is byte-for-byte the
-   ADR-0031 fork, so the full existing suite stays green.
-2. **Follow-up (tracked under #9773):** wire the planner decision gate to invoke
-   the discover/shape helpers; then flip the default and rip out the standalone
-   loops, labels, `IssueStoreStage`/`PipelineStage` members, dashboard track
-   rendering, and update the product-track scenarios. See the migration
-   checklist in the issue.
+1. **Keystone (#10145):** the flag (default `False`) and the flag-gated
+   Triage→Plan-direct routing. With the flag off, behavior was byte-for-byte the
+   ADR-0031 fork, so the full existing suite stayed green.
+2. **Planner gate (#10147):** wired the planner decision gate
+   (`_should_discover_helper` / `_should_shape_helper`) to invoke the
+   `DiscoverRunner` / `ShapeRunner` engines behind the flag.
+3. **Full removal (#9773):** made the collapsed behavior **unconditional** and
+   **removed the flag entirely**, along with the standalone `_discover_loop` /
+   `_shape_loop`, the `hydraflow-discover` / `hydraflow-shape` labels, the
+   `IssueStoreStage` / `PipelineStage` `DISCOVER` / `SHAPE` members and their
+   queues, the dashboard track rendering, the `DiscoverPhase` / `ShapePhase`
+   wrappers and their loop-only council/challenger/gate modules, and migrated
+   the product-track scenarios/tests.
 
-The flag is a migration lever, not a permanent operating mode: enabling it
-before the planner gate lands routes low-clarity issues to the planner with no
-discovery pre-pass (a known plan-quality regression ADR-0031 documented), so it
-must stay `False` in production until step 2 completes.
+The flag was a migration lever, not a permanent operating mode — it has been
+removed now that the collapsed topology is the only path.
 
 ## Consequences
 
@@ -185,15 +191,17 @@ must stay `False` in production until step 2 completes.
   human-interactive shaping instead of a dedicated Shape loop.
 - ADR-0042 (Two-Tier Branch Release Promotion) — precedent for landing a
   topology change behind a boolean rollout flag.
-- `src/triage_phase.py:_triage_single` — routing; the Discover branch becomes
-  flag-gated and is retired when `collapse_discover_shape` defaults on.
-- `src/config.py:collapse_discover_shape` — the rollout flag.
+- `src/triage_phase.py` — routing; the Discover branch is removed, so a ready
+  issue always transitions to `hydraflow-plan`.
 - `src/plan_phase.py:_should_research` — existing gate the planner discovery
   decision extends.
+- `src/plan_phase.py:_should_discover_helper` / `_should_shape_helper` — the
+  planner decision gate that invokes the discover/shape engines on demand.
 - `src/plan_phase.py:_is_product_track_issue` — product-track detection that
   collapses into planner decomposition.
-- `src/discover_phase.py:DiscoverPhase` — retained as a planner-invoked research
-  engine.
-- `src/shape_phase.py:ShapePhase` — retained as a planner-invoked shaping engine.
+- `src/discover_runner.py:DiscoverRunner` — retained as the planner-invoked
+  research engine (the standalone `DiscoverPhase` wrapper was removed).
+- `src/shape_runner.py:ShapeRunner` — retained as the planner-invoked shaping
+  engine (the standalone `ShapePhase` wrapper was removed).
 - `src/models.py:TriageResult` — `clarity_score` / `needs_discovery` become
   planner hints rather than triage routing verdicts.

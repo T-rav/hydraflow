@@ -127,9 +127,11 @@ class DiscoverRunner(BaseRunner):
     ) -> None:
         """Wire issue-filing + dedup deps used by evaluator escalation.
 
-        Called by :class:`DiscoverPhase` after construction. Without
-        binding, escalation logs a warning and returns — evaluator
-        dispatch and bounded retry still run.
+        Bound by the service factory (``service_registry.build_services``)
+        right after construction (ADR-0107 — this engine is invoked as a
+        planner helper, not a standalone phase). Without binding, escalation
+        logs a warning and returns — evaluator dispatch and bounded retry
+        still run.
         """
         self._prs = prs
         self._dedup = dedup

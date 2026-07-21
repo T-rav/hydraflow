@@ -100,7 +100,7 @@ The following files carry this ADR's decisions and must be kept in sync with any
 - `src/trust_fleet_sanity_loop.py:TrustFleetSanityLoop` — meta-observability implementation (§12.1).
 - `src/health_monitor_loop.py:HealthMonitorLoop` — dead-man-switch for the meta-observer.
 - `src/corpus_learning_loop.py:CorpusLearningLoop`, `src/contract_refresh_loop.py:ContractRefreshLoop`, `src/staging_bisect_loop.py:StagingBisectLoop`, `src/principles_audit_loop.py:PrinciplesAuditLoop`, `src/flake_tracker_loop.py:FlakeTrackerLoop`, `src/skill_prompt_eval_loop.py:SkillPromptEvalLoop`, `src/fake_coverage_auditor_loop.py:FakeCoverageAuditorLoop`, `src/rc_budget_loop.py:RCBudgetLoop`, `src/wiki_rot_detector_loop.py:WikiRotDetectorLoop` — the nine watched trust loops.
-- `src/discover_phase.py:DiscoverPhase`, `src/discover_runner.py:DiscoverRunner`, `src/shape_phase.py:ShapePhase`, `src/shape_runner.py:ShapeRunner` — §4.10 product-phase evaluator dispatch (extends ADR-0031 with evaluator skill retry + HITL escalation).
+- `src/discover_runner.py:DiscoverRunner`, `src/shape_runner.py:ShapeRunner` — §4.10 product-phase evaluator dispatch (evaluator skill retry + HITL escalation). ADR-0107 removed the standalone `DiscoverPhase` / `ShapePhase` wrappers; these engines are now invoked by the planner on demand.
 - `src/report_issue_loop.py:ReportIssueLoop` — §4.11 daily-budget sweep hook inside `_do_work` (additive; does not change the screenshot-capture behavior covered by ADR-0018).
 
 ## Update Log

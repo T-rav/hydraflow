@@ -66,6 +66,6 @@ Supersede when a boundary's recording contract changes (for example, if a bounda
 
 - `src/convergence_recording.py`: `record_stage_verdict`, `signatures_from_concerns`.
 - `src/triage_phase.py`: integration of `record_stage_verdict` at Triage decision sites.
-- `src/shape_phase.py`: integration of `record_stage_verdict` at Shape decision sites.
+- Shape decision-site integration of `record_stage_verdict` — removed by ADR-0107 (the standalone Shape phase and its boundary are gone; `CONVERGENCE_BOUNDARY_STAGES` is now `("triage", "plan")`).
 - `src/plan_phase.py`: integration of `record_stage_verdict` at Plan decision sites.
 - `tests/scenarios/test_convergence_pipeline_mockworld.py`: MockWorld pipeline scenario exercising the full cross-boundary recording flow.

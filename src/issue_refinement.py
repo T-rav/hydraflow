@@ -481,8 +481,6 @@ def build_priority_prompt(issue: RefinementIssue) -> str:
 _ACTIVE_PIPELINE_PHASE_LABELS: frozenset[str] = frozenset(
     {
         "hydraflow-find",  # find_label (config.py)
-        "hydraflow-discover",  # discover_label (config.py)
-        "hydraflow-shape",  # shape_label (config.py)
         "hydraflow-plan",  # planner_label (config.py)
         "hydraflow-ready",  # ready_label (config.py)
         "hydraflow-review",  # review_label (config.py)

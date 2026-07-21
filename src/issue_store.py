@@ -40,8 +40,6 @@ class IssueStoreStage(StrEnum):
     """Internal routing stage names for the issue store queues."""
 
     FIND = "find"
-    DISCOVER = "discover"
-    SHAPE = "shape"
     PLAN = "plan"
     READY = "ready"
     REVIEW = "review"
@@ -51,8 +49,6 @@ class IssueStoreStage(StrEnum):
 
 # Backward-compatible module-level aliases
 STAGE_FIND = IssueStoreStage.FIND
-STAGE_DISCOVER = IssueStoreStage.DISCOVER
-STAGE_SHAPE = IssueStoreStage.SHAPE
 STAGE_PLAN = IssueStoreStage.PLAN
 STAGE_READY = IssueStoreStage.READY
 STAGE_REVIEW = IssueStoreStage.REVIEW
@@ -66,8 +62,6 @@ STAGE_MERGED = IssueStoreStage.MERGED
 # pushes and REST polls are byte-identical (modulo seq).
 STAGE_NAME_MAP: dict[str, str] = {
     IssueStoreStage.FIND: "triage",
-    IssueStoreStage.DISCOVER: "discover",
-    IssueStoreStage.SHAPE: "shape",
     IssueStoreStage.PLAN: "plan",
     IssueStoreStage.READY: "implement",
     IssueStoreStage.REVIEW: "review",
@@ -80,8 +74,6 @@ STAGE_NAME_MAP: dict[str, str] = {
 # most advanced stage (highest priority).
 _STAGE_PRIORITY = {
     IssueStoreStage.FIND: 0,
-    IssueStoreStage.DISCOVER: 1,
-    IssueStoreStage.SHAPE: 2,
     IssueStoreStage.PLAN: 3,
     IssueStoreStage.READY: 4,
     IssueStoreStage.REVIEW: 5,
@@ -134,8 +126,6 @@ class IssueStore:
         # Per-stage queues (FIFO)
         self._queues: dict[IssueStoreStage, deque[Task]] = {
             STAGE_FIND: deque(),
-            STAGE_DISCOVER: deque(),
-            STAGE_SHAPE: deque(),
             STAGE_PLAN: deque(),
             STAGE_READY: deque(),
             STAGE_REVIEW: deque(),
@@ -143,8 +133,6 @@ class IssueStore:
         # Companion sets for O(1) membership checks (task ids in each queue)
         self._queue_members: dict[IssueStoreStage, set[int]] = {
             STAGE_FIND: set(),
-            STAGE_DISCOVER: set(),
-            STAGE_SHAPE: set(),
             STAGE_PLAN: set(),
             STAGE_READY: set(),
             STAGE_REVIEW: set(),
@@ -176,8 +164,6 @@ class IssueStore:
         # Session throughput counters
         self._processed_count: dict[str, int] = {
             STAGE_FIND: 0,
-            STAGE_DISCOVER: 0,
-            STAGE_SHAPE: 0,
             STAGE_PLAN: 0,
             STAGE_READY: 0,
             STAGE_REVIEW: 0,
@@ -369,10 +355,6 @@ class IssueStore:
         m: dict[str, IssueStoreStage] = {}
         for lbl in self._config.find_label:
             m[lbl] = STAGE_FIND
-        for lbl in self._config.discover_label:
-            m[lbl] = STAGE_DISCOVER
-        for lbl in self._config.shape_label:
-            m[lbl] = STAGE_SHAPE
         for lbl in self._config.planner_label:
             m[lbl] = STAGE_PLAN
         for lbl in self._config.ready_label:
@@ -419,8 +401,6 @@ class IssueStore:
         """
         stage_alias: dict[str, IssueStoreStage] = {
             "find": STAGE_FIND,
-            "discover": STAGE_DISCOVER,
-            "shape": STAGE_SHAPE,
             "plan": STAGE_PLAN,
             "ready": STAGE_READY,
             "review": STAGE_REVIEW,
@@ -485,14 +465,6 @@ class IssueStore:
     def get_triageable(self, max_count: int) -> list[Task]:
         """Return up to *max_count* issues from the find queue."""
         return self._take_from_queue(STAGE_FIND, max_count)
-
-    def get_discoverable(self, max_count: int) -> list[Task]:
-        """Return up to *max_count* issues from the discover queue."""
-        return self._take_from_queue(STAGE_DISCOVER, max_count)
-
-    def get_shapeable(self, max_count: int) -> list[Task]:
-        """Return up to *max_count* issues from the shape queue."""
-        return self._take_from_queue(STAGE_SHAPE, max_count)
 
     def get_plannable(self, max_count: int) -> list[Task]:
         """Return up to *max_count* issues from the plan queue."""
@@ -904,8 +876,6 @@ class IssueStore:
         active_count: dict[str, int] = {}
         for stage in [
             STAGE_FIND,
-            STAGE_DISCOVER,
-            STAGE_SHAPE,
             STAGE_PLAN,
             STAGE_READY,
             STAGE_REVIEW,

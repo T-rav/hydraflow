@@ -118,8 +118,6 @@ _EPIC_INTERNAL_LABELS: frozenset[str] = frozenset(
 # Frontend stage key → config label field name (for request-changes)
 _FRONTEND_STAGE_TO_LABEL_FIELD: dict[str, str] = {
     "triage": "find_label",
-    "discover": "discover_label",
-    "shape": "shape_label",
     "plan": "planner_label",
     "implement": "ready_label",
     "review": "review_label",

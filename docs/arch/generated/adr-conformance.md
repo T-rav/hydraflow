@@ -56,7 +56,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0060 | enforced | `pytest:tests/test_atlas_routes.py` |
 | ADR-0061 | enforced | `pytest:tests/test_atlas_routes.py` |
 | ADR-0062 | enforced | `pytest:tests/test_entry_evidence_loop.py`, `pytest:tests/scenarios/test_entry_evidence_loop_scenario.py` |
-| ADR-0064 | enforced | `pytest:tests/scenarios/test_adversarial_pipeline.py` |
+| ADR-0064 | enforced | `pytest:tests/test_adversarial_retry_loop.py` |
 | ADR-0065 | manual | `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` |
 | ADR-0071 | enforced | `pytest:tests/test_route_back.py` |
 | ADR-0083 | enforced | `pytest:tests/test_sandbox_scenario_contract.py`, `pytest:tests/test_no_screenshot_regression_tests.py` |
@@ -104,7 +104,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/regressions/test_otel_disabled_is_noop.py` | ADR-0055 |
 | `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` | ADR-0094, ADR-0095 |
 | `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` | ADR-0024 |
-| `pytest:tests/scenarios/test_adversarial_pipeline.py` | ADR-0064 |
 | `pytest:tests/scenarios/test_auto_agent_preflight.py` | ADR-0050 |
 | `pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py` | ADR-0097 |
 | `pytest:tests/scenarios/test_convergence_oscillation_mockworld.py` | ADR-0098 |
@@ -115,6 +114,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_adr_conformance_coverage.py` | ADR-0100 |
 | `pytest:tests/test_adr_pre_validator.py` | ADR-0037 |
 | `pytest:tests/test_adr_touchpoint_auditor_loop.py` | ADR-0056 |
+| `pytest:tests/test_adversarial_retry_loop.py` | ADR-0064 |
 | `pytest:tests/test_agent_advanced.py` | ADR-0092 |
 | `pytest:tests/test_agent_cli.py` | ADR-0004, ADR-0092 |
 | `pytest:tests/test_atlas_routes.py` | ADR-0060, ADR-0061, ADR-0090 |

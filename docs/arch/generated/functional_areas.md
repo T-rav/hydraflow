@@ -286,14 +286,17 @@ The Auto-Agent HITL pre-flight loop intercepts every `hitl-escalation` issue bef
 
 ## Goal-Driven Development
 
-The Discover → Shape → Implement track for vague work that the orchestrator can't take directly. Implemented as call-sites in shape_phase.py and discover_phase.py rather than dedicated loops.
+Discovery research and direction shaping for vague or broad work. ADR-0107 retired the standalone Discover/Shape pipeline phases: these engines (DiscoverRunner / ShapeRunner and their expander / completeness / coherence helpers) are now invoked on demand by the planner behind its decision gate (plan_phase.py:_should_discover_helper / _should_shape_helper) rather than as dedicated loops or labels.
 
 **Module globs**
 
-- `src/discover_phase.py`
-- `src/shape_phase.py`
+- `src/discover_runner.py`
+- `src/discover_expander.py`
+- `src/discover_completeness.py`
+- `src/shape_runner.py`
+- `src/shape_coherence.py`
 
-**Related ADRs:** `ADR-0031`
+**Related ADRs:** `ADR-0031`, `ADR-0107`
 
 
 ## Orchestration
