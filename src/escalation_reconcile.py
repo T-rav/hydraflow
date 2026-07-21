@@ -70,15 +70,18 @@ def is_bot_close(issue: GitHubIssueSummary | dict[str, object]) -> bool:
 
     Detected via :data:`BOT_CLOSE_MARKER_LABEL` on the issue dict — the only
     per-close signal the reconciler can obtain, since ``GitHubIssueSummary``
-    carries no ``closed_by``/actor/``state_reason`` and the closed-issue
-    projection is label-free by default (#9943).
+    carries no ``closed_by``/actor/``state_reason``. ``PRManager
+    .list_closed_issues_by_label`` projects ``labels`` on the closed listing
+    (#8996 — originally label-free by default, #9943), so this predicate is
+    load-bearing there; other callers that pass a plain dict with no
+    ``labels`` key still fall open per the paragraph below.
 
     Fail-open toward the pre-#9437 contract: when the marker is ABSENT — which
-    includes the common case where labels are simply not projected onto a
-    closed issue — the close is treated as human, and the caller drops the
-    dedup key so the detector may re-fire, exactly as before this guard. We
-    only ever RETAIN the key on a *positive* bot signal; an unknown/unavailable
-    signal never starts silently retaining keys everywhere.
+    includes any case where labels are simply not present on a closed issue —
+    the close is treated as human, and the caller drops the dedup key so the
+    detector may re-fire, exactly as before this guard. We only ever RETAIN
+    the key on a *positive* bot signal; an unknown/unavailable signal never
+    starts silently retaining keys everywhere.
     """
     labels = issue.get("labels") or []
     if not isinstance(labels, list):

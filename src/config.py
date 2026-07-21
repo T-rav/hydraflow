@@ -329,6 +329,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_AUTO_PR_PREFLIGHT_STAGE_TIMEOUT_S",
         600,
     ),
+    ("pr_base_max_age_days", "HYDRAFLOW_PR_BASE_MAX_AGE_DAYS", 3),
     ("flake_tracker_interval", "HYDRAFLOW_FLAKE_TRACKER_INTERVAL", 14400),
     ("flake_threshold", "HYDRAFLOW_FLAKE_THRESHOLD", 3),
     ("skill_prompt_eval_interval", "HYDRAFLOW_SKILL_PROMPT_EVAL_INTERVAL", 604800),
@@ -644,6 +645,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "auto_pr_preflight_gate_enabled",
         "HYDRAFLOW_AUTO_PR_PREFLIGHT_GATE_ENABLED",
+        True,
+    ),
+    (
+        "pr_base_freshness_guard_enabled",
+        "HYDRAFLOW_PR_BASE_FRESHNESS_GUARD_ENABLED",
         True,
     ),
     (
@@ -3899,6 +3905,30 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Per-stage timeout in seconds for the auto-PR pre-flight gate "
             "(#10013). A stage that exceeds it counts as red."
+        ),
+    )
+    pr_base_freshness_guard_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for the implementer/pr_manager base-freshness guard "
+            "(#10101, the #9964 class): before ``gh pr create`` on a "
+            "long-lived implementer worktree, refuses (or auto "
+            "fetch+merges) a branch whose merge-base with the base branch "
+            "is older than ``pr_base_max_age_days``. Distinct from the "
+            "auto_pr pre-flight gate (#10013), which covers the "
+            "short-lived bot-PR worktree seam and always forks fresh."
+        ),
+    )
+    pr_base_max_age_days: int = Field(
+        default=3,
+        ge=1,
+        le=90,
+        description=(
+            "Max age in days of an implementer branch's merge-base with the "
+            "base branch before the base-freshness guard (#10101) treats it "
+            "as stale. Older than this triggers an in-worktree "
+            "fetch+merge-update attempt before falling back to refusing the "
+            "PR open."
         ),
     )
     implement_two_stage_review_enabled: bool = Field(

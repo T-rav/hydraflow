@@ -100,7 +100,7 @@ class TestAdapterProjectsClosedAt:
 
         assert run_gh.await_args is not None
         argv = run_gh.await_args.args
-        assert "number,title,body,updatedAt,closedAt" in argv
+        assert "number,title,body,updatedAt,closedAt,labels" in argv
         assert issues[0]["closed_at"] == "2026-06-01T00:00:00Z"
         assert issues[0]["updated_at"] == "2026-07-17T00:00:00Z"
 
