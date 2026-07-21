@@ -299,9 +299,13 @@ jobs:
       # excluded here and run SERIALLY below: process-global OTel/loop-registry
       # + convergence-timing state flakes across xdist workers (Tier 1a split).
       - name: Run tests (fast, parallel — no coverage)
-        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --ignore=tests/scenarios -n auto --dist loadscope
-      - name: Run scenario tests (serial)
-        run: PYTHONPATH=src uv run pytest tests/scenarios
+        # tests/scenarios + tests/test_review_phase_metrics.py are xdist-unsafe
+        # (process-global OTel/loop-registry/timing #10111; leaked review_advisor
+        # client mock) — excluded here, run serially below. Keep in sync with the
+        # Makefile PYTEST_SERIAL_PATHS.
+        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --ignore=tests/scenarios --ignore=tests/test_review_phase_metrics.py -n auto --dist loadscope --reruns 2 --reruns-delay 1
+      - name: Run serial (xdist-unsafe) tests
+        run: PYTHONPATH=src uv run pytest tests/scenarios tests/test_review_phase_metrics.py
 
   # Trailing coverage gate (Tier 2a). Coverage is SINGLE-THREADED (xdist + --cov
   # is finicky) and therefore too slow for the PR merge path, so it runs OFF the

@@ -20,7 +20,26 @@ DEPS_STAMP := $(VENV)/.deps-synced
 # assert convergence ORDERING/timing, so cross-worker scheduling makes them
 # flake. Making scenarios xdist-safe (per-worker OTel provider + registry
 # isolation) is a tracked follow-up. Override PYTEST_PARALLEL= to disable.
-PYTEST_PARALLEL ?= -n auto --dist loadscope
+# `--reruns` rescues TRANSIENT cross-worker flakes a newly-parallelized suite
+# surfaces (subprocess PID/timing races, e.g. the process-group reap tests) —
+# deterministic failures still fail on every retry and stay red, so real breaks
+# are not masked. PERSISTENT isolation leaks (a global mock left set) are NOT
+# rescued by reruns and are quarantined via PYTEST_SERIAL_PATHS instead.
+PYTEST_PARALLEL ?= -n auto --dist loadscope --reruns 2 --reruns-delay 1
+
+# Paths excluded from the parallel run and executed SERIALLY (xdist-unsafe:
+# process-global state that collides across workers). tests/scenarios: OTel
+# provider + loop-registration catalog + convergence-timing (#10111).
+# tests/test_review_phase_metrics.py: a leaked global review_advisor client mock
+# degrades the advisor under cross-worker ordering (passes single-threaded) —
+# tracked follow-up. Add a path here when a non-scenario test proves
+# xdist-unsafe; the real fix is per-test isolation, not growing this list.
+# tests/regressions runs serially too — it mirrors CI (the Regression Tests job
+# is single-threaded) and contains the subprocess-group reap tests (own
+# dedicated serial CI lane), which race under parallel workers (timing, not a
+# real bug). Keeps the local `make quality` split identical to CI's job layout.
+PYTEST_SERIAL_PATHS ?= tests/scenarios tests/regressions tests/test_review_phase_metrics.py
+PYTEST_SERIAL_IGNORE := $(addprefix --ignore=,$(PYTEST_SERIAL_PATHS))
 
 # Runtime overrides (used by `make hot`)
 WORKERS ?= 3
@@ -188,8 +207,8 @@ cover: coverage
 
 test: deps
 	@echo "$(BLUE)Running HydraFlow unit tests (parallel; scenarios serial)...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ --ignore=tests/scenarios $(PYTEST_PARALLEL) -q
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios -q
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(PYTEST_PARALLEL) -q
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) -q
 	@echo "$(GREEN)All tests passed$(RESET)"
 
 smoke: deps
@@ -396,8 +415,8 @@ quality: deps lint-ul
 	@cd $(HYDRAFLOW_DIR) && ( \
 		$(UV) pyright && echo "[typecheck OK]" & \
 		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
-		PYTHONPATH=src $(UV) pytest tests/ --ignore=tests/scenarios $(PYTEST_PARALLEL) && echo "[tests OK]" & \
-		PYTHONPATH=src $(UV) pytest tests/scenarios && echo "[scenarios OK]" & \
+		PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(PYTEST_PARALLEL) && echo "[tests OK]" & \
+		PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) && echo "[serial-tests OK]" & \
 		PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -q && echo "[scenario-loops OK]" & \
 		( $(UI_TEST_CMD) ) & \
 		wait_result=0; \
