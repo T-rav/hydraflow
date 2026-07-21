@@ -53,11 +53,20 @@ if [ -n "$STAGED_ALL" ]; then
 fi
 
 # Detect Python changes (existing) AND arch source changes (new).
+# The arch generators read MORE than likec4/functional_areas/src: coverage_matrix
+# rglobs docs/wiki/** and greps docs/adr/*.md (loop→doc references), and the UL
+# glossary derives from docs/wiki/terms/. A wiki- or ADR-only commit therefore
+# drifts docs/arch/generated/coverage_matrix.md (and the UL views) but hit NONE
+# of the triggers below before docs/wiki + docs/adr were added — so the drift
+# slipped past this gate to the bake/pre-push. Keep this list a superset of the
+# generators' input roots; test_arch_check_trigger_coverage guards that.
 STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM -- '*.py' || true)
 STAGED_ARCH=$(git diff --cached --name-only --diff-filter=ACM \
     -- 'docs/arch/*.likec4' \
        'docs/arch/functional_areas.yml' \
        'docs/arch/source/*' \
+       'docs/adr' \
+       'docs/wiki' \
        'src/*.py' || true)
 STAGED_TESTS=$(git diff --cached --name-only --diff-filter=ACM -- 'tests/test_*.py' || true)
 

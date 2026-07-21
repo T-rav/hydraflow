@@ -1,0 +1,25 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# create_promotion_pr opens the rc/* -> main promotion PR and returns its
+# number. Load-bearing host detail (#9436 plan): FakeGitHub stores
+# https://github.com/test/repo/pull/{num} — NOT the test-org/test-repo host
+# PRInfoFactory uses for create_pr. The pr_number normalizer collapses only
+# the /pull/<digits> segment; the host is compared verbatim. _pr_counter
+# starts at 10_000, so the first call yields pull/10000.
+adapter: github
+interaction: create_promotion_pr
+recorded_at: "2026-07-20T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: create_promotion_pr
+  args:
+    - "rc/2026-05-13-0000"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "https://github.com/test/repo/pull/10000\n"
+  stderr: ""
+normalizers:
+  - pr_number
+baseline_only: true

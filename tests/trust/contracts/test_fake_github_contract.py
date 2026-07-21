@@ -161,6 +161,107 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         )
         return FakeOutput(exit_code=0, stdout="", stderr="")
 
+    # --- Staging / RC promotion cluster (#9768 slice; subsumes #9436) ---
+
+    if method == "create_rc_branch":
+        sha = await fake.create_rc_branch(str(args[0]))
+        return FakeOutput(exit_code=0, stdout=f"{sha}\n", stderr="")
+
+    if method == "push_synthetic_commit":
+        sha = await fake.push_synthetic_commit(str(args[0]), str(args[1]))
+        return FakeOutput(exit_code=0, stdout=f"{sha}\n", stderr="")
+
+    if method == "create_promotion_pr":
+        pr_number = await fake.create_promotion_pr(
+            rc_branch=str(args[0]),
+            title="Promote staging to main",
+            body="Automated RC promotion (ADR-0042).",
+        )
+        # Read the stored URL rather than hard-coding it — the fake's URL
+        # host (test/repo) is the single source of truth; any format change
+        # must surface in this contract gate (#9436 plan).
+        url = fake._prs[pr_number].url
+        return FakeOutput(exit_code=0, stdout=f"{url}\n", stderr="")
+
+    if method == "find_open_promotion_pr":
+        found = await fake.find_open_promotion_pr()
+        assert found is None, (
+            f"fresh FakeGitHub must have no open promotion PR, got {found!r}"
+        )
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
+    if method == "merge_promotion_pr":
+        pr_number = int(args[0])
+        fake.add_pr(number=pr_number, issue_number=0, branch="rc/2026-05-13-0000")
+        merged = await fake.merge_promotion_pr(pr_number)
+        assert merged, "FakeGitHub.merge_promotion_pr unexpectedly returned False"
+        # The fake returns True even for an absent PR — the .merged
+        # side-effect on the seeded PR is what actually pins fidelity.
+        assert fake._prs[pr_number].merged, (
+            f"merge_promotion_pr did not mark PR #{pr_number} merged"
+        )
+        stdout = f"merged pull request https://github.com/_/_/pull/{pr_number}\n"
+        return FakeOutput(exit_code=0, stdout=stdout, stderr="")
+
+    if method == "update_pr_branch":
+        pr_number = int(args[0])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        fake._prs[pr_number].mergeable = False
+        ok = await fake.update_pr_branch(pr_number)
+        assert fake._prs[pr_number].mergeable, (
+            f"update_pr_branch did not clear the conflict flag on #{pr_number}"
+        )
+        return FakeOutput(exit_code=0, stdout=f"{ok}\n", stderr="")
+
+    if method == "update_pr_base":
+        pr_number = int(args[0])
+        base = str(args[1])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        ok = await fake.update_pr_base(pr_number, base=base)
+        assert fake._prs[pr_number].base == base, (
+            f"update_pr_base did not record base {base!r} on #{pr_number}"
+        )
+        return FakeOutput(exit_code=0, stdout=f"{ok}\n", stderr="")
+
+    if method == "list_rc_branches":
+        import json as _json
+
+        branches = await fake.list_rc_branches()
+        return FakeOutput(exit_code=0, stdout=_json.dumps(branches) + "\n", stderr="")
+
+    if method == "delete_branch":
+        ok = await fake.delete_branch(str(args[0]))
+        return FakeOutput(exit_code=0, stdout=f"{ok}\n", stderr="")
+
+    if method == "list_recent_promotion_prs":
+        import json as _json
+
+        days = int(args[0]) if args else 7
+        prs = await fake.list_recent_promotion_prs(days=days)
+        return FakeOutput(exit_code=0, stdout=_json.dumps(prs) + "\n", stderr="")
+
+    if method == "ensure_branch_exists":
+        created = await fake.ensure_branch_exists(str(args[0]), base=str(args[1]))
+        return FakeOutput(exit_code=0, stdout=f"{created}\n", stderr="")
+
+    if method == "apply_staging_branch_protection":
+        import json as _json
+
+        result = await fake.apply_staging_branch_protection(str(args[0]))
+        return FakeOutput(exit_code=0, stdout=_json.dumps(result) + "\n", stderr="")
+
+    if method == "wait_for_ci":
+        from ci_sentinels import is_ci_incomplete
+
+        passed, summary = await fake.wait_for_ci(int(args[0]))
+        # #9351 contract class: a success summary must never be classified
+        # as an incomplete wait, or the caller retries a finished CI forever
+        # (and the inverse drift once force-closed green RC PRs for 3 days).
+        assert not is_ci_incomplete(summary), (
+            f"success summary {summary!r} mis-classified as incomplete"
+        )
+        return FakeOutput(exit_code=0, stdout=f"{passed}\n{summary}\n", stderr="")
+
     msg = f"FakeGitHub has no contract-tested method {method!r}"
     raise NotImplementedError(msg)
 
