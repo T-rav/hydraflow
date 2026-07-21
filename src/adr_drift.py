@@ -8,6 +8,11 @@ For per-ADR rollups (#8987) ``compute_drift_by_adr`` aggregates per-PR
 findings across a batch of merged PRs, producing one entry per drifted
 ADR with the union of contributing PRs.
 
+For cross-cutting fleet PRs (#9662) ``partition_fleet_drift`` splits the
+same input into per-ADR rollups plus one ``FleetDriftBatch`` per PR that
+drifts at least ``fleet_threshold`` distinct ADRs — so a fleet-wide
+implementation sweep yields ONE batched issue instead of N per-ADR ones.
+
 Kept pure (no I/O, no `gh` calls) so the loop can drive it from real
 state and tests can drive it from stubbed inputs.
 """
@@ -192,6 +197,25 @@ class AdrRollupEntry:
         return tuple(sorted({f.pr_number for f in self.contributors}))
 
 
+def _aggregate_by_adr(findings: Iterable[DriftFinding]) -> list[AdrRollupEntry]:
+    """Group already-computed drift findings into one entry per drifted ADR.
+
+    Single source of truth for the grouping/sorting semantics shared by
+    :func:`compute_drift_by_adr` and :func:`partition_fleet_drift`: findings
+    keep their input order within each ADR's contributor tuple, and output
+    is sorted by ADR number for deterministic processing.
+    """
+    per_adr: dict[int, tuple[ADR, list[DriftFinding]]] = {}
+    for finding in findings:
+        slot = per_adr.setdefault(finding.adr.number, (finding.adr, []))
+        slot[1].append(finding)
+
+    return [
+        AdrRollupEntry(adr=adr, contributors=tuple(entry_findings))
+        for _, (adr, entry_findings) in sorted(per_adr.items())
+    ]
+
+
 def compute_drift_by_adr(
     adr_index: ADRIndex,
     pr_diffs: Iterable[tuple[int, Iterable[str]]],
@@ -206,17 +230,75 @@ def compute_drift_by_adr(
     that ADR — drift on that pair is considered resolved by the same PR
     (matches ``compute_drift``'s per-PR semantics).
     """
-    pr_diffs = list(pr_diffs)
-    if not pr_diffs:
-        return []
+    return _aggregate_by_adr(
+        finding
+        for pr_number, changed_files in pr_diffs
+        for finding in compute_drift(adr_index, pr_number, changed_files)
+    )
 
-    per_adr: dict[int, tuple[ADR, list[DriftFinding]]] = {}
+
+@dataclass(frozen=True)
+class FleetDriftBatch:
+    """All ADRs drifted by one cross-cutting fleet PR (#9662).
+
+    Produced by :func:`partition_fleet_drift` when a single PR drifts at
+    least ``fleet_threshold`` distinct ADRs. The loop files ONE batched
+    ``hydraflow-adr-drift`` issue for the whole batch (dedup key
+    ``adr_touchpoint_auditor:FLEET-<pr>``) instead of N per-ADR rollups.
+
+    ``entries`` carries one single-contributor :class:`AdrRollupEntry` per
+    drifted ADR, sorted by ADR number.
+    """
+
+    pr_number: int
+    entries: tuple[AdrRollupEntry, ...]
+
+    @property
+    def adr_numbers(self) -> tuple[int, ...]:
+        return tuple(e.adr.number for e in self.entries)
+
+
+def partition_fleet_drift(
+    adr_index: ADRIndex,
+    pr_diffs: Iterable[tuple[int, Iterable[str]]],
+    *,
+    fleet_threshold: int,
+) -> tuple[list[AdrRollupEntry], list[FleetDriftBatch]]:
+    """Split drift findings into per-ADR rollups + per-PR fleet batches (#9662).
+
+    A PR drifting ``>= fleet_threshold`` distinct ADRs becomes exactly one
+    :class:`FleetDriftBatch`; its findings are REMOVED from the per-ADR
+    aggregation so the same drift is never double-filed (the core
+    correctness invariant). Every other PR's findings aggregate per-ADR
+    exactly as :func:`compute_drift_by_adr` would — below-threshold drift
+    keeps the existing per-ADR rollup shape unchanged.
+
+    ``compute_drift``'s per-PR self-coverage carries over: an ADR whose own
+    file is in the PR's diff contributes no finding and does not count
+    toward the threshold. Batches are sorted by PR number; entries within a
+    batch by ADR number (deterministic output).
+    """
+    if fleet_threshold < 2:
+        raise ValueError(
+            f"fleet_threshold must be >= 2, got {fleet_threshold} — a lower "
+            "value would batch ordinary single-ADR drift"
+        )
+    per_adr_findings: list[DriftFinding] = []
+    batches: list[FleetDriftBatch] = []
     for pr_number, changed_files in pr_diffs:
-        for finding in compute_drift(adr_index, pr_number, changed_files):
-            slot = per_adr.setdefault(finding.adr.number, (finding.adr, []))
-            slot[1].append(finding)
-
-    return [
-        AdrRollupEntry(adr=adr, contributors=tuple(findings))
-        for _, (adr, findings) in sorted(per_adr.items())
-    ]
+        findings = compute_drift(adr_index, pr_number, changed_files)
+        # ``compute_drift`` emits at most one finding per ADR, sorted by ADR
+        # number — so ``len(findings)`` IS the distinct-ADR count.
+        if len(findings) >= fleet_threshold:
+            batches.append(
+                FleetDriftBatch(
+                    pr_number=pr_number,
+                    entries=tuple(
+                        AdrRollupEntry(adr=f.adr, contributors=(f,)) for f in findings
+                    ),
+                )
+            )
+        else:
+            per_adr_findings.extend(findings)
+    batches.sort(key=lambda b: b.pr_number)
+    return _aggregate_by_adr(per_adr_findings), batches
