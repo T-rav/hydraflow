@@ -1,0 +1,23 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# count_workflow_run_artifacts returns how many artifacts a run uploaded
+# (`gh api .../artifacts`). The dispatcher seeds a run with 3 artifacts
+# so the count is non-zero, not a vacuous default.
+adapter: github
+interaction: count_workflow_run_artifacts
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: count_workflow_run_artifacts
+  args:
+  - '5401'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '3
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

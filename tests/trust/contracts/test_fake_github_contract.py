@@ -650,6 +650,191 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         diffs = await fake.get_pr_recent_commit_diffs(pr_number)
         return FakeOutput(exit_code=0, stdout=f"{diffs}\n", stderr="")
 
+    # --- Workflow-run / CI-log / git-op / alerts cluster (#9768 slice 5) ---
+
+    if method == "list_workflow_runs":
+        import json as _json
+
+        # Two runs at distinct timestamps so the newest-first ordering the
+        # method promises is actually exercised, not a single-row shape.
+        fake.add_workflow_run(
+            5101,
+            workflow="ci.yml",
+            conclusion="success",
+            created_at="2026-07-01T00:00:00Z",
+            pr_number=901,
+        )
+        fake.add_workflow_run(
+            5102,
+            workflow="arch-regen.yml",
+            conclusion="failure",
+            created_at="2026-07-02T00:00:00Z",
+            pr_number=0,
+        )
+        runs = await fake.list_workflow_runs()
+        assert [r["id"] for r in runs] == [5102, 5101], (
+            f"list_workflow_runs not newest-first: {[r['id'] for r in runs]}"
+        )
+        return FakeOutput(exit_code=0, stdout=_json.dumps(runs) + "\n", stderr="")
+
+    if method == "list_runs_for_workflow":
+        import json as _json
+
+        workflow = str(args[0])
+        # Two runs of the target workflow (newest-first) + one run of a
+        # different workflow the method must exclude.
+        fake.add_workflow_run(
+            5201,
+            workflow=workflow,
+            conclusion="success",
+            created_at="2026-07-01T00:00:00Z",
+            url="https://github.com/_/_/actions/runs/5201",
+            run_started_at="2026-07-01T00:00:10Z",
+            updated_at="2026-07-01T00:05:00Z",
+        )
+        fake.add_workflow_run(
+            5202,
+            workflow=workflow,
+            conclusion="failure",
+            created_at="2026-07-03T00:00:00Z",
+            url="https://github.com/_/_/actions/runs/5202",
+            run_started_at="2026-07-03T00:00:10Z",
+            updated_at="2026-07-03T00:05:00Z",
+        )
+        fake.add_workflow_run(
+            5203,
+            workflow="other.yml",
+            conclusion="success",
+            created_at="2026-07-04T00:00:00Z",
+        )
+        runs = await fake.list_runs_for_workflow(workflow)
+        assert [r["id"] for r in runs] == [5202, 5201], (
+            f"list_runs_for_workflow leaked/misordered rows: {[r['id'] for r in runs]}"
+        )
+        return FakeOutput(exit_code=0, stdout=_json.dumps(runs) + "\n", stderr="")
+
+    if method == "get_workflow_run_jobs":
+        import json as _json
+
+        run_id = int(args[0])
+        job = {
+            "name": "test (3.13)",
+            "status": "completed",
+            "conclusion": "failure",
+            "started_at": "2026-07-01T00:00:10Z",
+            "completed_at": "2026-07-01T00:04:00Z",
+            "steps": [
+                {"name": "Run pytest", "status": "completed", "conclusion": "failure"}
+            ],
+        }
+        fake.add_workflow_run(
+            run_id, workflow="ci.yml", conclusion="failure", jobs=[job]
+        )
+        jobs = await fake.get_workflow_run_jobs(run_id)
+        assert [j["name"] for j in jobs] == ["test (3.13)"], (
+            f"get_workflow_run_jobs returned unexpected jobs: {jobs}"
+        )
+        return FakeOutput(exit_code=0, stdout=_json.dumps(jobs) + "\n", stderr="")
+
+    if method == "count_workflow_run_artifacts":
+        run_id = int(args[0])
+        fake.add_workflow_run(
+            run_id, workflow="ci.yml", conclusion="success", artifact_count=3
+        )
+        count = await fake.count_workflow_run_artifacts(run_id)
+        assert count == 3, f"count_workflow_run_artifacts returned {count}, want 3"
+        return FakeOutput(exit_code=0, stdout=f"{count}\n", stderr="")
+
+    if method == "fetch_code_scanning_alerts":
+        import json as _json
+
+        from models import CodeScanningAlert
+
+        branch = str(args[0])
+        # Seed one open alert on the branch so the read returns the
+        # CodeScanningAlert projection, not a vacuous empty list.
+        alert = CodeScanningAlert(
+            number=7,
+            severity="error",
+            security_severity="high",
+            path="src/app.py",
+            start_line=42,
+            rule="py/sql-injection",
+            message="Possible SQL injection",
+        )
+        fake.add_alerts(branch=branch, alerts=[alert])
+        alerts = await fake.fetch_code_scanning_alerts(branch)
+        assert [a.number for a in alerts] == [7], (
+            f"fetch_code_scanning_alerts returned unexpected alerts: {alerts}"
+        )
+        stdout = _json.dumps([a.model_dump(mode="json") for a in alerts]) + "\n"
+        return FakeOutput(exit_code=0, stdout=stdout, stderr="")
+
+    if method == "get_dependabot_alerts":
+        import json as _json
+
+        # FIDELITY GAP: FakeGitHub.get_dependabot_alerts has no seed hook and
+        # always returns [] (the air-gapped sandbox never surfaces supply-chain
+        # alerts). Documented in the cassette header; the contract pins the
+        # empty-list shape the real adapter also returns in dry-run/error mode.
+        alerts = await fake.get_dependabot_alerts()
+        assert alerts == [], f"get_dependabot_alerts unexpectedly non-empty: {alerts}"
+        return FakeOutput(exit_code=0, stdout=_json.dumps(alerts) + "\n", stderr="")
+
+    if method == "push_branch":
+        # push_branch(worktree_path, branch, *, force=...) — the fake ignores
+        # its args (air-gapped: no real remote) and reports success.
+        ok = await fake.push_branch(str(args[0]), str(args[1]))
+        assert ok is True, f"push_branch returned {ok!r}, want True"
+        return FakeOutput(exit_code=0, stdout=f"{ok}\n", stderr="")
+
+    if method == "branch_has_diff_from_main":
+        # The fake conservatively reports a diff always exists so callers never
+        # falsely skip a branch as empty.
+        branch = str(args[0])
+        has_diff = await fake.branch_has_diff_from_main(branch)
+        assert has_diff is True, f"branch_has_diff_from_main returned {has_diff!r}"
+        return FakeOutput(exit_code=0, stdout=f"{has_diff}\n", stderr="")
+
+    if method == "pull_main":
+        # FIDELITY GAP: the fake's pull_main returns None (the real PRPort
+        # returns bool). No git remote exists in the sandbox, so it is a
+        # no-op; the contract records the empty stdout the no-op produces.
+        result = await fake.pull_main()
+        assert result is None, f"pull_main returned {result!r}, want None"
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
+    if method == "refresh_pr_branch_with_arch_regen":
+        pr_number = int(args[0])
+        branch = str(args[1])
+        fake.add_pr(number=pr_number, issue_number=1, branch=branch)
+        ok = await fake.refresh_pr_branch_with_arch_regen(pr_number, branch)
+        assert ok is True, f"refresh_pr_branch_with_arch_regen returned {ok!r}"
+        assert fake.arch_refresh_call_count(pr_number) == 1, (
+            "refresh_pr_branch_with_arch_regen did not record the call on "
+            f"PR #{pr_number}"
+        )
+        return FakeOutput(exit_code=0, stdout=f"{ok}\n", stderr="")
+
+    if method == "upload_screenshot":
+        # FIDELITY GAP: the air-gapped fake never uploads an asset and returns
+        # the empty URL (documented in the cassette header). The real adapter
+        # returns a gist URL, or "" on failure — the shape the fake pins.
+        url = await fake.upload_screenshot(png_path=str(args[0]))
+        assert url == "", f"upload_screenshot returned {url!r}, want empty string"
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
+    if method == "fetch_ci_failure_logs":
+        pr_number = int(args[0])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        # Seed the failure-log text so the read returns a non-empty payload.
+        fake.seed_ci_failure_log(pr_number, "FAILED tests/test_x.py::test_y")
+        logs = await fake.fetch_ci_failure_logs(pr_number)
+        assert logs == "FAILED tests/test_x.py::test_y", (
+            f"fetch_ci_failure_logs returned unexpected text: {logs!r}"
+        )
+        return FakeOutput(exit_code=0, stdout=f"{logs}\n", stderr="")
+
     msg = f"FakeGitHub has no contract-tested method {method!r}"
     raise NotImplementedError(msg)
 

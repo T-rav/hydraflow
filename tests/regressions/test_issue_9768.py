@@ -1,4 +1,4 @@
-"""Regression pin for issue #9768 (slices 1–4) — cassette-cluster pins.
+"""Regression pin for issue #9768 (slices 1–5) — cassette-cluster pins.
 
 Issue #9768 is the canonical ``fake_coverage_auditor`` rollup for the
 FakeGitHub adapter surface. The first carved slice (subsuming #9436) closes
@@ -18,7 +18,17 @@ the **PR/label read & query cluster** — 11 methods covering open-PR lookup
 ``list_open_prs`` / ``list_all_open_prs`` / ``list_conflicting_prs``), HITL
 listing (``list_hitl_items``), label-count aggregation (``get_label_counts``),
 and PR content reads (``get_pr_diff`` / ``get_pr_diff_names`` /
-``get_pr_head_sha`` / ``get_pr_recent_commit_diffs``). Each pin uses
+``get_pr_head_sha`` / ``get_pr_recent_commit_diffs``). Slice 5 — the FINAL
+slice — closes the **workflow-run / CI-log / git-op / alerts cluster**: the
+last 12 methods covering workflow-run reads (``list_workflow_runs`` /
+``list_runs_for_workflow`` / ``get_workflow_run_jobs`` /
+``count_workflow_run_artifacts``), security-alert reads
+(``fetch_code_scanning_alerts`` / ``get_dependabot_alerts``), CI-log reads
+(``fetch_ci_failure_logs``), and git/branch ops (``push_branch`` /
+``branch_has_diff_from_main`` / ``pull_main`` /
+``refresh_pr_branch_with_arch_regen`` / ``upload_screenshot``). With slice 5
+the FakeGitHub adapter surface is fully cassetted and
+``GRANDFATHERED_UNCASSETTED["FakeGitHub"]`` is empty. Each pin uses
 the auditor's *own* catalog functions so it fails for exactly the reason the
 auditor would re-file:
 
@@ -218,4 +228,67 @@ def test_issue_9768_pr_read_query_cluster_is_cassetted() -> None:
         "PR-read-query-cluster methods lost cassette coverage under "
         f"{cassette_dir.relative_to(_REPO_ROOT)}/ (input.command is the "
         f"coverage key, not the filename): {uncovered}"
+    )
+
+
+# The #9768 slice-5 cluster (FINAL): workflow-run reads, security-alert reads,
+# CI-log reads, and git/branch ops. Closing this empties
+# GRANDFATHERED_UNCASSETTED["FakeGitHub"] — the whole adapter surface is
+# cassetted.
+_WORKFLOW_GITOP_CLUSTER = frozenset(
+    {
+        "branch_has_diff_from_main",
+        "count_workflow_run_artifacts",
+        "fetch_ci_failure_logs",
+        "fetch_code_scanning_alerts",
+        "get_dependabot_alerts",
+        "get_workflow_run_jobs",
+        "list_runs_for_workflow",
+        "list_workflow_runs",
+        "pull_main",
+        "push_branch",
+        "refresh_pr_branch_with_arch_regen",
+        "upload_screenshot",
+    }
+)
+
+
+def test_issue_9768_workflow_gitop_cluster_is_cassetted() -> None:
+    """Every workflow-run/CI-log/git-op/alerts method stays covered by a cassette."""
+    catalog = catalog_fake_methods(_FAKE_DIR, repo_root=_REPO_ROOT)
+    assert "FakeGitHub" in catalog, "FakeGitHub not found in fakes catalog"
+
+    surface = set(catalog["FakeGitHub"]["adapter-surface"])
+    misclassified = sorted(_WORKFLOW_GITOP_CLUSTER - surface)
+    assert misclassified == [], (
+        "Workflow-gitop-cluster methods no longer classified adapter-surface "
+        f"(auditor accounting drift?): {misclassified}"
+    )
+
+    cassette_dir = _CASSETTE_ROOT / _FAKE_TO_CASSETTE_DIR["FakeGitHub"]
+    cassetted = catalog_cassette_methods(cassette_dir)
+    uncovered = sorted(_WORKFLOW_GITOP_CLUSTER - cassetted)
+    assert uncovered == [], (
+        "Workflow-gitop-cluster methods lost cassette coverage under "
+        f"{cassette_dir.relative_to(_REPO_ROOT)}/ (input.command is the "
+        f"coverage key, not the filename): {uncovered}"
+    )
+
+
+def test_issue_9768_fakegithub_surface_fully_cassetted() -> None:
+    """The whole point of #9768: FakeGitHub has zero uncovered surface methods.
+
+    Slice 5 is the closing slice. This end-state pin fails loudly if any
+    future adapter-surface method lands without a cassette — the gap must
+    never silently reopen now that the rollup is closed.
+    """
+    catalog = catalog_fake_methods(_FAKE_DIR, repo_root=_REPO_ROOT)
+    surface = set(catalog["FakeGitHub"]["adapter-surface"])
+    cassette_dir = _CASSETTE_ROOT / _FAKE_TO_CASSETTE_DIR["FakeGitHub"]
+    cassetted = catalog_cassette_methods(cassette_dir)
+    uncovered = sorted(surface - cassetted)
+    assert uncovered == [], (
+        "FakeGitHub adapter surface regressed to a non-zero coverage gap "
+        f"(#9768 was closed at zero): {uncovered}. Record a cassette + "
+        "dispatcher branch for each."
     )
