@@ -26,7 +26,7 @@ def _client(monkeypatch, *, stdout="", returncode=0):
         captured.update(kwargs)
         return SimpleResult(stdout=stdout, stderr="boom", returncode=returncode)
 
-    monkeypatch.setattr("runner_utils.run_lightweight_agent", _fake_seam)
+    monkeypatch.setattr("adr_drift_resolver_runtime.run_lightweight_agent", _fake_seam)
     client = AdrDriftResolverLLMClient(
         runner=AsyncMock(),
         config=ConfigFactory.create(),
