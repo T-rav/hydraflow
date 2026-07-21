@@ -65,6 +65,29 @@ logger = logging.getLogger("hydraflow.escalation_reconcile")
 BOT_CLOSE_MARKER_LABEL = "hydraflow-auto-resolved"
 
 
+async def stamp_and_close(prs: PRPort, issue_number: int) -> None:
+    """Stamp :data:`BOT_CLOSE_MARKER_LABEL` on *issue_number*, then close it.
+
+    The one shared choke point every PROGRAMMATIC escalation-closer routes
+    through (#10095 — activates the #9437 guard, which was landed dormant:
+    nothing stamped the marker). Label-before-close so the very next
+    ``list_closed_issues_by_label`` read — this tick or a later one — always
+    observes both together, letting :func:`is_bot_close` tell this apart
+    from a human/external close.
+
+    Callers: ``IssueDecomposer.create_epic_from_result`` (the
+    superseded-by-decompose close of the source issue — reachable for a
+    ``hitl-escalation``-labeled subject via
+    ``preflight.decompose_terminal.decompose_or_escalate``). NEVER call this
+    for a close a human initiated (e.g. via the GitHub UI, or an
+    intentional dedup-key reset) — that path must keep re-arming the
+    tracker, which is exactly what :meth:`EscalationReconciler.reconcile_closed`
+    still does when the marker is absent.
+    """
+    await prs.add_labels(issue_number, [BOT_CLOSE_MARKER_LABEL])
+    await prs.close_issue(issue_number)
+
+
 def is_bot_close(issue: GitHubIssueSummary | dict[str, object]) -> bool:
     """Whether *issue* was closed by a programmatic/bot path, not a human.
 
