@@ -1,0 +1,25 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_workflow_runs returns recent workflow runs newest-first
+# (`gh run list --json ...`) in the repo-wide blame-correlation shape
+# {id, workflow, conclusion, created_at, pr_number}. The dispatcher
+# seeds two runs at distinct timestamps so the ordering is exercised.
+adapter: github
+interaction: list_workflow_runs
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_workflow_runs
+  args: []
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[{"id": 5102, "workflow": "arch-regen.yml", "conclusion": "failure", "created_at":
+    "2026-07-02T00:00:00Z", "pr_number": 0}, {"id": 5101, "workflow": "ci.yml", "conclusion":
+    "success", "created_at": "2026-07-01T00:00:00Z", "pr_number": 901}]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true
