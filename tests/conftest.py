@@ -252,6 +252,36 @@ def _reset_otel_tracer_provider():
 
 
 @pytest.fixture(autouse=True)
+def _restore_phase_utils_memory_seams():
+    """Snapshot + restore the ``phase_utils`` memory-suggestion seams per test.
+
+    Many modules patch ``phase_utils.file_memory_suggestion`` /
+    ``safe_file_memory_suggestion`` (review/implement/HITL phase hooks,
+    review-phase-metrics, phase-utils' own suite). If a patch escapes its test —
+    which xdist's cross-module worker scheduling can trigger — the module
+    attribute is left pointing at a stale ``AsyncMock``, so a LATER test's own
+    ``with patch(...)`` never rebinds the value the code under test resolves, and
+    that test's mock is "awaited 0 times". Snapshot + restore contains the leak
+    regardless of which test caused it (mirrors ``_restore_auto_pr_seams`` in
+    tests/scenarios/conftest.py). Fixes the whole memory-suggestion category
+    under -n auto (#10119 and the phase_utils flake).
+    """
+    import phase_utils
+
+    saved = (
+        phase_utils.file_memory_suggestion,
+        phase_utils.safe_file_memory_suggestion,
+    )
+    try:
+        yield
+    finally:
+        (
+            phase_utils.file_memory_suggestion,
+            phase_utils.safe_file_memory_suggestion,
+        ) = saved
+
+
+@pytest.fixture(autouse=True)
 def _disable_hitl_summary_autowarm(config) -> None:
     """Keep route tests deterministic unless a test explicitly opts in."""
     config.transcript_summarization_enabled = False
