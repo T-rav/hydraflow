@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from models import ConvergenceLedger
+from models import AutoAgentRedriveState, ConvergenceLedger
 
 if TYPE_CHECKING:
     from models import StateData
@@ -54,6 +54,58 @@ class AutoAgentStateMixin:
         rec.attempts = max(0, rec.attempts - 1)
         self.save()
         return rec.attempts
+
+    # --- Escalation TTL re-drive markers (#9719) ---
+
+    def arm_auto_agent_redrive(self, issue: int, ts: str) -> None:
+        """Arm the re-drive marker at the exhaustion transition.
+
+        Idempotent: an already-armed marker is a no-op so re-confirmation
+        ticks that re-run the exhaustion branch preserve the FIRST exhaustion
+        timestamp (the #9716 re-arm trap — a refreshed clock never ages and
+        re-drive never fires). A disarmed record (post-re-drive) re-arms with
+        a fresh timestamp so each backoff window measures from its own
+        exhaustion.
+        """
+        key = str(issue)
+        rec = self._data.auto_agent_redrive.get(key)
+        if rec is None:
+            self._data.auto_agent_redrive[key] = AutoAgentRedriveState(exhausted_at=ts)
+            self.save()
+            return
+        if rec.exhausted_at is None:
+            rec.exhausted_at = ts
+            self.save()
+
+    def list_armed_auto_agent_redrives(self) -> list[tuple[int, str, int]]:
+        """Return ``(issue, exhausted_at, redrive_count)`` for armed markers."""
+        return [
+            (int(key), rec.exhausted_at, rec.redrive_count)
+            for key, rec in self._data.auto_agent_redrive.items()
+            if rec.exhausted_at is not None
+        ]
+
+    def get_auto_agent_redrive_count(self, issue: int) -> int:
+        rec = self._data.auto_agent_redrive.get(str(issue))
+        return rec.redrive_count if rec is not None else 0
+
+    def record_auto_agent_redrive(self, issue: int) -> int:
+        """Bump the re-drive count and disarm the marker. Returns new count."""
+        key = str(issue)
+        rec = self._data.auto_agent_redrive.get(key)
+        if rec is None:
+            rec = AutoAgentRedriveState()
+            self._data.auto_agent_redrive[key] = rec
+        rec.redrive_count += 1
+        rec.exhausted_at = None
+        self.save()
+        return rec.redrive_count
+
+    def clear_auto_agent_redrive(self, issue: int) -> None:
+        """Drop the re-drive record entirely (reconcile-on-close)."""
+        if str(issue) in self._data.auto_agent_redrive:
+            del self._data.auto_agent_redrive[str(issue)]
+            self.save()
 
     def get_auto_agent_daily_spend(self, date_iso: str) -> float:
         return float(self._data.auto_agent_daily_spend.get(date_iso, 0.0))

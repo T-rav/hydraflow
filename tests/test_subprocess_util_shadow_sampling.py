@@ -38,7 +38,8 @@ class _StubRunner:
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         timeout: float = 120.0,
-        input: bytes | None = None,  # noqa: A002
+        input: bytes | None = None,  # noqa: A002,
+        **_kwargs: object,  # #9577 cancel_check/cancel_poll_interval
     ) -> SimpleResult:
         del cmd, cwd, env, timeout, input
         return SimpleResult(

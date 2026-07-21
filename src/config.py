@@ -314,6 +314,17 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("auto_agent_preflight_interval", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_INTERVAL", 120),
     ("auto_agent_max_attempts", "HYDRAFLOW_AUTO_AGENT_MAX_ATTEMPTS", 3),
     (
+        "auto_agent_redrive_max_attempts",
+        "HYDRAFLOW_AUTO_AGENT_REDRIVE_MAX_ATTEMPTS",
+        1,
+    ),
+    ("auto_agent_redrive_ttl_days", "HYDRAFLOW_AUTO_AGENT_REDRIVE_TTL_DAYS", 5),
+    (
+        "auto_agent_redrive_human_quiet_days",
+        "HYDRAFLOW_AUTO_AGENT_REDRIVE_HUMAN_QUIET_DAYS",
+        2,
+    ),
+    (
         "auto_pr_preflight_stage_timeout_s",
         "HYDRAFLOW_AUTO_PR_PREFLIGHT_STAGE_TIMEOUT_S",
         600,
@@ -486,6 +497,11 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
         900.0,
     ),
     ("auto_tighten_coverage_margin", "HYDRAFLOW_AUTO_TIGHTEN_COVERAGE_MARGIN", 1.0),
+    (
+        "auto_agent_redrive_backoff_multiplier",
+        "HYDRAFLOW_AUTO_AGENT_REDRIVE_BACKOFF_MULTIPLIER",
+        3.0,
+    ),
     # Work-queue starvation valve (#10037): hours before weighted_mix promotes.
     (
         "queue_starvation_threshold_hours",
@@ -614,6 +630,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("detector_calibration_enabled", "HYDRAFLOW_DETECTOR_CALIBRATION_ENABLED", True),
     ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
+    ("auto_agent_redrive_enabled", "HYDRAFLOW_AUTO_AGENT_REDRIVE_ENABLED", True),
     (
         "auto_pr_preflight_gate_enabled",
         "HYDRAFLOW_AUTO_PR_PREFLIGHT_GATE_ENABLED",
@@ -3884,6 +3901,53 @@ class HydraFlowConfig(BaseModel):
     auto_agent_daily_budget_usd: float | None = Field(
         default=None,
         description="Per-day total spend budget in USD. None = unlimited.",
+    )
+    auto_agent_redrive_enabled: bool = Field(
+        default=True,
+        description=(
+            "Escalation TTL re-drive (#9719): re-feed auto-agent-exhausted "
+            "escalations that carried human-required past the TTL back to "
+            "preflight (labels removed, attempt counter cleared; the durable "
+            "audit log — the diverse-retry source — is never cleared)."
+        ),
+    )
+    auto_agent_redrive_max_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description=(
+            "Max re-drives per issue before it stays human-required "
+            "permanently (0 disables re-drive behaviorally)."
+        ),
+    )
+    auto_agent_redrive_ttl_days: int = Field(
+        default=5,
+        ge=1,
+        le=90,
+        description=(
+            "Days an exhausted escalation carries human-required before its "
+            "first re-drive."
+        ),
+    )
+    auto_agent_redrive_backoff_multiplier: float = Field(
+        default=3.0,
+        ge=1.0,
+        le=10.0,
+        description=(
+            "TTL multiplier per re-drive: the TTL for re-drive k is "
+            "ttl_days * multiplier**k (default schedule 5d → 15d → stop at "
+            "the max-attempts cap)."
+        ),
+    )
+    auto_agent_redrive_human_quiet_days: int = Field(
+        default=2,
+        ge=0,
+        le=90,
+        description=(
+            "Min days without a comment from an authorized human "
+            "(human_steering_authorized_users) before an escalation may be "
+            "re-driven. Empty allowlist → label-only claim detection."
+        ),
     )
 
     # Credit pause
