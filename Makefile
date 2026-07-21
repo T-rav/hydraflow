@@ -578,6 +578,13 @@ ensure-hooks:
 	@git config core.hooksPath .githooks
 	@echo "$(GREEN)core.hooksPath set to .githooks$(RESET) (current: $$(git config core.hooksPath))"
 	@echo "  Canary: if pre-commit/pre-push hooks aren't firing, run 'make ensure-hooks'."
+	@# arch-meta merge driver (see .gitattributes): auto-resolve docs/arch/.meta.json
+	@# conflicts to the incoming (staging) copy so staging advances never force a
+	@# manual re-resolve of the regen stamp. changelog.md uses the built-in
+	@# merge=union and needs no driver registration.
+	@git config merge.arch-meta.name 'keep incoming arch .meta.json (regenerated on mainline)'
+	@git config merge.arch-meta.driver 'cp -- %B %A'
+	@echo "$(GREEN)arch-meta merge driver registered$(RESET) (auto-resolves docs/arch/.meta.json)."
 
 ensure-labels: deps
 	@echo "$(BLUE)Creating HydraFlow lifecycle labels...$(RESET)"

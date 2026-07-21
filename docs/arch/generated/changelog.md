@@ -6,17 +6,16 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `0668416` — feat(config): heavy make-invoking loop subprocess timeouts become operator knobs (#9555) (#10091) (#10091) *(2026-07-21)*
+- `33ff371` — feat(preflight): widen AutoAgentPreflightLoop intake to attempt-cap/quality-gate HITL issues (#9721) (#10080) (#10080) *(2026-07-21)*
+- `2ff96bb` — fix(adr-drift): batch cross-cutting fleet-PR drift into one rollup (#9662) (#10093) (#10093) *(2026-07-21)*
 - `52b6752` — fix(subprocess): cooperative kill-switch in the shared helper — migrate staging_bisect._run_git (#9577) (#10077) (#10077) *(2026-07-21)*
 - `b0c7d5e` — test(guard): spawn-side reap guard — raw-spawn containment + reap-pairing ratchets (#9623) (#10088) (#10088) *(2026-07-21)*
-- `93e905e` — Merge remote-tracking branch 'origin/staging' into fix/preflight-intake-widen *(2026-07-20)*
-- `a070222` — Merge remote-tracking branch 'origin/staging' into fix/preflight-intake-widen *(2026-07-20)*
+- `13bac66` — Merge remote-tracking branch 'origin/staging' into fix/arch-artifact-merge *(2026-07-20)*
+- `982dc91` — build(arch): auto-resolve docs/arch/.meta.json + changelog.md merge conflicts *(2026-07-20)*
 - `9f99bcf` — fix(escalation): TTL re-drive so stale auto-agent escalations self-heal (#9719) (#10079) (#10079) *(2026-07-20)*
-- `47a4992` — Merge remote-tracking branch 'origin/staging' into fix/preflight-intake-widen *(2026-07-20)*
-- `1517fba` — Merge remote-tracking branch 'origin/staging' into fix/preflight-intake-widen *(2026-07-20)*
 - `982cec5` — fix(workspace,state): automate HITL reset runbook residuals — main-repo core.worktree heal + attempt-counter close-to-clear (#9723) (#10082) (#10082) *(2026-07-20)*
-- `54f57b6` — Merge remote-tracking branch 'origin/staging' into fix/preflight-intake-widen *(2026-07-20)*
 - `ee15f26` — feat(test-adequacy): independent second-opinion verifier gated on explicit OK (#9546) (#10076) (#10076) *(2026-07-20)*
-- `1d0acde` — Merge remote-tracking branch 'origin/staging' into fix/preflight-intake-widen *(2026-07-20)*
 - `fa5e02e` — feat(gh-load): cached CI-run + issue-list reads and first-tick stagger — cut direct-gh load (#9814) (#10075) (#10075) *(2026-07-20)*
 - `aee928c` — feat(sandbox): active-trigger scenarios for six governance loops (s65-s70) (#9543) (#10074) (#10074) *(2026-07-20)*
 - `64fc05d` — feat(watchdog): thread-level event-loop freeze detector (#9552) (#10070) (#10070) *(2026-07-20)*
@@ -25,7 +24,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `8509ee0` — feat(orchestration): v2 IssueDriver runtime phase spec + accept ADR-0099 (#10038) (#10055) (#10055) *(2026-07-20)*
 - `d94945e` — fix(ul): one file per term — delete stale forks, hard-fail uniqueness lint, store-level dedupe (#9938) (#10051) (#10051) *(2026-07-20)*
 - `f4c0d38` — fix(stale-issue): branch-GC reconciler + unpushed-work boot check (#10011) (#10052) (#10052) *(2026-07-20)*
-- `171d2fa` — feat(preflight): widen AutoAgentPreflightLoop intake to attempt-cap/quality-gate HITL issues *(2026-07-20)*
 - `9d6184d` — feat(liveness): external factory watchdog + boot-time down-detection (#10044) (#10044) *(2026-07-20)*
 - `9fa2966` — fix(health-monitor): stale-code dead-man-switch — host in HealthMonitorLoop (#9596) (#10035) (#10035) *(2026-07-20)*
 - `6206f38` — fix(stale-issue): detect regression-test rot — false-close + orphaned-RED (#9597) (#10039) (#10039) *(2026-07-20)*
