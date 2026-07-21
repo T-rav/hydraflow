@@ -41,7 +41,9 @@ class TestAgentSkill:
     def test_test_adequacy_skill(self):
         skill = BUILTIN_SKILLS[3]
         assert skill.name == "test-adequacy"
-        assert skill.blocking is False
+        # Blocking as of #9227 — an uncovered changed line gates the implementer
+        # (shift-left) instead of recurring as a `missing_tests` review finding.
+        assert skill.blocking is True
         assert skill.config_key == "max_test_adequacy_attempts"
 
     def test_skill_is_frozen(self):
