@@ -55,6 +55,7 @@ from entry_evidence_loop import EntryEvidenceLoop
 from epic import EpicCompletionChecker, EpicManager
 from epic_monitor_loop import EpicMonitorLoop
 from epic_sweeper_loop import EpicSweeperLoop
+from erosion_metrics_loop import ErosionMetricsLoop
 from events import EventBus
 from execution import SubprocessRunner
 from fake_coverage_auditor_loop import FakeCoverageAuditorLoop
@@ -316,6 +317,7 @@ class ServiceRegistry:
     stale_issue_gc_loop: StaleIssueGCLoop
     gate_health_loop: GateHealthLoop
     pr_red_repair_loop: PrRedRepairLoop
+    erosion_metrics_loop: ErosionMetricsLoop
     issue_refinement_loop: IssueRefinementLoop
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
@@ -1382,6 +1384,17 @@ def build_services(
         state=state,
         deps=loop_deps,
     )
+    erosion_metrics_dedup = DedupStore(
+        "erosion_metrics_filed_findings",
+        config.data_root / "dedup" / "erosion_metrics_filed.json",
+    )
+    erosion_metrics_loop = ErosionMetricsLoop(
+        config=config,
+        pr_manager=prs,
+        state=state,
+        dedup=erosion_metrics_dedup,
+        deps=loop_deps,
+    )
     issue_refinement_dedup = DedupStore(
         "issue_refinement",
         config.data_root / "dedup" / "issue_refinement.json",
@@ -1939,6 +1952,7 @@ def build_services(
         stale_issue_gc_loop=stale_issue_gc_loop,
         gate_health_loop=gate_health_loop,
         pr_red_repair_loop=pr_red_repair_loop,
+        erosion_metrics_loop=erosion_metrics_loop,
         issue_refinement_loop=issue_refinement_loop,
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,

@@ -26,6 +26,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **EntryEvidenceLoop** | `src.entry_evidence_loop` | 86400 | — | — | ADR-0062 |
 | **EpicMonitorLoop** | `src.epic_monitor_loop` | 1800 | — | — | — |
 | **EpicSweeperLoop** | `src.epic_sweeper_loop` | 3600 | — | — | — |
+| **ErosionMetricsLoop** | `src.erosion_metrics_loop` | 14400 | — | — | — |
 | **FakeCoverageAuditorLoop** | `src.fake_coverage_auditor_loop` | 604800 | — | — | — |
 | **FitnessScorecardLoop** | `src.fitness_scorecard_loop` | 86400 | — | BACKGROUND_WORKER_STATUS, LOOP_FITNESS_UPDATE | ADR-0029, ADR-0046 |
 | **FlakeTrackerLoop** | `src.flake_tracker_loop` | 14400 | — | — | — |

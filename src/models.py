@@ -2312,6 +2312,11 @@ class StateData(BaseModel):
     # once the issue gains a P-label). Deduped by unordered pair (dup) / issue
     # number (priority) so a re-judged pair supersedes its stale entry.
     refinement_open_proposals: list[dict[str, Any]] = Field(default_factory=list)
+    # ErosionMetricsLoop (#10107, epic #10104) — base-branch HEAD SHA the loop
+    # last finished analyzing. Empty = never run; primed to current HEAD (no
+    # back-analysis) on the first tick, mirroring log_ingest_cursor's
+    # prime-on-first-tick convention.
+    erosion_last_processed_sha: str = Field(default="")
     last_updated: str | None = None
 
 

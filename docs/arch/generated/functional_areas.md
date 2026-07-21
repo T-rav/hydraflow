@@ -53,6 +53,7 @@ flowchart LR
         trust_fleet_AutoTightenLoop([AutoTightenLoop])
         trust_fleet_ContractRefreshLoop([ContractRefreshLoop])
         trust_fleet_CorpusLearningLoop([CorpusLearningLoop])
+        trust_fleet_ErosionMetricsLoop([ErosionMetricsLoop])
         trust_fleet_FakeCoverageAuditorLoop([FakeCoverageAuditorLoop])
         trust_fleet_FlakeTrackerLoop([FlakeTrackerLoop])
         trust_fleet_LiveCorpusReplayLoop([LiveCorpusReplayLoop])
@@ -166,6 +167,7 @@ The trust-architecture hardening fleet (ADR-0045) — RC promotion gate, staging
 - `AutoTightenLoop` — `src.auto_tighten_loop`
 - `ContractRefreshLoop` — `src.contract_refresh_loop`
 - `CorpusLearningLoop` — `src.corpus_learning_loop`
+- `ErosionMetricsLoop` — `src.erosion_metrics_loop`
 - `FakeCoverageAuditorLoop` — `src.fake_coverage_auditor_loop`
 - `FlakeTrackerLoop` — `src.flake_tracker_loop`
 - `LiveCorpusReplayLoop` — `src.live_corpus_replay_loop`
@@ -178,7 +180,7 @@ The trust-architecture hardening fleet (ADR-0045) — RC promotion gate, staging
 
 - `ConformanceRunnerPort` — `src.ports`
 
-**Related ADRs:** `ADR-0042`, `ADR-0045`, `ADR-0048`, `ADR-0056`, `ADR-0100`
+**Related ADRs:** `ADR-0042`, `ADR-0045`, `ADR-0048`, `ADR-0056`, `ADR-0100`, `ADR-0101`
 
 
 ## Hexagonal Boundaries
