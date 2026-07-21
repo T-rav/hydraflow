@@ -3,7 +3,9 @@
 **Status:** Accepted
 **Date:** 2026-05-30
 **Enforcement:** enforced
-**Enforced by:** pytest:tests/test_secret_scrub.py, pytest:tests/regressions/test_issue_9143_codeql_suppression.py
+**Enforced by:**
+- pytest:tests/test_secret_scrub.py
+- pytest:tests/regressions/test_issue_9143_codeql_suppression.py
 
 ## Context
 
