@@ -20,9 +20,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
+from bg_worker_manager import BGWorkerManager
 from events import EventBus, EventType
 from report_issue_loop import ReportIssueLoop
 from sentry_loop import SentryLoop
+from state import StateTracker
 from tests.helpers import ConfigFactory
 
 pytestmark = pytest.mark.scenario
@@ -92,3 +94,63 @@ async def test_llm_loops_resolve_to_the_wider_bound_via_real_config(
     assert config.loop_watchdog_llm_seconds > config.loop_watchdog_default_seconds, (
         "LLM bound must be wider than the default bound"
     )
+
+
+@pytest.mark.asyncio
+async def test_operator_watchdog_override_takes_effect_on_the_loop(
+    tmp_path: Path,
+) -> None:
+    """The System-tab watchdog-timeout override (#9503) actually reaches the
+    watchdog — not just BGWorkerManager's in-memory table.
+
+    Wires a real BGWorkerManager.get_timeout as the loop's timeout_cb, exactly
+    as service_registry.py wires WorkerRegistryCallbacks.get_watchdog_timeout
+    into the shared LoopDeps. Before any override the loop takes the wide
+    config default; after the operator sets a 0s override the SAME loop's
+    watchdog fires on its very next cycle — proving the read path, not just
+    the write path (an unread override would be a silent no-op).
+    """
+    config = ConfigFactory.create(repo_root=tmp_path / "repo")
+    state = StateTracker(tmp_path / "state.json")
+    bus = EventBus()
+
+    # Mirrors the real bootstrap order (service_registry.py): the loop
+    # registry dict is populated after the loop is constructed, but
+    # BGWorkerManager holds a reference to the SAME dict, so it sees the
+    # loop once registered below.
+    bg_loop_registry: dict[str, BaseBackgroundLoop] = {}
+    bg_workers = BGWorkerManager(config, state, bg_loop_registry)
+    deps = LoopDeps(
+        event_bus=bus,
+        stop_event=asyncio.Event(),
+        status_cb=MagicMock(),
+        enabled_cb=lambda _name: True,
+        timeout_cb=bg_workers.get_timeout,
+    )
+    loop = _HangingLoop(worker_name="hanging_loop", config=config, deps=deps)
+    bg_loop_registry["hanging_loop"] = loop
+
+    # No override yet: the loop reads the wide config default through
+    # BGWorkerManager.get_timeout -> loop._default_cycle_timeout_seconds().
+    assert loop._cycle_timeout_seconds() == config.loop_watchdog_default_seconds
+
+    # Operator sets a tight override via the same path the System tab route
+    # calls (orchestrator.set_bg_worker_timeout -> BGWorkerManager.set_timeout).
+    bg_workers.set_timeout("hanging_loop", 0)
+
+    # The SAME loop instance now reads the override on its very next cycle —
+    # no redeploy, no reconstruction.
+    assert loop._cycle_timeout_seconds() == 0
+
+    # And the watchdog actually fires at the new bound: the hung cycle is
+    # cancelled and reported, instead of hanging until the wide default.
+    await asyncio.wait_for(loop._execute_cycle(), timeout=5)
+
+    error_events = [e for e in bus.get_history() if e.type == EventType.ERROR]
+    assert error_events, "operator override did not reach the watchdog"
+    assert "watchdog timeout" in error_events[-1].data["message"]
+
+    # The override survives a restart — the whole point of #9503 ("no
+    # redeploy" means the operator doesn't have to re-set it after one).
+    state2 = StateTracker(tmp_path / "state.json")
+    assert state2.get_watchdog_timeouts() == {"hanging_loop": 0}

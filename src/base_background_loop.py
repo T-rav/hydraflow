@@ -184,19 +184,29 @@ class BaseBackgroundLoop(abc.ABC):
             return self._interval_cb(self._worker_name)
         return self._get_default_interval()
 
+    def _default_cycle_timeout_seconds(self) -> int:
+        """Return the config-driven default watchdog bound, ignoring any override.
+
+        Mirrors :meth:`_get_default_interval`: the override-free baseline
+        :meth:`_cycle_timeout_seconds` falls back to when no ``timeout_cb`` is
+        wired, and the one :class:`~bg_worker_manager.BGWorkerManager` calls
+        (via ``loop._default_cycle_timeout_seconds()``) to resolve a loop's
+        "no operator override" bound without recursing back through
+        ``timeout_cb`` (#9503).
+        """
+        if self.LONG_LLM_CYCLE:
+            return self._config.loop_watchdog_llm_seconds
+        return self._config.loop_watchdog_default_seconds
+
     def _cycle_timeout_seconds(self) -> int:
         """Resolve this loop's per-cycle watchdog bound in seconds (#9556).
 
         Prefers the injected ``timeout_cb`` (operator-tunable, per-loop); else
-        derives from config: :attr:`LONG_LLM_CYCLE` loops get the longer
-        ``loop_watchdog_llm_seconds`` bound, all others the tight
-        ``loop_watchdog_default_seconds`` one.
+        falls back to :meth:`_default_cycle_timeout_seconds`.
         """
         if self._timeout_cb is not None:
             return self._timeout_cb(self._worker_name)
-        if self.LONG_LLM_CYCLE:
-            return self._config.loop_watchdog_llm_seconds
-        return self._config.loop_watchdog_default_seconds
+        return self._default_cycle_timeout_seconds()
 
     def _build_details(self, stats: dict[str, Any] | None) -> dict[str, Any]:
         """Coerce arbitrary worker stats into a details dict."""

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ACTIVE_STATUSES, PIPELINE_STAGES, PIPELINE_LOOPS, INTERVAL_PRESETS, EDITABLE_INTERVAL_WORKERS, REPORT_ISSUE_PRESETS, WORKER_PRESETS, PIPELINE_POLLER_PRESETS, ADR_REVIEWER_PRESETS, DEPENDABOT_MERGE_PRESETS, BACKGROUND_WORKERS, WORKER_GROUPS } from '../../constants'
+import { ACTIVE_STATUSES, PIPELINE_STAGES, PIPELINE_LOOPS, INTERVAL_PRESETS, EDITABLE_INTERVAL_WORKERS, REPORT_ISSUE_PRESETS, WORKER_PRESETS, PIPELINE_POLLER_PRESETS, ADR_REVIEWER_PRESETS, DEPENDABOT_MERGE_PRESETS, BACKGROUND_WORKERS, WORKER_GROUPS, WATCHDOG_TIMEOUT_PRESETS } from '../../constants'
 import { theme } from '../../theme'
 
 describe('ACTIVE_STATUSES', () => {
@@ -179,6 +179,32 @@ describe('EDITABLE_INTERVAL_WORKERS', () => {
   it('does not include non-editable workers', () => {
     expect(EDITABLE_INTERVAL_WORKERS.has('triage')).toBe(false)
     expect(EDITABLE_INTERVAL_WORKERS.has('health_monitor')).toBe(false)
+  })
+})
+
+describe('WATCHDOG_TIMEOUT_PRESETS', () => {
+  it('has 5 presets', () => {
+    expect(WATCHDOG_TIMEOUT_PRESETS).toHaveLength(5)
+  })
+
+  it('each preset has label and seconds', () => {
+    for (const preset of WATCHDOG_TIMEOUT_PRESETS) {
+      expect(preset).toHaveProperty('label')
+      expect(preset).toHaveProperty('seconds')
+      expect(typeof preset.seconds).toBe('number')
+    }
+  })
+
+  it('presets are in ascending order', () => {
+    for (let i = 1; i < WATCHDOG_TIMEOUT_PRESETS.length; i++) {
+      expect(WATCHDOG_TIMEOUT_PRESETS[i].seconds).toBeGreaterThan(WATCHDOG_TIMEOUT_PRESETS[i - 1].seconds)
+    }
+  })
+
+  it('includes the config defaults (2h normal, 4h LLM)', () => {
+    const seconds = WATCHDOG_TIMEOUT_PRESETS.map(p => p.seconds)
+    expect(seconds).toContain(7200)
+    expect(seconds).toContain(14400)
   })
 })
 

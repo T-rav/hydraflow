@@ -37,6 +37,7 @@ class StateRestorer:
     ) -> None:
         """Run all restore steps in the correct order."""
         self._restore_worker_intervals()
+        self._restore_watchdog_timeouts()
         self._restore_crash_recovered_issues(recovered_issues, active_impl_issues)
         self._restore_interrupted_issues(
             recovered_issues,
@@ -55,6 +56,16 @@ class StateRestorer:
             logger.info(
                 "Restored %d worker interval override(s) from state",
                 len(saved_intervals),
+            )
+
+    def _restore_watchdog_timeouts(self) -> None:
+        """Restore saved per-loop watchdog-timeout overrides from state (#9503)."""
+        saved_timeouts = self._state.get_watchdog_timeouts()
+        if saved_timeouts:
+            self._bg_workers._restore_timeouts(saved_timeouts)
+            logger.info(
+                "Restored %d watchdog-timeout override(s) from state",
+                len(saved_timeouts),
             )
 
     def _restore_crash_recovered_issues(

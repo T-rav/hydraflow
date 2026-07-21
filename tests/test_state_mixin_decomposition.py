@@ -471,6 +471,21 @@ class TestWorkerStateMixin:
         t.set_worker_intervals({"loop_a": 30, "loop_b": 60})
         assert t.get_worker_intervals() == {"loop_a": 30, "loop_b": 60}
 
+    def test_watchdog_timeouts(self, tmp_path: Path) -> None:
+        t = make_tracker(tmp_path)
+        t.set_watchdog_timeouts({"loop_a": 3600, "loop_b": 7200})
+        assert t.get_watchdog_timeouts() == {"loop_a": 3600, "loop_b": 7200}
+
+    def test_watchdog_timeouts_default_empty(self, tmp_path: Path) -> None:
+        t = make_tracker(tmp_path)
+        assert t.get_watchdog_timeouts() == {}
+
+    def test_watchdog_timeouts_persist_across_reload(self, tmp_path: Path) -> None:
+        t = make_tracker(tmp_path)
+        t.set_watchdog_timeouts({"loop_a": 1800})
+        t2 = make_tracker(tmp_path)
+        assert t2.get_watchdog_timeouts() == {"loop_a": 1800}
+
     def test_disabled_workers(self, tmp_path: Path) -> None:
         t = make_tracker(tmp_path)
         t.set_disabled_workers({"loop_a", "loop_b"})
