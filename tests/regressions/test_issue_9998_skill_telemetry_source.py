@@ -233,7 +233,9 @@ class TestSkillSourcesDriveRefineOrder:
         telemetry = PromptTelemetry(
             telemetry_config, pricing=ModelPricingTable(pricing_path)
         )
-        assert len(_BLOCKING_SKILL_NAMES) == 4
+        # diff-sanity, scope-check, discover-completeness, shape-coherence, and
+        # test-adequacy (blocking as of #9227).
+        assert len(_BLOCKING_SKILL_NAMES) == 5
 
         # Cheapest-first seeding: cost rises with position, so the
         # worst-first efficiency ranking must invert the seeded order.
