@@ -35,10 +35,18 @@ logger = logging.getLogger("hydraflow.github_cache")
 # rc_budget) can never drift on which workflow they read.
 RC_PROMOTION_WORKFLOW = "rc-promotion-scenario.yml"
 
+# Nightly xdist-isolation audit workflow (#10141). FlakeTrackerLoop reads its
+# run list through the same cache so the 4h loop never issues a per-tick raw
+# ``gh run list`` (the #9814 principle) — single-sourced like the RC workflow.
+XDIST_AUDIT_WORKFLOW = "xdist-audit.yml"
+
 # One snapshot fetch covers every consumer's window: rc_budget previously
 # ran ``gh run list --limit 100`` (30-day window), flake_tracker ``--limit
 # 20``. Also the REST runs endpoint's per_page cap.
 _RC_RUNS_FETCH_LIMIT = 100
+
+# The xdist audit is nightly (≤~30 runs/month); a smaller window suffices.
+_XDIST_AUDIT_FETCH_LIMIT = 20
 
 # On refresh failure a stale snapshot is still served while younger than
 # this multiple of the caller's bound — the same x3 convention the
@@ -102,6 +110,10 @@ class GitHubDataCache:
         # loop first-ticks coalesces on one gh call.
         self._rc_workflow_runs = CacheSnapshot()
         self._rc_workflow_runs_lock = asyncio.Lock()
+        # xdist-audit CI runs (#10141): same demand-refresh contract as the RC
+        # runs, so FlakeTrackerLoop reads them without a per-tick gh call.
+        self._xdist_audit_runs = CacheSnapshot()
+        self._xdist_audit_runs_lock = asyncio.Lock()
         # Shared issue-list-by-label snapshots (#9814): keyed by
         # ``state:label:limit``, demand-refreshed like the RC runs. One
         # lock for all keys — refreshes are rare (one per key per TTL) and
@@ -201,6 +213,46 @@ class GitHubDataCache:
                 )
                 return list(snap.data) if serve_stale else []
             self._rc_workflow_runs = CacheSnapshot(
+                data=runs, fetched_at=datetime.now(UTC)
+            )
+            self._save_to_disk()
+            return list(runs)
+
+    async def get_xdist_audit_runs(
+        self, *, max_age_seconds: float | None = None
+    ) -> list[dict[str, Any]]:
+        """Return the shared xdist-audit workflow-run snapshot (#10141).
+
+        Same demand-refresh contract as :meth:`get_rc_workflow_runs` (staleness
+        bound, single-flight lock, stale-serve grace, empty on hard failure) so
+        FlakeTrackerLoop's 4h tick never issues a per-tick raw ``gh run list``.
+        Rows use the port shape; newest first.
+        """
+        if max_age_seconds is None:
+            max_age_seconds = float(self._config.data_poll_interval * 3)
+        snap = self._xdist_audit_runs
+        if snap.data is not None and snap.age_seconds <= max_age_seconds:
+            return list(snap.data)
+        async with self._xdist_audit_runs_lock:
+            snap = self._xdist_audit_runs
+            if snap.data is not None and snap.age_seconds <= max_age_seconds:
+                return list(snap.data)
+            try:
+                runs = await self._prs.list_runs_for_workflow(
+                    XDIST_AUDIT_WORKFLOW, limit=_XDIST_AUDIT_FETCH_LIMIT
+                )
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                grace = max_age_seconds * _STALE_SERVE_MULTIPLIER
+                serve_stale = snap.data is not None and snap.age_seconds <= grace
+                logger.warning(
+                    "xdist_audit_runs refresh failed (age=%.0fs); %s",
+                    snap.age_seconds,
+                    "serving stale snapshot" if serve_stale else "returning empty",
+                    exc_info=True,
+                )
+                return list(snap.data) if serve_stale else []
+            self._xdist_audit_runs = CacheSnapshot(
                 data=runs, fetched_at=datetime.now(UTC)
             )
             self._save_to_disk()

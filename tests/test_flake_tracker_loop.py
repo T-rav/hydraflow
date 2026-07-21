@@ -17,6 +17,7 @@ from flake_tracker_loop import FlakeTrackerLoop, parse_junit_xml
 def _gh_cache() -> MagicMock:
     cache = MagicMock()
     cache.get_rc_workflow_runs = AsyncMock(return_value=[])
+    cache.get_xdist_audit_runs = AsyncMock(return_value=[])
     return cache
 
 
@@ -711,3 +712,112 @@ async def test_reconcile_open_clears_exact_spaced_subject_on_close(
     closed = await loop._escalations.reconcile_open(active_subjects=set())
     assert closed == 1
     state.clear_flake_attempts.assert_called_once_with(spaced_id)
+
+
+# ---------------------------------------------------------------------------
+# xdist-quarantine detection (#10141)
+# ---------------------------------------------------------------------------
+
+
+def test_quarantine_path_hint_module_level() -> None:
+    from flake_tracker_loop import _quarantine_path_hint
+
+    assert _quarantine_path_hint("tests.test_foo.test_bar") == "tests/test_foo.py"
+
+
+def test_quarantine_path_hint_drops_class_component() -> None:
+    from flake_tracker_loop import _quarantine_path_hint
+
+    assert (
+        _quarantine_path_hint("tests.scenarios.test_x.TestY.test_z")
+        == "tests/scenarios/test_x.py"
+    )
+
+
+def test_tally_xdist_unsafe_counts_runs_not_occurrences() -> None:
+    per_run = [["a", "b", "a"], ["a"], ["a", "b"]]
+    assert FlakeTrackerLoop._tally_xdist_unsafe(per_run) == {"a": 3, "b": 2}
+
+
+@pytest.mark.asyncio
+async def test_xdist_files_consent_package_at_threshold(loop_env, monkeypatch) -> None:
+    cfg, _state, pr, _dedup = loop_env
+    cfg.xdist_quarantine_threshold = 2
+    loop = _make_loop(loop_env)
+    monkeypatch.setattr(
+        loop,
+        "_fetch_xdist_audit_runs",
+        AsyncMock(
+            return_value=[{"databaseId": 1}, {"databaseId": 2}, {"databaseId": 3}]
+        ),
+    )
+    # test_a flagged in 2 runs (>= threshold), test_b in 1 (below).
+    monkeypatch.setattr(
+        loop,
+        "_download_xdist_audit",
+        AsyncMock(
+            side_effect=[
+                ["tests.test_a.test_x"],
+                ["tests.test_a.test_x"],
+                ["tests.test_b.test_y"],
+            ]
+        ),
+    )
+
+    result = await loop._run_xdist_quarantine_detection()
+
+    assert result["filed"] == 1
+    pr.create_issue.assert_awaited_once()
+    title, body, labels = pr.create_issue.await_args.args
+    assert title == "xdist-unsafe test: tests.test_a.test_x"
+    assert "Consent package" in body
+    assert "PYTEST_SERIAL_PATHS" in body
+    assert "tests/test_a.py" in body
+    assert "flaky-test" in labels
+
+
+@pytest.mark.asyncio
+async def test_xdist_dedup_skips_refile(loop_env, monkeypatch) -> None:
+    cfg, _state, pr, dedup = loop_env
+    cfg.xdist_quarantine_threshold = 1
+    dedup.get.return_value = {"xdist_quarantine:tests.test_a.test_x"}
+    loop = _make_loop(loop_env)
+    monkeypatch.setattr(
+        loop, "_fetch_xdist_audit_runs", AsyncMock(return_value=[{"databaseId": 1}])
+    )
+    monkeypatch.setattr(
+        loop,
+        "_download_xdist_audit",
+        AsyncMock(return_value=["tests.test_a.test_x"]),
+    )
+
+    result = await loop._run_xdist_quarantine_detection()
+
+    assert result["filed"] == 0
+    pr.create_issue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_xdist_kill_switch_short_circuits(loop_env, monkeypatch) -> None:
+    cfg, _state, _pr, _dedup = loop_env
+    cfg.xdist_quarantine_enabled = False
+    loop = _make_loop(loop_env)
+    fetch = AsyncMock(return_value=[{"databaseId": 1}])
+    monkeypatch.setattr(loop, "_fetch_xdist_audit_runs", fetch)
+
+    result = await loop._run_xdist_quarantine_detection()
+
+    assert result["filed"] == 0
+    fetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_xdist_no_runs_is_noop(loop_env, monkeypatch) -> None:
+    _cfg, _state, pr, _dedup = loop_env
+    loop = _make_loop(loop_env)
+    monkeypatch.setattr(loop, "_fetch_xdist_audit_runs", AsyncMock(return_value=[]))
+
+    result = await loop._run_xdist_quarantine_detection()
+
+    assert result["filed"] == 0
+    pr.create_issue.assert_not_awaited()

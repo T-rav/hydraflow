@@ -53,7 +53,6 @@ GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
     "src/adr_touchpoint_auditor_loop.py::AdrTouchpointAuditorLoop._list_recent_merged_prs::run_subprocess_result": 1,
     "src/fake_coverage_auditor_loop.py::FakeCoverageAuditorLoop._grep_scenario_for_helper::run_subprocess_result": 1,
     "src/fake_coverage_auditor_loop.py::FakeCoverageAuditorLoop._list_open_rollup_titles::run_subprocess_result": 1,
-    "src/flake_tracker_loop.py::FlakeTrackerLoop._download_junit::run_subprocess_result": 1,
     "src/health_monitor_loop.py::HealthMonitorLoop._check_stale_code::run_subprocess": 1,
     "src/memory_backlog_loop.py::MemoryBacklogLoop._commit_mirror_updates::run_subprocess_result": 2,
     "src/principles_audit_loop.py::PrinciplesAuditLoop._run_audit::run_subprocess_result": 1,

@@ -346,6 +346,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("pr_base_max_age_days", "HYDRAFLOW_PR_BASE_MAX_AGE_DAYS", 3),
     ("flake_tracker_interval", "HYDRAFLOW_FLAKE_TRACKER_INTERVAL", 14400),
     ("flake_threshold", "HYDRAFLOW_FLAKE_THRESHOLD", 3),
+    ("xdist_quarantine_threshold", "HYDRAFLOW_XDIST_QUARANTINE_THRESHOLD", 2),
     ("skill_prompt_eval_interval", "HYDRAFLOW_SKILL_PROMPT_EVAL_INTERVAL", 604800),
     (
         "skill_prompt_eval_adversarial_timeout_seconds",
@@ -730,6 +731,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("flake_tracker_loop_enabled", "HYDRAFLOW_FLAKE_TRACKER_LOOP_ENABLED", True),
+    ("xdist_quarantine_enabled", "HYDRAFLOW_XDIST_QUARANTINE_ENABLED", True),
     ("github_cache_loop_enabled", "HYDRAFLOW_GITHUB_CACHE_LOOP_ENABLED", True),
     ("health_monitor_loop_enabled", "HYDRAFLOW_HEALTH_MONITOR_LOOP_ENABLED", True),
     (
@@ -3398,6 +3400,15 @@ class HydraFlowConfig(BaseModel):
         le=20,
         description="Flake count in last 20 runs that triggers an issue (>=)",
     )
+    xdist_quarantine_threshold: int = Field(
+        default=2,
+        ge=1,
+        le=20,
+        description=(
+            "xdist-audit runs a test must be flagged fail-parallel/pass-serial "
+            "in before FlakeTrackerLoop files a quarantine issue (>=)"
+        ),
+    )
 
     # Trust fleet — SkillPromptEvalLoop (spec §4.6)
     skill_prompt_eval_interval: int = Field(
@@ -4390,6 +4401,13 @@ class HydraFlowConfig(BaseModel):
     flake_tracker_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for FlakeTrackerLoop.",
+    )
+    xdist_quarantine_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for FlakeTrackerLoop's xdist-quarantine detection "
+            "(reads the xdist-audit report; independent of flake tracking)."
+        ),
     )
     github_cache_loop_enabled: bool = Field(
         default=True,
