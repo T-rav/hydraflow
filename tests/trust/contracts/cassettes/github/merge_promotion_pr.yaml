@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# merge_promotion_pr merges the promotion PR via a merge commit (--merge,
+# never squash — ADR-0042) and returns True. Mirrors merge_pr.yaml's
+# synthetic stdout shape; the dispatcher seeds the PR and asserts the
+# .merged side-effect because the fake returns True even for an absent PR
+# (#9436 plan: the side-effect is what pins fidelity, not the bool).
+adapter: github
+interaction: merge_promotion_pr
+recorded_at: "2026-07-20T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: merge_promotion_pr
+  args:
+    - "42"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "merged pull request https://github.com/_/_/pull/42\n"
+  stderr: ""
+normalizers:
+  - pr_number
+baseline_only: true
