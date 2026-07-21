@@ -50,6 +50,9 @@ from tests.sandbox_scenarios.scenarios import (
 from tests.sandbox_scenarios.scenarios import (
     s79_wiki_rot_detector_broken_cite_fires as s79,
 )
+from tests.sandbox_scenarios.scenarios import (
+    s81_label_drift_watcher_reconciles_pr_ahead as s81,
+)
 
 
 async def _run(mock_world, scenario):
@@ -288,3 +291,32 @@ async def test_s79_wiki_rot_detector_files_broken_cite_finding(mock_world) -> No
         issue = mock_world.github.issue(i["number"])
         assert "hydraflow-find" in issue.labels
         assert "wiki-rot" in issue.labels
+
+
+@pytest.mark.asyncio
+async def test_s81_label_drift_watcher_reconciles_pr_ahead(mock_world) -> None:
+    """#9155 — last test-pyramid backfill loop: a seeded issue at a pre-PR
+    label (``hydraflow-plan``) alongside its PR already at
+    ``hydraflow-review`` drives ``LabelDriftWatcherLoop``'s real
+    ``pr_ahead_of_issue`` reconciliation, not just a heartbeat.
+
+    The sandbox Tier-2 counterpart asserts the loop's own reported counters
+    (the only surface ``/api/events`` exposes); this Tier-1 companion
+    additionally asserts the label swap and audit comment against the
+    shared FakeGitHub state.
+    """
+    _seed, stats = await _run(mock_world, s81)
+
+    assert stats["label_drift_watcher"]["detected"] >= 1
+    assert stats["label_drift_watcher"]["reconciled"] >= 1
+    # The world shows the side effect, not just the counters: the issue's
+    # pipeline label actually moved to match the PR's stage.
+    issue = mock_world._github._issues[s81._ISSUE]
+    assert "hydraflow-review" in issue.labels
+    assert "hydraflow-plan" not in issue.labels
+    drift_comments = [
+        body
+        for number, body in mock_world._github._comments
+        if number == s81._ISSUE and "LabelDriftWatcher" in body
+    ]
+    assert drift_comments, "expected a LabelDriftWatcher audit comment on the issue"
