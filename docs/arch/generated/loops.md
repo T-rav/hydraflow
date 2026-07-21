@@ -41,6 +41,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **MemoryBacklogLoop** | `src.memory_backlog_loop` | 86400 | — | — | — |
 | **MergeStateWatcherLoop** | `src.merge_state_watcher_loop` | 600 | — | SYSTEM_ALERT | — |
 | **PRUnstickerLoop** | `src.pr_unsticker_loop` | 3600 | — | — | — |
+| **PrRedRepairLoop** | `src.pr_red_repair_loop` | 300 | — | — | — |
 | **PricingRefreshLoop** | `src.pricing_refresh_loop` | 86400 | `HYDRAFLOW_DISABLE_PRICING_REFRESH` | — | — |
 | **PrinciplesAuditLoop** | `src.principles_audit_loop` | 604800 | — | — | ADR-0044 |
 | **RCBudgetLoop** | `src.rc_budget_loop` | 14400 | — | — | — |

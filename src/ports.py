@@ -60,6 +60,7 @@ from models import (
     LabelDrift,
     LoopResult,
     PRInfo,
+    PRListItem,
     ReviewVerdict,
     Task,
     TranscriptEventData,
@@ -487,11 +488,12 @@ class PRPort(Protocol):
         ...
 
     async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
-        """Return jobs for one run (#9974, enriched #10010).
+        """Return jobs for one run (#9974, enriched #10010, #10027).
 
-        Each dict: ``{"name", "conclusion", "started_at", "completed_at",
-        "steps"}`` — the last three feed GateHealthLoop's suspected-hang
-        classifier.
+        Each dict: ``{"name", "status", "conclusion", "started_at",
+        "completed_at", "steps"}`` — the timing/steps fields feed
+        GateHealthLoop's suspected-hang classifier; ``status`` feeds
+        PrRedRepairLoop's settled-red predicate.
         """
         ...
 
@@ -512,6 +514,18 @@ class PRPort(Protocol):
 
     async def count_workflow_run_artifacts(self, run_id: int) -> int:
         """Return the number of artifacts a run uploaded (#9974)."""
+        ...
+
+    async def rerun_workflow_failed(self, run_id: int) -> bool:
+        """Trigger ``gh run rerun <id> --failed`` (#10027). Never raises."""
+        ...
+
+    async def list_all_open_prs(self) -> list[PRListItem]:
+        """Return ALL open PRs regardless of label, including author login.
+
+        Pre-existing ``PRManager``/``FakeGitHub`` method, reused by #10027
+        to enumerate settled-red candidates instead of adding a new read.
+        """
         ...
 
     async def get_issue_updated_at(self, issue_number: int) -> str:

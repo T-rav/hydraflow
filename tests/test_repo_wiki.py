@@ -966,3 +966,83 @@ def test_load_topic_entries_is_public_api(store):
     private_entries = store._load_topic_entries(topic_path)
     assert len(public_entries) == 1
     assert public_entries == private_entries
+
+
+# ---------------------------------------------------------------------------
+# fixed_in_pr / code_refs (issue #9936)
+# ---------------------------------------------------------------------------
+#
+# WikiRotDetectorLoop's shipped-claim pass (#9598) needs a claim's
+# fixed_in_pr + code_refs. Before #9936 these were unmodeled extra fields
+# on WikiEntry — pydantic's default extra="ignore" silently dropped them
+# on every model_validate, so any caller reading the structured model
+# (rather than regexing the raw json:entry block) never saw them.
+
+
+def test_wiki_entry_captures_fixed_in_pr_and_code_refs_from_manual_gotcha_shape():
+    """Hand-authored 'manual' gotcha entries (rule/anti_pattern/code_refs/
+    fixed_in_pr/tags — the real on-disk shape in docs/wiki/gotchas.md)
+    must not lose fixed_in_pr/code_refs on parse."""
+    e = WikiEntry.model_validate(
+        {
+            "id": "swap-pipeline-labels",
+            "source_type": "manual",
+            "topic": "label_state_machine",
+            "tags": ["state-machine"],
+            "rule": "Swap issue/PR with separate calls.",
+            "anti_pattern": "swap_pipeline_labels(...) across the boundary",
+            "code_refs": ["src/pr_unsticker.py:_resolve_or_release_back_to_hitl"],
+            "fixed_in_pr": "#8715",
+            "title": "Swap boundary",
+            "content": "prose",
+        }
+    )
+    assert e.fixed_in_pr == "#8715"
+    assert e.code_refs == ("src/pr_unsticker.py:_resolve_or_release_back_to_hitl",)
+    # Fields with no WikiEntry counterpart are still ignored, unaffected.
+    assert not hasattr(e, "rule")
+
+
+def test_wiki_entry_fixed_in_pr_and_code_refs_default_empty():
+    e = WikiEntry(title="t", content="c", source_type="plan")
+    assert e.fixed_in_pr is None
+    assert e.code_refs == ()
+
+
+def test_entries_round_trip_fixed_in_pr_and_code_refs(store: RepoWikiStore) -> None:
+    original = WikiEntry(
+        title="Shipped claim round trip",
+        content="Some gotcha prose.",
+        source_type="manual",
+        source_issue=42,
+        fixed_in_pr="#9000",
+        code_refs=("src/foo.py:bar", "src/baz.py:qux"),
+    )
+    store.ingest(REPO, [original])
+
+    repo_dir = store._repo_dir(REPO)
+    topic = store._classify_topic(original)
+    topic_path = repo_dir / f"{topic}.md"
+    entries = store._load_topic_entries(topic_path)
+    assert len(entries) == 1
+    assert entries[0].fixed_in_pr == "#9000"
+    assert entries[0].code_refs == ("src/foo.py:bar", "src/baz.py:qux")
+
+
+def test_parse_topic_page_module_level_function_matches_store_method(
+    store: RepoWikiStore,
+) -> None:
+    """WikiRotDetectorLoop (issue #9936) imports ``parse_topic_page``
+    directly so it can share the authoritative parse without needing a
+    live ``RepoWikiStore`` instance — it must match the store's own read."""
+    from repo_wiki import parse_topic_page
+
+    entry = WikiEntry(title="X", content="Y", source_type="plan", source_issue=1)
+    store.ingest(REPO, [entry])
+    repo_dir = store._repo_dir(REPO)
+    topic = store._classify_topic(entry)
+    topic_path = repo_dir / f"{topic}.md"
+
+    via_function = parse_topic_page(topic_path)
+    via_store = store._load_topic_entries(topic_path)
+    assert [e.model_dump() for e in via_function] == [e.model_dump() for e in via_store]

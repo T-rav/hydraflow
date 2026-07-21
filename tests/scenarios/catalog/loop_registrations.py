@@ -44,6 +44,42 @@ def _build_gate_health(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     return GateHealthLoop(config=config, pr_manager=ports["github"], deps=deps)
 
 
+def _build_pr_red_repair(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build PrRedRepairLoop for scenarios (#10027 Phase 1: infra-flake retrier).
+
+    ``state`` defaults to a MagicMock mirroring the ``_build_security_patch``
+    guard: ``get_rollup_issue``/``get_rollup_issue_keys`` return falsy/empty
+    so ``RollupIssueManager.ensure``/``resolve_all_except`` see a clean
+    slate rather than a truthy unstubbed MagicMock. Attempt-count reads/
+    bumps default to a simple in-memory counter so bounded-rerun scenarios
+    (settle red → rerun → re-settle red → escalate) work without a real
+    ``StateTracker``.
+    """
+    from pr_red_repair_loop import PrRedRepairLoop  # noqa: PLC0415
+
+    state = ports.get("pr_red_repair_state")
+    if state is None:
+        state = MagicMock()
+        state.get_rollup_issue.return_value = None
+        state.get_rollup_issue_keys.return_value = []
+        counts: dict[str, int] = {}
+
+        def _get_attempts(pr_number: int) -> int:
+            return counts.get(str(pr_number), 0)
+
+        def _bump_attempts(pr_number: int) -> int:
+            key = str(pr_number)
+            counts[key] = counts.get(key, 0) + 1
+            return counts[key]
+
+        state.get_pr_red_rerun_attempts.side_effect = _get_attempts
+        state.bump_pr_red_rerun_attempts.side_effect = _bump_attempts
+        ports["pr_red_repair_state"] = state
+    return PrRedRepairLoop(
+        config=config, pr_manager=ports["github"], state=state, deps=deps
+    )
+
+
 def _build_issue_refinement(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build IssueRefinementLoop for scenarios (#9957).
 
@@ -1807,6 +1843,7 @@ _BUILDERS: dict[str, Any] = {
     "gate_activator": _build_gate_activator,
     "stale_issue_gc": _build_stale_issue_gc,
     "gate_health": _build_gate_health,
+    "pr_red_repair": _build_pr_red_repair,
     "issue_refinement": _build_issue_refinement,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,
