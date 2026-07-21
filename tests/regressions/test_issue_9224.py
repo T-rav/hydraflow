@@ -39,6 +39,15 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HEADER_JSX = _REPO_ROOT / "src" / "ui" / "src" / "components" / "Header.jsx"
 _CONSTANTS_JS = _REPO_ROOT / "src" / "ui" / "src" / "constants.js"
+# #9564 extracted the fork topology out of Header.jsx into a shared renderer
+# (``PipelineFork.jsx``) + a pure track-splitter (``pipelineTracks.js``); Header
+# and StreamView now both render from these. The #9224 invariants therefore live
+# in the shared modules now — the structure checks below read them, plus Header
+# as the consumer, rather than expecting the fork JSX inline in Header.
+_PIPELINE_FORK_JSX = (
+    _REPO_ROOT / "src" / "ui" / "src" / "components" / "PipelineFork.jsx"
+)
+_PIPELINE_TRACKS_JS = _REPO_ROOT / "src" / "ui" / "src" / "utils" / "pipelineTracks.js"
 
 # Rightward / branch arrow glyphs that can represent a flow edge. The diagram
 # currently uses U+2192 (->), U+2197 (^/up-right) and U+2198 (down-right).
@@ -136,33 +145,33 @@ def test_review_forks_to_two_terminal_endstates_not_linear_chain() -> None:
     review fork analogous to the product-track fork so the terminals render as
     two parallel arms with no trailing arrow.
     """
+    fork_src = _read(_PIPELINE_FORK_JSX)
+    tracks_src = _read(_PIPELINE_TRACKS_JS)
     header_src = _read(_HEADER_JSX)
-    terminals = _terminal_stage_keys(_read(_CONSTANTS_JS))
 
-    # The product-track fork is the only fork present today (single
-    # `styles.pipelineFork` usage). A correct fix adds a second fork for the
-    # review terminals -- detectable via any of these mutually-tolerant signals
-    # so the test accepts either a data-driven or a hardcoded implementation.
-    second_fork_block = header_src.count("styles.pipelineFork") >= 2
-    terminal_track = ("'terminal'" in header_src) or ('"terminal"' in header_src)
-    terminal_set_import = "TERMINAL_STAGE_KEYS" in header_src
-    explicit_terminal_keys = all(
-        re.search(rf"['\"]{re.escape(key)}['\"]", header_src) for key in terminals
+    # Post-#9564 the review terminals fork via the shared ``TerminalFork``
+    # component off a first-class ``terminal`` track, rather than a flat
+    # post-triage chain. The invariant holds iff: the terminal fork exists as a
+    # distinct component, the terminal track is a first-class concept, and Header
+    # actually renders the fork (not a linear chain).
+    terminal_fork_component = "TerminalFork" in fork_src
+    terminal_track_concept = ("TERMINAL_TRACK_KEYS" in tracks_src) or (
+        "isTerminalStage" in tracks_src
     )
+    terminal_fork_rendered = "TerminalFork" in header_src
 
     review_fork_present = (
-        second_fork_block
-        or terminal_track
-        or terminal_set_import
-        or explicit_terminal_keys
+        terminal_fork_component and terminal_track_concept and terminal_fork_rendered
     )
 
     assert review_fork_present, (
-        "Header.jsx renders the REVIEW terminals (hitl, merged) in the flat "
-        "post-triage linear chain instead of forking REVIEW into two terminal "
-        "arms. Expected a second fork block (styles.pipelineFork), a "
-        "track:'terminal' / TERMINAL_STAGE_KEYS concept, or explicit handling "
-        f"of the terminal keys {terminals}. Found none -- issue #9224 bug 1."
+        "The REVIEW terminals (hitl, merged) must fork into two parallel arms, "
+        "not a flat linear chain. Expected the shared TerminalFork component "
+        "(PipelineFork.jsx), a first-class terminal track "
+        "(TERMINAL_TRACK_KEYS/isTerminalStage in pipelineTracks.js), and Header "
+        "rendering <TerminalFork>. "
+        f"component={terminal_fork_component} track={terminal_track_concept} "
+        f"rendered={terminal_fork_rendered} -- issue #9224 bug 1."
     )
 
 
@@ -173,24 +182,35 @@ def test_triage_fork_has_explicit_direct_arrow_to_plan() -> None:
     -- a text label with no arrow. The fix adds an explicit arrow representing
     the TRIAGE -> PLAN bypass, parallel to the ``^ discover -> shape v`` arc.
     """
-    header_src = _read(_HEADER_JSX)
+    fork_src = _read(_PIPELINE_FORK_JSX)
 
-    direct_arm = _extract_balanced_span(header_src, "styles.forkBottom")
+    direct_arm = _extract_balanced_span(fork_src, "styles.forkBottom")
     assert direct_arm is not None, (
         "Could not locate the product-track fork's direct arm "
-        "(styles.forkBottom) in Header.jsx."
+        "(styles.forkBottom) in the shared ProductFork (PipelineFork.jsx)."
     )
 
+    # The direct arm renders ``{directLabel}``; the explicit arrow lives in the
+    # canonical default (``directLabel = 'direct →'``). Accept an inline glyph,
+    # an arrow element, or the arrow carried by the directLabel default.
+    direct_label_has_arrow = bool(
+        re.search(
+            rf"directLabel\s*=\s*['\"][^'\"]*[{re.escape(_ARROW_GLYPHS)}][^'\"]*['\"]",
+            fork_src,
+        )
+    )
     has_arrow = (
         any(glyph in direct_arm for glyph in _ARROW_GLYPHS)
         or "{arrow}" in direct_arm
         or "forkArrow" in direct_arm
         or "pipelineArrow" in direct_arm
+        or ("directLabel" in direct_arm and direct_label_has_arrow)
     )
 
     assert has_arrow, (
-        "The TRIAGE -> PLAN direct path in Header.jsx is rendered as a bare "
-        "text label ('direct') with no arrow. Expected an explicit arrow "
-        "(glyph or arrow element) in the fork's direct arm pointing to plan. "
-        f"Direct-arm content was: {direct_arm.strip()!r} -- issue #9224 bug 2."
+        "The TRIAGE -> PLAN direct path must render an explicit arrow, not a "
+        "bare 'direct' label. Expected an arrow glyph/element in the shared "
+        "ProductFork's direct arm, or the arrow carried by the directLabel "
+        f"default. Direct-arm content: {direct_arm.strip()!r}; "
+        f"directLabel-has-arrow={direct_label_has_arrow} -- issue #9224 bug 2."
     )
