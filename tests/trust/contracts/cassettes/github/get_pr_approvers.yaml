@@ -1,0 +1,23 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_pr_approvers lists GitHub logins that approved a PR (`gh pr view
+# <n> --json reviews`, filtered to APPROVED). The fake hard-codes a
+# single approver; the dispatcher asserts the JSON-list shape.
+adapter: github
+interaction: get_pr_approvers
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_pr_approvers
+  args:
+  - '529'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '["octocat"]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

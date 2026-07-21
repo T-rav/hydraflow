@@ -713,11 +713,13 @@ def build_seeded_branch_protection_auditor(
 ) -> Callable[[], Any]:
     """Auditor stand-in serving live rulesets from FakeGitHub (#9543/#9644).
 
-    Runs the REAL ``audit_repo`` diff — only its two inputs are swapped: the
+    Runs the REAL ``audit_repo`` diff — its inputs are swapped: the
     live-ruleset fetch moves from the raw-``gh`` ``gh_fetch_rulesets``
     (unreachable on the air-gapped network) to ``FakeGitHub.fetch_rulesets``
-    serving ``seed.rulesets``, and ``canonical_dir`` defaults to the
-    materialized fixed baseline (see ``materialize_canonical_rulesets``).
+    serving ``seed.rulesets``, the legacy-branch-protection fetch moves to
+    ``FakeGitHub.fetch_legacy_protection`` (empty by default — #10148), and
+    ``canonical_dir`` defaults to the materialized fixed baseline (see
+    ``materialize_canonical_rulesets``).
     """
     if canonical_dir is None:
         canonical_dir = materialize_canonical_rulesets(config)
@@ -728,6 +730,7 @@ def build_seeded_branch_protection_auditor(
             config.repo,
             canonical_dir,
             fetch_rulesets=github.fetch_rulesets,
+            fetch_legacy_protection=github.fetch_legacy_protection,
         )
 
     return _audit

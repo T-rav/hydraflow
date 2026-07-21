@@ -33,7 +33,12 @@ from auto_tighten_loop import AutoTightenLoop
 from base_background_loop import LoopDeps
 from baseline_policy import BaselinePolicy
 from beads_manager import BeadsManager
-from branch_protection_audit import AuditReport, audit_repo, gh_fetch_rulesets
+from branch_protection_audit import (
+    AuditReport,
+    audit_repo,
+    gh_fetch_legacy_protection,
+    gh_fetch_rulesets,
+)
 from branch_protection_auditor_loop import BranchProtectionAuditorLoop  # noqa: TCH001
 from bug_reproducer import BugReproducer
 from caching_issue_store import CachingIssueStore
@@ -1641,6 +1646,7 @@ def build_services(
             config.repo,
             _bp_canonical_dir,
             fetch_rulesets=gh_fetch_rulesets,
+            fetch_legacy_protection=gh_fetch_legacy_protection,
         )
 
     branch_protection_auditor_loop = BranchProtectionAuditorLoop(  # noqa: F841

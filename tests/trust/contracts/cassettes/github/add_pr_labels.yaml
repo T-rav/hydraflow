@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# add_pr_labels mirrors PRManager.add_pr_labels -- appends each label to
+# the PR idempotently (one `gh api .../issues/{n}/labels -X POST` call
+# per label). The dispatcher seeds a fresh, unlabelled PR and asserts
+# both labels land, in the order given.
+adapter: github
+interaction: add_pr_labels
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: add_pr_labels
+  args:
+  - '521'
+  - needs-review
+  - priority-high
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ''
+  stderr: ''
+normalizers: []
+baseline_only: true

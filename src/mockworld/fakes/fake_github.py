@@ -171,6 +171,13 @@ class FakeGitHub:
         # (ADR-0082, #9644). Mirrors the shape gh_fetch_rulesets returns:
         # {name: {name, target, enforcement, conditions, rules, ...}}.
         self._rulesets: dict[str, dict[str, Any]] = {}
+        # Classic branch-protection config keyed by branch name, served by
+        # fetch_legacy_protection (#10148). Mirrors the shape GitHub's
+        # ``/repos/{repo}/branches/{branch}/protection`` returns. Default
+        # empty: fetch_legacy_protection returns None (no classic rule) for
+        # every branch, matching the raw ``gh api`` 404 case, so existing
+        # ruleset-only seeds see no new drift from this seam.
+        self._legacy_protection: dict[str, dict[str, Any]] = {}
 
     @classmethod
     def from_seed(cls, seed: MockWorldSeed) -> FakeGitHub:
@@ -323,6 +330,19 @@ class FakeGitHub:
         not retroactively alter seeded state.
         """
         self._rulesets[name] = dict(config)
+
+    def add_legacy_protection(self, branch: str, config: dict[str, Any]) -> None:
+        """Seed-API helper: register classic branch-protection config for a branch.
+
+        The stored config is what ``fetch_legacy_protection`` serves — shaped
+        like GitHub's ``/repos/{repo}/branches/{branch}/protection`` response
+        (``{"required_status_checks": {"contexts": [...], "checks": [...]}}``)
+        so ``branch_protection_audit.undeclared_legacy_contexts`` can detect an
+        undeclared legacy layer stacking extra required checks on top of the
+        ruleset (#10148). Stored as a shallow copy so later mutation of the
+        caller's dict does not retroactively alter seeded state.
+        """
+        self._legacy_protection[branch] = dict(config)
 
     def script_ci(self, pr_number: int, results: list[tuple[bool, str]]) -> None:
         self._ci_scripts[pr_number] = deque(results)
@@ -1222,6 +1242,28 @@ class FakeGitHub:
         """
         _ = repo
         return copy.deepcopy(self._rulesets)
+
+    def fetch_legacy_protection(self, repo: str, branch: str) -> dict[str, Any] | None:
+        """Serve seeded classic branch-protection config for one branch.
+
+        Sync mirror of ``branch_protection_audit.gh_fetch_legacy_protection``
+        (which shells out to ``gh api /repos/{repo}/branches/{branch}/
+        protection``, 404-ing to ``None`` when no classic rule exists).
+        Injectable verbatim as the ``fetch_legacy_protection=`` seam of
+        ``branch_protection_audit.audit_repo`` so a sandbox / scenario
+        ``branch_protection_auditor`` run can observe an undeclared
+        legacy-layer drift without a real network fetch (#10148).
+
+        ``repo`` is accepted for signature parity with
+        ``gh_fetch_legacy_protection`` but ignored: the Fake serves one
+        repo's worth of seeded state. Returns a deep copy so a caller
+        mutating the result cannot corrupt seeded state. ``None`` (not an
+        empty dict) when ``branch`` was never seeded — matches the raw
+        fetcher's "no classic rule" return.
+        """
+        _ = repo
+        protection = self._legacy_protection.get(branch)
+        return copy.deepcopy(protection) if protection is not None else None
 
     # --- Concrete-only PRManager methods invoked at orchestrator boot ---
 
