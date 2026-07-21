@@ -32,11 +32,15 @@ logger = logging.getLogger("hydraflow.principles_audit_loop")
 
 # Hard caps on subprocess reads. A wedged child must not hang the loop cycle
 # forever and freeze its heartbeat — the #9410 silent-stall failure class
-# (#9454 / #9508). ``make audit-json`` runs a full audit so it gets a longer
-# bound than a plain ``git`` call. Bounded (and, via ``run_subprocess_result``,
-# process-group hardened — #9554/#10028) rather than a raw
-# ``create_subprocess_exec``.
-_AUDIT_TIMEOUT_SECONDS = 1800
+# (#9454 / #9508). Bounded (and, via ``run_subprocess_result``, process-group
+# hardened — #9554/#10028) rather than a raw ``create_subprocess_exec``.
+#
+# The heavy ``make audit-json`` bound is the operator-tunable
+# ``config.principles_audit_timeout_seconds`` knob (#9555, default 1800),
+# re-read from the live config at every invocation — NOT a module constant,
+# because a full audit's healthy runtime scales with repo size
+# (heavy-make-tunable vs fixed-tier convention). The incidental ``git``
+# fetch/clone below is repo-size-independent and stays a fixed tier constant.
 _GIT_TIMEOUT_SECONDS = 120
 
 
@@ -208,10 +212,13 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
     async def _run_audit(self, slug: str, repo_root: Path) -> dict[str, Any]:
         """Invoke ``make audit-json`` → parsed JSON report (spec §4.4)."""
         cmd = ["make", "audit-json", f"DIR={repo_root}"]
+        # Operator-tunable knob (#9555) — read fresh each invocation so a
+        # System-tab PATCH applies on the next audit without a restart.
+        timeout_s = self._config.principles_audit_timeout_seconds
         t0 = time.perf_counter()
         try:
             result = await run_subprocess_result(
-                *cmd, cwd=self._config.repo_root, timeout=_AUDIT_TIMEOUT_SECONDS
+                *cmd, cwd=self._config.repo_root, timeout=timeout_s
             )
         except SubprocessTimeoutError as exc:
             duration_ms = int((time.perf_counter() - t0) * 1000)
@@ -220,10 +227,10 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
                 command=cmd,
                 exit_code=124,  # bash convention for timeouts
                 duration_ms=duration_ms,
-                stderr_excerpt=f"timeout after {_AUDIT_TIMEOUT_SECONDS}s",
+                stderr_excerpt=f"timeout after {timeout_s}s",
             )
             raise RuntimeError(
-                f"make audit-json timed out after {_AUDIT_TIMEOUT_SECONDS}s for {slug}"
+                f"make audit-json timed out after {timeout_s}s for {slug}"
             ) from exc
         duration_ms = int((time.perf_counter() - t0) * 1000)
         exit_code = result.returncode
