@@ -7,12 +7,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 ## 2026-W30
 
 - `b0c7d5e` — test(guard): spawn-side reap guard — raw-spawn containment + reap-pairing ratchets (#9623) (#10088) (#10088) *(2026-07-21)*
-- `2c1a455` — test(reap-guard): prune staging_bisect._run_git from raw-spawn + reap baselines (#9577) (#9577) *(2026-07-20)*
-- `325d8ec` — chore(arch): regen artifacts for the migrated bisect seams (#10077 heal) *(2026-07-20)*
-- `6e1493f` — Merge remote-tracking branch 'origin/staging' into fix/subproc-cooperative-killswitch *(2026-07-20)*
-- `77e4b63` — Merge remote-tracking branch 'origin/staging' into fix/subproc-cooperative-killswitch *(2026-07-20)*
+- `1efcd08` — Merge remote-tracking branch 'origin/staging' into feat/9662-drift-batching *(2026-07-20)*
+- `9f99bcf` — fix(escalation): TTL re-drive so stale auto-agent escalations self-heal (#9719) (#10079) (#10079) *(2026-07-20)*
+- `552bb18` — Merge remote-tracking branch 'origin/staging' into feat/9662-drift-batching *(2026-07-20)*
+- `d9a601a` — fix(adr-drift): batch cross-cutting fleet-PR drift into one rollup (#9662) (#9662) *(2026-07-20)*
 - `982cec5` — fix(workspace,state): automate HITL reset runbook residuals — main-repo core.worktree heal + attempt-counter close-to-clear (#9723) (#10082) (#10082) *(2026-07-20)*
-- `5f4f1b6` — chore(arch): regenerate diagrams after staging merge (#9577) (#9577) *(2026-07-20)*
 - `ee15f26` — feat(test-adequacy): independent second-opinion verifier gated on explicit OK (#9546) (#10076) (#10076) *(2026-07-20)*
 - `fa5e02e` — feat(gh-load): cached CI-run + issue-list reads and first-tick stagger — cut direct-gh load (#9814) (#10075) (#10075) *(2026-07-20)*
 - `aee928c` — feat(sandbox): active-trigger scenarios for six governance loops (s65-s70) (#9543) (#10074) (#10074) *(2026-07-20)*
