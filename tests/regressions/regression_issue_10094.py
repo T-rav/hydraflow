@@ -14,7 +14,7 @@ then leaks into unrelated commits. Observed on
 ``s05_hitl_after_review_exhaustion.json`` but every committed generated seed
 was stale to some degree.
 
-Two guards, so the drift can never silently recur:
+Three guards, so the drift can never silently recur:
 
 1. **Freshness** — every committed *generated* seed must equal the current
    ``seed().to_json()`` for its scenario (exactly what ``write_seed`` would
@@ -26,6 +26,17 @@ Two guards, so the drift can never silently recur:
    this test (mirrors the repo's tree-clean hygiene guards, e.g. #9539). Fails
    loudly if a test or the harness mutates a committed seed in place. Skips
    cleanly outside a git checkout.
+
+3. **Round-trip isolation** — ``write_seed()`` run against the REAL scenario
+   module (not a mock — exercises the real ``MockWorldSeed.to_json()`` schema
+   round-trip that produces the default-valued-field drift) with ``SEEDS_DIR``
+   redirected to ``tmp_path`` must land ONLY in ``tmp_path`` and must leave the
+   real committed source file byte-for-byte and mtime untouched. Pins the fix
+   direction the issue asked for directly: a materialize round-trip writes to
+   a temp copy, never back to source. ``tests/test_sandbox_scenario_cli.py``
+   covers the CLI wiring but mocks ``load_scenario``/``to_json`` entirely, so
+   it never actually exercises the schema round-trip that causes the drift;
+   this guard closes that gap.
 
 ``_smoke.json`` is a hand-authored minimal fixture (a single-line payload, not
 ``write_seed`` output — it is deliberately NOT idempotent under
@@ -89,6 +100,45 @@ def test_committed_seed_matches_scenario_definition(seed_path: Path) -> None:
         "seed() and MUST be regenerated whenever MockWorldSeed or the scenario "
         "changes, or the next sandbox harness run rewrites them in place "
         "(#10094)."
+    )
+
+
+def test_write_seed_materialize_round_trip_never_touches_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``write_seed()`` must land ONLY in the injected ``SEEDS_DIR`` (#10094).
+
+    Exercises the REAL scenario module + REAL ``MockWorldSeed.to_json()`` —
+    not a mock — the same code path ``cmd_run``/``cmd_run-all``/``cmd_seed``
+    use, with ``SEEDS_DIR`` redirected to ``tmp_path``. Snapshots the real
+    committed seed's mtime and content before and after to prove the write
+    never lands on source, even if ``write_seed``'s target ever silently
+    drifted back to the real dir. This is the literal fix direction #10094
+    asked for: a materialize round-trip writes to a temp copy, never source.
+    """
+    from scripts import sandbox_scenario
+
+    stem = "s05_hitl_after_review_exhaustion"
+    real_seed_path = _SEEDS_DIR / f"{stem}.json"
+    content_before = real_seed_path.read_text()
+    mtime_before = real_seed_path.stat().st_mtime_ns
+
+    monkeypatch.setattr(sandbox_scenario, "SEEDS_DIR", tmp_path)
+    out = sandbox_scenario.write_seed(stem)
+
+    assert out == tmp_path / f"{stem}.json"
+    # Real round-trip through the current scenario/model — must match the
+    # freshness guard's expectation (both compute module.seed().to_json()).
+    module = importlib.import_module(f"tests.sandbox_scenarios.scenarios.{stem}")
+    assert out.read_text() == module.seed().to_json()
+
+    assert real_seed_path.read_text() == content_before, (
+        "write_seed() rewrote the COMMITTED source seed's content even "
+        "though SEEDS_DIR was redirected to tmp_path — the exact #10094 leak."
+    )
+    assert real_seed_path.stat().st_mtime_ns == mtime_before, (
+        "write_seed() touched the COMMITTED source seed's mtime even though "
+        "SEEDS_DIR was redirected to tmp_path — the exact #10094 leak."
     )
 
 

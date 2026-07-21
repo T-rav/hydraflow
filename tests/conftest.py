@@ -32,8 +32,34 @@ os.environ["HYDRAFLOW_SENTRY_DISABLED"] = "1"
 os.environ.pop("SENTRY_DSN", None)
 
 
+# #10094: committed sandbox seeds under tests/sandbox_scenarios/seeds/ must
+# never be mutated by the test suite (write_seed() materializing a
+# MockWorldSeed round-trip back onto its own source path adds schema
+# defaults like "comments": {} that then leak into unrelated commits).
+# tests/regressions/regression_issue_10094.py's `test_seed_dir_is_git_clean`
+# proves the dir was clean at ONE point in collection order; under
+# `-n auto --dist loadscope` a later test on a DIFFERENT xdist worker could
+# still dirty it afterward and go uncaught there. Snapshotting mtimes at
+# import time (before this process — controller or worker — runs its first
+# test) and re-checking after EVERY test's teardown closes that gap and, like
+# the MagicMock guard below, pins the exact offending test by name instead of
+# surfacing as an unexplained ` M` diff days later.
+_SANDBOX_SEEDS_DIR = Path(__file__).resolve().parent / "sandbox_scenarios" / "seeds"
+
+
+def _sandbox_seed_mtimes() -> dict[str, int]:
+    if not _SANDBOX_SEEDS_DIR.is_dir():
+        return {}
+    return {p.name: p.stat().st_mtime_ns for p in _SANDBOX_SEEDS_DIR.glob("*.json")}
+
+
+_sandbox_seed_baseline_mtimes = _sandbox_seed_mtimes()
+
+
 def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> None:  # noqa: ARG001 — nextitem required by pytest hook signature
-    """Fail any test that leaves a ``MagicMock/`` directory in the repo root.
+    """Fail any test that leaves a ``MagicMock/`` directory in the repo root,
+
+    or that mutates a committed sandbox seed (#10094).
 
     Caused by passing a bare ``MagicMock()`` where production code expects a
     ``Path`` / config and calls ``.mkdir()`` on the result — the str() of the
@@ -54,6 +80,28 @@ def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> 
             f"Mock-path pollution: test {item.nodeid} left {polluted} on disk. "
             "A MagicMock was used where a Path/config was expected. "
             "Use `MagicMock(spec=HydraFlowConfig)` or a real tmp_path-backed config."
+        )
+
+    current_seed_mtimes = _sandbox_seed_mtimes()
+    mutated_seeds = sorted(
+        name
+        for name, mtime in current_seed_mtimes.items()
+        if _sandbox_seed_baseline_mtimes.get(name) != mtime
+    )
+    if mutated_seeds:
+        # Absorb into the baseline so only the offending test is blamed —
+        # tests/regressions/regression_issue_10094.py::test_seed_dir_is_git_clean
+        # still catches the leftover git dirt from the actual content change.
+        _sandbox_seed_baseline_mtimes.update(
+            {name: current_seed_mtimes[name] for name in mutated_seeds}
+        )
+        pytest.fail(
+            f"Sandbox-seed tree-clean violation: test {item.nodeid} mutated "
+            f"committed seed(s) {mutated_seeds} in "
+            "tests/sandbox_scenarios/seeds/. Seeds are golden generated "
+            "artifacts — a test/fixture must never re-serialize a "
+            "materialized MockWorldSeed back to the source path; redirect the "
+            "write to tmp_path instead (#10094)."
         )
 
 
