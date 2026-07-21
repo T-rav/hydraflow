@@ -48,6 +48,29 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
 
       - name: Perform CodeQL Analysis
+        id: analyze
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:${{ matrix.language }}"
+          # Also write the SARIF locally so the dismiss-alerts step below can
+          # read its suppressions[] (populated by CodeQL's built-in
+          # AlertSuppression query from inline `# codeql[<rule>]` comments).
+          output: sarif-results
+
+      # GitHub code scanning does NOT natively honor inline suppression
+      # comments — CodeQL records them in the SARIF suppressions[] array, but
+      # the alert stays open until applied via the Code Scanning API. This step
+      # applies them, so the scoped `# codeql[py/clear-text-storage-sensitive-data]`
+      # suppression on file_util.append_jsonl (an ADR-0085 scrub_secrets false
+      # positive, issue #9143) actually dismisses the alert. Runs only on the
+      # python leg (the only language with a suppression) and only on the
+      # default branch (dismissing requires the alert to exist there, and PR
+      # runs must never dismiss).
+      - name: Apply inline suppressions to code scanning
+        if: matrix.language == 'python' && github.ref == 'refs/heads/main'
+        uses: advanced-security/dismiss-alerts@v2
+        with:
+          sarif-id: ${{ steps.analyze.outputs.sarif-id }}
+          sarif-file: sarif-results/python.sarif
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

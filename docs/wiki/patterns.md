@@ -406,6 +406,8 @@ HydraFlow uses **OpenTelemetry → Honeycomb** for distributed tracing (per-phas
 
 Both rulesets also enforce: no deletion, no force-push, PR required (no direct pushes). `main protect` additionally enforces code-quality severity=`errors` and code-scanning CodeQL high-or-higher; `staging protect` does NOT (staging is fast integration, and the CodeQL/code-quality gate is enforced on the `rc/* → main` promotion PR instead).
 
+**CodeQL false-positive policy (issue #9143).** A persistent CodeQL FP on first-party redaction/sanitizer code is fixed with a *version-controlled* mechanism, never a one-off UI dismissal (which suppresses a single alert instance on a single PR and re-fires on the next promotion PR). Preferred, in order: (1) a Models-as-Data sanitizer model (`barrierModel`) under `.github/codeql/` **if the flagging query consumes MaD barriers** — many do (the injection queries), but some don't: `py/clear-text-storage-sensitive-data`'s barrier set is a hardcoded QL `Sanitizer` class with no `barrierModel`/`ModelOutput` hook, so a MaD/neutral model is inert for it (and neutral models never override an analyzed first-party body); (2) if the query has no MaD barrier hook, a **scoped `# codeql[<rule>]` inline suppression at the sink** plus the `advanced-security/dismiss-alerts` step in `codeql.yml` — GitHub code scanning records suppressions in SARIF but does not natively dismiss from them. Suppress at the sink only, never the whole file/query. See the `scrub_secrets` case (ADR-0085, `file_util.append_jsonl`).
+
 Repo-level settings:
 - `default_branch=main` (release reference; integration is `staging`)
 - `allow_auto_merge=true` — required for `gh pr merge --auto` and for `StagingPromotionLoop` to queue auto-merges on RC PRs
