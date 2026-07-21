@@ -649,7 +649,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("screenshot_gist_public", "HYDRAFLOW_SCREENSHOT_GIST_PUBLIC", False),
     ("skip_preflight", "HYDRAFLOW_SKIP_PREFLIGHT", False),
     ("whatsapp_enabled", "HYDRAFLOW_WHATSAPP_ENABLED", False),
-    ("collapse_discover_shape", "HYDRAFLOW_COLLAPSE_DISCOVER_SHAPE", False),
     (
         "sandbox_failure_fixer_enabled",
         "HYDRAFLOW_SANDBOX_FAILURE_FIXER_ENABLED",
@@ -1858,14 +1857,6 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-find"],
         description="Labels for new issues to discover and triage into planning (OR logic)",
     )
-    discover_label: list[str] = Field(
-        default=["hydraflow-discover"],
-        description="Labels for issues needing product discovery research (OR logic)",
-    )
-    shape_label: list[str] = Field(
-        default=["hydraflow-shape"],
-        description="Labels for issues needing product direction shaping (OR logic)",
-    )
     regulated_labels: str = Field(
         default="",
         description=(
@@ -1879,18 +1870,11 @@ class HydraFlowConfig(BaseModel):
         default=7,
         ge=1,
         le=10,
-        description="Clarity score threshold: issues scoring below this route to discovery",
-    )
-    collapse_discover_shape: bool = Field(
-        default=False,
         description=(
-            "ADR-0107 rollout lever. When True, Triage routes ready issues "
-            "directly to Plan and no longer emits the hydraflow-discover / "
-            "hydraflow-shape transitions — Discover/Shape become planner-invoked "
-            "helpers instead of standalone phases. Migration flag: keep False in "
-            "production until the planner discover/shape decision gate lands "
-            "(#9773), since enabling it early plans low-clarity issues with no "
-            "discovery pre-pass."
+            "Clarity score threshold (ADR-0107). Issues scoring below this are "
+            "flagged to the planner's on-demand discover/shape decision gate "
+            "(plan_phase.py:_should_discover_helper) as a discovery hint, rather "
+            "than routed to a standalone Discover phase at triage time."
         ),
     )
     max_shape_turns: int = Field(
@@ -4644,8 +4628,6 @@ class HydraFlowConfig(BaseModel):
         "epic_child_label",
         "auto_decomposed_child_label",
         "find_label",
-        "discover_label",
-        "shape_label",
         "planner_label",
         "verify_label",
         "parked_label",
@@ -4691,8 +4673,6 @@ class HydraFlowConfig(BaseModel):
         result: list[str] = []
         for labels in (
             self.find_label,
-            self.discover_label,
-            self.shape_label,
             self.planner_label,
             self.ready_label,
             self.review_label,

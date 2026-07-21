@@ -36,8 +36,6 @@ if TYPE_CHECKING:
 # need to be reflected here too.
 HYDRAFLOW_LABELS = (
     "hydraflow-find",
-    "hydraflow-discover",
-    "hydraflow-shape",
     "hydraflow-plan",
     "hydraflow-ready",
     "hydraflow-review",

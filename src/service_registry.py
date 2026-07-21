@@ -54,7 +54,6 @@ from detector_calibration_loop import DetectorCalibrationLoop
 from diagnostic_loop import DiagnosticLoop  # noqa: TCH001
 from diagnostic_runner import DiagnosticRunner
 from diagram_loop import DiagramLoop  # noqa: TCH001
-from discover_phase import DiscoverPhase  # noqa: TCH001
 from discover_runner import DiscoverRunner
 from disturbance_dampener_loop import DisturbanceDampenerLoop
 from docker_runner import get_docker_runner
@@ -131,7 +130,6 @@ from runs_gc_loop import RunsGCLoop
 from sandbox_failure_fixer_loop import SandboxFailureFixerLoop
 from security_patch_loop import SecurityPatchLoop  # noqa: TCH001
 from sentry_loop import SentryLoop  # noqa: TCH001 — used in dataclass field
-from shape_phase import ShapePhase  # noqa: TCH001
 from shape_runner import ShapeRunner
 from skill_prompt_eval_loop import SkillPromptEvalLoop
 from staging_bisect_loop import StagingBisectLoop
@@ -285,8 +283,12 @@ class ServiceRegistry:
 
     # Phase coordinators
     triager: TriagePhase
-    discover_phase: DiscoverPhase
-    shape_phase: ShapePhase
+    # ADR-0107: Discover/Shape are no longer standalone phases. The
+    # DiscoverRunner / ShapeRunner engines are held here (not phase wrappers)
+    # so the planner can invoke them on demand behind its decision gate, and
+    # so the sandbox harness can route them through the fake-LLM sentinel.
+    discover_runner: DiscoverRunner
+    shape_runner: ShapeRunner
     planner_phase: PlanPhase
     hitl_phase: HITLPhase
     implementer: ImplementPhase
@@ -979,51 +981,24 @@ def build_services(
         issue_cache=issue_cache,
         bug_reproducer=bug_reproducer,
     )
+    # ADR-0107: Discover/Shape are no longer standalone pipeline phases.
+    # Build the discover/shape ENGINES (DiscoverRunner / ShapeRunner) directly
+    # and hand them to the planner, which invokes them on demand behind its
+    # decision gate (plan_phase.py:_should_discover_helper / _should_shape_helper).
+    # The escalation deps (issue-filing + dedup for evaluator escalation) that
+    # the standalone DiscoverPhase / ShapePhase used to bind at construction are
+    # bound here instead, on a single shared hitl_escalations dedup store, so
+    # the planner-invoked evaluator-escalation path keeps working unchanged.
+    from dedup_store import DedupStore  # noqa: PLC0415
+
+    hitl_escalation_dedup = DedupStore(
+        "hitl_escalations",
+        config.data_root / "memory" / "hitl_escalations_dedup.json",
+    )
     discover_runner = DiscoverRunner(config, event_bus)
-    discover_phase = DiscoverPhase(  # noqa: F841
-        config,
-        state,
-        store,
-        prs,
-        event_bus,
-        stop_event,
-        discover_runner=discover_runner,
-    )
+    discover_runner.bind_escalation_deps(prs, hitl_escalation_dedup)
     shape_runner = ShapeRunner(config, event_bus)
-    wa_bridge = None
-    if config.whatsapp_enabled:
-        from whatsapp_bridge import WhatsAppBridge  # noqa: PLC0415
-
-        wa_bridge = WhatsAppBridge(
-            phone_id=credentials.whatsapp_phone_id,
-            token=credentials.whatsapp_token,
-            recipient=credentials.whatsapp_recipient,
-        )
-    shape_phase = ShapePhase(  # noqa: F841
-        config,
-        state,
-        store,
-        prs,
-        event_bus,
-        stop_event,
-        shape_runner=shape_runner,
-        whatsapp_bridge=wa_bridge,
-    )
-    # Wire expert council for auto-decision on directions
-    from expert_council import ExpertCouncil  # noqa: PLC0415
-
-    shape_phase._council = ExpertCouncil(config, event_bus)
-
-    # Earlier-adversarial pipeline (ADR-0064). Always-on baseline; the
-    # ComplexityGate wiring is colocated here because it only depends on
-    # ``discover_phase``; the full AgentLike wiring for plan/discover/shape
-    # happens after ``planner_phase`` is constructed (below).
-    from complexity_gate import ComplexityGate  # noqa: PLC0415
-
-    # ``llm=None`` falls back to label + keyword heuristics; the gate
-    # defaults to LOAD_BEARING when uncertain, so a heuristic-only gate
-    # is safe (it never silently skips real work).
-    discover_phase.attach_complexity_gate(ComplexityGate(llm=None))
+    shape_runner.bind_escalation_deps(prs, hitl_escalation_dedup)
 
     planner_phase = PlanPhase(
         config,
@@ -1042,29 +1017,25 @@ def build_services(
         wiki_compiler=wiki_compiler,
         issue_cache=issue_cache,
         plan_reviewer=plan_reviewer,
-        # ADR-0107 (collapse_discover_shape): share the SAME DiscoverRunner /
-        # ShapeRunner instances DiscoverPhase / ShapePhase already bound
-        # escalation deps onto above, so the planner-invoked helper gates
-        # (plan_phase.py:_should_discover_helper / _should_shape_helper)
-        # can invoke them without re-binding. Both gates are no-ops with
-        # the flag off, so this wiring is inert until the flag flips.
+        # ADR-0107: hand the discover/shape engines (escalation deps already
+        # bound above) to the planner, whose decision gates
+        # (plan_phase.py:_should_discover_helper / _should_shape_helper) invoke
+        # them on demand as in-process research/shaping sub-steps.
         discover_runner=discover_runner,
         shape_runner=shape_runner,
     )
 
     # Earlier-adversarial pipeline AgentLike wiring (ADR-0064).
     #
-    # Attach ``SubprocessAgentRunner`` adapters to every adversarial-stage
-    # slot across plan, discover, and shape phases. Each adapter is
-    # stateless (the per-call ``system_prompt`` differentiates a surfacer
-    # from a council voter), so a single instance is shared across all
-    # slots.
+    # Attach a ``SubprocessAgentRunner`` adapter to every adversarial-stage
+    # slot on the plan phase. The adapter is stateless (the per-call
+    # ``system_prompt`` differentiates a surfacer from a council voter), so a
+    # single instance is shared across all slots.
     #
     # Why one shared instance: the AgentLike contract is
     # ``run(system_prompt, user_message) -> str``. The adapter holds
     # only the SubprocessRunner + model/tool config — no per-stage state.
-    # Sharing keeps the factory small; tests verify each slot is
-    # non-None per-phase.
+    # Sharing keeps the factory small; tests verify each slot is non-None.
     from adversarial_agent_runner import SubprocessAgentRunner  # noqa: PLC0415
 
     adversarial_agent = SubprocessAgentRunner(
@@ -1089,22 +1060,6 @@ def build_services(
     # for tests that build PlanPhase directly without the factory.
     planner_phase._touchpoint_expander = PlanTouchpointExpander(
         agent=adversarial_agent,
-    )
-    discover_phase.attach_adversarial_agents(
-        surfacer_agent=adversarial_agent,
-        council_agents={
-            "problem_sharpener": adversarial_agent,
-            "existing_solution_hunter": adversarial_agent,
-            "cheapest_test_advocate": adversarial_agent,
-        },
-    )
-    shape_phase.attach_adversarial_agents(
-        challenger_agent=adversarial_agent,
-        council_agents={
-            "user_advocate": adversarial_agent,
-            "tech_lead": adversarial_agent,
-            "product_strategist": adversarial_agent,
-        },
     )
 
     hitl_phase = HITLPhase(
@@ -1974,8 +1929,8 @@ def build_services(
         crate_manager=crate_manager,
         issue_cache=issue_cache,
         triager=triager,
-        discover_phase=discover_phase,
-        shape_phase=shape_phase,
+        discover_runner=discover_runner,
+        shape_runner=shape_runner,
         planner_phase=planner_phase,
         hitl_phase=hitl_phase,
         implementer=implementer,

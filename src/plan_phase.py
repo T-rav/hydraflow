@@ -156,12 +156,12 @@ class PlanPhase:
         self._wiki_compiler = wiki_compiler
         self._issue_cache = issue_cache
         self._plan_reviewer = plan_reviewer
-        # ADR-0107 (collapse_discover_shape): the discover/shape engines,
+        # ADR-0107: the discover/shape engines (DiscoverRunner / ShapeRunner),
         # reused as on-demand helpers the planner's decision gate invokes
         # (_should_discover_helper / _should_shape_helper) instead of them
-        # running as standalone pipeline phases. Optional — when None (the
-        # default, and always true while the flag is off), the gates always
-        # return False and behavior is unaffected.
+        # running as standalone pipeline phases. Optional — when None (e.g.
+        # tests that build PlanPhase directly without the factory), the gates
+        # always return False and the planner plans without a research pre-pass.
         self._discover_runner = discover_runner
         self._shape_runner = shape_runner
         # Touchpoint expander (ADR-0063 W3b). Dispatched on the FIRST
@@ -452,10 +452,10 @@ class PlanPhase:
     def _triage_hints(self, issue: Task) -> tuple[int, bool]:
         """Return ``(clarity_score, needs_discovery)`` triage HINTS for *issue*.
 
-        ADR-0107: with ``collapse_discover_shape`` on, Triage no longer treats
-        these as a routing verdict — it records them on the issue's
-        ``IssueCache`` classification record and the planner's decision gate
-        reads them back here. Missing cache / no classification record yet
+        ADR-0107: Triage no longer treats these as a routing verdict — it
+        records them on the issue's ``IssueCache`` classification record and
+        the planner's decision gate reads them back here. Missing cache / no
+        classification record yet
         (e.g. ``issue_cache`` disabled, or the issue predates classification)
         reads as the well-specified default ``(10, False)`` — the gate's
         conservative "no helper needed" reading.
@@ -473,10 +473,9 @@ class PlanPhase:
     def _should_discover_helper(self, issue: Task) -> bool:
         """ADR-0107 planner decision gate: run the discover helper before planning?
 
-        Only consulted when ``collapse_discover_shape`` is on and a
-        ``DiscoverRunner`` is wired — with the flag off (or no runner), this
-        always returns False and Triage's existing fork to the standalone
-        Discover phase is unaffected (byte-identical current behavior).
+        Consulted only when a ``DiscoverRunner`` is wired — with no runner
+        (e.g. tests that build PlanPhase directly), this always returns False
+        and the planner plans without a discovery pre-pass.
 
         Conservative default (per ADR-0107): a well-specified issue plans
         directly with no helper. The gate fires when any of —
@@ -491,8 +490,6 @@ class PlanPhase:
         decomposition output from a parent epic's planning pass, so
         re-running product discovery on them would be redundant.
         """
-        if not self._config.collapse_discover_shape:
-            return False
         if self._discover_runner is None:
             return False
         if self._is_epic_child(issue):
@@ -573,10 +570,8 @@ class PlanPhase:
         surfaced genuinely divergent opportunities (2+) that need a human
         choice, per ADR-0107's framing of shaping as direction-selection
         rather than open-ended exploration. Requires a ``ShapeRunner`` to be
-        wired; with the flag off or no runner this always returns False.
+        wired; with no runner this always returns False.
         """
-        if not self._config.collapse_discover_shape:
-            return False
         if self._shape_runner is None or discover_result is None:
             return False
         return len(discover_result.opportunities) >= 2
@@ -1454,11 +1449,12 @@ class PlanPhase:
                                 research_result.error,
                             )
 
-                    # ADR-0107 (collapse_discover_shape): the planner's
-                    # on-demand discover/shape decision gate. Both gates
-                    # always return False with the flag off (or no runner
-                    # wired), so this block is a pure no-op in that mode —
-                    # existing behavior is byte-identical.
+                    # ADR-0107: the planner's on-demand discover/shape
+                    # decision gate. Both gates return False when no runner is
+                    # wired (e.g. tests that build PlanPhase directly), so this
+                    # block is a no-op there; in production the gate decides,
+                    # per issue, whether a discovery pre-pass / shaping turn is
+                    # warranted before planning.
                     discover_result: DiscoverResult | None = None
                     if self._should_discover_helper(issue):
                         discover_result = await self._run_discover_helper(

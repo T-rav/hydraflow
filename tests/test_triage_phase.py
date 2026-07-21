@@ -311,53 +311,6 @@ class TestTriagePhase:
         prs.post_comment.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_triage_routes_vague_issue_to_discover(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """Vague issues with needs_discovery=True route to discover."""
-        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
-        issue = TaskFactory.create(
-            id=10, title="Build a better Calendly", body="A" * 100
-        )
-
-        triage.evaluate = AsyncMock(
-            return_value=TriageResultFactory.create(
-                issue_number=10,
-                ready=True,
-                needs_discovery=True,
-                clarity_score=3,
-            )
-        )
-        store.get_triageable = supply_once([issue])
-
-        await phase.triage_issues()
-
-        prs.transition.assert_called_once_with(10, "discover")
-
-    @pytest.mark.asyncio
-    async def test_triage_routes_low_clarity_to_discover(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """Issues with low clarity_score route to discover even if ready=True."""
-        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
-        issue = TaskFactory.create(
-            id=11, title="Improve onboarding experience", body="A" * 100
-        )
-
-        triage.evaluate = AsyncMock(
-            return_value=TriageResultFactory.create(
-                issue_number=11,
-                ready=True,
-                clarity_score=4,  # Below default threshold of 7
-            )
-        )
-        store.get_triageable = supply_once([issue])
-
-        await phase.triage_issues()
-
-        prs.transition.assert_called_once_with(11, "discover")
-
-    @pytest.mark.asyncio
     async def test_triage_clear_issue_still_routes_to_plan(
         self, config: HydraFlowConfig
     ) -> None:
@@ -381,13 +334,13 @@ class TestTriagePhase:
         prs.transition.assert_called_once_with(12, "plan")
 
     @pytest.mark.asyncio
-    async def test_collapse_flag_routes_low_clarity_to_plan(
+    async def test_low_clarity_ready_issue_routes_to_plan(
         self, config: HydraFlowConfig
     ) -> None:
-        """ADR-0107: with collapse_discover_shape on, a low-clarity ready issue
-        routes straight to plan instead of discover."""
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, _state, triage, prs, store, _stop = make_triage_phase(collapsed)
+        """ADR-0107: a low-clarity ready issue routes straight to plan — there
+        is no standalone discover fork; the planner's decision gate owns the
+        discover/shape decision."""
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
         issue = TaskFactory.create(
             id=13, title="Improve onboarding experience", body="A" * 100
         )
@@ -396,7 +349,7 @@ class TestTriagePhase:
             return_value=TriageResultFactory.create(
                 issue_number=13,
                 ready=True,
-                clarity_score=4,  # Below default threshold — would be discover
+                clarity_score=4,  # Below default threshold — pre-ADR-0107 discover
             )
         )
         store.get_triageable = supply_once([issue])
@@ -406,13 +359,12 @@ class TestTriagePhase:
         prs.transition.assert_called_once_with(13, "plan")
 
     @pytest.mark.asyncio
-    async def test_collapse_flag_routes_needs_discovery_to_plan(
+    async def test_needs_discovery_issue_routes_to_plan(
         self, config: HydraFlowConfig
     ) -> None:
-        """ADR-0107: with the flag on, needs_discovery no longer routes to the
-        standalone discover phase — the planner gate owns that decision."""
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, _state, triage, prs, store, _stop = make_triage_phase(collapsed)
+        """ADR-0107: needs_discovery no longer routes to a standalone discover
+        phase — the planner gate owns that decision."""
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
         issue = TaskFactory.create(
             id=14, title="Build a better Calendly", body="A" * 100
         )
@@ -436,8 +388,8 @@ class TestTriagePhase:
         self, config: HydraFlowConfig
     ) -> None:
         """ADR-0107: clarity_score / needs_discovery ride along on the
-        classification record regardless of the collapse flag, so the
-        planner's decision gate can read them back as hints later
+        classification record so the planner's decision gate can read them
+        back as hints later
         (plan_phase.py:_should_discover_helper / _triage_hints)."""
         from unittest.mock import MagicMock
 
@@ -861,31 +813,6 @@ class TestTriageConvergenceLedger:
         ledger = state.get_convergence_ledger(103)
         assert ledger is not None, "Ledger must be created"
         assert ledger.stage_state["triage"].last_verdict == "ADVANCE"
-
-    @pytest.mark.asyncio
-    async def test_discover_routing_records_loop_back_verdict(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """Issue routed to discovery -> ledger triage verdict == 'LOOP_BACK'.
-
-        Symmetry coverage for the 'discover' fall-through outcome (distinct from
-        the 'parked' outcome already covered).
-        """
-        phase, state, triage, prs, store, _stop = make_triage_phase(config)
-        issue = TaskFactory.create(id=104, title="Make it better", body="A" * 100)
-
-        triage.evaluate = AsyncMock(
-            return_value=TriageResultFactory.create(
-                issue_number=104, ready=True, needs_discovery=True
-            )
-        )
-        store.get_triageable = supply_once([issue])
-
-        await phase.triage_issues()
-
-        ledger = state.get_convergence_ledger(104)
-        assert ledger is not None, "Ledger must be created"
-        assert ledger.stage_state["triage"].last_verdict == "LOOP_BACK"
 
     @pytest.mark.asyncio
     async def test_sentry_noise_closed_records_advance_verdict(

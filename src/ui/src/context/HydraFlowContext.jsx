@@ -4,8 +4,6 @@ import { deriveStageStatus } from '../hooks/useStageStatus'
 
 const emptyPipeline = {
   triage: [],
-  discover: [],
-  shape: [],
   plan: [],
   implement: [],
   review: [],
@@ -663,7 +661,7 @@ export function reducer(state, action) {
       // WS frame carries {seq, stages}; REST dispatch passes stages already
       // unwrapped. Normalize both to the bare stage map.
       const incoming = action.data?.stages ?? action.data ?? {}
-      const allStages = ['triage', 'discover', 'shape', 'plan', 'implement', 'review', 'hitl', 'merged']
+      const allStages = ['triage', 'plan', 'implement', 'review', 'hitl', 'merged']
       // REST aggregation tags each issue with its repo; a WS frame's issues are
       // untagged but the event carries event.repo (threaded via onmessage) —
       // stamp it so WS and REST frames key/merge consistently (no dup cards).

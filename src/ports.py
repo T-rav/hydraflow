@@ -658,14 +658,6 @@ class IssueStorePort(Protocol):
         """Return up to *max_count* issues from the find queue."""
         ...
 
-    def get_discoverable(self, max_count: int) -> list[Task]:
-        """Return up to *max_count* issues from the discover queue."""
-        ...
-
-    def get_shapeable(self, max_count: int) -> list[Task]:
-        """Return up to *max_count* issues from the shape queue."""
-        ...
-
     def get_plannable(self, max_count: int) -> list[Task]:
         """Return up to *max_count* issues from the plan queue."""
         ...

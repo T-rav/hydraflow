@@ -6,18 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
-- `eec50e8` — docs(adr-0085): use bullet format for multi-check Enforced-by (#9143) (#9143) *(2026-07-21)*
-- `689db28` — chore(arch): regen after staging merge, keep staging .meta.json (#9143) (#9143) *(2026-07-21)*
-- `9d2e24e` — Merge remote-tracking branch 'origin/staging' into fix/9143-codeql-scrub-secrets-sanitizer *(2026-07-21)*
-- `f368c12` — docs(adr-0085): repoint Enforced-by citation to relocated regression test (#9143) (#9143) *(2026-07-21)*
+- `3f833ff` — fix(codeql): model scrub_secrets() as py/clear-text-storage sanitizer (#9143) (#10164) (#10164) *(2026-07-21)*
 - `dc6060b` — test(fake-coverage): cover final FakeGitHub adapter-surface slice — gap→0 (#9768) (#10165) (#10165) *(2026-07-21)*
-- `6c20ec5` — chore(arch): regen after staging merge (#9143) (#9143) *(2026-07-21)*
-- `d60f74a` — Merge remote-tracking branch 'origin/staging' into fix/9143-codeql-scrub-secrets-sanitizer *(2026-07-21)*
 - `37dcabe` — feat(health): loop self-repair actuator — persistent error-heartbeat → auto-repair or file (#10140) (#10155) (#10155) *(2026-07-21)*
-- `bec8567` — chore(arch): regen after staging merge (#9143) (#9143) *(2026-07-21)*
-- `f88aeac` — Merge remote-tracking branch 'origin/staging' into fix/9143-codeql-scrub-secrets-sanitizer *(2026-07-21)*
 - `94be7b3` — fix(fake-fidelity): FakeGitHub PR-title format matches real PRManager (#10153) (#10160) (#10160) *(2026-07-21)*
-- `babf722` — fix(codeql): model scrub_secrets() as a clear-text-storage sanitizer (#9143) (#9143) *(2026-07-21)*
 - `31e4cbd` — test(fake-coverage): cover next FakeGitHub adapter-surface slice (#9768) (#10161) (#10161) *(2026-07-21)*
 - `e9115b0` — feat(pr-red): Phase 2 — dispatch auto-agent to fix real (non-infra) settled CI reds on their branch (#10027) (#10157) (#10157) *(2026-07-21)*
 - `90d56c9` — test(trust): cassette FakeGitHub PR-review/label cluster — 11 methods (#9768 slice 3) (#10152) (#10152) *(2026-07-21)*
@@ -563,7 +555,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `be1315c` — feat(wiki): LLM semantic-drift layer (E2) (#8410) (#8410) *(2026-04-23)*
 - `8de17bf` — docs(adr): backfill real Enforced-by refs for 14 ADRs (B1) (#8404) (#8404) *(2026-04-23)*
 - `1b79b45` — feat(adr): require Enforced-by linkage on Accepted ADRs (P3) (#8398) (#8398) *(2026-04-23)*
-- `39c6fc9` — feat(principles-audit): ADR-0044 + audit framework + P1 checks (#8386) (#8386) *(2026-04-22)*
 
 
 <!-- arch:generated -->

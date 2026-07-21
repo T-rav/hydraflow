@@ -186,7 +186,7 @@ class TestHumanSteeringScenario:
         )
         world.github.add_seeded_comment(
             _ISSUE_NUMBER,
-            "/redo shape",
+            "/redo plan",
             login=_AUTHORIZED_LOGIN,
             created_at="2026-07-01T00:03:00Z",
         )
@@ -204,19 +204,19 @@ class TestHumanSteeringScenario:
         # latest-wins within the tick).
         assert written.flow == "running"
         assert written.guidance == "focus on tests"
-        # /redo shape is imperative and past the (initially None) high-water
+        # /redo plan is imperative and past the (initially None) high-water
         # mark -> fires on this first tick.
-        assert written.redo_phase == "shape"
+        assert written.redo_phase == "plan"
         assert written.last_applied_ts == "2026-07-01T00:03:00Z"
 
         # Actuator-decision seam: feed the loop's real persisted state into
         # the same pure function HydraFlowOrchestrator._apply_human_steering
-        # enacts verbatim. redo_phase="shape" is a known phase and under cap
+        # enacts verbatim. redo_phase="plan" is a known phase and under cap
         # -> the decision re-enqueues to it.
         decision = apply_steering(written, str(_ISSUE_NUMBER), _KNOWN_PHASES, 3)
         assert decision.skip is False
         assert decision.park is False
-        assert decision.redo_phase == "shape"
+        assert decision.redo_phase == "plan"
         # /steer guidance reaches the ADR-0092 single fence choke point.
         fenced = fenced_steering_guidance(decision.guidance)
         assert "## Human Steering Guidance" in fenced
@@ -226,14 +226,14 @@ class TestHumanSteeringScenario:
         # the sensor preserves an unconsumed redo_phase across ticks (the
         # actuator hasn't cleared it yet, see human_steering_loop.py's
         # `d.redo_phase or prev.redo_phase`) rather than dropping it, so it
-        # is still "shape" here — the same behavior
+        # is still "plan" here — the same behavior
         # test_human_steering_loop.py::test_loop_preserves_unconsumed_redo_on_retick
         # proves at the unit level.
         result2 = await loop._do_work()
         assert result2["status"] == "ok"
 
         written2 = state.get_human_steering(str(_ISSUE_NUMBER))
-        assert written2.redo_phase == "shape"
+        assert written2.redo_phase == "plan"
         assert written2.flow == "running"
         assert written2.guidance == "focus on tests"
         assert written2.last_applied_ts == "2026-07-01T00:03:00Z"

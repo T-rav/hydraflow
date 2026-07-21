@@ -22,12 +22,12 @@ graph LR
     ConformanceRunnerPort --> PreFlightAdvisor
     ConformanceRunnerPort --> RepoRuntime
     ConformanceRunnerPort --> ReportIssueLoop
-    ConformanceRunnerPort --> ShapeChallenger
     ConformanceRunnerPort --> SubprocessAgentRunner
     ConformanceRunnerPort --> SubprocessConformanceRunner
     ConformanceRunnerPort -.-> FakeConformanceRunner
     IssueFetcherPort --> IssueFetcher
     IssueFetcherPort -.-> FakeIssueFetcher
+    IssueStorePort --> CachingIssueStore
     IssueStorePort --> IssueStore
     IssueStorePort -.-> FakeIssueStore
     ObservabilityPort --> SentryObservabilityAdapter
@@ -77,7 +77,6 @@ graph LR
   - `PreFlightAdvisor` (`src.review_advisor`)
   - `RepoRuntime` (`src.repo_runtime`)
   - `ReportIssueLoop` (`src.report_issue_loop`)
-  - `ShapeChallenger` (`src.shape_challenger`)
   - `SubprocessAgentRunner` (`src.adversarial_agent_runner`)
   - `SubprocessConformanceRunner` (`src.adr_conformance_runner`)
 - Fake: `FakeConformanceRunner` (`mockworld.fakes.fake_conformance_runner`)
@@ -93,8 +92,9 @@ graph LR
 ### IssueStorePort
 
 - Module: `src.ports`
-- Methods: `enqueue_transition`, `enrich_with_comments`, `get_discoverable`, `get_implementable`, `get_plannable`, `get_reviewable`, `get_shapeable`, `get_triageable`, `is_active`, `mark_active`, `mark_complete`, `mark_merged`, `release_in_flight`
+- Methods: `enqueue_transition`, `enrich_with_comments`, `get_implementable`, `get_plannable`, `get_reviewable`, `get_triageable`, `is_active`, `mark_active`, `mark_complete`, `mark_merged`, `release_in_flight`
 - Adapters:
+  - `CachingIssueStore` (`src.caching_issue_store`)
   - `IssueStore` (`src.issue_store`)
 - Fake: `FakeIssueStore` (`mockworld.fakes.fake_issue_store`)
 

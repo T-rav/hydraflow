@@ -17,12 +17,10 @@ import pytest
 
 from events import EventBus
 from issue_store import (
-    STAGE_DISCOVER,
     STAGE_FIND,
     STAGE_PLAN,
     STAGE_READY,
     STAGE_REVIEW,
-    STAGE_SHAPE,
     IssueStore,
     IssueStoreStage,
 )
@@ -33,8 +31,6 @@ from tests.helpers import ConfigFactory
 
 _ALL_STAGES: tuple[IssueStoreStage, ...] = (
     STAGE_FIND,
-    STAGE_DISCOVER,
-    STAGE_SHAPE,
     STAGE_PLAN,
     STAGE_READY,
     STAGE_REVIEW,

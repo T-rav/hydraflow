@@ -1,19 +1,18 @@
 """MockWorld scenario for the ADR-0107 planner-invoked discover helper.
 
-Collapse-Discover-Shape step 1 (#9773): with ``collapse_discover_shape`` on,
-Triage routes a ready issue straight to Plan regardless of clarity — no
-``hydraflow-discover`` hop. The clarity/needs-discovery signals ride along as
-HINTS on the shared ``IssueCache`` classification record (mirroring
-``service_registry.py``'s production wiring, where Triage and Plan share one
-``IssueCache`` instance). The planner's decision gate
-(``plan_phase.py:_should_discover_helper``) reads those hints back and, for a
-low-clarity issue, invokes the ``DiscoverRunner``-backed helper before
-planning — and the issue still reaches a successful plan afterward.
+Collapse-Discover-Shape (#9773): Triage routes a ready issue straight to Plan
+regardless of clarity — there is no ``hydraflow-discover`` hop. The
+clarity/needs-discovery signals ride along as HINTS on the shared
+``IssueCache`` classification record (mirroring ``service_registry.py``'s
+production wiring, where Triage and Plan share one ``IssueCache`` instance).
+The planner's decision gate (``plan_phase.py:_should_discover_helper``) reads
+those hints back and, for a low-clarity issue, invokes the
+``DiscoverRunner``-backed helper before planning — and the issue still reaches
+a successful plan afterward.
 
 Scenario 2 covers the conservative default: a well-specified (high-clarity)
-issue plans directly with no helper invocation, exactly like the flag-off
-path — proving the gate doesn't fire indiscriminately just because the flag
-is on.
+issue plans directly with no helper invocation — proving the gate doesn't fire
+indiscriminately.
 """
 
 from __future__ import annotations
@@ -74,7 +73,6 @@ class TestS1LowClarityIssueGetsDiscoverHelper:
     ) -> None:
         world = mock_world
         harness = world.harness
-        harness.config.collapse_discover_shape = True
         _wire_shared_issue_cache(harness, tmp_path)
 
         discover_runner = _ScriptedDiscoverRunner(
@@ -130,7 +128,6 @@ class TestS2WellSpecifiedIssueSkipsHelper:
     ) -> None:
         world = mock_world
         harness = world.harness
-        harness.config.collapse_discover_shape = True
         _wire_shared_issue_cache(harness, tmp_path)
 
         discover_runner = _ScriptedDiscoverRunner(

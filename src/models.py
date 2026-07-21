@@ -1824,8 +1824,6 @@ class StageRecord(BaseModel):
 
 DriverState = Literal[
     "TRIAGE",
-    "DISCOVER",
-    "SHAPE",
     "PLAN",
     "READY",
     "REVIEW",
@@ -1868,14 +1866,14 @@ class PolicyEvent(BaseModel):
 # recording). These MUST match the ``stage=`` literals passed to
 # ``record_stage_verdict``/``convergence_recording.record_stage_verdict`` at
 # each phase's boundary call-site: src/triage_phase.py (stage="triage"),
-# src/shape_phase.py (stage="shape"), src/plan_phase.py (stage="plan"). Both
+# src/plan_phase.py (stage="plan"). Both
 # ``ConvergenceLedger.detect_cross_boundary_oscillation`` below and
 # ``ConvergenceOscillationLoop``'s escalation-issue-body stage lookup
 # (src/convergence_oscillation_loop.py) read this single constant so a future
 # stage rename can't leave one of the two call-sites silently stale — a
 # literal-string drift there would still parse and run, just silently stop
 # matching either the detector or the issue body.
-CONVERGENCE_BOUNDARY_STAGES: tuple[str, ...] = ("triage", "shape", "plan")
+CONVERGENCE_BOUNDARY_STAGES: tuple[str, ...] = ("triage", "plan")
 
 
 class ConvergenceLedger(BaseModel):
@@ -3582,8 +3580,6 @@ class PipelineStage(StrEnum):
     """Display pipeline stages for issue lifecycle."""
 
     TRIAGE = "triage"
-    DISCOVER = "discover"
-    SHAPE = "shape"
     PLAN = "plan"
     IMPLEMENT = "implement"
     REVIEW = "review"

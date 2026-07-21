@@ -404,10 +404,10 @@ class TestHumanSteeringLoopActiveIssuesCb:
 class TestAdversarialPipelineWiring:
     """Factory wiring for the earlier-adversarial pipeline (ADR-0064).
 
-    The pipeline is now unconditional: ``DiscoverPhase`` always gets a
-    ``ComplexityGate`` attached AND all three phases (plan, discover,
-    shape) always get ``SubprocessAgentRunner`` adapters wired into
-    every adversarial-stage slot. No config flag, no opt-out.
+    ADR-0107 retired the standalone Discover/Shape phases, so the adversarial
+    council/surfacer wiring now lives only on the plan phase. The discover/shape
+    engines are the ``DiscoverRunner`` / ``ShapeRunner`` the planner invokes on
+    demand; the factory constructs them and binds their escalation deps.
     """
 
     @staticmethod
@@ -418,17 +418,26 @@ class TestAdversarialPipelineWiring:
         callbacks = _make_callbacks()
         return build_services(config, bus, state, stop_event, callbacks)
 
-    def test_complexity_gate_attached(self, config: HydraFlowConfig) -> None:
-        """DiscoverPhase gets a heuristic-only ComplexityGate."""
-        from complexity_gate import ComplexityGate
+    def test_discover_shape_runners_wired_with_escalation_deps(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ADR-0107: the factory builds the discover/shape engines, binds their
+        escalation deps, and hands them to the planner as on-demand helpers."""
+        from discover_runner import DiscoverRunner
+        from shape_runner import ShapeRunner
 
         registry = self._build(config)
-        gate = registry.discover_phase._complexity_gate
-        assert gate is not None
-        assert isinstance(gate, ComplexityGate)
-        # Heuristic-only — no LLM callable. The gate falls back to
-        # LOAD_BEARING on uncertainty so this is safe.
-        assert gate.llm is None
+
+        assert isinstance(registry.discover_runner, DiscoverRunner)
+        assert isinstance(registry.shape_runner, ShapeRunner)
+        # bind_escalation_deps ran at wire-up: prs + dedup are set.
+        assert registry.discover_runner._prs is not None
+        assert registry.discover_runner._dedup is not None
+        assert registry.shape_runner._prs is not None
+        assert registry.shape_runner._dedup is not None
+        # The planner borrows the SAME engine instances for its decision gate.
+        assert registry.planner_phase._discover_runner is registry.discover_runner
+        assert registry.planner_phase._shape_runner is registry.shape_runner
 
     def test_plan_phase_adversarial_agents_attached(
         self, config: HydraFlowConfig
@@ -450,44 +459,6 @@ class TestAdversarialPipelineWiring:
             assert isinstance(voter, SubprocessAgentRunner)
         assert isinstance(plan_phase._spec_ac_agent, SubprocessAgentRunner)
         assert isinstance(plan_phase._spec_judge_agent, SubprocessAgentRunner)
-
-    def test_discover_phase_adversarial_agents_attached(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """DiscoverPhase surfacer + three-voter council both wired."""
-        from adversarial_agent_runner import SubprocessAgentRunner
-
-        registry = self._build(config)
-        discover_phase = registry.discover_phase
-
-        assert isinstance(discover_phase._surfacer_agent, SubprocessAgentRunner)
-        assert discover_phase._council_agents is not None
-        assert set(discover_phase._council_agents.keys()) == {
-            "problem_sharpener",
-            "existing_solution_hunter",
-            "cheapest_test_advocate",
-        }
-        for voter in discover_phase._council_agents.values():
-            assert isinstance(voter, SubprocessAgentRunner)
-
-    def test_shape_phase_adversarial_agents_attached(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """ShapePhase challenger + three-voter council both wired."""
-        from adversarial_agent_runner import SubprocessAgentRunner
-
-        registry = self._build(config)
-        shape_phase = registry.shape_phase
-
-        assert isinstance(shape_phase._challenger_agent, SubprocessAgentRunner)
-        assert shape_phase._shape_council_agents is not None
-        assert set(shape_phase._shape_council_agents.keys()) == {
-            "user_advocate",
-            "tech_lead",
-            "product_strategist",
-        }
-        for voter in shape_phase._shape_council_agents.values():
-            assert isinstance(voter, SubprocessAgentRunner)
 
 
 class TestAutoTightenGhClosures:

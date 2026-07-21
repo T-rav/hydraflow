@@ -19,7 +19,6 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **CRATE_ACTIVATED** ⚠️ | `src.crate_manager:CrateManager.activate_crate` | — |
 | **CRATE_COMPLETED** ⚠️ | `src.crate_manager:CrateManager.check_and_advance` | — |
 | **DIAGNOSTIC_UPDATE** ⚠️ | `src.diagnostic_loop:DiagnosticLoop._publish_update` | — |
-| **DISCOVER_UPDATE** ⚠️ | `src.discover_phase:DiscoverPhase._discover_single` | — |
 | **EPIC_PROGRESS** ⚠️ | `src.epic:EpicManager.refresh_cache` | — |
 | **EPIC_READY** ⚠️ | `src.epic:EpicManager._publish_ready_event`<br>`src.epic:EpicManager.refresh_cache` | — |
 | **EPIC_RELEASED** ⚠️ | `src.epic:EpicManager._execute_release` | — |
@@ -46,7 +45,6 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **REVIEW_UPDATE** ⚠️ | `src.merge_conflict_resolver:MergeConflictResolver._publish_review_status`<br>`src.phase_utils:publish_review_status`<br>`src.reviewer:ReviewRunner.fix_review_findings`<br>`src.reviewer:ReviewRunner.review` | — |
 | **SESSION_END** ⚠️ | `src.orchestrator:HydraFlowOrchestrator._end_session` | — |
 | **SESSION_START** ⚠️ | `src.orchestrator:HydraFlowOrchestrator._start_session` | — |
-| **SHAPE_UPDATE** ⚠️ | `src.shape_phase:ShapePhase._process_finalization`<br>`src.shape_phase:ShapePhase._run_council_vote`<br>`src.shape_phase:ShapePhase._shape_with_runner` | — |
 | **SHIPPED_WITH_KNOWN_GAP** ⚠️ | `src.post_merge_handler:PostMergeHandler._maybe_emit_shipped_with_known_gap` | — |
 | **SYSTEM_ALERT** ⚠️ | `src.cost_budget_alerts:check_daily_budget`<br>`src.cost_budget_alerts:check_issue_cost`<br>`src.dependabot_merge_loop:DependabotMergeLoop._do_work`<br>`src.epic:EpicManager.check_stale_epics`<br>`src.health_monitor_loop:HealthMonitorLoop._check_persistent_worker_errors`<br>`src.health_monitor_loop:HealthMonitorLoop._check_stale_code`<br>`src.health_monitor_loop:HealthMonitorLoop._check_worker_staleness`<br>`src.merge_state_watcher_loop:MergeStateWatcherLoop._alert_on_capture_gap`<br>`src.orchestrator:HydraFlowOrchestrator._deferred_pipeline_start`<br>`src.orchestrator:HydraFlowOrchestrator._handle_auth_error`<br>`src.orchestrator:HydraFlowOrchestrator._pause_for_credits`<br>`src.orchestrator:HydraFlowOrchestrator._polling_loop`<br>`src.orchestrator:HydraFlowOrchestrator._resume_loops_after_credit_pause`<br>`src.post_merge_handler:PostMergeHandler._safe_hook`<br>`src.post_merge_handler:PostMergeHandler.handle_approved`<br>`src.prompt_gate_alerts:alert_prompt_gate_block`<br>`src.runs_gc_loop:RunsGCLoop._tend_audit_chains`<br>`src.server:_check_and_publish_boot_gap`<br>`src.staging_promotion_loop:StagingPromotionLoop._compile_evidence_pack`<br>`src.staging_promotion_loop:StagingPromotionLoop._handle_open_promotion`<br>`src.triage:TriageRunner._emit_injection_alert`<br>`src.unpushed_branch_alert:check_and_alert_unpushed_branches` | — |
 | **SYSTEM_REROUTE** ⚠️ | `src.review_phase._phase:ReviewPhase._review_single_adr`<br>`src.review_phase._phase:ReviewPhase._run_post_verify_advisor_for_adr`<br>`src.triage_phase:TriagePhase._triage_single_traced` | — |

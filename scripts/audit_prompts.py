@@ -205,13 +205,6 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "src/conflict_prompt.py:71",
     ),
     AuditTarget(
-        "expert_council_vote",
-        "expert_council.ExpertCouncil._build_vote_prompt",
-        "tests/fixtures/prompts/expert_council_vote.json",
-        "Adjacent",
-        "src/expert_council.py:278",
-    ),
-    AuditTarget(
         "diagnostic_runner",
         "diagnostic_runner._build_diagnosis_prompt",
         "tests/fixtures/prompts/diagnostic_runner.json",

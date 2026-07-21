@@ -1,16 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { PIPELINE_STAGES, PRODUCT_TRACK_KEYS } from '../../constants'
+import { PIPELINE_STAGES } from '../../constants'
 import {
   splitPipelineTracks,
-  isProductStage,
   isTerminalStage,
   TERMINAL_TRACK_KEYS,
 } from '../pipelineTracks'
 
 // This is the anti-drift lock (#9564): Header's compact pipeline row and
-// StreamView's PipelineFlow both derive their triage / product-fork / linear /
-// terminal-fork layout from splitPipelineTracks. Asserting the split against the
-// REAL constants means the two renderers can no longer diverge silently.
+// StreamView's PipelineFlow both derive their triage / linear / terminal-fork
+// layout from splitPipelineTracks. Asserting the split against the REAL
+// constants means the two renderers can no longer diverge silently.
 
 describe('TERMINAL_TRACK_KEYS', () => {
   it('is exactly the no-role, no-configKey end-states (hitl, merged)', () => {
@@ -23,19 +22,7 @@ describe('TERMINAL_TRACK_KEYS', () => {
   })
 })
 
-describe('isProductStage / isTerminalStage', () => {
-  it('isProductStage matches PRODUCT_TRACK_KEYS (discover, shape)', () => {
-    expect(isProductStage('discover')).toBe(true)
-    expect(isProductStage('shape')).toBe(true)
-    expect([...PRODUCT_TRACK_KEYS].sort()).toEqual(['discover', 'shape'])
-  })
-
-  it('isProductStage is false for main/terminal stages', () => {
-    expect(isProductStage('triage')).toBe(false)
-    expect(isProductStage('plan')).toBe(false)
-    expect(isProductStage('merged')).toBe(false)
-  })
-
+describe('isTerminalStage', () => {
   it('isTerminalStage matches TERMINAL_TRACK_KEYS (hitl, merged)', () => {
     expect(isTerminalStage('hitl')).toBe(true)
     expect(isTerminalStage('merged')).toBe(true)
@@ -43,8 +30,8 @@ describe('isProductStage / isTerminalStage', () => {
 
   it('isTerminalStage is false for worker-bearing stages', () => {
     expect(isTerminalStage('triage')).toBe(false)
+    expect(isTerminalStage('plan')).toBe(false)
     expect(isTerminalStage('review')).toBe(false)
-    expect(isTerminalStage('discover')).toBe(false)
   })
 })
 
@@ -56,10 +43,6 @@ describe('splitPipelineTracks with the real PIPELINE_STAGES', () => {
     expect(tracks.triage.key).toBe('triage')
   })
 
-  it('routes discover→shape into the product fork, in order', () => {
-    expect(tracks.product.map(s => s.key)).toEqual(['discover', 'shape'])
-  })
-
   it('routes plan→implement→review into the linear post-triage track', () => {
     expect(tracks.postTriage.map(s => s.key)).toEqual(['plan', 'implement', 'review'])
   })
@@ -68,16 +51,15 @@ describe('splitPipelineTracks with the real PIPELINE_STAGES', () => {
     expect(tracks.terminal.map(s => s.key)).toEqual(['hitl', 'merged'])
   })
 
-  it('main = every non-product stage, in pipeline order', () => {
+  it('main = every stage, in pipeline order', () => {
     expect(tracks.main.map(s => s.key)).toEqual([
       'triage', 'plan', 'implement', 'review', 'hitl', 'merged',
     ])
   })
 
-  it('partitions every stage into exactly one of product / postTriage / terminal / triage', () => {
+  it('partitions every stage into exactly one of postTriage / terminal / triage', () => {
     const covered = [
       tracks.triage.key,
-      ...tracks.product.map(s => s.key),
       ...tracks.postTriage.map(s => s.key),
       ...tracks.terminal.map(s => s.key),
     ]
@@ -93,7 +75,6 @@ describe('splitPipelineTracks with a custom getKey (StreamView group shape)', ()
 
   it('splits the {stage,issues} shape identically to the {key} shape', () => {
     expect(tracks.triage.stage.key).toBe('triage')
-    expect(tracks.product.map(g => g.stage.key)).toEqual(['discover', 'shape'])
     expect(tracks.postTriage.map(g => g.stage.key)).toEqual(['plan', 'implement', 'review'])
     expect(tracks.terminal.map(g => g.stage.key)).toEqual(['hitl', 'merged'])
   })
@@ -103,7 +84,6 @@ describe('splitPipelineTracks edge cases', () => {
   it('returns empty tracks and null triage for an empty array', () => {
     const tracks = splitPipelineTracks([])
     expect(tracks.triage).toBeNull()
-    expect(tracks.product).toEqual([])
     expect(tracks.postTriage).toEqual([])
     expect(tracks.terminal).toEqual([])
     expect(tracks.main).toEqual([])

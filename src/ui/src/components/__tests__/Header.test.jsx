@@ -261,8 +261,6 @@ describe('Header component', () => {
 
     const expectedCounts = {
       triage: 7,
-      discover: 0,
-      shape: 0,
       plan: 5,
       implement: 4,
       review: 3,
@@ -287,15 +285,14 @@ describe('Header component', () => {
       })
 
       const arrows = screen.getAllByText('\u2192')
-      // Linear arrows = 3 main (plan, implement, review) + 1 product-internal.
-      // Terminal stages (hitl, merged: role/configKey null) fork off review
-      // with diagonal fork arrows instead of chaining linearly, so they no
-      // longer contribute a linear arrow to the main track (#9224).
+      // Linear \u2192 arrows = one before each post-triage stage (plan, implement,
+      // review). triage is the junction (no leading arrow), and terminal stages
+      // (hitl, merged: role/configKey null) fork off review with diagonal fork
+      // arrows instead of chaining linearly, so they no longer contribute a
+      // linear arrow to the main track (#9224).
       const terminalStages = PIPELINE_STAGES.filter(s => !s.role && !s.configKey)
-      const mainTrackArrows =
-        PIPELINE_STAGES.filter(s => s.track !== 'product').length - 1 - terminalStages.length
-      const productTrackArrows = Math.max(0, PIPELINE_STAGES.filter(s => s.track === 'product').length - 1)
-      expect(arrows.length).toBe(mainTrackArrows + productTrackArrows)
+      const mainTrackArrows = PIPELINE_STAGES.length - 1 - terminalStages.length
+      expect(arrows.length).toBe(mainTrackArrows)
     })
 
     it('shows abbreviated stage labels in each session pill', () => {
@@ -312,18 +309,6 @@ describe('Header component', () => {
         const pill = screen.getByTestId(`session-stage-${stage.key}`)
         expect(pill.style.borderColor).toBe(stage.color)
       })
-    })
-
-    it('renders the shared product fork with a "direct →" bypass arm', () => {
-      // Header renders the discover→shape product fork via the shared ProductFork
-      // component; the "direct →" bottom arm is StreamView's canonical treatment
-      // (#9564), so the compact row and the flow diagram cannot drift.
-      render(<Header {...defaultProps} />)
-      const pipelineRow = screen.getByTestId('session-pipeline')
-      expect(pipelineRow.textContent).toContain('direct →')
-      // Both product stages sit inside the fork's top arm.
-      expect(screen.getByTestId('session-stage-discover')).toBeInTheDocument()
-      expect(screen.getByTestId('session-stage-shape')).toBeInTheDocument()
     })
 
     it('renders the shared terminal fork with hitl and merged as parallel arms', () => {

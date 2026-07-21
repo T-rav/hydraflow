@@ -242,7 +242,7 @@ class IssueCache:
         instead of regex-scraping triage comments.
 
         ``routing_outcome`` captures where the triager actually routed
-        the issue: ``"plan"``, ``"discover"``, ``"parked"``,
+        the issue: ``"plan"``, ``"parked"``,
         ``"sentry_noise_closed"``, ``"duplicate_closed"``, etc. The
         READY-stage precondition gate reads this field and only
         accepts classifications with ``routing_outcome == "plan"`` —
@@ -251,12 +251,12 @@ class IssueCache:
         pass ``"unknown"``.
 
         ``clarity_score`` / ``needs_discovery`` (ADR-0107) mirror
-        ``TriageResult``'s fields. When ``collapse_discover_shape`` is on,
-        Triage no longer treats them as a routing verdict — instead the
-        planner's decision gate (``plan_phase.py:_should_discover_helper``)
-        reads them back via :meth:`latest_classification` as HINTS for
-        whether an on-demand discover/shape helper is warranted before
-        planning. Defaults (``10``, ``False``) describe a well-specified
+        ``TriageResult``'s fields. Triage no longer treats them as a
+        routing verdict — instead the planner's decision gate
+        (``plan_phase.py:_should_discover_helper``) reads them back via
+        :meth:`latest_classification` as HINTS for whether an on-demand
+        discover/shape helper is warranted before planning. Defaults
+        (``10``, ``False``) describe a well-specified
         issue so callers that don't pass them (or issues with no
         classification record at all) read as "no helper needed" — the
         gate's conservative default.

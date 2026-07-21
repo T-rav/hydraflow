@@ -3,7 +3,7 @@ import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { PIPELINE_STAGES, SENSITIVE_SELECTORS } from '../constants'
 import { splitPipelineTracks } from '../utils/pipelineTracks'
-import { ProductFork, TerminalFork } from './PipelineFork'
+import { TerminalFork } from './PipelineFork'
 import { BugReportPanel } from './BugReportPanel'
 import { ReportIssueModal } from './ReportIssueModal'
 import html2canvasLib from 'html2canvas'
@@ -245,7 +245,7 @@ export function Header({ connected, orchestratorStatus }) {
         <div style={styles.sessionBox} data-testid="session-box" aria-label="Session pipeline statistics">
           <div style={styles.pipelineRow} data-testid="session-pipeline">
             {(() => {
-              const { triage, product, postTriage, terminal } = splitPipelineTracks(sessionStages)
+              const { triage, postTriage, terminal } = splitPipelineTracks(sessionStages)
               const renderPill = (stage) => (
                 <div
                   key={stage.key}
@@ -262,12 +262,6 @@ export function Header({ connected, orchestratorStatus }) {
               return (
                 <>
                   {triage && renderPill(triage)}
-                  <ProductFork
-                    items={product}
-                    renderItem={renderPill}
-                    separator={arrow}
-                    styles={forkStyles}
-                  />
                   {postTriage.map((stage) => (
                     <React.Fragment key={stage.key}>
                       {arrow}
@@ -434,20 +428,10 @@ const styles = {
     alignItems: 'center',
     gap: 4,
   },
-  forkBottom: {
-    display: 'flex',
-    alignItems: 'center',
-  },
   forkArrow: {
     color: theme.cyan,
     fontSize: 10,
     fontWeight: 600,
-  },
-  forkDirect: {
-    fontSize: 9,
-    color: theme.textInactive,
-    fontStyle: 'italic',
-    letterSpacing: '0.3px',
   },
   controls: { display: 'flex', alignItems: 'center', gap: 10, marginLeft: 10, flexShrink: 0 },
   controlStartBtn: {
@@ -494,15 +478,13 @@ const styles = {
   },
 }
 
-// Canonical fork-slot → Header-style map fed to the shared ProductFork /
-// TerminalFork so the compact pipeline row shares StreamView's fork topology
-// while keeping its own compact styling (#9564).
+// Canonical fork-slot → Header-style map fed to the shared TerminalFork so the
+// compact pipeline row shares StreamView's fork topology while keeping its own
+// compact styling (#9564).
 const forkStyles = {
   fork: styles.pipelineFork,
   forkTop: styles.forkTop,
-  forkBottom: styles.forkBottom,
   forkArrow: styles.forkArrow,
-  forkDirect: styles.forkDirect,
 }
 
 // Pre-computed pipeline stage style maps (avoids object spread in render loops)
