@@ -2060,6 +2060,16 @@ class StateData(BaseModel):
     metrics_last_snapshot_hash: str = ""
     metrics_last_synced: str | None = None
     worker_intervals: dict[str, int] = Field(default_factory=dict)
+    watchdog_timeouts: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Per-loop work-cycle watchdog bound overrides (seconds), keyed by "
+            "worker name. Mirrors worker_intervals: an operator-set runtime "
+            "override of the per-cycle watchdog bound (#9455 / #9556) that "
+            "otherwise derives from loop_watchdog_default_seconds / "
+            "loop_watchdog_llm_seconds. Preserved across restart (#9503)."
+        ),
+    )
     disabled_workers: list[str] = Field(default_factory=list)
     default_disabled_workers_seeded: list[str] = Field(default_factory=list)
     cost_budget_killed_workers: list[str] = Field(
@@ -3441,6 +3451,7 @@ class BackgroundWorkerStatus(BaseModel):
     enabled: bool = True
     last_run: str | None = None
     interval_seconds: int | None = None
+    watchdog_timeout_seconds: int | None = None
     next_run: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)
     repo: str = ""

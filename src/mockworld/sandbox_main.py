@@ -573,6 +573,9 @@ async def main() -> None:
         update_status=lambda *_a, **_kw: None,
         is_enabled=_build_caretaker_enabled_cb(seed.loops_enabled),
         get_interval=lambda *_a, _iv=_loop_interval, **_kw: _iv,
+        # No sandbox scenario relies on watchdog firing early — real config
+        # defaults keep the per-cycle bound generous (#9503).
+        get_watchdog_timeout=lambda *_a, **_kw: config.loop_watchdog_default_seconds,
     )
 
     # FakeSubprocessRunner short-circuits every remaining shell-out to

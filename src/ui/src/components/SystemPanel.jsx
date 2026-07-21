@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, lazy, Suspense } from 'react'
 import { LoopFitnessPanel } from './LoopFitnessPanel'
 import { theme } from '../theme'
-import { BACKGROUND_WORKERS, WORKER_GROUPS, INTERVAL_PRESETS, WORKER_PRESETS, EDITABLE_INTERVAL_WORKERS, SYSTEM_WORKER_INTERVALS, UNSTICK_BATCH_OPTIONS, REPO_ALL } from '../constants'
+import { BACKGROUND_WORKERS, WORKER_GROUPS, INTERVAL_PRESETS, WORKER_PRESETS, EDITABLE_INTERVAL_WORKERS, SYSTEM_WORKER_INTERVALS, UNSTICK_BATCH_OPTIONS, REPO_ALL, WATCHDOG_TIMEOUT_PRESETS } from '../constants'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { Livestream } from './Livestream'
 import { PipelineControlPanel } from './PipelineControlPanel'
@@ -81,14 +81,21 @@ function formatTimestamp(ts) {
 // the operator how to act.
 const AGGREGATE_EDIT_TIP = 'Select a specific repo to edit worker settings'
 
-function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval, events, extraContent, isAggregate }) {
+function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval, onUpdateWatchdogTimeout, events, extraContent, isAggregate }) {
   const [showIntervalEditor, setShowIntervalEditor] = useState(false)
+  const [showWatchdogEditor, setShowWatchdogEditor] = useState(false)
   const [triggerLoading, setTriggerLoading] = useState(false)
   const isPipelinePoller = def.key === 'pipeline_poller'
   const isSystem = def.system === true
   const orchRunning = orchestratorStatus === 'running'
   const isEditable = EDITABLE_INTERVAL_WORKERS.has(def.key)
   const presets = WORKER_PRESETS[def.key] ?? INTERVAL_PRESETS
+  // Editability is backend-resolved, not a client-side allowlist: the System
+  // ▸ Workers endpoint only populates watchdog_timeout_seconds for workers
+  // backed by a real BaseBackgroundLoop (and excludes principles_audit,
+  // whose cycle bound bypasses the operator override — #9639/#9503).
+  const watchdogTimeout = state?.watchdog_timeout_seconds ?? null
+  const isWatchdogEditable = watchdogTimeout != null
 
   let dotColor, statusText, lastRun, details
 
@@ -261,6 +268,39 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
                 setShowIntervalEditor(false)
               }}
               data-testid={`preset-${preset.label}`}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {isWatchdogEditable && (
+        <div style={styles.scheduleRow} data-testid={`watchdog-${def.key}`}>
+          <span style={styles.scheduleText}>
+            Watchdog {formatInterval(watchdogTimeout)}
+          </span>
+          {onUpdateWatchdogTimeout && !isAggregate && (
+            <span
+              style={styles.editIntervalLink}
+              onClick={() => setShowWatchdogEditor(!showWatchdogEditor)}
+              data-testid={`edit-watchdog-${def.key}`}
+            >
+              {showWatchdogEditor ? 'close' : 'edit'}
+            </span>
+          )}
+        </div>
+      )}
+      {showWatchdogEditor && isWatchdogEditable && onUpdateWatchdogTimeout && (
+        <div style={styles.intervalEditor} data-testid={`watchdog-editor-${def.key}`}>
+          {WATCHDOG_TIMEOUT_PRESETS.map((preset) => (
+            <button
+              key={preset.seconds}
+              style={watchdogTimeout === preset.seconds ? styles.presetActive : styles.presetButton}
+              onClick={() => {
+                onUpdateWatchdogTimeout(def.key, preset.seconds)
+                setShowWatchdogEditor(false)
+              }}
+              data-testid={`watchdog-preset-${preset.label}`}
             >
               {preset.label}
             </button>
@@ -724,7 +764,7 @@ function StagingBranchSetupButton() {
 }
 
 
-function WorkerGroupSection({ group, backgroundWorkers, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval, events, isAggregate }) {
+function WorkerGroupSection({ group, backgroundWorkers, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval, onUpdateWatchdogTimeout, events, isAggregate }) {
   const [collapsed, setCollapsed] = useState(false)
   const workerCount = group.workers.length
   const activeCount = group.workers.filter(w => {
@@ -761,6 +801,7 @@ function WorkerGroupSection({ group, backgroundWorkers, pipelinePollerLastRun, p
                 onToggleBgWorker={onToggleBgWorker}
                 onTriggerBgWorker={onTriggerBgWorker}
                 onUpdateInterval={onUpdateInterval}
+                onUpdateWatchdogTimeout={onUpdateWatchdogTimeout}
                 events={events}
                 isAggregate={isAggregate}
                 extraContent={
@@ -778,7 +819,7 @@ function WorkerGroupSection({ group, backgroundWorkers, pipelinePollerLastRun, p
   )
 }
 
-export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval }) {
+export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval, onUpdateWatchdogTimeout }) {
   const { pipelinePollerLastRun, orchestratorStatus, events, pipelineIssues, selectedRepoSlug } = useHydraFlow()
   const [activeSubTab, setActiveSubTab] = useState('workers')
   const isAggregate = selectedRepoSlug === REPO_ALL
@@ -800,6 +841,7 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWo
       onToggleBgWorker={onToggleBgWorker}
       onTriggerBgWorker={onTriggerBgWorker}
       onUpdateInterval={onUpdateInterval}
+      onUpdateWatchdogTimeout={onUpdateWatchdogTimeout}
       events={events}
       isAggregate={isAggregate}
     />

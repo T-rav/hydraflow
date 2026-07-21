@@ -96,6 +96,7 @@ class TestInitialization:
             "verification_issues",
             "worker_heartbeats",
             "worker_intervals",
+            "watchdog_timeouts",
             "worker_result_meta",
             "escalation_contexts",
             "diagnostic_attempts",

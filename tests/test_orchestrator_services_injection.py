@@ -28,6 +28,7 @@ def _make_callbacks() -> WorkerRegistryCallbacks:
         update_status=lambda *args, **kwargs: None,
         is_enabled=lambda name: True,
         get_interval=lambda name: 60,
+        get_watchdog_timeout=lambda name: 7200,
     )
 
 

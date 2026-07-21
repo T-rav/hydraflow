@@ -537,6 +537,24 @@ export function reducer(state, action) {
       }
     }
 
+    case 'UPDATE_BG_WORKER_WATCHDOG_TIMEOUT': {
+      // Mirrors UPDATE_BG_WORKER_INTERVAL (#9503).
+      const { name: watchdogName, watchdog_timeout_seconds } = action.data
+      const existingBw = state.backgroundWorkers.find(w => w.name === watchdogName)
+      if (existingBw) {
+        return {
+          ...state,
+          backgroundWorkers: state.backgroundWorkers.map(w =>
+            w.name === watchdogName ? { ...w, watchdog_timeout_seconds } : w
+          ),
+        }
+      }
+      return {
+        ...state,
+        backgroundWorkers: [...state.backgroundWorkers, { name: watchdogName, status: 'ok', enabled: true, last_run: null, watchdog_timeout_seconds, details: {} }],
+      }
+    }
+
     case 'METRICS':
       return { ...state, metrics: action.data }
 
@@ -1449,6 +1467,24 @@ export function HydraFlowProvider({ children }) {
     } catch { /* ignore — local state already updated */ }
   }, [applyRepoParam, state.selectedRepoSlug])
 
+  // Mirrors updateBgWorkerInterval for the per-loop watchdog-timeout override
+  // (#9503) — same single-repo constraint (the backend rejects repo=__all__).
+  const updateBgWorkerWatchdogTimeout = useCallback(async (name, timeoutSeconds) => {
+    if (state.selectedRepoSlug === REPO_ALL) return
+    // Optimistic local update
+    dispatch({
+      type: 'UPDATE_BG_WORKER_WATCHDOG_TIMEOUT',
+      data: { name, watchdog_timeout_seconds: timeoutSeconds },
+    })
+    try {
+      await fetch(applyRepoParam('/api/control/bg-worker/watchdog-timeout'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, watchdog_timeout_seconds: timeoutSeconds }),
+      })
+    } catch { /* ignore — local state already updated */ }
+  }, [applyRepoParam, state.selectedRepoSlug])
+
   const requestChanges = useCallback(async (issueNumber, feedback, stage, repo) => {
     try {
       // Escalate against the ROW's repo (not the aggregate selection) so the
@@ -1849,6 +1885,7 @@ export function HydraFlowProvider({ children }) {
     toggleBgWorker,
     triggerBgWorker,
     updateBgWorkerInterval,
+    updateBgWorkerWatchdogTimeout,
     dismissSystemAlert: useCallback(() => dispatch({ type: 'CLEAR_SYSTEM_ALERT' }), [dispatch]),
     refreshCreditStatus,
     clearCreditPause,

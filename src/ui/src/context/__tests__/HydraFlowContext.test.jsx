@@ -1562,6 +1562,35 @@ describe('UPDATE_BG_WORKER_INTERVAL action', () => {
   })
 })
 
+describe('UPDATE_BG_WORKER_WATCHDOG_TIMEOUT action', () => {
+  // Mirrors UPDATE_BG_WORKER_INTERVAL above (#9503).
+  it('updates watchdog_timeout_seconds for existing worker', () => {
+    const state = {
+      ...initialState,
+      backgroundWorkers: [
+        { name: 'repo_wiki', status: 'ok', enabled: true, last_run: null, watchdog_timeout_seconds: 7200, details: {} },
+      ],
+    }
+    const result = reducer(state, {
+      type: 'UPDATE_BG_WORKER_WATCHDOG_TIMEOUT',
+      data: { name: 'repo_wiki', watchdog_timeout_seconds: 14400 },
+    })
+    const worker = result.backgroundWorkers.find(w => w.name === 'repo_wiki')
+    expect(worker.watchdog_timeout_seconds).toBe(14400)
+  })
+
+  it('creates stub entry for unknown worker', () => {
+    const state = { ...initialState, backgroundWorkers: [] }
+    const result = reducer(state, {
+      type: 'UPDATE_BG_WORKER_WATCHDOG_TIMEOUT',
+      data: { name: 'repo_wiki', watchdog_timeout_seconds: 3600 },
+    })
+    expect(result.backgroundWorkers).toHaveLength(1)
+    expect(result.backgroundWorkers[0].name).toBe('repo_wiki')
+    expect(result.backgroundWorkers[0].watchdog_timeout_seconds).toBe(3600)
+  })
+})
+
 describe('session_start reducer', () => {
   it('adds new session and sets currentSessionId', () => {
     const result = reducer(initialState, {
