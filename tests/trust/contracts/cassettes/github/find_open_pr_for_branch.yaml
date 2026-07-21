@@ -1,0 +1,26 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# find_open_pr_for_branch resolves the open PR for a branch (`gh pr
+# list --head <branch> --state open --json ...`), returning a PRInfo.
+# The fake yields PRInfoFactory's default url; a merged/closed PR on
+# the branch is skipped, and absence returns a number=0 sentinel
+# (PRInfo, not None) -- the dispatcher seeds a matching open PR.
+adapter: github
+interaction: find_open_pr_for_branch
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: find_open_pr_for_branch
+  args:
+  - agent/issue-1
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '{"number": 777, "issue_number": 1, "branch": "agent/issue-1", "url": "https://github.com/test-org/test-repo/pull/101",
+    "draft": false, "labels": []}
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

@@ -1,4 +1,4 @@
-"""Regression pin for issue #9768 (slices 1, 2 & 3) — cassette-cluster pins.
+"""Regression pin for issue #9768 (slices 1–4) — cassette-cluster pins.
 
 Issue #9768 is the canonical ``fake_coverage_auditor`` rollup for the
 FakeGitHub adapter surface. The first carved slice (subsuming #9436) closes
@@ -12,7 +12,13 @@ methods covering PR comment/review submission (``post_pr_comment`` /
 ``submit_review``), review/check/approval reads (``get_pr_approvers`` /
 ``get_pr_checks`` / ``get_pr_reviews`` / ``get_pr_mergeable``), PR label
 mutation (``add_pr_labels`` / ``remove_pr_label``), and PR lifecycle/title
-(``close_pr`` / ``update_pr_title`` / ``expected_pr_title``). Each pin uses
+(``close_pr`` / ``update_pr_title`` / ``expected_pr_title``). Slice 4 closes
+the **PR/label read & query cluster** — 11 methods covering open-PR lookup
+(``find_open_pr_for_branch``), PR listings (``list_prs_by_label`` /
+``list_open_prs`` / ``list_all_open_prs`` / ``list_conflicting_prs``), HITL
+listing (``list_hitl_items``), label-count aggregation (``get_label_counts``),
+and PR content reads (``get_pr_diff`` / ``get_pr_diff_names`` /
+``get_pr_head_sha`` / ``get_pr_recent_commit_diffs``). Each pin uses
 the auditor's *own* catalog functions so it fails for exactly the reason the
 auditor would re-file:
 
@@ -168,6 +174,48 @@ def test_issue_9768_pr_review_cluster_is_cassetted() -> None:
     uncovered = sorted(_PR_REVIEW_CLUSTER - cassetted)
     assert uncovered == [], (
         "PR-review-cluster methods lost cassette coverage under "
+        f"{cassette_dir.relative_to(_REPO_ROOT)}/ (input.command is the "
+        f"coverage key, not the filename): {uncovered}"
+    )
+
+
+# The #9768 slice-4 cluster: open-PR lookup, PR listings (label-filtered,
+# unfiltered, conflicting), HITL listing, label-count aggregation, and PR
+# content reads (diff / diff-names / head-sha / recent-commit-diffs).
+_PR_READ_QUERY_CLUSTER = frozenset(
+    {
+        "find_open_pr_for_branch",
+        "get_label_counts",
+        "get_pr_diff",
+        "get_pr_diff_names",
+        "get_pr_head_sha",
+        "get_pr_recent_commit_diffs",
+        "list_all_open_prs",
+        "list_conflicting_prs",
+        "list_hitl_items",
+        "list_open_prs",
+        "list_prs_by_label",
+    }
+)
+
+
+def test_issue_9768_pr_read_query_cluster_is_cassetted() -> None:
+    """Every PR/label read-&-query-cluster method stays covered by a cassette."""
+    catalog = catalog_fake_methods(_FAKE_DIR, repo_root=_REPO_ROOT)
+    assert "FakeGitHub" in catalog, "FakeGitHub not found in fakes catalog"
+
+    surface = set(catalog["FakeGitHub"]["adapter-surface"])
+    misclassified = sorted(_PR_READ_QUERY_CLUSTER - surface)
+    assert misclassified == [], (
+        "PR-read-query-cluster methods no longer classified adapter-surface "
+        f"(auditor accounting drift?): {misclassified}"
+    )
+
+    cassette_dir = _CASSETTE_ROOT / _FAKE_TO_CASSETTE_DIR["FakeGitHub"]
+    cassetted = catalog_cassette_methods(cassette_dir)
+    uncovered = sorted(_PR_READ_QUERY_CLUSTER - cassetted)
+    assert uncovered == [], (
+        "PR-read-query-cluster methods lost cassette coverage under "
         f"{cassette_dir.relative_to(_REPO_ROOT)}/ (input.command is the "
         f"coverage key, not the filename): {uncovered}"
     )

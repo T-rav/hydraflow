@@ -1,0 +1,25 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_conflicting_prs returns PRs GitHub flagged mergeable=CONFLICTING
+# (`gh pr list --json mergeable ...`) as ConflictingPR dataclasses
+# (number/branch/labels) for merge_state_watcher. A mergeable PR is
+# excluded. NOTE: FakePR exposes no head_ref attribute, so the fake's
+# ConflictingPR.branch is always "" (getattr fallback) -- a fidelity
+# gap vs the real PRManager, which populates branch from headRefName.
+adapter: github
+interaction: list_conflicting_prs
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_conflicting_prs
+  args: []
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[{"number": 782, "branch": "", "labels": []}]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

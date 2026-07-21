@@ -145,7 +145,14 @@ BUILTIN_SKILLS: list[AgentSkill] = [
         name="test-adequacy",
         purpose="Assess whether changed production code has adequate test coverage, edge cases, and regression safety",
         config_key="max_test_adequacy_attempts",
-        blocking=False,
+        # Blocking (#9227): the deterministic coverage-delta check + LLM verdict
+        # already run here pre-review, but as advisory warnings the implementer
+        # never had to act on — so `missing_tests` kept recurring as a review
+        # finding. Gating it (like diff-sanity/scope-check) shifts the catch
+        # left: an uncovered changed line RETRIES the implementer via the
+        # existing prior_failure seam before review ever classifies it. Disable
+        # via max_test_adequacy_attempts=0 if it ever over-gates.
+        blocking=True,
         prompt_builder=build_test_adequacy_prompt,
         result_parser=parse_test_adequacy_result,
         coverage_check=True,

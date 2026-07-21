@@ -1,0 +1,27 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_hitl_items returns HITLItem rows for OPEN issues carrying any
+# HITL label (GET /api/hitl). Closed issues are excluded. The fake
+# hard-codes cause="ci_failure" and links the issue's PR when present.
+# status serializes to the HITLItemStatus enum value ("pending").
+adapter: github
+interaction: list_hitl_items
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_hitl_items
+  args:
+  - hydraflow-hitl
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[{"issue": 305, "title": "Escalated issue", "issue_url": "", "pr": 0, "pr_url":
+    "", "branch": "", "cause": "ci_failure", "status": "pending", "is_memory_suggestion":
+    false, "llm_summary": "", "llm_summary_updated_at": null, "visual_evidence": null,
+    "repo": ""}]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true
