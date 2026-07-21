@@ -175,42 +175,7 @@ def test_review_forks_to_two_terminal_endstates_not_linear_chain() -> None:
     )
 
 
-def test_triage_fork_has_explicit_direct_arrow_to_plan() -> None:
-    """The product-track fork's direct arm must render an explicit arrow, not bare text.
-
-    Today the bottom arm of the fork is only ``<span ...forkDirect>direct</span>``
-    -- a text label with no arrow. The fix adds an explicit arrow representing
-    the TRIAGE -> PLAN bypass, parallel to the ``^ discover -> shape v`` arc.
-    """
-    fork_src = _read(_PIPELINE_FORK_JSX)
-
-    direct_arm = _extract_balanced_span(fork_src, "styles.forkBottom")
-    assert direct_arm is not None, (
-        "Could not locate the product-track fork's direct arm "
-        "(styles.forkBottom) in the shared ProductFork (PipelineFork.jsx)."
-    )
-
-    # The direct arm renders ``{directLabel}``; the explicit arrow lives in the
-    # canonical default (``directLabel = 'direct →'``). Accept an inline glyph,
-    # an arrow element, or the arrow carried by the directLabel default.
-    direct_label_has_arrow = bool(
-        re.search(
-            rf"directLabel\s*=\s*['\"][^'\"]*[{re.escape(_ARROW_GLYPHS)}][^'\"]*['\"]",
-            fork_src,
-        )
-    )
-    has_arrow = (
-        any(glyph in direct_arm for glyph in _ARROW_GLYPHS)
-        or "{arrow}" in direct_arm
-        or "forkArrow" in direct_arm
-        or "pipelineArrow" in direct_arm
-        or ("directLabel" in direct_arm and direct_label_has_arrow)
-    )
-
-    assert has_arrow, (
-        "The TRIAGE -> PLAN direct path must render an explicit arrow, not a "
-        "bare 'direct' label. Expected an arrow glyph/element in the shared "
-        "ProductFork's direct arm, or the arrow carried by the directLabel "
-        f"default. Direct-arm content: {direct_arm.strip()!r}; "
-        f"directLabel-has-arrow={direct_label_has_arrow} -- issue #9224 bug 2."
-    )
+# NOTE: the third regression (``test_triage_fork_has_explicit_direct_arrow_to_plan``)
+# was removed by ADR-0107 (#9773): the product-track fork was deleted from the
+# dashboard, so there is no longer a TRIAGE→PLAN fork arm — Triage flows directly
+# to Plan as a single linear arrow. The terminal-fork regressions above still apply.

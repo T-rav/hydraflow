@@ -83,8 +83,6 @@ def test_spec_state_machine_cites_a_driver_state_layer_that_still_exists() -> No
     states = set(get_args(DriverState))
     expected = {
         "TRIAGE",
-        "DISCOVER",
-        "SHAPE",
         "PLAN",
         "READY",
         "REVIEW",

@@ -117,7 +117,6 @@ entries:
   src/diagnostic_loop.py::noqa:UP007: 1
   src/diagram_loop.py::noqa:PLC0415: 6
   "src/discover_expander.py::noqa:BLE001\u2014logandfallthrough": 1
-  src/discover_phase.py::type-ignore[arg-type]: 1
   src/discover_runner.py::type-ignore[attr-defined]: 1
   src/discover_runner.py::type-ignore[override]: 1
   src/disturbance_dampener_loop.py::noqa:BLE001: 1
@@ -136,10 +135,6 @@ entries:
   src/exception_classify.py::noqa:PLC0415: 3
   src/execution.py::noqa:A002: 2
   src/execution.py::noqa:PLW0603: 1
-  src/expert_council.py::noqa:ANN001: 1
-  src/expert_council.py::noqa:PLC0415: 1
-  src/expert_council.py::type-ignore[attr-defined]: 1
-  src/expert_council.py::type-ignore[override]: 1
   "src/fake_coverage_auditor_loop.py::noqa:BLE001\u2014auditmustnotcrashtheloop": 1
   "src/fake_coverage_auditor_loop.py::noqa:BLE001\u2014issuefilingfailure\u2260loopfailure": 1
   src/fake_coverage_auditor_loop.py::noqa:PLC0415: 2
@@ -282,19 +277,14 @@ entries:
   src/server.py::noqa:PLC0415: 18
   src/server.py::type-ignore[arg-type]: 2
   src/server.py::type-ignore[no-untyped-def]: 1
-  src/service_registry.py::noqa:F841: 34
-  src/service_registry.py::noqa:PLC0415: 14
-  src/service_registry.py::noqa:TCH001: 14
+  src/service_registry.py::noqa:F841: 32
+  src/service_registry.py::noqa:PLC0415: 12
+  src/service_registry.py::noqa:TCH001: 12
   "src/service_registry.py::noqa:TCH001\u2014dataclassannotation": 1
   "src/service_registry.py::noqa:TCH001\u2014usedindataclassfield": 2
   src/service_registry.py::type-ignore[arg-type]: 2
   src/service_registry.py::type-ignore[assignment]: 1
   src/service_registry.py::type-ignore[attr-defined]: 4
-  src/shape_challenger.py::noqa:BLE001: 1
-  src/shape_phase.py::noqa:BLE001: 2
-  src/shape_phase.py::noqa:PLC0415: 4
-  src/shape_phase.py::noqa:TCH001: 5
-  src/shape_phase.py::type-ignore[arg-type]: 1
   src/shape_runner.py::type-ignore[override]: 1
   src/skill_prompt_eval_loop.py::noqa:BLE001: 1
   src/skill_prompt_eval_loop.py::noqa:PLC0415: 1

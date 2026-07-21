@@ -996,9 +996,9 @@ def build_services(
         config.data_root / "memory" / "hitl_escalations_dedup.json",
     )
     discover_runner = DiscoverRunner(config, event_bus)
-    discover_runner.bind_escalation_deps(prs, hitl_escalation_dedup)  # type: ignore[arg-type]
+    discover_runner.bind_escalation_deps(prs, hitl_escalation_dedup)
     shape_runner = ShapeRunner(config, event_bus)
-    shape_runner.bind_escalation_deps(prs, hitl_escalation_dedup)  # type: ignore[arg-type]
+    shape_runner.bind_escalation_deps(prs, hitl_escalation_dedup)
 
     planner_phase = PlanPhase(
         config,
