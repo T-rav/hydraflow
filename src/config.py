@@ -227,6 +227,12 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_EROSION_METRICS_MAX_ISSUES_PER_TICK",
         3,
     ),
+    ("adr_drift_resolver_interval", "HYDRAFLOW_ADR_DRIFT_RESOLVER_INTERVAL", 3600),
+    (
+        "adr_drift_resolver_max_triage_per_tick",
+        "HYDRAFLOW_ADR_DRIFT_RESOLVER_MAX_TRIAGE_PER_TICK",
+        5,
+    ),
     ("adr_review_interval", "HYDRAFLOW_ADR_REVIEW_INTERVAL", 86400),
     ("adr_review_approval_threshold", "HYDRAFLOW_ADR_REVIEW_APPROVAL_THRESHOLD", 2),
     ("adr_review_max_rounds", "HYDRAFLOW_ADR_REVIEW_MAX_ROUNDS", 3),
@@ -778,6 +784,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     (
+        "adr_drift_resolver_loop_enabled",
+        "HYDRAFLOW_ADR_DRIFT_RESOLVER_LOOP_ENABLED",
+        True,
+    ),
+    (
         "human_branch_shepherd_enabled",
         "HYDRAFLOW_HUMAN_BRANCH_SHEPHERD_ENABLED",
         True,
@@ -901,6 +912,11 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
     ("HYDRAFLOW_ADR_REVIEW", "adr_review_tool", "adr_review_model"),
     ("HYDRAFLOW_REPORT_ISSUE", "report_issue_tool", "report_issue_model"),
     ("HYDRAFLOW_TERM_PROPOSER", "term_proposer_tool", "term_proposer_model"),
+    (
+        "HYDRAFLOW_ADR_DRIFT_RESOLVER",
+        "adr_drift_resolver_tool",
+        "adr_drift_resolver_model",
+    ),
 ]
 
 
@@ -1678,6 +1694,28 @@ class HydraFlowConfig(BaseModel):
             "(#10107). Overflow candidates beyond the cap for that tick's "
             "commit range are not carried over — a rate limit on filing "
             "volume, not a durable backlog."
+        ),
+    )
+    adr_drift_resolver_interval: int = Field(
+        default=3600,
+        ge=900,
+        le=86400,
+        description=(
+            "AdrDriftResolverLoop cycle interval in seconds (#9976: "
+            "triage-before-escalate for adr_touchpoint_auditor's ADR-drift "
+            "rollups; default 1h)"
+        ),
+    )
+    adr_drift_resolver_max_triage_per_tick: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description=(
+            "Max open ADR-drift rollups AdrDriftResolverLoop triages "
+            "(spends an LLM call on) in one tick (#9976). Overflow "
+            "candidates are simply retried next tick — no carryover "
+            "bookkeeping needed since the candidate set is re-derived from "
+            "state each tick."
         ),
     )
 
@@ -2740,6 +2778,29 @@ class HydraFlowConfig(BaseModel):
     sentry_model: str = Field(
         default="sonnet",
         description="Model for sentry_loop ingestion worker (issue triage + filing from Sentry events) — sonnet is sufficient; the task is stack-trace parsing + issue filing, not deep reasoning. Opus was 4-5× the cost for no measurable quality win.",
+    )
+    adr_drift_resolver_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+        default="claude",
+        description="CLI backend for AdrDriftResolverLoop's TRIAGE call (#9976).",
+    )
+    adr_drift_resolver_model: str = Field(
+        default="sonnet",
+        description=(
+            "Model for AdrDriftResolverLoop's TRIAGE call (#9976) — "
+            "classifying one ADR-drift rollup's cited diff against the "
+            "ADR's Decision/Context text. Sonnet is sufficient; the task is "
+            "structured classification, not deep reasoning."
+        ),
+    )
+    adr_drift_resolver_timeout: int = Field(
+        default=180,
+        ge=30,
+        le=1800,
+        description="Per-call timeout (seconds) for AdrDriftResolverLoop's TRIAGE call (#9976).",
+    )
+    adr_drift_resolver_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
+        default="claude",
+        description="Backend for AdrDriftResolverLoop's TRIAGE call (#9976).",
     )
     report_issue_interval: int = Field(
         default=30,
@@ -4406,6 +4467,15 @@ class HydraFlowConfig(BaseModel):
             "a real repo-specific baseline."
         ),
     )
+    adr_drift_resolver_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for AdrDriftResolverLoop (#9976: "
+            "triage-before-escalate so ADR-drift rollups self-resolve). "
+            "Defense-in-depth alongside the ADR-0049 UI kill-switch — the "
+            "in-body enabled_cb gate is checked first."
+        ),
+    )
     stale_issue_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for StaleIssueLoop.",
@@ -4934,6 +5004,11 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
         ("sentry", config.sentry_tool, config.sentry_model),
         ("adr_review", config.adr_review_tool, config.adr_review_model),
         ("term_proposer", config.term_proposer_tool, config.term_proposer_model),
+        (
+            "adr_drift_resolver",
+            config.adr_drift_resolver_tool,
+            config.adr_drift_resolver_model,
+        ),
     ]
 
     for stage, tool, model in stage_pairs:

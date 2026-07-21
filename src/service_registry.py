@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING, cast
 from acceptance_criteria import AcceptanceCriteriaGenerator
 from adr_conformance_loop import AdrConformanceLoop
 from adr_conformance_runner import SubprocessConformanceRunner
+from adr_drift_resolver_loop import AdrDriftResolverLoop
+from adr_drift_resolver_runtime import AdrDriftResolverLLMClient
+from adr_drift_triage_llm import AdrDriftTriageLLM
 from adr_index import ADRIndex
 from adr_reviewer import ADRCouncilReviewer
 from adr_reviewer_loop import ADRReviewerLoop
@@ -333,6 +336,7 @@ class ServiceRegistry:
     skill_prompt_eval_loop: SkillPromptEvalLoop
     fake_coverage_auditor_loop: FakeCoverageAuditorLoop
     adr_touchpoint_auditor_loop: AdrTouchpointAuditorLoop
+    adr_drift_resolver_loop: AdrDriftResolverLoop
     adr_conformance_loop: AdrConformanceLoop
     auto_tighten_loop: AutoTightenLoop
     memory_backlog_loop: MemoryBacklogLoop
@@ -1526,6 +1530,31 @@ def build_services(
         deps=loop_deps,
     )
 
+    # AdrDriftResolverLoop (#9976) — sibling of the auditor above: reads its
+    # rollup state, resolves the ~70% false-positive drift findings via one
+    # TRIAGE LLM call, never touches the auditor's own detection code.
+    adr_drift_resolver_dedup = DedupStore(
+        "adr_drift_resolver",
+        config.data_root / "dedup" / "adr_drift_resolver.json",
+    )
+    adr_drift_resolver_llm_client = AdrDriftResolverLLMClient(
+        runner=subprocess_runner,
+        config=config,
+        tool=config.adr_drift_resolver_tool,
+        model=config.adr_drift_resolver_model,
+        timeout=config.adr_drift_resolver_timeout,
+        provider=config.adr_drift_resolver_provider,
+    )
+    adr_drift_resolver_loop = AdrDriftResolverLoop(
+        config=config,
+        state=state,
+        pr_manager=prs,
+        dedup=adr_drift_resolver_dedup,
+        adr_index=ADRIndex(config.repo_root / "docs" / "adr"),
+        triage=AdrDriftTriageLLM(client=adr_drift_resolver_llm_client),
+        deps=loop_deps,
+    )
+
     adr_conformance_dedup = DedupStore(
         "adr_conformance",
         config.data_root / "dedup" / "adr_conformance.json",
@@ -1968,6 +1997,7 @@ def build_services(
         skill_prompt_eval_loop=skill_prompt_eval_loop,
         fake_coverage_auditor_loop=fake_coverage_auditor_loop,
         adr_touchpoint_auditor_loop=adr_touchpoint_auditor_loop,
+        adr_drift_resolver_loop=adr_drift_resolver_loop,
         adr_conformance_loop=adr_conformance_loop,
         auto_tighten_loop=auto_tighten_loop,
         memory_backlog_loop=memory_backlog_loop,

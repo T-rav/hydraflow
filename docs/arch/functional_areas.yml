@@ -73,6 +73,7 @@ areas:
       RC budget, meta-observability sanity.
     loops:
       - AdrConformanceLoop
+      - AdrDriftResolverLoop
       - AdrTouchpointAuditorLoop
       - AutoTightenLoop
       - ContractRefreshLoop

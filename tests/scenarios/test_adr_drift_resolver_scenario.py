@@ -1,0 +1,160 @@
+"""MockWorld scenario for AdrDriftResolverLoop (#9976).
+
+Drives the loop end-to-end against a rollup issue seeded exactly as
+``AdrTouchpointAuditorLoop`` (ADR-0056) would have filed it — a real
+``ADRIndex``/ADR-file fixture on disk, a real ``FakeGitHub`` issue with the
+same labels the auditor uses — with the TRIAGE LLM boundary FAKED (no real
+model calls, per #9976's requirement). Two scenarios:
+
+* A CONSISTENT verdict auto-closes the rollup with an audit comment and
+  never touches HITL labels.
+* A REAL_DRIFT verdict relabels the rollup ``hydraflow-find`` with a
+  concrete ADR-edit brief in the body, and leaves it open (the normal
+  discover→plan→implement→review pipeline picks it up from there).
+
+Mirrors the port-seeding pattern of
+``tests/scenarios/test_adr_touchpoint_auditor_scenario.py``.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from tests.scenarios.fakes.mock_world import MockWorld
+from tests.scenarios.helpers.loop_port_seeding import seed_ports as _seed_ports
+
+pytestmark = pytest.mark.scenario_loops
+
+
+def _write_adr(adr_dir: Path, *, number: int, title: str, related: list[str]) -> None:
+    related_block = ", ".join(f"`{f}`" for f in related)
+    body = (
+        f"# ADR-{number:04d}: {title}\n\n"
+        f"- **Status:** Accepted\n"
+        f"- **Date:** 2026-01-01\n"
+        f"- **Related:** {related_block}\n\n"
+        f"## Context\n\nFixture background for {title}.\n\n"
+        f"## Decision\n\nFixture decision text for {title}.\n"
+    )
+    (adr_dir / f"{number:04d}-{title.lower()}.md").write_text(body)
+
+
+class TestAdrDriftResolver:
+    """#9976 — triage-before-escalate MockWorld scenarios."""
+
+    async def test_consistent_verdict_auto_closes_no_hitl(self, tmp_path) -> None:
+        from adr_drift_triage import DriftClassification, TriageVerdict  # noqa: PLC0415
+        from adr_index import ADRIndex  # noqa: PLC0415
+
+        world = MockWorld(tmp_path)
+
+        repo = tmp_path / "repo"
+        adr_dir = repo / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        _write_adr(adr_dir, number=24, title="alpha", related=["src/agent.py"])
+        adr_index = ADRIndex(adr_dir)
+
+        # Seed the rollup issue exactly as the auditor would have filed it.
+        issue_number = await world.github.create_issue(
+            "ADR drift: ADR-0024 cited modules drifted across 1 PR",
+            "## ADR drift rollup\n\nPR #8473 changed `src/agent.py`.\n",
+            labels=["hydraflow-find", "hydraflow-adr-drift"],
+        )
+        world.github.seed_pr_diff(
+            8473,
+            "diff --git a/src/agent.py b/src/agent.py\n"
+            "@@ -10,1 +10,1 @@\n"
+            "-# old comment\n"
+            "+# updated comment wording only\n",
+        )
+
+        state = MagicMock()
+        state.all_adr_rollups.return_value = {
+            "ADR-0024": {"issue_number": issue_number, "pr_numbers": [8473]},
+        }
+
+        triage = MagicMock()
+        triage.classify = AsyncMock(
+            return_value=TriageVerdict(
+                classification=DriftClassification.CONSISTENT,
+                rationale="Only a comment wording change; the ADR's Decision is untouched.",
+            )
+        )
+
+        _seed_ports(
+            world,
+            adr_drift_resolver_state=state,
+            adr_drift_resolver_index=adr_index,
+            adr_drift_resolver_triage=triage,
+        )
+
+        results = await world.run_with_loops(["adr_drift_resolver"], cycles=1)
+        assert results["adr_drift_resolver"]["closed"] == 1
+
+        issue = world.github.issue(issue_number)
+        assert issue.state == "closed"
+        assert "hydraflow-hitl-escalation" not in issue.labels
+        assert "hydraflow-adr-drift-stuck" not in issue.labels
+        assert any("CONSISTENT" in c.body for c in issue.comments)
+        assert any("comment wording change" in c.body for c in issue.comments)
+
+    async def test_real_drift_relabels_to_find_with_brief(self, tmp_path) -> None:
+        from adr_drift_triage import DriftClassification, TriageVerdict  # noqa: PLC0415
+        from adr_index import ADRIndex  # noqa: PLC0415
+
+        world = MockWorld(tmp_path)
+
+        repo = tmp_path / "repo"
+        adr_dir = repo / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        _write_adr(adr_dir, number=27, title="beta", related=["src/runner.py"])
+        adr_index = ADRIndex(adr_dir)
+
+        issue_number = await world.github.create_issue(
+            "ADR drift: ADR-0027 cited modules drifted across 1 PR",
+            "## ADR drift rollup\n\nPR #9101 changed `src/runner.py`.\n",
+            labels=["hydraflow-find", "hydraflow-adr-drift"],
+        )
+        world.github.seed_pr_diff(
+            9101,
+            "diff --git a/src/runner.py b/src/runner.py\n"
+            "@@ -1,1 +1,1 @@\n"
+            "-def run_sync():\n"
+            "+async def run_sync():\n",
+        )
+
+        state = MagicMock()
+        state.all_adr_rollups.return_value = {
+            "ADR-0027": {"issue_number": issue_number, "pr_numbers": [9101]},
+        }
+
+        triage = MagicMock()
+        triage.classify = AsyncMock(
+            return_value=TriageVerdict(
+                classification=DriftClassification.REAL_DRIFT,
+                rationale="The Decision says runs are synchronous; this PR made them async.",
+                section="Decision",
+            )
+        )
+
+        _seed_ports(
+            world,
+            adr_drift_resolver_state=state,
+            adr_drift_resolver_index=adr_index,
+            adr_drift_resolver_triage=triage,
+        )
+
+        results = await world.run_with_loops(["adr_drift_resolver"], cycles=1)
+        assert results["adr_drift_resolver"]["relabeled"] == 1
+
+        issue = world.github.issue(issue_number)
+        assert issue.state == "open"
+        assert "hydraflow-find" in issue.labels
+        assert "hydraflow-adr-drift" not in issue.labels
+        assert "hydraflow-hitl-escalation" not in issue.labels
+        assert "Decision" in issue.body
+        assert "made them async" in issue.body
+        assert any("real_drift" in c.body for c in issue.comments)
