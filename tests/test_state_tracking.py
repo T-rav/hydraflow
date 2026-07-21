@@ -148,6 +148,7 @@ class TestInitialization:
             # Auto-Agent — AutoAgentPreflightLoop (spec §3.6)
             # auto_agent_attempts migrated to convergence_ledgers (Task 1)
             "auto_agent_daily_spend",
+            "auto_agent_redrive",
             # SandboxFailureFixerLoop (sandbox-tier scenario testing track)
             # sandbox_failure_fixer_attempts migrated to convergence_ledgers (Task 2)
             # DisturbanceDampenerLoop (ADR-0101, Pattern A)
