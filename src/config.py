@@ -354,6 +354,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         14400,
     ),
     (
+        "adr_drift_fleet_batch_threshold",
+        "HYDRAFLOW_ADR_DRIFT_FLEET_BATCH_THRESHOLD",
+        4,
+    ),
+    (
         "adr_conformance_interval",
         "HYDRAFLOW_ADR_CONFORMANCE_INTERVAL",
         86400,
@@ -625,6 +630,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("detector_calibration_enabled", "HYDRAFLOW_DETECTOR_CALIBRATION_ENABLED", True),
     ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
     ("auto_agent_redrive_enabled", "HYDRAFLOW_AUTO_AGENT_REDRIVE_ENABLED", True),
+    (
+        "auto_agent_hitl_intake_enabled",
+        "HYDRAFLOW_AUTO_AGENT_HITL_INTAKE_ENABLED",
+        True,
+    ),
     (
         "auto_pr_preflight_gate_enabled",
         "HYDRAFLOW_AUTO_PR_PREFLIGHT_GATE_ENABLED",
@@ -3326,6 +3336,16 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-adr-drift-stuck"],
         description="Labels for stuck ADR drift escalations (paired with hitl_escalation_label)",
     )
+    adr_drift_fleet_batch_threshold: int = Field(
+        default=4,
+        ge=2,
+        le=100,
+        description=(
+            "Distinct-ADR count at which a single PR's drift findings collapse "
+            "into ONE batched fleet rollup issue instead of N per-ADR rollups "
+            "(#9662 cross-cutting caretaker-fleet sweeps)"
+        ),
+    )
 
     # Trust fleet — AdrConformanceLoop (ADR-0100)
     adr_conformance_interval: int = Field(
@@ -3798,6 +3818,16 @@ class HydraFlowConfig(BaseModel):
     auto_agent_preflight_enabled: bool = Field(
         default=True,
         description="UI kill-switch for AutoAgentPreflightLoop (ADR-0049).",
+    )
+    auto_agent_hitl_intake_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for the #9721 widened intake: AutoAgentPreflightLoop "
+            "also intercepts idle pipeline-origin hydraflow-hitl issues "
+            "(attempt-cap exhaustion, quality-gate/zero-diff bails) in "
+            "addition to hitl-escalation. Distinct from "
+            "auto_agent_preflight_enabled, which gates the whole loop."
+        ),
     )
     auto_pr_preflight_gate_enabled: bool = Field(
         default=True,
