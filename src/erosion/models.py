@@ -1,7 +1,8 @@
-"""Core value objects for the change-spread sensor (#10105, epic #10104).
+"""Core value objects for the erosion sensor family (epic #10104).
 
 Mirrors `disturbance.models`' style (frozen dataclass, no behavior beyond a
-derived property) for the erosion sensor family.
+derived property) for both the change-spread sensor (#10105) and the
+concept-scatter sensor (#10106).
 """
 
 from __future__ import annotations
@@ -37,3 +38,43 @@ class SpreadFinding:
         if self.files_touched == 0:
             return 0.0
         return self.modules_crossed / self.files_touched
+
+
+@dataclass(frozen=True)
+class ScatteredSymbol:
+    """One newly-added identifier a change introduced into >= threshold distinct modules.
+
+    v1 heuristic — PROVISIONAL, not the final definition (see
+    `erosion.scatter` module docstring and epic #10104): the same new
+    symbol name being independently introduced in several modules by one
+    change, rather than defined once and shared, is treated as a
+    shotgun-duplication / coupling-erosion smell.
+    """
+
+    symbol: str
+    modules: tuple[str, ...]  # sorted, distinct modules the symbol was newly added to
+    files: tuple[
+        str, ...
+    ]  # sorted, distinct changed files where the symbol was newly added
+
+
+@dataclass(frozen=True)
+class ScatterFinding:
+    """One change's newly-added-symbol scatter footprint — the sensor's raw reading.
+
+    ``scattered`` holds only symbols that met or exceeded ``threshold``
+    distinct modules; a symbol newly added to 1-2 modules never appears
+    here. ``unmapped_files`` mirrors `SpreadFinding`'s convention: changed
+    files outside `src/`, or whose derived package isn't a known
+    module-graph node, are tracked (not silently dropped) but never count
+    toward any symbol's ``modules`` tally.
+    """
+
+    scattered: tuple[ScatteredSymbol, ...]  # sorted by symbol name
+    threshold: int
+    unmapped_files: tuple[str, ...]  # sorted
+
+    @property
+    def is_flagged(self) -> bool:
+        """True when at least one symbol met the scatter threshold."""
+        return len(self.scattered) > 0
