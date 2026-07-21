@@ -25,7 +25,7 @@ from pathlib import Path
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 SECRET_SCRUB = REPO_ROOT / "src" / "secret_scrub.py"
 FILE_UTIL = REPO_ROOT / "src" / "file_util.py"
 CODEQL_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "codeql.yml"
