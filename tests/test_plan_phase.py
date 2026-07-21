@@ -1621,7 +1621,7 @@ class TestPlanConvergenceLedger:
 
 
 # ---------------------------------------------------------------------------
-# ADR-0107: planner-invoked discover/shape helpers behind collapse_discover_shape
+# ADR-0107: planner-invoked discover/shape helpers (no standalone phases)
 # ---------------------------------------------------------------------------
 
 
@@ -1629,8 +1629,8 @@ class TestPlanPhaseDiscoverShapeHelpers:
     """The planner's on-demand discover/shape decision gate (ADR-0107).
 
     Conservative default: a well-specified issue plans directly with no
-    helper. Both gates always return False with the flag off (or no runner
-    wired) — Triage's fork to the standalone Discover phase is unaffected.
+    helper. Both gates return False when no runner is wired (e.g. a PlanPhase
+    built without the factory), so planning proceeds without a pre-pass.
     """
 
     # -- _triage_hints ----------------------------------------------------
@@ -1670,19 +1670,10 @@ class TestPlanPhaseDiscoverShapeHelpers:
 
     # -- _should_discover_helper ------------------------------------------
 
-    def test_should_discover_helper_false_when_flag_off(
-        self, config: HydraFlowConfig
-    ) -> None:
-        phase, *_ = make_plan_phase(config)
-        phase._discover_runner = AsyncMock()
-        issue = TaskFactory.create(id=1)
-        assert phase._should_discover_helper(issue) is False
-
     def test_should_discover_helper_false_when_no_runner(
         self, config: HydraFlowConfig
     ) -> None:
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, *_ = make_plan_phase(collapsed)
+        phase, *_ = make_plan_phase(config)
         issue = TaskFactory.create(id=1)
         assert phase._should_discover_helper(issue) is False
 
@@ -1690,8 +1681,7 @@ class TestPlanPhaseDiscoverShapeHelpers:
         self, config: HydraFlowConfig
     ) -> None:
         """Conservative default: no hints, no signals -> plans directly."""
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, *_ = make_plan_phase(collapsed)
+        phase, *_ = make_plan_phase(config)
         phase._discover_runner = AsyncMock()
         issue = TaskFactory.create(id=1)
         assert phase._should_discover_helper(issue) is False
@@ -1701,8 +1691,7 @@ class TestPlanPhaseDiscoverShapeHelpers:
     ) -> None:
         from unittest.mock import MagicMock
 
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, *_ = make_plan_phase(collapsed)
+        phase, *_ = make_plan_phase(config)
         phase._discover_runner = AsyncMock()
         record = MagicMock()
         record.payload = {"clarity_score": 10, "needs_discovery": True}
@@ -1717,8 +1706,7 @@ class TestPlanPhaseDiscoverShapeHelpers:
     ) -> None:
         from unittest.mock import MagicMock
 
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, *_ = make_plan_phase(collapsed)
+        phase, *_ = make_plan_phase(config)
         phase._discover_runner = AsyncMock()
         record = MagicMock()
         record.payload = {"clarity_score": 3, "needs_discovery": False}
@@ -1731,8 +1719,7 @@ class TestPlanPhaseDiscoverShapeHelpers:
     def test_should_discover_helper_true_for_cycled_issue(
         self, config: HydraFlowConfig
     ) -> None:
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, state, *_ = make_plan_phase(collapsed)
+        phase, state, *_ = make_plan_phase(config)
         phase._discover_runner = AsyncMock()
         issue = TaskFactory.create(id=7)
         state.increment_route_back_count(issue.id)
@@ -1741,8 +1728,7 @@ class TestPlanPhaseDiscoverShapeHelpers:
     def test_should_discover_helper_true_for_escalation_label(
         self, config: HydraFlowConfig
     ) -> None:
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, *_ = make_plan_phase(collapsed)
+        phase, *_ = make_plan_phase(config)
         phase._discover_runner = AsyncMock()
         issue = TaskFactory.create(id=1, tags=[config.research_escalation_labels[0]])
         assert phase._should_discover_helper(issue) is True
@@ -1755,8 +1741,7 @@ class TestPlanPhaseDiscoverShapeHelpers:
         fire the gate."""
         from unittest.mock import MagicMock
 
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, *_ = make_plan_phase(collapsed)
+        phase, *_ = make_plan_phase(config)
         phase._discover_runner = AsyncMock()
         phase._is_epic_child = lambda _issue: True  # type: ignore[method-assign]
         record = MagicMock()
@@ -1769,20 +1754,10 @@ class TestPlanPhaseDiscoverShapeHelpers:
 
     # -- _should_shape_helper -----------------------------------------------
 
-    def test_should_shape_helper_false_when_flag_off(
-        self, config: HydraFlowConfig
-    ) -> None:
-        phase, *_ = make_plan_phase(config)
-        phase._shape_runner = AsyncMock()
-        result = DiscoverResult(issue_number=1, opportunities=["a", "b"])
-        issue = TaskFactory.create(id=1)
-        assert phase._should_shape_helper(issue, result) is False
-
     def test_should_shape_helper_false_when_no_runner(
         self, config: HydraFlowConfig
     ) -> None:
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, *_ = make_plan_phase(collapsed)
+        phase, *_ = make_plan_phase(config)
         result = DiscoverResult(issue_number=1, opportunities=["a", "b"])
         issue = TaskFactory.create(id=1)
         assert phase._should_shape_helper(issue, result) is False
@@ -1790,8 +1765,7 @@ class TestPlanPhaseDiscoverShapeHelpers:
     def test_should_shape_helper_false_when_no_discover_result(
         self, config: HydraFlowConfig
     ) -> None:
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, *_ = make_plan_phase(collapsed)
+        phase, *_ = make_plan_phase(config)
         phase._shape_runner = AsyncMock()
         issue = TaskFactory.create(id=1)
         assert phase._should_shape_helper(issue, None) is False
@@ -1799,8 +1773,7 @@ class TestPlanPhaseDiscoverShapeHelpers:
     def test_should_shape_helper_false_for_single_opportunity(
         self, config: HydraFlowConfig
     ) -> None:
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, *_ = make_plan_phase(collapsed)
+        phase, *_ = make_plan_phase(config)
         phase._shape_runner = AsyncMock()
         result = DiscoverResult(issue_number=1, opportunities=["only one"])
         issue = TaskFactory.create(id=1)
@@ -1809,8 +1782,7 @@ class TestPlanPhaseDiscoverShapeHelpers:
     def test_should_shape_helper_true_for_divergent_opportunities(
         self, config: HydraFlowConfig
     ) -> None:
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, *_ = make_plan_phase(collapsed)
+        phase, *_ = make_plan_phase(config)
         phase._shape_runner = AsyncMock()
         result = DiscoverResult(issue_number=1, opportunities=["a", "b"])
         issue = TaskFactory.create(id=1)
@@ -1865,8 +1837,10 @@ class TestPlanPhaseDiscoverShapeHelpers:
     async def test_run_shape_helper_returns_none_at_turn_ceiling(
         self, config: HydraFlowConfig
     ) -> None:
-        collapsed = config.model_copy(update={"max_shape_turns": 2})
-        phase, state, _planners, _prs, _store, _stop = make_plan_phase(collapsed)
+        short_turn_config = config.model_copy(update={"max_shape_turns": 2})
+        phase, state, _planners, _prs, _store, _stop = make_plan_phase(
+            short_turn_config
+        )
         shape_mock = AsyncMock()
         phase._shape_runner = shape_mock
         issue = TaskFactory.create(id=1)
@@ -1914,16 +1888,15 @@ class TestPlanPhaseDiscoverShapeHelpers:
     # -- integration via plan_issues() ------------------------------------------
 
     @pytest.mark.asyncio
-    async def test_flag_off_never_touches_discover_or_shape_runner(
+    async def test_no_runner_wired_never_touches_discover_or_shape(
         self, config: HydraFlowConfig
     ) -> None:
-        """Flag OFF: byte-identical behavior — helpers never invoked even if wired."""
+        """No runner wired (e.g. PlanPhase built without the factory): the gate
+        short-circuits and planning proceeds without a discover/shape pre-pass,
+        even for an issue whose escalation label would otherwise trigger it."""
         phase, _state, planners, _prs, store, _stop = make_plan_phase(config)
-        discover_mock = AsyncMock()
-        phase._discover_runner = discover_mock
-        shape_mock = AsyncMock()
-        phase._shape_runner = shape_mock
-        # Tags/labels that WOULD trigger the gate if the flag were on.
+        # Runners left at their None default — no discover/shape helpers wired.
+        # Tags/labels that WOULD trigger the gate if a runner were wired.
         issue = TaskFactory.create(id=1, tags=[config.research_escalation_labels[0]])
         plan_result = PlanResultFactory.create(
             issue_number=1, success=True, plan="p", use_defaults=True
@@ -1933,15 +1906,14 @@ class TestPlanPhaseDiscoverShapeHelpers:
 
         await phase.plan_issues()
 
-        discover_mock.discover.assert_not_awaited()
-        shape_mock.run_turn.assert_not_awaited()
+        assert phase._should_discover_helper(issue) is False
+        planners.plan.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_flag_on_well_specified_issue_plans_directly_no_helper(
+    async def test_well_specified_issue_plans_directly_no_helper(
         self, config: HydraFlowConfig
     ) -> None:
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, _state, planners, _prs, store, _stop = make_plan_phase(collapsed)
+        phase, _state, planners, _prs, store, _stop = make_plan_phase(config)
         discover_mock = AsyncMock()
         phase._discover_runner = discover_mock
         issue = TaskFactory.create(id=1)  # no hints / no cache => well-specified
@@ -1957,13 +1929,12 @@ class TestPlanPhaseDiscoverShapeHelpers:
         planners.plan.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_flag_on_low_clarity_issue_gets_discover_helper(
+    async def test_low_clarity_issue_gets_discover_helper(
         self, config: HydraFlowConfig
     ) -> None:
         from unittest.mock import MagicMock
 
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, _state, planners, _prs, store, _stop = make_plan_phase(collapsed)
+        phase, _state, planners, _prs, store, _stop = make_plan_phase(config)
         record = MagicMock()
         record.payload = {"clarity_score": 3, "needs_discovery": False}
         mock_cache = MagicMock()
@@ -1993,13 +1964,12 @@ class TestPlanPhaseDiscoverShapeHelpers:
         assert "Discovered context" in research_context
 
     @pytest.mark.asyncio
-    async def test_flag_on_divergent_directions_escalates_and_skips_planning(
+    async def test_divergent_directions_escalates_and_skips_planning(
         self, config: HydraFlowConfig
     ) -> None:
         from unittest.mock import MagicMock
 
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, _state, planners, prs, store, _stop = make_plan_phase(collapsed)
+        phase, _state, planners, prs, store, _stop = make_plan_phase(config)
         record = MagicMock()
         record.payload = {"clarity_score": 2, "needs_discovery": True}
         mock_cache = MagicMock()
@@ -2030,13 +2000,12 @@ class TestPlanPhaseDiscoverShapeHelpers:
         assert prs.post_comment.await_count >= 1
 
     @pytest.mark.asyncio
-    async def test_flag_on_finalized_shape_injects_decomposition_guidance(
+    async def test_finalized_shape_injects_decomposition_guidance(
         self, config: HydraFlowConfig
     ) -> None:
         from unittest.mock import MagicMock
 
-        collapsed = config.model_copy(update={"collapse_discover_shape": True})
-        phase, _state, planners, _prs, store, _stop = make_plan_phase(collapsed)
+        phase, _state, planners, _prs, store, _stop = make_plan_phase(config)
         record = MagicMock()
         record.payload = {"clarity_score": 2, "needs_discovery": True}
         mock_cache = MagicMock()

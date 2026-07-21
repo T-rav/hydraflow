@@ -2,8 +2,8 @@
 
 ``_RUNNER_EXECUTE_MODULES`` was a hand-maintained tuple listing only
 ``agent.py, planner.py, research_runner.py, reviewer.py, hitl_runner.py`` —
-seven other BaseRunner subclass modules (diagnostic_runner, discover_runner,
-expert_council, shape_runner, bug_reproducer, plan_reviewer, triage) bypassed
+other BaseRunner subclass modules (diagnostic_runner, discover_runner,
+shape_runner, bug_reproducer, plan_reviewer, triage) bypassed
 the ``issue_labels=`` pin entirely, so a ``data-class:regulated-*`` issue
 label did NOT elevate the prompt gate for their spawns — exactly the omission
 the pin was written to make "structurally impossible to reintroduce" (#9734
@@ -45,7 +45,6 @@ _ALL_RUNNER_MODULES = {
     "hitl_runner.py",
     "diagnostic_runner.py",
     "discover_runner.py",
-    "expert_council.py",
     "shape_runner.py",
     "bug_reproducer.py",
     "plan_reviewer.py",
