@@ -10,6 +10,7 @@
       ]
     }
   ],
+  "comments": {},
   "prs": [],
   "scripts": {
     "plan": {
@@ -64,6 +65,8 @@
   },
   "advisor_scripts": {},
   "phase_scripts": {},
+  "auto_agent_attempts": {},
+  "sandbox_loop_interval": 60,
   "cycles_to_run": 10,
   "loops_enabled": [
     "diagnostic",
@@ -72,5 +75,14 @@
   "main_branch_ci_status": [
     "success",
     ""
-  ]
+  ],
+  "plan_hold_seconds": 0.0,
+  "skill_prompt_corpus_cases": [],
+  "skill_prompt_refine_patch": "",
+  "rulesets": {},
+  "stale_workspaces": [],
+  "gate_activations": [],
+  "expired_run_dirs": [],
+  "issue_refinement_backlog": [],
+  "issue_refinement_verdicts": []
 }

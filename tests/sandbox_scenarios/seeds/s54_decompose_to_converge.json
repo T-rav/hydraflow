@@ -26,6 +26,7 @@
   "auto_agent_attempts": {
     "1": 3
   },
+  "sandbox_loop_interval": 60,
   "cycles_to_run": 2,
   "loops_enabled": [
     "auto_agent_preflight"
@@ -34,5 +35,13 @@
     "success",
     ""
   ],
-  "plan_hold_seconds": 0.0
+  "plan_hold_seconds": 0.0,
+  "skill_prompt_corpus_cases": [],
+  "skill_prompt_refine_patch": "",
+  "rulesets": {},
+  "stale_workspaces": [],
+  "gate_activations": [],
+  "expired_run_dirs": [],
+  "issue_refinement_backlog": [],
+  "issue_refinement_verdicts": []
 }
