@@ -6,11 +6,14 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
-- `3046b96` — Merge remote-tracking branch 'origin/staging' into fix/escalation-ttl-redrive *(2026-07-20)*
+- `b0c7d5e` — test(guard): spawn-side reap guard — raw-spawn containment + reap-pairing ratchets (#9623) (#10088) (#10088) *(2026-07-21)*
+- `2c1a455` — test(reap-guard): prune staging_bisect._run_git from raw-spawn + reap baselines (#9577) (#9577) *(2026-07-20)*
+- `325d8ec` — chore(arch): regen artifacts for the migrated bisect seams (#10077 heal) *(2026-07-20)*
+- `6e1493f` — Merge remote-tracking branch 'origin/staging' into fix/subproc-cooperative-killswitch *(2026-07-20)*
+- `77e4b63` — Merge remote-tracking branch 'origin/staging' into fix/subproc-cooperative-killswitch *(2026-07-20)*
 - `982cec5` — fix(workspace,state): automate HITL reset runbook residuals — main-repo core.worktree heal + attempt-counter close-to-clear (#9723) (#10082) (#10082) *(2026-07-20)*
-- `13766bb` — Merge remote-tracking branch 'origin/staging' into fix/escalation-ttl-redrive *(2026-07-20)*
+- `5f4f1b6` — chore(arch): regenerate diagrams after staging merge (#9577) (#9577) *(2026-07-20)*
 - `ee15f26` — feat(test-adequacy): independent second-opinion verifier gated on explicit OK (#9546) (#10076) (#10076) *(2026-07-20)*
-- `c46113e` — Merge remote-tracking branch 'origin/staging' into fix/escalation-ttl-redrive *(2026-07-20)*
 - `fa5e02e` — feat(gh-load): cached CI-run + issue-list reads and first-tick stagger — cut direct-gh load (#9814) (#10075) (#10075) *(2026-07-20)*
 - `aee928c` — feat(sandbox): active-trigger scenarios for six governance loops (s65-s70) (#9543) (#10074) (#10074) *(2026-07-20)*
 - `64fc05d` — feat(watchdog): thread-level event-loop freeze detector (#9552) (#10070) (#10070) *(2026-07-20)*
@@ -19,7 +22,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `8509ee0` — feat(orchestration): v2 IssueDriver runtime phase spec + accept ADR-0099 (#10038) (#10055) (#10055) *(2026-07-20)*
 - `d94945e` — fix(ul): one file per term — delete stale forks, hard-fail uniqueness lint, store-level dedupe (#9938) (#10051) (#10051) *(2026-07-20)*
 - `f4c0d38` — fix(stale-issue): branch-GC reconciler + unpushed-work boot check (#10011) (#10052) (#10052) *(2026-07-20)*
-- `444441d` — feat(auto-agent): escalation TTL re-drive for still-real stuck escalations *(2026-07-20)*
 - `9d6184d` — feat(liveness): external factory watchdog + boot-time down-detection (#10044) (#10044) *(2026-07-20)*
 - `9fa2966` — fix(health-monitor): stale-code dead-man-switch — host in HealthMonitorLoop (#9596) (#10035) (#10035) *(2026-07-20)*
 - `6206f38` — fix(stale-issue): detect regression-test rot — false-close + orphaned-RED (#9597) (#10039) (#10039) *(2026-07-20)*

@@ -4,11 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from time import monotonic as _monotonic
 from typing import Protocol, runtime_checkable
 
 from process_group import kill_process_group, track, untrack
+
+
+class SubprocessCancelledError(Exception):
+    """A cooperative ``cancel_check`` returned True mid-run (#9577).
+
+    Raised after the process group is torn down, so callers distinguish a
+    kill-switch/operator cancel from a natural timeout or exit.
+    """
 
 
 @dataclass
@@ -56,10 +65,15 @@ class SubprocessRunner(Protocol):
         env: dict[str, str] | None = None,
         timeout: float = 120.0,
         input: bytes | None = None,  # noqa: A002
+        cancel_check: Callable[[], bool] | None = None,
+        cancel_poll_interval: float = 5.0,
     ) -> SimpleResult:
         """Run a command and return its output.
 
         When *input* is provided, it is written to the process's stdin.
+        *cancel_check* (#9577) is polled every *cancel_poll_interval* seconds;
+        a True verdict tears down the process group and raises
+        ``SubprocessCancelledError``.
 
         Raises ``TimeoutError`` if the command exceeds *timeout* seconds
         (the process is killed before re-raising).
@@ -111,6 +125,50 @@ class HostRunner:
             start_new_session=start_new_session,
         )
 
+    async def _communicate_bounded(
+        self,
+        proc: asyncio.subprocess.Process,
+        stdin_input: bytes | None,
+        timeout: float,
+        cancel_check: Callable[[], bool] | None,
+        cancel_poll_interval: float,
+    ) -> tuple[bytes, bytes]:
+        """communicate() with an optional cooperative cancel poll (#9577).
+
+        Without *cancel_check* this is a plain ``wait_for(communicate)``. With
+        it, the wait is chunked into *cancel_poll_interval* slices; between
+        slices ``cancel_check()`` is consulted, and a True verdict group-kills
+        the tree and raises ``SubprocessCancelledError`` — the reap happens
+        HERE so run_simple's outer handlers own exactly one path each.
+        """
+        if cancel_check is None:
+            return await asyncio.wait_for(
+                proc.communicate(input=stdin_input), timeout=timeout
+            )
+        comm_task = asyncio.ensure_future(proc.communicate(input=stdin_input))
+        deadline = _monotonic() + timeout
+        try:
+            while True:
+                remaining = deadline - _monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                poll = min(cancel_poll_interval, remaining)
+                done, _pending = await asyncio.wait({comm_task}, timeout=poll)
+                if comm_task in done:
+                    return comm_task.result()
+                if cancel_check():
+                    _reap_process_group(proc)
+                    with contextlib.suppress(ProcessLookupError, OSError):
+                        await proc.wait()
+                    raise SubprocessCancelledError(
+                        "cooperative cancel_check tripped mid-run"
+                    )
+        finally:
+            if not comm_task.done():
+                comm_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await comm_task
+
     async def run_simple(
         self,
         cmd: Sequence[str],
@@ -119,10 +177,18 @@ class HostRunner:
         env: dict[str, str] | None = None,
         timeout: float = 120.0,
         input: bytes | None = None,  # noqa: A002
+        cancel_check: Callable[[], bool] | None = None,
+        cancel_poll_interval: float = 5.0,
     ) -> SimpleResult:
         """Run a command on the host and return its output.
 
         When *input* is provided, it is written to the process's stdin.
+
+        *cancel_check* (#9577) is polled every *cancel_poll_interval* seconds
+        while the process runs; when it returns True the whole process group
+        is torn down and ``SubprocessCancelledError`` is raised — letting a
+        long local subprocess (e.g. a 45-min ``git bisect``) honour a loop's
+        kill-switch mid-run without holding the shared gh/git gate.
 
         Raises ``TimeoutError`` if the command exceeds *timeout* seconds.
         """
@@ -146,11 +212,15 @@ class HostRunner:
         track(proc)
         try:
             try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    proc.communicate(input=input), timeout=timeout
+                stdout_bytes, stderr_bytes = await self._communicate_bounded(
+                    proc, input, timeout, cancel_check, cancel_poll_interval
                 )
             finally:
                 untrack(proc)
+        except SubprocessCancelledError:
+            # Cooperative cancel (#9577): the group is already reaped inside
+            # _communicate_bounded; surface the distinct error to the caller.
+            raise
         except TimeoutError:
             # Reap the whole process group, not just the direct child. Without
             # this, sub-make / pytest / agent grandchildren are re-parented to

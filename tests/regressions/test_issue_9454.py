@@ -64,13 +64,14 @@ _REPO = Path(__file__).resolve().parent.parent.parent
 # its own internal, already-hardened ``communicate()`` inside
 # ``execution.HostRunner.run_simple``) — same false-positive shape as the
 # two exclusions above: no direct ``proc.communicate()`` remains to flag.
-# ``staging_bisect_loop.py`` stays: ``_run_git`` (cooperative kill-switch
-# cancellation) is deliberately excluded from that migration and still calls
-# ``proc.communicate()`` directly (bounded via the ``create_task`` +
-# deadline-loop form below).
-_UNHARDENED_COMMUNICATE_MODULES = [
-    "src/staging_bisect_loop.py",
-]
+# ``staging_bisect_loop.py`` left the list with #9577: ``_run_git``'s
+# cooperative kill-switch cancellation is now expressed through the shared
+# helper (``run_simple(cancel_check=...)``, whose internal ``communicate()``
+# inside ``execution.HostRunner._communicate_bounded`` is bounded), so the
+# module no longer calls ``proc.communicate()`` directly — same
+# false-positive shape as the exclusions above. The fleet-wide AST scan in
+# ``test_issue_9508.py`` remains the authoritative source of truth.
+_UNHARDENED_COMMUNICATE_MODULES: list[str] = []
 
 # A ``communicate()`` call is considered *bounded* when it is a direct argument
 # to one of these. ``wait_for`` is the canonical fix; ``create_task`` is the
