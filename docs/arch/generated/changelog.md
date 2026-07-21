@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `eec50e8` — docs(adr-0085): use bullet format for multi-check Enforced-by (#9143) (#9143) *(2026-07-21)*
+- `689db28` — chore(arch): regen after staging merge, keep staging .meta.json (#9143) (#9143) *(2026-07-21)*
 - `9d2e24e` — Merge remote-tracking branch 'origin/staging' into fix/9143-codeql-scrub-secrets-sanitizer *(2026-07-21)*
 - `f368c12` — docs(adr-0085): repoint Enforced-by citation to relocated regression test (#9143) (#9143) *(2026-07-21)*
 - `dc6060b` — test(fake-coverage): cover final FakeGitHub adapter-surface slice — gap→0 (#9768) (#10165) (#10165) *(2026-07-21)*
