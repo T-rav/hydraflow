@@ -47,6 +47,11 @@ def _make_loop(tmp_path: Path, label_map: dict[str, list[dict]]):
     state.add_auto_agent_daily_spend = MagicMock(return_value=0.0)
     state.get_escalation_context = MagicMock(return_value=None)
     state.get_hitl_origin = MagicMock(return_value="hydraflow-ready")
+    # #9719 re-drive shares _do_work: with a bare MagicMock this returns a
+    # truthy Mock, so _redrive_stuck_escalations skips its `if not armed`
+    # early-return and polls extra labels. Stub empty to isolate #9721's
+    # intake-poll assertions.
+    state.list_armed_auto_agent_redrives = MagicMock(return_value=[])
     pr = AsyncMock()
     pr.list_closed_issues_by_label = AsyncMock(return_value=[])
     pr.list_issue_comments = AsyncMock(return_value=[])
