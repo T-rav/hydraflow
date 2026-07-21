@@ -45,7 +45,7 @@ graph LR
     src_dashboard_routes -- "2" --> src_state
     src_disturbance_detectors -- "1" --> src_arch
     src_disturbance_detectors -- "5" --> src_disturbance
-    src_erosion -- "2" --> src_arch
+    src_erosion -- "3" --> src_arch
     src_mockworld_fakes -- "31" --> src_mockworld
     src_mockworld_fakes -- "1" --> src_telemetry
     src_preflight -- "1" --> src_runners
