@@ -305,6 +305,35 @@ def test_seed_round_trips_registered_workers_through_json() -> None:
     assert parsed.registered_workers["runs_gc"] == {}
 
 
+def test_seed_round_trips_issue_updated_at_through_json() -> None:
+    """#9544: a per-issue ``updated_at`` key survives JSON transfer intact.
+
+    ``issues`` entries are plain JSON-native dicts (no ``from_json``
+    coercion needed for this key, unlike the outer-key-as-int shapes
+    elsewhere in this file) — the equality check guards a future shape
+    that would need one.
+    """
+    original = MockWorldSeed(
+        issues=[
+            {
+                "number": 7701,
+                "title": "stale",
+                "body": "b",
+                "labels": ["hydraflow-hitl"],
+                "updated_at": "2020-01-01T00:00:00Z",
+            },
+            {"number": 7702, "title": "fresh", "body": "b", "labels": []},
+        ],
+    )
+
+    parsed = MockWorldSeed.from_json(original.to_json())
+
+    assert parsed == original
+    assert parsed.issues[0]["updated_at"] == "2020-01-01T00:00:00Z"
+    # Absent key round-trips as absent, not a coerced default.
+    assert "updated_at" not in parsed.issues[1]
+
+
 def test_seed_round_trips_active_trigger_seams_through_json() -> None:
     original = MockWorldSeed(
         issues=[

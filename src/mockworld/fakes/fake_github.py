@@ -183,6 +183,7 @@ class FakeGitHub:
                 body=issue_dict["body"],
                 labels=list(issue_dict.get("labels", [])),
                 state=issue_dict.get("state", "open"),
+                updated_at=issue_dict.get("updated_at"),
             )
         for issue_number, comment_dicts in seed.comments.items():
             for comment_dict in comment_dicts:
@@ -222,20 +223,32 @@ class FakeGitHub:
         body: str,
         labels: list[str] | None = None,
         state: str = "open",
+        updated_at: str | None = None,
     ) -> None:
         """Seed an issue. ``state`` accepts ``"open"`` (default) or ``"closed"``.
 
         A closed seed issue reports ``COMPLETED`` from ``get_issue_state``
         (close-reason defaulting mirrors gh, #10025) — the surface loops like
         workspace_gc/epic_sweeper consult before acting (#9543).
+
+        ``updated_at`` (#9544) lets a scenario control the issue's staleness
+        independently of ``FakeIssue``'s hard-coded ``2026-01-01T00:00:00Z``
+        default — needed to drive time-triggered loops like
+        ``stale_issue_gc`` down BOTH branches (closes a genuinely stale
+        issue, skips a genuinely fresh one) instead of every seeded issue
+        reading as equally stale. ``None`` (default) leaves ``FakeIssue``'s
+        own default untouched — back-compat for every pre-#9544 seed.
         """
-        self._issues[number] = FakeIssue(
+        issue = FakeIssue(
             number=number,
             title=title,
             body=body,
             labels=labels or [],
             state=state,
         )
+        if updated_at:
+            issue.updated_at = updated_at
+        self._issues[number] = issue
 
     def add_seeded_comment(
         self,

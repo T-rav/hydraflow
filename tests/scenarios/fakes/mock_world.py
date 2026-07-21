@@ -370,6 +370,7 @@ class MockWorld:
         body: str,
         labels: list[str] | None = None,
         state: str = "open",
+        updated_at: str | None = None,
     ) -> MockWorld:
         self._issues[number] = {
             "number": number,
@@ -377,7 +378,9 @@ class MockWorld:
             "body": body,
             "labels": labels or ["hydraflow-find"],
         }
-        self._github.add_issue(number, title, body, labels=labels, state=state)
+        self._github.add_issue(
+            number, title, body, labels=labels, state=state, updated_at=updated_at
+        )
         return self
 
     def add_repo(
@@ -491,6 +494,7 @@ class MockWorld:
                 body=issue_dict["body"],
                 labels=list(issue_dict.get("labels", [])),
                 state=issue_dict.get("state", "open"),
+                updated_at=issue_dict.get("updated_at"),
             )
         for pr_dict in seed.prs:
             self._github.add_pr(

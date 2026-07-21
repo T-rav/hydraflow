@@ -41,6 +41,9 @@ from tests.sandbox_scenarios.scenarios import (
 from tests.sandbox_scenarios.scenarios import (
     s75_worker_stall_escalation as s75,
 )
+from tests.sandbox_scenarios.scenarios import (
+    s77_stale_issue_gc_skips_fresh_issue as s77,
+)
 
 
 async def _run(mock_world, scenario):
@@ -177,3 +180,24 @@ async def test_s75_health_monitor_escalates_stalled_registered_worker(
     )
     issue = mock_world._github._issues[stall_issues[0]["number"]]
     assert "Auto-restart attempted: `False`" in issue.body
+
+
+@pytest.mark.asyncio
+async def test_s77_stale_issue_gc_closes_stale_skips_fresh(mock_world) -> None:
+    """#9544 — a seeded per-issue ``updated_at`` lets stale_issue_gc genuinely
+    discriminate: close the far-past-threshold HITL issue, skip the fresh one.
+
+    Before the seeded ``updated_at`` seam, every ``FakeIssue`` shared the same
+    hard-coded ``2026-01-01T00:00:00Z`` default, so the "fresh issue is
+    skipped" branch of ``StaleIssueGCLoop._do_work`` was unreachable from a
+    scenario seed.
+    """
+    _seed, stats = await _run(mock_world, s77)
+
+    assert stats["stale_issue_gc"]["closed"] >= 1
+    assert stats["stale_issue_gc"]["skipped"] >= 1
+    # The world shows the side effects, not just the counters.
+    stale_issue = mock_world._github._issues[s77._STALE_ISSUE]
+    fresh_issue = mock_world._github._issues[s77._FRESH_ISSUE]
+    assert stale_issue.state == "closed"
+    assert fresh_issue.state == "open"
