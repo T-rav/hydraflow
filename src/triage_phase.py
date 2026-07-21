@@ -107,6 +107,25 @@ class TriagePhase:
         self._issue_cache = issue_cache
         self._bug_reproducer = bug_reproducer
 
+    def _record_triage_verdict(self, issue_id: int, routing_outcome: str) -> None:
+        """Record the ConvergenceLedger boundary verdict for a routing outcome.
+
+        Looks up ``routing_outcome`` in ``_TRIAGE_VERDICT_MAP`` and records the
+        verdict via :func:`record_stage_verdict` when a mapping exists.
+        Outcomes with no mapping (e.g. ``"unknown"``) are silently skipped —
+        matching the previous inline behavior at both call-sites.
+        """
+        verdict = _TRIAGE_VERDICT_MAP.get(routing_outcome)
+        if verdict is None:
+            return
+        record_stage_verdict(
+            self._state,
+            issue_number=issue_id,
+            stage="triage",
+            decision=verdict,
+            signatures=[],
+        )
+
     def _enrich_parent_epic(self, issue: Task) -> None:
         """Set the parent_epic field if this issue belongs to a tracked epic."""
         if self._epic_manager is None:
@@ -482,15 +501,7 @@ class TriagePhase:
                         issue.id,
                         evidence,
                     )
-                    _verdict = _TRIAGE_VERDICT_MAP.get(routing_outcome)
-                    if _verdict is not None:
-                        record_stage_verdict(
-                            self._state,
-                            issue_number=issue.id,
-                            stage="triage",
-                            decision=_verdict,
-                            signatures=[],
-                        )
+                    self._record_triage_verdict(issue.id, routing_outcome)
                     return 1
                 if str(repro.outcome) == "unable":
                     logger.warning(
@@ -518,15 +529,7 @@ class TriagePhase:
             await self._transitioner.transition(issue.id, "plan")
             self._state.increment_session_counter("triaged")
 
-        _verdict = _TRIAGE_VERDICT_MAP.get(routing_outcome)
-        if _verdict is not None:
-            record_stage_verdict(
-                self._state,
-                issue_number=issue.id,
-                stage="triage",
-                decision=_verdict,
-                signatures=[],
-            )
+        self._record_triage_verdict(issue.id, routing_outcome)
 
         return 1
 
