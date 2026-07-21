@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `b4f2f8d` — Merge remote-tracking branch 'origin/staging' into feat/10140-loop-self-repair-actuator *(2026-07-21)*
+- `be2470a` — feat(health): loop self-repair actuator — persistent error-heartbeat → auto-repair or file (#10140) (#10140) *(2026-07-21)*
+- `90d56c9` — test(trust): cassette FakeGitHub PR-review/label cluster — 11 methods (#9768 slice 3) (#10152) (#10152) *(2026-07-21)*
 - `f76c267` — feat(adr): AdrDriftResolverLoop — triage-before-escalate so drift rollups self-resolve (#9976) (#10146) (#10146) *(2026-07-21)*
 - `0d66c52` — feat(pipeline): ADR-0107 + flag-gated Triage→Plan routing — keystone for collapsing Discover/Shape (#9773) (#10145) (#10145) *(2026-07-21)*
 - `d4d4ecc` — fix(factory): perf/ auto-merge + worktree arch-meta merge driver (#10143) (#10143) *(2026-07-21)*
