@@ -6,7 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `52b6752` — fix(subprocess): cooperative kill-switch in the shared helper — migrate staging_bisect._run_git (#9577) (#10077) (#10077) *(2026-07-21)*
 - `b0c7d5e` — test(guard): spawn-side reap guard — raw-spawn containment + reap-pairing ratchets (#9623) (#10088) (#10088) *(2026-07-21)*
+- `93e905e` — Merge remote-tracking branch 'origin/staging' into fix/preflight-intake-widen *(2026-07-20)*
 - `a070222` — Merge remote-tracking branch 'origin/staging' into fix/preflight-intake-widen *(2026-07-20)*
 - `9f99bcf` — fix(escalation): TTL re-drive so stale auto-agent escalations self-heal (#9719) (#10079) (#10079) *(2026-07-20)*
 - `47a4992` — Merge remote-tracking branch 'origin/staging' into fix/preflight-intake-widen *(2026-07-20)*

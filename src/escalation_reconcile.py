@@ -48,9 +48,45 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from dedup_store import DedupStore
+    from models import GitHubIssueSummary
     from ports import PRPort
 
 logger = logging.getLogger("hydraflow.escalation_reconcile")
+
+#: Label a *programmatic* closer stamps on an escalation issue BEFORE closing
+#: it, so the shared reconciler can tell a bot/factory close from a human/
+#: external one (#9437). This is the one, shared bot-close marker: there is
+#: exactly one predicate (:func:`is_bot_close`) and one constant across every
+#: adopting trust loop. The pre-#9437 mechanism the issue references
+#: (``HITL_AUTO_RESOLVED_LABEL`` in ``src/hitl_stale_insight.py``, hardening
+#: #8996) never landed — that module and constant no longer exist — so this
+#: realises the intended "shared marker" against the signal the reconciler can
+#: actually obtain: labels on the closed-issue dict.
+BOT_CLOSE_MARKER_LABEL = "hydraflow-auto-resolved"
+
+
+def is_bot_close(issue: GitHubIssueSummary | dict[str, object]) -> bool:
+    """Whether *issue* was closed by a programmatic/bot path, not a human.
+
+    Detected via :data:`BOT_CLOSE_MARKER_LABEL` on the issue dict — the only
+    per-close signal the reconciler can obtain, since ``GitHubIssueSummary``
+    carries no ``closed_by``/actor/``state_reason`` and the closed-issue
+    projection is label-free by default (#9943).
+
+    Fail-open toward the pre-#9437 contract: when the marker is ABSENT — which
+    includes the common case where labels are simply not projected onto a
+    closed issue — the close is treated as human, and the caller drops the
+    dedup key so the detector may re-fire, exactly as before this guard. We
+    only ever RETAIN the key on a *positive* bot signal; an unknown/unavailable
+    signal never starts silently retaining keys everywhere.
+    """
+    labels = issue.get("labels") or []
+    if not isinstance(labels, list):
+        return False
+    return any(
+        isinstance(lbl, dict) and lbl.get("name") == BOT_CLOSE_MARKER_LABEL
+        for lbl in labels
+    )
 
 
 class EscalationReconciler:
@@ -82,7 +118,24 @@ class EscalationReconciler:
         return f"{self._key_prefix}:{subject}"
 
     async def reconcile_closed(self) -> None:
-        """Drop dedup keys + counters for human-closed escalations."""
+        """Drop dedup keys + counters for HUMAN-closed escalations.
+
+        A *human/external* close is the intentional reset signal: drop the
+        dedup key + attempt counter so the detector may re-fire (the pre-#9437
+        contract). A *bot/programmatic* close — one stamped with
+        :data:`BOT_CLOSE_MARKER_LABEL` before closing — must NOT reset dedup:
+        a premature programmatic close of a subject that is still detected at
+        HEAD would otherwise re-arm the tracker and refile a duplicate on the
+        next tick (#9437).
+
+        The guard is applied UNIFORMLY — no per-loop opt-out flag. All ~8
+        adopting reconcilers want the same contract (never refile a duplicate
+        on a bot close), it matches the issue intent ("generalize ... across
+        the loops"), and the marker is absent from today's closes, so the
+        observable behaviour is unchanged until a programmatic closer starts
+        stamping it. A constructor flag would add branching for no sibling that
+        genuinely needs different behaviour.
+        """
         closed = await self._prs.list_closed_issues_by_label(
             self._stuck_label, limit=100
         )
@@ -93,9 +146,14 @@ class EscalationReconciler:
             if subject is None:
                 continue
             key = self._key(subject)
-            if key in keep:
-                keep.discard(key)
-                self._clear_attempts(subject)
+            if key not in keep:
+                continue
+            if is_bot_close(issue):
+                # Programmatic close — retain the dedup key so a still-detected
+                # subject does not immediately refile a duplicate (#9437).
+                continue
+            keep.discard(key)
+            self._clear_attempts(subject)
         if keep != keys:
             self._dedup.set_all(keep)
 

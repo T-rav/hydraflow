@@ -14,10 +14,21 @@ listing all PRs that drifted it. Subsequent ticks update the body via
 ``PRPort.update_issue_body``. When an ADR's own file appears in a PR diff
 the rollup is closed — drift is resolved by the same PR.
 
+Fleet batch (#9662): a single cross-cutting PR drifting at least
+``config.adr_drift_fleet_batch_threshold`` distinct ADRs files **one
+batched issue** listing every affected ADR (dedup key
+``adr_touchpoint_auditor:FLEET-<pr>``) instead of N per-ADR rollups.
+Batched rollups are one-shot: they are never auto-closed by later
+ADR-file updates — a human closes them with a one-line explanation, and
+the manual-close reconcile pass clears the ``FLEET-<pr>`` state + dedup
+key so nothing strands.
+
 Migration: old per-tuple dedup keys (``adr_touchpoint_auditor:PR-N:ADR-N``)
 and per-tuple attempt counters are silently ignored. They are not pruned —
 the keys become dead weight in the dedup store until a future cleanup. New
-keys are ``adr_touchpoint_auditor:ADR-NNNN`` (no PR component).
+keys are ``adr_touchpoint_auditor:ADR-NNNN`` (no PR component) and
+``adr_touchpoint_auditor:FLEET-<pr>`` (fleet batches; the two sub-namespaces
+never collide).
 """
 
 from __future__ import annotations
@@ -29,14 +40,14 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from adr_drift import compute_drift_by_adr
+from adr_drift import compute_drift_by_adr, partition_fleet_drift
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
 from escalation_reconcile import EscalationReconciler
 from models import WorkCycleResult  # noqa: TCH001
 from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
-    from adr_drift import DriftFinding
+    from adr_drift import AdrRollupEntry, DriftFinding, FleetDriftBatch
     from adr_index import ADRIndex
     from config import HydraFlowConfig
     from dedup_store import DedupStore
@@ -62,6 +73,34 @@ def _rollup_key(adr_number: int) -> str:
 
 def _dedup_key(adr_number: int) -> str:
     return f"adr_touchpoint_auditor:{_rollup_key(adr_number)}"
+
+
+def _fleet_rollup_key(pr_number: int) -> str:
+    """Rollup/state key for a fleet batch (#9662).
+
+    The ``FLEET-`` discriminator keeps this sub-namespace disjoint from the
+    per-ADR ``ADR-NNNN`` keys under the shared ``adr_touchpoint_auditor:``
+    dedup prefix — a fleet batch for PR 42 and a rollup for ADR 42 coexist.
+    """
+    return f"FLEET-{pr_number}"
+
+
+def _fleet_dedup_key(pr_number: int) -> str:
+    return f"adr_touchpoint_auditor:{_fleet_rollup_key(pr_number)}"
+
+
+def _pr_num_from_fleet_key(rollup_key: str) -> int | None:
+    """Parse the PR number out of a ``FLEET-<pr>`` rollup key.
+
+    Returns ``None`` for non-fleet or malformed keys so a corrupt state
+    entry can't wedge the reconcile pass (mirrors ``_adr_num_from_key``).
+    """
+    if not rollup_key.startswith("FLEET-"):
+        return None
+    try:
+        return int(rollup_key[6:])
+    except ValueError:
+        return None
 
 
 # Parses ``_file_drift_escalation`` titles back to the dedup-key subject
@@ -300,6 +339,84 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
         body = self._rollup_body(adr, pr_entries)
         await self._pr.update_issue_body(issue_number, body)
 
+    def _fleet_rollup_title(self, pr_number: int, adr_count: int) -> str:
+        plural = "ADR" if adr_count == 1 else "ADRs"
+        return (
+            f"ADR drift: fleet PR #{pr_number} drifted {adr_count} {plural} (batched)"
+        )
+
+    def _fleet_rollup_body(
+        self,
+        pr_number: int,
+        entries: list[AdrRollupEntry],
+        merged_at: str,
+    ) -> str:
+        """Render the batched fleet-rollup body (#9662).
+
+        ``entries`` is the batch's member ``AdrRollupEntry`` list (one
+        single-contributor entry per drifted ADR).
+        """
+        repo = self._config.repo
+        threshold = self._config.adr_drift_fleet_batch_threshold
+        lines = [
+            "## ADR drift rollup — cross-cutting fleet PR (batched)",
+            "",
+            f"PR [#{pr_number}](https://github.com/{repo}/pull/{pr_number}) "
+            f"(merged {merged_at or '?'}) changed `src/` modules cited by "
+            f"**{len(entries)} ADRs** without any of those ADR files in the "
+            f"same diff. Per the #9662 batching heuristic (threshold: "
+            f"{threshold}), they are batched into ONE issue instead of "
+            f"{len(entries)} per-ADR rollups:",
+            "",
+        ]
+        for entry in entries:
+            adr = entry.adr
+            files = sorted(
+                {p for f in entry.contributors for p in f.changed_cited_files}
+            )
+            files_str = ", ".join(f"`{p}`" for p in files) or "(no paths recorded)"
+            lines.append(
+                f"- **ADR-{adr.number:04d}: {adr.title}** "
+                f"(status: {adr.status}): {files_str}"
+            )
+        lines.extend(
+            [
+                "",
+                "**Repair options:**",
+                "1. If the sweep genuinely changed a decision, update the "
+                "affected `docs/adr/NNNN-*.md` file(s), then close this "
+                "issue referencing that PR, OR",
+                "2. Confirm the sweep is implementation-only and consistent "
+                "with every ADR listed — close this issue with a one-line "
+                "explanation (the close comment is the audit trail).",
+                "",
+                "**Close semantics (differs from per-ADR rollups):** this "
+                "batched issue is one-shot — it is NOT auto-closed when a "
+                "member ADR's file is later updated. Closing it clears the "
+                f"`FLEET-{pr_number}` tracking state and dedup key.",
+                "",
+                "_Filed by `adr_touchpoint_auditor` per ADR-0056 "
+                "(fleet batch, #9662)._",
+                "",
+                "<!-- [hydraflow-auditor: source=ADRTouchpointAuditorLoop] -->",
+            ]
+        )
+        return "\n".join(lines)
+
+    async def _file_fleet_rollup(
+        self,
+        pr_number: int,
+        entries: list[AdrRollupEntry],
+        merged_at: str,
+    ) -> int:
+        title = self._fleet_rollup_title(pr_number, len(entries))
+        body = self._fleet_rollup_body(pr_number, entries, merged_at)
+        return await self._pr.create_issue(
+            title,
+            body,
+            [*self._config.find_label, *self._config.adr_drift_label],
+        )
+
     async def _file_drift_escalation(self, key: str, attempts: int) -> int:
         title = f"HITL: ADR drift {key} unresolved after {attempts}"
         body = (
@@ -353,14 +470,18 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             )
         return entries
 
-    async def _close_and_clear_rollup(self, adr_num: int, issue_number: int) -> None:
+    async def _close_and_clear_rollup(self, rollup_key: str, issue_number: int) -> None:
         """Close a rollup issue and clear its state, attempts, and dedup key.
 
-        Atomic teardown shared by the ADR-file-resolved close path and the
-        stale-rollup reconcile pass (#9622). Closing an already-closed issue
-        is idempotent, so this is safe to call for a manually-closed rollup.
+        Atomic teardown shared by the ADR-file-resolved close path, the
+        stale-rollup reconcile pass (#9622), and the fleet-batch manual-close
+        reconcile (#9662) — *rollup_key* is either ``ADR-NNNN`` or
+        ``FLEET-<pr>``; the matching ``adr_touchpoint_auditor:<key>`` dedup
+        key is cleared alongside state + attempts so re-detection can re-file
+        cleanly. Closing an already-closed issue is idempotent, so this is
+        safe to call for a manually-closed rollup.
         """
-        rollup_key = _rollup_key(adr_num)
+        dedup_key = f"adr_touchpoint_auditor:{rollup_key}"
         try:
             await self._pr.close_issue(int(issue_number))
         except (
@@ -375,8 +496,8 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
         self._state.clear_adr_rollup(rollup_key)
         self._state.clear_adr_audit_attempts(rollup_key)
         current = self._dedup.get()
-        if _dedup_key(adr_num) in current:
-            self._dedup.set_all(current - {_dedup_key(adr_num)})
+        if dedup_key in current:
+            self._dedup.set_all(current - {dedup_key})
 
     async def _reconcile_stale_rollups(
         self,
@@ -409,6 +530,21 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
         """
         closed = 0
         for rollup_key, entry in self._state.all_adr_rollups().items():
+            fleet_pr = _pr_num_from_fleet_key(rollup_key)
+            if fleet_pr is not None:
+                # Fleet batch (#9662): one-shot by design — no drift-recompute
+                # auto-close. The only lifecycle event to reconcile is a manual
+                # close, whose orphaned state + FLEET-<pr> dedup key would
+                # otherwise strand forever (this loop's escalation reconcile
+                # only sees escalation-labeled closes).
+                issue_number = int(entry.get("issue_number", 0))
+                if not issue_number:
+                    continue
+                state = await self._pr.get_issue_state(issue_number)
+                if state and state not in ("OPEN", "UNKNOWN"):
+                    await self._close_and_clear_rollup(rollup_key, issue_number)
+                    closed += 1
+                continue
             adr_num = _adr_num_from_key(rollup_key)
             if adr_num is None:
                 continue
@@ -427,7 +563,7 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             # on error — only act on a *definitive* closed state (fail-closed).
             state = await self._pr.get_issue_state(issue_number)
             if state and state not in ("OPEN", "UNKNOWN"):
-                await self._close_and_clear_rollup(adr_num, issue_number)
+                await self._close_and_clear_rollup(rollup_key, issue_number)
                 closed += 1
                 continue
 
@@ -444,12 +580,78 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             recomputed = compute_drift_by_adr(self._adr_index, pr_diffs)
             if any(e.adr.number == adr_num for e in recomputed):
                 continue  # still genuinely drifts — leave the rollup open
-            await self._close_and_clear_rollup(adr_num, issue_number)
+            await self._close_and_clear_rollup(rollup_key, issue_number)
             closed += 1
         return closed
 
+    async def _process_fleet_batches(
+        self,
+        batches: list[FleetDriftBatch],
+        *,
+        adrs_resolved_this_tick: set[int],
+        pr_meta: dict[int, dict],
+        dedup: set[str],
+    ) -> tuple[int, int]:
+        """File one batched rollup per fleet PR (#9662). Returns (filed, escalated).
+
+        Mirrors the per-ADR fresh-file branch's guards: state + dedup make
+        the batch one-shot across ticks/restarts; attempts increment with the
+        same once-at-threshold escalation (only reachable when a closed batch
+        is re-observed, e.g. a cursor rewind re-scanning the fleet PR); and
+        ``create_issue``'s 0-sentinel records neither state nor dedup so the
+        next tick retries. Member ADRs whose own file appeared in another PR
+        this tick were just resolved above and are dropped from the batch
+        (mirrors the per-ADR ``adrs_resolved_this_tick`` skip).
+        """
+        filed = 0
+        escalated = 0
+        for batch in batches:
+            members = [
+                e for e in batch.entries if e.adr.number not in adrs_resolved_this_tick
+            ]
+            if not members:
+                continue
+            rollup_key = _fleet_rollup_key(batch.pr_number)
+            dedup_key = _fleet_dedup_key(batch.pr_number)
+            if self._state.get_adr_rollup(rollup_key) is not None:
+                # Already filed and tracked — fleet batches are one-shot, no
+                # in-place body updates (the batch derives from ONE merged PR
+                # whose diff never changes).
+                continue
+            if dedup_key in dedup:
+                # Rollup state was cleared (e.g. external close) but dedup not
+                # yet reconciled — skip until reconcile catches up.
+                continue
+            attempts = self._state.inc_adr_audit_attempts(rollup_key)
+            if attempts == _MAX_ATTEMPTS:
+                await self._file_drift_escalation(rollup_key, attempts)
+                escalated += 1
+            else:
+                merged_at = pr_meta.get(batch.pr_number, {}).get("mergedAt", "")
+                issue_number = await self._file_fleet_rollup(
+                    batch.pr_number, members, merged_at
+                )
+                if issue_number == 0:
+                    logger.warning(
+                        "adr_touchpoint_auditor: create_issue returned 0 "
+                        "(sentinel) for %s fleet batch; skipping record/"
+                        "dedup, will retry next cycle",
+                        rollup_key,
+                    )
+                    continue
+                self._state.set_adr_rollup(
+                    rollup_key,
+                    issue_number=issue_number,
+                    pr_numbers=[batch.pr_number],
+                )
+                filed += 1
+            dedup.add(dedup_key)
+            self._dedup.set_all(dedup)
+        return filed, escalated
+
     async def _do_work(self) -> WorkCycleResult:  # noqa: PLR0915
-        """Scan recently-merged PRs vs ADR citations, file per-ADR drift rollups."""
+        """Scan recently-merged PRs vs ADR citations; file per-ADR drift
+        rollups, batching cross-cutting fleet PRs into one issue (#9662)."""
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
         if not self._config.adr_touchpoint_auditor_loop_enabled:
@@ -494,8 +696,13 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             merged_at = pr.get("mergedAt") or ""
             new_cursor = max(new_cursor, merged_at)
 
-        rollups = compute_drift_by_adr(self._adr_index, pr_diffs)
+        rollups, fleet_batches = partition_fleet_drift(
+            self._adr_index,
+            pr_diffs,
+            fleet_threshold=self._config.adr_drift_fleet_batch_threshold,
+        )
         drifting_adrs = {entry.adr.number for entry in rollups}
+        drifting_adrs |= {n for batch in fleet_batches for n in batch.adr_numbers}
 
         # Resolve rollups for ADRs that were updated in any PR diff this tick.
         closed = 0
@@ -503,7 +710,9 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             existing = self._state.get_adr_rollup(_rollup_key(adr_num))
             if not existing:
                 continue
-            await self._close_and_clear_rollup(adr_num, int(existing["issue_number"]))
+            await self._close_and_clear_rollup(
+                _rollup_key(adr_num), int(existing["issue_number"])
+            )
             closed += 1
 
         # Stale-rollup reconciliation (#9622): a shared-infra addition /
@@ -617,6 +826,15 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
                 filed += 1
             dedup.add(dedup_key)
             self._dedup.set_all(dedup)
+
+        fleet_filed, fleet_escalated = await self._process_fleet_batches(
+            fleet_batches,
+            adrs_resolved_this_tick=adrs_resolved_this_tick,
+            pr_meta=pr_meta,
+            dedup=dedup,
+        )
+        filed += fleet_filed
+        escalated += fleet_escalated
 
         if new_cursor != cursor:
             self._state.set_adr_audit_cursor(new_cursor)
