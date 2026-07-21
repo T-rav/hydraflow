@@ -24,13 +24,10 @@ never touches the network.
 from __future__ import annotations
 
 import datetime as _dt
-from unittest.mock import AsyncMock
 
 import pytest
 
-import health_monitor_loop
 from config import ManagedRepo
-from execution import SimpleResult
 from health_monitor_loop import _ERROR_STREAK_THRESHOLD
 from tests.helpers import make_bg_loop_deps
 from tests.scenarios.catalog.loop_catalog import LoopCatalog
@@ -87,22 +84,6 @@ async def test_principles_audit_404_repo_auto_pruned_no_issue(
     bg = make_bg_loop_deps(tmp_path)
     object.__setattr__(bg.config, "managed_repos", [good, bad])
 
-    async def fake_probe_result(*cmd: str, **_kwargs: object) -> SimpleResult:
-        slug = cmd[2] if len(cmd) > 2 else ""
-        if "bad/repo" in slug:
-            return SimpleResult(
-                stdout="",
-                stderr="fatal: repository 'https://github.com/bad/repo.git/' not found",
-                returncode=128,
-            )
-        return SimpleResult(stdout="abc123\tHEAD\n", stderr="", returncode=0)
-
-    monkeypatch.setattr(
-        health_monitor_loop,
-        "run_subprocess_result",
-        AsyncMock(side_effect=fake_probe_result),
-    )
-
     state = world._harness.state
     state.set_worker_heartbeat("principles_audit", _error_heartbeat())
 
@@ -112,6 +93,15 @@ async def test_principles_audit_404_repo_auto_pruned_no_issue(
         config=bg.config,
         deps=bg.loop_deps,
     )
+
+    # The git ls-remote probe is now an injected RepoProber seam (#10140);
+    # inject a slug-aware fake (bad/repo 404s, everything else reachable)
+    # instead of patching the moved run_subprocess_result — no network.
+    class _SlugAwareProber:
+        async def probe(self, slug: str) -> bool | None:
+            return "bad/repo" not in slug
+
+    loop._repo_prober = _SlugAwareProber()
 
     for _ in range(_ERROR_STREAK_THRESHOLD):
         await loop._do_work()
