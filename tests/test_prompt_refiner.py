@@ -70,6 +70,69 @@ def test_discover_validation_ids_superset_of_every_holdout() -> None:
     assert regressed in ids
 
 
+def test_select_live_validation_sample_regressed_case_always_first() -> None:
+    """#10063: the regressed case is the highest-value live-validation check
+    (it proves the candidate's own target-case fix against a REAL
+    transcript) so it always takes priority within the budget."""
+    from prompt_refiner import select_live_validation_sample
+
+    sample = select_live_validation_sample(
+        CASES_DIR, "missing-import", "diff-sanity", budget=1
+    )
+    assert sample == ["missing-import"]
+
+
+def test_select_live_validation_sample_fills_with_same_skill_holdouts_only() -> None:
+    """Remaining budget goes to *skill_name*'s OWN holdouts — a holdout for a
+    different skill would SKIP under `--live-skill skill_name` (no CLI call,
+    no signal), and benign 'none' sentinels carry no signal about the
+    candidate's target-case fix either."""
+    from prompt_refiner import select_live_validation_sample
+
+    sample = select_live_validation_sample(
+        CASES_DIR, "missing-import", "diff-sanity", budget=10
+    )
+    assert sample[0] == "missing-import"
+    assert "holdout-diff-sanity-attack-debug-residue" in sample
+    assert "holdout-diff-sanity-benign-docstring" not in sample  # benign sentinel
+    assert "holdout-scope-check-attack-stray-file" not in sample  # other skill
+    assert "holdout-test-adequacy-attack-untested-branch" not in sample
+
+
+def test_select_live_validation_sample_budget_zero_is_empty() -> None:
+    """0 disables the sample entirely — every case replays its fixture
+    (matching pre-#10063 behavior; CI/non-live-opt-in determinism)."""
+    from prompt_refiner import select_live_validation_sample
+
+    assert (
+        select_live_validation_sample(
+            CASES_DIR, "missing-import", "diff-sanity", budget=0
+        )
+        == []
+    )
+
+
+def test_select_live_validation_sample_respects_budget_cap() -> None:
+    from prompt_refiner import select_live_validation_sample
+
+    sample = select_live_validation_sample(
+        CASES_DIR, "missing-import", "diff-sanity", budget=1
+    )
+    assert len(sample) == 1
+    assert sample == ["missing-import"]
+
+
+def test_select_live_validation_sample_missing_cases_dir_returns_regressed_only(
+    tmp_path: Path,
+) -> None:
+    from prompt_refiner import select_live_validation_sample
+
+    missing = tmp_path / "does-not-exist"
+    assert select_live_validation_sample(missing, "some-case", "diff-sanity", 5) == [
+        "some-case"
+    ]
+
+
 def test_parse_patch_response_extracts_diff_fence() -> None:
     text = "reasoning...\n```diff\n--- a/src/diff_sanity.py\n+++ b/src/diff_sanity.py\n@@ -1 +1 @@\n-a\n+b\n```\ndone"
     assert parse_patch_response(text).startswith("--- a/src/diff_sanity.py")
