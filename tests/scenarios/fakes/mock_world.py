@@ -784,6 +784,14 @@ class MockWorld:
 
         loop_instances = []
         for name in loops:
+            if name == "pipeline_poller":
+                # pipeline_poller is the orchestrator-level
+                # `_pipeline_stats_loop` (src/orchestrator.py ~965), NOT a
+                # BaseBackgroundLoop subclass, so LoopCatalog has no builder
+                # for it and instantiate() would raise "Unknown loop" (#9441).
+                # Handled as a special case in the execution loop below.
+                loop_instances.append((name, None))
+                continue
             instance = LoopCatalog.instantiate(
                 name, ports=self._loop_ports, config=config, deps=loop_deps
             )
@@ -791,11 +799,41 @@ class MockWorld:
 
         results: dict[str, dict[str, Any] | None] = {}
         for name, loop in loop_instances:
+            if name == "pipeline_poller":
+                orchestrator = await self._pipeline_poller_orchestrator()
+                stats: dict[str, Any] | None = None
+                for _ in range(cycles):
+                    await orchestrator.emit_pipeline_stats()
+                    stats = orchestrator.build_pipeline_stats().model_dump()
+                results[name] = stats
+                continue
             for _ in range(cycles):
                 stats = await loop._do_work()
                 results[name] = stats
 
         return results
+
+    async def _pipeline_poller_orchestrator(self) -> Any:
+        """Lazily build (and cache) a real orchestrator to drive pipeline_poller.
+
+        ``pipeline_poller`` is the orchestrator-level ``_pipeline_stats_loop``
+        (src/orchestrator.py ~965), not a ``BaseBackgroundLoop`` subclass, so
+        it has no ``_do_work()`` and ``LoopCatalog`` has no builder for it
+        (#9441). Rather than faking the emission, reuse the same
+        ``_build_wired_orchestrator`` helper the dashboard's
+        ``with_orchestrator=True`` path uses to construct a real
+        ``HydraFlowOrchestrator`` wired to this world's fakes, so
+        ``run_with_loops`` drives the genuine ``emit_pipeline_stats()`` and
+        publishes a real ``PIPELINE_STATS`` event on the harness bus — exactly
+        what happens in the docker sandbox stack. Cached on the world so
+        repeated calls (e.g. multiple scenarios in one test session) reuse the
+        same instance instead of re-wiring on every cycle.
+        """
+        if not hasattr(self, "_pipeline_orchestrator"):
+            self._pipeline_orchestrator = await self._build_wired_orchestrator(
+                self._harness.config, self._harness.bus, self._harness.state
+            )
+        return self._pipeline_orchestrator
 
     def _wire_seed_loop_seams(self, config: Any) -> None:
         """Wire seed-seam loop overrides from the last applied seed (#9543).
