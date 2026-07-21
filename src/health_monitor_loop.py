@@ -25,16 +25,17 @@ from event_loop_watchdog import (
     read_stall_marker,
 )
 from events import EventType, HydraFlowEvent
-from exception_classify import reraise_on_credit_or_bug
 from git_revision import get_commits_behind
+from repo_existence_prober import DefaultRepoProber
 from rollup_issue_manager import RollupIssueManager
-from subprocess_util import run_subprocess, run_subprocess_result
+from subprocess_util import run_subprocess
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from bg_worker_manager import BGWorkerManager
     from ports import ObservabilityPort, PRPort
+    from repo_existence_prober import RepoProber
     from retrospective_queue import RetrospectiveQueue
     from state import StateTracker
 
@@ -129,19 +130,6 @@ _PERSISTENT_ERROR_EXCLUDED = frozenset({"trust_fleet_sanity", "health_monitor"})
 # RollupIssueManager namespace for the persistent-error actuator's
 # generic (unknown-pattern) issue-filing fallback.
 _PERSISTENT_ERROR_NAMESPACE = "health_monitor_persistent_error"
-
-# Bounded probe timeout for the known-repair `git ls-remote` 404 check
-# (PrinciplesAuditLoop's managed_repos entries) — short and fixed, mirrors
-# `_STALE_CODE_FETCH_TIMEOUT_SECS`; a probe must degrade to "ambiguous"
-# rather than hang the health-monitor cycle.
-_REPO_PROBE_TIMEOUT_SECS = 30.0
-
-# Conservative `git ls-remote` failure-output markers that indicate a
-# confirmed 404 (repo deleted/renamed/private-without-access). Anything
-# else (network blip, auth hiccup, rate limit) is ambiguous and must NOT
-# be treated as a 404 — fail open, never prune a healthy repo entry on a
-# signal that isn't a clear "this repo does not exist".
-_REPO_NOT_FOUND_MARKERS = ("repository not found", "not found")
 
 # ---------------------------------------------------------------------------
 # Trend metrics
@@ -404,6 +392,7 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         bg_workers: BGWorkerManager | None = None,
         observability: ObservabilityPort | None = None,
         credentials: Credentials | None = None,
+        repo_prober: RepoProber | None = None,
     ) -> None:
         super().__init__(
             worker_name="health_monitor",
@@ -419,6 +408,15 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         # commits-behind snapshot it consumes (git_revision.get_commits_behind,
         # #9663) is fresh, not the possibly-stale local tracking ref.
         self._credentials: Credentials = credentials or Credentials()
+        # Repo-existence probe for the persistent-error self-repair actuator's
+        # ``principles_audit`` 404-prune (#10140). Extracted behind a
+        # ``RepoProber`` seam so the raw ``git ls-remote`` spawn lives outside
+        # ``*_loop.py`` (sandbox seam guard) and the sandbox/MockWorld can
+        # inject a fake, air-gapping it. Self-defaults so production wiring
+        # (service_registry) needs no change.
+        self._repo_prober: RepoProber = repo_prober or DefaultRepoProber(
+            self._credentials.gh_token, config.repo_root
+        )
         # §12.1 dead-man-switch inputs — ``state`` is available at
         # service-registry time; ``bg_workers`` is built after the loop
         # registry, so orchestrator injects it via ``set_bg_workers``.
@@ -1913,31 +1911,16 @@ class HealthMonitorLoop(BaseBackgroundLoop):
     async def _repo_probe(self, slug: str) -> bool | None:
         """Bounded, fail-open existence probe for a managed-repo slug.
 
-        Returns ``True`` (reachable), ``False`` (confirmed 404 — safe to
-        prune), or ``None`` (ambiguous: timeout, circuit-breaker-open,
-        network/auth hiccup — never treated as a 404, so a transient
-        failure can never prune a healthy entry).
+        Delegates to the injected :class:`RepoProber` (production default
+        :class:`DefaultRepoProber`). Extracted from this loop in #10140 so
+        the raw ``git ls-remote`` spawn lives outside ``*_loop.py`` (sandbox
+        seam guard) and the sandbox/MockWorld can inject a fake to air-gap
+        it. Contract unchanged: ``True`` (reachable), ``False`` (confirmed
+        404 — safe to prune), or ``None`` (ambiguous: timeout,
+        circuit-breaker-open, network/auth hiccup — never treated as a 404,
+        so a transient failure can never prune a healthy entry).
         """
-        try:
-            result = await run_subprocess_result(
-                "git",
-                "ls-remote",
-                f"https://github.com/{slug}.git",
-                "HEAD",
-                cwd=self._config.repo_root,
-                gh_token=self._credentials.gh_token,
-                timeout=_REPO_PROBE_TIMEOUT_SECS,
-            )
-        except Exception as exc:  # noqa: BLE001
-            reraise_on_credit_or_bug(exc)
-            logger.debug("repo probe failed for %s", slug, exc_info=True)
-            return None
-        if result.returncode == 0:
-            return True
-        haystack = f"{result.stdout}\n{result.stderr}".lower()
-        if any(marker in haystack for marker in _REPO_NOT_FOUND_MARKERS):
-            return False
-        return None
+        return await self._repo_prober.probe(slug)
 
     async def _repair_principles_audit_404_repo(self) -> str | None:
         """Known auto-repair: prune a ``managed_repos`` entry whose repo 404s.

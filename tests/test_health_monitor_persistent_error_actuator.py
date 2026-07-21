@@ -19,17 +19,19 @@ silent-heartbeat dead-man-switch this complements).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
-import health_monitor_loop
+import repo_existence_prober
 from base_background_loop import LoopDeps
 from config import HydraFlowConfig, ManagedRepo
 from events import EventBus
 from execution import SimpleResult
 from health_monitor_loop import _ERROR_STREAK_THRESHOLD, HealthMonitorLoop
+from repo_existence_prober import DefaultRepoProber
 from state import StateTracker
 from subprocess_util import CreditExhaustedError
 
@@ -214,8 +216,26 @@ async def test_known_repair_attempted_only_once_per_streak(hm_env) -> None:
 # ---------------------------------------------------------------------------
 
 
+class _FakeProber:
+    """Test ``RepoProber`` mapping each slug through a plain verdict callable
+    and recording the calls, so the repair tests exercise the injected-prober
+    seam exactly as production (``DefaultRepoProber``) and the sandbox
+    (``_FakeRepoProber``) wire it — not a method-assign on ``_repo_probe``."""
+
+    def __init__(self, verdict: Callable[[str], bool | None]) -> None:
+        self._verdict = verdict
+        self.calls: list[str] = []
+
+    async def probe(self, slug: str) -> bool | None:
+        self.calls.append(slug)
+        return self._verdict(slug)
+
+
 def _real_loop(
-    tmp_path: Path, *, managed_repos: list[ManagedRepo]
+    tmp_path: Path,
+    *,
+    managed_repos: list[ManagedRepo],
+    repo_prober: repo_existence_prober.RepoProber | None = None,
 ) -> tuple[HealthMonitorLoop, AsyncMock, StateTracker, HydraFlowConfig]:
     cfg = HydraFlowConfig(
         data_root=tmp_path,
@@ -225,61 +245,69 @@ def _real_loop(
     prs = AsyncMock()
     prs.create_issue = AsyncMock(return_value=777)
     state = StateTracker(state_file=tmp_path / "state2.json")
-    loop = HealthMonitorLoop(config=cfg, deps=_deps(), prs=prs, state=state)
+    loop = HealthMonitorLoop(
+        config=cfg, deps=_deps(), prs=prs, state=state, repo_prober=repo_prober
+    )
     return loop, prs, state, cfg
 
 
-async def test_repo_probe_confirmed_404(tmp_path: Path, monkeypatch) -> None:
-    loop, *_ = _real_loop(tmp_path, managed_repos=[])
+# --- DefaultRepoProber: the real ``git ls-remote`` probe, now air-gappable ---
+
+
+async def test_default_prober_confirmed_404(tmp_path: Path, monkeypatch) -> None:
     mock = AsyncMock(
         return_value=_result(
             128,
             stderr="fatal: repository 'https://github.com/a/b.git/' not found",
         )
     )
-    monkeypatch.setattr(health_monitor_loop, "run_subprocess_result", mock)
-    assert await loop._repo_probe("a/b") is False
+    monkeypatch.setattr(repo_existence_prober, "run_subprocess_result", mock)
+    assert await DefaultRepoProber("", tmp_path).probe("a/b") is False
 
 
-async def test_repo_probe_reachable(tmp_path: Path, monkeypatch) -> None:
-    loop, *_ = _real_loop(tmp_path, managed_repos=[])
+async def test_default_prober_reachable(tmp_path: Path, monkeypatch) -> None:
     mock = AsyncMock(return_value=_result(0, stdout="abc123\tHEAD\n"))
-    monkeypatch.setattr(health_monitor_loop, "run_subprocess_result", mock)
-    assert await loop._repo_probe("a/b") is True
+    monkeypatch.setattr(repo_existence_prober, "run_subprocess_result", mock)
+    assert await DefaultRepoProber("", tmp_path).probe("a/b") is True
 
 
-async def test_repo_probe_ambiguous_failure_fails_open(
+async def test_default_prober_ambiguous_failure_fails_open(
     tmp_path: Path, monkeypatch
 ) -> None:
-    loop, *_ = _real_loop(tmp_path, managed_repos=[])
     mock = AsyncMock(
         return_value=_result(
             128, stderr="fatal: unable to access ...: Could not resolve host"
         )
     )
-    monkeypatch.setattr(health_monitor_loop, "run_subprocess_result", mock)
-    assert await loop._repo_probe("a/b") is None
+    monkeypatch.setattr(repo_existence_prober, "run_subprocess_result", mock)
+    assert await DefaultRepoProber("", tmp_path).probe("a/b") is None
 
 
-async def test_repo_probe_credit_exhausted_reraises(
+async def test_default_prober_credit_exhausted_reraises(
     tmp_path: Path, monkeypatch
 ) -> None:
-    loop, *_ = _real_loop(tmp_path, managed_repos=[])
     mock = AsyncMock(side_effect=CreditExhaustedError("out of credit"))
-    monkeypatch.setattr(health_monitor_loop, "run_subprocess_result", mock)
+    monkeypatch.setattr(repo_existence_prober, "run_subprocess_result", mock)
     with pytest.raises(CreditExhaustedError):
-        await loop._repo_probe("a/b")
+        await DefaultRepoProber("", tmp_path).probe("a/b")
+
+
+async def test_repo_probe_delegates_to_injected_prober(tmp_path: Path) -> None:
+    """The loop's ``_repo_probe`` is a thin pass-through to the injected
+    ``RepoProber`` — the #10140 air-gap seam (no raw spawn in the loop)."""
+    prober = _FakeProber(lambda _slug: False)
+    loop, *_ = _real_loop(tmp_path, managed_repos=[], repo_prober=prober)
+    assert await loop._repo_probe("x/y") is False
+    assert prober.calls == ["x/y"]
 
 
 async def test_repair_prunes_first_404_entry(tmp_path: Path) -> None:
     good = ManagedRepo(slug="good/repo")
     bad = ManagedRepo(slug="bad/repo")
-    loop, _prs, _state, cfg = _real_loop(tmp_path, managed_repos=[good, bad])
-
-    async def fake_probe(slug: str) -> bool | None:
-        return slug != "bad/repo"
-
-    loop._repo_probe = fake_probe  # type: ignore[method-assign]
+    prober = _FakeProber(lambda slug: slug != "bad/repo")
+    loop, _prs, _state, cfg = _real_loop(
+        tmp_path, managed_repos=[good, bad], repo_prober=prober
+    )
     result = await loop._repair_principles_audit_404_repo()
     assert result == "bad/repo"
     enabled_by_slug = {mr.slug: mr.enabled for mr in cfg.managed_repos}
@@ -288,27 +316,21 @@ async def test_repair_prunes_first_404_entry(tmp_path: Path) -> None:
 
 async def test_repair_skips_already_disabled_entries(tmp_path: Path) -> None:
     disabled_bad = ManagedRepo(slug="bad/repo", enabled=False)
-    loop, _prs, _state, _cfg = _real_loop(tmp_path, managed_repos=[disabled_bad])
-    probe_calls: list[str] = []
-
-    async def fake_probe(slug: str) -> bool | None:
-        probe_calls.append(slug)
-        return False
-
-    loop._repo_probe = fake_probe  # type: ignore[method-assign]
+    prober = _FakeProber(lambda _slug: False)
+    loop, _prs, _state, _cfg = _real_loop(
+        tmp_path, managed_repos=[disabled_bad], repo_prober=prober
+    )
     result = await loop._repair_principles_audit_404_repo()
     assert result is None
-    assert probe_calls == []
+    assert prober.calls == []
 
 
 async def test_repair_all_healthy_returns_none(tmp_path: Path) -> None:
     good = ManagedRepo(slug="good/repo")
-    loop, _prs, _state, cfg = _real_loop(tmp_path, managed_repos=[good])
-
-    async def fake_probe(_slug: str) -> bool | None:
-        return True
-
-    loop._repo_probe = fake_probe  # type: ignore[method-assign]
+    prober = _FakeProber(lambda _slug: True)
+    loop, _prs, _state, cfg = _real_loop(
+        tmp_path, managed_repos=[good], repo_prober=prober
+    )
     result = await loop._repair_principles_audit_404_repo()
     assert result is None
     assert cfg.managed_repos[0].enabled is True
@@ -322,12 +344,10 @@ async def test_end_to_end_principles_audit_repair_via_actuator(
     filed for a repo that self-healed."""
     good = ManagedRepo(slug="good/repo")
     bad = ManagedRepo(slug="bad/repo")
-    loop, prs, state, cfg = _real_loop(tmp_path, managed_repos=[good, bad])
-
-    async def fake_probe(slug: str) -> bool | None:
-        return slug != "bad/repo"
-
-    loop._repo_probe = fake_probe  # type: ignore[method-assign]
+    prober = _FakeProber(lambda slug: slug != "bad/repo")
+    loop, prs, state, cfg = _real_loop(
+        tmp_path, managed_repos=[good, bad], repo_prober=prober
+    )
     state.set_worker_heartbeat("principles_audit", _hb("error"))
 
     for _ in range(_ERROR_STREAK_THRESHOLD):

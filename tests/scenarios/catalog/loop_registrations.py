@@ -261,18 +261,35 @@ def _build_pr_unsticker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
+class _StubRepoProber:
+    """In-process air-gap for ``HealthMonitorLoop``'s repo-existence probe.
+
+    Production ``DefaultRepoProber.probe`` shells out to ``git ls-remote``
+    (#10140); reporting "reachable" (``True``) without spawning keeps
+    in-process MockWorld health-monitor scenarios off the network the same
+    way ``sandbox_main`` injects ``_FakeRepoProber``.
+    """
+
+    async def probe(self, slug: str) -> bool | None:
+        _ = slug
+        return True
+
+
 def _build_health_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from health_monitor_loop import HealthMonitorLoop  # noqa: PLC0415
 
     # ``state`` powers the dead-man-switch heartbeat reads; ``bg_workers``
     # (seeded via seed_ports) powers the restart-first stall sweep. Both
     # checks silently no-op when their deps are absent, so plain
-    # health-monitor scenarios are unaffected.
+    # health-monitor scenarios are unaffected. ``repo_prober`` is stubbed so
+    # the persistent-error self-repair actuator's ``git ls-remote`` 404-probe
+    # (#10140) never spawns in-process.
     loop = HealthMonitorLoop(
         config=config,
         deps=deps,
         prs=ports["github"],
         state=ports.get("state"),
+        repo_prober=_StubRepoProber(),
     )
     bg_workers = ports.get("bg_workers")
     if bg_workers is not None:
