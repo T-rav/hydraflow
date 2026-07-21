@@ -380,6 +380,57 @@ class TestTriagePhase:
 
         prs.transition.assert_called_once_with(12, "plan")
 
+    @pytest.mark.asyncio
+    async def test_collapse_flag_routes_low_clarity_to_plan(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ADR-0107: with collapse_discover_shape on, a low-clarity ready issue
+        routes straight to plan instead of discover."""
+        collapsed = config.model_copy(update={"collapse_discover_shape": True})
+        phase, _state, triage, prs, store, _stop = make_triage_phase(collapsed)
+        issue = TaskFactory.create(
+            id=13, title="Improve onboarding experience", body="A" * 100
+        )
+
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=13,
+                ready=True,
+                clarity_score=4,  # Below default threshold — would be discover
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        await phase.triage_issues()
+
+        prs.transition.assert_called_once_with(13, "plan")
+
+    @pytest.mark.asyncio
+    async def test_collapse_flag_routes_needs_discovery_to_plan(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ADR-0107: with the flag on, needs_discovery no longer routes to the
+        standalone discover phase — the planner gate owns that decision."""
+        collapsed = config.model_copy(update={"collapse_discover_shape": True})
+        phase, _state, triage, prs, store, _stop = make_triage_phase(collapsed)
+        issue = TaskFactory.create(
+            id=14, title="Build a better Calendly", body="A" * 100
+        )
+
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=14,
+                ready=True,
+                needs_discovery=True,
+                clarity_score=3,
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        await phase.triage_issues()
+
+        prs.transition.assert_called_once_with(14, "plan")
+
 
 class TestTriagePhaseBatchScaling:
     """Pool respects max_triagers for concurrency control."""

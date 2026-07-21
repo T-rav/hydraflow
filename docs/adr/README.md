@@ -68,7 +68,7 @@ cadence and files remediation issues on drift.
 | [0028](0028-event-driven-report-pipeline.md) | Event-Driven Report Pipeline with Extractable Widget | Accepted |
 | [0029](0029-caretaker-loop-pattern.md) | Caretaker Background Loop Pattern | Accepted |
 | [0030](0030-routes-domain-decomposition.md) | Dashboard Routes Domain Decomposition | Accepted |
-| [0031](0031-product-track-architecture.md) | Product Track Architecture — Discover and Shape Phases | Accepted |
+| [0031](0031-product-track-architecture.md) | Product Track Architecture — Discover and Shape Phases | Superseded |
 | [0032](0032-per-repo-wiki-knowledge-base.md) | Per-Repo Wiki Knowledge Base (Karpathy Pattern) | Accepted |
 | [0033](0033-gate-triage-call-not-hitl-fallback.md) | Gate Triage Call on Config Toggle, Not Just HITL Fallback | Superseded |
 | [0034](0034-auto-triage-toggle-must-gate-routing.md) | Auto-Triage Toggle Must Gate Routing, Not Just Stat Tracking | Accepted |
@@ -144,6 +144,7 @@ cadence and files remediation issues on drift.
 | [0104](0104-auto-tightening-ratchet.md) | Auto-tightening ratchet | Accepted |
 | [0105](0105-autonomous-convergence-via-decomposition.md) | Autonomous Convergence via Decomposition | Proposed |
 | [0106](0106-thread-level-event-loop-freeze-detector.md) | Thread-level event-loop freeze detector | Accepted |
+| [0107](0107-collapse-discover-shape-into-plan.md) | Collapse Discover + Shape into Plan — Triage → Plan Directly | Accepted |
 
 ## Adding a new ADR
 

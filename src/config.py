@@ -637,6 +637,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("screenshot_gist_public", "HYDRAFLOW_SCREENSHOT_GIST_PUBLIC", False),
     ("skip_preflight", "HYDRAFLOW_SKIP_PREFLIGHT", False),
     ("whatsapp_enabled", "HYDRAFLOW_WHATSAPP_ENABLED", False),
+    ("collapse_discover_shape", "HYDRAFLOW_COLLAPSE_DISCOVER_SHAPE", False),
     (
         "sandbox_failure_fixer_enabled",
         "HYDRAFLOW_SANDBOX_FAILURE_FIXER_ENABLED",
@@ -1811,6 +1812,18 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=10,
         description="Clarity score threshold: issues scoring below this route to discovery",
+    )
+    collapse_discover_shape: bool = Field(
+        default=False,
+        description=(
+            "ADR-0107 rollout lever. When True, Triage routes ready issues "
+            "directly to Plan and no longer emits the hydraflow-discover / "
+            "hydraflow-shape transitions — Discover/Shape become planner-invoked "
+            "helpers instead of standalone phases. Migration flag: keep False in "
+            "production until the planner discover/shape decision gate lands "
+            "(#9773), since enabling it early plans low-clarity issues with no "
+            "discovery pre-pass."
+        ),
     )
     max_shape_turns: int = Field(
         default=10,
