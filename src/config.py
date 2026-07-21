@@ -221,6 +221,12 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ),
     ("pr_red_repair_interval", "HYDRAFLOW_PR_RED_REPAIR_INTERVAL", 300),
     ("pr_red_rerun_max_attempts", "HYDRAFLOW_PR_RED_RERUN_MAX_ATTEMPTS", 2),
+    ("erosion_metrics_interval", "HYDRAFLOW_EROSION_METRICS_INTERVAL", 14400),
+    (
+        "erosion_metrics_max_issues_per_tick",
+        "HYDRAFLOW_EROSION_METRICS_MAX_ISSUES_PER_TICK",
+        3,
+    ),
     ("adr_review_interval", "HYDRAFLOW_ADR_REVIEW_INTERVAL", 86400),
     ("adr_review_approval_threshold", "HYDRAFLOW_ADR_REVIEW_APPROVAL_THRESHOLD", 2),
     ("adr_review_max_rounds", "HYDRAFLOW_ADR_REVIEW_MAX_ROUNDS", 3),
@@ -766,6 +772,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("stale_issue_gc_loop_enabled", "HYDRAFLOW_STALE_ISSUE_GC_LOOP_ENABLED", True),
     ("gate_health_loop_enabled", "HYDRAFLOW_GATE_HEALTH_LOOP_ENABLED", True),
     ("pr_red_repair_loop_enabled", "HYDRAFLOW_PR_RED_REPAIR_LOOP_ENABLED", True),
+    (
+        "erosion_metrics_loop_enabled",
+        "HYDRAFLOW_EROSION_METRICS_LOOP_ENABLED",
+        True,
+    ),
     (
         "human_branch_shepherd_enabled",
         "HYDRAFLOW_HUMAN_BRANCH_SHEPHERD_ENABLED",
@@ -1646,6 +1657,27 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Max bounded `gh run rerun --failed` attempts per PR before "
             "PrRedRepairLoop escalates via a rollup issue (#10027)"
+        ),
+    )
+    erosion_metrics_interval: int = Field(
+        default=14400,
+        ge=900,
+        le=604800,
+        description=(
+            "ErosionMetricsLoop cycle interval in seconds (#10107, epic "
+            "#10104: change-spread/concept-scatter drift → triage; v1 "
+            "provisional cadence, default 4h)"
+        ),
+    )
+    erosion_metrics_max_issues_per_tick: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Max hydraflow-find issues ErosionMetricsLoop files in one tick "
+            "(#10107). Overflow candidates beyond the cap for that tick's "
+            "commit range are not carried over — a rate limit on filing "
+            "volume, not a durable backlog."
         ),
     )
 
@@ -4362,6 +4394,16 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Deploy-time kill-switch for PrRedRepairLoop (#10027 Phase 1: "
             "infra-flake retrier)."
+        ),
+    )
+    erosion_metrics_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for ErosionMetricsLoop (#10107, epic "
+            "#10104: v1 change-spread/concept-scatter drift caretaker). "
+            "Defaults ON but conservative — the sensors' own baseline/"
+            "threshold defaults keep it quiet until an operator snapshots "
+            "a real repo-specific baseline."
         ),
     )
     stale_issue_loop_enabled: bool = Field(

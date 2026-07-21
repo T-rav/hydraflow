@@ -27,15 +27,16 @@ graph LR
     src_sentry["src.sentry"]
     src_state["src.state"]
     src_telemetry["src.telemetry"]
-    src -- "4" --> src_arch
+    src -- "6" --> src_arch
     src -- "14" --> src_auto_tighten
     src -- "30" --> src_contracts
     src -- "4" --> src_dashboard_routes
     src -- "5" --> src_disturbance
+    src -- "9" --> src_erosion
     src -- "1" --> src_observability
     src -- "14" --> src_preflight
     src -- "1" --> src_review_phase
-    src -- "57" --> src_state
+    src -- "58" --> src_state
     src -- "7" --> src_telemetry
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch

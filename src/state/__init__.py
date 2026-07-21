@@ -35,6 +35,7 @@ from ._diagnostic import DiagnosticStateMixin
 from ._disturbance import DisturbanceStateMixin
 from ._driver import DriverStateMixin
 from ._epic import EpicStateMixin
+from ._erosion_metrics import ErosionMetricsStateMixin
 from ._fake_coverage import FakeCoverageStateMixin
 from ._flake_tracker import FlakeTrackerStateMixin
 from ._gc import StateGCMixin
@@ -125,6 +126,7 @@ class StateTracker(
     HumanSteeringStateMixin,
     DriverStateMixin,
     IssueRefinementStateMixin,
+    ErosionMetricsStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 

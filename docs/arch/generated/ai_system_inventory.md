@@ -55,7 +55,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_REPORT_ISSUE` | `report_issue_tool` | `report_issue_model` |
 | `HYDRAFLOW_TERM_PROPOSER` | `term_proposer_tool` | `term_proposer_model` |
 
-## Background loops (57)
+## Background loops (58)
 
 | Worker | Loop class | Area | Model role(s) | Long LLM cycle | Oversight | Purpose |
 |---|---|---|---|---|---|---|
@@ -79,6 +79,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `entry_evidence` | `EntryEvidenceLoop` | Caretaking | — | — | — | Caretaker that links wiki entries to UL terms via LLM matching, populating Term.evidence so the Atlas Domain view can render entry leaves under their term parents. See ADR-0062. |
 | `epic_monitor` | `EpicMonitorLoop` | Caretaking | — | — | — | Detects stale epics and refreshes progress cache so the dashboard shows accurate sub-issue rollups. |
 | `epic_sweeper` | `EpicSweeperLoop` | Caretaking | — | — | — | Periodically sweeps open epics and auto-closes those with all sub-issues resolved. |
+| `erosion_metrics` | `ErosionMetricsLoop` | Trust Fleet | — | — | — | v1: runs the change-spread and concept-scatter sensors over commits merged since the last tick; files above-baseline drift as hydraflow-find issues for human triage (Pattern B). See #10107, epic #10104. |
 | `fake_coverage_auditor` | `FakeCoverageAuditorLoop` | Trust Fleet | — | — | HITL escalation | Flags fake-adapter methods without cassettes and scenario helpers nobody calls. |
 | `fitness_scorecard` | `FitnessScorecardLoop` | Caretaking | — | — | — | Computes per-loop fitness scores each tick by combining event history and issue attribution. Persists to fitness.jsonl and regenerates docs/arch/generated/loop-fitness.md. Read-only caretaker per ADR-0029. |
 | `flake_tracker` | `FlakeTrackerLoop` | Trust Fleet | — | — | HITL escalation | Detects persistently flaky tests across recent RC runs and files flake-tracker issues. |

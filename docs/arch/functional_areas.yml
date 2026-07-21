@@ -77,6 +77,7 @@ areas:
       - AutoTightenLoop
       - ContractRefreshLoop
       - CorpusLearningLoop
+      - ErosionMetricsLoop
       - FakeCoverageAuditorLoop
       - FlakeTrackerLoop
       - LiveCorpusReplayLoop
@@ -86,7 +87,7 @@ areas:
       - TrustFleetSanityLoop
     ports:
       - ConformanceRunnerPort
-    related_adrs: ['0042', '0045', '0048', '0056', '0100']
+    related_adrs: ['0042', '0045', '0048', '0056', '0100', '0101']
 
   hexagonal_boundaries:
     label: Hexagonal Boundaries

@@ -308,6 +308,11 @@ _bg_worker_defs = [
         "Detects settled-red open PRs and bounded-reruns infra-flake CI; escalates via rollup issue once the rerun budget is exhausted (#10027 Phase 1).",
     ),
     (
+        "erosion_metrics",
+        "Erosion Metrics",
+        "v1: runs the change-spread and concept-scatter sensors over commits merged since the last tick; files above-baseline drift as hydraflow-find issues for human triage (Pattern B). See #10107, epic #10104.",
+    ),
+    (
         "issue_refinement",
         "Issue Refinement",
         "Backlog-wide duplicate detection, priority scoring, and a rolling operator digest issue.",

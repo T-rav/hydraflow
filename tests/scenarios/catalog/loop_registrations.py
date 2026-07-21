@@ -80,6 +80,52 @@ def _build_pr_red_repair(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
+def _build_erosion_metrics(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build ErosionMetricsLoop for scenarios (#10107, epic #10104).
+
+    ``state`` defaults to a MagicMock whose last-processed-SHA cursor is a
+    simple in-memory string starting empty (clean slate — the first tick
+    primes the baseline, matching production's fresh-install behavior).
+    ``dedup`` defaults to a clean-slate MagicMock (no prior filed
+    fingerprints), mirroring GateActivatorLoop's builder. Both this
+    loop's git-range analysis (``changed_files_for_range`` /
+    ``added_symbols_for_range``) run against ``config.repo_root`` on disk,
+    not through the ``github`` port, so scenarios exercising the
+    threshold/dedup path need a real git repo fixture there rather than
+    seeded FakeGitHub state — see ``tests/scenarios/test_erosion_metrics_scenario.py``.
+    """
+    from erosion_metrics_loop import ErosionMetricsLoop  # noqa: PLC0415
+
+    state = ports.get("erosion_metrics_state")
+    if state is None:
+        state = MagicMock()
+        cursor: dict[str, str] = {"sha": ""}
+
+        def _get_sha() -> str:
+            return cursor["sha"]
+
+        def _set_sha(sha: str) -> None:
+            cursor["sha"] = sha
+
+        state.get_erosion_last_processed_sha.side_effect = _get_sha
+        state.set_erosion_last_processed_sha.side_effect = _set_sha
+        ports["erosion_metrics_state"] = state
+
+    dedup = ports.get("erosion_metrics_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["erosion_metrics_dedup"] = dedup
+
+    return ErosionMetricsLoop(
+        config=config,
+        pr_manager=ports["github"],
+        state=state,
+        dedup=dedup,
+        deps=deps,
+    )
+
+
 def _build_issue_refinement(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build IssueRefinementLoop for scenarios (#9957).
 
@@ -1844,6 +1890,7 @@ _BUILDERS: dict[str, Any] = {
     "stale_issue_gc": _build_stale_issue_gc,
     "gate_health": _build_gate_health,
     "pr_red_repair": _build_pr_red_repair,
+    "erosion_metrics": _build_erosion_metrics,
     "issue_refinement": _build_issue_refinement,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,

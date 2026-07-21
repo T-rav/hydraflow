@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `769843e` — feat(sandbox): seed repo-wiki broken-cite fixture + wiki_rot_detector active-trigger scenario (#10133) (#10137) (#10137) *(2026-07-21)*
+- `2c34150` — feat(erosion): v1 concept-scatter sensor — newly-added symbol across K>=3 modules (#10106) (#10136) (#10136) *(2026-07-21)*
 - `76bc56b` — feat(sandbox): seed worker-status event-history + trust_fleet_sanity active-trigger scenario (#10133) (#10135) (#10135) *(2026-07-21)*
 - `9af3aa2` — feat(sandbox): per-issue updated_at seed field + stale_issue_gc fresh-skip active-trigger scenario (#9544) (#10132) (#10132) *(2026-07-21)*
 - `281548c` — feat(sandbox): seed BGWorkerManager registered_workers set + dead-man-switch stall-escalation e2e scenario (#10086) (#10131) (#10131) *(2026-07-21)*

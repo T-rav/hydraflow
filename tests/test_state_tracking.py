@@ -183,6 +183,8 @@ class TestInitialization:
             "refinement_last_full_sweep",
             "refinement_digest_issue",
             "refinement_open_proposals",
+            # ErosionMetricsLoop (#10107, epic #10104) — last-processed-SHA cursor.
+            "erosion_last_processed_sha",
         }
         assert set(d.keys()) == expected_keys
 
