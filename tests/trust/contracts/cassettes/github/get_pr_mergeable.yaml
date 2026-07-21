@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_pr_mergeable reports whether a PR has merge conflicts (`gh api
+# repos/{repo}/pulls/{n} --jq .mergeable`), returning True/False/None.
+# The fake hard-codes a clean, mergeable PR; the dispatcher pins the
+# boolean-return convention (`f"{mergeable}\n"`).
+adapter: github
+interaction: get_pr_mergeable
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_pr_mergeable
+  args:
+  - '526'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: 'True
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

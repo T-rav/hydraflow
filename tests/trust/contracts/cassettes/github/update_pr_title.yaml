@@ -1,0 +1,25 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# update_pr_title updates an existing PR's title (`gh pr edit <n>
+# --title <title>`) and returns whether the edit succeeded. The fake
+# always succeeds; the dispatcher pins the boolean-return convention
+# used by update_pr_branch.yaml / update_pr_base.yaml (`f"{ok}\n"`).
+adapter: github
+interaction: update_pr_title
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: update_pr_title
+  args:
+  - '525'
+  - 'Fixes #525: Improve caching layer performance'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: 'True
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true
