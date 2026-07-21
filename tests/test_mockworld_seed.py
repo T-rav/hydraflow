@@ -332,6 +332,38 @@ def test_seed_round_trips_worker_status_history_through_json() -> None:
     assert parsed.worker_status_history["rc_budget"] == []
 
 
+def test_default_seed_has_empty_repo_wiki_fixtures() -> None:
+    """#10133 PIECE 2 repo-wiki-fixture seed field defaults empty."""
+    seed = MockWorldSeed()
+    assert seed.repo_wiki_fixtures == []
+
+
+def test_seed_round_trips_repo_wiki_fixtures_through_json() -> None:
+    """Repo-wiki fixture entries are JSON-native dicts — no ``from_json``
+    coercion is required (#10133 PIECE 2)."""
+    original = MockWorldSeed(
+        repo_wiki_fixtures=[
+            {
+                "repo_slug": "acme/widget",
+                "title": "Broken cite fixture",
+                "content": "See `src/gone.py:vanished` for details.",
+                "source_type": "manual",
+                "source_issue": 9999,
+                "fixed_in_pr": "#9999",
+                "code_refs": ["src/gone.py:vanished"],
+            }
+        ],
+    )
+
+    parsed = MockWorldSeed.from_json(original.to_json())
+
+    assert parsed == original
+    fixture = parsed.repo_wiki_fixtures[0]
+    assert fixture["repo_slug"] == "acme/widget"
+    assert fixture["fixed_in_pr"] == "#9999"
+    assert fixture["code_refs"] == ["src/gone.py:vanished"]
+
+
 def test_seed_round_trips_issue_updated_at_through_json() -> None:
     """#9544: a per-issue ``updated_at`` key survives JSON transfer intact.
 

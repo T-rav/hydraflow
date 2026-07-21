@@ -47,6 +47,9 @@ from tests.sandbox_scenarios.scenarios import (
 from tests.sandbox_scenarios.scenarios import (
     s78_trust_fleet_sanity_tick_error_ratio_breach as s78,
 )
+from tests.sandbox_scenarios.scenarios import (
+    s79_wiki_rot_detector_broken_cite_fires as s79,
+)
 
 
 async def _run(mock_world, scenario):
@@ -238,3 +241,50 @@ async def test_s78_trust_fleet_sanity_files_tick_error_ratio_escalation(
     )
     assert "hitl-escalation" in issue.labels
     assert "trust-loop-anomaly" in issue.labels
+
+
+@pytest.mark.asyncio
+async def test_s79_wiki_rot_detector_files_broken_cite_finding(mock_world) -> None:
+    """#10133 PIECE 2 — a seeded repo-wiki fixture (structured ``WikiEntry``
+    shape, issue #9936) with a broken code-symbol cite drives
+    ``WikiRotDetectorLoop``'s genuine per-cite finding, not just an idle
+    scan.
+
+    Before ``repo_wiki_fixtures``, ``MockWorldSeed`` had no way to express a
+    repo-wiki entry at all — every wiki_rot_detector coverage had to
+    hand-mock the ``wiki_store`` port directly (see
+    ``tests/scenarios/test_wiki_rot_detector_scenario.py``), leaving the
+    seed-driven active-trigger path (both loaders) unproven end-to-end.
+
+    Unlike the sandbox tier (``config.repo`` is EMPTY there — see
+    ``MockWorldSeed.repo_wiki_fixtures``), this harness's default
+    ``config.repo`` (``"test-org/test-repo"``) is non-empty, so
+    ``WikiRotDetectorLoop`` ALSO scans the self-repo slug — and, because the
+    self-repo's ``RepoWikiStore.repo_dir`` is the flat ``wiki_root`` itself,
+    its ``rglob`` picks up the seeded fixture's nested managed-repo file too,
+    additionally firing the self-only shipped-claim pass
+    (``fixed_in_pr``/``code_refs``, issue #9598) for the SAME entry. Both
+    passes are genuine — assert on the per-cite finding specifically (it
+    fires in every environment, including the sandbox) rather than assuming
+    a fixed issue count or list order.
+    """
+    _seed, stats = await _run(mock_world, s79)
+
+    assert stats["wiki_rot_detector"]["status"] == "fired", stats
+    assert stats["wiki_rot_detector"]["issues_filed"] >= 1, stats
+
+    issues = await mock_world.github.list_issues_by_label("wiki-rot")
+    assert issues, "expected a wiki-rot finding for the seeded broken cite"
+    cite_findings = [
+        i
+        for i in issues
+        if s79._BROKEN_CITE in mock_world.github.issue(i["number"]).title
+    ]
+    assert cite_findings, (
+        f"expected a finding naming the broken cite {s79._BROKEN_CITE!r}; "
+        f"filed: {issues!r}"
+    )
+    for i in issues:
+        issue = mock_world.github.issue(i["number"])
+        assert "hydraflow-find" in issue.labels
+        assert "wiki-rot" in issue.labels

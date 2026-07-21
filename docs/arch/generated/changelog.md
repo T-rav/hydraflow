@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `76bc56b` — feat(sandbox): seed worker-status event-history + trust_fleet_sanity active-trigger scenario (#10133) (#10135) (#10135) *(2026-07-21)*
 - `9af3aa2` — feat(sandbox): per-issue updated_at seed field + stale_issue_gc fresh-skip active-trigger scenario (#9544) (#10132) (#10132) *(2026-07-21)*
 - `281548c` — feat(sandbox): seed BGWorkerManager registered_workers set + dead-man-switch stall-escalation e2e scenario (#10086) (#10131) (#10131) *(2026-07-21)*
 - `896486d` — feat(sandbox): seed materializer for EpicState + health trend/heartbeat history; s71/s72 active-trigger scenarios (#9643) (#10084) (#10084) *(2026-07-21)*

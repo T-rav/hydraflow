@@ -65,7 +65,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `TermPrunerLoop` | ✅ [0057, 0060, 0062, 0068] | ✅ [term-pruner-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_term_pruner_loop.py` | ✅ in catalog | ❌ |
 | `TriageRetryLoop` | ✅ [0063] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_triage_retry_loop.py` | ✅ in catalog | ❌ |
 | `TrustFleetSanityLoop` | ✅ [0045, 0046, 0093] | ✅ [testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_trust_fleet_sanity_loop.py` | ✅ in catalog | ✅ `s78_trust_fleet_sanity_tick_error_ratio_breach.py` |
-| `WikiRotDetectorLoop` | ✅ [0045, 0056, 0089, 0099] | ✅ [wiki-rot-detector-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_wiki_rot_detector_loop.py` | ✅ in catalog | ❌ |
+| `WikiRotDetectorLoop` | ✅ [0045, 0056, 0089, 0099] | ✅ [wiki-rot-detector-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_wiki_rot_detector_loop.py` | ✅ in catalog | ✅ `s79_wiki_rot_detector_broken_cite_fires.py` |
 | `WorkspaceGCLoop` | ✅ [0069, 0093] | ✅ [patterns.md, workspace-gc-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_workspace_gc_loop.py` | ✅ in catalog | ✅ `s46_workspace_gc_idle_poll.py` |
 ## Section 2: Ports
 

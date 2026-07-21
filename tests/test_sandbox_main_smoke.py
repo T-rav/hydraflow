@@ -362,6 +362,99 @@ def test_materialize_worker_status_history_writes_backdated_rows(tmp_path) -> No
     assert ok_ts > datetime.now(UTC) - timedelta(seconds=3_700)
 
 
+def test_resolve_self_wiki_root_falls_back_to_data_path_when_docs_wiki_absent(
+    tmp_path,
+) -> None:
+    """#10133 PIECE 2 — no ``docs/wiki`` on disk (the sandbox image ships no
+    ``docs/``) falls back to the runtime-cache ``config.data_path("repo_wiki")``.
+    """
+    config = _seed_config(tmp_path)
+
+    wiki_root = sandbox_main.resolve_self_wiki_root(config)
+
+    assert wiki_root == config.data_path("repo_wiki")
+
+
+def test_resolve_self_wiki_root_prefers_docs_wiki_when_present(tmp_path) -> None:
+    """#10133 PIECE 2 — a real ``docs/wiki`` (the self-repo's git-tracked
+    wiki) wins over the runtime-cache fallback, mirroring
+    ``service_registry.build_services``'s ``repo_wiki_store`` construction.
+    """
+    config = _seed_config(tmp_path)
+    docs_wiki = config.repo_root / "docs" / "wiki"
+    docs_wiki.mkdir(parents=True)
+
+    wiki_root = sandbox_main.resolve_self_wiki_root(config)
+
+    assert wiki_root == docs_wiki
+
+
+def test_materialize_wiki_fixtures_noops_when_empty(tmp_path) -> None:
+    """Empty ``repo_wiki_fixtures`` writes nothing (#10133 PIECE 2)."""
+    from mockworld.seed import MockWorldSeed
+
+    config = _seed_config(tmp_path)
+
+    sandbox_main.materialize_wiki_fixtures(config, MockWorldSeed())
+
+    assert not sandbox_main.resolve_self_wiki_root(config).exists()
+
+
+def test_materialize_wiki_fixtures_round_trips_structured_wiki_entry(tmp_path) -> None:
+    """A seeded fixture round-trips through a REAL ``RepoWikiStore.ingest``
+    into the STRUCTURED ``WikiEntry`` shape ``WikiRotDetectorLoop`` consumes
+    (issue #9936) — ``source_type``/``source_issue``/``fixed_in_pr``/
+    ``code_refs`` all survive as modeled fields, not an unstructured blob
+    (#10133 PIECE 2).
+    """
+    from mockworld.seed import MockWorldSeed
+    from repo_wiki import RepoWikiStore
+
+    config = _seed_config(tmp_path)
+    slug = "acme/wiki-fixture-repo"
+    broken_cite = (
+        "src/wiki_rot_sandbox_fixture_module.py:wiki_rot_sandbox_fixture_symbol"
+    )
+    seed = MockWorldSeed(
+        repo_wiki_fixtures=[
+            {
+                "repo_slug": slug,
+                "title": "Broken cite fixture",
+                "content": f"See `{broken_cite}` for the (missing) fix.",
+                "source_type": "manual",
+                "source_issue": 9999,
+                "fixed_in_pr": "#9999",
+                "code_refs": [broken_cite],
+            }
+        ]
+    )
+
+    sandbox_main.materialize_wiki_fixtures(config, seed)
+
+    wiki_root = sandbox_main.resolve_self_wiki_root(config)
+    assert wiki_root.exists()
+    read_store = RepoWikiStore(
+        wiki_root=wiki_root,
+        tracked_root=config.repo_root / config.repo_wiki_path,
+        self_slug=config.repo,
+    )
+    assert slug in read_store.list_repos()
+    repo_dir = read_store.repo_dir(slug)
+    entries = [
+        entry
+        for md_path in sorted(repo_dir.glob("*.md"))
+        for entry in read_store.load_topic_entries(md_path)
+    ]
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.title == "Broken cite fixture"
+    assert entry.source_type == "manual"
+    assert entry.source_issue == 9999
+    assert entry.fixed_in_pr == "#9999"
+    assert entry.code_refs == (broken_cite,)
+    assert broken_cite in entry.content
+
+
 def test_materialize_registered_workers_noops_when_empty(tmp_path) -> None:
     """Empty ``registered_workers`` returns ``None`` — no ``BGWorkerManager``
     is constructed and no state is touched (#10086)."""
