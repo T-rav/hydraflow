@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from mockworld.fakes.fake_github import FakeGitHub
+from models import ReviewVerdict
 from tests.conftest import IssueFactory
 from tests.trust.contracts._replay import FakeOutput, list_cassettes, replay_cassette
 from tests.trust.contracts._schema import Cassette
@@ -401,6 +402,112 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         )
         stdout = _json.dumps([d.model_dump(mode="json") for d in drifts]) + "\n"
         return FakeOutput(exit_code=0, stdout=stdout, stderr="")
+
+    # --- PR review / label-mutation cluster (#9768 slice 3) ---
+
+    if method == "add_pr_labels":
+        pr_number = int(args[0])
+        labels = [str(a) for a in args[1:]]
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        await fake.add_pr_labels(pr_number, labels)
+        assert fake._prs[pr_number].labels == labels, (
+            f"add_pr_labels did not record labels on PR #{pr_number}: "
+            f"{fake._prs[pr_number].labels}"
+        )
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
+    if method == "remove_pr_label":
+        pr_number = int(args[0])
+        label = str(args[1])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        fake.add_pr_label(pr_number, label)
+        fake.add_pr_label(pr_number, "keep-me")
+        await fake.remove_pr_label(pr_number, label)
+        assert fake._prs[pr_number].labels == ["keep-me"], (
+            f"remove_pr_label left unexpected labels on PR #{pr_number}: "
+            f"{fake._prs[pr_number].labels}"
+        )
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
+    if method == "close_pr":
+        pr_number = int(args[0])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        closed = await fake.close_pr(pr_number)
+        assert closed, "FakeGitHub.close_pr unexpectedly returned False"
+        assert fake._prs[pr_number].closed, (
+            f"close_pr did not mark PR #{pr_number} closed"
+        )
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
+    if method == "expected_pr_title":
+        issue_number = int(args[0])
+        issue_title = str(args[1])
+        title = FakeGitHub.expected_pr_title(issue_number, issue_title)
+        return FakeOutput(exit_code=0, stdout=f"{title}\n", stderr="")
+
+    if method == "update_pr_title":
+        pr_number = int(args[0])
+        title = str(args[1])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        ok = await fake.update_pr_title(pr_number, title)
+        return FakeOutput(exit_code=0, stdout=f"{ok}\n", stderr="")
+
+    if method == "get_pr_mergeable":
+        pr_number = int(args[0])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        mergeable = await fake.get_pr_mergeable(pr_number)
+        return FakeOutput(exit_code=0, stdout=f"{mergeable}\n", stderr="")
+
+    if method == "post_pr_comment":
+        pr_number = int(args[0])
+        body = str(args[1])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        await fake.post_pr_comment(pr_number, body)
+        assert (pr_number, body) in fake._comments, (
+            f"post_pr_comment did not record comment on PR #{pr_number}"
+        )
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
+    if method == "submit_review":
+        pr_number = int(args[0])
+        flag = str(args[1])
+        body = str(args[2])
+        # Cassette shape mirrors close_issue.yaml's "--reason" convention —
+        # a CLI-flag-shaped encoding of the ReviewVerdict enum kwarg the
+        # real PRManager.submit_review takes.
+        verdict_map = {
+            "--approve": ReviewVerdict.APPROVE,
+            "--request-changes": ReviewVerdict.REQUEST_CHANGES,
+            "--comment": ReviewVerdict.COMMENT,
+        }
+        verdict = verdict_map[flag]
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        ok = await fake.submit_review(pr_number, verdict, body)
+        return FakeOutput(exit_code=0, stdout=f"{ok}\n", stderr="")
+
+    if method == "get_pr_approvers":
+        import json as _json
+
+        pr_number = int(args[0])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        approvers = await fake.get_pr_approvers(pr_number)
+        return FakeOutput(exit_code=0, stdout=_json.dumps(approvers) + "\n", stderr="")
+
+    if method == "get_pr_checks":
+        import json as _json
+
+        pr_number = int(args[0])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        checks = await fake.get_pr_checks(pr_number)
+        return FakeOutput(exit_code=0, stdout=_json.dumps(checks) + "\n", stderr="")
+
+    if method == "get_pr_reviews":
+        import json as _json
+
+        pr_number = int(args[0])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        reviews = await fake.get_pr_reviews(pr_number)
+        return FakeOutput(exit_code=0, stdout=_json.dumps(reviews) + "\n", stderr="")
 
     msg = f"FakeGitHub has no contract-tested method {method!r}"
     raise NotImplementedError(msg)

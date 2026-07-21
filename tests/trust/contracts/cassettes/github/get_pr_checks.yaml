@@ -1,0 +1,25 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_pr_checks lists CI check results for a PR (`gh pr checks <n>
+# --json name,state`). No CI checks exist in the air-gapped sandbox,
+# so the fake always returns an empty list -- empty is falsy, so epic
+# detail rendering derives no CI status rather than AttributeError-ing
+# (see FakeGitHub.get_pr_checks docstring).
+adapter: github
+interaction: get_pr_checks
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_pr_checks
+  args:
+  - '530'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true
