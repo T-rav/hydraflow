@@ -70,13 +70,15 @@ def test_committed_seed_matches_scenario_definition(seed_path: Path) -> None:
     stem = seed_path.stem
     try:
         module = importlib.import_module(f"tests.sandbox_scenarios.scenarios.{stem}")
-    except ModuleNotFoundError:
-        pytest.fail(
+    except ModuleNotFoundError as exc:
+        # raise (not pytest.fail) so the except branch provably ends control
+        # flow — keeps `module` bound below for type checkers.
+        raise AssertionError(
             f"{seed_path.name} has no scenario module "
             f"tests/sandbox_scenarios/scenarios/{stem}.py — orphaned generated "
             "seed. Delete the seed, restore the scenario, or (if it is a "
             "hand-authored fixture) add it to _FIXTURE_SEEDS."
-        )
+        ) from exc
 
     expected = module.seed().to_json()  # identical to write_seed()'s payload
     actual = seed_path.read_text()
