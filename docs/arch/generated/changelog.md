@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `31e4cbd` — test(fake-coverage): cover next FakeGitHub adapter-surface slice (#9768) (#10161) (#10161) *(2026-07-21)*
 - `e9115b0` — feat(pr-red): Phase 2 — dispatch auto-agent to fix real (non-infra) settled CI reds on their branch (#10027) (#10157) (#10157) *(2026-07-21)*
 - `90d56c9` — test(trust): cassette FakeGitHub PR-review/label cluster — 11 methods (#9768 slice 3) (#10152) (#10152) *(2026-07-21)*
 - `f76c267` — feat(adr): AdrDriftResolverLoop — triage-before-escalate so drift rollups self-resolve (#9976) (#10146) (#10146) *(2026-07-21)*
