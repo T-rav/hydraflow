@@ -11,6 +11,7 @@ from config import HydraFlowConfig
 def test_defaults() -> None:
     c = HydraFlowConfig()
     assert c.auto_agent_preflight_enabled is True
+    assert c.auto_agent_hitl_intake_enabled is True
     assert c.auto_agent_preflight_interval == 120
     assert c.auto_agent_max_attempts == 3
     assert c.auto_agent_skip_sublabels == ["principles-stuck", "cultural-check"]
@@ -18,6 +19,15 @@ def test_defaults() -> None:
     assert c.auto_agent_wall_clock_cap_s is None
     assert c.auto_agent_daily_budget_usd is None
     assert "lead engineer" in c.auto_agent_persona
+
+
+def test_hitl_intake_env_can_disable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#9721: HYDRAFLOW_AUTO_AGENT_HITL_INTAKE_ENABLED gates the widened
+    hydraflow-hitl intake independently of auto_agent_preflight_enabled."""
+    monkeypatch.setenv("HYDRAFLOW_AUTO_AGENT_HITL_INTAKE_ENABLED", "false")
+    assert HydraFlowConfig().auto_agent_hitl_intake_enabled is False
+    monkeypatch.setenv("HYDRAFLOW_AUTO_AGENT_HITL_INTAKE_ENABLED", "true")
+    assert HydraFlowConfig().auto_agent_hitl_intake_enabled is True
 
 
 def test_interval_bounds_enforced() -> None:
