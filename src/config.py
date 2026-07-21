@@ -733,6 +733,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("github_cache_loop_enabled", "HYDRAFLOW_GITHUB_CACHE_LOOP_ENABLED", True),
     ("health_monitor_loop_enabled", "HYDRAFLOW_HEALTH_MONITOR_LOOP_ENABLED", True),
     (
+        "self_repair_actuator_enabled",
+        "HYDRAFLOW_SELF_REPAIR_ACTUATOR_ENABLED",
+        True,
+    ),
+    (
         "label_drift_watcher_loop_enabled",
         "HYDRAFLOW_LABEL_DRIFT_WATCHER_LOOP_ENABLED",
         True,
@@ -4398,6 +4403,18 @@ class HydraFlowConfig(BaseModel):
     health_monitor_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for HealthMonitorLoop.",
+    )
+    self_repair_actuator_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for HealthMonitorLoop's persistent-error "
+            "self-repair actuator (#10140): when a registry loop reports an "
+            "`error` heartbeat for N consecutive cycles, auto-repair a known "
+            "pattern (e.g. PrinciplesAuditLoop's managed_repos 404-repo prune) "
+            "or file one deduped hydraflow-find issue naming the loop. "
+            "Independent of `health_monitor_loop_enabled` so operators can "
+            "disable auto-repair/auto-file without disabling the whole loop."
+        ),
     )
     label_drift_watcher_loop_enabled: bool = Field(
         default=True,
