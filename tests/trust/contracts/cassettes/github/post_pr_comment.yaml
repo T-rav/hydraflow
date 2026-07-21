@@ -1,0 +1,23 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# post_pr_comment posts a comment on a PR (`gh pr comment <n>
+# --body-file ...`); returns None and produces no stdout on success --
+# the PR sibling of post_comment.yaml. The dispatcher seeds a PR and
+# verifies the comment landed via side-effect inspection, not stdout.
+adapter: github
+interaction: post_pr_comment
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: post_pr_comment
+  args:
+  - '527'
+  - LGTM — nice cleanup.
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ''
+  stderr: ''
+normalizers: []
+baseline_only: true

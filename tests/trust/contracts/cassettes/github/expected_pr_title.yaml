@@ -1,0 +1,31 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# expected_pr_title is a pure static formatter (no gh call). NOTE — a
+# fidelity gap, pinned as-is rather than silently papered over:
+# FakeGitHub.expected_pr_title returns `[#<n>] <title>`, but the real
+# PRManager.expected_pr_title (src/pr_manager.py) returns
+# `Fixes #<n>: <title>` (truncated to 70 chars). FakeGitHub is cast to
+# PRPort in the sandbox harness (mockworld/sandbox_main.py), so this
+# divergence is live-reachable, not dead code. Out of scope for this
+# cassette slice (#9768) to fix — flagged here, and in the PR description,
+# for a follow-up. The cassette pins the fake's CURRENT return so the
+# contract test is honest about what FakeGitHub actually does.
+adapter: github
+interaction: expected_pr_title
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: expected_pr_title
+  args:
+  - '524'
+  - Improve caching layer performance
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[#524] Improve caching layer performance
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true
