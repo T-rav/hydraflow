@@ -533,6 +533,11 @@ def _build_flake_tracker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     * ``flake_fetch_runs`` → ``_fetch_recent_runs``
     * ``flake_download_junit`` → ``_download_junit``
     * ``flake_reconcile_closed`` → ``_reconcile_closed_escalations``
+    * ``flake_fetch_xdist_runs`` → ``_fetch_xdist_audit_runs`` (#10141)
+    * ``flake_download_xdist`` → ``_download_xdist_audit`` (#10141)
+
+    The xdist-audit seams default to an EMPTY audit (no gh, no quarantine)
+    so the detection is a no-op unless a test seeds them.
 
     ``state`` and ``dedup`` default to MagicMocks that behave like a clean
     slate (no prior flake counts, no prior dedup keys). Tests may override
@@ -577,6 +582,16 @@ def _build_flake_tracker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     reconcile = ports.get("flake_reconcile_closed")
     if reconcile is not None:
         loop._reconcile_closed_escalations = reconcile  # type: ignore[method-assign]
+
+    # xdist-quarantine external gh I/O (#10141) — air-gapped like the flake
+    # seams above. Default fetch to an empty audit so _run_xdist_quarantine_
+    # detection is a no-op (no gh, no _download call) unless a test seeds it.
+    loop._fetch_xdist_audit_runs = ports.get(  # type: ignore[method-assign]
+        "flake_fetch_xdist_runs"
+    ) or AsyncMock(return_value=[])
+    xdist_download = ports.get("flake_download_xdist")
+    if xdist_download is not None:
+        loop._download_xdist_audit = xdist_download  # type: ignore[method-assign]
 
     return loop
 

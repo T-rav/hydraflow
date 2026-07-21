@@ -113,6 +113,11 @@ SANDBOX_SEAMS: dict[str, str] = {
     # seams replace ``_refinement_llm`` so dup/priority judgments never shell
     # out to a real ``claude``.
     "issue_refinement_loop": "seed_seam",
+    # FlakeTrackerLoop reads CI JUnit / xdist-audit reports via raw ``gh run
+    # download`` (_download_junit, _download_xdist_audit). It is a caretaker
+    # loop no sandbox scenario exercises, so the whole loop is config-disabled
+    # below rather than seeding those reads.
+    "flake_tracker_loop": "config_disable",
 }
 
 
@@ -160,6 +165,12 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # and the watcher's active outcome is unobservable. The reconciler has its
     # own unit tests; the sandbox exercises the conflict watcher.
     object.__setattr__(config, "approval_records_enabled", False)
+    # FlakeTrackerLoop (#10141): both its CI-report reads (_download_junit RC
+    # JUnit, _download_xdist_audit) are raw ``gh run download`` spawns that hang
+    # on the air-gapped network. No sandbox scenario exercises this caretaker
+    # loop, so disable it wholesale (retires the grandfathered _download_junit
+    # spawn and air-gaps the new xdist-audit read).
+    object.__setattr__(config, "flake_tracker_loop_enabled", False)
 
 
 def _load_seed() -> MockWorldSeed:

@@ -135,6 +135,9 @@ def _loop_kwargs(tmp_path: Path, gh_cache: MagicMock) -> dict[str, object]:
 def _cache_mock(rows: list[dict[str, object]]) -> MagicMock:
     gh_cache = MagicMock()
     gh_cache.get_rc_workflow_runs = AsyncMock(return_value=rows)
+    # FlakeTracker also reads the xdist-audit run list from the cache (#10141);
+    # default to an empty audit so the xdist path is a cached-read no-op.
+    gh_cache.get_xdist_audit_runs = AsyncMock(return_value=[])
     return gh_cache
 
 
@@ -302,7 +305,7 @@ class TestFlakeTrackerCachedReads:
 
         result = await loop._do_work()
 
-        assert result == {"status": "no_runs", "filed": 0}
+        assert result == {"status": "no_runs", "filed": 0, "xdist_filed": 0}
 
 
 class TestRcBudgetCachedReads:
