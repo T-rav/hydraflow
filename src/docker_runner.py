@@ -578,13 +578,21 @@ class DockerRunner:
         env: dict[str, str] | None = None,  # noqa: ARG002
         timeout: float = 120.0,
         input: bytes | None = None,  # noqa: A002
+        cancel_check: Callable[[], bool] | None = None,
+        cancel_poll_interval: float = 5.0,
     ) -> SimpleResult:
         """Run a command in a Docker container and return the result.
+
+        ``cancel_check``/``cancel_poll_interval`` (#9577) are accepted for
+        protocol parity but not honoured: Docker-mode subprocesses are
+        already container-scoped and reaped with the container, so there is
+        no host process group to poll-cancel.
 
         .. note::
             The ``env`` parameter is intentionally ignored — see
             :meth:`create_streaming_process` for the rationale.
         """
+        _ = (cancel_check, cancel_poll_interval)
         if input is not None:
             msg = "stdin input not supported in Docker mode"
             raise NotImplementedError(msg)

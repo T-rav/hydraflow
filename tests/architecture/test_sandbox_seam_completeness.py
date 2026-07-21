@@ -64,7 +64,13 @@ GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
     "src/repo_wiki_loop.py::RepoWikiLoop._poll_and_merge_open_pr::run_subprocess": 3,
     "src/staging_bisect_loop.py::StagingBisectLoop._run_bisect_probe::run_subprocess_result": 1,
     "src/staging_bisect_loop.py::StagingBisectLoop._run_gh::run_subprocess": 1,
-    "src/staging_bisect_loop.py::StagingBisectLoop._run_git::create_subprocess_exec": 1,
+    # #9577: _run_git swapped its raw create_subprocess_exec for a direct
+    # get_default_runner().run_simple(cancel_check=...) — semaphore-free so a
+    # 45-min bisect never holds the fleet gh/git gate. Still a tolerated raw
+    # host spawn (same grandfathered status as the sibling _run_gh/_run_bisect
+    # entries — staging_bisect is not exercised by any sandbox scenario), so
+    # the baseline entry is RENAMED to the new token, not grown.
+    "src/staging_bisect_loop.py::StagingBisectLoop._run_git::get_default_runner": 1,
     "src/staging_promotion_loop.py::StagingPromotionLoop._list_merged_promotion_prs::run_subprocess": 1,
     "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._find_open_escalation::run_subprocess_result": 1,
     "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._reconcile_closed_escalations::run_subprocess_result": 1,

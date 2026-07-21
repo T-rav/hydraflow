@@ -55,15 +55,18 @@ sys.path.insert(0, str(SRC_DIR))
 # migrated onto the shared bounded helper (#9554/#10028) and is pinned
 # instead by each loop's own test file + tests/test_subprocess_util.py +
 # tests/regressions/test_hostrunner_reap_grandchildren.py.
+# #9577: staging_bisect_loop._run_git migrated onto HostRunner.run_simple
+# (which owns the start_new_session spawn + guarded group reap, pinned by
+# tests/test_execution.py + test_issue_9911/9641). No raw heavy-spawn site
+# remains in loop code; test_run_git_delegates_to_shared_helper below pins
+# that migration so the property can't silently regress.
 _HEAVY_SPAWN_SITES = [
-    ("staging_bisect_loop", "_run_git"),
 ]
 
 # (module, function) → the timeout/cancel reap inside must route through
 # the guarded primitive (a `kill_process_group(...)` call) and must not
 # fall back to a child-only bare `proc.kill()`.
 _GROUP_REAP_SITES = [
-    ("staging_bisect_loop", "_run_git"),
 ]
 
 
@@ -164,3 +167,34 @@ def test_heavy_reap_sites_use_the_guarded_group_primitive(
 # bespoke reap path — pinned by `_HEAVY_SPAWN_SITES`/`_GROUP_REAP_SITES`
 # above plus its dedicated cooperative-cancellation tests in
 # tests/test_staging_bisect_loop.py.
+
+
+def test_run_git_delegates_to_shared_helper() -> None:
+    """staging_bisect._run_git must NOT re-introduce a raw spawn (#9577).
+
+    The heavy-spawn hardening now lives in HostRunner.run_simple; _run_git
+    delegates via run_simple(cancel_check=...). A regression that inlines a
+    fresh create_subprocess_exec here would dodge the registry/reap the
+    shared helper provides.
+    """
+    func = _find_function(_module_tree("staging_bisect_loop"), "_run_git")
+    raw_spawns = [
+        node
+        for node in ast.walk(func)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "create_subprocess_exec"
+    ]
+    assert not raw_spawns, (
+        "staging_bisect._run_git re-introduced a raw create_subprocess_exec "
+        "— route through HostRunner.run_simple(cancel_check=...) instead (#9577)."
+    )
+    calls_run_simple = any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "run_simple"
+        for node in ast.walk(func)
+    )
+    assert calls_run_simple, (
+        "staging_bisect._run_git no longer delegates to run_simple (#9577)."
+    )
