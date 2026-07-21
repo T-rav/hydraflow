@@ -15,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from events import EventBus, EventLog
 from mockworld.fakes.fake_clock import FakeClock
 
 if TYPE_CHECKING:
@@ -860,6 +861,7 @@ class MockWorld:
             materialize_health_metrics,
             materialize_registered_workers,
             materialize_worker_heartbeats,
+            materialize_worker_status_history,
             seed_stale_workspaces,
         )
 
@@ -906,6 +908,19 @@ class MockWorld:
             materialize_health_metrics(config, seed)
         if seed.worker_heartbeats:
             materialize_worker_heartbeats(self._harness.state, seed)
+        if seed.worker_status_history:
+            # Mirrors sandbox_main's ``main()`` wiring (#10133): the seeded
+            # rows only become readable once the loop's ``event_bus`` port
+            # has a REAL ``EventLog`` attached (``TrustFleetSanityLoop._
+            # collect_window_metrics`` reads via ``EventBus.load_events_
+            # since``, a disk read — the harness's default ``event_bus``
+            # port, when unseeded, falls back to a bare ``MagicMock`` whose
+            # ``load_events_since`` isn't awaitable at all, see
+            # ``_build_trust_fleet_sanity``).
+            materialize_worker_status_history(config, seed)
+            self._loop_ports.setdefault(
+                "event_bus", EventBus(event_log=EventLog(config.event_log_path))
+            )
         if seed.stale_workspaces:
             # Register the worktrees in the REAL harness StateTracker and hand
             # that tracker to the loop builder (its default is an empty-world

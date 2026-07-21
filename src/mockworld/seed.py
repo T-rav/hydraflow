@@ -297,6 +297,28 @@ class MockWorldSeed:
     # only exercise the read path) is unaffected.
     registered_workers: dict[str, dict[str, Any]] = field(default_factory=dict)
 
+    # Seeded BACKGROUND_WORKER_STATUS event HISTORY, materialized onto disk at
+    # boot (#10133, deferred from #9544). ``TrustFleetSanityLoop._collect_
+    # window_metrics`` computes its 24h ticks/repair/error window via
+    # ``EventBus.load_events_since`` — a DISK read (``EventLog.load``), NOT
+    # the in-memory ``EventBus._history`` list that ``/api/events`` falls back
+    # to. The sandbox's shared bus has historically been a bare ``EventBus()``
+    # with no ``EventLog`` attached, so that read returned ``None`` (coerced
+    # to ``[]`` by the loop) regardless of what a scenario seeded — the
+    # issues_per_hour / repair_ratio / tick_error_ratio breach paths had no
+    # active-trigger coverage. Keyed by worker name; each entry is a dict
+    # with ``age_seconds`` (numeric, relative — mirrors ``worker_heartbeats``;
+    # the materializer back-dates the row's timestamp from boot so the seed
+    # never rots), ``status`` (default "ok") and ``details`` (dict, default
+    # ``{}`` — the same shape ``BaseBackgroundLoop._execute_cycle`` publishes,
+    # e.g. ``{"filed": 20}`` for issues_per_hour or ``{"failed": 5}`` for
+    # repair_ratio). Both loaders (``sandbox_main.materialize_worker_status_
+    # history`` / ``MockWorld._wire_seed_loop_seams``) only attach a real
+    # ``EventLog`` to the loop's event bus when this field is non-empty —
+    # every other scenario keeps the historical no-log ``EventBus()``,
+    # unaffected. Default empty: no rows written, no EventLog attached.
+    worker_status_history: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+
     def to_json(self) -> str:
         """Serialize to JSON for cross-process transfer."""
         return json.dumps(asdict(self), indent=2)

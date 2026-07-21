@@ -304,6 +304,64 @@ def test_materialize_worker_heartbeats_backdates_last_run(tmp_path) -> None:
     assert fresh > datetime.now(UTC) - timedelta(seconds=60)
 
 
+def test_materialize_worker_status_history_noops_when_empty(tmp_path) -> None:
+    """Empty ``worker_status_history`` writes nothing to the event log (#10133)."""
+    from mockworld.seed import MockWorldSeed
+
+    config = _seed_config(tmp_path)
+
+    sandbox_main.materialize_worker_status_history(config, MockWorldSeed())
+
+    assert not config.event_log_path.exists()
+
+
+def test_materialize_worker_status_history_writes_backdated_rows(tmp_path) -> None:
+    """Seeded entries land as BACKGROUND_WORKER_STATUS rows on disk, with a
+    relative ``age_seconds`` back-dating the row's timestamp from boot, and
+    the loop's OWN read path (``EventBus.load_events_since``) can see them
+    back (#10133) — the read side ``worker_heartbeats``/``registered_workers``
+    never had to prove, since those are read straight off ``StateTracker``.
+    """
+    import asyncio
+    from datetime import UTC, datetime, timedelta
+
+    from events import EventBus, EventLog, EventType
+    from mockworld.seed import MockWorldSeed
+
+    config = _seed_config(tmp_path)
+    seed = MockWorldSeed(
+        worker_status_history={
+            "corpus_learning": [
+                {"age_seconds": 82_800, "status": "error", "details": {}},
+                {"age_seconds": 3_600, "status": "ok", "details": {"filed": 2}},
+            ],
+        }
+    )
+
+    sandbox_main.materialize_worker_status_history(config, seed)
+
+    assert config.event_log_path.exists()
+    event_bus = EventBus(event_log=EventLog(config.event_log_path))
+    events = asyncio.run(
+        event_bus.load_events_since(datetime.now(UTC) - timedelta(days=1))
+    )
+    assert events is not None
+    assert len(events) == 2
+    by_status = {e.data["status"]: e for e in events}
+    assert set(by_status) == {"error", "ok"}
+    error_event = by_status["error"]
+    assert error_event.type == EventType.BACKGROUND_WORKER_STATUS
+    assert error_event.data["worker"] == "corpus_learning"
+    assert error_event.data["details"] == {}
+    error_ts = datetime.fromisoformat(error_event.timestamp)
+    assert error_ts.tzinfo is not None
+    assert error_ts < datetime.now(UTC) - timedelta(seconds=82_000)
+    ok_event = by_status["ok"]
+    assert ok_event.data["details"] == {"filed": 2}
+    ok_ts = datetime.fromisoformat(ok_event.timestamp)
+    assert ok_ts > datetime.now(UTC) - timedelta(seconds=3_700)
+
+
 def test_materialize_registered_workers_noops_when_empty(tmp_path) -> None:
     """Empty ``registered_workers`` returns ``None`` — no ``BGWorkerManager``
     is constructed and no state is touched (#10086)."""

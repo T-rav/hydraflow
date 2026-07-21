@@ -64,7 +64,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `TermProposerLoop` | ✅ [0054, 0057, 0060, 0061, 0062, 0068] | ✅ [adr-council-reviewer.md, adr-index.md, adr-pre-validator.md, bot-pr-port.md, credentials.md, entry-evidence-loop.md, task.md, term-pruner-loop.md, tribal-wiki-store.md] | ✅ loops.md | ✅ README.md | ✅ `test_term_proposer_loop.py` | ✅ in catalog | ❌ |
 | `TermPrunerLoop` | ✅ [0057, 0060, 0062, 0068] | ✅ [term-pruner-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_term_pruner_loop.py` | ✅ in catalog | ❌ |
 | `TriageRetryLoop` | ✅ [0063] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_triage_retry_loop.py` | ✅ in catalog | ❌ |
-| `TrustFleetSanityLoop` | ✅ [0045, 0046, 0093] | ✅ [testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_trust_fleet_sanity_loop.py` | ✅ in catalog | ❌ |
+| `TrustFleetSanityLoop` | ✅ [0045, 0046, 0093] | ✅ [testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_trust_fleet_sanity_loop.py` | ✅ in catalog | ✅ `s78_trust_fleet_sanity_tick_error_ratio_breach.py` |
 | `WikiRotDetectorLoop` | ✅ [0045, 0056, 0089, 0099] | ✅ [wiki-rot-detector-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_wiki_rot_detector_loop.py` | ✅ in catalog | ❌ |
 | `WorkspaceGCLoop` | ✅ [0069, 0093] | ✅ [patterns.md, workspace-gc-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_workspace_gc_loop.py` | ✅ in catalog | ✅ `s46_workspace_gc_idle_poll.py` |
 ## Section 2: Ports
