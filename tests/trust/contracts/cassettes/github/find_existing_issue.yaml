@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# find_existing_issue returns the number of an OPEN issue whose title
+# matches exactly, or 0 when none matches — the de-dup guard TriageLoop
+# runs before filing a new issue. The dispatcher seeds one matching open
+# issue so the contract covers the found (non-zero) path.
+adapter: github
+interaction: find_existing_issue
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: find_existing_issue
+  args:
+  - Duplicate title probe
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '701
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true
