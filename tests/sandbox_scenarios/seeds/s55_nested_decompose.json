@@ -165,5 +165,13 @@
     "success",
     ""
   ],
-  "plan_hold_seconds": 0.0
+  "plan_hold_seconds": 0.0,
+  "skill_prompt_corpus_cases": [],
+  "skill_prompt_refine_patch": "",
+  "rulesets": {},
+  "stale_workspaces": [],
+  "gate_activations": [],
+  "expired_run_dirs": [],
+  "issue_refinement_backlog": [],
+  "issue_refinement_verdicts": []
 }

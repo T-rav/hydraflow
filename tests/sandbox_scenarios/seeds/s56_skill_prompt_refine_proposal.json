@@ -27,5 +27,11 @@
       "summary": "the skill stopped catching this adversarial case"
     }
   ],
-  "skill_prompt_refine_patch": "```diff\n--- a/tests/trust/adversarial/corpus_runner.py\n+++ b/tests/trust/adversarial/corpus_runner.py\n@@ -1,1 +1,1 @@\n-CORPUS_RUNNER_UNTOUCHED\n+CORPUS_RUNNER_TAMPERED\n```\n"
+  "skill_prompt_refine_patch": "```diff\n--- a/tests/trust/adversarial/corpus_runner.py\n+++ b/tests/trust/adversarial/corpus_runner.py\n@@ -1,1 +1,1 @@\n-CORPUS_RUNNER_UNTOUCHED\n+CORPUS_RUNNER_TAMPERED\n```\n",
+  "rulesets": {},
+  "stale_workspaces": [],
+  "gate_activations": [],
+  "expired_run_dirs": [],
+  "issue_refinement_backlog": [],
+  "issue_refinement_verdicts": []
 }

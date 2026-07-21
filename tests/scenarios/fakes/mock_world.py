@@ -7,6 +7,9 @@ run the pipeline, and assert on the world's final state.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import faulthandler
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -32,6 +35,12 @@ from tests.scenarios.catalog import (
     loop_registrations as _loop_registrations,  # noqa: F401
 )
 from tests.scenarios.fakes.scenario_result import IssueOutcome, ScenarioResult
+
+#: Upper bound for ``orchestrator.stop()`` during teardown (#10073). Generous —
+#: a healthy stop path finishes in well under a second; the bound exists only to
+#: convert a wedged shutdown into a loud, attributed failure instead of a silent
+#: 20-minute CI cancel at event-loop close.
+_ORCHESTRATOR_STOP_TIMEOUT = 60.0
 
 
 class _SafeProxy:
@@ -953,13 +962,36 @@ class MockWorld:
         self._dashboard_url = f"http://127.0.0.1:{port}"
         return self._dashboard_url
 
-    async def stop_dashboard(self) -> None:
-        """Shut down uvicorn task, stop orchestrator if present."""
+    async def stop_dashboard(
+        self, *, orchestrator_stop_timeout: float = _ORCHESTRATOR_STOP_TIMEOUT
+    ) -> None:
+        """Shut down uvicorn task, stop orchestrator if present.
+
+        ``orchestrator.stop()`` is bounded (#10073): a stop path that blocks —
+        or any task surviving shutdown — used to wedge the in-process harness
+        at event-loop close, hanging pytest until the CI job's 20-minute
+        timeout with zero output. On timeout we dump live asyncio task names
+        and faulthandler stacks to stderr, then raise a TimeoutError naming
+        the survivors, so the failure is loud and attributed.
+        """
         if self._dashboard is None:
             return
         try:
             if self._dashboard._orchestrator and self._dashboard._orchestrator.running:
-                await self._dashboard._orchestrator.stop()
+                try:
+                    await asyncio.wait_for(
+                        self._dashboard._orchestrator.stop(),
+                        timeout=orchestrator_stop_timeout,
+                    )
+                except TimeoutError:
+                    live = self._dump_stuck_teardown_diagnostics(
+                        orchestrator_stop_timeout
+                    )
+                    raise TimeoutError(
+                        "MockWorld.stop_dashboard: orchestrator.stop() did not "
+                        f"complete within {orchestrator_stop_timeout}s (#10073); "
+                        f"live tasks: {live}"
+                    ) from None
 
             uv_server = getattr(self._dashboard, "_uvicorn_server", None)
             if uv_server is not None:
@@ -975,6 +1007,34 @@ class MockWorld:
         finally:
             self._dashboard = None
             self._dashboard_url = None
+
+    @staticmethod
+    def _dump_stuck_teardown_diagnostics(timeout: float) -> list[str]:
+        """Dump live task names + faulthandler stacks to stderr; return the names.
+
+        Called when ``orchestrator.stop()`` exceeds its bound (#10073). The
+        task-name dump attributes the wedge (the #10071 orphan-probe
+        technique); the faulthandler dump adds thread stacks. Both are
+        best-effort diagnostics — the load-bearing signal is the TimeoutError
+        the caller raises with the returned names.
+        """
+        current = asyncio.current_task()
+        live = sorted(
+            task.get_name()
+            for task in asyncio.all_tasks()
+            if task is not current and not task.done()
+        )
+        print(
+            f"MockWorld.stop_dashboard: orchestrator.stop() timed out after {timeout}s; "
+            f"live tasks: {live}",
+            file=sys.stderr,
+            flush=True,
+        )
+        # capsys-style captures replace sys.stderr with a fileno-less buffer,
+        # which faulthandler rejects — never let diagnostics mask the timeout.
+        with contextlib.suppress(Exception):
+            faulthandler.dump_traceback(file=sys.stderr)
+        return live
 
     async def _await_dashboard_port(self, dashboard: Any, timeout: float = 5.0) -> int:
         """Poll ``dashboard._uvicorn_server`` for the bound port up to ``timeout`` seconds."""
