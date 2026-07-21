@@ -17,6 +17,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `ddfdb66` — build(arch): auto-resolve docs/arch/.meta.json + changelog.md merge conflicts (#10099) (#10099) *(2026-07-20)*
 - `62b6a74` — Merge remote-tracking branch 'origin/staging' into feat/9643-seed-state-materializer *(2026-07-20)*
 - `91649f1` — Merge remote-tracking branch 'origin/staging' into feat/9643-seed-state-materializer *(2026-07-20)*
+- `ddfdb66` — build(arch): auto-resolve docs/arch/.meta.json + changelog.md merge conflicts (#10099) (#10099) *(2026-07-20)*
+- `68abc51` — Merge remote-tracking branch 'origin/staging' into feat/9768-fake-coverage-slice *(2026-07-20)*
+- `359af75` — Merge remote-tracking branch 'origin/staging' into feat/9768-fake-coverage-slice *(2026-07-20)*
 - `9f99bcf` — fix(escalation): TTL re-drive so stale auto-agent escalations self-heal (#9719) (#10079) (#10079) *(2026-07-20)*
 - `f57e313` — Merge remote-tracking branch 'origin/staging' into feat/9643-seed-state-materializer *(2026-07-20)*
 - `982cec5` — fix(workspace,state): automate HITL reset runbook residuals — main-repo core.worktree heal + attempt-counter close-to-clear (#9723) (#10082) (#10082) *(2026-07-20)*
