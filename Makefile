@@ -14,12 +14,13 @@ UV := VIRTUAL_ENV=$(VENV) UV_CACHE_DIR=$(PROJECT_ROOT)/.uv-cache uv run --active
 DEPS_STAMP := $(VENV)/.deps-synced
 
 # Parallel test execution (pytest-xdist). `--dist loadscope` keeps a module's
-# tests on one worker (safe for module-level fixtures). tests/scenarios/ is
-# excluded from parallel runs and executed SERIALLY: those tests share
-# process-global state (OTel TracerProvider, the loop-registration catalog) and
-# assert convergence ORDERING/timing, so cross-worker scheduling makes them
-# flake. Making scenarios xdist-safe (per-worker OTel provider + registry
-# isolation) is a tracked follow-up. Override PYTEST_PARALLEL= to disable.
+# tests on one worker (safe for module-level fixtures). tests/scenarios/ now
+# runs in the parallel bulk: its one cross-worker leak (a sibling test wiped the
+# process-global loop-registration catalog and left it empty) is contained by
+# the `_restore_loop_catalog_registry` autouse fixture in
+# tests/scenarios/conftest.py, and OTel provider state is already reset per test
+# by `_reset_otel_tracer_provider` in tests/conftest.py (#10111). Override
+# PYTEST_PARALLEL= to disable.
 # `--reruns` rescues TRANSIENT cross-worker flakes a newly-parallelized suite
 # surfaces (subprocess PID/timing races, e.g. the process-group reap tests) —
 # deterministic failures still fail on every retry and stay red, so real breaks
@@ -28,11 +29,10 @@ DEPS_STAMP := $(VENV)/.deps-synced
 PYTEST_PARALLEL ?= -n auto --dist loadscope --reruns 2 --reruns-delay 1
 
 # Paths excluded from the parallel run and executed SERIALLY (xdist-unsafe:
-# process-global state that collides across workers). tests/scenarios: OTel
-# provider + loop-registration catalog + convergence-timing (#10111).
+# process-global state that collides across workers).
 # tests/test_review_phase_metrics.py: a leaked global review_advisor client mock
 # degrades the advisor under cross-worker ordering (passes single-threaded) —
-# tracked follow-up. Add a path here when a non-scenario test proves
+# tracked follow-up (#10119). Add a path here when a non-scenario test proves
 # xdist-unsafe; the real fix is per-test isolation, not growing this list.
 # Subprocess-group reap tests race under parallel workers (a child's process
 # group / reap timing collides cross-worker; they have a dedicated serial CI
@@ -44,10 +44,10 @@ REAP_TESTS := tests/regressions/test_reap_processlookuperror.py \
   tests/regressions/test_issue_9911_stop_path_reap.py \
   tests/regressions/test_issue_9641_unified_group_kill.py \
   tests/regressions/test_hostrunner_reap_grandchildren.py
-# Paths run SERIALLY (excluded from the parallel run). scenarios: OTel/loop-
-# registry/timing (#10111). review_phase_metrics: leaked review_advisor mock
-# (#10119). REAP_TESTS: subprocess-group reap races. Everything else parallelizes.
-PYTEST_SERIAL_PATHS ?= tests/scenarios tests/test_review_phase_metrics.py $(REAP_TESTS)
+# Paths run SERIALLY (excluded from the parallel run). review_phase_metrics:
+# leaked review_advisor mock (#10119). REAP_TESTS: subprocess-group reap races.
+# Everything else — including tests/scenarios (#10111) — parallelizes.
+PYTEST_SERIAL_PATHS ?= tests/test_review_phase_metrics.py $(REAP_TESTS)
 PYTEST_SERIAL_IGNORE := $(addprefix --ignore=,$(PYTEST_SERIAL_PATHS))
 
 # Runtime overrides (used by `make hot`)
