@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# update_issue_body overwrites the issue body in place and returns
+# nothing — the mutation itself is the contract. The dispatcher seeds
+# an issue with a distinct old body, calls update_issue_body, and
+# asserts the new body was recorded before reporting the (empty)
+# stdout/stderr.
+adapter: github
+interaction: update_issue_body
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: update_issue_body
+  args:
+  - '960'
+  - new body text
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ''
+  stderr: ''
+normalizers: []
+baseline_only: true

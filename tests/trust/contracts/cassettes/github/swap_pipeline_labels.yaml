@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# swap_pipeline_labels replaces every hydraflow-* label on the issue
+# with the literal *new_label* (unlike transition, no stage->label
+# lookup — the caller passes the exact label, e.g. the review-fix-cap
+# "hydraflow-diagnose" escalation). Returns nothing; the dispatcher
+# asserts the label swap side-effect.
+adapter: github
+interaction: swap_pipeline_labels
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: swap_pipeline_labels
+  args:
+  - '990'
+  - hydraflow-diagnose
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ''
+  stderr: ''
+normalizers: []
+baseline_only: true

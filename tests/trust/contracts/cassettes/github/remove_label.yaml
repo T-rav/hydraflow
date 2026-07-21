@@ -1,0 +1,22 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# remove_label strips exactly the named label from the issue, leaving
+# other labels untouched, and returns nothing. The dispatcher seeds an
+# issue with two labels and asserts only the targeted one is gone.
+adapter: github
+interaction: remove_label
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: remove_label
+  args:
+  - '970'
+  - hydraflow-hitl
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ''
+  stderr: ''
+normalizers: []
+baseline_only: true
