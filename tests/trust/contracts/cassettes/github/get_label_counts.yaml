@@ -1,0 +1,27 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_label_counts returns the LabelCounts TypedDict
+# (open_by_label / total_closed / total_merged) GitHubCacheLoop warms
+# the throughput tile from. Takes a HydraFlowConfig (label map source);
+# the dispatcher passes the real default config and seeds two open
+# issues at distinct pipeline labels, one closed-fixed issue, and one
+# merged PR so every count is non-vacuous.
+adapter: github
+interaction: get_label_counts
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_label_counts
+  args: []
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '{"open_by_label": {"hydraflow-plan": 0, "hydraflow-ready": 1, "hydraflow-review":
+    1, "hydraflow-hitl": 0, "hydraflow-fixed": 0}, "total_closed": 1, "total_merged":
+    1}
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true
