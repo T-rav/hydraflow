@@ -619,19 +619,6 @@ describe('PipelineFlow visualization', () => {
     expect(queuedDot.style.animation).toBe('')
   })
 
-  it('renders the shared product fork with a "direct →" bypass arm', () => {
-    // PipelineFlow renders the discover→shape product fork via the shared
-    // ProductFork component — the same topology Header's pipeline row uses
-    // (#9564). PIPELINE_STAGES always contains discover/shape, so the fork
-    // renders regardless of issue counts.
-    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext())
-    render(<StreamView {...defaultProps} />)
-    const flow = screen.getByTestId('pipeline-flow')
-    expect(flow.textContent).toContain('direct →')
-    expect(flow.textContent).toContain('Discover')
-    expect(flow.textContent).toContain('Shape')
-  })
-
   it('renders the shared terminal fork with hitl and merged as parallel arms', () => {
     // hitl/merged fork off REVIEW via the shared TerminalFork — the same
     // topology Header's review-terminal-fork renders (#9564).

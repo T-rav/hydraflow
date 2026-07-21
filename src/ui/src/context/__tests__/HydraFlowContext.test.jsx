@@ -4,8 +4,6 @@ import { reducer } from '../HydraFlowContext'
 
 const emptyPipeline = {
   triage: [],
-  discover: [],
-  shape: [],
   plan: [],
   implement: [],
   review: [],
@@ -495,21 +493,6 @@ describe('PIPELINE_SNAPSHOT reducer', () => {
       data: { stages: { implement: [{ issue_number: 7, title: 'Renamed', url: 'u', status: 'active' }] } },
     })
     expect(overridden.pipelineIssues.implement[0].title).toBe('Renamed')
-  })
-
-  it('F6: discover and shape stages are included in the merged snapshot', () => {
-    const state = { ...initialState, pipelineIssues: { ...emptyPipeline } }
-    const next = reducer(state, {
-      type: 'pipeline_snapshot',
-      data: { stages: {
-        discover: [{ issue_number: 21, title: 'D', url: 'u', status: 'active' }],
-        shape: [{ issue_number: 22, title: 'S', url: 'u', status: 'active' }],
-      } },
-    })
-    expect(next.pipelineIssues.discover).toHaveLength(1)
-    expect(next.pipelineIssues.discover[0].issue_number).toBe(21)
-    expect(next.pipelineIssues.shape).toHaveLength(1)
-    expect(next.pipelineIssues.shape[0].issue_number).toBe(22)
   })
 
   it('F7: absent stage key is preserved — omitting merged keeps the existing merged card', () => {

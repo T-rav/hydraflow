@@ -4,7 +4,7 @@ import { useHydraFlow, workerKey } from '../context/HydraFlowContext'
 import { StreamCard } from './StreamCard'
 import { PIPELINE_STAGES, PULSE_ANIMATION } from '../constants'
 import { splitPipelineTracks } from '../utils/pipelineTracks'
-import { ProductFork, TerminalFork } from './PipelineFork'
+import { TerminalFork } from './PipelineFork'
 import { STAGE_KEYS } from '../hooks/useTimeline'
 import {
   sectionHeaderStyles,
@@ -99,7 +99,7 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
     </div>
   )
 
-  const { triage: triageGroup, product: productGroups, postTriage: postTriageGroups, terminal: terminalGroups } =
+  const { triage: triageGroup, postTriage: postTriageGroups, terminal: terminalGroups } =
     splitPipelineTracks(stageGroups, g => g.stage.key)
   const groupKey = g => g.stage.key
 
@@ -117,13 +117,6 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
       )}
       <div style={styles.flowConnector} />
       {triageGroup && renderFlowStage(triageGroup)}
-      <ProductFork
-        items={productGroups}
-        keyOf={groupKey}
-        renderItem={renderFlowStage}
-        separator={<div style={styles.flowConnectorShort} />}
-        styles={forkStyles}
-      />
       {postTriageGroups.map((group) => (
         <React.Fragment key={group.stage.key}>
           <div style={styles.flowConnector} />
@@ -728,12 +721,6 @@ const styles = {
     background: theme.border,
     flexShrink: 0,
   },
-  flowConnectorShort: {
-    width: 8,
-    height: 1,
-    background: theme.border,
-    flexShrink: 0,
-  },
   flowFork: {
     display: 'flex',
     flexDirection: 'column',
@@ -746,19 +733,10 @@ const styles = {
     alignItems: 'center',
     gap: 4,
   },
-  flowForkBottom: {
-    display: 'flex',
-    alignItems: 'center',
-  },
   flowForkArrow: {
     color: theme.cyan,
     fontSize: 10,
     fontWeight: 600,
-  },
-  flowForkDirect: {
-    fontSize: 9,
-    color: theme.textInactive,
-    fontStyle: 'italic',
   },
   flowTitle: {
     fontSize: 9,
@@ -847,15 +825,13 @@ const styles = {
   },
 }
 
-// Canonical fork-slot → PipelineFlow-style map fed to the shared ProductFork /
-// TerminalFork so the large flow diagram shares the Header pipeline row's fork
-// topology while keeping its own larger styling (#9564).
+// Canonical fork-slot → PipelineFlow-style map fed to the shared TerminalFork so
+// the large flow diagram shares the Header pipeline row's fork topology while
+// keeping its own larger styling (#9564).
 const forkStyles = {
   fork: styles.flowFork,
   forkTop: styles.flowForkTop,
-  forkBottom: styles.flowForkBottom,
   forkArrow: styles.flowForkArrow,
-  forkDirect: styles.flowForkDirect,
 }
 
 const epicContainerStyles = {
