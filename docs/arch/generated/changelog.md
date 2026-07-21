@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `3046b96` — Merge remote-tracking branch 'origin/staging' into fix/escalation-ttl-redrive *(2026-07-20)*
+- `982cec5` — fix(workspace,state): automate HITL reset runbook residuals — main-repo core.worktree heal + attempt-counter close-to-clear (#9723) (#10082) (#10082) *(2026-07-20)*
 - `13766bb` — Merge remote-tracking branch 'origin/staging' into fix/escalation-ttl-redrive *(2026-07-20)*
 - `ee15f26` — feat(test-adequacy): independent second-opinion verifier gated on explicit OK (#9546) (#10076) (#10076) *(2026-07-20)*
 - `c46113e` — Merge remote-tracking branch 'origin/staging' into fix/escalation-ttl-redrive *(2026-07-20)*
