@@ -34,7 +34,7 @@ graph LR
     src -- "5" --> src_disturbance
     src -- "9" --> src_erosion
     src -- "1" --> src_observability
-    src -- "14" --> src_preflight
+    src -- "16" --> src_preflight
     src -- "1" --> src_review_phase
     src -- "59" --> src_state
     src -- "7" --> src_telemetry

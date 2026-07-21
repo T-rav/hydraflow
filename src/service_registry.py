@@ -1390,11 +1390,24 @@ def build_services(
         pr_manager=prs,
         deps=loop_deps,
     )
+    # Phase 2 (#10027) real-red dispatch reuses the SAME AutoAgentRunner
+    # subprocess wrapper as SandboxFailureFixerLoop / DisturbanceDampenerLoop
+    # (no new runner code; ADR-0050 envelope applies to all three).
+    from preflight.auto_agent_runner import AutoAgentRunner
+
+    pr_red_repair_runner = AutoAgentRunner(config=config, event_bus=event_bus)
+    pr_red_repair_human_pr_dedup = DedupStore(
+        "pr_red_repair_human_pointer",
+        config.data_root / "dedup" / "pr_red_repair_human_pointer.json",
+    )
     pr_red_repair_loop = PrRedRepairLoop(
         config=config,
         pr_manager=prs,
         state=state,
         deps=loop_deps,
+        runner=pr_red_repair_runner,
+        workspaces=workspaces,
+        human_pr_dedup=pr_red_repair_human_pr_dedup,
     )
     erosion_metrics_dedup = DedupStore(
         "erosion_metrics_filed_findings",
