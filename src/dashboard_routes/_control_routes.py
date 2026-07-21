@@ -299,6 +299,11 @@ _bg_worker_defs = [
         "Weekly read-only CI-gate auditor: pass-rate distributions, blame-correlation, missing failure artifacts, stale quarantines.",
     ),
     (
+        "pr_red_repair",
+        "PR Red Repair",
+        "Detects settled-red open PRs and bounded-reruns infra-flake CI; escalates via rollup issue once the rerun budget is exhausted (#10027 Phase 1).",
+    ),
+    (
         "issue_refinement",
         "Issue Refinement",
         "Backlog-wide duplicate detection, priority scoring, and a rolling operator digest issue.",

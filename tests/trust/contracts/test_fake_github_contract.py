@@ -233,6 +233,15 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         ok = await fake.delete_branch(str(args[0]))
         return FakeOutput(exit_code=0, stdout=f"{ok}\n", stderr="")
 
+    if method == "rerun_workflow_failed":
+        run_id = int(args[0])
+        ok = await fake.rerun_workflow_failed(run_id)
+        assert ok, "FakeGitHub.rerun_workflow_failed unexpectedly returned False"
+        assert run_id in fake._workflow_reruns, (
+            f"rerun_workflow_failed did not record run {run_id}"
+        )
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
     if method == "list_recent_promotion_prs":
         import json as _json
 

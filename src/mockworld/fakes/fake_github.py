@@ -130,6 +130,11 @@ class FakeGitHub:
         self._workflow_runs: list[dict[str, Any]] = []
         self._workflow_jobs: dict[int, list[dict[str, Any]]] = {}
         self._workflow_artifacts: dict[int, int] = {}
+        # #10027: run ids passed to rerun_workflow_failed, in call order.
+        # Scenarios re-seed via add_workflow_run (status="in_progress") after
+        # asserting a rerun fired, to simulate the mid-rerun stale-conclusion
+        # trap the settled-red predicate must not double-fire on.
+        self._workflow_reruns: list[int] = []
         self._prs: dict[int, FakePR] = {}
         self._pr_counter = 10_000
         self._ci_scripts: dict[int, deque[tuple[bool, str]]] = {}
@@ -849,6 +854,18 @@ class FakeGitHub:
     async def count_workflow_run_artifacts(self, run_id: int) -> int:
         self._maybe_rate_limit()
         return self._workflow_artifacts.get(run_id, 0)
+
+    async def rerun_workflow_failed(self, run_id: int) -> bool:
+        """Record a rerun trigger for *run_id* (#10027).
+
+        Mirrors ``PRManager.rerun_workflow_failed``'s always-True success
+        path; does not itself mutate the seeded run/job state — scenarios
+        that want to simulate a rerun's effect re-seed via
+        :meth:`add_workflow_run`.
+        """
+        self._maybe_rate_limit()
+        self._workflow_reruns.append(run_id)
+        return True
 
     async def list_closed_issues_by_label(
         self,
