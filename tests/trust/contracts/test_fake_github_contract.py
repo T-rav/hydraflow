@@ -271,6 +271,137 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         )
         return FakeOutput(exit_code=0, stdout=f"{passed}\n{summary}\n", stderr="")
 
+    # --- Issue-lifecycle / label cluster (#9768 slice 2) ---
+
+    if method == "find_existing_issue":
+        title = str(args[0])
+        fake.add_issue(701, title, "body")
+        number = await fake.find_existing_issue(title)
+        return FakeOutput(exit_code=0, stdout=f"{number}\n", stderr="")
+
+    if method == "get_issue_state":
+        issue_number = int(args[0])
+        # Closed with no explicit reason: covers the COMPLETED fallback
+        # (#10025) rather than the trivial OPEN/UNKNOWN paths.
+        fake.add_issue(issue_number, "Closed issue", "body", state="closed")
+        state = await fake.get_issue_state(issue_number)
+        return FakeOutput(exit_code=0, stdout=f"{state}\n", stderr="")
+
+    if method == "get_issue_updated_at":
+        issue_number = int(args[0])
+        # Non-default value so the contract doesn't pass vacuously against
+        # FakeIssue's hard-coded 2026-01-01T00:00:00Z default.
+        fake.add_issue(
+            issue_number,
+            "Timestamped issue",
+            "body",
+            updated_at="2026-03-15T10:00:00Z",
+        )
+        updated_at = await fake.get_issue_updated_at(issue_number)
+        return FakeOutput(exit_code=0, stdout=f"{updated_at}\n", stderr="")
+
+    if method == "list_closed_issues_by_label":
+        import json as _json
+
+        label = str(args[0])
+        fake.add_issue(
+            901,
+            "Closed with label",
+            "body text",
+            labels=[label],
+            state="closed",
+            updated_at="2026-01-15T00:00:00Z",
+        )
+        rows = await fake.list_closed_issues_by_label(label)
+        return FakeOutput(exit_code=0, stdout=_json.dumps(rows) + "\n", stderr="")
+
+    if method == "list_issue_comments":
+        import json as _json
+
+        issue_number = int(args[0])
+        fake.add_issue(issue_number, "Commented issue", "body")
+        fake.add_seeded_comment(
+            issue_number,
+            "First comment",
+            login="reviewer-bot",
+            created_at="2026-02-01T00:00:00Z",
+        )
+        comments = await fake.list_issue_comments(issue_number)
+        return FakeOutput(exit_code=0, stdout=_json.dumps(comments) + "\n", stderr="")
+
+    if method == "list_open_issue_numbers":
+        import json as _json
+
+        # Seeded out of ascending order to pin the sort; a closed issue
+        # must be excluded from the result.
+        fake.add_issue(120, "Open A", "body")
+        fake.add_issue(110, "Open B", "body")
+        fake.add_issue(130, "Closed C", "body", state="closed")
+        numbers = await fake.list_open_issue_numbers()
+        return FakeOutput(exit_code=0, stdout=_json.dumps(numbers) + "\n", stderr="")
+
+    if method == "update_issue_body":
+        issue_number = int(args[0])
+        new_body = str(args[1])
+        fake.add_issue(issue_number, "Body update target", "old body")
+        await fake.update_issue_body(issue_number, new_body)
+        assert fake._issues[issue_number].body == new_body, (
+            f"update_issue_body did not record the new body on #{issue_number}"
+        )
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
+    if method == "remove_label":
+        issue_number = int(args[0])
+        label = str(args[1])
+        fake.add_issue(
+            issue_number, "Label removal target", "body", labels=[label, "keep-me"]
+        )
+        await fake.remove_label(issue_number, label)
+        assert fake._issues[issue_number].labels == ["keep-me"], (
+            f"remove_label left unexpected labels on #{issue_number}: "
+            f"{fake._issues[issue_number].labels}"
+        )
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
+    if method == "transition":
+        issue_number = int(args[0])
+        new_stage = str(args[1])
+        fake.add_issue(
+            issue_number, "Transition target", "body", labels=["hydraflow-plan"]
+        )
+        await fake.transition(issue_number, new_stage)
+        assert fake._issues[issue_number].labels == ["hydraflow-review"], (
+            f"transition({new_stage!r}) produced unexpected labels: "
+            f"{fake._issues[issue_number].labels}"
+        )
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
+    if method == "swap_pipeline_labels":
+        issue_number = int(args[0])
+        new_label = str(args[1])
+        fake.add_issue(issue_number, "Swap target", "body", labels=["hydraflow-plan"])
+        await fake.swap_pipeline_labels(issue_number, new_label)
+        assert fake._issues[issue_number].labels == [new_label], (
+            f"swap_pipeline_labels did not set literal label {new_label!r} "
+            f"on #{issue_number}: {fake._issues[issue_number].labels}"
+        )
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
+    if method == "find_label_drift":
+        import json as _json
+
+        # ADR-0088 pr_ahead_of_issue case: issue at a pre-PR label, its PR
+        # already at hydraflow-review with commits.
+        fake.add_issue(501, "Drift issue", "body", labels=["hydraflow-ready"])
+        fake.add_pr(number=601, issue_number=501, branch="b")
+        fake.add_pr_label(601, "hydraflow-review")
+        drifts = await fake.find_label_drift()
+        assert [d.kind for d in drifts] == ["pr_ahead_of_issue"], (
+            f"find_label_drift returned unexpected kinds: {[d.kind for d in drifts]}"
+        )
+        stdout = _json.dumps([d.model_dump(mode="json") for d in drifts]) + "\n"
+        return FakeOutput(exit_code=0, stdout=stdout, stderr="")
+
     msg = f"FakeGitHub has no contract-tested method {method!r}"
     raise NotImplementedError(msg)
 

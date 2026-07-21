@@ -34,7 +34,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0028 | enforced | `pytest:tests/test_report_event_flow.py` |
 | ADR-0029 | enforced | `pytest:tests/test_caretaker_loop_wiring.py` |
 | ADR-0030 | decision-of-record | — |
-| ADR-0031 | enforced | `pytest:tests/test_discover_phase.py`, `pytest:tests/test_shape_phase.py`, `pytest:tests/test_discover_runner.py`, `pytest:tests/test_shape_runner.py`, `pytest:tests/architecture/test_functional_area_coverage.py` |
 | ADR-0032 | enforced | `pytest:tests/test_repo_wiki.py`, `pytest:tests/test_repo_wiki_store_git.py`, `pytest:tests/test_repo_wiki_ingest.py`, `pytest:tests/test_wiki_drift_detector.py`, `pytest:tests/test_wiki_drift_symbols.py`, `pytest:tests/test_wiki_semantic_drift.py`, `pytest:tests/test_repo_wiki_temporal.py`, `pytest:tests/test_wiki_corroboration.py` |
 | ADR-0034 | enforced | `pytest:tests/test_state_machine.py` |
 | ADR-0035 | manual | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
@@ -79,6 +78,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0103 | enforced | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_human_steering_state.py`, `pytest:tests/test_orchestrator_human_steering.py`, `pytest:tests/test_config_env.py` |
 | ADR-0104 | enforced | `pytest:tests/test_auto_tighten_invariant.py` |
 | ADR-0106 | enforced | `pytest:tests/regressions/test_issue_9552.py` |
+| ADR-0107 | decision-of-record | — |
 
 ## Check → ADRs it protects
 
@@ -93,7 +93,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `branch-protection ruleset review per docs/standards/branch_protection` | ADR-0042 |
 | `make:trust-contracts` | ADR-0047 |
 | `pytest:tests/architecture/test_edge_proposer_wiring.py` | ADR-0058 |
-| `pytest:tests/architecture/test_functional_area_coverage.py` | ADR-0031, ADR-0089 |
+| `pytest:tests/architecture/test_functional_area_coverage.py` | ADR-0089 |
 | `pytest:tests/architecture/test_loop_count_matches_adr0001.py` | ADR-0001 |
 | `pytest:tests/architecture/test_otel_invariants.py` | ADR-0055 |
 | `pytest:tests/architecture/test_term_proposer_wiring.py` | ADR-0054 |
@@ -127,8 +127,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_convergence_ledger.py` | ADR-0094 |
 | `pytest:tests/test_dashboard_routes_repo.py` | ADR-0007, ADR-0008 |
 | `pytest:tests/test_data_migration_d2.py` | ADR-0021 |
-| `pytest:tests/test_discover_phase.py` | ADR-0031 |
-| `pytest:tests/test_discover_runner.py` | ADR-0031 |
 | `pytest:tests/test_edge_proposer_loop.py` | ADR-0058 |
 | `pytest:tests/test_entry_evidence_loop.py` | ADR-0062 |
 | `pytest:tests/test_epic.py` | ADR-0011 |
@@ -175,8 +173,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_screenshot_scanner.py` | ADR-0018 |
 | `pytest:tests/test_secret_scrub.py` | ADR-0085 |
 | `pytest:tests/test_seed_terms.py` | ADR-0053, ADR-0099 |
-| `pytest:tests/test_shape_phase.py` | ADR-0031 |
-| `pytest:tests/test_shape_runner.py` | ADR-0031 |
 | `pytest:tests/test_state_machine.py` | ADR-0002, ADR-0014, ADR-0017, ADR-0034 |
 | `pytest:tests/test_state_persistence.py` | ADR-0021 |
 | `pytest:tests/test_term_proposer_loop.py` | ADR-0054 |

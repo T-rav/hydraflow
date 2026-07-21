@@ -1,0 +1,25 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_issue_updated_at returns the seeded issue's updated_at timestamp
+# verbatim — used by staleness-driven loops (e.g. stale_issue_gc) to
+# gate age-based actions. The dispatcher seeds a non-default value so
+# the contract does not pass vacuously against FakeIssue's hard-coded
+# default.
+adapter: github
+interaction: get_issue_updated_at
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_issue_updated_at
+  args:
+  - '888'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '2026-03-15T10:00:00Z
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true
