@@ -304,6 +304,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("diagnostic_interval", "HYDRAFLOW_DIAGNOSTIC_INTERVAL", 30),
     ("retrospective_interval", "HYDRAFLOW_RETROSPECTIVE_INTERVAL", 1800),
     ("principles_audit_interval", "HYDRAFLOW_PRINCIPLES_AUDIT_INTERVAL", 604800),
+    ("principles_audit_timeout_seconds", "HYDRAFLOW_PRINCIPLES_AUDIT_TIMEOUT", 1800),
     (
         "sandbox_failure_fixer_interval",
         "HYDRAFLOW_SANDBOX_FAILURE_FIXER_INTERVAL",
@@ -331,6 +332,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("flake_tracker_interval", "HYDRAFLOW_FLAKE_TRACKER_INTERVAL", 14400),
     ("flake_threshold", "HYDRAFLOW_FLAKE_THRESHOLD", 3),
     ("skill_prompt_eval_interval", "HYDRAFLOW_SKILL_PROMPT_EVAL_INTERVAL", 604800),
+    (
+        "skill_prompt_eval_adversarial_timeout_seconds",
+        "HYDRAFLOW_SKILL_PROMPT_EVAL_TIMEOUT",
+        3600,
+    ),
     (
         "skill_prompt_refine_max_weekly",
         "HYDRAFLOW_SKILL_PROMPT_REFINE_MAX_WEEKLY",
@@ -3293,6 +3299,20 @@ class HydraFlowConfig(BaseModel):
             "aligned with corpus_runner.DEFAULT_LIVE_BUDGET (#10014)."
         ),
     )
+    skill_prompt_eval_adversarial_timeout_seconds: int = Field(
+        default=3600,
+        ge=60,
+        le=21600,
+        description=(
+            "Hard cap (seconds) on the `make trust-adversarial` subprocess "
+            "read in SkillPromptEvalLoop (default 1h; also bounds the "
+            "per-skill live refine-validation runner). Healthy runtime "
+            "scales with corpus/repo size, so this is an operator knob, not "
+            "a constant (#9555): too low silently degrades the weekly "
+            "backstop to a permanent no-op (false timeout every tick); too "
+            "high weakens wedged-child protection."
+        ),
+    )
 
     # Trust fleet — prompt self-refinement (#9724)
     skill_prompt_refine_enabled: bool = Field(
@@ -3757,6 +3777,18 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Seconds between PrinciplesAuditLoop ticks. "
             "Default 604800 = 7 days (spec §4.4)."
+        ),
+    )
+    principles_audit_timeout_seconds: int = Field(
+        default=1800,
+        ge=60,
+        le=21600,
+        description=(
+            "Hard cap (seconds) on the `make audit-json` subprocess read in "
+            "PrinciplesAuditLoop (default 30m). Healthy runtime scales with "
+            "repo size, so this is an operator knob, not a constant (#9555): "
+            "too low silently degrades the audit to a permanent no-op (false "
+            "timeout every tick); too high weakens wedged-child protection."
         ),
     )
 
