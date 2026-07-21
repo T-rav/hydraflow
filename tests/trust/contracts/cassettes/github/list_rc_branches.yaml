@@ -1,0 +1,20 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_rc_branches returns [(branch_name, committer_date_iso), ...] for all
+# rc/* refs — StagingPromotionLoop's retention-cleanup input. A fresh fake
+# has no rc/* refs, so the contract pins the empty-list JSON shape.
+adapter: github
+interaction: list_rc_branches
+recorded_at: "2026-07-20T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_rc_branches
+  args: []
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "[]\n"
+  stderr: ""
+normalizers: []
+baseline_only: true
