@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from mockworld.fakes._factories import PRInfoFactory
 from models import LabelDrift
+from pr_manager import PRManager
 
 if TYPE_CHECKING:
     from mockworld.seed import MockWorldSeed
@@ -1123,7 +1124,6 @@ class FakeGitHub:
         to ``PRPort`` in the sandbox harness, so a divergent title here would be
         live-reachable — a fake that lies about the real format.
         """
-        from pr_manager import PRManager  # noqa: PLC0415
 
         return PRManager.expected_pr_title(issue_number, issue_title)
 
