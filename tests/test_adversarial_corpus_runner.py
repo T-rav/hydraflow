@@ -268,3 +268,82 @@ def test_force_live_empty_prompt_falls_back_to_fixture(
 
     assert fake.prompts == []
     assert result["status"] == "PASS"  # replayed the canned transcript
+
+
+# ---------------------------------------------------------------------------
+# #10063 — `--live-skill` + `--force-live-cases` CLI wiring (refine-candidate
+# validation routes a small live sample through the real agent CLI).
+# ---------------------------------------------------------------------------
+
+
+def test_live_skill_force_live_cases_routes_only_named_cases(monkeypatch) -> None:
+    """`--force-live-cases` must route ONLY the listed cases through
+    force_live=True when combined with `--live-skill`; other cases in
+    `--cases` keep replaying their fixture."""
+    fake = _FakeClaudeCLI()
+    monkeypatch.setattr(corpus_runner.subprocess, "run", fake)
+    monkeypatch.setenv("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE", "1")
+
+    forced = "holdout-diff-sanity-attack-debug-residue"
+    replayed = "missing-import"
+    rc = main(
+        [
+            "--json",
+            "--live-skill",
+            "diff-sanity",
+            "--cases",
+            f"{forced},{replayed}",
+            "--force-live-cases",
+            forced,
+        ]
+    )
+
+    assert rc == 0
+    assert fake.prompts == [_own_prompt_for(CASES_DIR / forced, "diff-sanity")]
+
+
+def test_live_skill_force_live_cases_inert_without_live_env(monkeypatch) -> None:
+    """Non-live runs keep replay for CI determinism: `--force-live-cases`
+    without `HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1` must never invoke the CLI."""
+    fake = _FakeClaudeCLI()
+    monkeypatch.setattr(corpus_runner.subprocess, "run", fake)
+    monkeypatch.delenv("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE", raising=False)
+
+    forced = "holdout-diff-sanity-attack-debug-residue"
+    rc = main(
+        [
+            "--json",
+            "--live-skill",
+            "diff-sanity",
+            "--cases",
+            forced,
+            "--force-live-cases",
+            forced,
+        ]
+    )
+
+    assert rc == 0
+    assert fake.prompts == []
+
+
+def test_live_skill_without_force_live_cases_replays_fixture(monkeypatch) -> None:
+    """Baseline: `--live-skill` alone (no `--force-live-cases`) must not
+    change — every case still replays its fixture, even under
+    HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1 (guards the pre-#10063 contract the
+    validation path relied on before this issue)."""
+    fake = _FakeClaudeCLI()
+    monkeypatch.setattr(corpus_runner.subprocess, "run", fake)
+    monkeypatch.setenv("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE", "1")
+
+    rc = main(
+        [
+            "--json",
+            "--live-skill",
+            "diff-sanity",
+            "--cases",
+            "missing-import",
+        ]
+    )
+
+    assert rc == 0
+    assert fake.prompts == []

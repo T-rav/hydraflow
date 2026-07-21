@@ -39,6 +39,18 @@ round-robin across skills, so every skill's OWN prompt gets exercised against
 the real agent CLI — not just ``BUILTIN_SKILLS[0]``'s (#10014). Cases beyond
 the budget, ``"none"`` sentinels, and every non-live run replay their
 ``expected_transcript.txt`` fixtures exactly as before.
+
+Refine-candidate validation (``--live-skill`` + ``--force-live-cases``,
+#10063): ``SkillPromptEvalLoop._validate_candidate`` re-runs this module
+against a candidate (already-patched) worktree to decide whether a
+synthesized prompt fix may auto-merge. Passing ``--force-live-cases`` names
+a small subset of the ``--cases`` set (the regressed case + a holdout
+sample — :func:`prompt_refiner.select_live_validation_sample`) that gets
+``force_live=True``, so the candidate prompt is genuinely exercised against
+the real agent CLI instead of being judged only against the OLD prompt's
+canned transcript. Cases outside that subset keep replaying fixtures. Inert
+unless the operator has also set ``HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1`` —
+without it every case replays its fixture (CI determinism).
 """
 
 from __future__ import annotations
@@ -466,6 +478,19 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="evaluate only this skill's cases, building its own prompt/parser",
     )
+    parser.add_argument(
+        "--force-live-cases",
+        default="",
+        help=(
+            "comma-separated case ids to force through force_live=True "
+            "(bypassing the expected_transcript.txt fixture short-circuit) "
+            "when combined with --live-skill; only meaningful when "
+            "HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1 (live=True) is also set. "
+            "Used by refine-candidate validation (#10063) to genuinely "
+            "exercise a small sample against the real agent CLI instead of "
+            "replaying the old prompt's canned transcript"
+        ),
+    )
     args = parser.parse_args(argv)
     live = os.environ.get("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE") == "1"
     try:
@@ -478,8 +503,16 @@ def main(argv: list[str] | None = None) -> int:
         else None
     )
     if args.live_skill:
+        force_live_cases = frozenset(
+            c.strip() for c in args.force_live_cases.split(",") if c.strip()
+        )
         results = [
-            evaluate_case_for_skill(case_dir, args.live_skill, live=live)
+            evaluate_case_for_skill(
+                case_dir,
+                args.live_skill,
+                live=live,
+                force_live=live and case_dir.name in force_live_cases,
+            )
             for case_dir in discover_cases(CASES_DIR)
             if case_ids is None or case_dir.name in case_ids
         ]

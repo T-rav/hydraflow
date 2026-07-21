@@ -34,13 +34,40 @@ logger = logging.getLogger("hydraflow.state")
 # attempt counters are covered here — ``issue_attempts`` directly,
 # review attempts inside ``convergence_ledgers`` stage state, and
 # ``hitl_summary_failures`` directly.
+#
+# #10083 follow-up: the #9723 audit only chased down the fields a prior PR
+# happened to touch. A full sweep of every str(issue_number)-keyed
+# StateTracker field (tests/regressions/test_issue_10083_gc_sweep.py ::
+# test_every_issue_keyed_field_is_classified enforces this structurally —
+# see that file for the field-by-field classification) turned up two more
+# gaps of the exact same shape as #9723's:
+#
+# * ``route_back_counts`` / ``review_orphan_strikes`` /
+#   ``review_orphan_requeues`` — burned route-back and review-orphan
+#   penalty budget, same "attempt cap" risk class as ``issue_attempts``.
+# * ``hitl_origins`` / ``hitl_causes`` / ``hitl_visual_evidence`` —
+#   siblings of ``hitl_summaries``/``hitl_summary_failures`` inside
+#   ``HITLStateMixin.clear_hitl_state``; only two of the five fields that
+#   method clears together had made it into this sweep.
+# * ``diagnostic_attempts`` / ``diagnosis_severities`` — siblings of
+#   ``escalation_contexts`` inside ``DiagnosticStateMixin.clear_diagnostic_state``;
+#   only one of the three fields that method clears together had made it
+#   into this sweep.
 _ISSUE_SCOPED_FIELDS = (
     "adversarial_states",
     "convergence_ledgers",
+    "diagnosis_severities",
+    "diagnostic_attempts",
     "escalation_contexts",
+    "hitl_causes",
+    "hitl_origins",
     "hitl_summaries",
     "hitl_summary_failures",
+    "hitl_visual_evidence",
     "issue_attempts",
+    "review_orphan_requeues",
+    "review_orphan_strikes",
+    "route_back_counts",
 )
 
 
