@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any, cast
 
 from execution import HostRunner, SimpleResult
@@ -145,15 +145,23 @@ class FakeSubprocessRunner:
         env: dict[str, str] | None = None,
         timeout: float = 120.0,
         input: bytes | None = None,  # noqa: A002
+        cancel_check: Callable[[], bool] | None = None,
+        cancel_poll_interval: float = 5.0,
     ) -> SimpleResult:
         # Host-side utilities (git, make) run for real so that AgentRunner's
         # commit-counting and quality-gate checks observe the actual worktree.
         if cmd and cmd[0] in _HOST_COMMANDS:
             return await self._run_on_host(
-                cmd, cwd=cwd, env=env, timeout=timeout, input=input
+                cmd,
+                cwd=cwd,
+                env=env,
+                timeout=timeout,
+                input=input,
+                cancel_check=cancel_check,
+                cancel_poll_interval=cancel_poll_interval,
             )
 
-        _ = (cwd, input)
+        _ = (cwd, input, cancel_check, cancel_poll_interval)
 
         async def _drain() -> tuple[str, int]:
             event_iter = await self._docker.run_agent(command=list(cmd), env=env)
@@ -176,6 +184,8 @@ class FakeSubprocessRunner:
         env: dict[str, str] | None = None,
         timeout: float = 120.0,
         input: bytes | None = None,  # noqa: A002
+        cancel_check: Callable[[], bool] | None = None,
+        cancel_poll_interval: float = 5.0,
     ) -> SimpleResult:
         """Run *cmd* directly on the host, sharing ``HostRunner``'s lifecycle.
 
@@ -187,9 +197,19 @@ class FakeSubprocessRunner:
         previously a near-duplicate that only killed the direct child on timeout
         and had no cancel handler — so a forking host command (or a cancelled
         cycle) leaked the grandchildren the real runner reaps.
+
+        ``cancel_check``/``cancel_poll_interval`` (#9577) thread straight through
+        to ``HostRunner.run_simple`` so the fake's host path gets the same
+        cooperative kill-switch cancellation as production instead of ignoring it.
         """
         return await HostRunner().run_simple(
-            cmd, cwd=cwd, env=env, timeout=timeout, input=input
+            cmd,
+            cwd=cwd,
+            env=env,
+            timeout=timeout,
+            input=input,
+            cancel_check=cancel_check,
+            cancel_poll_interval=cancel_poll_interval,
         )
 
     async def cleanup(self) -> None:
