@@ -49,6 +49,7 @@ flowchart LR
     end
     subgraph trust_fleet["Trust Fleet"]
         trust_fleet_AdrConformanceLoop([AdrConformanceLoop])
+        trust_fleet_AdrDriftResolverLoop([AdrDriftResolverLoop])
         trust_fleet_AdrTouchpointAuditorLoop([AdrTouchpointAuditorLoop])
         trust_fleet_AutoTightenLoop([AutoTightenLoop])
         trust_fleet_ContractRefreshLoop([ContractRefreshLoop])
@@ -163,6 +164,7 @@ The trust-architecture hardening fleet (ADR-0045) — RC promotion gate, staging
 **Loops**
 
 - `AdrConformanceLoop` — `src.adr_conformance_loop`
+- `AdrDriftResolverLoop` — `src.adr_drift_resolver_loop`
 - `AdrTouchpointAuditorLoop` — `src.adr_touchpoint_auditor_loop`
 - `AutoTightenLoop` — `src.auto_tighten_loop`
 - `ContractRefreshLoop` — `src.contract_refresh_loop`

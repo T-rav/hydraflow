@@ -113,6 +113,7 @@ _BACKEND_WORKER_LOOPS: dict[str, str] = {
     "pr_unsticker": "pr_unstick_provider",
     "term_proposer": "term_proposer_provider",
     "entry_evidence": "term_proposer_provider",
+    "adr_drift_resolver": "adr_drift_resolver_provider",
 }
 
 
@@ -241,6 +242,7 @@ class HydraFlowOrchestrator:
             "skill_prompt_eval": svc.skill_prompt_eval_loop,
             "fake_coverage_auditor": svc.fake_coverage_auditor_loop,
             "adr_touchpoint_auditor": svc.adr_touchpoint_auditor_loop,
+            "adr_drift_resolver": svc.adr_drift_resolver_loop,
             "adr_conformance": svc.adr_conformance_loop,
             "auto_tighten": svc.auto_tighten_loop,
             "memory_backlog": svc.memory_backlog_loop,
@@ -1430,6 +1432,7 @@ class HydraFlowOrchestrator:
             ("skill_prompt_eval", self._svc.skill_prompt_eval_loop.run),
             ("fake_coverage_auditor", self._svc.fake_coverage_auditor_loop.run),
             ("adr_touchpoint_auditor", self._svc.adr_touchpoint_auditor_loop.run),
+            ("adr_drift_resolver", self._svc.adr_drift_resolver_loop.run),
             ("adr_conformance", self._svc.adr_conformance_loop.run),
             ("auto_tighten", self._svc.auto_tighten_loop.run),
             ("memory_backlog", self._svc.memory_backlog_loop.run),

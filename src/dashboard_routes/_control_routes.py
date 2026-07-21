@@ -313,6 +313,11 @@ _bg_worker_defs = [
         "v1: runs the change-spread and concept-scatter sensors over commits merged since the last tick; files above-baseline drift as hydraflow-find issues for human triage (Pattern B). See #10107, epic #10104.",
     ),
     (
+        "adr_drift_resolver",
+        "ADR Drift Resolver",
+        "Triage-before-escalate for adr_touchpoint_auditor's ADR-drift rollups: one LLM call classifies each as consistent (auto-close), real/over/dead-citation drift (relabel hydraflow-find with an ADR-edit brief), or low-confidence (HITL, rare). Fail-closed — only a confident consistent verdict auto-closes. See #9976.",
+    ),
+    (
         "issue_refinement",
         "Issue Refinement",
         "Backlog-wide duplicate detection, priority scoring, and a rolling operator digest issue.",

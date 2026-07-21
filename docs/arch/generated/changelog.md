@@ -6,7 +6,14 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
-- `2d9c827` — feat(pipeline): remove Discover+Shape as standalone phases; Triage→Plan direct, discover/shape as planner helpers (#9773) (#9773) *(2026-07-21)*
+- `253dd51` — test(adr): patch run_lightweight_agent at its use-site after module-top hoist (#9976) (#9976) *(2026-07-21)*
+- `7f7d73c` — Merge remote-tracking branch 'origin/staging' into feat/9976-adr-drift-resolver-loop *(2026-07-21)*
+- `0d66c52` — feat(pipeline): ADR-0107 + flag-gated Triage→Plan routing — keystone for collapsing Discover/Shape (#9773) (#10145) (#10145) *(2026-07-21)*
+- `44c0d49` — chore(arch): regen after staging merge (#9976) (#9976) *(2026-07-21)*
+- `6026edf` — chore(arch): merge staging + regen (#9976) (#9976) *(2026-07-21)*
+- `334b992` — Merge remote-tracking branch 'origin/staging' into feat/9976-adr-drift-resolver-loop *(2026-07-21)*
+- `d4d4ecc` — fix(factory): perf/ auto-merge + worktree arch-meta merge driver (#10143) (#10143) *(2026-07-21)*
+- `554da62` — feat(adr): AdrDriftResolverLoop — triage-before-escalate so drift rollups self-resolve (#9976) (#9976) *(2026-07-21)*
 - `e556096` — feat(erosion): ErosionMetricsLoop v1 — Pattern-B caretaker files change-spread/concept-scatter drift to triage (#10107) (#10138) (#10138) *(2026-07-21)*
 - `769843e` — feat(sandbox): seed repo-wiki broken-cite fixture + wiki_rot_detector active-trigger scenario (#10133) (#10137) (#10137) *(2026-07-21)*
 - `2c34150` — feat(erosion): v1 concept-scatter sensor — newly-added symbol across K>=3 modules (#10106) (#10136) (#10136) *(2026-07-21)*
