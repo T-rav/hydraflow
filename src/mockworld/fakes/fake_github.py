@@ -1116,7 +1116,16 @@ class FakeGitHub:
 
     @staticmethod
     def expected_pr_title(issue_number: int, issue_title: str) -> str:
-        return f"[#{issue_number}] {issue_title}"
+        """Return the canonical PR title (``Fixes #N: <title>``, truncated).
+
+        Delegates to the real :meth:`PRManager.expected_pr_title` so the fake
+        can never drift from production formatting (#10153). FakeGitHub is cast
+        to ``PRPort`` in the sandbox harness, so a divergent title here would be
+        live-reachable — a fake that lies about the real format.
+        """
+        from pr_manager import PRManager  # noqa: PLC0415
+
+        return PRManager.expected_pr_title(issue_number, issue_title)
 
     async def get_pr_mergeable(self, pr_number: int) -> bool | None:
         self._maybe_rate_limit()

@@ -529,3 +529,29 @@ def test_cassette_directory_not_empty() -> None:
     assert list_cassettes(_CASSETTE_DIR), (
         f"{_CASSETTE_DIR} has no *.yaml cassettes; seed at least one."
     )
+
+
+@pytest.mark.parametrize(
+    ("issue_number", "issue_title"),
+    [
+        (524, "Improve caching layer performance"),
+        (1, "Fix bug"),
+        (0, ""),
+        # Long title that trips the 70-char truncation branch in PRManager.
+        (99, "x" * 120),
+    ],
+)
+def test_expected_pr_title_matches_real_prmanager(
+    issue_number: int, issue_title: str
+) -> None:
+    """FakeGitHub.expected_pr_title must equal PRManager's for every input (#10153).
+
+    FakeGitHub is cast to PRPort in the sandbox harness, so any divergence from
+    the real formatter (``[#n] title`` vs ``Fixes #n: title``) is live-reachable
+    and lets a wrong-format PR title slip past MockWorld/sandbox tests.
+    """
+    from pr_manager import PRManager
+
+    assert FakeGitHub.expected_pr_title(issue_number, issue_title) == (
+        PRManager.expected_pr_title(issue_number, issue_title)
+    )
