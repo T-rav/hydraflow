@@ -6,11 +6,13 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `953eaf8` — Merge remote-tracking branch 'origin/staging' into feat/10140-loop-self-repair-actuator *(2026-07-21)*
+- `7961771` — chore(arch): regen after staging merge (#10140) (#10140) *(2026-07-21)*
+- `94be7b3` — fix(fake-fidelity): FakeGitHub PR-title format matches real PRManager (#10153) (#10160) (#10160) *(2026-07-21)*
 - `ac24c1e` — Merge remote-tracking branch 'origin/staging' into feat/10140-loop-self-repair-actuator *(2026-07-21)*
 - `31e4cbd` — test(fake-coverage): cover next FakeGitHub adapter-surface slice (#9768) (#10161) (#10161) *(2026-07-21)*
 - `e19f18f` — fix(sandbox): air-gap HealthMonitorLoop._repo_probe via injected RepoProber (#10140) (#10140) *(2026-07-21)*
 - `a666fc8` — Merge remote-tracking branch 'origin/staging' into feat/10140-loop-self-repair-actuator *(2026-07-21)*
-- `31e4cbd` — test(fake-coverage): cover next FakeGitHub adapter-surface slice (#9768) (#10161) (#10161) *(2026-07-21)*
 - `e9115b0` — feat(pr-red): Phase 2 — dispatch auto-agent to fix real (non-infra) settled CI reds on their branch (#10027) (#10157) (#10157) *(2026-07-21)*
 - `94976a6` — chore(arch): regen (#10140) (#10140) *(2026-07-21)*
 - `b4f2f8d` — Merge remote-tracking branch 'origin/staging' into feat/10140-loop-self-repair-actuator *(2026-07-21)*
