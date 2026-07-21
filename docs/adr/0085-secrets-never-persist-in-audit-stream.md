@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-05-30
 **Enforcement:** enforced
-**Enforced by:** pytest:tests/test_secret_scrub.py, pytest:tests/test_codeql_scrub_secrets_suppression.py
+**Enforced by:** pytest:tests/test_secret_scrub.py, pytest:tests/regressions/test_issue_9143_codeql_suppression.py
 
 ## Context
 
@@ -25,5 +25,5 @@ The **persistence boundary is the single scrub chokepoint**:
 - **Secrets are redacted at the durability boundary**, labelled (`[REDACTED:<label>]`), and the scrubbed line remains valid JSON.
 - **This is the persistence trust boundary, not the agent sandbox.** A secret in flight is still in the agent's process memory; this ADR only guarantees it does not leak into durable, retained, fanned-out logs.
 - Patterns require specific structure (known prefixes, quoted assignments) to keep false-positive redaction of legitimate audit prose low; `scrub_secrets` is idempotent.
-- **CodeQL companion (issue #9143).** Because `scrub_secrets` sanitizes the taint that CodeQL's `py/clear-text-storage-sensitive-data` query traces, that query reports a false positive at the `append_jsonl` write sink. The query's barrier set is a hardcoded QL `Sanitizer` class with no Models-as-Data `barrierModel` hook, so it cannot be taught via a data-extension model; the FP is instead suppressed at the sink with a scoped `# codeql[py/clear-text-storage-sensitive-data]` comment, applied to code scanning by the `advanced-security/dismiss-alerts` step in `codeql.yml`. `tests/test_codeql_scrub_secrets_suppression.py` guards that wiring against drift.
+- **CodeQL companion (issue #9143).** Because `scrub_secrets` sanitizes the taint that CodeQL's `py/clear-text-storage-sensitive-data` query traces, that query reports a false positive at the `append_jsonl` write sink. The query's barrier set is a hardcoded QL `Sanitizer` class with no Models-as-Data `barrierModel` hook, so it cannot be taught via a data-extension model; the FP is instead suppressed at the sink with a scoped `# codeql[py/clear-text-storage-sensitive-data]` comment, applied to code scanning by the `advanced-security/dismiss-alerts` step in `codeql.yml`. `tests/regressions/test_issue_9143_codeql_suppression.py` guards that wiring against drift.
 - **Residual / follow-up:** other plain-`open` JSONL writers (`health_monitor` `decisions.jsonl`, the advisor session log) should also route through `append_jsonl`; and the disk-full silent-loss (suppressed `OSError` on the append path) must fail loud — both tracked as follow-up, not delivered here.
