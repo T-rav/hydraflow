@@ -146,6 +146,17 @@ def append_jsonl(path: Path, data: str) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
+        # scrub_secrets() is the ADR-0085 redaction sanitizer for this durable
+        # write path: it regex-redacts every credential-shaped substring to a
+        # [REDACTED:<label>] marker before the record is persisted, so no secret
+        # reaches the canonical audit stream. CodeQL's
+        # py/clear-text-storage-sensitive-data query cannot be taught this via a
+        # Models-as-Data barrier — that query's barrier set is a hardcoded QL
+        # `Sanitizer` class (CleartextStorageQuery.qll: isBarrier(n){ n instanceof
+        # Sanitizer }) with no barrierModel/ModelOutput hook, so it flags the
+        # scrub_secrets(data) -> f.write path as a false positive. Suppress it at
+        # the sink (the only supported lever for this query). See issue #9143.
+        # codeql[py/clear-text-storage-sensitive-data]
         f.write(scrub_secrets(data) + "\n")
         f.flush()
         os.fsync(f.fileno())
