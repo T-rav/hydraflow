@@ -190,6 +190,52 @@ class MockWorldSeed:
     # Default empty: no directories are created.
     expired_run_dirs: list[dict[str, Any]] = field(default_factory=list)
 
+    # EpicState records upserted into StateTracker at boot (#9643). Each entry
+    # is an ``EpicState``-shaped payload (``epic_number`` required; every other
+    # key optional — see ``models.EpicState``), with one seed-only extra:
+    # ``last_activity_age_days`` (numeric). The materializer pops that key and
+    # back-dates ``last_activity`` to ``now - age_days`` as a tz-AWARE ISO
+    # timestamp, so seeds stay time-independent (no hard-coded date that rots)
+    # and never hit the naive-timestamp footgun (``EpicManager._is_stale``
+    # swallows the naive/aware ``TypeError`` and reads the epic as fresh).
+    # Age the entry past ``epic_stale_days`` and EpicMonitorLoop's
+    # ``check_stale_epics`` genuinely fires (s71). Keep ``child_issues`` empty
+    # unless every child is also seeded — ``refresh_cache`` builds child detail
+    # through the fetcher. Both loaders (sandbox_main + the in-process harness)
+    # apply this before the loops boot. Default empty: no state written,
+    # every existing seed payload unchanged.
+    epic_states: list[dict[str, Any]] = field(default_factory=list)
+
+    # Health trend artifacts written to disk at boot (#9643) — the JSONL/JSON
+    # history ``HealthMonitorLoop.compute_trend_metrics`` reads. Fixed key
+    # allowlist (unknown keys raise ``ValueError`` — fail-closed, a typo'd
+    # artifact name must not silently seed nothing):
+    #
+    # - ``"outcomes"``: list[dict] appended row-by-row to
+    #   ``config.memory_dir/outcomes.jsonl`` (rows like ``{"outcome":
+    #   "failure"}``; < 20% ``success`` drives the first_pass_rate_low
+    #   auto-adjustment, s72).
+    # - ``"item_scores"``: dict written to ``config.memory_dir/item_scores.json``.
+    # - ``"harness_failures"``: list[dict] appended to
+    #   ``config.repo_memory_dir/harness_failures.jsonl`` (repo-scoped — NOT
+    #   the flat memory_dir; mirrors ``HealthMonitorLoop._failures_path``).
+    #
+    # Default empty: no files created, every existing seed payload unchanged.
+    health_metrics: dict[str, Any] = field(default_factory=dict)
+
+    # Persisted worker heartbeats seeded into StateTracker at boot (#9643,
+    # absorbed from #9904). Keyed by worker name; each value takes ``status``
+    # (default "running"), ``age_seconds`` (numeric, relative — the
+    # materializer back-dates ``last_run`` to ``now - age_seconds``, tz-aware)
+    # and ``details`` (dict). An aged entry gives HealthMonitorLoop's
+    # dead-man-switch reads (``_check_worker_staleness`` /
+    # ``_check_sanity_loop_staleness`` via ``state.get_worker_heartbeats()``)
+    # genuine history to judge. Note: the restart-then-escalate sweep also
+    # needs a live BGWorkerManager with the worker registered — seeding only a
+    # heartbeat exercises the read path, not a full stall escalation. Default
+    # empty: no heartbeats written, every existing seed payload unchanged.
+    worker_heartbeats: dict[str, dict[str, Any]] = field(default_factory=dict)
+
     # IssueRefinementLoop (spec #9957) air-gap seam. The loop reads the WHOLE
     # open backlog via ``PRPort.list_open_issues`` (Faked) and then spends one
     # structured LLM call per duplicate candidate / priority target — and THAT

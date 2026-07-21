@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, cast
 from branch_protection_audit import AuditReport, audit_repo
 from dashboard import HydraFlowDashboard
 from events import EventBus
+from file_util import append_jsonl, atomic_write
 from mockworld.fakes import (
     FakeGitHub,
     FakeIssueFetcher,
@@ -34,6 +35,7 @@ from mockworld.fakes import (
 from mockworld.fakes.fake_docker import FakeDocker
 from mockworld.fakes.fake_subprocess_runner import FakeSubprocessRunner
 from mockworld.seed import MockWorldSeed
+from models import EpicState
 from orchestrator import HydraFlowOrchestrator
 from ports import IssueFetcherPort, IssueStorePort, PRPort, WorkspacePort
 from runtime_config import load_runtime_config
@@ -363,6 +365,87 @@ def materialize_expired_runs(config: HydraFlowConfig, seed: MockWorldSeed) -> No
         (run_dir / "transcript.log").write_text("seeded expired run (#9543)\n")
 
 
+def materialize_epic_states(state: Any, seed: MockWorldSeed) -> None:
+    """Upsert seeded EpicState records into StateTracker (#9643).
+
+    EpicMonitorLoop's stale sweep reads ``state.get_all_epic_states()``; the
+    seed-only ``last_activity_age_days`` key is popped and converted to a
+    tz-AWARE ``last_activity`` back-dated from boot, so seeds stay
+    time-independent (mirroring ``expired_run_dirs.age_days``) and can never
+    hit the naive-timestamp footgun (``EpicManager._is_stale`` swallows the
+    naive/aware ``TypeError`` and reads the epic as fresh). Empty
+    ``epic_states`` (every other scenario) touches nothing.
+    """
+    for entry in seed.epic_states:
+        payload = dict(entry)
+        age_days = payload.pop("last_activity_age_days", None)
+        if age_days is not None:
+            payload["last_activity"] = (
+                datetime.now(UTC) - timedelta(days=float(age_days))
+            ).isoformat()
+        state.upsert_epic_state(EpicState.model_validate(payload))
+
+
+# The fixed ``health_metrics`` artifact allowlist. Paths mirror
+# ``HealthMonitorLoop._outcomes_path`` / ``_scores_path`` / ``_failures_path``
+# exactly — a wrong root yields a silently-idle loop reading zero metrics.
+_HEALTH_METRIC_KEYS: frozenset[str] = frozenset(
+    {"outcomes", "item_scores", "harness_failures"}
+)
+
+
+def materialize_health_metrics(config: HydraFlowConfig, seed: MockWorldSeed) -> None:
+    """Write seeded health trend artifacts to the paths the loop reads (#9643).
+
+    ``outcomes.jsonl`` + ``item_scores.json`` are FLAT under
+    ``config.memory_dir``; ``harness_failures.jsonl`` is repo-scoped under
+    ``config.repo_memory_dir``. Unknown keys raise ``ValueError`` (fail-closed
+    — a typo'd artifact name must not silently seed nothing). Empty
+    ``health_metrics`` (every other scenario) creates no files.
+    """
+    metrics = seed.health_metrics
+    if not metrics:
+        return
+    unknown = set(metrics) - _HEALTH_METRIC_KEYS
+    if unknown:
+        msg = (
+            f"Unknown health_metrics keys: {sorted(unknown)}; "
+            f"valid: {sorted(_HEALTH_METRIC_KEYS)}"
+        )
+        raise ValueError(msg)
+    for rec in metrics.get("outcomes") or []:
+        append_jsonl(config.memory_dir / "outcomes.jsonl", json.dumps(rec))
+    item_scores = metrics.get("item_scores") or {}
+    if item_scores:
+        atomic_write(
+            config.memory_dir / "item_scores.json", json.dumps(item_scores, indent=2)
+        )
+    for rec in metrics.get("harness_failures") or []:
+        append_jsonl(config.repo_memory_dir / "harness_failures.jsonl", json.dumps(rec))
+
+
+def materialize_worker_heartbeats(state: Any, seed: MockWorldSeed) -> None:
+    """Persist seeded worker heartbeats into StateTracker (#9643/#9904).
+
+    HealthMonitorLoop's dead-man-switch reads (``_check_worker_staleness`` /
+    ``_check_sanity_loop_staleness``) consume ``state.get_worker_heartbeats()``;
+    the relative ``age_seconds`` back-dates ``last_run`` from boot (tz-aware),
+    so a seeded stall stays a stall regardless of clock. Empty
+    ``worker_heartbeats`` (every other scenario) touches nothing.
+    """
+    for name, entry in seed.worker_heartbeats.items():
+        age_seconds = float(entry.get("age_seconds", 0))
+        last_run = (datetime.now(UTC) - timedelta(seconds=age_seconds)).isoformat()
+        state.set_worker_heartbeat(
+            name,
+            {
+                "status": str(entry.get("status", "running")),
+                "last_run": last_run,
+                "details": dict(entry.get("details") or {}),
+            },
+        )
+
+
 @dataclass(frozen=True)
 class SeededActivationProposal:
     """Duck-typed stand-in for ``scripts.gates.activation.ActivationProposal``.
@@ -554,6 +637,13 @@ async def main() -> None:
     # before the loops boot; empty seed fields are no-ops.
     seed_stale_workspaces(state, config, seed)
     materialize_expired_runs(config, seed)
+
+    # EpicState / health-metrics / heartbeat seeding (#9643). All act on
+    # state/disk before build_services wires the REAL EpicManager and
+    # HealthMonitorLoop over them; empty seed fields are no-ops.
+    materialize_epic_states(state, seed)
+    materialize_health_metrics(config, seed)
+    materialize_worker_heartbeats(state, seed)
 
     # Every async-touched ``subprocess.run`` site in production code now
     # specifies ``timeout=`` (PRs #8454, #8456, #8468 — enforced by
