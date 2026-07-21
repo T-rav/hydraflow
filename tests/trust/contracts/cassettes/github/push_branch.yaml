@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# push_branch(worktree_path, branch, *, force=...) pushes a branch to
+# origin, returning True on success. The air-gapped fake ignores its
+# args (no real remote) and always reports success.
+adapter: github
+interaction: push_branch
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: push_branch
+  args:
+  - /tmp/wt-feat
+  - feat/push-me
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: 'True
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

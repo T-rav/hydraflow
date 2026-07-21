@@ -1,0 +1,26 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_workflow_run_jobs returns the jobs of one run
+# {name, status, conclusion, started_at, completed_at, steps} — the
+# timing/steps fields feed GateHealthLoop's suspected-hang classifier
+# and PrRedRepairLoop's settled-red predicate. One failing job is seeded.
+adapter: github
+interaction: get_workflow_run_jobs
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_workflow_run_jobs
+  args:
+  - '5301'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[{"name": "test (3.13)", "status": "completed", "conclusion": "failure",
+    "started_at": "2026-07-01T00:00:10Z", "completed_at": "2026-07-01T00:04:00Z",
+    "steps": [{"name": "Run pytest", "status": "completed", "conclusion": "failure"}]}]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

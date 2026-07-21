@@ -51,25 +51,15 @@ _CASSETTE_ROOT = _REPO_ROOT / "tests" / "trust" / "contracts" / "cassettes"
 # green on the current tree. This is the honest, current coverage gap — the
 # weekly ``FakeCoverageAuditorLoop`` would file a rollup for exactly these.
 # SHRINK ONLY: record a cassette (and prune the entry here) to close a gap.
-# A NEW uncovered method must be cassetted, NOT added below. FakeGit and
-# FakeDocker are fully cassetted today, hence empty baselines.
+# A NEW uncovered method must be cassetted, NOT added below. All three audited
+# fakes (FakeGitHub, FakeGit, FakeDocker) are fully cassetted today, hence the
+# empty baselines — the adapter-surface audit is at zero uncovered methods.
 GRANDFATHERED_UNCASSETTED: dict[str, frozenset[str]] = {
-    "FakeGitHub": frozenset(
-        {
-            "branch_has_diff_from_main",
-            "count_workflow_run_artifacts",
-            "fetch_ci_failure_logs",
-            "fetch_code_scanning_alerts",
-            "get_dependabot_alerts",
-            "get_workflow_run_jobs",
-            "list_runs_for_workflow",
-            "list_workflow_runs",
-            "pull_main",
-            "push_branch",
-            "refresh_pr_branch_with_arch_regen",
-            "upload_screenshot",
-        }
-    ),
+    # FakeGitHub is now FULLY cassetted (#9768 closed by slice 5 — the final
+    # workflow-run / CI-log / git-op / alerts cluster). All three audited fakes
+    # have empty baselines; the FakeCoverageAuditorLoop adapter-surface audit is
+    # at zero uncovered methods.
+    "FakeGitHub": frozenset(),
     "FakeDocker": frozenset(),
     "FakeGit": frozenset(),
 }
