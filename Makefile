@@ -36,7 +36,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev factory dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial
+.PHONY: help run dev factory dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -270,6 +270,39 @@ test-cov: deps
 	@echo "$(BLUE)Running HydraFlow tests with coverage...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ -v --cov=src --cov-fail-under=70 --cov-report=term-missing --cov-report=html:htmlcov -p no:xdist
 	@echo "$(GREEN)All tests passed with coverage$(RESET)"
+
+# CI-speedup Tier 3: run ONLY the tests impacted by this branch's diff vs the
+# base branch, plus the always-on architecture guards + smoke floor, instead of
+# the whole ~15,700-test suite. The selection is computed by the pure, unit-
+# tested scripts/impacted_tests.py (see its header for the exact mapping rules
+# and the conservative full-suite fallback). If ANY changed file is high-fanout
+# (config/models/orchestrator/ports/service_registry, src/arch/**, conftest,
+# pyproject, workflows, Makefile, hooks) the selector emits the __ALL__ sentinel
+# and we run the entire suite — never risk skipping a relevant test.
+#
+# LOCAL ONLY for now. CI wiring is a deliberate follow-up: a workflow step would
+# run `python scripts/impacted_tests.py --base origin/$$GITHUB_BASE_REF` and feed
+# the result to pytest exactly like this target does. That PR is intentionally
+# separate to avoid conflicting with an in-flight CI-workflow change.
+#
+# Override the compared ref with e.g. `make test-impacted BASE_REF=origin/main`.
+# BASE_REF corresponds to config.base_branch() (origin/staging by default).
+BASE_REF ?= origin/staging
+test-impacted: deps
+	@cd $(HYDRAFLOW_DIR) && set -e; \
+	base="$(BASE_REF)"; \
+	sel="$$(PYTHONPATH=src $(UV) python scripts/impacted_tests.py --base "$$base")"; \
+	if [ "$$sel" = "__ALL__" ]; then \
+		echo "$(YELLOW)test-impacted: FULL SUITE required (high-fanout/infra change vs $$base) — running everything$(RESET)"; \
+		PYTHONPATH=src $(UV) pytest tests/ -n auto --dist loadscope; \
+	elif [ -z "$$sel" ]; then \
+		echo "$(YELLOW)test-impacted: no impacted tests for diff vs $$base — nothing to run$(RESET)"; \
+	else \
+		count="$$(printf '%s\n' "$$sel" | grep -c .)"; \
+		echo "$(BLUE)test-impacted: running $$count impacted test file(s) vs $$base (guards + smoke + mapped)$(RESET)"; \
+		PYTHONPATH=src $(UV) pytest $$sel -n auto --dist loadscope; \
+	fi
+	@echo "$(GREEN)test-impacted complete$(RESET)"
 
 lint: deps
 	@echo "$(BLUE)Linting HydraFlow (auto-fix)...$(RESET)"
