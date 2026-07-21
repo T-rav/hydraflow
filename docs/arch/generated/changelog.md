@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `253dd51` — test(adr): patch run_lightweight_agent at its use-site after module-top hoist (#9976) (#9976) *(2026-07-21)*
 - `7f7d73c` — Merge remote-tracking branch 'origin/staging' into feat/9976-adr-drift-resolver-loop *(2026-07-21)*
 - `0d66c52` — feat(pipeline): ADR-0107 + flag-gated Triage→Plan routing — keystone for collapsing Discover/Shape (#9773) (#10145) (#10145) *(2026-07-21)*
 - `44c0d49` — chore(arch): regen after staging merge (#9976) (#9976) *(2026-07-21)*
