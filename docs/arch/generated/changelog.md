@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `b0c7d5e` — test(guard): spawn-side reap guard — raw-spawn containment + reap-pairing ratchets (#9623) (#10088) (#10088) *(2026-07-21)*
+- `552bb18` — Merge remote-tracking branch 'origin/staging' into feat/9662-drift-batching *(2026-07-20)*
 - `d9a601a` — fix(adr-drift): batch cross-cutting fleet-PR drift into one rollup (#9662) (#9662) *(2026-07-20)*
 - `982cec5` — fix(workspace,state): automate HITL reset runbook residuals — main-repo core.worktree heal + attempt-counter close-to-clear (#9723) (#10082) (#10082) *(2026-07-20)*
 - `ee15f26` — feat(test-adequacy): independent second-opinion verifier gated on explicit OK (#9546) (#10076) (#10076) *(2026-07-20)*
