@@ -305,6 +305,33 @@ def test_seed_round_trips_registered_workers_through_json() -> None:
     assert parsed.registered_workers["runs_gc"] == {}
 
 
+def test_default_seed_has_empty_worker_status_history() -> None:
+    """#10133 worker-status event-history seed field defaults empty."""
+    seed = MockWorldSeed()
+    assert seed.worker_status_history == {}
+
+
+def test_seed_round_trips_worker_status_history_through_json() -> None:
+    """Worker-status history entries are JSON-native string-keyed dicts of
+    lists — no ``from_json`` coercion is required (#10133)."""
+    original = MockWorldSeed(
+        worker_status_history={
+            "corpus_learning": [
+                {"age_seconds": 82_800, "status": "error", "details": {}},
+                {"age_seconds": 3_600, "status": "ok", "details": {"filed": 1}},
+            ],
+            "rc_budget": [],
+        },
+    )
+
+    parsed = MockWorldSeed.from_json(original.to_json())
+
+    assert parsed == original
+    assert parsed.worker_status_history["corpus_learning"][0]["age_seconds"] == 82_800
+    assert parsed.worker_status_history["corpus_learning"][1]["details"] == {"filed": 1}
+    assert parsed.worker_status_history["rc_budget"] == []
+
+
 def test_seed_round_trips_issue_updated_at_through_json() -> None:
     """#9544: a per-issue ``updated_at`` key survives JSON transfer intact.
 
