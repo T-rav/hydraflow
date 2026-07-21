@@ -91,6 +91,23 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "convergence_oscillation": (300, 86400),  # 5m min, 1d max (default 1h, ADR-0098)
 }
 
+# Per-loop work-cycle watchdog-timeout override bounds (#9455/#9556 base, #9503
+# operator override). Unlike _INTERVAL_BOUNDS (per-worker cadence, varies by
+# domain), the watchdog bound is a uniform hang-safety net — a single range
+# spanning both loop_watchdog_default_seconds (ge=60, le=21600) and
+# loop_watchdog_llm_seconds (ge=300, le=43200) config Field constraints covers
+# every loop, normal or LONG_LLM_CYCLE.
+_WATCHDOG_TIMEOUT_BOUNDS: tuple[int, int] = (60, 43200)
+
+# principles_audit_loop's per-cycle bound is force-set to the LLM watchdog via
+# a dedicated LoopDeps.timeout_cb closure in service_registry.py (#9639) that
+# bypasses the shared operator-override callback entirely.
+# principles_audit_loop.py is on the ADR-0049/0050 agent deny-list ("agent
+# must not modify the system that judges or governs it"), so that closure
+# can't be taught to read the override without editing a protected file.
+# Excluded here rather than ship a knob that is a silent no-op (#9503).
+_WATCHDOG_TIMEOUT_EXCLUDED_WORKERS: frozenset[str] = frozenset({"principles_audit"})
+
 # Internal pipeline labels that must not be treated as epic names in the history panel.
 _EPIC_INTERNAL_LABELS: frozenset[str] = frozenset(
     {"hydraflow-epic-child", "hydraflow-epic"}

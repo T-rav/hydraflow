@@ -3353,6 +3353,28 @@ class HydraFlowConfig(BaseModel):
             "Empty string = use the background_model default."
         ),
     )
+    skill_prompt_refine_live_validation_budget: int = Field(
+        default=4,
+        ge=0,
+        le=50,
+        description=(
+            "Max cases (the regressed case + a sample of that skill's own "
+            "held-out honeypots) a refine-candidate live re-validation run "
+            "forces through the real agent CLI instead of the "
+            "expected_transcript.txt fixture — proving the candidate patch "
+            "actually changed prompt->transcript behavior for the better, "
+            "not just against the OLD prompt's canned transcript. Forwarded "
+            "to the corpus runner via the `--force-live-cases` CLI flag; "
+            "inert unless the operator has also set HYDRAFLOW_TRUST_"
+            "ADVERSARIAL_LIVE=1 on the loop's environment (the same "
+            "operator opt-in the weekly live backstop uses). 0 disables the "
+            "sample — every validation case replays its fixture, matching "
+            "pre-#10063 behavior. Distinct from "
+            "skill_prompt_eval_live_case_budget (the weekly full-corpus "
+            "backstop's budget): refine validation runs once per candidate "
+            "attempt over a handful of cases, not the whole corpus (#10063)."
+        ),
+    )
 
     # Trust fleet — FakeCoverageAuditorLoop (spec §4.7)
     fake_coverage_auditor_interval: int = Field(

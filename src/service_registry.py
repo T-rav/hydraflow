@@ -365,12 +365,16 @@ class WorkerRegistryCallbacks:
     """Focused interface for background-worker management callbacks.
 
     Replaces the former ``OrchestratorCallbacks`` god-object with only the
-    three callbacks that ``LoopDeps`` and status-reporting consumers need.
+    focused callbacks that ``LoopDeps`` and status-reporting consumers need.
     """
 
     update_status: StatusCallback
     is_enabled: Callable[[str], bool]
     get_interval: Callable[[str], int]
+    # Per-loop work-cycle watchdog bound override (#9503) — mirrors
+    # get_interval. Wired to LoopDeps.timeout_cb below so every shared-deps
+    # loop's watchdog reads the live operator override each cycle.
+    get_watchdog_timeout: Callable[[str], int]
 
 
 _GH_SUBPROCESS_TIMEOUT_S = 120
@@ -1238,6 +1242,7 @@ def build_services(
         status_cb=callbacks.update_status,
         enabled_cb=callbacks.is_enabled,
         interval_cb=callbacks.get_interval,
+        timeout_cb=callbacks.get_watchdog_timeout,
     )
     pr_unsticker_loop = PRUnstickerLoop(config, pr_unsticker, prs, deps=loop_deps)
     merge_state_watcher_loop = MergeStateWatcherLoop(

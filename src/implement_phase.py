@@ -613,7 +613,14 @@ class ImplementPhase:
                 f"Error: {result.error or 'none'}",
                 stage=PipelineStage.IMPLEMENT,
             )
-        self._state.set_quality_fix_attempts(issue.id, result.quality_fix_attempts)
+        # Only write a quality_fix stage record when a fix round actually
+        # happened. Writing unconditionally (including count == 0) created an
+        # empty stage_state["quality_fix"] entry for every issue; retrospective
+        # reads via ConvergenceLedger.get_attempts() already default to 0 for
+        # a missing stage, so skipping the zero-count write is a no-op for
+        # readers.
+        if result.quality_fix_attempts > 0:
+            self._state.set_quality_fix_attempts(issue.id, result.quality_fix_attempts)
         meta: WorkerResultMeta = {
             "pre_quality_review_attempts": result.pre_quality_review_attempts,
             "duration_seconds": result.duration_seconds,

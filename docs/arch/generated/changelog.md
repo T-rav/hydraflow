@@ -13,6 +13,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `52b6752` — fix(subprocess): cooperative kill-switch in the shared helper — migrate staging_bisect._run_git (#9577) (#10077) (#10077) *(2026-07-21)*
 - `b0c7d5e` — test(guard): spawn-side reap guard — raw-spawn containment + reap-pairing ratchets (#9623) (#10088) (#10088) *(2026-07-21)*
 - `ddfdb66` — build(arch): auto-resolve docs/arch/.meta.json + changelog.md merge conflicts (#10099) (#10099) *(2026-07-20)*
+- `68abc51` — Merge remote-tracking branch 'origin/staging' into feat/9768-fake-coverage-slice *(2026-07-20)*
+- `359af75` — Merge remote-tracking branch 'origin/staging' into feat/9768-fake-coverage-slice *(2026-07-20)*
 - `9f99bcf` — fix(escalation): TTL re-drive so stale auto-agent escalations self-heal (#9719) (#10079) (#10079) *(2026-07-20)*
 - `982cec5` — fix(workspace,state): automate HITL reset runbook residuals — main-repo core.worktree heal + attempt-counter close-to-clear (#9723) (#10082) (#10082) *(2026-07-20)*
 - `ee15f26` — feat(test-adequacy): independent second-opinion verifier gated on explicit OK (#9546) (#10076) (#10076) *(2026-07-20)*

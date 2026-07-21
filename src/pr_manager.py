@@ -54,6 +54,24 @@ logger = logging.getLogger("hydraflow.pr_manager")
 _LABEL_CACHE_TTL: int = 30
 
 
+def _gh_wire_labels(r: BoundaryParseResult[GhIssueListItem]) -> list[dict[str, str]]:
+    """Project one lenient-parsed gh issue row's labels into gh wire shape.
+
+    Shared by ``_project_issue_summaries`` (open listing, #9943) and
+    ``list_closed_issues_by_label`` (#8996 — the closed listing needs labels
+    too, since ``escalation_reconcile.is_bot_close`` reads them to distinguish
+    a programmatic close from a human one).
+    """
+    if r.model_instance is not None:
+        return [{"name": lbl.name} for lbl in r.model_instance.labels if lbl.name]
+    entry = r.payload if isinstance(r.payload, dict) else {}
+    return [
+        {"name": str(lbl.get("name", ""))}
+        for lbl in (entry.get("labels") or [])
+        if isinstance(lbl, dict) and lbl.get("name")
+    ]
+
+
 def _project_issue_summaries(
     results: list[BoundaryParseResult[GhIssueListItem]],
 ) -> list[GitHubIssueSummary]:
@@ -71,22 +89,13 @@ def _project_issue_summaries(
 
     summaries: list[GitHubIssueSummary] = []
     for r in results:
-        if r.model_instance is not None:
-            labels = [{"name": lbl.name} for lbl in r.model_instance.labels if lbl.name]
-        else:
-            entry = r.payload if isinstance(r.payload, dict) else {}
-            labels = [
-                {"name": str(lbl.get("name", ""))}
-                for lbl in (entry.get("labels") or [])
-                if isinstance(lbl, dict) and lbl.get("name")
-            ]
         summaries.append(
             {
                 "number": field_or(r, "number", 0),
                 "title": field_or(r, "title", ""),
                 "body": field_or(r, "body", ""),
                 "updated_at": field_or(r, "updated_at", "", dict_key="updatedAt"),
-                "labels": labels,
+                "labels": _gh_wire_labels(r),
             }
         )
     return summaries
@@ -1795,6 +1804,13 @@ class PRManager:
         #9727: projects ``closedAt`` → ``closed_at`` so the
         detector-calibration churn window can key on close time
         (``updated_at`` moves on ANY issue activity).
+
+        #8996: also projects ``labels`` in gh wire shape — the closed
+        listing used to be label-free by default (#9943), which meant
+        ``escalation_reconcile.is_bot_close`` could never see the bot-close
+        marker on a closed row from this method and fell open to "treat as
+        human" every time. Threading labels through here is what makes that
+        predicate load-bearing rather than dead code.
         """
         from contracts.boundary import parse_list_with_shape  # noqa: PLC0415
         from contracts.shapes import GhIssueListItem  # noqa: PLC0415
@@ -1811,7 +1827,7 @@ class PRManager:
             "--state",
             "closed",
             "--json",
-            "number,title,body,updatedAt,closedAt",
+            "number,title,body,updatedAt,closedAt,labels",
             "--limit",
             str(limit),
         )
@@ -1825,6 +1841,7 @@ class PRManager:
                 "body": field_or(r, "body", ""),
                 "updated_at": field_or(r, "updated_at", "", dict_key="updatedAt"),
                 "closed_at": field_or(r, "closed_at", "", dict_key="closedAt"),
+                "labels": _gh_wire_labels(r),
             }
             for r in results
         ]

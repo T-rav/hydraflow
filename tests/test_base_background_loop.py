@@ -668,6 +668,30 @@ class TestLoopCycleWatchdog:
 
         assert loop._cycle_timeout_seconds() == 42
 
+    def test_default_cycle_timeout_seconds_ignores_timeout_cb(
+        self, tmp_path: Path
+    ) -> None:
+        """_default_cycle_timeout_seconds is the override-FREE baseline (#9503).
+
+        BGWorkerManager.get_timeout() calls this directly (not
+        _cycle_timeout_seconds) to resolve a loop's "no operator override"
+        bound without recursing back through timeout_cb.
+        """
+        loop, _stop = _make_stub(tmp_path, timeout_cb=lambda _name: 42)
+
+        assert loop._default_cycle_timeout_seconds() == (
+            loop._config.loop_watchdog_default_seconds
+        )
+
+    def test_default_cycle_timeout_seconds_long_llm_cycle(self, tmp_path: Path) -> None:
+        loop, _stop = _make_stub(
+            tmp_path, loop_cls=_LongLlmStubLoop, timeout_cb=lambda _name: 42
+        )
+
+        assert loop._default_cycle_timeout_seconds() == (
+            loop._config.loop_watchdog_llm_seconds
+        )
+
     @pytest.mark.asyncio
     async def test_hung_cycle_is_cancelled_and_reported(self, tmp_path: Path) -> None:
         """A cycle that overruns its bound is cancelled, reported as error, survives."""

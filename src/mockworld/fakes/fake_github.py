@@ -877,15 +877,14 @@ class FakeGitHub:
 
         ``closed_at`` mirrors the adapter's ``closedAt`` projection (#9727)
         so churn windows keyed on close time behave identically under the
-        fake and the real port.
+        fake and the real port. ``labels`` (#8996) reuses ``_issue_summary``
+        so ``escalation_reconcile.is_bot_close`` sees the same gh-wire-shape
+        label list under the fake as under the real adapter.
         """
         self._maybe_rate_limit()
         rows = [
             {
-                "number": issue.number,
-                "title": issue.title,
-                "body": issue.body,
-                "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
+                **self._issue_summary(issue),
                 "closed_at": getattr(issue, "closed_at", "")
                 or getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
             }

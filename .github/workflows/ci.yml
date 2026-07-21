@@ -191,6 +191,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -212,6 +214,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -231,6 +235,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -252,6 +258,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -276,6 +284,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -283,8 +293,49 @@ jobs:
         run: uv sync --all-extras
       - name: Warning gate (targeted)
         run: PYTHONPATH=src uv run pytest tests/test_execution.py tests/test_agent_advanced.py tests/test_agent_cli.py tests/test_agent_execution.py tests/test_agent_lifecycle.py tests/test_agent_output.py tests/test_hitl_runner.py tests/test_prompt_telemetry.py tests/test_dashboard_routes_control.py tests/test_dashboard_routes_core.py tests/test_dashboard_routes_hitl.py tests/test_dashboard_routes_issue_history.py tests/test_dashboard_routes_metrics.py tests/test_dashboard_routes_repo.py tests/test_dashboard_routes_state.py -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning
-      - name: Run tests with coverage
-        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --cov=src --cov-fail-under=70 --cov-report=term-missing --cov-report=json
+      # PR merge gate (Tier 2a): FAST parallel pass/fail, no coverage. Coverage
+      # is single-threaded and too slow for the merge path — it moved to the
+      # trailing `coverage` job (push-to-staging + nightly). tests/scenarios is
+      # excluded here and run SERIALLY below: process-global OTel/loop-registry
+      # + convergence-timing state flakes across xdist workers (Tier 1a split).
+      - name: Run tests (fast, parallel — no coverage)
+        # tests/scenarios + tests/test_review_phase_metrics.py are xdist-unsafe
+        # (process-global OTel/loop-registry/timing #10111; leaked review_advisor
+        # client mock) — excluded here, run serially below. Keep in sync with the
+        # Makefile PYTEST_SERIAL_PATHS.
+        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --ignore=tests/scenarios --ignore=tests/test_review_phase_metrics.py -n auto --dist loadscope --reruns 2 --reruns-delay 1
+      - name: Run serial (xdist-unsafe) tests
+        run: PYTHONPATH=src uv run pytest tests/scenarios tests/test_review_phase_metrics.py
+
+  # Trailing coverage gate (Tier 2a). Coverage is SINGLE-THREADED (xdist + --cov
+  # is finicky) and therefore too slow for the PR merge path, so it runs OFF the
+  # PR critical path — on push to the default/staging branch and on the nightly
+  # schedule only (`if: github.event_name != 'pull_request'`). It STILL fails
+  # red if coverage drops below 70%, so the gate is preserved as a trailing
+  # safety net rather than dropped. The `changes` gating mirrors the `test` job.
+  # Deliberately NOT in ci-gate's `needs`: it must not gate the PR merge path.
+  coverage:
+    name: Coverage (trailing)
+    needs: changes
+    if: |
+      github.event_name != 'pull_request' &&
+      (needs.changes.outputs.core_python == 'true' || needs.changes.outputs.ci == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Run tests with coverage (single-threaded)
+        run: PYTHONPATH=src uv run pytest tests/ --cov=src --cov-fail-under=70 --cov-report=term-missing --cov-report=json -p no:xdist
       - name: Upload coverage.json
         if: always()
         uses: actions/upload-artifact@v4
@@ -311,6 +362,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -338,6 +391,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -359,6 +414,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -446,6 +503,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -553,6 +612,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"

@@ -195,6 +195,7 @@ class HydraFlowOrchestrator:
                     update_status=self.update_bg_worker_status,
                     is_enabled=self.is_bg_worker_enabled,
                     get_interval=self.get_bg_worker_interval,
+                    get_watchdog_timeout=self.get_bg_worker_timeout,
                 ),
                 active_issues_cb=self._sync_active_issue_numbers,
             )
@@ -783,6 +784,15 @@ class HydraFlowOrchestrator:
         """Return a copy of all background worker states with enabled flag."""
         return self._bg_workers.get_states()
 
+    def registered_bg_loop_names(self) -> set[str]:
+        """Names of workers backed by a registered ``BaseBackgroundLoop``.
+
+        Public passthrough for the System-tab route layer (#9503) — the
+        watchdog-timeout knob is only meaningful for loop-backed workers
+        (pipeline phases and other non-loop workers have no watchdog cycle).
+        """
+        return self._bg_workers.registered_loop_names()
+
     def trigger_bg_worker(self, name: str) -> bool:
         """Trigger an immediate execution of a background worker.
 
@@ -801,6 +811,19 @@ class HydraFlowOrchestrator:
         Returns the dynamic override if set, otherwise the config default.
         """
         return self._bg_workers.get_interval(name)
+
+    def set_bg_worker_timeout(self, name: str, seconds: int) -> None:
+        """Set a dynamic watchdog-timeout override for a background worker (#9503)."""
+        self._bg_workers.set_timeout(name, seconds)
+
+    def get_bg_worker_timeout(self, name: str) -> int:
+        """Return the effective per-cycle watchdog bound for a background worker.
+
+        Returns the dynamic override if set, otherwise the loop's own
+        (LONG_LLM_CYCLE-aware) config default. Mirrors
+        :meth:`get_bg_worker_interval` (#9503).
+        """
+        return self._bg_workers.get_timeout(name)
 
     async def _publish_status(self) -> None:
         """Broadcast the current orchestrator status to all subscribers."""
