@@ -928,6 +928,8 @@ async def _run_gated(
     runner: SubprocessRunner | None = None,
     extra_env: dict[str, str] | None = None,
     stdin_input: bytes | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    cancel_poll_interval: float = 5.0,
     check: bool,
 ) -> SimpleResult:
     """Shared gated core for :func:`run_subprocess`/:func:`run_subprocess_result`.
@@ -980,6 +982,8 @@ async def _run_gated(
                 env=env,
                 timeout=timeout,
                 input=stdin_input,
+                cancel_check=cancel_check,
+                cancel_poll_interval=cancel_poll_interval,
             )
         except TimeoutError as exc:
             if breaker is not None:
@@ -1077,6 +1081,8 @@ async def run_subprocess_result(
     runner: SubprocessRunner | None = None,
     extra_env: dict[str, str] | None = None,
     stdin_input: bytes | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    cancel_poll_interval: float = 5.0,
 ) -> SimpleResult:
     """Run a subprocess and return the full result, never raising on non-zero exit.
 
@@ -1107,6 +1113,8 @@ async def run_subprocess_result(
         runner=runner,
         extra_env=extra_env,
         stdin_input=stdin_input,
+        cancel_check=cancel_check,
+        cancel_poll_interval=cancel_poll_interval,
         check=False,
     )
 
