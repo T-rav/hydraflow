@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `b0c7d5e` — test(guard): spawn-side reap guard — raw-spawn containment + reap-pairing ratchets (#9623) (#10088) (#10088) *(2026-07-21)*
+- `6e1493f` — Merge remote-tracking branch 'origin/staging' into fix/subproc-cooperative-killswitch *(2026-07-20)*
 - `77e4b63` — Merge remote-tracking branch 'origin/staging' into fix/subproc-cooperative-killswitch *(2026-07-20)*
 - `982cec5` — fix(workspace,state): automate HITL reset runbook residuals — main-repo core.worktree heal + attempt-counter close-to-clear (#9723) (#10082) (#10082) *(2026-07-20)*
 - `5f4f1b6` — chore(arch): regenerate diagrams after staging merge (#9577) (#9577) *(2026-07-20)*
