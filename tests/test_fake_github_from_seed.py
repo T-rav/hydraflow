@@ -73,6 +73,31 @@ def test_from_seed_honors_issue_state() -> None:
     assert asyncio.run(gh.get_issue_state(7302)) == "OPEN"
 
 
+def test_from_seed_honors_issue_updated_at() -> None:
+    """#9544: a seeded ``updated_at`` overrides FakeIssue's hard-coded default,
+    so time-triggered loops (stale_issue_gc) can seed a genuinely fresh or
+    genuinely stale issue instead of every issue reading equally stale."""
+    seed = MockWorldSeed(
+        issues=[
+            {
+                "number": 7701,
+                "title": "stale",
+                "body": "b",
+                "labels": [],
+                "updated_at": "2020-01-01T00:00:00Z",
+            },
+            {"number": 7702, "title": "no override", "body": "b", "labels": []},
+        ],
+    )
+
+    gh = FakeGitHub.from_seed(seed)
+
+    assert gh._issues[7701].updated_at == "2020-01-01T00:00:00Z"
+    # Absent `updated_at` key still defaults to FakeIssue's own default —
+    # back-compat preserved for every pre-#9544 seed.
+    assert gh._issues[7702].updated_at == "2026-01-01T00:00:00Z"
+
+
 def test_from_seed_honors_pr_mergeable() -> None:
     """#9543: ``mergeable: false`` seeds a CONFLICTING PR the watcher can act on."""
     import asyncio

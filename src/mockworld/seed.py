@@ -27,6 +27,16 @@ class MockWorldSeed:
     # scenario exercise closed-issue reads (e.g. workspace_gc's is-it-safe-to-GC
     # check, epic_sweeper's are-all-children-done sweep) without driving the
     # whole pipeline to close it first (#9543).
+    #
+    # Also optionally ``updated_at`` (ISO-8601 string, #9544): overrides
+    # ``FakeIssue``'s hard-coded ``2026-01-01T00:00:00Z`` default so a
+    # scenario can seed a genuinely FRESH or genuinely STALE issue relative to
+    # real wall-clock ``datetime.now(UTC)`` — needed for time-triggered loops
+    # like ``stale_issue_gc`` (previously every seeded issue read as equally
+    # stale, making the "fresh issue is skipped" branch untestable). Both
+    # loaders (``FakeGitHub.from_seed`` for sandbox_main +
+    # ``MockWorld.apply_seed`` for the in-process harness) thread this through
+    # ``FakeGitHub.add_issue``. Absent key = no-op, back-compat preserved.
     issues: list[dict[str, Any]] = field(default_factory=list)
 
     # Per-issue seeded comments, keyed by issue number. Each entry is a dict

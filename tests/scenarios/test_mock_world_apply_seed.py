@@ -86,6 +86,30 @@ async def test_apply_seed_threads_issue_state_and_pr_mergeable(mock_world) -> No
 
 
 @pytest.mark.asyncio
+async def test_apply_seed_threads_issue_updated_at(mock_world) -> None:
+    """#9544: a seeded per-issue ``updated_at`` reaches FakeIssue in the
+    in-process (Tier 1) loader too — dual-loader parity with FakeGitHub.from_seed."""
+    seed = MockWorldSeed(
+        issues=[
+            {
+                "number": 7701,
+                "title": "stale",
+                "body": "b",
+                "labels": [],
+                "updated_at": "2020-01-01T00:00:00Z",
+            },
+            {"number": 7702, "title": "no override", "body": "b", "labels": []},
+        ],
+    )
+
+    mock_world.apply_seed(seed)
+
+    assert mock_world._github._issues[7701].updated_at == "2020-01-01T00:00:00Z"
+    # Absent `updated_at` key still defaults to FakeIssue's own default.
+    assert mock_world._github._issues[7702].updated_at == "2026-01-01T00:00:00Z"
+
+
+@pytest.mark.asyncio
 async def test_apply_seed_threads_rulesets(mock_world) -> None:
     """#9543: seeded rulesets reach FakeGitHub.fetch_rulesets in Tier 1 too."""
     seed = MockWorldSeed(

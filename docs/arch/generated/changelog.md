@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `281548c` — feat(sandbox): seed BGWorkerManager registered_workers set + dead-man-switch stall-escalation e2e scenario (#10086) (#10131) (#10131) *(2026-07-21)*
 - `896486d` — feat(sandbox): seed materializer for EpicState + health trend/heartbeat history; s71/s72 active-trigger scenarios (#9643) (#10084) (#10084) *(2026-07-21)*
 - `0c629f3` — feat(erosion): pure change-spread sensor — modules-crossed + files-touched per change, baselined (#10105) (#10116) (#10116) *(2026-07-21)*
 - `97d7436` — feat(pr-red): Phase 1 infra-flake retrier caretaker loop — settled-red detect + bounded rerun (#10027) (#10124) (#10124) *(2026-07-21)*
