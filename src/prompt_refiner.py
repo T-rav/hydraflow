@@ -183,6 +183,59 @@ def check_tripwires(patch_text: str, skill_name: str, repo_root: Path) -> list[s
     return reasons
 
 
+def select_live_validation_sample(
+    cases_dir: Path, regressed_case_id: str, skill_name: str, budget: int
+) -> list[str]:
+    """Small sample of the validation-case set to force through the real
+    agent CLI during refine-candidate live re-validation (#10063), bounded
+    by *budget*.
+
+    Without this, ``_validate_candidate`` re-judges the candidate patch
+    against ``expected_transcript.txt`` fixtures produced by the OLD
+    prompt — a candidate that subtly breaks prompt->transcript behavior can
+    pass validation without ever exercising the real CLI. The regressed
+    case always takes priority (budget permitting): it is the one whose
+    behavior the candidate patch is trying to restore, so proving it
+    against a REAL transcript is the highest-value check. Remaining budget
+    is spent on a deterministic (sorted) sample of *skill_name*'s OWN
+    held-out honeypots — a holdout belonging to a DIFFERENT skill would
+    return ``SKIPPED`` under ``--live-skill <skill_name>`` before any
+    transcript is loaded (no CLI call, no signal), so including one would
+    silently shrink the effective sample. Benign (``"none"``) sentinels are
+    never sampled — fixture replay already fully exercises their parser
+    path, and they carry no signal about the candidate's target-case fix.
+
+    ``budget <= 0`` returns ``[]`` — the caller's default (no
+    ``--force-live-cases`` flag), so every validation case still replays
+    its fixture. Keeps CI/non-live runs deterministic.
+
+    Scans the WORKTREE's cases dir directly (never imports tests code,
+    mirroring :func:`discover_validation_case_ids`). A missing dir still
+    yields the regressed case alone (budget permitting) — the caller's
+    ``--cases`` filter is the ground truth for what actually runs.
+    """
+    if budget <= 0:
+        return []
+    selected = [regressed_case_id]
+    if cases_dir.is_dir():
+        holdouts = sorted(
+            p.name
+            for p in cases_dir.iterdir()
+            if p.is_dir()
+            and p.name != regressed_case_id
+            and (p / _HOLDOUT_MARKER).is_file()
+            and _case_expected_catcher(p) == skill_name
+        )
+        selected.extend(holdouts)
+    return selected[:budget]
+
+
+def _case_expected_catcher(case_dir: Path) -> str:
+    """Best-effort read of ``expected_catcher.txt``; ``""`` when absent."""
+    path = case_dir / "expected_catcher.txt"
+    return path.read_text(encoding="utf-8").strip() if path.is_file() else ""
+
+
 def discover_validation_case_ids(cases_dir: Path, regressed_case_id: str) -> list[str]:
     """Case ids a candidate prompt must survive during loop-side validation.
 

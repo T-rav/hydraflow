@@ -13,6 +13,15 @@ UV := VIRTUAL_ENV=$(VENV) UV_CACHE_DIR=$(PROJECT_ROOT)/.uv-cache uv run --active
 # Stamp file to track when deps were last synced
 DEPS_STAMP := $(VENV)/.deps-synced
 
+# Parallel test execution (pytest-xdist). `--dist loadscope` keeps a module's
+# tests on one worker (safe for module-level fixtures). tests/scenarios/ is
+# excluded from parallel runs and executed SERIALLY: those tests share
+# process-global state (OTel TracerProvider, the loop-registration catalog) and
+# assert convergence ORDERING/timing, so cross-worker scheduling makes them
+# flake. Making scenarios xdist-safe (per-worker OTel provider + registry
+# isolation) is a tracked follow-up. Override PYTEST_PARALLEL= to disable.
+PYTEST_PARALLEL ?= -n auto --dist loadscope
+
 # Runtime overrides (used by `make hot`)
 WORKERS ?= 3
 MODEL ?= opus
@@ -178,8 +187,9 @@ coverage: deps
 cover: coverage
 
 test: deps
-	@echo "$(BLUE)Running HydraFlow unit tests...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ -x -q
+	@echo "$(BLUE)Running HydraFlow unit tests (parallel; scenarios serial)...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ --ignore=tests/scenarios $(PYTEST_PARALLEL) -q
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios -q
 	@echo "$(GREEN)All tests passed$(RESET)"
 
 smoke: deps
@@ -386,8 +396,9 @@ quality: deps lint-ul
 	@cd $(HYDRAFLOW_DIR) && ( \
 		$(UV) pyright && echo "[typecheck OK]" & \
 		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
-		PYTHONPATH=src $(UV) pytest tests/ && echo "[tests OK]" & \
-		PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -q && echo "[scenarios OK]" & \
+		PYTHONPATH=src $(UV) pytest tests/ --ignore=tests/scenarios $(PYTEST_PARALLEL) && echo "[tests OK]" & \
+		PYTHONPATH=src $(UV) pytest tests/scenarios && echo "[scenarios OK]" & \
+		PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -q && echo "[scenario-loops OK]" & \
 		( $(UI_TEST_CMD) ) & \
 		wait_result=0; \
 		for job in $$(jobs -p); do wait $$job || wait_result=1; done; \
