@@ -1033,6 +1033,14 @@ def build_services(
         wiki_compiler=wiki_compiler,
         issue_cache=issue_cache,
         plan_reviewer=plan_reviewer,
+        # ADR-0107 (collapse_discover_shape): share the SAME DiscoverRunner /
+        # ShapeRunner instances DiscoverPhase / ShapePhase already bound
+        # escalation deps onto above, so the planner-invoked helper gates
+        # (plan_phase.py:_should_discover_helper / _should_shape_helper)
+        # can invoke them without re-binding. Both gates are no-ops with
+        # the flag off, so this wiring is inert until the flag flips.
+        discover_runner=discover_runner,
+        shape_runner=shape_runner,
     )
 
     # Earlier-adversarial pipeline AgentLike wiring (ADR-0064).

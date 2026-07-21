@@ -449,6 +449,11 @@ class TriagePhase:
         # accepting a classification whose issue was parked or sent
         # to discover — the gate checks routing_outcome == "plan".
         # Best-effort: cache failures never raise into the domain layer.
+        #
+        # clarity_score / needs_discovery (ADR-0107) ride along so the
+        # planner's decision gate can read them back as HINTS via
+        # ``IssueCache.latest_classification`` when collapse_discover_shape
+        # is on — see plan_phase.py:_should_discover_helper.
         if self._issue_cache is not None:
             self._issue_cache.record_classification(
                 issue.id,
@@ -457,6 +462,8 @@ class TriagePhase:
                 complexity_rank=self._complexity_rank(result.complexity_score),
                 routing_outcome=routing_outcome,
                 reasoning="; ".join(result.reasons) if result.reasons else "",
+                clarity_score=result.clarity_score,
+                needs_discovery=result.needs_discovery,
             )
 
         # Reproduce bug-classified issues that were routed to plan

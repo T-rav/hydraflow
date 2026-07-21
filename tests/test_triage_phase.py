@@ -431,6 +431,43 @@ class TestTriagePhase:
 
         prs.transition.assert_called_once_with(14, "plan")
 
+    @pytest.mark.asyncio
+    async def test_classification_record_carries_clarity_hints(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ADR-0107: clarity_score / needs_discovery ride along on the
+        classification record regardless of the collapse flag, so the
+        planner's decision gate can read them back as hints later
+        (plan_phase.py:_should_discover_helper / _triage_hints)."""
+        from unittest.mock import MagicMock
+
+        from issue_cache import IssueCache
+
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
+        mock_cache = MagicMock(spec=IssueCache)
+        mock_cache.record_classification = MagicMock()
+        phase._issue_cache = mock_cache
+
+        issue = TaskFactory.create(
+            id=15, title="Build a better Calendly", body="A" * 100
+        )
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=15,
+                ready=True,
+                needs_discovery=True,
+                clarity_score=3,
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        await phase.triage_issues()
+
+        mock_cache.record_classification.assert_called_once()
+        kwargs = mock_cache.record_classification.call_args.kwargs
+        assert kwargs["clarity_score"] == 3
+        assert kwargs["needs_discovery"] is True
+
 
 class TestTriagePhaseBatchScaling:
     """Pool respects max_triagers for concurrency control."""
