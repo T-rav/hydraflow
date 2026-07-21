@@ -5,9 +5,12 @@ This directory contains two kinds of cassettes:
 **Machine-recorded** (`baseline_only: false`) — refreshed by
 `ContractRefreshLoop` via `record_github_mutation` in
 `src/contract_recording.py`. Each recording provisions fresh sandbox
-resources, runs the mutation, writes the cassette, and tears down the
-sandbox state (e.g. closing the scratch issue). Currently covers:
-`close_issue.yaml`, `create_issue.yaml`, `merge_pr.yaml`.
+resources (issue, or scratch branch + PR via a tree-identical synthetic
+commit), runs the mutation, writes the cassette, and tears down the sandbox
+state (closing the scratch issue/PR, best-effort deleting the scratch
+branch). Currently covers: `close_issue.yaml`, `create_issue.yaml`,
+`merge_pr.yaml`, `pr_create.yaml` (`create_pr`), `create_promotion_pr.yaml`
+(issue #8699).
 
 **Hand-authored baselines** (`baseline_only: true`) — not refreshed by
 `ContractRefreshLoop`. Identifiable by both:
@@ -17,7 +20,7 @@ sandbox state (e.g. closing the scratch issue). Currently covers:
   checkable retirement marker)
 
 All remaining cassettes (e.g. `add_labels.yaml`, `post_comment.yaml`,
-`pr_create.yaml`, etc.) are hand-authored baselines.
+`merge_promotion_pr.yaml`, etc.) are hand-authored baselines.
 
 ## Retirement plan (Phase 4 of #8786)
 
@@ -41,11 +44,14 @@ respective FakeGitHub methods.
 
 ## Why some cassettes are still hand-authored
 
-Cassettes for `gh label create`, `gh issue edit --add-label`, and other
-operations not yet covered by `record_github_mutation` remain hand-authored
-because extending the recorder to cover them safely is tracked separately
-(#8693, #8699). The sandbox setup/teardown contract in
-`record_github_mutation` is the pattern to follow when adding new
+Cassettes for `gh label create`, `gh issue edit --add-label`,
+`merge_promotion_pr`, and other operations not yet covered by
+`record_github_mutation` remain hand-authored because extending the recorder
+to cover them safely is tracked separately (#8693). `merge_promotion_pr`'s
+real CLI shape (`gh pr merge --merge --delete-branch`) is already identical
+to `merge_pr`'s (see `_record_merge_pr`) — promoting it to machine-recorded
+is a small follow-up, not a design gap. The sandbox setup/teardown contract
+in `record_github_mutation` is the pattern to follow when adding new
 machine-recorded operations.
 
 ## How baselines stay accurate
