@@ -121,6 +121,7 @@ from review_insights import (
     build_persistent_finding_body,
     extract_categories,
     is_infra_failure_summary,
+    reconcile_closed_insight_escalations,
     verify_proposals,
 )
 from reviewer import ReviewRunner
@@ -3150,6 +3151,25 @@ class ReviewPhase:
                 # factory as an actionable `find_label` issue (#9227) — not a
                 # HITL dead-end — and skips (no duplicate, no comment spam) when
                 # one is already open.
+                if stale:
+                    # Re-arm: any HUMAN-closed escalation clears its category
+                    # from the in-memory window-tracker so a still-stale
+                    # category can refile fresh. Bot-closed escalations are
+                    # retained, not re-armed — same shared contract the loop
+                    # site uses (#8996), via the one shared implementation so
+                    # this fallback can't drift from it.
+                    reconcile_labels = self._config.find_label[:1]
+                    if reconcile_labels:
+                        rearmed = await reconcile_closed_insight_escalations(
+                            prs=self._prs,
+                            insight_escalated_at=self._insight_escalated_at,
+                            find_label=reconcile_labels[0],
+                        )
+                        if rearmed:
+                            logger.info(
+                                "ReviewPhase: re-armed stale-insight tracker for %s",
+                                rearmed,
+                            )
                 now_escalated = datetime.now(UTC)
                 for category in stale:
                     desc = CATEGORY_DESCRIPTIONS.get(category, category)
