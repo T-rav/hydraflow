@@ -45,7 +45,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `MemoryBacklogLoop` | ✅ [0089] | ✅ [README.md] | ✅ loops.md | ✅ README.md | ✅ `test_memory_backlog_loop.py` | ✅ in catalog | ❌ |
 | `MergeStateWatcherLoop` | ✅ [0075, 0077] | ✅ [merge-state-watcher-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_merge_state_watcher_loop.py` | ✅ in catalog | ✅ `s49_merge_state_watcher_idle_poll.py` |
 | `PRUnstickerLoop` | ✅ [0075, 0077] | ✅ [pr-unsticker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_pr_unsticker_loop.py` | ✅ in catalog | ✅ `s08_pr_unsticker_revives_stuck_pr.py` |
-| `PrRedRepairLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_pr_red_repair_loop.py` | ✅ in catalog | ✅ `s71_pr_red_repair_idle_poll.py` |
+| `PrRedRepairLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_pr_red_repair_loop.py` | ✅ in catalog | ✅ `s74_pr_red_repair_idle_poll.py` |
 | `PricingRefreshLoop` | ✅ [0078, 0093] | ✅ [pricing-refresh-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_pricing_refresh_loop_scenario.py` | ✅ in catalog | ❌ |
 | `PrinciplesAuditLoop` | ✅ [0045, 0056] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_principles_audit_loop.py` | ✅ in catalog | ❌ |
 | `RCBudgetLoop` | ✅ [0045] | ✅ [rc-budget-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_rc_budget_loop.py` | ✅ in catalog | ✅ `s20_rc_budget_no_regression.py` |
