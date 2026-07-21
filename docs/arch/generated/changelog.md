@@ -6,15 +6,16 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `9d2e24e` — Merge remote-tracking branch 'origin/staging' into fix/9143-codeql-scrub-secrets-sanitizer *(2026-07-21)*
+- `f368c12` — docs(adr-0085): repoint Enforced-by citation to relocated regression test (#9143) (#9143) *(2026-07-21)*
+- `dc6060b` — test(fake-coverage): cover final FakeGitHub adapter-surface slice — gap→0 (#9768) (#10165) (#10165) *(2026-07-21)*
+- `6c20ec5` — chore(arch): regen after staging merge (#9143) (#9143) *(2026-07-21)*
 - `d60f74a` — Merge remote-tracking branch 'origin/staging' into fix/9143-codeql-scrub-secrets-sanitizer *(2026-07-21)*
 - `37dcabe` — feat(health): loop self-repair actuator — persistent error-heartbeat → auto-repair or file (#10140) (#10155) (#10155) *(2026-07-21)*
 - `bec8567` — chore(arch): regen after staging merge (#9143) (#9143) *(2026-07-21)*
 - `f88aeac` — Merge remote-tracking branch 'origin/staging' into fix/9143-codeql-scrub-secrets-sanitizer *(2026-07-21)*
 - `94be7b3` — fix(fake-fidelity): FakeGitHub PR-title format matches real PRManager (#10153) (#10160) (#10160) *(2026-07-21)*
 - `babf722` — fix(codeql): model scrub_secrets() as a clear-text-storage sanitizer (#9143) (#9143) *(2026-07-21)*
-- `32da94a` — test(fake-coverage): cover final FakeGitHub adapter-surface slice — gap→0 (#9768) (#9768) *(2026-07-21)*
-- `37dcabe` — feat(health): loop self-repair actuator — persistent error-heartbeat → auto-repair or file (#10140) (#10155) (#10155) *(2026-07-21)*
-- `94be7b3` — fix(fake-fidelity): FakeGitHub PR-title format matches real PRManager (#10153) (#10160) (#10160) *(2026-07-21)*
 - `31e4cbd` — test(fake-coverage): cover next FakeGitHub adapter-surface slice (#9768) (#10161) (#10161) *(2026-07-21)*
 - `e9115b0` — feat(pr-red): Phase 2 — dispatch auto-agent to fix real (non-infra) settled CI reds on their branch (#10027) (#10157) (#10157) *(2026-07-21)*
 - `90d56c9` — test(trust): cassette FakeGitHub PR-review/label cluster — 11 methods (#9768 slice 3) (#10152) (#10152) *(2026-07-21)*

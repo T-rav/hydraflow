@@ -91,7 +91,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0082 | `src.branch_protection_audit`, `src.branch_protection_auditor_loop`, `src.gate_activation_check`, `src.gate_activator_loop` | — |
 | ADR-0083 | — | `pytest:tests/test_sandbox_scenario_contract.py`, `pytest:tests/test_no_screenshot_regression_tests.py` |
 | ADR-0084 | `src.auto_agent_preflight_loop`, `src.base_background_loop`, `src.config`, `src.issue_store`, `src.models`, `src.pr_manager`, `src.preflight.agent`, `src.preflight.context`, `src.preflight.decision`, `src.preflight.runner` | — |
-| ADR-0085 | `src.secret_scrub` | `pytest:tests/test_secret_scrub.py, pytest:tests/test_codeql_scrub_secrets_suppression.py` |
+| ADR-0085 | `src.secret_scrub` | `pytest:tests/test_secret_scrub.py, pytest:tests/regressions/test_issue_9143_codeql_suppression.py` |
 | ADR-0086 | `src.contracts.shadow`, `src.live_corpus_replay_loop` | — |
 | ADR-0087 | `src.prompt_builder`, `src.prompt_template` | — |
 | ADR-0088 | `src.label_drift_watcher_loop`, `src.models`, `src.pr_manager` | `pytest:tests/test_label_drift_watcher_loop.py`, `pytest:tests/test_label_drift_watcher_integration.py` |

@@ -60,7 +60,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0065 | manual | `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` |
 | ADR-0071 | enforced | `pytest:tests/test_route_back.py` |
 | ADR-0083 | enforced | `pytest:tests/test_sandbox_scenario_contract.py`, `pytest:tests/test_no_screenshot_regression_tests.py` |
-| ADR-0085 | enforced | `pytest:tests/test_secret_scrub.py, pytest:tests/test_codeql_scrub_secrets_suppression.py` |
+| ADR-0085 | enforced | `pytest:tests/test_secret_scrub.py, pytest:tests/regressions/test_issue_9143_codeql_suppression.py` |
 | ADR-0088 | enforced | `pytest:tests/test_label_drift_watcher_loop.py`, `pytest:tests/test_label_drift_watcher_integration.py` |
 | ADR-0089 | enforced | `pytest:tests/test_memory_backlog_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/architecture/test_functional_area_coverage.py` |
 | ADR-0090 | enforced | `pytest:tests/test_atlas_routes.py` |
@@ -171,7 +171,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_route_back.py` | ADR-0071 |
 | `pytest:tests/test_sandbox_scenario_contract.py` | ADR-0052, ADR-0083 |
 | `pytest:tests/test_screenshot_scanner.py` | ADR-0018 |
-| `pytest:tests/test_secret_scrub.py, pytest:tests/test_codeql_scrub_secrets_suppression.py` | ADR-0085 |
+| `pytest:tests/test_secret_scrub.py, pytest:tests/regressions/test_issue_9143_codeql_suppression.py` | ADR-0085 |
 | `pytest:tests/test_seed_terms.py` | ADR-0053, ADR-0099 |
 | `pytest:tests/test_state_machine.py` | ADR-0002, ADR-0014, ADR-0017, ADR-0034 |
 | `pytest:tests/test_state_persistence.py` | ADR-0021 |
