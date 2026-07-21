@@ -313,6 +313,28 @@ describe('Header component', () => {
         expect(pill.style.borderColor).toBe(stage.color)
       })
     })
+
+    it('renders the shared product fork with a "direct →" bypass arm', () => {
+      // Header renders the discover→shape product fork via the shared ProductFork
+      // component; the "direct →" bottom arm is StreamView's canonical treatment
+      // (#9564), so the compact row and the flow diagram cannot drift.
+      render(<Header {...defaultProps} />)
+      const pipelineRow = screen.getByTestId('session-pipeline')
+      expect(pipelineRow.textContent).toContain('direct →')
+      // Both product stages sit inside the fork's top arm.
+      expect(screen.getByTestId('session-stage-discover')).toBeInTheDocument()
+      expect(screen.getByTestId('session-stage-shape')).toBeInTheDocument()
+    })
+
+    it('renders the shared terminal fork with hitl and merged as parallel arms', () => {
+      // hitl/merged fork off REVIEW (never both) via the shared TerminalFork —
+      // the same topology StreamView's flow-terminal-fork renders (#9564).
+      render(<Header {...defaultProps} />)
+      const fork = screen.getByTestId('review-terminal-fork')
+      expect(fork).toBeInTheDocument()
+      expect(fork).toContainElement(screen.getByTestId('session-stage-hitl'))
+      expect(fork).toContainElement(screen.getByTestId('session-stage-merged'))
+    })
   })
 
   describe('Report button', () => {

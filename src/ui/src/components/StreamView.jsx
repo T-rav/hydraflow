@@ -2,7 +2,9 @@ import React, { useMemo, useCallback, useState } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow, workerKey } from '../context/HydraFlowContext'
 import { StreamCard } from './StreamCard'
-import { PIPELINE_STAGES, PRODUCT_TRACK_KEYS, PULSE_ANIMATION } from '../constants'
+import { PIPELINE_STAGES, PULSE_ANIMATION } from '../constants'
+import { splitPipelineTracks } from '../utils/pipelineTracks'
+import { ProductFork, TerminalFork } from './PipelineFork'
 import { STAGE_KEYS } from '../hooks/useTimeline'
 import {
   sectionHeaderStyles,
@@ -24,14 +26,6 @@ const NO_ROLE_DOT_COLORS = {
   merged: theme.green,
   hitl: theme.red,
 }
-
-// Terminal end-states = pipeline stages with no processing role and no config
-// knob (hitl, merged). After REVIEW an issue forks to a human OR gets merged —
-// never both — so these render as parallel arms of a fork, not a linear chain.
-// Derived from PIPELINE_STAGES so adding/removing a terminal needs no edit here.
-const TERMINAL_STAGE_KEYS = new Set(
-  PIPELINE_STAGES.filter(s => !s.role && !s.configKey).map(s => s.key)
-)
 
 // Human-readable labels for the work-queue strategy badge (#10067).
 const QUEUE_STRATEGY_LABELS = {
@@ -105,15 +99,9 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
     </div>
   )
 
-  const mainGroups = stageGroups.filter(g => !PRODUCT_TRACK_KEYS.has(g.stage.key))
-  const productGroups = stageGroups.filter(g => PRODUCT_TRACK_KEYS.has(g.stage.key))
-  const triageGroup = mainGroups.find(g => g.stage.key === 'triage')
-  // Post-triage main-track stages, minus the terminal end-states (hitl, merged):
-  // those fork off REVIEW rather than chaining linearly after it.
-  const postTriageGroups = mainGroups.filter(
-    g => g.stage.key !== 'triage' && !TERMINAL_STAGE_KEYS.has(g.stage.key)
-  )
-  const terminalGroups = mainGroups.filter(g => TERMINAL_STAGE_KEYS.has(g.stage.key))
+  const { triage: triageGroup, product: productGroups, postTriage: postTriageGroups, terminal: terminalGroups } =
+    splitPipelineTracks(stageGroups, g => g.stage.key)
+  const groupKey = g => g.stage.key
 
   return (
     <div style={styles.flowContainer} data-testid="pipeline-flow">
@@ -129,41 +117,26 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
       )}
       <div style={styles.flowConnector} />
       {triageGroup && renderFlowStage(triageGroup)}
-      {productGroups.length > 0 && (
-        <>
-          <div style={styles.flowFork}>
-            <div style={styles.flowForkTop}>
-              {productGroups.map((group, idx) => (
-                <React.Fragment key={group.stage.key}>
-                  {idx === 0 && <span style={styles.flowForkArrow}>↗</span>}
-                  {idx > 0 && <div style={styles.flowConnectorShort} />}
-                  {renderFlowStage(group)}
-                </React.Fragment>
-              ))}
-              <span style={styles.flowForkArrow}>↘</span>
-            </div>
-            <div style={styles.flowForkBottom}>
-              <span style={styles.flowForkDirect}>direct →</span>
-            </div>
-          </div>
-        </>
-      )}
-      {postTriageGroups.map((group, idx) => (
+      <ProductFork
+        items={productGroups}
+        keyOf={groupKey}
+        renderItem={renderFlowStage}
+        separator={<div style={styles.flowConnectorShort} />}
+        styles={forkStyles}
+      />
+      {postTriageGroups.map((group) => (
         <React.Fragment key={group.stage.key}>
           <div style={styles.flowConnector} />
           {renderFlowStage(group)}
         </React.Fragment>
       ))}
-      {terminalGroups.length > 0 && (
-        <div style={styles.flowFork} data-testid="flow-terminal-fork">
-          {terminalGroups.map((group, idx) => (
-            <div style={styles.flowForkTop} key={group.stage.key}>
-              <span style={styles.flowForkArrow}>{idx === 0 ? '↗' : '↘'}</span>
-              {renderFlowStage(group)}
-            </div>
-          ))}
-        </div>
-      )}
+      <TerminalFork
+        items={terminalGroups}
+        keyOf={groupKey}
+        renderItem={renderFlowStage}
+        styles={forkStyles}
+        testId="flow-terminal-fork"
+      />
       {(mergedCount > 0 || failedCount > 0) && (
         <span style={styles.flowSummary} data-testid="flow-summary">
           {mergedCount > 0 && <span style={flowSummaryMergedStyle}>{mergedCount} merged</span>}
@@ -872,6 +845,17 @@ const styles = {
     color: theme.textMuted,
     flexShrink: 0,
   },
+}
+
+// Canonical fork-slot → PipelineFlow-style map fed to the shared ProductFork /
+// TerminalFork so the large flow diagram shares the Header pipeline row's fork
+// topology while keeping its own larger styling (#9564).
+const forkStyles = {
+  fork: styles.flowFork,
+  forkTop: styles.flowForkTop,
+  forkBottom: styles.flowForkBottom,
+  forkArrow: styles.flowForkArrow,
+  forkDirect: styles.flowForkDirect,
 }
 
 const epicContainerStyles = {
