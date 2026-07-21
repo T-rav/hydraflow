@@ -34,11 +34,20 @@ PYTEST_PARALLEL ?= -n auto --dist loadscope --reruns 2 --reruns-delay 1
 # degrades the advisor under cross-worker ordering (passes single-threaded) —
 # tracked follow-up. Add a path here when a non-scenario test proves
 # xdist-unsafe; the real fix is per-test isolation, not growing this list.
-# tests/regressions runs serially too — it mirrors CI (the Regression Tests job
-# is single-threaded) and contains the subprocess-group reap tests (own
-# dedicated serial CI lane), which race under parallel workers (timing, not a
-# real bug). Keeps the local `make quality` split identical to CI's job layout.
-PYTEST_SERIAL_PATHS ?= tests/scenarios tests/regressions tests/test_review_phase_metrics.py
+# Subprocess-group reap tests race under parallel workers (a child's process
+# group / reap timing collides cross-worker; they have a dedicated serial CI
+# lane). Only THESE regressions stay serial — the rest of tests/regressions/ is
+# xdist-safe (verified) and runs in the parallel bulk. Keep in sync with ci.yml.
+REAP_TESTS := tests/regressions/test_reap_processlookuperror.py \
+  tests/regressions/test_issue_9553.py \
+  tests/regressions/test_issue_9579.py \
+  tests/regressions/test_issue_9911_stop_path_reap.py \
+  tests/regressions/test_issue_9641_unified_group_kill.py \
+  tests/regressions/test_hostrunner_reap_grandchildren.py
+# Paths run SERIALLY (excluded from the parallel run). scenarios: OTel/loop-
+# registry/timing (#10111). review_phase_metrics: leaked review_advisor mock
+# (#10119). REAP_TESTS: subprocess-group reap races. Everything else parallelizes.
+PYTEST_SERIAL_PATHS ?= tests/scenarios tests/test_review_phase_metrics.py $(REAP_TESTS)
 PYTEST_SERIAL_IGNORE := $(addprefix --ignore=,$(PYTEST_SERIAL_PATHS))
 
 # Runtime overrides (used by `make hot`)

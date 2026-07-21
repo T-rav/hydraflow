@@ -421,8 +421,22 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: uv sync --all-extras
-      - name: Run regression tests
-        run: PYTHONPATH=src uv run pytest tests/regressions/ -q
+      - name: Run regression tests (parallel; reap tests serial)
+        # The subprocess-group reap tests race under parallel workers, so they
+        # run SERIALLY here (they also have the signal-context lane below); the
+        # rest of tests/regressions/ is xdist-safe and parallelizes. Keep the
+        # reap-file list in sync with the Makefile REAP_TESTS.
+        run: |
+          set -euo pipefail
+          REAP="tests/regressions/test_reap_processlookuperror.py \
+            tests/regressions/test_issue_9553.py \
+            tests/regressions/test_issue_9579.py \
+            tests/regressions/test_issue_9911_stop_path_reap.py \
+            tests/regressions/test_issue_9641_unified_group_kill.py \
+            tests/regressions/test_hostrunner_reap_grandchildren.py"
+          IGNORES=""; for f in $REAP; do IGNORES="$IGNORES --ignore=$f"; done
+          PYTHONPATH=src uv run pytest tests/regressions/ $IGNORES -n auto --dist loadscope --reruns 2 --reruns-delay 1 -q
+          PYTHONPATH=src uv run pytest $REAP -q
 
   # Linux signal-context smoke lane (#10049, deferred from #10010). Reruns the
   # reap/signal-focused test subset INSIDE a plain Linux container as root —
