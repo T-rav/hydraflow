@@ -3164,12 +3164,13 @@ class ShippedWithKnownGapPayload(TypedDict):
 class GitHubIssueSummary(TypedDict):
     """Lightweight issue dict returned by ``PRPort.list_issues_by_label``.
 
-    ``labels`` uses the gh wire shape (``[{"name": ...}, ...]``) and is only
-    populated by the OPEN listing — the closed listing keeps its narrower
-    projection (#9943). ``closed_at`` is the mirror image: populated by
-    ``list_closed_issues_by_label`` only (#9727 — the detector-calibration
-    churn window keys on close time, since ``updated_at`` moves on ANY
-    issue activity).
+    ``labels`` uses the gh wire shape (``[{"name": ...}, ...]``). Originally
+    populated by the OPEN listing only (#9943); ``list_closed_issues_by_label``
+    now projects it too (#8996), since ``escalation_reconcile.is_bot_close``
+    needs labels on CLOSED rows to tell a programmatic close from a human one.
+    ``closed_at`` is populated by ``list_closed_issues_by_label`` only (#9727
+    — the detector-calibration churn window keys on close time, since
+    ``updated_at`` moves on ANY issue activity).
     """
 
     number: int
