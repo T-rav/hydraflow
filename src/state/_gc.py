@@ -28,11 +28,18 @@ logger = logging.getLogger("hydraflow.state")
 # field here is keyed by str(issue_number) via StateTracker._key. Fields
 # keyed by anything else (worker name, PR branch, stream name) must never
 # be listed.
+#
+# Attempt-cap close-to-clear contract (#9723 Fix J): a closed issue's burned
+# attempt budget must not leak into a reopened/re-filed issue. The three
+# attempt counters are covered here — ``issue_attempts`` directly,
+# review attempts inside ``convergence_ledgers`` stage state, and
+# ``hitl_summary_failures`` directly.
 _ISSUE_SCOPED_FIELDS = (
     "adversarial_states",
     "convergence_ledgers",
     "escalation_contexts",
     "hitl_summaries",
+    "hitl_summary_failures",
     "issue_attempts",
 )
 
