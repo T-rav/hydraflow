@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from bg_worker_manager import BGWorkerManager
 from branch_protection_audit import AuditReport, audit_repo
 from dashboard import HydraFlowDashboard
 from events import EventBus
@@ -446,6 +447,65 @@ def materialize_worker_heartbeats(state: Any, seed: MockWorldSeed) -> None:
         )
 
 
+@dataclass
+class SeededRegisteredLoop:
+    """Duck-typed ``BaseBackgroundLoop`` stand-in for a seeded registered worker.
+
+    ``BGWorkerManager.get_interval`` / ``cycle_timeout`` / ``run_started_at``
+    read through ``loop._get_default_interval()`` / ``loop._cycle_timeout_
+    seconds()`` / ``loop._run_started_at`` on whatever object is registered
+    under a name in its ``_bg_loop_registry`` dict. Production populates that
+    dict from the orchestrator's REAL loop instances (a chicken-and-egg with
+    ``BGWorkerManager`` itself — see ``orchestrator.py``); a seeded scenario
+    doesn't need a fully-wired ``BaseBackgroundLoop`` (LoopDeps, ports, ...),
+    only these three duck-typed members traversed by
+    ``HealthMonitorLoop._check_worker_staleness`` (#10086). Mirrors the
+    ``stalled_loop = MagicMock()`` shape used by
+    ``tests/scenarios/test_loop_stall_restart_scenario.py``, but as a plain
+    class (no ``unittest.mock`` import in production composition-root code).
+    """
+
+    _interval_seconds: int
+    _timeout_seconds: int
+    _run_started_at: datetime | None = None
+
+    def _get_default_interval(self) -> int:
+        return self._interval_seconds
+
+    def _cycle_timeout_seconds(self) -> int:
+        return self._timeout_seconds
+
+
+def materialize_registered_workers(
+    state: Any, config: HydraFlowConfig, seed: MockWorldSeed
+) -> BGWorkerManager | None:
+    """Build a ``BGWorkerManager`` whose registered-loop set matches the seed (#10086).
+
+    ``HealthMonitorLoop._check_worker_staleness`` filters every heartbeat
+    through ``bg_workers.registered_loop_names()`` (backed by
+    ``BGWorkerManager``'s ``_bg_loop_registry`` dict) — a heartbeat for a name
+    absent from that set never reaches the restart/escalate logic at all, so
+    seeding ``worker_heartbeats`` (#9643/#9904) alone can only exercise the
+    dead-man-switch's *read* path, never a genuine stall escalation. Each
+    seed entry optionally carries ``interval_seconds`` / ``cycle_timeout_
+    seconds`` (both default 60) consumed by a lightweight
+    ``SeededRegisteredLoop`` stand-in — no real loop boot required. Returns
+    ``None`` (no-op) when ``registered_workers`` is empty; the caller must
+    then leave ``HealthMonitorLoop._bg_workers`` unset, exactly as before
+    #10086 — every existing scenario is unaffected.
+    """
+    if not seed.registered_workers:
+        return None
+    registry: dict[str, Any] = {
+        name: SeededRegisteredLoop(
+            _interval_seconds=int(entry.get("interval_seconds", 60)),
+            _timeout_seconds=int(entry.get("cycle_timeout_seconds", 60)),
+        )
+        for name, entry in seed.registered_workers.items()
+    }
+    return BGWorkerManager(config, state, registry)
+
+
 @dataclass(frozen=True)
 class SeededActivationProposal:
     """Duck-typed stand-in for ``scripts.gates.activation.ActivationProposal``.
@@ -692,6 +752,17 @@ async def main() -> None:
         runners=fake_llm,
         subprocess_runner=fake_subprocess_runner,
     )
+
+    # Registered-worker SET for the dead-man-switch stall/escalate sweep
+    # (#10086). ``HealthMonitorLoop._check_worker_staleness`` only sweeps
+    # names present in a wired BGWorkerManager's ``registered_loop_names()``
+    # — without this, a seeded ``worker_heartbeats`` stale entry (#9643/#9904)
+    # can never reach the restart/escalate path. None when
+    # seed.registered_workers is empty — HealthMonitorLoop._bg_workers stays
+    # unset, unchanged from pre-#10086 behavior.
+    bg_workers = materialize_registered_workers(state, config, seed)
+    if bg_workers is not None:
+        svc.health_monitor_loop.set_bg_workers(bg_workers)
 
     # Attach the advisor-routing sentinel — mirrors
     # tests/scenarios/fakes/mock_world.py::_wire_targets so

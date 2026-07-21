@@ -268,6 +268,25 @@ class MockWorldSeed:
     # scenario's observable is a single dup proposal, not a relabel storm.
     issue_refinement_verdicts: list[str] = field(default_factory=list)
 
+    # BGWorkerManager's registered-loop SET, materialized at boot (#10086).
+    # Keyed by worker name; each value optionally carries
+    # ``interval_seconds`` (default 60) and ``cycle_timeout_seconds``
+    # (default 60) for a lightweight duck-typed loop stand-in registered
+    # into a real ``BGWorkerManager`` (see
+    # ``mockworld.sandbox_main.materialize_registered_workers``).
+    #
+    # ``HealthMonitorLoop._check_worker_staleness`` (the generic restart-
+    # first/escalate dead-man-switch) only considers names present in
+    # ``bg_workers.registered_loop_names()`` — a seeded ``worker_heartbeats``
+    # entry alone (#9643/#9904) never traverses that filter, so the stall
+    # sweep's restart/escalate path was previously unreachable end-to-end.
+    # Pair a name here with a matching stale entry in ``worker_heartbeats``
+    # to drive the escalation. Default empty: no ``BGWorkerManager`` is
+    # constructed and ``HealthMonitorLoop._bg_workers`` stays unset, so every
+    # existing scenario (including plain ``worker_heartbeats`` usages that
+    # only exercise the read path) is unaffected.
+    registered_workers: dict[str, dict[str, Any]] = field(default_factory=dict)
+
     def to_json(self) -> str:
         """Serialize to JSON for cross-process transfer."""
         return json.dumps(asdict(self), indent=2)

@@ -686,12 +686,12 @@ class TestMemorySuggester:
         config = MagicMock()
 
         suggest = MemorySuggester(config)
+        mock_sfms = AsyncMock()
 
-        with patch.object(
-            sys.modules[MemorySuggester.__module__],
-            "safe_file_memory_suggestion",
-            new_callable=AsyncMock,
-        ) as mock_sfms:
+        with patch.dict(
+            MemorySuggester.__call__.__globals__,
+            {"safe_file_memory_suggestion": mock_sfms},
+        ):
             await suggest("transcript text", "planner", "issue #42")
 
             mock_sfms.assert_awaited_once_with(
@@ -707,12 +707,12 @@ class TestMemorySuggester:
         config = MagicMock()
 
         suggest = MemorySuggester(config)
+        mock_sfms = AsyncMock()
 
-        with patch.object(
-            sys.modules[MemorySuggester.__module__],
-            "safe_file_memory_suggestion",
-            new_callable=AsyncMock,
-        ) as mock_sfms:
+        with patch.dict(
+            MemorySuggester.__call__.__globals__,
+            {"safe_file_memory_suggestion": mock_sfms},
+        ):
             await suggest("t1", "src1", "ref1")
             await suggest("t2", "src2", "ref2")
 

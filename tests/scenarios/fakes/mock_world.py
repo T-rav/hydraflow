@@ -854,9 +854,24 @@ class MockWorld:
             materialize_epic_states,
             materialize_expired_runs,
             materialize_health_metrics,
+            materialize_registered_workers,
             materialize_worker_heartbeats,
             seed_stale_workspaces,
         )
+
+        if seed.registered_workers:
+            # Mirrors sandbox_main's post-``build_services`` wiring: a
+            # BGWorkerManager backed by the seeded name set is handed to the
+            # catalog's health_monitor builder via the ``bg_workers`` port
+            # (``_build_health_monitor`` calls ``loop.set_bg_workers(...)``
+            # when the port is present), so
+            # ``HealthMonitorLoop._check_worker_staleness`` can traverse a
+            # seeded stall exactly as the docker tier does (#10086).
+            bg_workers = materialize_registered_workers(
+                self._harness.state, config, seed
+            )
+            if bg_workers is not None:
+                self._loop_ports.setdefault("bg_workers", bg_workers)
 
         if seed.epic_states:
             # Materialize into the REAL harness StateTracker and hand the loop

@@ -304,6 +304,104 @@ def test_materialize_worker_heartbeats_backdates_last_run(tmp_path) -> None:
     assert fresh > datetime.now(UTC) - timedelta(seconds=60)
 
 
+def test_materialize_registered_workers_noops_when_empty(tmp_path) -> None:
+    """Empty ``registered_workers`` returns ``None`` — no ``BGWorkerManager``
+    is constructed and no state is touched (#10086)."""
+    from mockworld.seed import MockWorldSeed
+    from state import StateTracker
+
+    config = _seed_config(tmp_path)
+    state = StateTracker(config.state_file)
+
+    result = sandbox_main.materialize_registered_workers(state, config, MockWorldSeed())
+
+    assert result is None
+    assert state.get_disabled_workers() == set()
+
+
+def test_materialize_registered_workers_builds_registered_loop_set(tmp_path) -> None:
+    """Seeded names become BGWorkerManager's ``registered_loop_names()``; the
+    duck-typed stand-in honors per-entry interval/timeout overrides and falls
+    back to 60s for an empty entry (#10086)."""
+    from mockworld.seed import MockWorldSeed
+    from state import StateTracker
+
+    config = _seed_config(tmp_path)
+    state = StateTracker(config.state_file)
+    seed = MockWorldSeed(
+        registered_workers={
+            "workspace_gc": {"interval_seconds": 5, "cycle_timeout_seconds": 5},
+            "runs_gc": {},  # defaults: 60s / 60s
+        }
+    )
+
+    bg_workers = sandbox_main.materialize_registered_workers(state, config, seed)
+
+    assert bg_workers is not None
+    assert bg_workers.registered_loop_names() == {"workspace_gc", "runs_gc"}
+    assert bg_workers.get_interval("workspace_gc") == 5
+    assert bg_workers.cycle_timeout("workspace_gc") == 5
+    assert bg_workers.get_interval("runs_gc") == 60
+    assert bg_workers.cycle_timeout("runs_gc") == 60
+    assert bg_workers.run_started_at("workspace_gc") is None
+    # A name absent from the seed is simply unregistered — not an error.
+    assert "epic_monitor" not in bg_workers.registered_loop_names()
+
+
+async def test_registered_workers_seed_drives_stall_escalation_end_to_end(
+    tmp_path,
+) -> None:
+    """The gap #10086 closes: a seeded registered worker + a stale seeded
+    heartbeat together reach ``HealthMonitorLoop``'s generic dead-man-switch
+    escalation — proving the seed can now express BGWorkerManager's
+    registered-worker SET, not just the heartbeat read path (#9643/#9904).
+
+    Before this materializer, ``worker_heartbeats`` alone could never
+    traverse ``_check_worker_staleness``'s ``name not in registered`` filter
+    (``bg_workers`` stays ``None`` unless the seed also seeds the registered
+    set), so the restart/escalate branch was unreachable from a seed.
+    """
+    from unittest.mock import AsyncMock
+
+    from health_monitor_loop import HealthMonitorLoop
+    from mockworld.seed import MockWorldSeed
+    from state import StateTracker
+    from tests.helpers import make_bg_loop_deps
+
+    config = _seed_config(tmp_path)
+    state = StateTracker(config.state_file)
+    seed = MockWorldSeed(
+        registered_workers={
+            "workspace_gc": {"interval_seconds": 5, "cycle_timeout_seconds": 5},
+        },
+        worker_heartbeats={
+            # threshold = 3 * 5 + 5 = 20s; 99_999s is far past it.
+            "workspace_gc": {"status": "ok", "age_seconds": 99_999},
+        },
+    )
+
+    sandbox_main.materialize_worker_heartbeats(state, seed)
+    bg_workers = sandbox_main.materialize_registered_workers(state, config, seed)
+    assert bg_workers is not None
+    # No restart_cb wired (mirrors sandbox_main/mock_world's minimal seam) —
+    # ``bg_workers.restart()`` returns False, so the sweep escalates on the
+    # very first stale cycle instead of restart-then-wait-a-sweep.
+
+    deps = make_bg_loop_deps(tmp_path).loop_deps
+    prs = AsyncMock()
+    prs.create_issue = AsyncMock(return_value=99)
+
+    loop = HealthMonitorLoop(config=config, deps=deps, prs=prs, state=state)
+    loop.set_bg_workers(bg_workers)
+
+    await loop._check_worker_staleness()
+
+    prs.create_issue.assert_awaited_once()
+    title, _body, labels = prs.create_issue.await_args.args
+    assert "workspace_gc" in title
+    assert "loop-stalled" in labels
+
+
 def test_build_seeded_gate_detector_returns_proposals() -> None:
     import asyncio
 
