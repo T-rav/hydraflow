@@ -1704,14 +1704,20 @@ class PRManager:
         )
 
     async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
-        """Return jobs for one workflow run (#9974, enriched #10010).
+        """Return jobs for one workflow run (#9974, enriched #10010, #10027).
 
-        Each dict: ``{"name", "conclusion", "started_at", "completed_at",
-        "steps"}``. ``started_at``/``completed_at``/``steps`` feed
-        GateHealthLoop's suspected-hang classifier (duration vs. the
+        Each dict: ``{"name", "status", "conclusion", "started_at",
+        "completed_at", "steps"}``. ``started_at``/``completed_at``/``steps``
+        feed GateHealthLoop's suspected-hang classifier (duration vs. the
         workflow's configured timeout-minutes, plus whether a test step
         ever reached a terminal conclusion) — the jobs API is the only
         source for a job's *actual* timing and step-level outcomes.
+
+        ``status`` (queued / in_progress / completed, #10027) lets
+        PrRedRepairLoop's settled-red predicate tell a genuinely finished
+        job apart from one mid-rerun whose ``conclusion`` still reads its
+        OLD (pre-rerun) value while ``status`` has already flipped back to
+        pending — additive field, existing consumers ignore it.
         """
         self._assert_repo()
         output = await self._run_gh(
@@ -1720,7 +1726,8 @@ class PRManager:
             f"repos/{self._repo}/actions/runs/{int(run_id)}/jobs?per_page=100",
             "--jq",
             (
-                '[.jobs[] | {name: .name, conclusion: (.conclusion // ""), '
+                '[.jobs[] | {name: .name, status: (.status // ""), '
+                'conclusion: (.conclusion // ""), '
                 'started_at: (.started_at // ""), '
                 'completed_at: (.completed_at // ""), '
                 "steps: [.steps[]? | {name: .name, "
@@ -1752,6 +1759,39 @@ class PRManager:
             return int((output or "0").strip())
         except ValueError:
             return 0
+
+    async def rerun_workflow_failed(self, run_id: int) -> bool:
+        """Trigger ``gh run rerun <id> --failed`` (#10027 bounded infra-flake retry).
+
+        Reruns only the FAILED jobs within *run_id* — the same run id
+        persists, which is why the caller's attempt cap is keyed by PR
+        number rather than expecting a fresh run id per retry. Returns
+        ``True`` on success, ``False`` on any ``gh`` failure (never
+        raises) so the caller's attempt-cap bookkeeping stays authoritative
+        regardless of transient gh/API errors.
+        """
+        if self._config.dry_run:
+            logger.info("[dry-run] Would rerun failed jobs for run %d", run_id)
+            return False
+        self._assert_repo()
+        try:
+            await self._run_gh(
+                "gh",
+                "run",
+                "rerun",
+                str(run_id),
+                "--repo",
+                self._repo,
+                "--failed",
+            )
+        except RuntimeError:
+            logger.warning(
+                "rerun_workflow_failed: gh run rerun failed for run %d",
+                run_id,
+                exc_info=True,
+            )
+            return False
+        return True
 
     async def list_closed_issues_by_label(
         self, label: str, limit: int = 100

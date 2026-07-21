@@ -219,6 +219,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_GATE_HEALTH_HANG_TOLERANCE_SECONDS",
         90,
     ),
+    ("pr_red_repair_interval", "HYDRAFLOW_PR_RED_REPAIR_INTERVAL", 300),
+    ("pr_red_rerun_max_attempts", "HYDRAFLOW_PR_RED_RERUN_MAX_ATTEMPTS", 2),
     ("adr_review_interval", "HYDRAFLOW_ADR_REVIEW_INTERVAL", 86400),
     ("adr_review_approval_threshold", "HYDRAFLOW_ADR_REVIEW_APPROVAL_THRESHOLD", 2),
     ("adr_review_max_rounds", "HYDRAFLOW_ADR_REVIEW_MAX_ROUNDS", 3),
@@ -763,6 +765,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("stale_issue_gc_loop_enabled", "HYDRAFLOW_STALE_ISSUE_GC_LOOP_ENABLED", True),
     ("gate_health_loop_enabled", "HYDRAFLOW_GATE_HEALTH_LOOP_ENABLED", True),
+    ("pr_red_repair_loop_enabled", "HYDRAFLOW_PR_RED_REPAIR_LOOP_ENABLED", True),
     (
         "human_branch_shepherd_enabled",
         "HYDRAFLOW_HUMAN_BRANCH_SHEPHERD_ENABLED",
@@ -1625,6 +1628,24 @@ class HydraFlowConfig(BaseModel):
             "job whose duration lands within this many seconds of its "
             "workflow's configured timeout-minutes is a candidate hang, "
             "not a generic cancellation"
+        ),
+    )
+    pr_red_repair_interval: int = Field(
+        default=300,
+        ge=60,
+        le=86400,
+        description=(
+            "PrRedRepairLoop cycle interval in seconds (#10027 Phase 1: "
+            "infra-flake retrier; default 5 minutes)"
+        ),
+    )
+    pr_red_rerun_max_attempts: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description=(
+            "Max bounded `gh run rerun --failed` attempts per PR before "
+            "PrRedRepairLoop escalates via a rollup issue (#10027)"
         ),
     )
 
@@ -4335,6 +4356,13 @@ class HydraFlowConfig(BaseModel):
     gate_health_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for GateHealthLoop (#9974).",
+    )
+    pr_red_repair_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for PrRedRepairLoop (#10027 Phase 1: "
+            "infra-flake retrier)."
+        ),
     )
     stale_issue_loop_enabled: bool = Field(
         default=True,

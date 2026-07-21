@@ -47,6 +47,7 @@ from ._live_corpus_replay import LiveCorpusReplayStateMixin
 from ._log_ingest import LogIngestStateMixin
 from ._memory_backlog import MemoryBacklogStateMixin
 from ._onboarding import OnboardingStateMixin
+from ._pr_red_repair import PrRedRepairStateMixin
 from ._principles_audit import PrinciplesAuditStateMixin
 from ._rc_budget import RCBudgetStateMixin
 from ._report import ReportStateMixin
@@ -114,6 +115,7 @@ class StateTracker(
     AutoAgentStateMixin,
     DetectorCalibrationStateMixin,
     SandboxFailureFixerStateMixin,
+    PrRedRepairStateMixin,
     AdrAuditStateMixin,
     AdversarialStateMixin,
     StateGCMixin,

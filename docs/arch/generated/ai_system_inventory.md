@@ -55,7 +55,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_REPORT_ISSUE` | `report_issue_tool` | `report_issue_model` |
 | `HYDRAFLOW_TERM_PROPOSER` | `term_proposer_tool` | `term_proposer_model` |
 
-## Background loops (56)
+## Background loops (57)
 
 | Worker | Loop class | Area | Model role(s) | Long LLM cycle | Oversight | Purpose |
 |---|---|---|---|---|---|---|
@@ -93,6 +93,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `log_ingest` | `LogIngestLoop` | Caretaking | — | — | — | Clusters and dedups recurring errors/warnings in HydraFlow's own server log and files them as fix-issues for the pipeline. |
 | `memory_backlog` | `MemoryBacklogLoop` | Caretaking | — | — | HITL escalation | Files hydraflow-find issues for pending entries in docs/wiki/memory-feedback/. |
 | `merge_state_watcher` | `MergeStateWatcherLoop` | Caretaking | — | — | HITL escalation | Auto-rebases or HITL-escalates open PRs flagged mergeable=CONFLICTING (RC, dependabot, agent). |
+| `pr_red_repair` | `PrRedRepairLoop` | Quality Gates | — | — | — | Detects settled-red open PRs and bounded-reruns infra-flake CI; escalates via rollup issue once the rerun budget is exhausted (#10027 Phase 1). |
 | `pr_unsticker` | `PRUnstickerLoop` | Caretaking | `background_model` | — | HITL escalation | Requeues stalled HITL PRs by validating requirements and reopening flow. |
 | `pricing_refresh` | `PricingRefreshLoop` | Caretaking | — | — | PR review + merge gate | Daily upstream-pricing refresh caretaker — fetches LiteLLM JSON, opens PR on drift; bounds-guarded, always human-reviewed. |
 | `principles_audit` | `PrinciplesAuditLoop` | Trust Fleet | — | — | HITL escalation | Weekly ADR-0044 audit of HydraFlow-self plus managed repos; blocks onboarding on P1–P5 fails. |

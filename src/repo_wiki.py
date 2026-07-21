@@ -652,6 +652,25 @@ class WikiEntry(BaseModel):
             "the ingest-path dedup/corroboration logic in wiki_compiler."
         ),
     )
+    fixed_in_pr: str | None = Field(
+        default=None,
+        description=(
+            "PR reference (e.g. '#8713') asserting this entry's underlying "
+            "fix has shipped. Hand-authored gotcha/manual entries carry "
+            "this alongside code_refs; WikiRotDetectorLoop's shipped-claim "
+            "pass (issue #9598) verifies the claim against them. Previously "
+            "dropped as an unmodeled extra field on parse (issue #9936)."
+        ),
+    )
+    code_refs: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "path.py:symbol (or bare-file) references corroborating "
+            "fixed_in_pr — resolved against checked-out source by the "
+            "shipped-claim verifier. Previously dropped as an unmodeled "
+            "extra field on parse (issue #9936)."
+        ),
+    )
 
     @model_validator(mode="after")
     def _default_valid_from(self) -> WikiEntry:
@@ -701,6 +720,80 @@ def annotate_entries_with_temporal_tags(
             base = f"{base} (+{entry.corroborations})"
         annotated.append((entry, base))
     return annotated
+
+
+def parse_topic_page(topic_path: Path) -> list[WikiEntry]:
+    """Parse a topic markdown file into its ``WikiEntry`` objects.
+
+    Schema-slim layout: each entry is rendered as a `## Title`
+    section followed by prose, an optional `_Source: #N (kind)_`
+    footer, and a `json:entry` code block carrying metadata WITHOUT
+    the `content` field. The reader reconstructs ``WikiEntry.content``
+    from the prose section above the metadata block.
+
+    Legacy entries that still embed ``content`` in the JSON continue
+    to load — the prose section overrides if present, otherwise the
+    JSON-embedded copy is used.
+
+    Parsing strategy: split the file at line-start ``## `` boundaries
+    into entry sections, then within each section locate the LAST
+    ``json:entry`` code block as the metadata block. This is robust
+    against (a) prose containing embedded ```` ```json:entry ```` fences
+    (e.g., wiki entries about the wiki schema itself), and (b) free-form
+    ``## Heading`` sections without a metadata block (silently skipped
+    rather than eating the next entry).
+
+    Module-level (not a ``RepoWikiStore`` method) so callers that only
+    need the authoritative, read-only parse — e.g. ``WikiRotDetectorLoop``
+    (issue #9936) — can share it without a live store instance. Returns
+    ``[]``, never raises, for files that aren't in this shape (no ``## ``
+    sections, or none carrying a ``json:entry`` block) — callers treat
+    an empty result as "not a topic page" and fall back accordingly.
+    """
+    if not topic_path.exists():
+        return []
+
+    text = topic_path.read_text()
+    # Split at line-start "## " — first chunk is the file preamble.
+    sections = re.split(r"(?:^|\n)## ", text)
+    entries: list[WikiEntry] = []
+
+    for section in sections[1:]:
+        title, _, body = section.partition("\n")
+        title = title.strip()
+        if not title:
+            continue
+        meta_matches = list(
+            re.finditer(r"```json:entry\n(.+?)\n```", body, re.DOTALL),
+        )
+        if not meta_matches:
+            continue  # free-form section without metadata — skip silently
+        meta_match = meta_matches[-1]  # always the LAST block
+        try:
+            metadata = json.loads(meta_match.group(1))
+            prose = _strip_prose_chrome(body[: meta_match.start()])
+            if prose:
+                metadata["content"] = prose
+            elif "content" not in metadata:
+                metadata["content"] = ""
+            if not metadata.get("title"):
+                metadata["title"] = title
+            entries.append(WikiEntry.model_validate(metadata))
+        except Exception as exc:  # noqa: BLE001
+            # Surface the offending entry id and the validation reason so
+            # drift is diagnosable from the log alone (the bare path is not).
+            try:
+                entry_id = str(json.loads(meta_match.group(1)).get("id", ""))
+            except Exception:  # noqa: BLE001
+                entry_id = "<invalid-json>"
+            logger.warning(
+                "Skipping malformed entry %s in %s: %s",
+                entry_id or "<no-id>",
+                topic_path,
+                exc,
+            )
+
+    return entries
 
 
 class WikiIndex(BaseModel):
@@ -1546,68 +1639,12 @@ class RepoWikiStore:
     def _load_topic_entries(self, topic_path: Path) -> list[WikiEntry]:
         """Parse a topic markdown file back into entries.
 
-        Schema-slim layout: each entry is rendered as a `## Title`
-        section followed by prose, an optional `_Source: #N (kind)_`
-        footer, and a `json:entry` code block carrying metadata WITHOUT
-        the `content` field. The reader reconstructs ``WikiEntry.content``
-        from the prose section above the metadata block.
-
-        Legacy entries that still embed ``content`` in the JSON continue
-        to load — the prose section overrides if present, otherwise the
-        JSON-embedded copy is used.
-
-        Parsing strategy: split the file at line-start ``## `` boundaries
-        into entry sections, then within each section locate the LAST
-        ``json:entry`` code block as the metadata block. This is robust
-        against (a) prose containing embedded ```` ```json:entry ```` fences
-        (e.g., wiki entries about the wiki schema itself), and (b) free-form
-        ``## Heading`` sections without a metadata block (silently skipped
-        rather than eating the next entry).
+        Thin delegator to the module-level :func:`parse_topic_page` — that
+        function is the single source of truth so other callers (e.g.
+        ``WikiRotDetectorLoop``, issue #9936) can share the identical parse
+        without needing a live ``RepoWikiStore`` instance.
         """
-        if not topic_path.exists():
-            return []
-
-        text = topic_path.read_text()
-        # Split at line-start "## " — first chunk is the file preamble.
-        sections = re.split(r"(?:^|\n)## ", text)
-        entries: list[WikiEntry] = []
-
-        for section in sections[1:]:
-            title, _, body = section.partition("\n")
-            title = title.strip()
-            if not title:
-                continue
-            meta_matches = list(
-                re.finditer(r"```json:entry\n(.+?)\n```", body, re.DOTALL),
-            )
-            if not meta_matches:
-                continue  # free-form section without metadata — skip silently
-            meta_match = meta_matches[-1]  # always the LAST block
-            try:
-                metadata = json.loads(meta_match.group(1))
-                prose = _strip_prose_chrome(body[: meta_match.start()])
-                if prose:
-                    metadata["content"] = prose
-                elif "content" not in metadata:
-                    metadata["content"] = ""
-                if not metadata.get("title"):
-                    metadata["title"] = title
-                entries.append(WikiEntry.model_validate(metadata))
-            except Exception as exc:  # noqa: BLE001
-                # Surface the offending entry id and the validation reason so
-                # drift is diagnosable from the log alone (the bare path is not).
-                try:
-                    entry_id = str(json.loads(meta_match.group(1)).get("id", ""))
-                except Exception:  # noqa: BLE001
-                    entry_id = "<invalid-json>"
-                logger.warning(
-                    "Skipping malformed entry %s in %s: %s",
-                    entry_id or "<no-id>",
-                    topic_path,
-                    exc,
-                )
-
-        return entries
+        return parse_topic_page(topic_path)
 
     def _write_topic_page(
         self,

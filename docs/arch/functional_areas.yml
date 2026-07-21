@@ -61,6 +61,7 @@ areas:
       - BranchProtectionAuditorLoop
       - CIMonitorLoop
       - GateActivatorLoop
+      - PrRedRepairLoop
     related_adrs: ['0023', '0035', '0044', '0082']
 
   trust_fleet:

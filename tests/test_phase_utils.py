@@ -687,8 +687,10 @@ class TestMemorySuggester:
 
         suggest = MemorySuggester(config)
 
-        with patch(
-            "phase_utils.safe_file_memory_suggestion", new_callable=AsyncMock
+        with patch.object(
+            sys.modules[MemorySuggester.__module__],
+            "safe_file_memory_suggestion",
+            new_callable=AsyncMock,
         ) as mock_sfms:
             await suggest("transcript text", "planner", "issue #42")
 
@@ -706,8 +708,10 @@ class TestMemorySuggester:
 
         suggest = MemorySuggester(config)
 
-        with patch(
-            "phase_utils.safe_file_memory_suggestion", new_callable=AsyncMock
+        with patch.object(
+            sys.modules[MemorySuggester.__module__],
+            "safe_file_memory_suggestion",
+            new_callable=AsyncMock,
         ) as mock_sfms:
             await suggest("t1", "src1", "ref1")
             await suggest("t2", "src2", "ref2")

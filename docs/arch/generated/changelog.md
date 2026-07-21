@@ -6,6 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `a147936` — Merge remote-tracking branch 'origin/staging' into feat/10027-pr-red-infra-flake-retrier *(2026-07-21)*
+- `822fe7a` — feat(pr-red): Phase 1 infra-flake retrier caretaker loop — settled-red detect + bounded rerun (#10027) (#10027) *(2026-07-21)*
+- `95a6402` — feat(retrospective): re-arm HITL stale-insight window only on human close via is_bot_close (#8996) (#10110) (#10110) *(2026-07-21)*
+- `6f0e235` — fix(state-gc): sweep route_back_counts + review-orphan counters on issue close; structural issue-keyed-field guard (#10083) (#10114) (#10114) *(2026-07-21)*
 - `77a163a` — test(trust): cassette the staging/RC promotion cluster — 13 FakeGitHub methods (#9768 slice 1) (#10092) (#10092) *(2026-07-21)*
 - `0668416` — feat(config): heavy make-invoking loop subprocess timeouts become operator knobs (#9555) (#10091) (#10091) *(2026-07-21)*
 - `33ff371` — feat(preflight): widen AutoAgentPreflightLoop intake to attempt-cap/quality-gate HITL issues (#9721) (#10080) (#10080) *(2026-07-21)*
@@ -18,8 +22,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `62b6a74` — Merge remote-tracking branch 'origin/staging' into feat/9643-seed-state-materializer *(2026-07-20)*
 - `91649f1` — Merge remote-tracking branch 'origin/staging' into feat/9643-seed-state-materializer *(2026-07-20)*
 - `ddfdb66` — build(arch): auto-resolve docs/arch/.meta.json + changelog.md merge conflicts (#10099) (#10099) *(2026-07-20)*
-- `68abc51` — Merge remote-tracking branch 'origin/staging' into feat/9768-fake-coverage-slice *(2026-07-20)*
-- `359af75` — Merge remote-tracking branch 'origin/staging' into feat/9768-fake-coverage-slice *(2026-07-20)*
 - `9f99bcf` — fix(escalation): TTL re-drive so stale auto-agent escalations self-heal (#9719) (#10079) (#10079) *(2026-07-20)*
 - `f57e313` — Merge remote-tracking branch 'origin/staging' into feat/9643-seed-state-materializer *(2026-07-20)*
 - `982cec5` — fix(workspace,state): automate HITL reset runbook residuals — main-repo core.worktree heal + attempt-counter close-to-clear (#9723) (#10082) (#10082) *(2026-07-20)*

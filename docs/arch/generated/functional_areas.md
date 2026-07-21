@@ -45,6 +45,7 @@ flowchart LR
         quality_gates_BranchProtectionAuditorLoop([BranchProtectionAuditorLoop])
         quality_gates_CIMonitorLoop([CIMonitorLoop])
         quality_gates_GateActivatorLoop([GateActivatorLoop])
+        quality_gates_PrRedRepairLoop([PrRedRepairLoop])
     end
     subgraph trust_fleet["Trust Fleet"]
         trust_fleet_AdrConformanceLoop([AdrConformanceLoop])
@@ -149,6 +150,7 @@ Runtime CI/test monitoring loops that catch regressions and watch external check
 - `BranchProtectionAuditorLoop` — `src.branch_protection_auditor_loop`
 - `CIMonitorLoop` — `src.ci_monitor_loop`
 - `GateActivatorLoop` — `src.gate_activator_loop`
+- `PrRedRepairLoop` — `src.pr_red_repair_loop`
 
 **Related ADRs:** `ADR-0023`, `ADR-0035`, `ADR-0044`, `ADR-0082`
 

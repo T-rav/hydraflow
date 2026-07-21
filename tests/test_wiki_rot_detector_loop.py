@@ -257,6 +257,198 @@ async def test_tick_repo_escalates_on_third_attempt(
     assert set(labels_escalate) == {"hitl-escalation", "wiki-rot-stuck"}
 
 
+# ---------------------------------------------------------------------------
+# Structured WikiEntry consumption (issue #9936)
+# ---------------------------------------------------------------------------
+#
+# Before #9936, ``_load_wiki_entries`` walked every ``.md`` file and treated
+# the WHOLE FILE as one blob, titled under the file's ``# Heading``. Two
+# regex-driven false positives fell out of that: (1) every broken cite in a
+# multi-entry topic page was misattributed to the file heading instead of
+# the entry that actually cited it, and (2) fenced-code "hints" from an
+# unrelated entry sharing the file leaked into a finding that had nothing
+# to do with them. Both are fixed by parsing the authoritative per-entry
+# ``WikiEntry`` (``repo_wiki.parse_topic_page``) instead.
+
+
+async def test_tick_repo_structured_entries_attribute_title_correctly(
+    tmp_path: Path, loop_env
+) -> None:
+    """A broken cite in one entry of a multi-entry topic page must be filed
+    under THAT entry's own title, not the topic file's ``# Heading``."""
+    from repo_wiki import RepoWikiStore, WikiEntry
+
+    cfg, state, pr, dedup, wiki_store = loop_env
+    slug = "hydra/hydraflow"
+
+    real_store = RepoWikiStore(tmp_path / "real_wiki", self_slug=slug)
+    real_store.ingest(
+        slug,
+        [
+            WikiEntry(
+                title="Alpha broken cite",
+                content="See src/foo.py:missing_symbol for the guard.",
+                source_type="manual",
+                source_issue=101,
+            ),
+            WikiEntry(
+                title="Beta unrelated hint",
+                content=("```python\ndef totally_unrelated_hint():\n    pass\n```\n"),
+                source_type="manual",
+                source_issue=102,
+            ),
+        ],
+    )
+    wiki_dir = real_store._repo_dir(slug)
+    wiki_store.repo_dir.return_value = wiki_dir
+    wiki_store.list_repos.return_value = [slug]
+
+    (tmp_path / "src").mkdir(exist_ok=True)
+    (tmp_path / "src" / "foo.py").write_text("def other():\n    return 1\n")
+    cfg.repo_root = tmp_path  # type: ignore[misc]
+
+    loop = _loop((cfg, state, pr, dedup, wiki_store))
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    stats = await loop._do_work()
+
+    assert stats["issues_filed"] == 1, stats
+    title, body, labels = pr.create_issue.await_args.args
+    # Fixed: attributed to the originating entry, not the topic file's H1
+    # ("Patterns" — the old regex-whole-file behavior would have used it
+    # for every finding in the file, regardless of which entry cited it).
+    assert "Alpha broken cite" in title
+    assert "Patterns cites missing" not in title
+    # Fixed: Beta's fenced-code hint must not leak into Alpha's finding —
+    # under the old whole-file parse, extract_fenced_hints ran over BOTH
+    # entries concatenated and would have surfaced this as "context".
+    assert "totally_unrelated_hint" not in body
+    # New: structured provenance is now available and surfaced.
+    assert "#101 (manual)" in body
+    assert set(labels) == {"hydraflow-find", "wiki-rot"}
+
+
+async def test_shipped_claim_fires_via_structured_wiki_entry_fields(
+    tmp_path: Path, loop_env
+) -> None:
+    """Structured entries carry ``fixed_in_pr``/``code_refs`` as authoritative
+    ``WikiEntry`` fields (issue #9936 added them — previously silently
+    dropped as unmodeled pydantic extras). The shipped-claim pass must read
+    them directly rather than re-parsing the ``json:entry`` block
+    RepoWikiStore already parsed once — this must work even though
+    ``entry.content`` (the scanned ``body``) never contains that block."""
+    from repo_wiki import RepoWikiStore, WikiEntry
+
+    cfg, state, pr, dedup, wiki_store = loop_env
+    slug = "hydra/hydraflow"
+
+    real_store = RepoWikiStore(tmp_path / "real_wiki", self_slug=slug)
+    real_store.ingest(
+        slug,
+        [
+            WikiEntry(
+                title="Swap boundary",
+                content="Prose about the swap boundary gotcha.",
+                source_type="manual",
+                source_issue=6295,
+                fixed_in_pr="#8715",
+                code_refs=("src/gone.py:vanished",),
+            ),
+        ],
+    )
+    wiki_dir = real_store._repo_dir(slug)
+    wiki_store.repo_dir.return_value = wiki_dir
+    wiki_store.list_repos.return_value = [slug]
+
+    (tmp_path / "src").mkdir(exist_ok=True)  # module absent → code_ref dead
+    cfg.repo_root = tmp_path  # type: ignore[misc]
+
+    loop = _loop((cfg, state, pr, dedup, wiki_store))
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    stats = await loop._do_work()
+
+    assert stats["issues_filed"] == 1, stats
+    title, body, labels = pr.create_issue.await_args.args
+    assert "#8715" in title
+    assert "#8715" in body
+    assert "#6295 (manual)" in body
+    assert set(labels) == {"hydraflow-find", "wiki-rot"}
+
+
+async def test_shipped_claim_clean_via_structured_fields_when_ref_resolves(
+    tmp_path: Path, loop_env
+) -> None:
+    """A structured entry's ``fixed_in_pr`` claim with a live code_ref must
+    not fire — mirrors the raw-fallback corroboration test but exercises
+    the structured (``WikiEntry.fixed_in_pr``) path."""
+    from repo_wiki import RepoWikiStore, WikiEntry
+
+    cfg, state, pr, dedup, wiki_store = loop_env
+    slug = "hydra/hydraflow"
+
+    real_store = RepoWikiStore(tmp_path / "real_wiki", self_slug=slug)
+    real_store.ingest(
+        slug,
+        [
+            WikiEntry(
+                title="Half-state on skill failure",
+                content="Prose about the guard.",
+                source_type="manual",
+                source_issue=6295,
+                fixed_in_pr="#8713",
+                code_refs=("src/live.py:present", "src/gone.py:vanished"),
+            ),
+        ],
+    )
+    wiki_dir = real_store._repo_dir(slug)
+    wiki_store.repo_dir.return_value = wiki_dir
+    wiki_store.list_repos.return_value = [slug]
+
+    (tmp_path / "src").mkdir(exist_ok=True)
+    (tmp_path / "src" / "live.py").write_text("def present():\n    return 1\n")
+    cfg.repo_root = tmp_path  # type: ignore[misc]
+
+    loop = _loop((cfg, state, pr, dedup, wiki_store))
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    await loop._do_work()
+
+    assert not any("#8713" in c.args[0] for c in pr.create_issue.await_args_list), (
+        pr.create_issue.await_args_list
+    )
+
+
+async def test_load_wiki_entries_falls_back_to_raw_for_non_topic_page_markdown(
+    tmp_path: Path, loop_env
+) -> None:
+    """Markdown that isn't in the WikiEntry topic-page shape (no ``## ``
+    sections, or none carrying a ``json:entry`` block) must still be
+    scanned via the legacy whole-file path — preserving existing behavior
+    for entries that still need it (glossary/feedback-style pages)."""
+    cfg, state, pr, dedup, wiki_store = loop_env
+    slug = "hydra/hydraflow"
+    wiki_dir = tmp_path / "wiki" / slug
+    wiki_dir.mkdir(parents=True)
+    (wiki_dir / "terms" / "actuator.md").parent.mkdir(parents=True, exist_ok=True)
+    (wiki_dir / "terms" / "actuator.md").write_text(
+        "---\ncode_anchor: src/foo.py:bar\n---\n\n## Definition\n\nProse.\n"
+    )
+    wiki_store.repo_dir.return_value = wiki_dir
+    wiki_store.list_repos.return_value = [slug]
+
+    (tmp_path / "src").mkdir(exist_ok=True)
+    (tmp_path / "src" / "foo.py").write_text("def other():\n    return 1\n")
+    cfg.repo_root = tmp_path  # type: ignore[misc]
+
+    loop = _loop((cfg, state, pr, dedup, wiki_store))
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    stats = await loop._do_work()
+
+    assert stats["issues_filed"] == 1, stats
+    title, body, labels = pr.create_issue.await_args.args
+    assert "src/foo.py:bar" in title
+    # No structured provenance for a raw-fallback row.
+    assert "Entry source:" not in body
+
+
 def _shipped_entry(pr_ref: str, code_refs: list[str]) -> str:
     """A wiki entry with a structured ``fixed_in_pr`` shipped claim."""
     import json
