@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `6026edf` — chore(arch): merge staging + regen (#9976) (#9976) *(2026-07-21)*
 - `334b992` — Merge remote-tracking branch 'origin/staging' into feat/9976-adr-drift-resolver-loop *(2026-07-21)*
 - `d4d4ecc` — fix(factory): perf/ auto-merge + worktree arch-meta merge driver (#10143) (#10143) *(2026-07-21)*
 - `554da62` — feat(adr): AdrDriftResolverLoop — triage-before-escalate so drift rollups self-resolve (#9976) (#9976) *(2026-07-21)*
