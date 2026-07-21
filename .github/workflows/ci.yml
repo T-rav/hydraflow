@@ -295,17 +295,17 @@ jobs:
         run: PYTHONPATH=src uv run pytest tests/test_execution.py tests/test_agent_advanced.py tests/test_agent_cli.py tests/test_agent_execution.py tests/test_agent_lifecycle.py tests/test_agent_output.py tests/test_hitl_runner.py tests/test_prompt_telemetry.py tests/test_dashboard_routes_control.py tests/test_dashboard_routes_core.py tests/test_dashboard_routes_hitl.py tests/test_dashboard_routes_issue_history.py tests/test_dashboard_routes_metrics.py tests/test_dashboard_routes_repo.py tests/test_dashboard_routes_state.py -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning
       # PR merge gate (Tier 2a): FAST parallel pass/fail, no coverage. Coverage
       # is single-threaded and too slow for the merge path — it moved to the
-      # trailing `coverage` job (push-to-staging + nightly). tests/scenarios is
-      # excluded here and run SERIALLY below: process-global OTel/loop-registry
-      # + convergence-timing state flakes across xdist workers (Tier 1a split).
+      # trailing `coverage` job (push-to-staging + nightly). tests/scenarios now
+      # runs in the parallel bulk (#10111): its loop-registry leak is contained
+      # by the _restore_loop_catalog_registry autouse fixture and OTel state is
+      # reset per test, so scenarios are xdist-safe.
       - name: Run tests (fast, parallel — no coverage)
-        # tests/scenarios + tests/test_review_phase_metrics.py are xdist-unsafe
-        # (process-global OTel/loop-registry/timing #10111; leaked review_advisor
-        # client mock) — excluded here, run serially below. Keep in sync with the
-        # Makefile PYTEST_SERIAL_PATHS.
-        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --ignore=tests/scenarios --ignore=tests/test_review_phase_metrics.py -n auto --dist loadscope --reruns 2 --reruns-delay 1
+        # Only tests/test_review_phase_metrics.py stays xdist-unsafe here (a
+        # leaked review_advisor client mock, #10119) — excluded and run serially
+        # below. Keep in sync with the Makefile PYTEST_SERIAL_PATHS.
+        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --ignore=tests/test_review_phase_metrics.py -n auto --dist loadscope --reruns 2 --reruns-delay 1
       - name: Run serial (xdist-unsafe) tests
-        run: PYTHONPATH=src uv run pytest tests/scenarios tests/test_review_phase_metrics.py
+        run: PYTHONPATH=src uv run pytest tests/test_review_phase_metrics.py
 
   # Trailing coverage gate (Tier 2a). Coverage is SINGLE-THREADED (xdist + --cov
   # is finicky) and therefore too slow for the PR merge path, so it runs OFF the
