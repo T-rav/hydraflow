@@ -86,7 +86,12 @@ def test_fake_fetcher_injectable_into_audit_repo_reports_drift() -> None:
     )
     gh = FakeGitHub.from_seed(seed)
 
-    report = audit_repo("owner/repo", _CANONICAL_DIR, fetch_rulesets=gh.fetch_rulesets)
+    report = audit_repo(
+        "owner/repo",
+        _CANONICAL_DIR,
+        fetch_rulesets=gh.fetch_rulesets,
+        fetch_legacy_protection=gh.fetch_legacy_protection,
+    )
 
     assert not report.clean
     assert any("staging protect" in line for line in report.drifts)
@@ -102,6 +107,11 @@ def test_fake_fetcher_injectable_into_audit_repo_clean_when_matched() -> None:
     )
     gh = FakeGitHub.from_seed(seed)
 
-    report = audit_repo("owner/repo", _CANONICAL_DIR, fetch_rulesets=gh.fetch_rulesets)
+    report = audit_repo(
+        "owner/repo",
+        _CANONICAL_DIR,
+        fetch_rulesets=gh.fetch_rulesets,
+        fetch_legacy_protection=gh.fetch_legacy_protection,
+    )
 
     assert report.clean, report.drifts
