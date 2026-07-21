@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# update_pr_base retargets a PR's base branch (real: `gh pr edit --base`),
+# returning True when the PR exists. The dispatcher seeds PR #42 (default
+# base "main") and asserts the recorded base flips to "staging" — the
+# retarget side-effect the two-tier branch model (ADR-0042) relies on when
+# a ruleset change breaks a PR's merge target.
+adapter: github
+interaction: update_pr_base
+recorded_at: "2026-07-20T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: update_pr_base
+  args:
+    - "42"
+    - "staging"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "True\n"
+  stderr: ""
+normalizers: []
+baseline_only: true
