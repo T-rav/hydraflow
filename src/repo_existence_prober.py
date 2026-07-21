@@ -83,7 +83,10 @@ class DefaultRepoProber:
                 gh_token=self._gh_token,
                 timeout=_REPO_PROBE_TIMEOUT_SECS,
             )
-        except Exception as exc:  # noqa: BLE001
+        except (OSError, RuntimeError) as exc:
+            # run_subprocess_result only raises on spawn failure (OSError) or
+            # timeout/credit (both RuntimeError subclasses — SubprocessTimeoutError,
+            # CreditExhaustedError); command failures come back as a nonzero result.
             reraise_on_credit_or_bug(exc)
             logger.debug("repo probe failed for %s", slug, exc_info=True)
             return None
