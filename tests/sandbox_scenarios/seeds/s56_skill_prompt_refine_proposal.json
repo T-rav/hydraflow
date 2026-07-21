@@ -38,5 +38,6 @@
   "issue_refinement_backlog": [],
   "issue_refinement_verdicts": [],
   "registered_workers": {},
-  "worker_status_history": {}
+  "worker_status_history": {},
+  "repo_wiki_fixtures": []
 }

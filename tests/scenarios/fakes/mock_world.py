@@ -860,8 +860,10 @@ class MockWorld:
             materialize_expired_runs,
             materialize_health_metrics,
             materialize_registered_workers,
+            materialize_wiki_fixtures,
             materialize_worker_heartbeats,
             materialize_worker_status_history,
+            resolve_self_wiki_root,
             seed_stale_workspaces,
         )
 
@@ -945,6 +947,26 @@ class MockWorld:
 
             materialize_expired_runs(config, seed)
             self._loop_ports.setdefault("run_recorder", RunRecorder(config))
+        if seed.repo_wiki_fixtures:
+            # Mirrors sandbox_main's ``main()`` wiring (#10133 PIECE 2): the
+            # catalog's ``wiki_store`` port defaults to a MagicMock whose
+            # ``list_repos`` returns ``[]`` (see ``_build_wiki_rot_detector``),
+            # so a seeded fixture is invisible to WikiRotDetectorLoop unless a
+            # REAL ``RepoWikiStore`` pointed at the exact same wiki_root the
+            # materializer wrote to replaces it — ``resolve_self_wiki_root``
+            # is the single source of truth both loaders share, so this
+            # never drifts from sandbox_main's own construction.
+            from repo_wiki import RepoWikiStore  # noqa: PLC0415
+
+            materialize_wiki_fixtures(config, seed)
+            self._loop_ports.setdefault(
+                "wiki_store",
+                RepoWikiStore(
+                    wiki_root=resolve_self_wiki_root(config),
+                    tracked_root=config.repo_root / config.repo_wiki_path,
+                    self_slug=config.repo,
+                ),
+            )
         epic_labels = set(getattr(config, "epic_label", None) or ["hydraflow-epic"])
         if any(epic_labels & set(i.get("labels", [])) for i in seed.issues):
             # Give epic_sweeper a real fetcher over the shared FakeGitHub so a

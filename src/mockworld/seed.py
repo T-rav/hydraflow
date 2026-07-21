@@ -319,6 +319,42 @@ class MockWorldSeed:
     # unaffected. Default empty: no rows written, no EventLog attached.
     worker_status_history: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
+    # Repo-wiki fixture entries, materialized into a REAL ``RepoWikiStore``
+    # at boot via ``RepoWikiStore.ingest`` (#10133, PIECE 2). Each entry is a
+    # dict with keys ``repo_slug`` (required — the wiki repo to ingest under),
+    # ``title`` (required), ``content`` (default ``""``), ``source_type``
+    # (default ``"manual"``), ``source_issue`` (optional int), ``fixed_in_pr``
+    # (optional str — a PR reference like ``"#8715"``) and ``code_refs``
+    # (optional list of ``path.py:symbol`` strings). Routing the fixture
+    # through the store's own ``ingest`` — rather than hand-writing topic-page
+    # markdown — is what GUARANTEES the STRUCTURED ``WikiEntry`` shape
+    # ``WikiRotDetectorLoop`` consumes since issue #9936
+    # (``source_type``/``source_issue``/``fixed_in_pr``/``code_refs`` as
+    # modeled fields, not an unstructured whole-file blob): it is the same
+    # production writer the real ingest pipeline uses.
+    #
+    # Deliberately keyed by an explicit ``repo_slug`` per entry rather than
+    # always targeting the running config's own ``config.repo`` (self-repo):
+    # in the air-gapped sandbox ``config.repo`` is EMPTY (no ``.git`` in the
+    # image — see ``mockworld.sandbox_main._apply_sandbox_config_overrides``
+    # docstring), so ``WikiRotDetectorLoop``'s ``is_self`` check
+    # (``slug == self_slug and bool(self_slug)``) can never be true there
+    # regardless of which slug a fixture uses. A fixture ingested under any
+    # OTHER (managed-repo-shaped) slug is scanned via the loop's non-self
+    # path (``verify_cite_grep`` against ``config.repo_root`` — no
+    # ``is_self`` gate), which is what actually drives the per-cite
+    # broken-cite fire end-to-end in the sandbox; a cite embedded in
+    # ``content`` (e.g. ``` `path/to.py:missing_symbol` ```) that does not
+    # resolve on disk is what makes the entry "broken" (mirrors
+    # ``fixed_in_pr``/``code_refs`` shipped-claim entries, which only verify
+    # on the self-repo path). Both loaders (``sandbox_main.
+    # materialize_wiki_fixtures`` / ``MockWorld._wire_seed_loop_seams``)
+    # ingest into the SAME wiki_root the real (read-only) ``repo_wiki_store``
+    # reads from — see ``sandbox_main.resolve_self_wiki_root``. Default
+    # empty: no wiki content is written, every existing seed payload
+    # unchanged.
+    repo_wiki_fixtures: list[dict[str, Any]] = field(default_factory=list)
+
     def to_json(self) -> str:
         """Serialize to JSON for cross-process transfer."""
         return json.dumps(asdict(self), indent=2)

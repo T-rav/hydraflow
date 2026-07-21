@@ -39,6 +39,7 @@ from mockworld.seed import MockWorldSeed
 from models import BackgroundWorkerStatusPayload, EpicState
 from orchestrator import HydraFlowOrchestrator
 from ports import IssueFetcherPort, IssueStorePort, PRPort, WorkspacePort
+from repo_wiki import RepoWikiStore, WikiEntry
 from runtime_config import load_runtime_config
 from service_registry import (
     WorkerRegistryCallbacks,
@@ -485,6 +486,74 @@ def materialize_worker_status_history(
             append_jsonl(config.event_log_path, event.model_dump_json())
 
 
+def resolve_self_wiki_root(config: HydraFlowConfig) -> Path:
+    """Return the wiki_root a fresh ``RepoWikiStore`` should point at (#10133).
+
+    MIRRORS ``service_registry.build_services``'s ``repo_wiki_store``
+    construction EXACTLY (same fallback order): the self-repo's wiki lives
+    at ``docs/wiki/`` when it exists (git-tracked alongside the code), else
+    the runtime-cache ``config.data_path("repo_wiki")``. Dockerfile.agent
+    does NOT ship ``docs/`` into the sandbox image (only ``src``/``tests``/
+    ``templates``/``static`` are copied), so the docker tier always takes the
+    fallback branch; the in-process ``MockWorld`` harness usually does too
+    (its ``config.repo_root`` is a bare ``tmp_path``). A single source of
+    truth here keeps ``materialize_wiki_fixtures`` (below) and any port a
+    caller builds pointed at the exact same directory the real (read-only)
+    ``repo_wiki_store`` reads from.
+    """
+    wiki_root = config.repo_root / "docs" / "wiki"
+    if not wiki_root.exists():
+        wiki_root = config.data_path("repo_wiki")
+    return wiki_root
+
+
+def materialize_wiki_fixtures(config: HydraFlowConfig, seed: MockWorldSeed) -> None:
+    """Ingest seeded repo-wiki fixture entries via a REAL ``RepoWikiStore`` (#10133).
+
+    ``WikiRotDetectorLoop`` reads wiki content through the same structured
+    ``parse_topic_page`` parse ``RepoWikiStore`` uses to write itself (issue
+    #9936): a hand-written markdown blob falls back to the legacy whole-file
+    regex row and never carries ``source_type``/``source_issue``/
+    ``fixed_in_pr``/``code_refs`` as modeled ``WikiEntry`` fields. Routing
+    each fixture through ``RepoWikiStore.ingest`` — the same call the real
+    ingest pipeline makes — is what GUARANTEES that structured shape rather
+    than merely approximating it.
+
+    A throwaway WRITABLE store is built here (the composition root's own
+    ``repo_wiki_store`` is ``read_only=True`` — its roots live under the
+    operator's main checkout, see ``service_registry.build_services``) —
+    pointed at :func:`resolve_self_wiki_root` so it lands exactly where the
+    loop's own store later reads from. See ``MockWorldSeed.repo_wiki_
+    fixtures`` for the per-entry field shape and why each fixture names its
+    own ``repo_slug`` rather than always targeting the (empty-in-sandbox)
+    self-repo slug. Empty ``repo_wiki_fixtures`` (every other scenario)
+    creates nothing.
+    """
+    if not seed.repo_wiki_fixtures:
+        return
+    store = RepoWikiStore(
+        wiki_root=resolve_self_wiki_root(config),
+        tracked_root=config.repo_root / config.repo_wiki_path,
+        self_slug=config.repo,
+        read_only=False,
+    )
+    by_repo: dict[str, list[WikiEntry]] = {}
+    for fixture in seed.repo_wiki_fixtures:
+        repo_slug = str(fixture["repo_slug"])
+        source_issue = fixture.get("source_issue")
+        entry = WikiEntry(
+            title=str(fixture["title"]),
+            content=str(fixture.get("content", "")),
+            source_type=str(fixture.get("source_type", "manual")),
+            source_issue=int(source_issue) if source_issue is not None else None,
+            fixed_in_pr=fixture.get("fixed_in_pr"),
+            code_refs=tuple(fixture.get("code_refs") or ()),
+        )
+        by_repo.setdefault(repo_slug, []).append(entry)
+    for repo_slug, entries in by_repo.items():
+        store.ingest(repo_slug, entries)
+
+
 @dataclass
 class SeededRegisteredLoop:
     """Duck-typed ``BaseBackgroundLoop`` stand-in for a seeded registered worker.
@@ -755,6 +824,10 @@ async def main() -> None:
     # Worker-status event HISTORY (#10133) — pairs with the event_bus/EventLog
     # wiring above; empty seed field writes nothing.
     materialize_worker_status_history(config, seed)
+    # Repo-wiki fixture entries (#10133 PIECE 2) — ingested into the SAME
+    # wiki_root the real (read-only) ``repo_wiki_store`` below reads from;
+    # empty seed field writes nothing.
+    materialize_wiki_fixtures(config, seed)
 
     # Every async-touched ``subprocess.run`` site in production code now
     # specifies ``timeout=`` (PRs #8454, #8456, #8468 — enforced by
