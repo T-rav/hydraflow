@@ -631,6 +631,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
     ("auto_agent_redrive_enabled", "HYDRAFLOW_AUTO_AGENT_REDRIVE_ENABLED", True),
     (
+        "auto_agent_hitl_intake_enabled",
+        "HYDRAFLOW_AUTO_AGENT_HITL_INTAKE_ENABLED",
+        True,
+    ),
+    (
         "auto_pr_preflight_gate_enabled",
         "HYDRAFLOW_AUTO_PR_PREFLIGHT_GATE_ENABLED",
         True,
@@ -3813,6 +3818,16 @@ class HydraFlowConfig(BaseModel):
     auto_agent_preflight_enabled: bool = Field(
         default=True,
         description="UI kill-switch for AutoAgentPreflightLoop (ADR-0049).",
+    )
+    auto_agent_hitl_intake_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for the #9721 widened intake: AutoAgentPreflightLoop "
+            "also intercepts idle pipeline-origin hydraflow-hitl issues "
+            "(attempt-cap exhaustion, quality-gate/zero-diff bails) in "
+            "addition to hitl-escalation. Distinct from "
+            "auto_agent_preflight_enabled, which gates the whole loop."
+        ),
     )
     auto_pr_preflight_gate_enabled: bool = Field(
         default=True,

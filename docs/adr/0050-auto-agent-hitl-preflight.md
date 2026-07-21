@@ -11,6 +11,8 @@
 pytest:tests/test_auto_agent_preflight_loop.py
 pytest:tests/scenarios/test_auto_agent_preflight.py
 pytest:tests/test_loop_wiring_completeness.py
+pytest:tests/test_auto_agent_hitl_intake.py
+pytest:tests/test_preflight_decision_hitl_widened.py
 - **Spec:** [docs/superpowers/specs/2026-04-25-auto-agent-hitl-preflight-design.md](../superpowers/specs/2026-04-25-auto-agent-hitl-preflight-design.md)
 - **Plan:** [docs/superpowers/plans/2026-04-25-auto-agent-hitl-preflight.md](../superpowers/plans/2026-04-25-auto-agent-hitl-preflight.md)
 
@@ -115,7 +117,7 @@ The following files carry this ADR's decisions and must be kept in sync with any
 
 - `src/models.py` — `StateData` fields `auto_agent_attempts: dict[str, int]` and `auto_agent_daily_spend: dict[str, float]`.
 - `src/state/_auto_agent.py:AutoAgentStateMixin` — `AutoAgentStateMixin` (attempts get/bump/clear + daily-spend get/add).
-- `src/config.py` — `auto_agent_preflight_enabled`, `auto_agent_preflight_interval`, `auto_agent_persona`, `auto_agent_max_attempts`, `auto_agent_skip_sublabels`, `auto_agent_cost_cap_usd`, `auto_agent_wall_clock_cap_s`, `auto_agent_daily_budget_usd` fields + matching env-overrides.
+- `src/config.py` — `auto_agent_preflight_enabled`, `auto_agent_hitl_intake_enabled`, `auto_agent_preflight_interval`, `auto_agent_persona`, `auto_agent_max_attempts`, `auto_agent_skip_sublabels`, `auto_agent_cost_cap_usd`, `auto_agent_wall_clock_cap_s`, `auto_agent_daily_budget_usd` fields + matching env-overrides.
 - `src/preflight/audit.py:PreflightAuditStore` — `PreflightAuditStore` durable JSONL persistence (file_lock + fsync) + 24h/7d aggregates + top-spend.
 - `src/preflight/context.py:PreflightContext` — `PreflightContext` dataclass + `gather_context()` (handles `escalation_context=None`).
 - `src/preflight/decision.py:apply_decision` — `PreflightResult` + `apply_decision()` pure label state machine for all 6 statuses.
@@ -139,3 +141,4 @@ extended since this ADR was accepted. Recorded here so the decision stays honest
 - **Specialist-aware playbook bundles** ([ADR-0063](0063-factory-phase-drift-mitigation.md)) — the single generic `_default` persona is generalised so a `*-stuck` sub-label routes to a phase-specific playbook bundle (existing playbooks become the `_default` for their sub-label). The pre-flight loop becomes specialist-aware rather than running one lead-engineer persona for every escalation.
 - **Tightened escalation contract** ([ADR-0084](0084-auto-agent-universal-root-cause-gate.md), Proposed — *amends* this ADR) — keeps this architecture but makes the gate universal, persistent, and root-cause-oriented: a `retry` outcome with confidence/blocked-reason so a transient bail is no longer indistinguishable from a true human-only blocker, a global escalation cap so exhausted issues stop cycling, and a shared escalation helper so every loop routes through the gate.
 - **Multi-repo audit scoping** (Phase-3c) — `PreflightAuditEntry` carries a `repo` field, `PreflightAuditStore` queries accept a `repos` filter, and `/api/diagnostics/auto-agent` accepts `repo=__all__` to union every repo's audit rows so the diagnostics tile aggregates correctly under multi-repo mode.
+- **Widened HITL intake** (#9721, gated by `auto_agent_hitl_intake_enabled`, default on) — the loop also intercepts idle, pipeline-origin `hydraflow-hitl` issues (ImplementPhase attempt-cap exhaustion and quality-gate/zero-diff bails) that previously went straight to a human with no autonomous attempt. Eligible issues are **claimed** by swapping to the previously-reserved `hydraflow-hitl-autofix` label before any spawn, which removes them from the human queue (built from `hitl_label` + `hitl_active_label` only) so the attempt can never race `HITLPhase`. Race guards: issues carrying `hydraflow-hitl-active` or `human-required` are never intercepted; dual-labelled `hitl-escalation` issues stay with the escalation branch; `operator-abort` parks remain human-owned. Ownership rule — the resolver owns the transition, mirroring `HITLPhase`: a widened resolve swaps the claim to the recorded `hitl_origin` stage (`ready_label[0]` when none), resets `issue_attempts`, and clears `hitl_origin`/`hitl_cause`; a terminal/exhausted outcome returns the issue to `hydraflow-hitl` + `human-required`. Playbook routing keys on `hitl_origin` (`ready_label` → the new `implement-cap-exhausted` playbook; plan/review origins reuse their existing specialists; unknown → `_default`).
