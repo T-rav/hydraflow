@@ -250,6 +250,23 @@ class _SeededRefinementLLM:
         return self._verdicts[idx]
 
 
+class _FakeRepoProber:
+    """Air-gapped stand-in for ``HealthMonitorLoop``'s repo-existence probe.
+
+    Production ``repo_existence_prober.DefaultRepoProber.probe`` shells out to a
+    raw ``git ls-remote`` (#10140, the persistent-error self-repair actuator's
+    ``principles_audit`` 404-prune); on the sandbox's air-gapped network that
+    call hangs on its timeout. Reports every slug as reachable (``True``)
+    without spawning — so the actuator never prunes a ``managed_repos`` entry in
+    the sandbox, which no scenario asserts on. Structurally satisfies the
+    ``RepoProber`` protocol (a single ``async probe(slug) -> bool | None``).
+    """
+
+    async def probe(self, slug: str) -> bool | None:
+        _ = slug  # ignored by design — always "reachable", never spawns
+        return True
+
+
 def _load_phase_script(
     fake_llm: FakeLLM, phase_name: str, issue_number: int, payload: object
 ) -> None:
@@ -901,6 +918,17 @@ async def main() -> None:
     bg_workers = materialize_registered_workers(state, config, seed)
     if bg_workers is not None:
         svc.health_monitor_loop.set_bg_workers(bg_workers)
+
+    # Air-gap the persistent-error self-repair actuator's repo-existence probe
+    # (#10140). ``HealthMonitorLoop._repo_probe`` delegates to an injected
+    # ``RepoProber``; production's ``DefaultRepoProber`` shells out to a raw
+    # ``git ls-remote`` that would hang on the air-gapped sandbox network — and
+    # the ``principles_audit`` self-repair path can reach it whenever the health
+    # monitor runs (s48/s72/s75 drive the loop). Swap in a fake that reports
+    # "reachable" without spawning. No SANDBOX_SEAMS entry is needed: the raw
+    # spawn now lives in ``repo_existence_prober`` (outside the scanned
+    # ``*_loop.py`` set), so the loop declares no undeclared spawn.
+    svc.health_monitor_loop._repo_prober = _FakeRepoProber()
 
     # Attach the advisor-routing sentinel — mirrors
     # tests/scenarios/fakes/mock_world.py::_wire_targets so
