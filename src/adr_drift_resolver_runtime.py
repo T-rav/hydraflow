@@ -24,6 +24,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from agent_cli import AgentTool
+from runner_utils import run_lightweight_agent
 
 logger = logging.getLogger("hydraflow.adr_drift_resolver_runtime")
 
@@ -77,7 +78,6 @@ class AdrDriftResolverLLMClient:
         issue in scope (the drift rollup being triaged), unlike the
         term-proposer's drafting call, so both are always threaded through.
         """
-        from runner_utils import run_lightweight_agent  # noqa: PLC0415
 
         result = await run_lightweight_agent(
             runner=self._runner,
