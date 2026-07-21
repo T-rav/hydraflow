@@ -1,9 +1,13 @@
-"""PrRedRepairLoop unit tests (#10027 Phase 1: infra-flake retrier).
+"""PrRedRepairLoop unit tests (#10027: infra-flake retrier + real-red dispatch).
 
 Covers the pure functions (settled-red predicate incl. the pinned
 mid-rerun stale-conclusion trap, infra-flake classifier, latest-run
-selection) and the loop's ``_do_work`` orchestration: bounded rerun,
-attempt-cap escalation via rollup issue, and rollup auto-close.
+selection, dispatch-ownership predicate) and the loop's ``_do_work``
+orchestration: Phase 1's bounded rerun / attempt-cap escalation / rollup
+auto-close, and Phase 2's real-red auto-agent dispatch, its two
+guardrails (double-writer via ``review_label``, human-PR ownership via
+``is_bot`` + ``auto-fix-ok``), its own bounded attempt cap +
+``hydraflow-hitl`` give-up, and the log-pointer comment dedup.
 """
 
 from __future__ import annotations
@@ -24,7 +28,9 @@ from pr_red_repair_loop import (
     classify_run_infra_flake,
     is_settled_red,
     select_latest_runs,
+    should_dispatch_auto_agent,
 )
+from subprocess_util import CreditExhaustedError
 from tests.helpers import make_bg_loop_deps
 
 # ---------------------------------------------------------------------------
@@ -254,6 +260,38 @@ class TestSelectLatestRuns:
 
 
 # ---------------------------------------------------------------------------
+# should_dispatch_auto_agent — Phase 2 ownership predicate
+# ---------------------------------------------------------------------------
+
+
+class TestShouldDispatchAutoAgent:
+    def test_bot_authored_pr_always_dispatches(self) -> None:
+        assert (
+            should_dispatch_auto_agent(is_bot_author=True, has_auto_fix_ok_label=False)
+            is True
+        )
+
+    def test_human_authored_pr_without_label_does_not_dispatch(self) -> None:
+        assert (
+            should_dispatch_auto_agent(is_bot_author=False, has_auto_fix_ok_label=False)
+            is False
+        )
+
+    def test_human_authored_pr_with_auto_fix_ok_label_dispatches(self) -> None:
+        assert (
+            should_dispatch_auto_agent(is_bot_author=False, has_auto_fix_ok_label=True)
+            is True
+        )
+
+    def test_bot_authored_pr_with_label_also_dispatches(self) -> None:
+        """Redundant but harmless — both signals agree."""
+        assert (
+            should_dispatch_auto_agent(is_bot_author=True, has_auto_fix_ok_label=True)
+            is True
+        )
+
+
+# ---------------------------------------------------------------------------
 # PrRedRepairLoop — smoke + kill-switch
 # ---------------------------------------------------------------------------
 
@@ -267,6 +305,8 @@ _POST_CONSTRUCT_FIELDS = frozenset(
         "pr_red_repair_loop_enabled",
         "pr_red_repair_interval",
         "pr_red_rerun_max_attempts",
+        "pr_red_repair_dispatch_max_attempts",
+        "pr_red_repair_dispatch_enabled",
     }
 )
 
@@ -277,6 +317,9 @@ def _make_loop(
     enabled: bool = True,
     prs: object | None = None,
     state: object | None = None,
+    runner: object | None = None,
+    workspaces: object | None = None,
+    human_pr_dedup: object | None = None,
     **config_overrides,
 ):
     config_overrides.setdefault("pr_red_repair_loop_enabled", True)
@@ -294,13 +337,20 @@ def _make_loop(
         pr_manager=prs,
         state=state,
         deps=deps.loop_deps,
+        runner=runner,
+        workspaces=workspaces,
+        human_pr_dedup=human_pr_dedup,
     )
     return loop, state
 
 
-def _make_state_with_attempts(attempts: dict[str, int] | None = None) -> MagicMock:
+def _make_state_with_attempts(
+    attempts: dict[str, int] | None = None,
+    dispatch_attempts: dict[str, int] | None = None,
+) -> MagicMock:
     state = MagicMock()
     counts = dict(attempts or {})
+    dispatch_counts = dict(dispatch_attempts or {})
 
     def _get(pr_number: int) -> int:
         return int(counts.get(str(pr_number), 0))
@@ -310,16 +360,27 @@ def _make_state_with_attempts(attempts: dict[str, int] | None = None) -> MagicMo
         counts[str(pr_number)] = new
         return new
 
+    def _get_dispatch(pr_number: int) -> int:
+        return int(dispatch_counts.get(str(pr_number), 0))
+
+    def _bump_dispatch(pr_number: int) -> int:
+        new = _get_dispatch(pr_number) + 1
+        dispatch_counts[str(pr_number)] = new
+        return new
+
     state.get_pr_red_rerun_attempts.side_effect = _get
     state.bump_pr_red_rerun_attempts.side_effect = _bump
+    state.get_pr_red_dispatch_attempts.side_effect = _get_dispatch
+    state.bump_pr_red_dispatch_attempts.side_effect = _bump_dispatch
     state.get_rollup_issue.return_value = None
     state.get_rollup_issue_keys.return_value = []
     state._counts = counts
+    state._dispatch_counts = dispatch_counts
     return state
 
 
-def _pr(number: int, branch: str = "feat/x") -> SimpleNamespace:
-    return SimpleNamespace(pr=number, branch=branch)
+def _pr(number: int, branch: str = "feat/x", *, is_bot: bool = True) -> SimpleNamespace:
+    return SimpleNamespace(pr=number, branch=branch, is_bot=is_bot)
 
 
 def _cancelled_job(steps: list | None = None) -> dict:
@@ -329,6 +390,27 @@ def _cancelled_job(steps: list | None = None) -> dict:
         "conclusion": "cancelled",
         "steps": steps or [],
     }
+
+
+def _real_red_run(pr_number: int, run_id: int = 700) -> dict:
+    return {
+        "id": run_id,
+        "workflow": "CI",
+        "conclusion": "failure",
+        "created_at": "2026-07-20T00:00:00Z",
+        "pr_number": pr_number,
+    }
+
+
+def _real_red_jobs() -> list[dict]:
+    return [
+        {
+            "name": "Tests",
+            "status": "completed",
+            "conclusion": "failure",
+            "steps": [{"name": "Run pytest", "conclusion": "failure"}],
+        }
+    ]
 
 
 def test_worker_name(tmp_path: Path) -> None:
@@ -407,7 +489,8 @@ async def test_settled_red_infra_flake_triggers_bounded_rerun(tmp_path: Path) ->
 @pytest.mark.asyncio
 async def test_real_red_is_left_untouched(tmp_path: Path) -> None:
     """A failed test step (not one of the four infra-flake signals) must
-    never be rerun — Phase 2 (real-red dispatch) is out of scope."""
+    never be rerun. With NO auto-agent runner wired, Phase 2 degrades to
+    exactly Phase 1's original behavior: skipped, not rerun, not dispatched."""
     prs = AsyncMock()
     prs.list_all_open_prs.return_value = [_pr(42)]
     prs.list_workflow_runs.return_value = [
@@ -437,6 +520,8 @@ async def test_real_red_is_left_untouched(tmp_path: Path) -> None:
     prs.rerun_workflow_failed.assert_not_called()
     assert result["skipped_real_red"] == 1
     assert result["reran"] == 0
+    assert result["dispatched"] == 0
+    assert result["commented_human_pr"] == 0
 
 
 @pytest.mark.asyncio
@@ -661,3 +746,333 @@ async def test_vanished_logs_signal_triggers_rerun(tmp_path: Path) -> None:
 
     prs.rerun_workflow_failed.assert_awaited_once_with(555)
     assert result["reran"] == 1
+
+
+# ---------------------------------------------------------------------------
+# PrRedRepairLoop — Phase 2 (#10027): real-red auto-agent dispatch
+# ---------------------------------------------------------------------------
+
+
+def _dispatch_prs_mock(
+    *, review_labels: set[int] | None = None, auto_fix_ok: set[int] | None = None
+) -> AsyncMock:
+    """Build the ``list_prs_by_label`` side effect for the two Phase 2 fetches."""
+    review = review_labels or set()
+    ok = auto_fix_ok or set()
+
+    async def _by_label(label: str) -> list[SimpleNamespace]:
+        if label == "hydraflow-review":
+            return [SimpleNamespace(number=n) for n in review]
+        if label == "auto-fix-ok":
+            return [SimpleNamespace(number=n) for n in ok]
+        return []
+
+    prs = AsyncMock()
+    prs.list_prs_by_label.side_effect = _by_label
+    # AsyncMock auto-creates unconfigured attributes as AsyncMock too, so an
+    # un-set ``get_pr_recent_commit_diffs`` returns another (unawaited)
+    # AsyncMock rather than a string — default it to empty here so every
+    # dispatch test doesn't have to remember to set it individually.
+    prs.get_pr_recent_commit_diffs.return_value = ""
+    return prs
+
+
+@pytest.mark.asyncio
+async def test_real_red_bot_pr_dispatches_auto_agent(tmp_path: Path) -> None:
+    """A bot-authored PR's real red gets dispatched to the auto-agent."""
+    prs = _dispatch_prs_mock()
+    prs.list_all_open_prs.return_value = [_pr(42, is_bot=True)]
+    prs.list_workflow_runs.return_value = [_real_red_run(42)]
+    prs.get_workflow_run_jobs.return_value = _real_red_jobs()
+    prs.fetch_ci_failure_logs.return_value = "FAILED tests/test_thing.py::test_x"
+    prs.get_pr_recent_commit_diffs.return_value = "diff --git a/x.py b/x.py\n+bug"
+
+    state = _make_state_with_attempts()
+    runner = MagicMock()
+    runner.run = AsyncMock(return_value=SimpleNamespace(crashed=False))
+    workspaces = MagicMock()
+    resolved = tmp_path / "worktrees" / "issue-42"
+    resolved.mkdir(parents=True)
+    workspaces.create = AsyncMock(return_value=resolved)
+
+    loop, _ = _make_loop(
+        tmp_path, prs=prs, state=state, runner=runner, workspaces=workspaces
+    )
+
+    result = await loop._do_work()
+
+    assert result["dispatched"] == 1
+    assert result["skipped_real_red"] == 0
+    assert result["commented_human_pr"] == 0
+    runner.run.assert_awaited_once()
+    assert state.get_pr_red_dispatch_attempts(42) == 1
+
+    kwargs = runner.run.await_args.kwargs
+    assert kwargs["worktree_path"] == str(resolved)
+    assert kwargs["issue_number"] == 42
+    assert "FAILED tests/test_thing.py::test_x" in kwargs["prompt"]
+    assert "diff --git a/x.py b/x.py" in kwargs["prompt"]
+    assert "{CI_FAILURE_LOG}" not in kwargs["prompt"]
+    assert "{RECENT_COMMIT_DIFFS}" not in kwargs["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_infra_flake_still_reruns_when_runner_is_wired(tmp_path: Path) -> None:
+    """Wiring Phase 2 must not change Phase 1's infra-flake path at all."""
+    prs = _dispatch_prs_mock()
+    prs.list_all_open_prs.return_value = [_pr(42)]
+    prs.list_workflow_runs.return_value = [
+        {
+            "id": 555,
+            "workflow": "CI",
+            "conclusion": "cancelled",
+            "created_at": "2026-07-20T00:00:00Z",
+            "pr_number": 42,
+        }
+    ]
+    prs.get_workflow_run_jobs.return_value = [_cancelled_job()]
+    prs.rerun_workflow_failed.return_value = True
+
+    state = _make_state_with_attempts()
+    runner = MagicMock()
+    runner.run = AsyncMock()
+
+    loop, _ = _make_loop(tmp_path, prs=prs, state=state, runner=runner)
+
+    result = await loop._do_work()
+
+    prs.rerun_workflow_failed.assert_awaited_once_with(555)
+    assert result["reran"] == 1
+    runner.run.assert_not_awaited()
+    assert result["dispatched"] == 0
+
+
+@pytest.mark.asyncio
+async def test_review_labeled_pr_skips_dispatch_double_writer_guard(
+    tmp_path: Path,
+) -> None:
+    """A PR under active review (double-writer risk) is never dispatched to."""
+    prs = _dispatch_prs_mock(review_labels={42})
+    prs.list_all_open_prs.return_value = [_pr(42, is_bot=True)]
+    prs.list_workflow_runs.return_value = [_real_red_run(42)]
+    prs.get_workflow_run_jobs.return_value = _real_red_jobs()
+    prs.fetch_ci_failure_logs.return_value = ""
+
+    state = _make_state_with_attempts()
+    runner = MagicMock()
+    runner.run = AsyncMock()
+
+    loop, _ = _make_loop(tmp_path, prs=prs, state=state, runner=runner)
+
+    result = await loop._do_work()
+
+    runner.run.assert_not_awaited()
+    assert result["dispatched"] == 0
+    assert result["skipped_external_activity"] == 1
+    assert result["skipped_real_red"] == 1
+    # No attempt consumed while blocked by the guardrail.
+    assert state.get_pr_red_dispatch_attempts(42) == 0
+
+
+@pytest.mark.asyncio
+async def test_human_authored_pr_gets_one_comment_not_dispatch(tmp_path: Path) -> None:
+    """A human-authored PR without the opt-in label gets a comment, not a push."""
+    prs = _dispatch_prs_mock()
+    prs.list_all_open_prs.return_value = [_pr(42, is_bot=False)]
+    prs.list_workflow_runs.return_value = [_real_red_run(42)]
+    prs.get_workflow_run_jobs.return_value = _real_red_jobs()
+    prs.fetch_ci_failure_logs.return_value = "AssertionError: boom"
+    prs.post_pr_comment.return_value = None
+
+    state = _make_state_with_attempts()
+    runner = MagicMock()
+    runner.run = AsyncMock()
+
+    loop, _ = _make_loop(tmp_path, prs=prs, state=state, runner=runner)
+
+    result = await loop._do_work()
+
+    runner.run.assert_not_awaited()
+    assert result["dispatched"] == 0
+    assert result["commented_human_pr"] == 1
+    assert state.get_pr_red_dispatch_attempts(42) == 0
+    prs.post_pr_comment.assert_awaited_once()
+    pr_number, body = prs.post_pr_comment.await_args.args
+    assert pr_number == 42
+    assert "auto-fix-ok" in body
+    assert "AssertionError: boom" in body
+
+
+@pytest.mark.asyncio
+async def test_human_authored_pr_with_auto_fix_ok_label_dispatches(
+    tmp_path: Path,
+) -> None:
+    """The auto-fix-ok opt-in label routes a human PR back to dispatch."""
+    prs = _dispatch_prs_mock(auto_fix_ok={42})
+    prs.list_all_open_prs.return_value = [_pr(42, is_bot=False)]
+    prs.list_workflow_runs.return_value = [_real_red_run(42)]
+    prs.get_workflow_run_jobs.return_value = _real_red_jobs()
+    prs.fetch_ci_failure_logs.return_value = ""
+    prs.get_pr_recent_commit_diffs.return_value = ""
+
+    state = _make_state_with_attempts()
+    runner = MagicMock()
+    runner.run = AsyncMock(return_value=SimpleNamespace(crashed=False))
+
+    loop, _ = _make_loop(tmp_path, prs=prs, state=state, runner=runner)
+
+    result = await loop._do_work()
+
+    runner.run.assert_awaited_once()
+    assert result["dispatched"] == 1
+    assert result["commented_human_pr"] == 0
+    prs.post_pr_comment.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_human_pr_comment_is_deduped_across_cycles(tmp_path: Path) -> None:
+    """The log-pointer comment posts at most once while the PR stays real-red."""
+    prs = _dispatch_prs_mock()
+    prs.list_all_open_prs.return_value = [_pr(42, is_bot=False)]
+    prs.list_workflow_runs.return_value = [_real_red_run(42)]
+    prs.get_workflow_run_jobs.return_value = _real_red_jobs()
+    prs.fetch_ci_failure_logs.return_value = "same failure both cycles"
+
+    state = _make_state_with_attempts()
+    runner = MagicMock()
+    runner.run = AsyncMock()
+
+    loop, _ = _make_loop(tmp_path, prs=prs, state=state, runner=runner)
+
+    result_1 = await loop._do_work()
+    result_2 = await loop._do_work()
+
+    assert result_1["commented_human_pr"] == 1
+    assert result_2["commented_human_pr"] == 0
+    prs.post_pr_comment.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_attempt_cap_exhausted_gives_up_to_hitl_label(
+    tmp_path: Path,
+) -> None:
+    """Once the dispatch cap is spent, the PR is labeled hydraflow-hitl instead."""
+    prs = _dispatch_prs_mock()
+    prs.list_all_open_prs.return_value = [_pr(42, is_bot=True)]
+    prs.list_workflow_runs.return_value = [_real_red_run(42)]
+    prs.get_workflow_run_jobs.return_value = _real_red_jobs()
+    prs.fetch_ci_failure_logs.return_value = ""
+    prs.add_pr_labels.return_value = None
+
+    # Dispatch attempts already at the (default) cap of 2.
+    state = _make_state_with_attempts(dispatch_attempts={"42": 2})
+    runner = MagicMock()
+    runner.run = AsyncMock()
+
+    loop, _ = _make_loop(tmp_path, prs=prs, state=state, runner=runner)
+
+    result = await loop._do_work()
+
+    runner.run.assert_not_awaited()
+    assert result["dispatch_escalated"] == 1
+    assert result["dispatched"] == 0
+    prs.add_pr_labels.assert_awaited_once_with(42, ["hydraflow-hitl"])
+
+
+@pytest.mark.asyncio
+async def test_dispatch_disabled_config_falls_back_to_phase1_only(
+    tmp_path: Path,
+) -> None:
+    """The dark-launch gate suppresses BOTH dispatch and the human-PR comment."""
+    prs = _dispatch_prs_mock()
+    prs.list_all_open_prs.return_value = [_pr(42, is_bot=True)]
+    prs.list_workflow_runs.return_value = [_real_red_run(42)]
+    prs.get_workflow_run_jobs.return_value = _real_red_jobs()
+    prs.fetch_ci_failure_logs.return_value = ""
+
+    state = _make_state_with_attempts()
+    runner = MagicMock()
+    runner.run = AsyncMock()
+
+    loop, _ = _make_loop(
+        tmp_path,
+        prs=prs,
+        state=state,
+        runner=runner,
+        pr_red_repair_dispatch_enabled=False,
+    )
+
+    result = await loop._do_work()
+
+    runner.run.assert_not_awaited()
+    prs.post_pr_comment.assert_not_called()
+    assert result["dispatched"] == 0
+    assert result["commented_human_pr"] == 0
+    assert result["skipped_real_red"] == 1
+
+
+@pytest.mark.asyncio
+async def test_dispatch_crashed_outcome_counts_separately(tmp_path: Path) -> None:
+    prs = _dispatch_prs_mock()
+    prs.list_all_open_prs.return_value = [_pr(42, is_bot=True)]
+    prs.list_workflow_runs.return_value = [_real_red_run(42)]
+    prs.get_workflow_run_jobs.return_value = _real_red_jobs()
+    prs.fetch_ci_failure_logs.return_value = ""
+
+    state = _make_state_with_attempts()
+    runner = MagicMock()
+    runner.run = AsyncMock(return_value=SimpleNamespace(crashed=True))
+
+    loop, _ = _make_loop(tmp_path, prs=prs, state=state, runner=runner)
+
+    result = await loop._do_work()
+
+    assert result["dispatch_crashed"] == 1
+    assert result["dispatched"] == 0
+    # The attempt still counts toward the cap even though it crashed.
+    assert state.get_pr_red_dispatch_attempts(42) == 1
+
+
+@pytest.mark.asyncio
+async def test_credit_exhausted_propagates_from_dispatch(tmp_path: Path) -> None:
+    """CreditExhaustedError from the auto-agent must reach BaseBackgroundLoop,
+    never be swallowed by the loop's own broad except (dark-factory §2.2)."""
+    prs = _dispatch_prs_mock()
+    prs.list_all_open_prs.return_value = [_pr(42, is_bot=True)]
+    prs.list_workflow_runs.return_value = [_real_red_run(42)]
+    prs.get_workflow_run_jobs.return_value = _real_red_jobs()
+    prs.fetch_ci_failure_logs.return_value = ""
+
+    state = _make_state_with_attempts()
+    runner = MagicMock()
+    runner.run = AsyncMock(side_effect=CreditExhaustedError("out of credits"))
+
+    loop, _ = _make_loop(tmp_path, prs=prs, state=state, runner=runner)
+
+    with pytest.raises(CreditExhaustedError):
+        await loop._do_work()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_falls_back_to_repo_root_without_workspace_port(
+    tmp_path: Path,
+) -> None:
+    """With no WorkspacePort wired the cwd degrades to repo_root — still a
+    real dispatch, matching SandboxFailureFixerLoop's own fallback."""
+    prs = _dispatch_prs_mock()
+    prs.list_all_open_prs.return_value = [_pr(42, is_bot=True)]
+    prs.list_workflow_runs.return_value = [_real_red_run(42)]
+    prs.get_workflow_run_jobs.return_value = _real_red_jobs()
+    prs.fetch_ci_failure_logs.return_value = ""
+
+    state = _make_state_with_attempts()
+    runner = MagicMock()
+    runner.run = AsyncMock(return_value=SimpleNamespace(crashed=False))
+
+    loop, _ = _make_loop(tmp_path, prs=prs, state=state, runner=runner)
+
+    result = await loop._do_work()
+
+    assert result["dispatched"] == 1
+    kwargs = runner.run.await_args.kwargs
+    assert kwargs["worktree_path"] == str(loop._config.repo_root)

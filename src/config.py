@@ -221,6 +221,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ),
     ("pr_red_repair_interval", "HYDRAFLOW_PR_RED_REPAIR_INTERVAL", 300),
     ("pr_red_rerun_max_attempts", "HYDRAFLOW_PR_RED_RERUN_MAX_ATTEMPTS", 2),
+    (
+        "pr_red_repair_dispatch_max_attempts",
+        "HYDRAFLOW_PR_RED_REPAIR_DISPATCH_MAX_ATTEMPTS",
+        2,
+    ),
     ("erosion_metrics_interval", "HYDRAFLOW_EROSION_METRICS_INTERVAL", 14400),
     (
         "erosion_metrics_max_issues_per_tick",
@@ -781,6 +786,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("stale_issue_gc_loop_enabled", "HYDRAFLOW_STALE_ISSUE_GC_LOOP_ENABLED", True),
     ("gate_health_loop_enabled", "HYDRAFLOW_GATE_HEALTH_LOOP_ENABLED", True),
     ("pr_red_repair_loop_enabled", "HYDRAFLOW_PR_RED_REPAIR_LOOP_ENABLED", True),
+    (
+        "pr_red_repair_dispatch_enabled",
+        "HYDRAFLOW_PR_RED_REPAIR_DISPATCH_ENABLED",
+        True,
+    ),
     (
         "erosion_metrics_loop_enabled",
         "HYDRAFLOW_EROSION_METRICS_LOOP_ENABLED",
@@ -1676,6 +1686,19 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Max bounded `gh run rerun --failed` attempts per PR before "
             "PrRedRepairLoop escalates via a rollup issue (#10027)"
+        ),
+    )
+    pr_red_repair_dispatch_max_attempts: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description=(
+            "Max bounded auto-agent dispatch attempts per PR before "
+            "PrRedRepairLoop gives up on a real (non-infra-flake) settled "
+            "red and labels the PR `hydraflow-hitl` for a human (#10027 "
+            "Phase 2). Tracked separately from `pr_red_rerun_max_attempts` "
+            "— a rerun is a cheap gh API call, a dispatch is a full "
+            "auto-agent worktree attempt."
         ),
     )
     erosion_metrics_interval: int = Field(
@@ -4486,6 +4509,18 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Deploy-time kill-switch for PrRedRepairLoop (#10027 Phase 1: "
             "infra-flake retrier)."
+        ),
+    )
+    pr_red_repair_dispatch_enabled: bool = Field(
+        default=True,
+        description=(
+            "Dark-launch gate for PrRedRepairLoop's Phase 2 real-red "
+            "auto-agent dispatch (#10027), ANDed with "
+            "`pr_red_repair_loop_enabled` and the live `enabled_cb` "
+            "kill-switch per ADR-0049 — not a replacement for either. "
+            "When False, a real (non-infra-flake) settled red is left "
+            "untouched (Phase 1 behavior only); the infra-flake rerun path "
+            "is unaffected."
         ),
     )
     erosion_metrics_loop_enabled: bool = Field(

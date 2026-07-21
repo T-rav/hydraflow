@@ -1,6 +1,6 @@
-"""MockWorld scenario for PrRedRepairLoop (#10027 Phase 1: infra-flake retrier).
+"""MockWorld scenario for PrRedRepairLoop (#10027: retrier + real-red dispatch).
 
-Two scenarios over FakeGitHub end-to-end:
+Phase 1 scenarios over FakeGitHub end-to-end:
 
 * ``test_settled_red_pr_gets_bounded_rerun`` — a PR whose only failing
   check is a cancelled job (an infra-flake signature) settles red; the
@@ -17,6 +17,13 @@ Two scenarios over FakeGitHub end-to-end:
   the loop fires bounded rerun attempt 2, still within the configured
   cap.
 
+Phase 2 scenario (real-red auto-agent dispatch):
+
+* ``test_real_red_dispatches_once_then_settles_and_stops`` — a bot-authored
+  PR's real red (a failed test step, not an infra-flake) gets dispatched
+  to the auto-agent runner exactly once; once the fix lands (CI goes
+  green on the NEXT tick), the loop must NOT re-dispatch.
+
 ``config.pr_red_repair_loop_enabled`` is a static-config gate (default
 True) but the scenario constructs the loop directly, matching
 SandboxFailureFixerLoop's scenario pattern — the catalog builder has no
@@ -25,7 +32,8 @@ per-scenario config-enable seam.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -34,10 +42,16 @@ from tests.scenarios.fakes.mock_world import MockWorld
 pytestmark = pytest.mark.scenario_loops
 
 
-def _make_state(attempts: dict[int, int] | None = None) -> MagicMock:
+def _make_state(
+    attempts: dict[int, int] | None = None,
+    dispatch_attempts: dict[int, int] | None = None,
+) -> MagicMock:
     """State mock mirroring PrRedRepairStateMixin + RollupIssueStateMixin."""
     state = MagicMock()
     counts: dict[str, int] = {str(k): v for k, v in (attempts or {}).items()}
+    dispatch_counts: dict[str, int] = {
+        str(k): v for k, v in (dispatch_attempts or {}).items()
+    }
 
     def _get(pr_number: int) -> int:
         return int(counts.get(str(pr_number), 0))
@@ -47,15 +61,28 @@ def _make_state(attempts: dict[int, int] | None = None) -> MagicMock:
         counts[str(pr_number)] = new
         return new
 
+    def _get_dispatch(pr_number: int) -> int:
+        return int(dispatch_counts.get(str(pr_number), 0))
+
+    def _bump_dispatch(pr_number: int) -> int:
+        new = _get_dispatch(pr_number) + 1
+        dispatch_counts[str(pr_number)] = new
+        return new
+
     state.get_pr_red_rerun_attempts.side_effect = _get
     state.bump_pr_red_rerun_attempts.side_effect = _bump
+    state.get_pr_red_dispatch_attempts.side_effect = _get_dispatch
+    state.bump_pr_red_dispatch_attempts.side_effect = _bump_dispatch
     state.get_rollup_issue.return_value = None
     state.get_rollup_issue_keys.return_value = []
     state._counts = counts
+    state._dispatch_counts = dispatch_counts
     return state
 
 
-def _build_loop(tmp_path, github, state, **config_overrides):
+def _build_loop(
+    tmp_path, github, state, *, runner=None, workspaces=None, **config_overrides
+):
     from pr_red_repair_loop import PrRedRepairLoop
     from tests.helpers import make_bg_loop_deps
 
@@ -69,6 +96,8 @@ def _build_loop(tmp_path, github, state, **config_overrides):
         pr_manager=github,
         state=state,
         deps=bg.loop_deps,
+        runner=runner,
+        workspaces=workspaces,
     )
 
 
@@ -200,3 +229,61 @@ class TestPrRedRepairScenario:
         assert result_4["reran"] == 0
         assert result_4["escalated"] == 1
         assert github._workflow_reruns == [555, 555]
+
+
+class TestPrRedRepairDispatchScenario:
+    """#10027 Phase 2 — real-red auto-agent dispatch end-to-end."""
+
+    async def test_real_red_dispatches_once_then_settles_and_stops(
+        self, tmp_path
+    ) -> None:
+        """A bot PR's real red (failed test step) gets ONE auto-agent
+        dispatch. Once the push lands and CI goes green, the NEXT tick
+        must not dispatch again."""
+        world = MockWorld(tmp_path)
+        github = world.github
+        github.add_pr(number=42, issue_number=10, branch="agent/issue-10", is_bot=True)
+
+        github.add_workflow_run(
+            run_id=900,
+            workflow="CI",
+            conclusion="failure",
+            pr_number=42,
+            created_at="2026-07-20T00:00:00Z",
+            jobs=[
+                {
+                    "name": "Tests",
+                    "status": "completed",
+                    "conclusion": "failure",
+                    "steps": [{"name": "Run pytest", "conclusion": "failure"}],
+                }
+            ],
+        )
+        github.seed_ci_failure_log(42, "FAILED tests/test_thing.py::test_x")
+
+        state = _make_state()
+        runner = MagicMock()
+        runner.run = AsyncMock(return_value=SimpleNamespace(crashed=False))
+        loop = _build_loop(tmp_path, github, state, runner=runner)
+
+        # Tick 1: real red -> exactly one auto-agent dispatch.
+        result_1 = await loop._do_work()
+        assert result_1["dispatched"] == 1
+        assert result_1["skipped_real_red"] == 0
+        runner.run.assert_awaited_once()
+        assert state._dispatch_counts == {"42": 1}
+
+        # The push landed: CI settles green on the next tick.
+        github._workflow_jobs[900] = [
+            {
+                "name": "Tests",
+                "status": "completed",
+                "conclusion": "success",
+                "steps": [],
+            }
+        ]
+        result_2 = await loop._do_work()
+        assert result_2["dispatched"] == 0
+        # Still exactly one call total — not re-dispatched.
+        runner.run.assert_awaited_once()
+        assert state._dispatch_counts == {"42": 1}
