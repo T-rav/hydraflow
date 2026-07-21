@@ -44,6 +44,9 @@ from tests.sandbox_scenarios.scenarios import (
 from tests.sandbox_scenarios.scenarios import (
     s77_stale_issue_gc_skips_fresh_issue as s77,
 )
+from tests.sandbox_scenarios.scenarios import (
+    s78_trust_fleet_sanity_tick_error_ratio_breach as s78,
+)
 
 
 async def _run(mock_world, scenario):
@@ -201,3 +204,37 @@ async def test_s77_stale_issue_gc_closes_stale_skips_fresh(mock_world) -> None:
     fresh_issue = mock_world._github._issues[s77._FRESH_ISSUE]
     assert stale_issue.state == "closed"
     assert fresh_issue.state == "open"
+
+
+@pytest.mark.asyncio
+async def test_s78_trust_fleet_sanity_files_tick_error_ratio_escalation(
+    mock_world,
+) -> None:
+    """#10133 — seeded ~24h worker-status HISTORY drives a genuine breach,
+    not just an idle heartbeat poll (the read-side counterpart of the
+    #9643/#10086 heartbeat/registered-worker materializers).
+
+    Before ``worker_status_history``, ``TrustFleetSanityLoop._collect_
+    window_metrics`` could never see anything a scenario seeded — its read
+    goes through ``EventBus.load_events_since`` (a disk-backed read), and
+    the harness's default unseeded ``event_bus`` port is a bare
+    ``MagicMock`` whose ``load_events_since`` isn't awaitable, so every
+    breach detector silently saw zero ticks regardless of the seed.
+    """
+    _seed, stats = await _run(mock_world, s78)
+
+    assert stats["trust_fleet_sanity"]["status"] == "ok", stats
+    assert stats["trust_fleet_sanity"].get("filed", 0) >= 1, stats
+
+    titles = [issue.title for issue in mock_world._github._issues.values()]
+    assert any(s78._WORKER in t and "tick_error_ratio" in t for t in titles), (
+        f"expected a tick_error_ratio escalation for {s78._WORKER!r}; "
+        f"titles: {titles!r}"
+    )
+    issue = next(
+        i
+        for i in mock_world._github._issues.values()
+        if s78._WORKER in i.title and "tick_error_ratio" in i.title
+    )
+    assert "hitl-escalation" in issue.labels
+    assert "trust-loop-anomaly" in issue.labels

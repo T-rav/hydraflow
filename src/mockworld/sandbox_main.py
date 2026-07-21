@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, cast
 from bg_worker_manager import BGWorkerManager
 from branch_protection_audit import AuditReport, audit_repo
 from dashboard import HydraFlowDashboard
-from events import EventBus
+from events import EventBus, EventLog, EventType, HydraFlowEvent
 from file_util import append_jsonl, atomic_write
 from mockworld.fakes import (
     FakeGitHub,
@@ -36,7 +36,7 @@ from mockworld.fakes import (
 from mockworld.fakes.fake_docker import FakeDocker
 from mockworld.fakes.fake_subprocess_runner import FakeSubprocessRunner
 from mockworld.seed import MockWorldSeed
-from models import EpicState
+from models import BackgroundWorkerStatusPayload, EpicState
 from orchestrator import HydraFlowOrchestrator
 from ports import IssueFetcherPort, IssueStorePort, PRPort, WorkspacePort
 from runtime_config import load_runtime_config
@@ -447,6 +447,44 @@ def materialize_worker_heartbeats(state: Any, seed: MockWorldSeed) -> None:
         )
 
 
+def materialize_worker_status_history(
+    config: HydraFlowConfig, seed: MockWorldSeed
+) -> None:
+    """Append seeded BACKGROUND_WORKER_STATUS rows to the on-disk event log (#10133).
+
+    ``TrustFleetSanityLoop._collect_window_metrics`` computes its 24h
+    ticks/repair/error window via ``EventBus.load_events_since`` — a DISK
+    read (``EventLog.load``), not the in-memory ``EventBus._history`` list
+    ``/api/events`` falls back to. Each row is appended in the exact
+    ``HydraFlowEvent.model_dump_json()`` format ``EventLog.append`` writes
+    (mirrors that method's own ``append_jsonl`` call, minus its lock file —
+    nothing else writes to the log this early in boot). Each entry's relative
+    ``age_seconds`` (mirrors ``worker_heartbeats``) back-dates the row's
+    ``timestamp`` from boot, so the seed never rots. Writing the rows alone
+    is not sufficient — the caller must ALSO attach a real
+    ``EventLog(config.event_log_path)`` to the shared event bus (see
+    ``main()`` / ``MockWorld._wire_seed_loop_seams``), since the loop's read
+    goes through the bus, not this file directly. Empty
+    ``worker_status_history`` (every other scenario) writes nothing.
+    """
+    now = datetime.now(UTC)
+    for worker, entries in seed.worker_status_history.items():
+        for entry in entries:
+            age_seconds = float(entry.get("age_seconds", 0))
+            ts = (now - timedelta(seconds=age_seconds)).isoformat()
+            event = HydraFlowEvent(
+                type=EventType.BACKGROUND_WORKER_STATUS,
+                timestamp=ts,
+                data=BackgroundWorkerStatusPayload(
+                    worker=worker,
+                    status=str(entry.get("status", "ok")),
+                    last_run=ts,
+                    details=dict(entry.get("details") or {}),
+                ),
+            )
+            append_jsonl(config.event_log_path, event.model_dump_json())
+
+
 @dataclass
 class SeededRegisteredLoop:
     """Duck-typed ``BaseBackgroundLoop`` stand-in for a seeded registered worker.
@@ -632,7 +670,17 @@ async def main() -> None:
     # air-gapped sandbox network (see the helper for the per-flag rationale).
     _apply_sandbox_config_overrides(config)
     seed = _load_seed()
-    event_bus = EventBus()
+    # A real EventLog is only attached when a scenario seeds worker-status
+    # history (#10133) — every other scenario keeps the historical no-log
+    # ``EventBus()`` so ``/api/events`` continues falling back to in-memory
+    # history exactly as before. TrustFleetSanityLoop's window read
+    # (``EventBus.load_events_since``) needs the disk-backed log to see
+    # anything materialize_worker_status_history writes below.
+    event_bus = EventBus(
+        event_log=EventLog(config.event_log_path)
+        if seed.worker_status_history
+        else None
+    )
     state = build_state_tracker(config)
     stop_event = asyncio.Event()
 
@@ -704,6 +752,9 @@ async def main() -> None:
     materialize_epic_states(state, seed)
     materialize_health_metrics(config, seed)
     materialize_worker_heartbeats(state, seed)
+    # Worker-status event HISTORY (#10133) — pairs with the event_bus/EventLog
+    # wiring above; empty seed field writes nothing.
+    materialize_worker_status_history(config, seed)
 
     # Every async-touched ``subprocess.run`` site in production code now
     # specifies ``timeout=`` (PRs #8454, #8456, #8468 — enforced by
