@@ -86,6 +86,11 @@ SETTINGS: dict[str, SettingSpec] = {
     "auto_pr_preflight_stage_timeout_s": SettingSpec(
         "CI & Quality", live=True, order=9
     ),
+    # Live: ImplementPhase reads both off its shared HydraFlowConfig
+    # reference on every PR-open (#10101), so a toggle applies to the next
+    # implementer PR without a restart.
+    "pr_base_freshness_guard_enabled": SettingSpec("CI & Quality", live=True, order=10),
+    "pr_base_max_age_days": SettingSpec("CI & Quality", live=True, order=11),
     # --- Scheduling ------------------------------------------------------
     "poll_interval": SettingSpec("Scheduling", live=True, order=0),
     "pr_unstick_interval": SettingSpec("Scheduling", live=True, order=1),

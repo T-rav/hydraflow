@@ -7,7 +7,7 @@ import contextlib
 import logging
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -1069,8 +1069,16 @@ class ImplementPhase:
     ) -> PRInfo | None:
         """Create a new PR or recover an existing one, updating result.pr_info."""
         if not is_retry:
-            gh_issue = GitHubIssue.from_task(issue)
-            pr = await self._prs.create_pr(gh_issue, result.branch)
+            if await self._ensure_fresh_base(issue, result):
+                gh_issue = GitHubIssue.from_task(issue)
+                pr = await self._prs.create_pr(gh_issue, result.branch)
+            else:
+                # Base-freshness guard refused (#10101): the zero-PR sentinel
+                # routes through the existing "implementation succeeded but
+                # no PR exists" fallback (_handle_no_pr_fallback), which
+                # keeps the issue in the ready queue for retry instead of
+                # silently opening a born-red PR against a stale base.
+                pr = PRInfo(number=0, issue_number=issue.id, branch=result.branch)
         else:
             pr = await self._prs.find_open_pr_for_branch(
                 result.branch, issue_number=issue.id
@@ -1082,6 +1090,126 @@ class ImplementPhase:
                 await self._prs.update_pr_title(pr.number, expected_title)
         result.pr_info = pr
         return pr
+
+    @staticmethod
+    async def _run_git_read(
+        run_simple: Callable[..., Awaitable[object]],
+        cmd: list[str],
+        *,
+        cwd: str,
+        timeout: float,
+    ) -> str | None:
+        """Run a local read-only git command; stripped stdout, or None on any failure.
+
+        Shared by ``_merge_base_age_days``'s two reads. A non-string
+        ``stdout`` (e.g. an unconfigured test double) fails open the same
+        as a real git error — this helper must never raise.
+        """
+        try:
+            out = await run_simple(cmd, cwd=cwd, timeout=timeout)
+        except (TimeoutError, FileNotFoundError, OSError):
+            return None
+        stdout = getattr(out, "stdout", "")
+        if not isinstance(stdout, str):
+            return None
+        return stdout.strip()
+
+    async def _merge_base_age_days(self, result: WorkerResult) -> float | None:
+        """Return the age in days of *result.branch*'s merge-base with the base branch.
+
+        Mirrors ``_branch_changed_files``: reads locally via the agent
+        runner's ``run_simple`` so it works uniformly under host/Docker
+        execution without a dedicated Port (#10101). Fails open (returns
+        ``None``) on any git error, a missing runner, or an unparsable
+        result — a freshness check must never itself block a PR.
+        """
+        if not result.workspace_path or not Path(result.workspace_path).is_dir():
+            return None
+        runner = getattr(self._agents, "_runner", None)
+        run_simple = getattr(runner, "run_simple", None) if runner else None
+        if run_simple is None:
+            return None
+        base = self._config.base_branch()
+        timeout = self._config.git_command_timeout
+        sha = await self._run_git_read(
+            run_simple,
+            ["git", "merge-base", result.branch, f"origin/{base}"],
+            cwd=result.workspace_path,
+            timeout=timeout,
+        )
+        if not sha:
+            return None
+        ts_str = await self._run_git_read(
+            run_simple,
+            ["git", "log", "-1", "--format=%ct", sha],
+            cwd=result.workspace_path,
+            timeout=timeout,
+        )
+        if not ts_str or not ts_str.isdigit():
+            return None
+        epoch = int(ts_str)
+        return max(time.time() - epoch, 0.0) / 86400.0
+
+    async def _ensure_fresh_base(self, issue: Task, result: WorkerResult) -> bool:
+        """Refuse or auto-update a stale merge-base before ``gh pr create`` (#10101).
+
+        The #9964 class: a long-lived implementer worktree forks from the
+        base branch once at worktree-creation time, then the agent runs for
+        however long it takes. New guard rules landed on the base in the
+        meantime are invisible to the branch — its PR opens born-red
+        against a base that's since drifted. Computes the branch's
+        merge-base age with the configured base branch; when it exceeds
+        ``pr_base_max_age_days`` this tries an in-place update (fetch +
+        merge, reusing the same ``merge_main`` path as post-PR conflict
+        resolution) before falling back to refusing the PR open.
+
+        Returns True when it's safe to proceed with ``create_pr``.
+        """
+        if not self._config.pr_base_freshness_guard_enabled:
+            return True
+        age_days = await self._merge_base_age_days(result)
+        if age_days is None or age_days <= self._config.pr_base_max_age_days:
+            return True
+        logger.warning(
+            "Issue #%d: branch %s has a %.1f-day-old merge-base with %s "
+            "(threshold %d days) — attempting auto-update before PR open",
+            issue.id,
+            result.branch,
+            age_days,
+            self._config.base_branch(),
+            self._config.pr_base_max_age_days,
+        )
+        updated = False
+        if result.workspace_path:
+            try:
+                updated = bool(
+                    await self._workspaces.merge_main(
+                        Path(result.workspace_path), result.branch
+                    )
+                )
+            except (RuntimeError, OSError):
+                updated = False
+            if updated:
+                updated = bool(
+                    await self._prs.push_branch(
+                        Path(result.workspace_path), result.branch
+                    )
+                )
+        if updated:
+            logger.info(
+                "Issue #%d: base-freshness guard auto-updated %s to a fresh %s",
+                issue.id,
+                result.branch,
+                self._config.base_branch(),
+            )
+            return True
+        logger.warning(
+            "Issue #%d: base-freshness guard could not auto-update %s "
+            "(merge conflict or push failure) — refusing PR open",
+            issue.id,
+            result.branch,
+        )
+        return False
 
     async def _handle_successful_push(
         self, issue: Task, result: WorkerResult, is_retry: bool
