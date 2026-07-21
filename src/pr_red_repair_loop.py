@@ -1,13 +1,43 @@
 """Background worker loop — PRUnsticker intake for settled CI reds (#10027).
 
-PHASE 1 ONLY: infra-flake retrier. An open PR's CI settles red and, tonight
+PHASE 1: infra-flake retrier. An open PR's CI settles red and, tonight
 after tonight, someone has to look at it — the most-repeated operator
 action across the 2026-07-19/20 overnight session, with no automated
 owner. This caretaker (ADR-0029) detects a **settled-red** open PR,
 classifies the failure as an infra-flake using the four signals proven
-that session, and issues a bounded ``gh run rerun --failed``. Real-red
-diagnosis + auto-agent dispatch is Phase 2 — explicitly out of scope here;
-a run whose failure doesn't classify as an infra-flake is left untouched.
+that session, and issues a bounded ``gh run rerun --failed``. A run whose
+failure doesn't classify as an infra-flake (a "real red") falls through
+to Phase 2.
+
+PHASE 2: real-red auto-agent dispatch. A settled red that is NOT an
+infra-flake gets the failing job's log tail (reusing the same
+``fetch_ci_failure_logs`` / ``gh run view --log-failed`` surface Phase 1
+already uses) plus the branch's recent commit diffs
+(``PRPort.get_pr_recent_commit_diffs``, the same source
+``SandboxFailureFixerLoop`` injects into its own auto-agent prompt), and
+dispatches :class:`preflight.auto_agent_runner.AutoAgentRunner` — the SAME
+subprocess-spawn machinery ``AutoAgentPreflightLoop`` /
+``SandboxFailureFixerLoop`` use, not a reimplementation — onto the PR's own
+branch to fix it and push. Two guardrails gate the dispatch:
+
+* **Double-writer guard.** A PR already labeled ``review_label``
+  (default ``hydraflow-review``) has an active reviewer worktree on it —
+  the same "avoid stepping on toes" signal ``MergeStateWatcherLoop`` skips
+  on for its own auto-rebase. Dispatching a competing auto-agent write
+  into that same worktree would race the reviewer, so it's skipped this
+  cycle (retried once the label moves on).
+* **Human-PR ownership guard.** A PR NOT authored by the factory's own bot
+  (``PRListItem.is_bot`` false) is someone's manual work; the factory
+  posts ONE log-pointer comment (deduped via ``DedupStore``, re-posted
+  only if the PR later carries new content) rather than pushing an
+  uninvited commit, UNLESS the PR carries the ``auto-fix-ok`` opt-in
+  label.
+
+Dispatch attempts are bounded by ``pr_red_repair_dispatch_max_attempts``
+(tracked the same way as Phase 1's rerun attempts — see below); once
+exhausted, the PR is labeled ``hitl_label`` (default ``hydraflow-hitl``)
+for a human, mirroring ``SandboxFailureFixerLoop``'s escalation-by-label
+pattern.
 
 Mirrors :class:`gate_health_loop.GateHealthLoop`'s structure (closest
 existing caretaker with PR/run/job read Port methods) and reuses its
@@ -17,9 +47,12 @@ carries each run's ``pr_number``, and ``get_workflow_run_jobs`` now also
 carries each job's ``status`` (added for #10027) alongside its
 ``conclusion`` — together they form the same "rollup" shape (per-check
 lifecycle + outcome) the settled-red predicate needs, without a new
-``gh`` call. The one genuinely new Port method is the write side,
-``PRPort.rerun_workflow_failed`` (triplet: Protocol + ``PRManager`` +
-``FakeGitHub`` + cassette).
+``gh`` call. The one genuinely new Port method Phase 1 added is the write
+side, ``PRPort.rerun_workflow_failed`` (triplet: Protocol + ``PRManager``
++ ``FakeGitHub`` + cassette); Phase 2 adds no new Port methods at all —
+``list_prs_by_label``, ``post_pr_comment``, ``add_pr_labels``,
+``get_pr_recent_commit_diffs``, and ``AutoAgentRunner`` are all reused
+as-is from ``SandboxFailureFixerLoop`` / ``MergeStateWatcherLoop``.
 
 Settled-red predicate (:func:`is_settled_red`) — the load-bearing one:
 failures present AND nothing pending remains. The proven trap from
@@ -36,23 +69,28 @@ restart-surviving substrate ``SandboxFailureFixerLoop`` uses for its
 bounded-attempt pattern (see ``state/_pr_red_repair.py``). Budget
 exhaustion escalates via :class:`rollup_issue_manager.RollupIssueManager`
 (one open issue per PR, auto-closed once the PR is no longer settled-red
-or is no longer open — #10022 discipline).
+or is no longer open — #10022 discipline). Phase 2's dispatch attempts
+reuse the SAME ledger under a distinct stage (``"pr_red_dispatch"``) —
+no new persisted state shape.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from dedup_store import DedupStore
 from exception_classify import reraise_on_credit_or_bug
 from loop_fitness import FitnessContext, FitnessKind, LoopFitness
 from rollup_issue_manager import RollupIssueManager
 
 if TYPE_CHECKING:
-    from ports import PRPort
+    from ports import PRPort, WorkspacePort
+    from preflight.auto_agent_runner import AutoAgentRunner
     from state import StateTracker
 
 logger = logging.getLogger("hydraflow.pr_red_repair")
@@ -83,6 +121,13 @@ REASON_SETUP_ACTION = "setup_action_step"
 REASON_VANISHED_LOGS = "vanished_logs"
 
 _ROLLUP_NAMESPACE = "pr_red_repair"
+
+# Phase 2 (#10027) — real-red auto-agent dispatch constants. The dispatch
+# attempt-cap ledger's stage name lives in state/_pr_red_repair.py (the
+# module that actually reads/writes it) — not duplicated here.
+_AUTO_FIX_OK_LABEL = "auto-fix-ok"
+_HUMAN_PR_DEDUP_NAMESPACE = "pr_red_repair_human_pointer"
+_PROMPT_TEMPLATE = "pr_red_fix.md"
 
 
 def is_settled_red(rollup: list[dict[str, Any]]) -> bool:
@@ -134,8 +179,9 @@ def classify_infra_flake_job(job: dict[str, Any], *, log_text: str = "") -> str 
     4. A failed *setup* step (``Set up …`` / ``astral-sh/setup-*`` /
        ``actions/checkout``) — the environment never ran user code.
 
-    Returns ``None`` for anything else, including a passing job (Phase 2
-    — real-red diagnosis — is explicitly out of scope for this loop).
+    Returns ``None`` for anything else, including a passing job — that's
+    a real red, which Phase 2 (:func:`should_dispatch_auto_agent` onward)
+    picks up.
     """
     conclusion = str(job.get("conclusion") or "").strip().lower()
     if conclusion == "cancelled":
@@ -163,9 +209,9 @@ def classify_run_infra_flake(
 
     ``gh run rerun --failed`` reruns every failed job in the run
     indiscriminately. If even one failing job looks like a genuine
-    regression (Phase 2 territory, out of scope here), the whole run is
-    left alone rather than rerun — which would re-run, and risk masking,
-    the real red too. Returns the first matched reason (for logging), or
+    regression (a real red — Phase 2 territory), the whole run is left
+    alone rather than rerun — which would re-run, and risk masking, the
+    real red too. Returns the first matched reason (for logging), or
     ``None`` if *failing_jobs* is empty or any job doesn't classify.
     """
     if not failing_jobs:
@@ -199,16 +245,60 @@ def select_latest_runs(
     return latest
 
 
-class PrRedRepairLoop(BaseBackgroundLoop):
-    """Detects settled-red open PRs and bounded-reruns infra-flake CI (#10027).
+def should_dispatch_auto_agent(
+    *, is_bot_author: bool, has_auto_fix_ok_label: bool
+) -> bool:
+    """True when a real (non-infra) settled red should get a CODE dispatch.
 
-    Phase 1 only: classifies four proven infra-flake signatures (cancelled
-    run, zero-failed-steps job, failed setup step, vanished logs) and
-    issues ``gh run rerun --failed``, capped at
-    ``pr_red_rerun_max_attempts`` per PR. Budget exhaustion files one
-    rollup issue per PR (auto-closed once the PR clears or closes). A red
-    that does NOT classify as an infra-flake is left untouched — real-red
-    auto-agent dispatch is Phase 2, explicitly out of scope.
+    The factory's own bot-authored PRs (``agent/issue-N`` branches it
+    created itself) always get a dispatch — there's no other owner. A
+    human-authored PR is someone's manual work-in-progress; the factory
+    never pushes an uninvited commit to it unless the human explicitly
+    opted in via the ``auto-fix-ok`` label (#10027 Phase 2 ownership
+    guardrail). ``False`` routes to the log-pointer-comment path instead
+    of a dispatch.
+    """
+    return is_bot_author or has_auto_fix_ok_label
+
+
+def _build_human_pr_comment(pr: Any, *, log_text: str) -> str:
+    """Render the one-time log-pointer comment for a human-authored PR."""
+    if log_text and log_text.strip():
+        tail = "\n".join(log_text.strip().splitlines()[-40:])
+    else:
+        tail = "(log unavailable — see the failing run in the Checks tab)"
+    return (
+        "## CI is red — human review needed\n\n"
+        "PrRedRepairLoop (#10027 Phase 2) found this PR's CI settled red "
+        "with a failure that does not match any known infra-flake "
+        "signature (cancelled run / zero failed steps / failed setup "
+        "step / vanished logs) — this looks like a real regression in "
+        "the diff.\n\n"
+        "Because this PR isn't authored by the factory's own bot, it "
+        "will **not** push an automated fix to your branch. Add the "
+        "`auto-fix-ok` label if you'd like the auto-agent to try.\n\n"
+        "<details><summary>Failing job log tail</summary>\n\n"
+        "```\n"
+        f"{tail}\n"
+        "```\n"
+        "</details>\n"
+    )
+
+
+class PrRedRepairLoop(BaseBackgroundLoop):
+    """Detects settled-red open PRs; reruns infra-flakes, dispatches real reds (#10027).
+
+    Phase 1: classifies four proven infra-flake signatures (cancelled run,
+    zero-failed-steps job, failed setup step, vanished logs) and issues
+    ``gh run rerun --failed``, capped at ``pr_red_rerun_max_attempts`` per
+    PR. Budget exhaustion files one rollup issue per PR (auto-closed once
+    the PR clears or closes).
+
+    Phase 2: a red that does NOT classify as an infra-flake (a real red)
+    gets dispatched to :class:`preflight.auto_agent_runner.AutoAgentRunner`
+    on the PR's own branch, capped at ``pr_red_repair_dispatch_max_attempts``
+    — see the module docstring for the two dispatch guardrails (double-writer
+    / human-PR ownership) and the give-up-to-``hydraflow-hitl`` path.
     """
 
     def __init__(
@@ -217,18 +307,29 @@ class PrRedRepairLoop(BaseBackgroundLoop):
         pr_manager: PRPort,
         state: StateTracker,
         deps: LoopDeps,
+        *,
+        runner: AutoAgentRunner | Any | None = None,
+        workspaces: WorkspacePort | Any | None = None,
+        human_pr_dedup: DedupStore | None = None,
     ) -> None:
         super().__init__(worker_name="pr_red_repair", config=config, deps=deps)
         self._prs = pr_manager
         self._state = state
+        self._runner = runner
+        self._workspaces = workspaces
+        self._human_pr_dedup = human_pr_dedup or DedupStore(
+            _HUMAN_PR_DEDUP_NAMESPACE,
+            config.data_root / "dedup" / f"{_HUMAN_PR_DEDUP_NAMESPACE}.json",
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.pr_red_repair_interval
 
     def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
-        # Bounded mechanical repair (rerun failed CI jobs), no proposal/
-        # acceptance lifecycle of its own to score — HOUSEKEEPING per
-        # ADR-0093's fitness contract (mirrors adr_conformance_loop.py).
+        # Bounded mechanical repair (rerun failed CI jobs / dispatch a
+        # fix attempt), no proposal/acceptance lifecycle of its own to
+        # score — HOUSEKEEPING per ADR-0093's fitness contract (mirrors
+        # adr_conformance_loop.py).
         return LoopFitness(
             worker_name=self._worker_name,
             kind=FitnessKind.HOUSEKEEPING,
@@ -280,12 +381,22 @@ class PrRedRepairLoop(BaseBackgroundLoop):
 
         rollup_mgr = self._rollups()
         max_attempts = int(self._config.pr_red_rerun_max_attempts)
+        # Per-cycle label-fetch cache (Phase 2) — ``list_prs_by_label`` is
+        # only ever called at most once per distinct label per cycle,
+        # regardless of how many PRs need a dispatch decision.
+        label_cache: dict[str, set[int]] = {}
 
         examined: set[str] = set()
         still_red: set[str] = set()
+        still_real_red: set[str] = set()
         reran = 0
         escalated = 0
         skipped_real_red = 0
+        dispatched = 0
+        dispatch_crashed = 0
+        dispatch_escalated = 0
+        commented_human_pr = 0
+        skipped_external_activity = 0
 
         for pr in open_prs:
             if self._stop_event.is_set():
@@ -345,7 +456,27 @@ class PrRedRepairLoop(BaseBackgroundLoop):
                 flake_run_ids.append(run_id)
 
             if real_red:
-                skipped_real_red += 1
+                still_real_red.add(str(pr.pr))
+                if log_text is None:
+                    log_text = await self._fetch_log_text(pr.pr)
+                status = await self._dispatch_real_red(
+                    pr, log_text=log_text, label_cache=label_cache
+                )
+                if status == "dispatched":
+                    dispatched += 1
+                elif status == "dispatch_crashed":
+                    dispatch_crashed += 1
+                elif status == "dispatch_escalated":
+                    dispatch_escalated += 1
+                elif status == "commented":
+                    commented_human_pr += 1
+                elif status == "skipped_external_activity":
+                    skipped_external_activity += 1
+                    skipped_real_red += 1
+                else:
+                    # skipped_no_runner / skipped_dispatch_disabled /
+                    # already_commented — no NEW action taken this cycle.
+                    skipped_real_red += 1
                 continue
             if not flake_run_ids:
                 continue
@@ -378,6 +509,7 @@ class PrRedRepairLoop(BaseBackgroundLoop):
             examined=examined,
             still_red=still_red,
         )
+        self._reconcile_human_pr_dedup(examined=examined, still_real_red=still_real_red)
 
         return {
             "status": "ok",
@@ -385,6 +517,11 @@ class PrRedRepairLoop(BaseBackgroundLoop):
             "reran": reran,
             "escalated": escalated,
             "skipped_real_red": skipped_real_red,
+            "dispatched": dispatched,
+            "dispatch_crashed": dispatch_crashed,
+            "dispatch_escalated": dispatch_escalated,
+            "commented_human_pr": commented_human_pr,
+            "skipped_external_activity": skipped_external_activity,
             "closed_rollups": closed,
         }
 
@@ -455,3 +592,244 @@ class PrRedRepairLoop(BaseBackgroundLoop):
             if subject not in examined or subject in still_red:
                 active.add(subject)
         return await rollup_mgr.resolve_all_except(active)
+
+    # -- Phase 2 (#10027): real-red auto-agent dispatch ---------------------
+
+    async def _prs_with_label(
+        self, label: str, label_cache: dict[str, set[int]]
+    ) -> set[int]:
+        """Return the PR-number set carrying *label*, cached for this cycle.
+
+        Fail-closed on fetch error: an empty set means "no PR verified to
+        carry this label," which is the safe default for both callers
+        (double-writer guard: nothing looks under-review; ownership guard:
+        nothing looks opted in) — never dispatch on an unverifiable state.
+        """
+        if label in label_cache:
+            return label_cache[label]
+        try:
+            items = await self._prs.list_prs_by_label(label)
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "PrRedRepair: list_prs_by_label(%r) failed", label, exc_info=True
+            )
+            items = []
+        numbers = {int(getattr(item, "number", 0) or 0) for item in items}
+        label_cache[label] = numbers
+        return numbers
+
+    async def _guardrail_status(
+        self, pr: Any, *, log_text: str, label_cache: dict[str, set[int]]
+    ) -> str | None:
+        """Short-circuit status for *pr*, or ``None`` to proceed to dispatch.
+
+        Checked in order: the Phase 2 static kill-switch, the double-writer
+        guardrail (active-review label), then the human-PR ownership
+        guardrail (posts the one-time log-pointer comment as a side effect
+        when it fires). The runner-wired check lives in
+        :meth:`_dispatch_real_red` (not here) so the ``self._runner`` narrow
+        to non-``None`` stays local to the one call site that needs it.
+        """
+        if not self._config.pr_red_repair_dispatch_enabled:
+            return "skipped_dispatch_disabled"
+
+        # Double-writer guardrail: a PR already under active review has a
+        # live worktree on it elsewhere in the factory — never race it.
+        review_label = (self._config.review_label or ["hydraflow-review"])[0]
+        review_prs = await self._prs_with_label(review_label, label_cache)
+        if int(pr.pr) in review_prs:
+            logger.info(
+                "PrRedRepair: PR #%d carries %s (active reviewer worktree) "
+                "— skipping dispatch this cycle (double-writer guard)",
+                pr.pr,
+                review_label,
+            )
+            return "skipped_external_activity"
+
+        # Human-PR ownership guardrail: never push an uninvited commit to
+        # a human-authored PR unless it explicitly opted in.
+        is_bot_author = bool(getattr(pr, "is_bot", False))
+        auto_fix_ok_prs = await self._prs_with_label(_AUTO_FIX_OK_LABEL, label_cache)
+        if not should_dispatch_auto_agent(
+            is_bot_author=is_bot_author,
+            has_auto_fix_ok_label=int(pr.pr) in auto_fix_ok_prs,
+        ):
+            posted = await self._comment_human_pr(pr, log_text=log_text)
+            # Deduped (already commented this streak) is a distinct status
+            # from a freshly posted comment — it must NOT double-count in
+            # ``commented_human_pr`` on a repeat cycle.
+            return "commented" if posted else "already_commented"
+        return None
+
+    async def _dispatch_real_red(
+        self, pr: Any, *, log_text: str, label_cache: dict[str, set[int]]
+    ) -> str:
+        """Handle one real (non-infra) settled-red PR for Phase 2.
+
+        Returns one of: ``"dispatched"``, ``"dispatch_crashed"``,
+        ``"dispatch_escalated"``, ``"commented"``, ``"already_commented"``,
+        ``"skipped_external_activity"``, ``"skipped_no_runner"``,
+        ``"skipped_dispatch_disabled"``.
+        """
+        runner = self._runner
+        if runner is None:
+            return "skipped_no_runner"
+
+        guard_status = await self._guardrail_status(
+            pr, log_text=log_text, label_cache=label_cache
+        )
+        if guard_status is not None:
+            return guard_status
+
+        attempts = self._state.get_pr_red_dispatch_attempts(pr.pr)
+        max_attempts = int(self._config.pr_red_repair_dispatch_max_attempts)
+        if attempts >= max_attempts:
+            await self._give_up(pr)
+            return "dispatch_escalated"
+
+        self._state.bump_pr_red_dispatch_attempts(pr.pr)
+        worktree_path = await self._resolve_dispatch_worktree(pr)
+        prompt = await self._build_dispatch_prompt(pr, log_text=log_text)
+        try:
+            outcome = await runner.run(
+                prompt=prompt,
+                worktree_path=worktree_path,
+                issue_number=int(pr.pr),
+            )
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "PrRedRepair: dispatch failed for PR #%d: %s",
+                pr.pr,
+                exc,
+                exc_info=True,
+            )
+            return "dispatch_crashed"
+
+        if getattr(outcome, "crashed", False):
+            return "dispatch_crashed"
+        return "dispatched"
+
+    async def _resolve_dispatch_worktree(self, pr: Any) -> str:
+        """Return a filesystem worktree path for *pr* (never its branch name).
+
+        Mirrors ``SandboxFailureFixerLoop._resolve_worktree``: reuse the
+        conventional per-issue workspace if present, otherwise create one
+        on the PR's branch. Falls back to ``repo_root`` when no
+        ``WorkspacePort`` is wired (test fixtures / dry-run).
+        """
+        if self._workspaces is None:
+            return str(self._config.repo_root)
+        wt_path = self._config.workspace_path_for_issue(int(pr.pr))
+        if wt_path.exists():
+            return str(wt_path)
+        branch = str(getattr(pr, "branch", "") or f"agent/issue-{pr.pr}")
+        try:
+            created = await self._workspaces.create(int(pr.pr), branch)
+            return str(created)
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "PrRedRepair: worktree creation failed for PR #%d: %s — "
+                "falling back to repo_root",
+                pr.pr,
+                exc,
+            )
+            return str(self._config.repo_root)
+
+    async def _fetch_recent_diffs(self, pr_number: int) -> str:
+        try:
+            return await self._prs.get_pr_recent_commit_diffs(pr_number, n=3)
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.debug(
+                "PrRedRepair: get_pr_recent_commit_diffs failed for PR #%d",
+                pr_number,
+                exc_info=True,
+            )
+            return ""
+
+    async def _build_dispatch_prompt(self, pr: Any, *, log_text: str) -> str:
+        """Render the ``pr_red_fix.md`` envelope with this PR's context."""
+        envelope_path = (
+            Path(__file__).resolve().parent.parent
+            / "prompts"
+            / "auto_agent"
+            / _PROMPT_TEMPLATE
+        )
+        envelope = envelope_path.read_text()
+
+        diffs = await self._fetch_recent_diffs(pr.pr)
+        ci_failure_log = (
+            log_text.strip()
+            if log_text and log_text.strip()
+            else "(no CI failure log available)"
+        )
+        recent_commit_diffs = (
+            diffs.strip()
+            if diffs and diffs.strip()
+            else "(no recent commit diffs available)"
+        )
+
+        return (
+            envelope.replace("{PR_NUMBER}", str(pr.pr))
+            .replace("{PR_BRANCH}", str(getattr(pr, "branch", "")))
+            .replace("{CI_FAILURE_LOG}", ci_failure_log)
+            .replace("{RECENT_COMMIT_DIFFS}", recent_commit_diffs)
+        )
+
+    async def _comment_human_pr(self, pr: Any, *, log_text: str) -> bool:
+        """Post the ONE log-pointer comment on a human-authored real-red PR.
+
+        Deduped via ``DedupStore`` keyed by PR number so a repeat cycle
+        (the PR is still real-red, still un-opted-in) never re-posts;
+        :meth:`_reconcile_human_pr_dedup` clears the key once the PR
+        resolves so a LATER, distinct real red gets a fresh comment.
+        Returns ``True`` only when a NEW comment was actually posted this
+        call, so the caller never double-counts an already-deduped PR.
+        """
+        dedup_key = str(pr.pr)
+        if dedup_key in self._human_pr_dedup.get():
+            return False
+        body = _build_human_pr_comment(pr, log_text=log_text)
+        try:
+            await self._prs.post_pr_comment(pr.pr, body)
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "PrRedRepair: log-pointer comment failed for PR #%d: %s",
+                pr.pr,
+                exc,
+                exc_info=True,
+            )
+            return False
+        self._human_pr_dedup.add(dedup_key)
+        return True
+
+    async def _give_up(self, pr: Any) -> None:
+        """Label *pr* ``hitl_label`` once the dispatch attempt cap is spent."""
+        hitl_label = (self._config.hitl_label or ["hydraflow-hitl"])[0]
+        try:
+            await self._prs.add_pr_labels(pr.pr, [hitl_label])
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "PrRedRepair: hitl label-add failed for PR #%d: %s",
+                pr.pr,
+                exc,
+                exc_info=True,
+            )
+
+    def _reconcile_human_pr_dedup(
+        self, *, examined: set[str], still_real_red: set[str]
+    ) -> None:
+        """Clear the log-pointer dedup key for any examined PR no longer real-red.
+
+        Positive-evidence-only, mirroring :meth:`_reconcile_rollups`: a PR
+        this cycle couldn't examine stays as-is (silence never implies
+        resolution); one that WAS examined and is no longer real-red gets
+        its dedup key dropped so a later, distinct real red re-comments.
+        """
+        for key in examined - still_real_red:
+            self._human_pr_dedup.discard(key)
