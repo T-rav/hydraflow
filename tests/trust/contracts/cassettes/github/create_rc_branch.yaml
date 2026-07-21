@@ -1,0 +1,22 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# create_rc_branch creates rc/* at the staging tip and returns the SHA the
+# new ref points at (real: `gh api repos/{repo}/git/refs` POST). The fake
+# returns a deterministic "sha-<branch>" token, so no normalizer is needed.
+# Used exclusively by StagingPromotionLoop (ADR-0042).
+adapter: github
+interaction: create_rc_branch
+recorded_at: "2026-07-20T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: create_rc_branch
+  args:
+    - "rc/2026-05-13-0000"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "sha-rc/2026-05-13-0000\n"
+  stderr: ""
+normalizers: []
+baseline_only: true
