@@ -108,14 +108,17 @@ def _inefficiency_subject(title: str) -> str | None:
     return m.group(1) if m else None
 
 
-# Hard cap on the subprocess read. A wedged child must not hang the loop cycle
-# forever and freeze its heartbeat — the #9410 silent-stall failure class
-# (#9454 / #9508). ``make trust-adversarial`` drives an LLM eval harness so it
-# gets a generous bound. (The former ``gh`` reconcile read now goes through
-# the PRPort via the shared ``EscalationReconciler``.) Bounded (and, via
-# ``run_subprocess_result``, process-group hardened — #9554/#10028) rather
-# than a raw ``create_subprocess_exec``.
-_ADVERSARIAL_TIMEOUT_SECONDS = 3600
+# Hard cap on the heavy ``make trust-adversarial`` subprocess read: the
+# operator-tunable ``config.skill_prompt_eval_adversarial_timeout_seconds``
+# knob (#9555, default 3600), re-read from the live config at every
+# invocation — NOT a module constant, because the harness's healthy runtime
+# scales with corpus/repo size (heavy-make-tunable vs fixed-tier convention).
+# A wedged child must not hang the loop cycle forever and freeze its
+# heartbeat — the #9410 silent-stall failure class (#9454 / #9508). (The
+# former ``gh`` reconcile read now goes through the PRPort via the shared
+# ``EscalationReconciler``.) Bounded (and, via ``run_subprocess_result``,
+# process-group hardened — #9554/#10028) rather than a raw
+# ``create_subprocess_exec``.
 
 
 # --- Prompt self-refinement (#9724) ------------------------------------------
@@ -386,7 +389,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             result = await run_subprocess_result(
                 *cmd,
                 cwd=self._config.repo_root,
-                timeout=_ADVERSARIAL_TIMEOUT_SECONDS,
+                timeout=self._config.skill_prompt_eval_adversarial_timeout_seconds,
                 extra_env={
                     "HYDRAFLOW_TRUST_ADVERSARIAL_MAX_CASES": str(
                         self._config.skill_prompt_eval_max_corpus_cases
@@ -979,7 +982,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             result = await run_subprocess_result(
                 *cmd,
                 cwd=worktree,
-                timeout=_ADVERSARIAL_TIMEOUT_SECONDS,
+                timeout=self._config.skill_prompt_eval_adversarial_timeout_seconds,
                 extra_env={
                     "HYDRAFLOW_TRUST_ADVERSARIAL_LIVE": "1",
                     "PYTHONPATH": "src:.",

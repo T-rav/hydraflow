@@ -486,3 +486,93 @@ async def test_recovery_closes_drift_issue_and_clears(loop_env, monkeypatch) -> 
     assert stats["resolved"] == 1
     pr.close_issue.assert_awaited_once_with(88)
     state.clear_skill_prompt_attempts.assert_called_once_with("case_shrink_001")
+
+
+# --- #9555: heavy-make timeout is an operator knob, read live per call -------
+
+
+async def test_run_corpus_timeout_uses_config_knob(loop_env, monkeypatch) -> None:
+    """The `make trust-adversarial` bound comes from the live config knob
+    (#9555), not a hardcoded constant — a System-tab PATCH (which mutates the
+    live config in-place) applies to the next invocation without a restart."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup = loop_env
+    object.__setattr__(cfg, "skill_prompt_eval_adversarial_timeout_seconds", 777)
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_result(*cmd: str, **kwargs: object) -> SimpleResult:
+        captured["cmd"] = cmd
+        captured["timeout"] = kwargs.get("timeout")
+        return SimpleResult(stdout="[]", stderr="", returncode=0)
+
+    monkeypatch.setattr("skill_prompt_eval_loop.run_subprocess_result", fake_result)
+
+    out = await loop._run_corpus()
+
+    assert out == []
+    assert captured["cmd"][:2] == ("make", "trust-adversarial")
+    assert captured["timeout"] == 777
+
+
+async def test_run_corpus_default_timeout_preserves_prior_constant(
+    loop_env, monkeypatch
+) -> None:
+    """Default knob value == the former _ADVERSARIAL_TIMEOUT_SECONDS (3600):
+    no behaviour change when the operator sets nothing."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup = loop_env
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_result(*_cmd: str, **kwargs: object) -> SimpleResult:
+        captured["timeout"] = kwargs.get("timeout")
+        return SimpleResult(stdout="[]", stderr="", returncode=0)
+
+    monkeypatch.setattr("skill_prompt_eval_loop.run_subprocess_result", fake_result)
+
+    await loop._run_corpus()
+
+    assert captured["timeout"] == 3600
+
+
+async def test_validate_candidate_timeout_uses_config_knob(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """The live-skill refine-validation corpus run shares the adversarial-eval
+    semantic, so it is bounded by the same knob (#9555)."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup = loop_env
+    object.__setattr__(cfg, "skill_prompt_eval_adversarial_timeout_seconds", 777)
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    monkeypatch.setattr(
+        "skill_prompt_eval_loop.discover_validation_case_ids",
+        lambda _cases_dir, _case_id: ["case_x"],
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_result(*_cmd: str, **kwargs: object) -> SimpleResult:
+        captured["timeout"] = kwargs.get("timeout")
+        return SimpleResult(stdout="[]", stderr="", returncode=0)
+
+    monkeypatch.setattr("skill_prompt_eval_loop.run_subprocess_result", fake_result)
+
+    await loop._validate_candidate(tmp_path, "diff_sanity", "case_x")
+
+    assert captured["timeout"] == 777
