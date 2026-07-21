@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import random
 import re
 import sys
@@ -50,6 +51,7 @@ from prompt_refiner import (
     length_drift_exceeds,
     parse_patch_response,
     render_builder_prompt,
+    select_live_validation_sample,
 )
 from prompt_telemetry import PromptTelemetry
 from runner_utils import run_lightweight_agent
@@ -962,8 +964,35 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         case + 100% of holdouts + benign sentinels; True iff every non-SKIPPED
         result is PASS.
 
+        By default every case in that set is judged against its
+        ``expected_transcript.txt`` fixture — parser-side only, produced by
+        the OLD prompt. When the operator has set
+        ``HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1`` on the loop's own environment
+        (the same opt-in the weekly live backstop's ``_run_corpus``
+        naturally inherits — read directly here, not duplicated onto
+        ``HydraFlowConfig``, so one operator setting gates every live-
+        adversarial consumer), a small sample of the validation set (the
+        regressed case + up to ``skill_prompt_refine_live_validation_budget``
+        of *skill_name*'s own holdouts —
+        :func:`prompt_refiner.select_live_validation_sample`) is additionally
+        routed through ``--force-live-cases``, so the candidate's PATCHED
+        prompt is genuinely exercised against the real agent CLI instead of
+        being judged only against the old prompt's canned transcript
+        (#10063). Without that opt-in, every case replays its fixture
+        exactly as before — CI/non-live runs stay deterministic. The
+        candidate is guaranteed installed at call time: this subprocess is a
+        FRESH interpreter (``cwd=worktree``, ``PYTHONPATH=src:.`` resolved
+        relative to that cwd), so its imports read the patched worktree
+        copy of ``skill_name``'s builder module, never the host process's
+        already-imported one.
+
         Any subprocess/parse failure — or an empty non-SKIPPED set — is a
-        conservative False: never ship a candidate we could not prove.
+        conservative False: never ship a candidate we could not prove. That
+        includes a live-CLI error/timeout inside the corpus runner: an
+        uncaught exception there exits the subprocess non-zero, which the
+        `result.returncode != 0` branch below turns into False — fail
+        CLOSED, a live validation error must never fall back to a silent
+        fixture-replay pass.
         """
         cases_dir = worktree / _CASES_REL
         case_ids = discover_validation_case_ids(cases_dir, case_id)
@@ -978,6 +1007,15 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             "--cases",
             ",".join(case_ids),
         ]
+        if os.environ.get("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE") == "1":
+            force_live_ids = select_live_validation_sample(
+                cases_dir,
+                case_id,
+                skill_name,
+                self._config.skill_prompt_refine_live_validation_budget,
+            )
+            if force_live_ids:
+                cmd += ["--force-live-cases", ",".join(force_live_ids)]
         try:
             result = await run_subprocess_result(
                 *cmd,
