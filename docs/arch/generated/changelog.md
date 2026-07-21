@@ -7,7 +7,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 ## 2026-W30
 
 - `b0c7d5e` — test(guard): spawn-side reap guard — raw-spawn containment + reap-pairing ratchets (#9623) (#10088) (#10088) *(2026-07-21)*
-- `abba360` — test(reap-guard): prune staging_bisect._run_git from raw-spawn + reap baselines (#9577) (#9577) *(2026-07-20)*
+- `2c1a455` — test(reap-guard): prune staging_bisect._run_git from raw-spawn + reap baselines (#9577) (#9577) *(2026-07-20)*
 - `325d8ec` — chore(arch): regen artifacts for the migrated bisect seams (#10077 heal) *(2026-07-20)*
 - `6e1493f` — Merge remote-tracking branch 'origin/staging' into fix/subproc-cooperative-killswitch *(2026-07-20)*
 - `77e4b63` — Merge remote-tracking branch 'origin/staging' into fix/subproc-cooperative-killswitch *(2026-07-20)*
