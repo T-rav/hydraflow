@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from dedup_store import DedupStore
 from escalation_reconcile import is_bot_close
@@ -415,7 +415,7 @@ class ReviewInsightStore:
         for line in tail:
             try:
                 records.append(ReviewRecord.model_validate_json(line))
-            except Exception:  # noqa: BLE001
+            except ValidationError:
                 logger.warning("Skipping malformed review record: %s", line[:80])
         return records
 
@@ -446,7 +446,7 @@ class ReviewInsightStore:
             for cat, entry in raw.items():
                 try:
                     result[cat] = ProposalMetadata.model_validate(entry)
-                except Exception:  # noqa: BLE001
+                except ValidationError:
                     logger.warning("Skipping malformed proposal metadata for %s", cat)
             return result
         except (json.JSONDecodeError, OSError):

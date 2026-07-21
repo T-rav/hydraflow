@@ -249,12 +249,11 @@ entries:
   src/report_issue_loop.py::noqa:PLR0911: 1
   src/research_runner.py::type-ignore[override]: 1
   src/retrospective.py::noqa:PLC0415: 4
-  src/retrospective_loop.py::noqa:BLE001: 1
-  src/retrospective_loop.py::noqa:PLC0415: 3
+  src/retrospective_loop.py::noqa:PLC0415: 2
   "src/review_advisor.py::noqa:BLE001\u2014telemetryneverbreaksbusinesslogic": 3
   src/review_advisor.py::noqa:PLC0415: 2
   src/review_advisor.py::type-ignore[override]: 1
-  src/review_insights.py::noqa:BLE001: 2
+  src/review_insights.py::noqa:BLE001: 1
   src/review_insights.py::noqa:PLC0415: 4
   src/review_insights.py::noqa:TCH004: 1
   src/review_phase/__init__.py::noqa:E402: 3
