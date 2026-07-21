@@ -65,9 +65,6 @@ SANCTIONED_RAW_SPAWNERS: frozenset[str] = frozenset(
 #
 # * dashboard_routes / preflight: interactive UI/boot one-shots (git/gh
 #   plumbing) that predate the #9554/#10060 migration wave.
-# * staging_bisect_loop._run_git: deliberately excluded from that migration —
-#   cooperative kill-switch cancellation needs its own deadline-poll loop
-#   (part of #10028).
 # * subprocess_util.probe_auth_availability: the fail-open `gh auth status`
 #   probe; cannot route through _run_gated without recursing into the very
 #   machinery it corroborates.
@@ -79,21 +76,17 @@ GRANDFATHERED_RAW_SPAWN_BASELINE: dict[str, int] = {
     "src/dashboard_routes/_state_routes.py::register.clone_github_repo::create_subprocess_exec": 1,
     "src/dashboard_routes/_state_routes.py::register.list_github_repos::create_subprocess_exec": 1,
     "src/preflight/__init__.py::_check_gh_auth::create_subprocess_exec": 1,
-    "src/staging_bisect_loop.py::StagingBisectLoop._run_git::create_subprocess_exec": 1,
     "src/subprocess_util.py::probe_auth_availability::create_subprocess_exec": 1,
 }
 
 # Session-leader spawn sites that do not reap via except-handlers, keyed
 # ``relpath::qualname``. DO NOT ADD ENTRIES; prune when the site conforms.
 #
-# * staging_bisect_loop._run_git: reaps the group inline from a cooperative
-#   deadline-poll loop (kill-switch cancellation, #9579) rather than from
-#   except handlers — the known deliberate exclusion, part of #10028.
-GRANDFATHERED_REAP_BASELINE: frozenset[str] = frozenset(
-    {
-        "src/staging_bisect_loop.py::StagingBisectLoop._run_git",
-    }
-)
+# Empty: staging_bisect_loop._run_git migrated to the shared runner
+# (get_default_runner().run_simple, #9577) — it no longer spawns a
+# session-leader directly, so the whole-group reap now lives inside
+# HostRunner.run_simple rather than in this loop.
+GRANDFATHERED_REAP_BASELINE: frozenset[str] = frozenset()
 
 
 # ---------------------------------------------------------------------------

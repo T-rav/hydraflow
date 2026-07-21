@@ -7,6 +7,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 ## 2026-W30
 
 - `b0c7d5e` — test(guard): spawn-side reap guard — raw-spawn containment + reap-pairing ratchets (#9623) (#10088) (#10088) *(2026-07-21)*
+- `a070222` — Merge remote-tracking branch 'origin/staging' into fix/preflight-intake-widen *(2026-07-20)*
+- `9f99bcf` — fix(escalation): TTL re-drive so stale auto-agent escalations self-heal (#9719) (#10079) (#10079) *(2026-07-20)*
 - `47a4992` — Merge remote-tracking branch 'origin/staging' into fix/preflight-intake-widen *(2026-07-20)*
 - `1517fba` — Merge remote-tracking branch 'origin/staging' into fix/preflight-intake-widen *(2026-07-20)*
 - `982cec5` — fix(workspace,state): automate HITL reset runbook residuals — main-repo core.worktree heal + attempt-counter close-to-clear (#9723) (#10082) (#10082) *(2026-07-20)*

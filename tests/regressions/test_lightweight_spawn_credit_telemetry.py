@@ -45,7 +45,8 @@ class _FakeRunner:
         input=None,
         timeout=None,
         env=None,
-        cwd=None,  # noqa: A002
+        cwd=None,  # noqa: A002,
+        **_kwargs: object,  # #9577 cancel_check/cancel_poll_interval
     ) -> SimpleResult:
         if self._raise_exc is not None:
             raise self._raise_exc
