@@ -446,8 +446,7 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         """
         try:
             entries = parse_topic_page(md_path)
-        except Exception as exc:  # noqa: BLE001
-            reraise_on_credit_or_bug(exc)
+        except (OSError, ValueError, KeyError, IndexError):
             logger.debug("parse_topic_page(%s) failed", md_path, exc_info=True)
             return []
         return [
