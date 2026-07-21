@@ -1,0 +1,25 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# wait_for_ci polls PR checks and returns (passed, summary). The unscripted
+# fake's default is (True, "CI passed"); stdout mirrors the
+# get_latest_ci_status two-line shape ("<passed>\n<summary>\n"). The
+# dispatcher additionally asserts ci_sentinels.is_ci_incomplete(summary)
+# is False — pinning the #9351 contract class (a success summary must never
+# be classified as an incomplete wait; summary-string drift here once
+# force-closed green RC PRs for 3 days).
+adapter: github
+interaction: wait_for_ci
+recorded_at: "2026-07-20T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: wait_for_ci
+  args:
+    - "42"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "True\nCI passed\n"
+  stderr: ""
+normalizers: []
+baseline_only: true
