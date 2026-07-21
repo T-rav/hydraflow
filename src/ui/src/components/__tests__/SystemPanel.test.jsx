@@ -778,6 +778,59 @@ describe('BackgroundWorkerCard schedule display', () => {
     expect(onUpdate).toHaveBeenCalledWith('epic_sweeper', 7200)
   })
 
+  // #9503 — per-loop watchdog-timeout override. Mirrors the interval editor
+  // tests above, but gating is backend-resolved (watchdog_timeout_seconds
+  // present) rather than a client-side allowlist, since only the live
+  // orchestrator knows which workers are loop-backed.
+  it('does not show watchdog row when watchdog_timeout_seconds is absent', () => {
+    const bgWorkers = [
+      { name: 'epic_sweeper', status: 'ok', enabled: true, last_run: null, interval_seconds: 3600, details: {} },
+    ]
+    render(<SystemPanel backgroundWorkers={bgWorkers} onUpdateWatchdogTimeout={() => {}} />)
+    expect(screen.queryByTestId('watchdog-epic_sweeper')).not.toBeInTheDocument()
+  })
+
+  it('shows watchdog row and edit link when watchdog_timeout_seconds is present', () => {
+    const bgWorkers = [
+      { name: 'epic_sweeper', status: 'ok', enabled: true, last_run: null, watchdog_timeout_seconds: 7200, details: {} },
+    ]
+    render(<SystemPanel backgroundWorkers={bgWorkers} onUpdateWatchdogTimeout={() => {}} />)
+    expect(screen.getByTestId('watchdog-epic_sweeper')).toBeInTheDocument()
+    expect(screen.getByTestId('watchdog-epic_sweeper').textContent).toMatch(/Watchdog every 2h/)
+    expect(screen.getByTestId('edit-watchdog-epic_sweeper')).toBeInTheDocument()
+  })
+
+  it('shows watchdog editor with presets when edit is clicked', () => {
+    const bgWorkers = [
+      { name: 'epic_sweeper', status: 'ok', enabled: true, last_run: null, watchdog_timeout_seconds: 7200, details: {} },
+    ]
+    render(<SystemPanel backgroundWorkers={bgWorkers} onUpdateWatchdogTimeout={() => {}} />)
+    fireEvent.click(screen.getByTestId('edit-watchdog-epic_sweeper'))
+    expect(screen.getByTestId('watchdog-editor-epic_sweeper')).toBeInTheDocument()
+    expect(screen.getByTestId('watchdog-preset-1h')).toBeInTheDocument()
+    expect(screen.getByTestId('watchdog-preset-4h')).toBeInTheDocument()
+  })
+
+  it('calls onUpdateWatchdogTimeout with the worker name and seconds when preset is clicked', () => {
+    const onUpdate = vi.fn()
+    const bgWorkers = [
+      { name: 'epic_sweeper', status: 'ok', enabled: true, last_run: null, watchdog_timeout_seconds: 7200, details: {} },
+    ]
+    render(<SystemPanel backgroundWorkers={bgWorkers} onUpdateWatchdogTimeout={onUpdate} />)
+    fireEvent.click(screen.getByTestId('edit-watchdog-epic_sweeper'))
+    fireEvent.click(screen.getByTestId('watchdog-preset-4h'))
+    expect(onUpdate).toHaveBeenCalledWith('epic_sweeper', 14400)
+  })
+
+  it('does not show watchdog edit link without onUpdateWatchdogTimeout', () => {
+    const bgWorkers = [
+      { name: 'epic_sweeper', status: 'ok', enabled: true, last_run: null, watchdog_timeout_seconds: 7200, details: {} },
+    ]
+    render(<SystemPanel backgroundWorkers={bgWorkers} />)
+    expect(screen.getByTestId('watchdog-epic_sweeper')).toBeInTheDocument()
+    expect(screen.queryByTestId('edit-watchdog-epic_sweeper')).not.toBeInTheDocument()
+  })
+
   it('shows schedule for pipeline_poller from SYSTEM_WORKER_INTERVALS fallback', () => {
     mockUseHydraFlow.mockReturnValue(defaultMockContext({ orchestratorStatus: 'running' }))
     render(<SystemPanel backgroundWorkers={[]} />)

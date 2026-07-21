@@ -24,7 +24,15 @@ from contracts._schema import Cassette
 _GH_CASSETTES = Path(__file__).parent / "trust" / "contracts" / "cassettes" / "github"
 
 # Cassettes covered by record_github_mutation — live-recorded, baseline_only: false.
-_LIVE_RECORDED = frozenset({"close_issue.yaml", "create_issue.yaml", "merge_pr.yaml"})
+_LIVE_RECORDED = frozenset(
+    {
+        "close_issue.yaml",
+        "create_issue.yaml",
+        "merge_pr.yaml",
+        "pr_create.yaml",
+        "create_promotion_pr.yaml",
+    }
+)
 
 
 def test_unretired_github_cassettes_are_baseline_only() -> None:

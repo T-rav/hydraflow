@@ -1864,6 +1864,20 @@ class PolicyEvent(BaseModel):
     counters: dict[str, int] = Field(default_factory=dict)
 
 
+# Ubiquitous-language boundary-stage names (ADR-0096 boundary verdict
+# recording). These MUST match the ``stage=`` literals passed to
+# ``record_stage_verdict``/``convergence_recording.record_stage_verdict`` at
+# each phase's boundary call-site: src/triage_phase.py (stage="triage"),
+# src/shape_phase.py (stage="shape"), src/plan_phase.py (stage="plan"). Both
+# ``ConvergenceLedger.detect_cross_boundary_oscillation`` below and
+# ``ConvergenceOscillationLoop``'s escalation-issue-body stage lookup
+# (src/convergence_oscillation_loop.py) read this single constant so a future
+# stage rename can't leave one of the two call-sites silently stale — a
+# literal-string drift there would still parse and run, just silently stop
+# matching either the detector or the issue body.
+CONVERGENCE_BOUNDARY_STAGES: tuple[str, ...] = ("triage", "shape", "plan")
+
+
 class ConvergenceLedger(BaseModel):
     """Single source of truth for one issue's two-level convergence state.
 
@@ -1962,7 +1976,7 @@ class ConvergenceLedger(BaseModel):
             identical findings across review laps.  Evaluated only when
             *include_temporal* is True.
         (b) Snapshot: at least ``min_loopback_stages`` DISTINCT stages among
-            ``{"triage", "shape", "plan"}`` currently have
+            ``CONVERGENCE_BOUNDARY_STAGES`` currently have
             ``last_verdict == "LOOP_BACK"`` — pre-review cross-boundary churn.
 
         Pass ``include_temporal=False`` to suppress the temporal arm and check
@@ -1973,10 +1987,9 @@ class ConvergenceLedger(BaseModel):
         """
         if include_temporal and self.detect_outer_oscillation(window):
             return True
-        boundary_stages = {"triage", "shape", "plan"}
         loopback_count = sum(
             1
-            for stage in boundary_stages
+            for stage in CONVERGENCE_BOUNDARY_STAGES
             if self.stage_state.get(stage, StageRecord()).last_verdict == "LOOP_BACK"
         )
         return loopback_count >= min_loopback_stages
@@ -2047,6 +2060,16 @@ class StateData(BaseModel):
     metrics_last_snapshot_hash: str = ""
     metrics_last_synced: str | None = None
     worker_intervals: dict[str, int] = Field(default_factory=dict)
+    watchdog_timeouts: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Per-loop work-cycle watchdog bound overrides (seconds), keyed by "
+            "worker name. Mirrors worker_intervals: an operator-set runtime "
+            "override of the per-cycle watchdog bound (#9455 / #9556) that "
+            "otherwise derives from loop_watchdog_default_seconds / "
+            "loop_watchdog_llm_seconds. Preserved across restart (#9503)."
+        ),
+    )
     disabled_workers: list[str] = Field(default_factory=list)
     default_disabled_workers_seeded: list[str] = Field(default_factory=list)
     cost_budget_killed_workers: list[str] = Field(
@@ -3141,12 +3164,13 @@ class ShippedWithKnownGapPayload(TypedDict):
 class GitHubIssueSummary(TypedDict):
     """Lightweight issue dict returned by ``PRPort.list_issues_by_label``.
 
-    ``labels`` uses the gh wire shape (``[{"name": ...}, ...]``) and is only
-    populated by the OPEN listing — the closed listing keeps its narrower
-    projection (#9943). ``closed_at`` is the mirror image: populated by
-    ``list_closed_issues_by_label`` only (#9727 — the detector-calibration
-    churn window keys on close time, since ``updated_at`` moves on ANY
-    issue activity).
+    ``labels`` uses the gh wire shape (``[{"name": ...}, ...]``). Originally
+    populated by the OPEN listing only (#9943); ``list_closed_issues_by_label``
+    now projects it too (#8996), since ``escalation_reconcile.is_bot_close``
+    needs labels on CLOSED rows to tell a programmatic close from a human one.
+    ``closed_at`` is populated by ``list_closed_issues_by_label`` only (#9727
+    — the detector-calibration churn window keys on close time, since
+    ``updated_at`` moves on ANY issue activity).
     """
 
     number: int
@@ -3428,6 +3452,7 @@ class BackgroundWorkerStatus(BaseModel):
     enabled: bool = True
     last_run: str | None = None
     interval_seconds: int | None = None
+    watchdog_timeout_seconds: int | None = None
     next_run: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)
     repo: str = ""

@@ -7,14 +7,18 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from dedup_store import DedupStore
+from escalation_reconcile import is_bot_close
+from exception_classify import reraise_on_credit_or_bug
 from models import IsoTimestamp, ReviewVerdict
 from text_match import keyword_matches
 
 if TYPE_CHECKING:
-    from ports import ObservabilityPort, ReviewInsightStorePort  # noqa: TCH004
+    from datetime import datetime
+
+    from ports import ObservabilityPort, PRPort, ReviewInsightStorePort  # noqa: TCH004
 
 logger = logging.getLogger("hydraflow.review_insights")
 
@@ -411,7 +415,7 @@ class ReviewInsightStore:
         for line in tail:
             try:
                 records.append(ReviewRecord.model_validate_json(line))
-            except Exception:  # noqa: BLE001
+            except ValidationError:
                 logger.warning("Skipping malformed review record: %s", line[:80])
         return records
 
@@ -442,7 +446,7 @@ class ReviewInsightStore:
             for cat, entry in raw.items():
                 try:
                     result[cat] = ProposalMetadata.model_validate(entry)
-                except Exception:  # noqa: BLE001
+                except ValidationError:
                     logger.warning("Skipping malformed proposal metadata for %s", cat)
             return result
         except (json.JSONDecodeError, OSError):
@@ -807,3 +811,71 @@ def build_persistent_finding_body(category: str, desc: str, stale_days: int) -> 
         f"---\n*Auto-filed by HydraFlow review-insight verification — routed "
         f"to the factory (previously a HITL escalation, #9227).*"
     )
+
+
+async def reconcile_closed_insight_escalations(
+    *,
+    prs: PRPort,
+    insight_escalated_at: dict[str, datetime],
+    find_label: str,
+) -> list[str]:
+    """Clear the in-memory stale-insight window-tracker for HUMAN-closed escalations.
+
+    A *human/external* close of a :data:`PERSISTENT_FINDING_PREFIX` escalation
+    is the intentional re-arm signal — the factory merged a fix, or a human
+    dismissed it — so the next stale tick should be free to file fresh. A
+    *bot/programmatic* close (one stamped with
+    ``escalation_reconcile.BOT_CLOSE_MARKER_LABEL`` before closing) must NOT
+    re-arm: a still-stale category would otherwise refile a duplicate on the
+    very next tick (#8996 — mirrors
+    ``EscalationReconciler.reconcile_closed``, #9437).
+
+    Shared by ``RetrospectiveLoop._reconcile_closed_insight_escalations`` and
+    the ``ReviewPhase`` fallback in ``review_phase/_phase.py`` — same
+    can't-drift-apart rationale as :data:`PERSISTENT_FINDING_PREFIX` above:
+    one writer of the reconcile contract, not two copies that can diverge.
+
+    *insight_escalated_at* is mutated in place (categories re-armed are
+    deleted from it). Returns the list of re-armed categories, for logging.
+    """
+    if not insight_escalated_at or not find_label:
+        return []
+
+    try:
+        closed = await prs.list_closed_issues_by_label(find_label)
+    except Exception as exc:  # noqa: BLE001
+        reraise_on_credit_or_bug(exc)
+        # Best-effort — a transient GitHub fault shouldn't block the tick
+        # that's trying to file (or skip) a stale-insight escalation.
+        logger.debug(
+            "review_insights: could not list closed find issues for re-arm",
+            exc_info=True,
+        )
+        return []
+
+    prefix = PERSISTENT_FINDING_PREFIX
+    # Build desc -> category reverse lookup once.
+    desc_to_category = {
+        CATEGORY_DESCRIPTIONS.get(cat, cat): cat for cat in list(insight_escalated_at)
+    }
+
+    cleared: list[str] = []
+    for entry in closed:
+        if not isinstance(entry, dict):
+            continue
+        title = entry.get("title", "")
+        if not title.startswith(prefix):
+            continue
+        desc = title[len(prefix) :]
+        category = desc_to_category.get(desc) or desc
+        if category not in insight_escalated_at:
+            continue
+        if is_bot_close(entry):
+            # Programmatic close — retain the window-tracker entry so a
+            # still-detected category does not immediately refile a
+            # duplicate on the next stale tick (#8996).
+            continue
+        del insight_escalated_at[category]
+        cleared.append(category)
+
+    return cleared

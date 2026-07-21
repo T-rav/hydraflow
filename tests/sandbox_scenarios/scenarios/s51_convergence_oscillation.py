@@ -69,17 +69,19 @@ PIPELINE ROUTE THAT PRODUCES BOTH LOOP_BACKs SIMULTANEOUSLY
 ----------------------------------------------------------------------
 OSCILLATION LOOP INTERVAL IN SANDBOX
 ----------------------------------------------------------------------
-``HYDRAFLOW_CONVERGENCE_OSCILLATION_INTERVAL: "5"`` is set in
-docker-compose.sandbox.yml as a signal of intent (short interval for testing).
-However, the pydantic field enforces ``ge=300`` (5 minutes minimum); the
-``_apply_env_overrides`` function raises ``ValueError`` which is suppressed by
-``contextlib.suppress(ValueError)`` — the config field remains at its default of
-3600.  This is harmless: the sandbox bootstraps all caretaker loops with
-``WorkerRegistryCallbacks(get_interval=lambda *_a, **_kw: 60)``, which wires as
-``LoopDeps.interval_cb`` and takes precedence over ``_get_default_interval()`` in
-``BaseBackgroundLoop._get_interval()``.  The effective interval is therefore
-60 seconds in every sandbox run, independent of the config field.  The assertion
-timeout (120 s) comfortably accommodates one full tick margin.
+docker-compose.sandbox.yml deliberately does NOT set
+``HYDRAFLOW_CONVERGENCE_OSCILLATION_INTERVAL``. A short value like ``"5"``
+would fail the pydantic field's ``ge=300`` (5 minutes minimum) validation;
+``_apply_env_overrides`` raises ``ValueError`` which is suppressed by
+``contextlib.suppress(ValueError)``, so the config field silently stays at its
+default of 3600 — a misleading no-op that looked like a fast-tick override but
+wasn't (#9685). It isn't needed: the sandbox bootstraps all caretaker loops
+with ``WorkerRegistryCallbacks(get_interval=lambda *_a, **_kw: 60)``, which
+wires as ``LoopDeps.interval_cb`` and takes precedence over
+``_get_default_interval()`` in ``BaseBackgroundLoop._get_interval()``.  The
+effective interval is therefore 60 seconds in every sandbox run, independent
+of the config field.  The assertion timeout (120 s) comfortably accommodates
+one full tick margin.
 """
 
 from __future__ import annotations

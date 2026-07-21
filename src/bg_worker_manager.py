@@ -35,6 +35,7 @@ class BGWorkerManager:
         self._bg_worker_states: dict[str, BackgroundWorkerState] = {}
         self._bg_worker_enabled: dict[str, bool] = {}
         self._bg_worker_intervals: dict[str, int] = {}
+        self._bg_worker_timeouts: dict[str, int] = {}
         # Injected post-ctor by the orchestrator (chicken-and-egg with the
         # supervisor's task dict) — mirrors HealthMonitor's set_bg_workers.
         self._restart_cb: Callable[[str], Awaitable[bool]] | None = None
@@ -54,6 +55,11 @@ class BGWorkerManager:
     def worker_intervals(self) -> dict[str, int]:
         """Mutable intervals dict."""
         return self._bg_worker_intervals
+
+    @property
+    def worker_timeouts(self) -> dict[str, int]:
+        """Mutable watchdog-timeout overrides dict."""
+        return self._bg_worker_timeouts
 
     def update_status(
         self, name: str, status: str, details: dict[str, Any] | None = None
@@ -128,6 +134,14 @@ class BGWorkerManager:
 
         Falls back to ``loop_watchdog_default_seconds`` for names without a
         registered ``BaseBackgroundLoop``.
+
+        Used by ``HealthMonitorLoop``'s stall-multiplier calc, NOT by the
+        watchdog itself — the watchdog reads through ``loop._timeout_cb``
+        (wired to :meth:`get_timeout` for every shared-``LoopDeps`` loop), so
+        this delegates to ``loop._cycle_timeout_seconds()`` to stay correct
+        for loops with a bespoke ``timeout_cb`` (e.g. ``principles_audit``'s
+        hardcoded LLM-bound closure in ``service_registry.py``, #9639) that
+        bypasses the operator override table entirely (#9503).
         """
         loop = self._bg_loop_registry.get(name)
         if loop is None:
@@ -149,6 +163,10 @@ class BGWorkerManager:
     def _restore_intervals(self, intervals: dict[str, int]) -> None:
         """Bulk-restore interval overrides (used during startup recovery)."""
         self._bg_worker_intervals.update(intervals)
+
+    def _restore_timeouts(self, timeouts: dict[str, int]) -> None:
+        """Bulk-restore watchdog-timeout overrides (used during startup recovery)."""
+        self._bg_worker_timeouts.update(timeouts)
 
     def _seed_default_disabled_workers(self) -> None:
         """Persist first-run disabled defaults without overriding later UI enables."""
@@ -224,3 +242,42 @@ class BGWorkerManager:
             "pipeline_poller": 5,
         }
         return non_loop_defaults.get(name, self._config.poll_interval)
+
+    def set_timeout(self, name: str, seconds: int) -> None:
+        """Set a dynamic watchdog-timeout override for a background worker.
+
+        Mirrors :meth:`set_interval`. Wired to every registered loop's
+        ``timeout_cb`` (via ``WorkerRegistryCallbacks.get_watchdog_timeout`` →
+        :meth:`get_timeout`), so the override takes effect on the loop's very
+        next cycle without a redeploy (#9503).
+        """
+        self._bg_worker_timeouts[name] = seconds
+        self._state.set_watchdog_timeouts(dict(self._bg_worker_timeouts))
+
+    def clear_timeout(self, name: str) -> None:
+        """Remove a dynamic watchdog-timeout override and persist (no-op if absent).
+
+        Mirrors :meth:`clear_interval`. The loop falls back to its own
+        :meth:`get_timeout` default (LONG_LLM_CYCLE-aware) once cleared.
+        """
+        if name not in self._bg_worker_timeouts:
+            return
+        del self._bg_worker_timeouts[name]
+        self._state.set_watchdog_timeouts(dict(self._bg_worker_timeouts))
+
+    def get_timeout(self, name: str) -> int:
+        """Return the effective per-cycle watchdog bound for a background worker.
+
+        Priority: dynamic override -> loop's own
+        ``_default_cycle_timeout_seconds()`` -> config default. Mirrors
+        :meth:`get_interval`. This is the method wired as every loop's
+        ``timeout_cb`` (via ``WorkerRegistryCallbacks.get_watchdog_timeout``),
+        so it — not :meth:`cycle_timeout` — is the live read path the
+        watchdog actually consults each cycle.
+        """
+        if name in self._bg_worker_timeouts:
+            return self._bg_worker_timeouts[name]
+        loop = self._bg_loop_registry.get(name)
+        if loop is not None:
+            return loop._default_cycle_timeout_seconds()
+        return self._config.loop_watchdog_default_seconds

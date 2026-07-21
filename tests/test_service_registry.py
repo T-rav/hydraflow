@@ -30,6 +30,7 @@ def _make_callbacks() -> WorkerRegistryCallbacks:
         update_status=lambda *args, **kwargs: None,
         is_enabled=lambda name: True,
         get_interval=lambda name: 60,
+        get_watchdog_timeout=lambda name: 7200,
     )
 
 
@@ -294,10 +295,15 @@ class TestServiceRegistryWiring:
 
 
 class TestWorkerRegistryCallbacks:
-    def test_has_three_fields_only(self) -> None:
-        """WorkerRegistryCallbacks should expose exactly 3 focused callbacks."""
+    def test_has_four_fields_only(self) -> None:
+        """WorkerRegistryCallbacks should expose exactly 4 focused callbacks."""
         fields = set(WorkerRegistryCallbacks.__dataclass_fields__)
-        assert fields == {"update_status", "is_enabled", "get_interval"}
+        assert fields == {
+            "update_status",
+            "is_enabled",
+            "get_interval",
+            "get_watchdog_timeout",
+        }
 
     def test_is_frozen(self) -> None:
         """WorkerRegistryCallbacks should be immutable."""
@@ -307,6 +313,7 @@ class TestWorkerRegistryCallbacks:
             update_status=lambda *a, **kw: None,
             is_enabled=lambda _: True,
             get_interval=lambda _: 60,
+            get_watchdog_timeout=lambda _: 7200,
         )
         with pytest.raises(AttributeError):
             cb.update_status = lambda *a, **kw: None  # type: ignore[misc]
