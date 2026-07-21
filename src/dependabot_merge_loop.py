@@ -55,6 +55,16 @@ _AUTO_AGENT_BRANCH_PREFIX = "agent/auto-agent-"
 # deploy-time kill-switch below, the existing draft exclusion, the CH-3
 # merge policy (which reads fresh PR labels, so policy-override:*/deny
 # still apply), and a per-PR ``no-auto-merge`` label opt-out.
+#
+# The set is the Conventional-Commit type family: every one names a class of
+# real, mergeable work that otherwise has NO merge path off a human/agent
+# branch (the exact gap the class-5 shepherd exists to close). ``perf/``,
+# ``ci/`` and ``build/`` were added after a factory session hand-merged a
+# batch of green ``perf/`` CI-speedup PRs one by one — they were green and
+# non-conflicting but fell outside the prefix set, so the shepherd ignored
+# them. GitHub branch protection (a merge with an unsatisfied required check
+# is rejected server-side) plus the ``no-auto-merge`` opt-out remain the
+# backstops for the CI-touching prefixes.
 _HUMAN_SHEPHERD_BRANCH_PREFIXES = (
     "fix/",
     "feat/",
@@ -62,6 +72,9 @@ _HUMAN_SHEPHERD_BRANCH_PREFIXES = (
     "test/",
     "chore/",
     "refactor/",
+    "perf/",
+    "ci/",
+    "build/",
 )
 _HUMAN_SHEPHERD_OPT_OUT_LABEL = "no-auto-merge"
 
