@@ -1,0 +1,21 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# delete_branch deletes a remote ref (real: `gh api --method DELETE
+# .../git/refs/heads/<branch>`), returning True on success — the RC
+# retention-cleanup path. The fake succeeds unconditionally.
+adapter: github
+interaction: delete_branch
+recorded_at: "2026-07-20T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: delete_branch
+  args:
+    - "rc/2026-05-13-0000"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "True\n"
+  stderr: ""
+normalizers: []
+baseline_only: true
