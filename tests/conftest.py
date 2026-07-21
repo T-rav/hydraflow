@@ -57,6 +57,58 @@ def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> 
         )
 
 
+# --- Test-duration ratchet (CI-speedup Tier 4a) -----------------------------
+# Prevent the suite from silently accumulating slow / hung tests. A test whose
+# CALL phase exceeds a deliberately generous budget FAILS with a clear message,
+# unless it is in the explicit shrink-only grandfather set below. This catches
+# new pathologically-slow or hung tests (a real one recently hung ~300s under
+# parallel execution) without flaking on ordinary machine variance.
+#
+# Follow-up (deliberately NOT done here): move genuinely-slow tests behind a
+# `@pytest.mark.slow` marker and run them in a dedicated nightly "slow" lane
+# instead of grandfathering them. That is a separate change; this ratchet only
+# guards the fast lane against regressions.
+_SLOW_TEST_BUDGET_S = 60.0
+# Tests legitimately over budget today (measured under parallel CPU contention,
+# so these are upper bounds). SHRINK-ONLY: optimize a test and remove it here;
+# never add a new one without justification. Optimizing these is tracked as a
+# follow-up.
+_SLOW_TEST_GRANDFATHER = frozenset(
+    {
+        "tests/test_audit_prompts.py::test_main_emits_report_to_expected_path",
+        "tests/test_audit_prompts.py::test_canary_cross_check_passes_when_every_trace_builder_registered",
+        "tests/test_audit_prompts.py::test_canary_cross_check_flags_drift_over_threshold",
+        "tests/test_orchestrator_integration.py::test_credit_pause_publishes_alerts_and_restores_loops",
+    }
+)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]):  # noqa: ARG001 — call required by pytest hook signature
+    """Fail any test whose CALL phase exceeds the slow-test budget.
+
+    Grandfathered node ids are exempt (shrink-only — see
+    ``_SLOW_TEST_GRANDFATHER``). The budget is intentionally generous so normal
+    machine variance never trips it; only pathologically-slow or hung tests do.
+    """
+    outcome = yield
+    report = outcome.get_result()
+    if (
+        report.when == "call"
+        and report.passed
+        and report.duration > _SLOW_TEST_BUDGET_S
+    ):
+        nodeid = item.nodeid
+        if nodeid not in _SLOW_TEST_GRANDFATHER:
+            report.outcome = "failed"
+            report.longrepr = (
+                f"Duration ratchet: {nodeid} took {report.duration:.1f}s "
+                f"(> {_SLOW_TEST_BUDGET_S:.0f}s budget). Optimize it, or if it is "
+                f"unavoidably slow add it to _SLOW_TEST_GRANDFATHER in "
+                f"tests/conftest.py (shrink-only)."
+            )
+
+
 # Ensure source modules are importable from src/ layout.
 _REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "src"))
