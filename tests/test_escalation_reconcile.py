@@ -18,7 +18,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from dedup_store import DedupStore
-from escalation_reconcile import EscalationReconciler
+from escalation_reconcile import (
+    BOT_CLOSE_MARKER_LABEL,
+    EscalationReconciler,
+    is_bot_close,
+)
 
 _TITLE_RE = re.compile(r"fake coverage gap (\S+) unresolved")
 
@@ -46,8 +50,11 @@ def env(tmp_path: Path):
     return rec, prs, dedup, cleared
 
 
-def _issue(number: int, title: str) -> dict:
-    return {"number": number, "title": title, "body": "", "updated_at": ""}
+def _issue(number: int, title: str, labels: list[str] | None = None) -> dict:
+    issue: dict = {"number": number, "title": title, "body": "", "updated_at": ""}
+    if labels is not None:
+        issue["labels"] = [{"name": name} for name in labels]
+    return issue
 
 
 _STUCK_TITLE = "HITL: fake coverage gap FakeGitHub:adapter-surface unresolved after 3"
@@ -95,6 +102,69 @@ class TestReconcileClosed:
         await rec.reconcile_closed()
         assert dedup.get() == {"fake_coverage_auditor:FakeGitHub:adapter-surface"}
         assert cleared == []
+
+    # --- bot-vs-human close guard (#9437) -------------------------------------
+    # A human/external close is the intentional reset signal → drop the dedup
+    # key + counter (pre-#9437 contract). A bot/programmatic close (stamped with
+    # BOT_CLOSE_MARKER_LABEL before closing) must NOT reset dedup, or a premature
+    # close of a still-detected subject refiles a duplicate next tick. An
+    # unknown/absent signal falls open to the human path — behaviour unchanged.
+
+    @pytest.mark.asyncio
+    async def test_human_close_drops_key(self, env) -> None:
+        """No bot marker on the close → treat as human/external → drop key."""
+        rec, prs, dedup, cleared = env
+        dedup.set_all({"fake_coverage_auditor:FakeGitHub:adapter-surface"})
+        prs.list_closed_issues_by_label.return_value = [
+            _issue(9618, _STUCK_TITLE, labels=["hydraflow-fake-coverage-stuck"])
+        ]
+        await rec.reconcile_closed()
+        assert dedup.get() == set()
+        assert cleared == ["FakeGitHub:adapter-surface"]
+
+    @pytest.mark.asyncio
+    async def test_bot_close_retains_key(self, env) -> None:
+        """Bot/programmatic marker present → retain key (no duplicate refile)."""
+        rec, prs, dedup, cleared = env
+        dedup.set_all({"fake_coverage_auditor:FakeGitHub:adapter-surface"})
+        prs.list_closed_issues_by_label.return_value = [
+            _issue(
+                9618,
+                _STUCK_TITLE,
+                labels=["hydraflow-fake-coverage-stuck", BOT_CLOSE_MARKER_LABEL],
+            )
+        ]
+        await rec.reconcile_closed()
+        assert dedup.get() == {"fake_coverage_auditor:FakeGitHub:adapter-surface"}
+        assert cleared == []
+
+    @pytest.mark.asyncio
+    async def test_unknown_signal_falls_open_to_drop(self, env) -> None:
+        """Closed projection omits labels (#9943) → signal unavailable → the
+        backward-compatible fallback drops the key, exactly as pre-#9437."""
+        rec, prs, dedup, cleared = env
+        dedup.set_all({"fake_coverage_auditor:FakeGitHub:adapter-surface"})
+        prs.list_closed_issues_by_label.return_value = [_issue(9618, _STUCK_TITLE)]
+        await rec.reconcile_closed()
+        assert dedup.get() == set()
+        assert cleared == ["FakeGitHub:adapter-surface"]
+
+
+class TestIsBotClose:
+    def test_marker_label_present_is_bot(self) -> None:
+        issue = {"labels": [{"name": "x"}, {"name": BOT_CLOSE_MARKER_LABEL}]}
+        assert is_bot_close(issue) is True
+
+    def test_marker_label_absent_is_human(self) -> None:
+        issue = {"labels": [{"name": "hydraflow-fake-coverage-stuck"}]}
+        assert is_bot_close(issue) is False
+
+    def test_missing_labels_key_is_human(self) -> None:
+        assert is_bot_close({"number": 1, "title": "t"}) is False
+
+    def test_none_or_malformed_labels_is_human(self) -> None:
+        assert is_bot_close({"labels": None}) is False
+        assert is_bot_close({"labels": ["not-a-dict"]}) is False
 
 
 class TestReconcileOpen:
