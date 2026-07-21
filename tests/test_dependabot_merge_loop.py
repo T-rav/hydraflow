@@ -874,6 +874,28 @@ class TestHumanBranchShepherd:
         prs.merge_pr.assert_awaited_once_with(42, auto_rebase=True)
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("prefix", ["perf/", "ci/", "build/"])
+    async def test_green_conventional_prefix_branch_is_merged(
+        self, tmp_path: Path, prefix: str
+    ) -> None:
+        """Every Conventional-Commit work prefix gets the shepherd merge path.
+
+        Regression for a factory session that hand-merged a batch of green
+        ``perf/`` CI-speedup PRs because ``perf/``/``ci/``/``build/`` were
+        outside the shepherd prefix set — they had no merge path at all.
+        """
+        loop, _, _, prs, _ = _make_loop(
+            tmp_path,
+            open_prs=[_make_pr(42, author="T-rav", branch=f"{prefix}some-work")],
+        )
+
+        with patch("dependabot_merge_loop.fetch_pr_labels", AsyncMock(return_value=[])):
+            result = await loop._do_work()
+
+        assert result["merged"] == 1
+        prs.merge_pr.assert_awaited_once_with(42, auto_rebase=True)
+
+    @pytest.mark.asyncio
     async def test_kill_switch_restores_no_merge_path(self, tmp_path: Path) -> None:
         loop, _, _, prs, _ = _make_loop(
             tmp_path,

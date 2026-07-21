@@ -981,6 +981,10 @@ class WorkspaceManager:
         In host mode, sets ``core.hooksPath`` to the shared ``.githooks`` dir.
         In docker mode, copies individual hook files into the worktree's git
         hooks directory so the worktree is self-contained.
+
+        Either way, registers the ``arch-meta`` merge driver so the worktree
+        gets the same conflict-free ``docs/arch/.meta.json`` handling that
+        ``make ensure-hooks`` gives a developer checkout.
         """
         if self._config.execution_mode == "docker":
             await self._install_hooks_docker(wt_path)
@@ -996,6 +1000,44 @@ class WorkspaceManager:
                 )
             except RuntimeError as exc:
                 logger.warning("git hooks setup failed: %s", exc)
+        await self._register_arch_meta_merge_driver(wt_path)
+
+    async def _register_arch_meta_merge_driver(self, wt_path: Path) -> None:
+        """Register the ``arch-meta`` git merge driver in the worktree.
+
+        ``.gitattributes`` maps ``docs/arch/.meta.json`` to ``merge=arch-meta``
+        so a staging advance auto-resolves the regenerated stamp instead of
+        conflicting on it (#10099). That mapping is INERT unless the driver is
+        registered in git config — and ``make ensure-hooks`` (which registers
+        it for a developer checkout) never runs during factory worktree setup.
+        Without this, every agent worktree still hits the ``.meta.json``
+        conflict on each rebase onto staging, forcing the arch-heal loop to
+        regen it. Values mirror ``make ensure-hooks`` exactly; the sibling
+        ``changelog.md merge=union`` needs no driver (``union`` is built in).
+
+        Best-effort: on failure the branch simply falls back to the old
+        conflict-then-heal path, so we warn and continue rather than fail
+        worktree setup.
+        """
+        for key, value in (
+            (
+                "merge.arch-meta.name",
+                "keep incoming arch .meta.json (regenerated on mainline)",
+            ),
+            ("merge.arch-meta.driver", "cp -- %B %A"),
+        ):
+            try:
+                await run_subprocess(
+                    "git",
+                    "config",
+                    key,
+                    value,
+                    cwd=wt_path,
+                    gh_token=self._credentials.gh_token,
+                )
+            except RuntimeError as exc:
+                logger.warning("arch-meta merge driver setup failed (%s): %s", key, exc)
+                return
 
     async def _install_hooks_docker(self, wt_path: Path) -> None:
         """Copy hook files from .githooks/ into the worktree's git hooks dir."""

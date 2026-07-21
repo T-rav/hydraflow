@@ -367,13 +367,53 @@ class TestInstallHooksDocker:
         ) as mock_exec:
             await manager._install_hooks(tmp_path)
 
-        mock_exec.assert_called_once()
-        assert mock_exec.call_args.args[:4] == (
+        # core.hooksPath is set first; the arch-meta merge driver follows.
+        assert mock_exec.call_args_list[0].args[:4] == (
             "git",
             "config",
             "core.hooksPath",
             ".githooks",
         )
+
+    @pytest.mark.asyncio
+    async def test_install_hooks_docker_registers_arch_meta_driver(
+        self, tmp_path: Path
+    ) -> None:
+        """Docker mode also registers the arch-meta merge driver.
+
+        The driver must reach the worktree in BOTH modes so docs/arch/.meta.json
+        auto-resolves on a staging advance (#10099 follow-up); docker copies
+        hook files rather than sharing core.hooksPath, but the git-config merge
+        driver is orthogonal to how hooks are installed.
+        """
+        manager = make_docker_manager(tmp_path)
+        repo_root = manager._repo_root
+        repo_root.mkdir(parents=True, exist_ok=True)
+        (repo_root / ".githooks").mkdir()
+
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        hooks_dir = wt_path / ".git" / "hooks"
+        hooks_dir.mkdir(parents=True)
+
+        calls: list[tuple] = []
+
+        async def _record(*args, **_kwargs):
+            calls.append(args)
+            if "rev-parse" in args:
+                return str(hooks_dir)
+            return ""
+
+        with patch("workspace.run_subprocess", side_effect=_record):
+            await manager._install_hooks(wt_path)
+
+        config_calls = [a[:4] for a in calls]
+        assert (
+            "git",
+            "config",
+            "merge.arch-meta.driver",
+            "cp -- %B %A",
+        ) in config_calls
 
     @pytest.mark.asyncio
     async def test_install_hooks_docker_copies_multiple_hooks(
