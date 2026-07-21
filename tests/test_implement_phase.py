@@ -1103,6 +1103,51 @@ class TestWorkerResultMetaPersistence:
         assert led.stage_state["quality_fix"].attempts == 2
 
     @pytest.mark.asyncio
+    async def test_zero_quality_fix_attempts_writes_no_stage_record(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """count == 0 must not create an empty quality_fix stage record.
+
+        Regression for #9685 (2c): implement_phase previously called
+        ``set_quality_fix_attempts`` unconditionally, writing an empty
+        ``stage_state["quality_fix"]`` entry for every issue even when no
+        fix round happened. The retrospective reader
+        (``ConvergenceLedger.get_attempts``) already defaults to 0 for a
+        missing stage, so the write is conditionalized to count > 0 and the
+        retrospective-read behavior (0) is unchanged either way.
+        """
+        issue = TaskFactory.create(id=42)
+
+        async def agent_no_qf(
+            issue: Task,
+            wt_path: Path,
+            branch: str,
+            worker_id: int = 0,
+            review_feedback: str = "",
+            prior_failure: str = "",
+        ) -> WorkerResult:
+            return WorkerResultFactory.create(
+                issue_number=issue.id,
+                branch=branch,
+                success=True,
+                workspace_path=str(wt_path),
+                quality_fix_attempts=0,
+            )
+
+        phase, _, _ = make_implement_phase(config, [issue], agent_run=agent_no_qf)
+        await phase.run_batch()
+
+        led = phase._state.get_convergence_ledger(42)
+        # No fix round happened and nothing else in this flow touches the
+        # ledger, so no ConvergenceLedger is created for the issue at all.
+        assert led is None or "quality_fix" not in led.stage_state
+        # Retrospective read behavior is unchanged either way: retrospective.py
+        # reads `led.get_attempts("quality_fix") if led else 0`, which is 0
+        # whether the ledger is absent or present without the stage.
+        quality_fix_rounds = led.get_attempts("quality_fix") if led else 0
+        assert quality_fix_rounds == 0
+
+    @pytest.mark.asyncio
     async def test_worker_result_meta_no_longer_has_quality_fix_attempts(
         self, config: HydraFlowConfig
     ) -> None:

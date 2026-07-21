@@ -1864,6 +1864,20 @@ class PolicyEvent(BaseModel):
     counters: dict[str, int] = Field(default_factory=dict)
 
 
+# Ubiquitous-language boundary-stage names (ADR-0096 boundary verdict
+# recording). These MUST match the ``stage=`` literals passed to
+# ``record_stage_verdict``/``convergence_recording.record_stage_verdict`` at
+# each phase's boundary call-site: src/triage_phase.py (stage="triage"),
+# src/shape_phase.py (stage="shape"), src/plan_phase.py (stage="plan"). Both
+# ``ConvergenceLedger.detect_cross_boundary_oscillation`` below and
+# ``ConvergenceOscillationLoop``'s escalation-issue-body stage lookup
+# (src/convergence_oscillation_loop.py) read this single constant so a future
+# stage rename can't leave one of the two call-sites silently stale — a
+# literal-string drift there would still parse and run, just silently stop
+# matching either the detector or the issue body.
+CONVERGENCE_BOUNDARY_STAGES: tuple[str, ...] = ("triage", "shape", "plan")
+
+
 class ConvergenceLedger(BaseModel):
     """Single source of truth for one issue's two-level convergence state.
 
@@ -1962,7 +1976,7 @@ class ConvergenceLedger(BaseModel):
             identical findings across review laps.  Evaluated only when
             *include_temporal* is True.
         (b) Snapshot: at least ``min_loopback_stages`` DISTINCT stages among
-            ``{"triage", "shape", "plan"}`` currently have
+            ``CONVERGENCE_BOUNDARY_STAGES`` currently have
             ``last_verdict == "LOOP_BACK"`` — pre-review cross-boundary churn.
 
         Pass ``include_temporal=False`` to suppress the temporal arm and check
@@ -1973,10 +1987,9 @@ class ConvergenceLedger(BaseModel):
         """
         if include_temporal and self.detect_outer_oscillation(window):
             return True
-        boundary_stages = {"triage", "shape", "plan"}
         loopback_count = sum(
             1
-            for stage in boundary_stages
+            for stage in CONVERGENCE_BOUNDARY_STAGES
             if self.stage_state.get(stage, StageRecord()).last_verdict == "LOOP_BACK"
         )
         return loopback_count >= min_loopback_stages
