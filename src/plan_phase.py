@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,11 +16,15 @@ from events import EventBus
 from exception_classify import reraise_on_credit_or_bug
 from harness_insights import FailureCategory, HarnessInsightStore
 from models import (
+    ConversationTurn,
+    DiscoverResult,
     EpicGapReview,
     IssueOutcomeType,
     PipelineStage,
     PlanResult,
     PlanReview,
+    ShapeConversation,
+    ShapeTurnResult,
     Task,
 )
 from phase_utils import (
@@ -54,11 +59,13 @@ from wiki_maint_queue import enqueue_wiki_ingest
 
 if TYPE_CHECKING:
     from beads_manager import BeadsManager
+    from discover_runner import DiscoverRunner
     from epic import EpicManager
     from issue_cache import IssueCache
     from plan_reviewer import PlanReviewer
     from plan_touchpoint_expander import PlanTouchpointExpander
     from ports import IssueStorePort, PRPort
+    from shape_runner import ShapeRunner
     from wiki_compiler import CorroborationDecision, WikiCompiler  # noqa: TCH004
 
 logger = logging.getLogger("hydraflow.plan_phase")
@@ -129,6 +136,8 @@ class PlanPhase:
         issue_cache: IssueCache | None = None,
         plan_reviewer: PlanReviewer | None = None,
         touchpoint_expander: PlanTouchpointExpander | None = None,
+        discover_runner: DiscoverRunner | None = None,
+        shape_runner: ShapeRunner | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -147,6 +156,14 @@ class PlanPhase:
         self._wiki_compiler = wiki_compiler
         self._issue_cache = issue_cache
         self._plan_reviewer = plan_reviewer
+        # ADR-0107 (collapse_discover_shape): the discover/shape engines,
+        # reused as on-demand helpers the planner's decision gate invokes
+        # (_should_discover_helper / _should_shape_helper) instead of them
+        # running as standalone pipeline phases. Optional — when None (the
+        # default, and always true while the flag is off), the gates always
+        # return False and behavior is unaffected.
+        self._discover_runner = discover_runner
+        self._shape_runner = shape_runner
         # Touchpoint expander (ADR-0063 W3b). Dispatched on the FIRST
         # PlanReviewer blocking-finding failure to enrich the next
         # review pass with cross-referenced ADRs, recent PR conflict
@@ -393,6 +410,19 @@ class PlanPhase:
         )
         self._persist_adversarial_state(issue, adv)
 
+    def _has_escalation_label(self, issue: Task) -> bool:
+        """True if *issue* carries one of ``config.research_escalation_labels``.
+
+        Shared by :meth:`_should_research` and the ADR-0107 discover-helper
+        gate (:meth:`_should_discover_helper`) — both treat an
+        operator/loop-applied escalation label as a signal that the issue
+        warrants deeper pre-planning work.
+        """
+        escalation_labels = {
+            lbl.lower() for lbl in self._config.research_escalation_labels
+        }
+        return any(tag.lower() in escalation_labels for tag in issue.tags)
+
     def _should_research(self, issue: Task) -> bool:
         """Return True if the research pre-pass should run before planning *issue*.
 
@@ -417,10 +447,192 @@ class PlanPhase:
         if self._state.get_route_back_count(issue.id) > 0:
             return True
         # Escalated: operator/loop flagged the issue for deeper handling.
-        escalation_labels = {
-            lbl.lower() for lbl in self._config.research_escalation_labels
-        }
-        return any(tag.lower() in escalation_labels for tag in issue.tags)
+        return self._has_escalation_label(issue)
+
+    def _triage_hints(self, issue: Task) -> tuple[int, bool]:
+        """Return ``(clarity_score, needs_discovery)`` triage HINTS for *issue*.
+
+        ADR-0107: with ``collapse_discover_shape`` on, Triage no longer treats
+        these as a routing verdict — it records them on the issue's
+        ``IssueCache`` classification record and the planner's decision gate
+        reads them back here. Missing cache / no classification record yet
+        (e.g. ``issue_cache`` disabled, or the issue predates classification)
+        reads as the well-specified default ``(10, False)`` — the gate's
+        conservative "no helper needed" reading.
+        """
+        if self._issue_cache is None:
+            return 10, False
+        record = self._issue_cache.latest_classification(issue.id)
+        if record is None:
+            return 10, False
+        return (
+            int(record.payload.get("clarity_score", 10)),
+            bool(record.payload.get("needs_discovery", False)),
+        )
+
+    def _should_discover_helper(self, issue: Task) -> bool:
+        """ADR-0107 planner decision gate: run the discover helper before planning?
+
+        Only consulted when ``collapse_discover_shape`` is on and a
+        ``DiscoverRunner`` is wired — with the flag off (or no runner), this
+        always returns False and Triage's existing fork to the standalone
+        Discover phase is unaffected (byte-identical current behavior).
+
+        Conservative default (per ADR-0107): a well-specified issue plans
+        directly with no helper. The gate fires when any of —
+
+        - **needs_discovery hint** — Triage's LLM flagged the issue as vague.
+        - **clarity_score hint** below ``config.clarity_threshold``.
+        - **Cycled / failing to land** — routed back to plan at least once
+          (``StateTracker.get_route_back_count``).
+        - **Escalated** — issue carries a ``research_escalation_labels`` tag.
+
+        Epic children are excluded outright: they are already-scoped
+        decomposition output from a parent epic's planning pass, so
+        re-running product discovery on them would be redundant.
+        """
+        if not self._config.collapse_discover_shape:
+            return False
+        if self._discover_runner is None:
+            return False
+        if self._is_epic_child(issue):
+            return False
+        clarity_score, needs_discovery = self._triage_hints(issue)
+        return (
+            needs_discovery
+            or clarity_score < self._config.clarity_threshold
+            or self._state.get_route_back_count(issue.id) > 0
+            or self._has_escalation_label(issue)
+        )
+
+    async def _run_discover_helper(
+        self, issue: Task, *, guidance: str
+    ) -> DiscoverResult | None:
+        """Invoke ``DiscoverRunner`` as an on-demand research pre-pass (ADR-0107).
+
+        This is a synchronous in-process helper call, not a stage transition —
+        the engine is reused unmodified; only the caller changes. Bounded
+        internally by ``config.max_discover_attempts`` /
+        ``max_discover_expansions`` (read by ``DiscoverRunner.discover``
+        itself), the same knobs that bounded the standalone Discover phase —
+        they now bound this planner-invoked sub-step instead. Returns
+        ``None`` (never raises) on failure so planning proceeds without a
+        research brief rather than being blocked by it.
+        """
+        assert self._discover_runner is not None  # guarded by caller
+        try:
+            result = await self._discover_runner.discover(issue, guidance=guidance)
+        except Exception as exc:
+            # Dark-factory contract: credit/auth/likely-bug exceptions must
+            # propagate so the loop pauses on the billing signal instead of
+            # silently planning without research.
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "Discover helper failed for issue #%d — planning without a "
+                "research brief",
+                issue.id,
+                exc_info=True,
+            )
+            return None
+        try:
+            await self._prs.post_comment(
+                issue.id, self._format_discover_brief(issue, result)
+            )
+        except Exception:
+            logger.warning(
+                "Failed to post discover-helper brief for issue #%d",
+                issue.id,
+                exc_info=True,
+            )
+        return result
+
+    @staticmethod
+    def _format_discover_brief(issue: Task, result: DiscoverResult) -> str:
+        """Format a ``DiscoverResult`` as a GitHub comment for the audit trail."""
+        lines = [
+            "## Discovery Research (planner-invoked helper)",
+            "",
+            f"*ADR-0107 — issue #{issue.id} routed Triage → Plan directly; "
+            f"the planner's decision gate determined discovery research was "
+            f"warranted before planning.*",
+            "",
+            result.research_brief,
+        ]
+        if result.opportunities:
+            lines.extend(["", "### Opportunities", ""])
+            lines.extend(f"- {o}" for o in result.opportunities)
+        return "\n".join(lines)
+
+    def _should_shape_helper(
+        self, issue: Task, discover_result: DiscoverResult | None
+    ) -> bool:
+        """ADR-0107 planner decision gate: does discovery warrant a shaping turn?
+
+        Only consulted after the discover helper has already run — shaping
+        without a discovery brief has nothing to shape. Fires when the brief
+        surfaced genuinely divergent opportunities (2+) that need a human
+        choice, per ADR-0107's framing of shaping as direction-selection
+        rather than open-ended exploration. Requires a ``ShapeRunner`` to be
+        wired; with the flag off or no runner this always returns False.
+        """
+        if not self._config.collapse_discover_shape:
+            return False
+        if self._shape_runner is None or discover_result is None:
+            return False
+        return len(discover_result.opportunities) >= 2
+
+    async def _run_shape_helper(
+        self, issue: Task, discover_result: DiscoverResult, *, guidance: str
+    ) -> ShapeTurnResult | None:
+        """Invoke ``ShapeRunner`` for one bounded conversation turn (ADR-0107).
+
+        Reuses the same ``ShapeConversation`` state slot the standalone Shape
+        phase used (``StateTracker.get/set_shape_conversation``) so this
+        helper composes with that machinery rather than reimplementing it.
+        Bounded by ``config.max_shape_turns`` (conversation-length ceiling —
+        returns ``None`` once hit, same as the standalone phase forcing
+        finalization) and ``config.max_shape_attempts`` (retried internally
+        by ``ShapeRunner.run_turn`` against the shape-coherence evaluator).
+
+        Because shaping is human-interactive, a non-final result is NOT
+        waited on synchronously — the caller (``_plan_one``) escalates to
+        HITL per ADR-0107's "yield to the existing human-steering channel"
+        design rather than blocking the plan tick.
+        """
+        assert self._shape_runner is not None  # guarded by caller
+        conv = self._state.get_shape_conversation(issue.id) or ShapeConversation(
+            issue_number=issue.id,
+            started_at=datetime.now(UTC).isoformat(),
+        )
+        if len(conv.turns) >= self._config.max_shape_turns:
+            logger.warning(
+                "Shape helper hit max_shape_turns (%d) for issue #%d without "
+                "finalizing",
+                self._config.max_shape_turns,
+                issue.id,
+            )
+            return None
+        try:
+            result = await self._shape_runner.run_turn(
+                issue,
+                conv,
+                research_brief=discover_result.research_brief,
+                guidance=guidance,
+            )
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning("Shape helper failed for issue #%d", issue.id, exc_info=True)
+            return None
+        conv.turns.append(
+            ConversationTurn(
+                role="agent",
+                content=result.content,
+                timestamp=datetime.now(UTC).isoformat(),
+            )
+        )
+        conv.last_activity_at = datetime.now(UTC).isoformat()
+        self._state.set_shape_conversation(issue.id, conv)
+        return result
 
     async def _handle_already_satisfied(self, issue: Task, result: PlanResult) -> bool:
         """Validate evidence and close issue as already-satisfied.
@@ -1199,6 +1411,19 @@ class PlanPhase:
 
             with _sentry_transaction("pipeline.plan", f"plan:#{issue.id}"):
                 async with store_lifecycle(self._store, issue.id, "plan"):
+                    # Human-on-the-loop continuous steering (ADR-0099 #4):
+                    # fold live operator guidance into the plan prompt.
+                    # Reference signal only — never blocking; empty when
+                    # the feature is off or no guidance was posted for
+                    # this issue. Named `human_guidance` (not bare
+                    # `guidance`) to avoid colliding with the unrelated
+                    # `EpicGapReview.guidance` field used elsewhere in
+                    # this module. Fetched up front (not just before the
+                    # planner call) so the ADR-0107 discover/shape helpers
+                    # below can also thread it into their prompts.
+                    human_guidance = (
+                        self._state.get_human_steering(str(issue.id)).guidance or ""
+                    )
                     research_context = ""
                     if self._should_research(issue):
                         research_result = await self._research_runner.research(issue)  # type: ignore[union-attr]
@@ -1228,6 +1453,105 @@ class PlanPhase:
                                 issue.id,
                                 research_result.error,
                             )
+
+                    # ADR-0107 (collapse_discover_shape): the planner's
+                    # on-demand discover/shape decision gate. Both gates
+                    # always return False with the flag off (or no runner
+                    # wired), so this block is a pure no-op in that mode —
+                    # existing behavior is byte-identical.
+                    discover_result: DiscoverResult | None = None
+                    if self._should_discover_helper(issue):
+                        discover_result = await self._run_discover_helper(
+                            issue, guidance=human_guidance
+                        )
+                        if discover_result is not None:
+                            research_context = (
+                                f"{research_context}\n\n{discover_result.research_brief}"
+                            ).strip()
+
+                        if self._should_shape_helper(issue, discover_result):
+                            assert discover_result is not None  # gate requires it
+                            shape_result = await self._run_shape_helper(
+                                issue, discover_result, guidance=human_guidance
+                            )
+                            if shape_result is None or not shape_result.is_final:
+                                # Divergent directions need a human choice.
+                                # Shaping is human-interactive (ADR-0107) —
+                                # yield to the existing HITL / human-steering
+                                # channel instead of blocking this plan tick
+                                # on a synchronous wait for a reply.
+                                options_text = (
+                                    shape_result.content
+                                    if shape_result is not None
+                                    else "Shaping could not produce directions "
+                                    "within the configured turn budget."
+                                )
+                                try:
+                                    await self._prs.post_comment(
+                                        issue.id,
+                                        "## Product Directions (planner-invoked "
+                                        f"shaping helper)\n\n{options_text}\n\n"
+                                        "---\n*A human choice is needed before "
+                                        "planning can continue — reply with your "
+                                        "preferred direction or use human "
+                                        "steering, then re-queue for planning.*",
+                                    )
+                                except Exception:
+                                    logger.warning(
+                                        "Failed to post shape-helper options "
+                                        "for issue #%d",
+                                        issue.id,
+                                        exc_info=True,
+                                    )
+                                await self._escalator(
+                                    issue,
+                                    cause="Shape helper surfaced divergent "
+                                    "product directions needing a human choice",
+                                    details=options_text[:500],
+                                    category=FailureCategory.HITL_ESCALATION,
+                                )
+                                logger.info(
+                                    "Issue #%d shape helper escalated to HITL "
+                                    "for a direction choice",
+                                    issue.id,
+                                )
+                                return PlanResult(
+                                    issue_number=issue.id, error="shape_escalated"
+                                )
+                            # Finalized on this turn — fold the selected
+                            # direction into research_context (synchronous,
+                            # no re-fetch needed) and require the same
+                            # decomposition the standalone Shape phase asked
+                            # for, since this is still a broad product
+                            # direction rather than one implementable task.
+                            research_context = (
+                                f"{research_context}\n\n{shape_result.content}\n\n"
+                                "IMPORTANT — DECOMPOSITION REQUIRED: this issue "
+                                "came through the ADR-0107 planner-invoked shaping "
+                                "helper and MUST be decomposed into 3-8 concrete "
+                                "sub-issues using NEW_ISSUES_START/NEW_ISSUES_END "
+                                "markers."
+                            ).strip()
+                            try:
+                                await self._prs.post_comment(
+                                    issue.id,
+                                    "## Final Product Direction (planner-invoked "
+                                    f"shaping helper)\n\n{shape_result.content}\n\n"
+                                    "\n### Planning Guidance — DECOMPOSITION "
+                                    "REQUIRED\n\nThis issue was shaped via the "
+                                    "planner's on-demand helper. It is a BROAD "
+                                    "product direction, NOT a single "
+                                    "implementable task. You MUST decompose this "
+                                    "into 3-8 concrete sub-issues using the "
+                                    "NEW_ISSUES_START/NEW_ISSUES_END format.",
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "Failed to post finalized shape direction "
+                                    "for issue #%d",
+                                    issue.id,
+                                    exc_info=True,
+                                )
 
                     from trace_rollup import write_phase_rollup  # noqa: PLC0415
                     from tracing_context import (  # noqa: PLC0415
@@ -1268,17 +1592,6 @@ class PlanPhase:
                             source="planner",
                             run_id=run_id,
                         )
-                    )
-                    # Human-on-the-loop continuous steering (ADR-0099 #4):
-                    # fold live operator guidance into the plan prompt.
-                    # Reference signal only — never blocking; empty when
-                    # the feature is off or no guidance was posted for
-                    # this issue. Named `human_guidance` (not bare
-                    # `guidance`) to avoid colliding with the unrelated
-                    # `EpicGapReview.guidance` field used elsewhere in
-                    # this module.
-                    human_guidance = (
-                        self._state.get_human_steering(str(issue.id)).guidance or ""
                     )
                     try:
                         result = await self._planners.plan(
