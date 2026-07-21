@@ -1,0 +1,21 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_pr_recent_commit_diffs returns a diff block for the PR's last n
+# commits (context for review). With no seeded commit diffs the fake
+# yields a deterministic single-hunk stub naming the PR branch.
+adapter: github
+interaction: get_pr_recent_commit_diffs
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_pr_recent_commit_diffs
+  args:
+  - '601'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "## deadbeef stub-commit \u2014 b\ndiff --git a/x b/x\n+fix\n"
+  stderr: ''
+normalizers: []
+baseline_only: true

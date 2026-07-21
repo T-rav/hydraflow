@@ -1,0 +1,23 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_pr_diff_names returns the changed-file list for a PR (`gh pr diff
+# <n> --name-only`) as a parsed list[str]; the fake defaults to
+# ["src/app.py"] when no file list is seeded.
+adapter: github
+interaction: get_pr_diff_names
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_pr_diff_names
+  args:
+  - '601'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '["src/app.py"]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

@@ -7,6 +7,10 @@ on:
     branches: [main]
   schedule:
     - cron: "30 3 * * 1"
+  # On-demand runs so a security fix (e.g. a sanitizer model-pack, #9143) can be
+  # validated against a branch without waiting for the weekly scan or an
+  # RC-promotion PR to main — CodeQL otherwise never runs on staging branches.
+  workflow_dispatch:
 
 permissions:
   security-events: write

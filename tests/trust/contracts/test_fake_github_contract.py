@@ -509,6 +509,147 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         reviews = await fake.get_pr_reviews(pr_number)
         return FakeOutput(exit_code=0, stdout=_json.dumps(reviews) + "\n", stderr="")
 
+    # --- PR/label read & query cluster (#9768 slice 4) ---
+
+    if method == "find_open_pr_for_branch":
+        import json as _json
+
+        branch = str(args[0])
+        # Seed an open PR on the branch so the lookup hits, not the
+        # number=0 absence sentinel (which get_pr_diff etc. never see).
+        fake.add_pr(number=777, issue_number=1, branch=branch)
+        info = await fake.find_open_pr_for_branch(branch)
+        assert info.number == 777, (
+            f"find_open_pr_for_branch returned the wrong PR: {info.number}"
+        )
+        stdout = _json.dumps(info.model_dump(mode="json")) + "\n"
+        return FakeOutput(exit_code=0, stdout=stdout, stderr="")
+
+    if method == "list_prs_by_label":
+        import json as _json
+
+        label = str(args[0])
+        # One matching open PR + one merged PR carrying the same label the
+        # method must exclude — pins the merged filter, not just the shape.
+        fake.add_pr(number=778, issue_number=2, branch="feat/x")
+        fake.add_pr_label(778, label)
+        fake.add_pr(number=779, issue_number=3, branch="feat/y", merged=True)
+        fake.add_pr_label(779, label)
+        prs = await fake.list_prs_by_label(label)
+        assert [p.number for p in prs] == [778], (
+            f"list_prs_by_label leaked a merged PR: {[p.number for p in prs]}"
+        )
+        stdout = _json.dumps([p.model_dump(mode="json") for p in prs]) + "\n"
+        return FakeOutput(exit_code=0, stdout=stdout, stderr="")
+
+    if method == "list_open_prs":
+        import json as _json
+
+        labels = [str(a) for a in args]
+        fake.add_pr(number=780, issue_number=4, branch="feat/z")
+        fake.add_pr_label(780, labels[0])
+        prs = await fake.list_open_prs(labels)
+        assert [p.pr for p in prs] == [780], (
+            f"list_open_prs returned unexpected PRs: {[p.pr for p in prs]}"
+        )
+        stdout = _json.dumps([p.model_dump(mode="json") for p in prs]) + "\n"
+        return FakeOutput(exit_code=0, stdout=stdout, stderr="")
+
+    if method == "list_all_open_prs":
+        import json as _json
+
+        # A bot PR carrying no HydraFlow label — invisible to the
+        # label-filtered list_open_prs, visible here (DependabotMergeLoop).
+        fake.add_pr(
+            number=781,
+            issue_number=0,
+            branch="dependabot/pip/foo",
+            author="dependabot[bot]",
+            is_bot=True,
+        )
+        prs = await fake.list_all_open_prs()
+        assert [p.pr for p in prs] == [781], (
+            f"list_all_open_prs returned unexpected PRs: {[p.pr for p in prs]}"
+        )
+        stdout = _json.dumps([p.model_dump(mode="json") for p in prs]) + "\n"
+        return FakeOutput(exit_code=0, stdout=stdout, stderr="")
+
+    if method == "list_conflicting_prs":
+        import dataclasses as _dc
+        import json as _json
+
+        # mergeable=False seeds the CONFLICTING PR the method surfaces; a
+        # mergeable PR must be excluded.
+        fake.add_pr(number=782, issue_number=5, branch="feat/conf", mergeable=False)
+        fake.add_pr(number=783, issue_number=6, branch="feat/ok")
+        conflicts = await fake.list_conflicting_prs()
+        assert [c.number for c in conflicts] == [782], (
+            f"list_conflicting_prs returned unexpected PRs: "
+            f"{[c.number for c in conflicts]}"
+        )
+        stdout = _json.dumps([_dc.asdict(c) for c in conflicts]) + "\n"
+        return FakeOutput(exit_code=0, stdout=stdout, stderr="")
+
+    if method == "list_hitl_items":
+        import json as _json
+
+        hitl_labels = [str(a) for a in args]
+        # One open issue at a HITL label + a closed one that must be
+        # excluded (list_hitl_items only reports open issues).
+        fake.add_issue(305, "Escalated issue", "body", labels=[hitl_labels[0]])
+        fake.add_issue(
+            306, "Closed HITL", "body", labels=[hitl_labels[0]], state="closed"
+        )
+        items = await fake.list_hitl_items(hitl_labels)
+        assert [i.issue for i in items] == [305], (
+            f"list_hitl_items returned unexpected issues: {[i.issue for i in items]}"
+        )
+        stdout = _json.dumps([i.model_dump(mode="json") for i in items]) + "\n"
+        return FakeOutput(exit_code=0, stdout=stdout, stderr="")
+
+    if method == "get_label_counts":
+        import json as _json
+
+        from config import HydraFlowConfig
+
+        # Seed a non-trivial world: two open issues at distinct pipeline
+        # labels, one closed-fixed issue, one merged PR — so every count in
+        # the LabelCounts TypedDict is exercised, not a vacuous all-zero dict.
+        fake.add_issue(210, "Open ready", "body", labels=["hydraflow-ready"])
+        fake.add_issue(211, "Open review", "body", labels=["hydraflow-review"])
+        fake.add_issue(
+            212, "Closed fixed", "body", labels=["hydraflow-fixed"], state="closed"
+        )
+        fake.add_pr(number=790, issue_number=210, branch="b", merged=True)
+        counts = await fake.get_label_counts(HydraFlowConfig())
+        return FakeOutput(exit_code=0, stdout=_json.dumps(counts) + "\n", stderr="")
+
+    if method == "get_pr_diff":
+        pr_number = int(args[0])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        diff = await fake.get_pr_diff(pr_number)
+        return FakeOutput(exit_code=0, stdout=f"{diff}\n", stderr="")
+
+    if method == "get_pr_diff_names":
+        import json as _json
+
+        pr_number = int(args[0])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        names = await fake.get_pr_diff_names(pr_number)
+        return FakeOutput(exit_code=0, stdout=_json.dumps(names) + "\n", stderr="")
+
+    if method == "get_pr_head_sha":
+        pr_number = int(args[0])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        sha = await fake.get_pr_head_sha(pr_number)
+        return FakeOutput(exit_code=0, stdout=f"{sha}\n", stderr="")
+
+    if method == "get_pr_recent_commit_diffs":
+        pr_number = int(args[0])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        diffs = await fake.get_pr_recent_commit_diffs(pr_number)
+        return FakeOutput(exit_code=0, stdout=f"{diffs}\n", stderr="")
+
     msg = f"FakeGitHub has no contract-tested method {method!r}"
     raise NotImplementedError(msg)
 
