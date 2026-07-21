@@ -4,6 +4,8 @@
 **Date:** 2026-02-26
 **Enforcement:** enforced
 **Enforced by:** pytest:tests/test_state_machine.py
+**Amended by:** ADR-0107 (Collapse Discover + Shape into Plan) — removes the
+`hydraflow-discover` / `hydraflow-shape` labels from the state machine.
 
 ## Context
 
@@ -66,3 +68,5 @@ State is polled, not pushed: each loop queries GitHub for issues with its label.
 - `src/config.py:all_pipeline_labels` — the full label set
 - `tests/test_state_machine.py` — property-based invariant tests
 - ADR-0001 (Five Concurrent Async Loops) for why polling loops were chosen over a push-based model
+- ADR-0107 (Collapse Discover + Shape into Plan) — amends this state machine by
+  removing the `hydraflow-discover` / `hydraflow-shape` labels

@@ -334,9 +334,16 @@ class TriagePhase:
             return 1
 
         routing_outcome: str = "unknown"
-        if result.needs_discovery or (
-            result.ready and result.clarity_score < self._config.clarity_threshold
-        ):
+        # ADR-0107: when collapse_discover_shape is enabled, Triage stops
+        # emitting the hydraflow-discover transition entirely. Ready issues go
+        # straight to Plan and the discovery/shaping decision moves into the
+        # planner's gate. The clarity_score / needs_discovery signals survive on
+        # the TriageResult as planner hints rather than a triage routing verdict.
+        route_to_discovery = not self._config.collapse_discover_shape and (
+            result.needs_discovery
+            or (result.ready and result.clarity_score < self._config.clarity_threshold)
+        )
+        if route_to_discovery:
             # Vague or broad issue — route to product discovery track
             self._store.enqueue_transition(issue, "discover")
             await self._transitioner.transition(issue.id, "discover")
