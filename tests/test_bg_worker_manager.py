@@ -211,11 +211,96 @@ class TestInterval:
         assert mgr.get_interval("myloop") != config.poll_interval
 
 
+class TestWatchdogTimeout:
+    """Mirrors TestInterval for the per-loop watchdog-timeout override (#9503)."""
+
+    def test_override(self, manager: BGWorkerManager) -> None:
+        manager.set_timeout("memory_sync", 3600)
+        assert manager.get_timeout("memory_sync") == 3600
+
+    def test_default_falls_back_to_config_default(
+        self, manager: BGWorkerManager
+    ) -> None:
+        # No loop registered for "memory_sync" in the bare `manager` fixture,
+        # so it takes the plain config default (mirrors get_interval's
+        # unknown-name fallback).
+        assert manager.get_timeout("memory_sync") == (
+            manager._config.loop_watchdog_default_seconds
+        )
+
+    def test_registered_loop_uses_its_own_default_cycle_timeout(
+        self, config: HydraFlowConfig, state: Any
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        fake_loop = MagicMock()
+        fake_loop._default_cycle_timeout_seconds.return_value = 14400
+        mgr = BGWorkerManager(config, state, {"myloop": fake_loop})
+        assert mgr.get_timeout("myloop") == 14400
+        assert mgr.get_timeout("myloop") != config.loop_watchdog_default_seconds
+
+    def test_override_takes_priority_over_loop_default(
+        self, config: HydraFlowConfig, state: Any
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        fake_loop = MagicMock()
+        fake_loop._default_cycle_timeout_seconds.return_value = 14400
+        mgr = BGWorkerManager(config, state, {"myloop": fake_loop})
+        mgr.set_timeout("myloop", 900)
+        assert mgr.get_timeout("myloop") == 900
+
+    def test_persists_to_state(self, manager: BGWorkerManager) -> None:
+        manager.set_timeout("x", 5400)
+        saved = manager._state.get_watchdog_timeouts()
+        assert saved["x"] == 5400
+
+    def test_clear_removes_override_and_persists(
+        self, manager: BGWorkerManager
+    ) -> None:
+        manager.set_timeout("memory_sync", 99)
+        manager.clear_timeout("memory_sync")
+        assert manager.get_timeout("memory_sync") == (
+            manager._config.loop_watchdog_default_seconds
+        )
+        assert "memory_sync" not in manager._state.get_watchdog_timeouts()
+
+    def test_clear_missing_override_is_noop(self, manager: BGWorkerManager) -> None:
+        manager.clear_timeout("never_set")
+        assert "never_set" not in manager._state.get_watchdog_timeouts()
+
+    def test_unread_override_would_be_a_silent_no_op_without_wiring(
+        self, config: HydraFlowConfig, state: Any
+    ) -> None:
+        """Regression guard for the read path (#9503).
+
+        Setting an override only matters if something reads it back through
+        the SAME name the loop uses at cycle time — this proves get_timeout
+        (the method wired as every shared-deps loop's ``timeout_cb``) is the
+        one that observes it, not some other internal-only accessor.
+        """
+        from unittest.mock import MagicMock
+
+        fake_loop = MagicMock()
+        fake_loop._default_cycle_timeout_seconds.return_value = 7200
+        mgr = BGWorkerManager(config, state, {"repo_wiki": fake_loop})
+        assert mgr.get_timeout("repo_wiki") == 7200
+
+        mgr.set_timeout("repo_wiki", 1800)
+
+        assert mgr.get_timeout("repo_wiki") == 1800
+
+
 class TestRestoreMethods:
     def test_restore_intervals(self, manager: BGWorkerManager) -> None:
         manager._restore_intervals({"memory_sync": 120, "metrics": 60})
         assert manager.get_interval("memory_sync") == 120
         assert manager.get_interval("metrics") == 60
+
+    def test_restore_timeouts(self, manager: BGWorkerManager) -> None:
+        manager._restore_timeouts({"memory_sync": 3600, "metrics": 1800})
+        assert manager.get_timeout("memory_sync") == 3600
+        assert manager.get_timeout("metrics") == 1800
 
     def test_restore_enabled_flags(self, manager: BGWorkerManager) -> None:
         manager._restore_enabled_flags({"memory_sync", "metrics"})

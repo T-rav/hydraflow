@@ -78,6 +78,17 @@ class WorkerStateMixin:
         self._data.worker_intervals = intervals
         self.save()
 
+    # --- watchdog timeout overrides (#9503, mirrors worker interval overrides) ---
+
+    def get_watchdog_timeouts(self) -> dict[str, int]:
+        """Return persisted per-loop watchdog-timeout overrides."""
+        return dict(self._data.watchdog_timeouts)
+
+    def set_watchdog_timeouts(self, timeouts: dict[str, int]) -> None:
+        """Persist per-loop watchdog-timeout overrides."""
+        self._data.watchdog_timeouts = timeouts
+        self.save()
+
     # --- disabled workers ---
 
     def get_disabled_workers(self) -> set[str]:

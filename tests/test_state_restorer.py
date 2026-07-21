@@ -51,6 +51,24 @@ class TestRestoreAll:
         restorer.restore_all(recovered, impl, review, hitl)
         assert restorer._bg_workers.get_interval("memory_sync") == 120
 
+    def test_restores_watchdog_timeouts(
+        self, restorer: StateRestorer, state: Any
+    ) -> None:
+        """Mirrors test_restores_worker_intervals for the watchdog override (#9503)."""
+        state.set_watchdog_timeouts({"memory_sync": 3600})
+        recovered: set[int] = set()
+        impl: set[int] = set()
+        review: set[int] = set()
+        hitl: set[int] = set()
+        restorer.restore_all(recovered, impl, review, hitl)
+        assert restorer._bg_workers.get_timeout("memory_sync") == 3600
+
+    def test_restore_watchdog_timeouts_noop_when_none_saved(
+        self, restorer: StateRestorer, bg_workers: BGWorkerManager
+    ) -> None:
+        restorer._restore_watchdog_timeouts()
+        assert bg_workers.worker_timeouts == {}
+
     def test_restores_crash_recovered_issues(
         self, restorer: StateRestorer, state: Any
     ) -> None:

@@ -193,7 +193,7 @@ function AppContent() {
   const {
     connected, orchestratorStatus, workers, prs,
     hitlItems, humanInputRequests, submitHumanInput, refreshHitl,
-    backgroundWorkers, systemAlert, dismissSystemAlert, refreshCreditStatus, clearCreditPause, intents, toggleBgWorker, triggerBgWorker, updateBgWorkerInterval,
+    backgroundWorkers, systemAlert, dismissSystemAlert, refreshCreditStatus, clearCreditPause, intents, toggleBgWorker, triggerBgWorker, updateBgWorkerInterval, updateBgWorkerWatchdogTimeout,
     requestChanges,
     config,
     reporterId,
@@ -283,6 +283,7 @@ function AppContent() {
               onToggleBgWorker={toggleBgWorker}
               onTriggerBgWorker={triggerBgWorker}
               onUpdateInterval={updateBgWorkerInterval}
+              onUpdateWatchdogTimeout={updateBgWorkerWatchdogTimeout}
             />
           )}
         </div>

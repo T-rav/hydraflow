@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import time
 from collections.abc import Generator
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -994,6 +996,227 @@ class TestReviewFeedbackPassing:
 
 
 # ---------------------------------------------------------------------------
+# Base-freshness guard (#10101, the #9964 class)
+# ---------------------------------------------------------------------------
+
+
+def _fake_git_runner(
+    *, merge_base_sha: str = "deadbeef", epoch: int
+) -> SimpleNamespace:
+    """Build a fake ``AgentRunner._runner`` with controllable git output.
+
+    Returns objects that only expose ``.stdout`` (like the real
+    ``execution.SimpleResult``) so ``_merge_base_age_days``'s
+    ``getattr(..., "stdout", "")`` reads work without importing the real
+    dataclass.
+    """
+
+    async def run_simple(
+        cmd: list[str], *, cwd: str | None = None, timeout: float | None = None
+    ) -> SimpleNamespace:
+        if cmd[:2] == ["git", "merge-base"]:
+            return SimpleNamespace(stdout=f"{merge_base_sha}\n")
+        if cmd[:2] == ["git", "log"]:
+            return SimpleNamespace(stdout=f"{epoch}\n")
+        raise AssertionError(f"unexpected command in fake git runner: {cmd}")
+
+    return SimpleNamespace(run_simple=AsyncMock(side_effect=run_simple))
+
+
+class TestBaseFreshnessGuard:
+    """Refuse/auto-update a stale merge-base before ``gh pr create``."""
+
+    @pytest.mark.asyncio
+    async def test_fresh_merge_base_creates_pr_normally(
+        self, config: HydraFlowConfig, tmp_path: Path
+    ) -> None:
+        """A merge-base within the age threshold does not trigger any update."""
+        issue = TaskFactory.create()
+        fresh_epoch = int(time.time()) - 3600  # 1 hour old — well under 3 days
+        phase, mock_wt, mock_prs = make_implement_phase(
+            config, [issue], create_pr_return=PRInfoFactory.create()
+        )
+        phase._agents._runner = _fake_git_runner(epoch=fresh_epoch)
+        result = WorkerResultFactory.create(
+            issue_number=issue.id,
+            branch="agent/issue-42",
+            workspace_path=str(tmp_path),
+        )
+
+        pr = await phase._resolve_pr(issue, result, is_retry=False)
+
+        mock_wt.merge_main.assert_not_awaited()
+        mock_prs.create_pr.assert_awaited_once()
+        assert pr is not None
+        assert pr.number != 0
+
+    @pytest.mark.asyncio
+    async def test_stale_merge_base_auto_updates_then_creates_pr(
+        self, config: HydraFlowConfig, tmp_path: Path
+    ) -> None:
+        """A merge-base older than the threshold triggers merge_main + push,
+        then still opens the PR once the branch is updated."""
+        issue = TaskFactory.create()
+        stale_epoch = int(time.time()) - (10 * 86400)  # 10 days old
+        phase, mock_wt, mock_prs = (
+            ImplementPhaseMockBuilder(config)
+            .with_issues([issue])
+            .with_create_pr_return(PRInfoFactory.create())
+            .with_wt_method("merge_main", AsyncMock(return_value=True))
+            .build()
+        )
+        phase._agents._runner = _fake_git_runner(epoch=stale_epoch)
+        result = WorkerResultFactory.create(
+            issue_number=issue.id,
+            branch="agent/issue-42",
+            workspace_path=str(tmp_path),
+        )
+
+        pr = await phase._resolve_pr(issue, result, is_retry=False)
+
+        mock_wt.merge_main.assert_awaited_once_with(tmp_path, "agent/issue-42")
+        mock_prs.push_branch.assert_awaited()
+        mock_prs.create_pr.assert_awaited_once()
+        assert pr is not None
+        assert pr.number != 0
+
+    @pytest.mark.asyncio
+    async def test_stale_merge_base_refuses_when_update_fails(
+        self, config: HydraFlowConfig, tmp_path: Path
+    ) -> None:
+        """When the auto-update can't complete (merge conflict), the PR is
+        never opened — a zero-number sentinel routes to the no-PR fallback."""
+        issue = TaskFactory.create()
+        stale_epoch = int(time.time()) - (10 * 86400)
+        phase, mock_wt, mock_prs = (
+            ImplementPhaseMockBuilder(config)
+            .with_issues([issue])
+            .with_create_pr_return(PRInfoFactory.create())
+            .with_wt_method("merge_main", AsyncMock(return_value=False))
+            .build()
+        )
+        phase._agents._runner = _fake_git_runner(epoch=stale_epoch)
+        result = WorkerResultFactory.create(
+            issue_number=issue.id,
+            branch="agent/issue-42",
+            workspace_path=str(tmp_path),
+        )
+
+        pr = await phase._resolve_pr(issue, result, is_retry=False)
+
+        mock_wt.merge_main.assert_awaited_once()
+        mock_prs.create_pr.assert_not_awaited()
+        assert pr is not None
+        assert pr.number == 0
+        assert result.pr_info is pr
+
+    @pytest.mark.asyncio
+    async def test_guard_disabled_skips_freshness_check(
+        self, config: HydraFlowConfig, tmp_path: Path
+    ) -> None:
+        """The kill-switch bypasses the check even on a very stale base."""
+        config.pr_base_freshness_guard_enabled = False
+        issue = TaskFactory.create()
+        stale_epoch = int(time.time()) - (365 * 86400)  # 1 year old
+        phase, mock_wt, mock_prs = make_implement_phase(
+            config, [issue], create_pr_return=PRInfoFactory.create()
+        )
+        phase._agents._runner = _fake_git_runner(epoch=stale_epoch)
+        result = WorkerResultFactory.create(
+            issue_number=issue.id,
+            branch="agent/issue-42",
+            workspace_path=str(tmp_path),
+        )
+
+        pr = await phase._resolve_pr(issue, result, is_retry=False)
+
+        mock_wt.merge_main.assert_not_awaited()
+        mock_prs.create_pr.assert_awaited_once()
+        assert pr is not None
+        assert pr.number != 0
+
+    @pytest.mark.asyncio
+    async def test_knob_threshold_is_configurable(
+        self, config: HydraFlowConfig, tmp_path: Path
+    ) -> None:
+        """Raising pr_base_max_age_days tolerates a base that would
+        otherwise be flagged stale under the default threshold."""
+        config.pr_base_max_age_days = 30
+        issue = TaskFactory.create()
+        ten_days_old = int(time.time()) - (10 * 86400)
+        phase, mock_wt, mock_prs = make_implement_phase(
+            config, [issue], create_pr_return=PRInfoFactory.create()
+        )
+        phase._agents._runner = _fake_git_runner(epoch=ten_days_old)
+        result = WorkerResultFactory.create(
+            issue_number=issue.id,
+            branch="agent/issue-42",
+            workspace_path=str(tmp_path),
+        )
+
+        pr = await phase._resolve_pr(issue, result, is_retry=False)
+
+        mock_wt.merge_main.assert_not_awaited()
+        mock_prs.create_pr.assert_awaited_once()
+        assert pr is not None
+        assert pr.number != 0
+
+    @pytest.mark.asyncio
+    async def test_retry_path_never_invokes_guard(
+        self, config: HydraFlowConfig, tmp_path: Path
+    ) -> None:
+        """The guard only gates ``gh pr create``; the retry/recovery path
+        (find_open_pr_for_branch) is untouched."""
+        issue = TaskFactory.create()
+        stale_epoch = int(time.time()) - (365 * 86400)
+        phase, mock_wt, mock_prs = (
+            ImplementPhaseMockBuilder(config)
+            .with_issues([issue])
+            .with_prs_method(
+                "find_open_pr_for_branch",
+                AsyncMock(return_value=PRInfoFactory.create()),
+            )
+            .build()
+        )
+        phase._agents._runner = _fake_git_runner(epoch=stale_epoch)
+        result = WorkerResultFactory.create(
+            issue_number=issue.id,
+            branch="agent/issue-42",
+            workspace_path=str(tmp_path),
+        )
+
+        pr = await phase._resolve_pr(issue, result, is_retry=True)
+
+        mock_wt.merge_main.assert_not_awaited()
+        mock_prs.create_pr.assert_not_awaited()
+        assert pr is not None
+        assert pr.number != 0
+
+    @pytest.mark.asyncio
+    async def test_missing_runner_fails_open(
+        self, config: HydraFlowConfig, tmp_path: Path
+    ) -> None:
+        """No agent runner available (e.g. never started) — never blocks the PR."""
+        issue = TaskFactory.create()
+        phase, mock_wt, mock_prs = make_implement_phase(
+            config, [issue], create_pr_return=PRInfoFactory.create()
+        )
+        phase._agents._runner = None
+        result = WorkerResultFactory.create(
+            issue_number=issue.id,
+            branch="agent/issue-42",
+            workspace_path=str(tmp_path),
+        )
+
+        pr = await phase._resolve_pr(issue, result, is_retry=False)
+
+        mock_wt.merge_main.assert_not_awaited()
+        mock_prs.create_pr.assert_awaited_once()
+        assert pr is not None
+        assert pr.number != 0
+
+
+# ---------------------------------------------------------------------------
 # Worker result metadata persistence
 # ---------------------------------------------------------------------------
 
@@ -1101,6 +1324,51 @@ class TestWorkerResultMetaPersistence:
         led = phase._state.get_convergence_ledger(42)
         assert led is not None
         assert led.stage_state["quality_fix"].attempts == 2
+
+    @pytest.mark.asyncio
+    async def test_zero_quality_fix_attempts_writes_no_stage_record(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """count == 0 must not create an empty quality_fix stage record.
+
+        Regression for #9685 (2c): implement_phase previously called
+        ``set_quality_fix_attempts`` unconditionally, writing an empty
+        ``stage_state["quality_fix"]`` entry for every issue even when no
+        fix round happened. The retrospective reader
+        (``ConvergenceLedger.get_attempts``) already defaults to 0 for a
+        missing stage, so the write is conditionalized to count > 0 and the
+        retrospective-read behavior (0) is unchanged either way.
+        """
+        issue = TaskFactory.create(id=42)
+
+        async def agent_no_qf(
+            issue: Task,
+            wt_path: Path,
+            branch: str,
+            worker_id: int = 0,
+            review_feedback: str = "",
+            prior_failure: str = "",
+        ) -> WorkerResult:
+            return WorkerResultFactory.create(
+                issue_number=issue.id,
+                branch=branch,
+                success=True,
+                workspace_path=str(wt_path),
+                quality_fix_attempts=0,
+            )
+
+        phase, _, _ = make_implement_phase(config, [issue], agent_run=agent_no_qf)
+        await phase.run_batch()
+
+        led = phase._state.get_convergence_ledger(42)
+        # No fix round happened and nothing else in this flow touches the
+        # ledger, so no ConvergenceLedger is created for the issue at all.
+        assert led is None or "quality_fix" not in led.stage_state
+        # Retrospective read behavior is unchanged either way: retrospective.py
+        # reads `led.get_attempts("quality_fix") if led else 0`, which is 0
+        # whether the ledger is absent or present without the stage.
+        quality_fix_rounds = led.get_attempts("quality_fix") if led else 0
+        assert quality_fix_rounds == 0
 
     @pytest.mark.asyncio
     async def test_worker_result_meta_no_longer_has_quality_fix_attempts(

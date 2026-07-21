@@ -265,6 +265,20 @@ export const WORKER_PRESETS = {
 export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'auto_tighten', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry', 'convergence_oscillation', 'gate_health', 'issue_refinement'])
 
 /**
+ * Preset options for the per-loop watchdog-timeout override (#9503).
+ * Unlike interval presets, one set covers every editable worker — the
+ * watchdog is a uniform hang-safety bound, not a domain-specific cadence.
+ * Spans loop_watchdog_default_seconds (2h) and loop_watchdog_llm_seconds (4h).
+ */
+export const WATCHDOG_TIMEOUT_PRESETS = [
+  { label: '30m', seconds: 1800 },
+  { label: '1h', seconds: 3600 },
+  { label: '2h', seconds: 7200 },
+  { label: '4h', seconds: 14400 },
+  { label: '8h', seconds: 28800 },
+]
+
+/**
  * Default intervals (in seconds) for system workers.
  * Used as fallback when state?.interval_seconds is not yet available
  * (e.g., before the worker's first run report from the backend).

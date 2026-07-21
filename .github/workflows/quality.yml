@@ -141,6 +141,9 @@ jobs:
       - name: Set up uv
         if: ${{ needs.changes.outputs.code == 'true' && (hashFiles(format('{0}/Makefile', matrix.project_dir), format('{0}/makefile', matrix.project_dir), format('{0}/GNUmakefile', matrix.project_dir)) != '') }}
         uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - name: Set up Node
         if: ${{ needs.changes.outputs.code == 'true' && (hashFiles(format('{0}/package.json', matrix.project_dir)) != '') }}
         uses: actions/setup-node@v4
@@ -170,6 +173,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # #dedup: the repo ROOT's full quality is already covered by ci.yml's
+          # granular lanes (Lint/Tests/Type Check/Architecture Check), so running
+          # a full `make quality` on `.` here just runs the whole suite twice per
+          # PR. Skip it — the job still reports `quality (.)` SUCCESS (a required
+          # check), we just don't redo the work. Managed SUB-projects (e.g.
+          # src/ui) still get their own `make quality` below.
+          if [ "${{ matrix.project_dir }}" = "." ]; then
+            echo "Root covered by ci.yml lanes (#dedup); skipping redundant make quality."
+            exit 0
+          fi
           cd "${{ matrix.project_dir }}"
           if [ -f Makefile ] || [ -f makefile ] || [ -f GNUmakefile ]; then
             make quality
@@ -181,6 +194,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # #dedup: root smoke is covered by ci.yml's Smoke Tests lane.
+          if [ "${{ matrix.project_dir }}" = "." ]; then
+            echo "Root smoke covered by ci.yml (#dedup); skipping."
+            exit 0
+          fi
           cd "${{ matrix.project_dir }}"
           if [ -f Makefile ] || [ -f makefile ] || [ -f GNUmakefile ]; then
             if make -n smoke >/dev/null 2>&1; then
