@@ -2207,10 +2207,12 @@ class PRManager:
                 "",
             )
             body = pr.get("body") or ""
-            m = fixes_re.search(body)
-            if not m:
+            matched_issue_ns = list(
+                dict.fromkeys(int(m.group(1)) for m in fixes_re.finditer(body))
+            )
+            if not matched_issue_ns:
                 continue
-            issue_n = int(m.group(1))
+            issue_n = matched_issue_ns[0]
 
             # Commit count is fetched per-PR (only for Fixes-matched PRs, which
             # already trigger an issue fetch below) — requesting `commits` in the
@@ -2259,12 +2261,48 @@ class PRManager:
             # re-file until the operator closes it. Draft PRs are excluded —
             # a not-ready-for-review PR isn't a reliable resolved signal even
             # with green CI (mirrors find_open_resolving_pr's draft check).
-            escalations = issue_labels & {"hitl-escalation", "diagnose-failed"}
+            # A body can link more than one issue (e.g. an epic PR) — the
+            # escalated issue may not be the first Fixes/Closes/Resolves
+            # match, so every matched issue is a candidate, not just the
+            # primary one already fetched above (#10260 review; mirrors
+            # find_open_resolving_pr's finditer scan).
+            escalation_issue_n = issue_n
+            escalation_labels = issue_labels
+            if not ({"hitl-escalation", "diagnose-failed"} <= escalation_labels):
+                for candidate_n in matched_issue_ns[1:]:
+                    candidate_raw = await self._gh_json_query(
+                        "gh",
+                        "issue",
+                        "view",
+                        str(candidate_n),
+                        "--repo",
+                        self._repo,
+                        "--json",
+                        "labels",
+                        dry_run_return={"labels": []},
+                        error_log=(
+                            f"find_label_drift: issue {candidate_n} fetch failed"
+                        ),
+                    )
+                    if not isinstance(candidate_raw, dict):
+                        continue
+                    candidate_labels = {
+                        lbl.get("name", "")
+                        for lbl in (candidate_raw.get("labels") or [])
+                        if isinstance(lbl, dict)
+                    }
+                    if {"hitl-escalation", "diagnose-failed"} <= candidate_labels:
+                        escalation_issue_n = candidate_n
+                        escalation_labels = candidate_labels
+                        break
+
+            escalations = escalation_labels & {"hitl-escalation", "diagnose-failed"}
             kind: str | None = None
             issue_label = issue_pipeline
-            if {"hitl-escalation", "diagnose-failed"} <= issue_labels and not pr.get(
-                "isDraft"
-            ):
+            if {
+                "hitl-escalation",
+                "diagnose-failed",
+            } <= escalation_labels and not pr.get("isDraft"):
                 checks = await self.get_pr_checks(pr_n)
                 if checks and all(
                     c.get("state", "").upper() in self._PASSING_STATES for c in checks
@@ -2288,7 +2326,11 @@ class PRManager:
                 continue
             out.append(
                 LabelDrift(
-                    issue=issue_n,
+                    issue=(
+                        escalation_issue_n
+                        if kind == "escalated_with_resolving_pr"
+                        else issue_n
+                    ),
                     pr=pr_n,
                     pr_commits=commits,
                     issue_label=issue_label,

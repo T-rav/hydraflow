@@ -487,3 +487,90 @@ class TestFindLabelDriftEscalatedWithResolvingPR:
             drift = await mgr.find_label_drift()
 
         assert drift == []
+
+    @pytest.mark.asyncio
+    async def test_detects_escalated_issue_when_not_the_first_fixes_link(
+        self, config, event_bus
+    ) -> None:
+        """#10260 review: an epic-style PR body can carry more than one
+        Fixes/Closes/Resolves link. The escalated issue must be detected
+        even when it isn't the first (leftmost) match — mirrors
+        ``find_open_resolving_pr``'s finditer scan (gotcha #0311), which
+        this same escalation-clearing path must not regress on."""
+        mgr = make_pr_manager(config, event_bus)
+        prs_json = json.dumps(
+            [
+                {
+                    "number": 100,
+                    "labels": [],
+                    "body": "Closes #10.\n\nAlso fixes #42 in this PR.",
+                }
+            ]
+        )
+        issue_10_json = json.dumps({"labels": [{"name": "hydraflow-review"}]})
+        issue_42_json = json.dumps(
+            {"labels": [{"name": "hitl-escalation"}, {"name": "diagnose-failed"}]}
+        )
+        checks_json = json.dumps([{"name": "Tests", "state": "SUCCESS"}])
+
+        async def _side_effect(*args, **kwargs):
+            if "list" in args:
+                return prs_json
+            if "checks" in args:
+                return checks_json
+            if "view" in args and "pr" in args:
+                return _commits_json(1)
+            if "view" in args and "10" in args:
+                return issue_10_json
+            if "view" in args and "42" in args:
+                return issue_42_json
+            raise AssertionError(f"unexpected gh call: {args}")
+
+        with patch(
+            "pr_manager.run_subprocess_with_retry",
+            new=AsyncMock(side_effect=_side_effect),
+        ):
+            drift = await mgr.find_label_drift()
+
+        assert len(drift) == 1
+        assert drift[0].kind == "escalated_with_resolving_pr"
+        assert drift[0].issue == 42
+        assert drift[0].pr == 100
+
+    @pytest.mark.asyncio
+    async def test_not_detected_when_no_matched_issue_is_escalated(
+        self, config, event_bus
+    ) -> None:
+        """Sanity check for the multi-link scan: when NEITHER matched issue
+        carries both escalation labels, no drift is reported."""
+        mgr = make_pr_manager(config, event_bus)
+        prs_json = json.dumps(
+            [
+                {
+                    "number": 100,
+                    "labels": [],
+                    "body": "Closes #10.\n\nAlso fixes #42 in this PR.",
+                }
+            ]
+        )
+        issue_10_json = json.dumps({"labels": [{"name": "hydraflow-review"}]})
+        issue_42_json = json.dumps({"labels": [{"name": "hydraflow-ready"}]})
+
+        async def _side_effect(*args, **kwargs):
+            if "list" in args:
+                return prs_json
+            if "view" in args and "pr" in args:
+                return _commits_json(0)
+            if "view" in args and "10" in args:
+                return issue_10_json
+            if "view" in args and "42" in args:
+                return issue_42_json
+            raise AssertionError(f"unexpected gh call: {args}")
+
+        with patch(
+            "pr_manager.run_subprocess_with_retry",
+            new=AsyncMock(side_effect=_side_effect),
+        ):
+            drift = await mgr.find_label_drift()
+
+        assert drift == []
