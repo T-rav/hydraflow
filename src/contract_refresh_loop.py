@@ -108,6 +108,18 @@ class AdapterPlan:
     cassette_dir_relpath: str  # under repo_root
 
 
+# Committed claude-stream samples that expand the StreamParser contract
+# corpus (tests/trust/contracts/test_fake_llm_contract.py parametrizes over
+# every *.jsonl in the directory) beyond the single fixed prompt
+# ``record_claude_stream`` actually sends. These are permanent
+# hand-authored fixtures — no recorder tick will ever regenerate them — so
+# diffing must not flag their permanent absence from the recording as
+# "deleted". Without this, the claude adapter's fleet report always has a
+# non-empty ``deleted_cassettes`` bucket, so it never has a clean tick and
+# its ContractRefreshLoop attempt counter (Task 18) climbs forever without
+# ever resetting (issue #10220).
+_CLAUDE_IGNORE_DELETED: frozenset[str] = frozenset({"stream_001_list_primes.jsonl"})
+
 ADAPTER_PLANS: tuple[AdapterPlan, ...] = (
     AdapterPlan(
         name="github", cassette_dir_relpath="tests/trust/contracts/cassettes/github"
@@ -835,7 +847,11 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         tmp_root.mkdir(parents=True, exist_ok=True)
         recordings = await self._record_all(tmp_root)
 
-        fleet: FleetDriftReport = detect_fleet_drift(recordings, self._config.repo_root)
+        fleet: FleetDriftReport = detect_fleet_drift(
+            recordings,
+            self._config.repo_root,
+            ignore_deleted_names={"claude": _CLAUDE_IGNORE_DELETED},
+        )
 
         # Task 18 — update attempt counters on EVERY tick, before any
         # short-circuits, so dedup-suppressed drift still counts toward

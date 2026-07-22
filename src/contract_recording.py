@@ -50,6 +50,7 @@ Ubiquitous language
 
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 from datetime import UTC, datetime
@@ -57,6 +58,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from agent_cli import claude_isolation_flags
 
 logger = logging.getLogger("hydraflow.contract_recording")
 
@@ -997,13 +1000,85 @@ def record_docker(tmp_cassette_dir: Path) -> list[Path]:
     return [path]
 
 
+CLAUDE_STREAM_FILENAME = "stream_001_ping.jsonl"
+
+# Placeholder substituted for live assistant/result text (see
+# ``_redact_claude_text``). Deliberately unambiguous so anyone reading a
+# committed cassette can tell at a glance that the wording was redacted,
+# not really said by the model.
+_CLAUDE_TEXT_PLACEHOLDER = "<redacted: non-deterministic assistant text>"
+
+
+def _redact_claude_text(raw_stdout: str) -> str:
+    """Replace free-form assistant/result text with a stable placeholder.
+
+    ``claude -p`` text is live LLM output — it varies on every call even
+    for the identical "ping" prompt (issue #10220: the claude adapter's
+    ContractRefreshLoop attempt counter never reset because a fresh
+    recording essentially never matched the previously committed one, so
+    the adapter could never reach a clean tick and kept re-escalating).
+    The StreamParser contract only requires a non-empty display/result —
+    see ``tests/trust/contracts/test_fake_llm_contract.py`` — not any
+    particular wording, so pinning the wording to a fixed placeholder
+    keeps the recording deterministic without weakening the structural
+    (event-shape) contract. Only the ``assistant`` message's ``text``
+    content blocks and the terminal ``result`` event's ``result`` string
+    are touched; empty strings are left empty so "no text produced" is
+    still distinguishable from "text produced".
+    """
+    out_lines: list[str] = []
+    for raw_line in raw_stdout.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            out_lines.append(raw_line)
+            continue
+        try:
+            event = json.loads(stripped)
+        except json.JSONDecodeError:
+            out_lines.append(raw_line)
+            continue
+        if not isinstance(event, dict):
+            out_lines.append(raw_line)
+            continue
+        _redact_event_text(event)
+        out_lines.append(json.dumps(event))
+    trailing_newline = "\n" if raw_stdout.endswith("\n") else ""
+    return "\n".join(out_lines) + trailing_newline
+
+
+def _redact_event_text(event: dict[str, Any]) -> None:
+    """Mutate *event* in place, redacting its free-form text fields."""
+    if event.get("type") == "assistant":
+        message = event.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list):
+            for block in content:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "text"
+                    and block.get("text")
+                ):
+                    block["text"] = _CLAUDE_TEXT_PLACEHOLDER
+    elif event.get("type") == "result":
+        if isinstance(event.get("result"), str) and event["result"]:
+            event["result"] = _CLAUDE_TEXT_PLACEHOLDER
+
+
 def record_claude_stream(tmp_stream_dir: Path) -> list[Path]:
     """Record a minimal ``claude`` stream JSONL.
 
     Runs ``claude -p "ping" --output-format stream-json --verbose`` and
-    writes the raw stdout to ``<tmp_stream_dir>/stream_001_ping.jsonl``.
-    The Claude adapter cassette is *not* YAML — it is a raw JSONL file
-    because the fake replays lines verbatim.
+    writes the redacted stdout (see ``_redact_claude_text``) to
+    ``<tmp_stream_dir>/stream_001_ping.jsonl``. The Claude adapter
+    cassette is *not* YAML — it is a raw JSONL file because the fake
+    replays lines verbatim.
+
+    ``claude_isolation_flags()`` restricts the spawn to project-scope
+    settings so a host/user-level plugin's ``SessionStart`` hook (e.g.
+    superpowers) can't inject its skill-invocation guidance into the
+    recording — that guidance is large, changes whenever the plugin's
+    skill content changes, and has nothing to do with the stream-json
+    protocol shape this cassette exists to guard (issue #10220).
 
     Returns ``[]`` if ``claude`` is missing, exits non-zero, or produces
     empty stdout (a zero-byte stream is useless as a fixture and would
@@ -1019,6 +1094,7 @@ def record_claude_stream(tmp_stream_dir: Path) -> list[Path]:
         "--output-format",
         "stream-json",
         "--verbose",
+        *claude_isolation_flags(),
     ]
     proc = _run(argv)
     if not _require_success(proc, label="claude -p ping"):
@@ -1031,7 +1107,7 @@ def record_claude_stream(tmp_stream_dir: Path) -> list[Path]:
         )
         return []
 
-    path = tmp_stream_dir / "stream_001_ping.jsonl"
+    path = tmp_stream_dir / CLAUDE_STREAM_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(proc.stdout, encoding="utf-8")
+    path.write_text(_redact_claude_text(proc.stdout), encoding="utf-8")
     return [path]
