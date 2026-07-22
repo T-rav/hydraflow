@@ -319,14 +319,26 @@ class TriagePhase:
         try:
             result = await self._triage.evaluate(issue)
         except RuntimeError as exc:
-            # Infrastructure errors (empty LLM response, subprocess crash)
-            # should NOT escalate to HITL.  Leave the issue in the find queue
-            # so it gets retried on the next triage cycle.
+            # Infrastructure errors (empty/unparseable LLM response, subprocess
+            # crash/timeout) must NOT hot-retry. Leaving the issue find-labeled
+            # means the next triage tick re-picks it immediately, so a
+            # persistently-failing issue loops forever — a triage retry storm
+            # that burns the usage budget (a batch of ADR-conformance
+            # false-positives did exactly this). Park it instead: TriageRetryLoop
+            # re-dispatches parked issues with backoff and a
+            # ``triage_retry_max_attempts`` cap, escalating to HITL once the
+            # retry budget is spent — bounded, not infinite.
             logger.warning(
-                "Issue #%d triage skipped (infra error, will retry): %s",
+                "Issue #%d triage infra error — parking for bounded retry: %s",
                 issue.id,
                 exc,
             )
+            # Park (find -> parked); TriageRetryLoop then re-dispatches with
+            # backoff + the attempt cap. As with the other park sites in this
+            # phase, a swap failure propagates — swap_pipeline_labels adds the
+            # parked label before removing find, so a failure leaves the issue
+            # find-labeled (safe fallback), not label-less.
+            await self._prs.swap_pipeline_labels(issue.id, self._config.parked_label[0])
             return 0
 
         if self._config.dry_run:
