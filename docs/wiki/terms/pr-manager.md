@@ -5,13 +5,13 @@ kind: "adapter"
 bounded_context: "shared-kernel"
 code_anchor: "src/pr_manager.py:PRManager"
 aliases: ["pr manager", "github adapter", "pull request manager"]
-related: []
+related: [{"kind": "depends_on", "target": "01KVHDB0GY6PSQPWY90DH8TNQS"}, {"kind": "depends_on", "target": "01KY4QF8BE4Y5782543MPQNDQ0"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}]
 evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-22T10:56:21.147213+00:00"
-updated_at: "2026-07-22T10:56:21.147215+00:00"
+updated_at: "2026-07-22T15:07:38.028195+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-07-22T10:56:21.147157+00:00"
 proposal_signals: ["S2"]
