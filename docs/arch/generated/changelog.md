@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `d071fbd` — refactor(pipeline): collapse Discover+Shape into Plan — full removal (#9773) (#10166) (#10166) *(2026-07-21)*
 - `3f833ff` — fix(codeql): model scrub_secrets() as py/clear-text-storage sanitizer (#9143) (#10164) (#10164) *(2026-07-21)*
 - `dc6060b` — test(fake-coverage): cover final FakeGitHub adapter-surface slice — gap→0 (#9768) (#10165) (#10165) *(2026-07-21)*
 - `37dcabe` — feat(health): loop self-repair actuator — persistent error-heartbeat → auto-repair or file (#10140) (#10155) (#10155) *(2026-07-21)*
