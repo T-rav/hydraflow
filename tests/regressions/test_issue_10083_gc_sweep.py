@@ -191,6 +191,13 @@ _GRANDFATHERED_EXCLUSIONS: dict[str, str] = {
         "Cleared alongside triage_retry_attempts by TriageRetryStateMixin."
         "clear_triage_retry_attempts(), same TriageRetryLoop-owned reconcile."
     ),
+    "triage_infra_parked": (
+        "#10290: cleared alongside triage_retry_attempts by "
+        "TriageRetryStateMixin.clear_triage_retry_attempts() (which now also "
+        "drops the infra marker) on the same TriageRetryLoop-owned close-to-clear "
+        "reconcile. It's a transient per-park marker, not durable per-issue "
+        "state, and is also re-classified on every re-triage."
+    ),
     # --- wrong keyspace: PR-keyed, not issue-keyed ---
     "reviewed_prs": (
         "Keyed by pr_number (IssueStateMixin.mark_pr), not issue_number. PR "

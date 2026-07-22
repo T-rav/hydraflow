@@ -2214,6 +2214,11 @@ class StateData(BaseModel):
     # on the underlying issue closing (reconciled via gh issue list).
     triage_retry_attempts: dict[str, int] = Field(default_factory=dict)
     triage_retry_last_attempt: dict[str, str] = Field(default_factory=dict)
+    # Issue numbers (as strings) parked by a TRANSIENT INFRA failure rather than
+    # a 'needs author clarification' verdict (#10290). TriageRetryLoop re-flows
+    # these on the short triage_infra_retry_interval floor instead of the 24h
+    # clarification backoff; cleared on re-dispatch and on close-reconcile.
+    triage_infra_parked: list[str] = Field(default_factory=list)
     # LiveCorpusReplayLoop (#8786 Phase 3) — per-drift-signature attempt
     # counters for the 3-attempt escalation chain.
     live_corpus_drift_attempts: dict[str, int] = Field(default_factory=dict)

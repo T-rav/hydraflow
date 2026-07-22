@@ -169,6 +169,7 @@ class TestInitialization:
             # TriageRetryLoop (ADR-0063 W2)
             "triage_retry_attempts",
             "triage_retry_last_attempt",
+            "triage_infra_parked",  # #10290
             # Earlier-adversarial pipeline (#8953) — pulled in by the
             # rebase; the enumeration needs the entry so set-equality
             # holds against the live StateData.

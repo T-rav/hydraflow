@@ -293,9 +293,10 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         14,
     ),
     ("auditor_finding_max_age_days", "HYDRAFLOW_AUDITOR_FINDING_MAX_AGE_DAYS", 14),
-    ("triage_max_turns", "HYDRAFLOW_TRIAGE_MAX_TURNS", 3),
+    ("triage_max_turns", "HYDRAFLOW_TRIAGE_MAX_TURNS", 12),
     ("triage_retry_interval", "HYDRAFLOW_TRIAGE_RETRY_INTERVAL", 86400),
     ("triage_retry_max_attempts", "HYDRAFLOW_TRIAGE_RETRY_MAX_ATTEMPTS", 3),
+    ("triage_infra_retry_interval", "HYDRAFLOW_TRIAGE_INFRA_RETRY_INTERVAL", 900),
     ("sentry_poll_interval", "SENTRY_POLL_INTERVAL", 600),
     ("sentry_min_events", "SENTRY_MIN_EVENTS", 2),
     ("sentry_max_creation_attempts", "SENTRY_MAX_CREATION_ATTEMPTS", 3),
@@ -1598,6 +1599,21 @@ class HydraFlowConfig(BaseModel):
             "sub-label (ADR-0063 W2)."
         ),
     )
+    triage_infra_retry_interval: int = Field(
+        default=900,
+        ge=60,
+        le=86400,
+        description=(
+            "Short re-flow floor (seconds, default 15m) for issues parked by a "
+            "TRANSIENT INFRA failure (rate-limit truncation, subprocess exit 1, "
+            "unparseable verdict) rather than a 'needs author clarification' "
+            "verdict (#10290). Infra-parks are the infra's fault, not the "
+            "issue's — they must re-flow as soon as infra recovers, not sit under "
+            "the 24h clarification backoff (triage_retry_interval). TriageRetryLoop "
+            "ticks at this cadence and applies this floor only to infra-parked "
+            "issues; clarification-parks keep the 24h floor."
+        ),
+    )
     stale_issue_threshold_days: int = Field(
         default=14,
         ge=1,
@@ -1983,12 +1999,16 @@ class HydraFlowConfig(BaseModel):
         description="Backend for the term-proposer / entry-evidence drafters.",
     )
     triage_max_turns: int = Field(
-        default=3,
+        default=12,
         ge=1,
         le=20,
         description=(
-            "Max LLM turns for triage evaluation. Increase from 1 to allow "
-            "Read/Grep tool calls to verify currency and falsifiable claims."
+            "Max LLM turns for triage evaluation. Must cover #9127's "
+            "verify-against-code exploration (Read/Grep to check currency and "
+            "falsifiable claims) PLUS emitting the verdict. 3 was too low — the "
+            "agent exhausted the budget mid-verification and terminated with "
+            "error_max_turns (exit 1, no verdict), so every code-citing issue "
+            "parked (#10291)."
         ),
     )
     triage_honeypot_enabled: bool = Field(

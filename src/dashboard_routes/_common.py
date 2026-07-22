@@ -89,6 +89,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "live_corpus_replay": (60, 86400),  # 1m min, 1d max (default 15m, ADR-0045 / #8786)
     "github_cache": (10, 3600),  # 10s min, 1h max (single-poller cache)
     "triage_retry": (3600, 604800),  # 1h min, 7d max (default 24h, ADR-0063 W2)
+    "triage_infra_retry": (60, 86400),  # 1m min, 24h max (default 15m, #10290)
     "fitness_scorecard": (3600, 604800),  # 1h min, 7d max (default 24h)
     "convergence_oscillation": (300, 86400),  # 5m min, 1d max (default 1h, ADR-0098)
 }
