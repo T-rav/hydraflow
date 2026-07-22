@@ -356,6 +356,73 @@ def test_adapter_drift_claude_new_and_deleted(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# issue #10220 — ignore_deleted_names for permanent hand-authored fixtures
+# ---------------------------------------------------------------------------
+
+
+def test_adapter_drift_ignores_deleted_name_in_ignore_set(tmp_path: Path) -> None:
+    """A committed-only cassette named in ``ignore_deleted_names`` is not drift.
+
+    The claude adapter's ``record_claude_stream`` recorder only ever sends
+    one fixed prompt, so any other committed sample under
+    ``claude_streams/`` (a permanent hand-authored addition to the
+    StreamParser test corpus) can never be "recorded" and would otherwise
+    show up as ``deleted_cassettes`` on every single tick — pinning the
+    adapter's ContractRefreshLoop attempt counter forever (issue #10220).
+    """
+    com_gone = _write_jsonl(tmp_path / "com/gone.jsonl", ['{"type": "ok"}'])
+
+    report = detect_adapter_drift(
+        "claude", [], [com_gone], ignore_deleted_names=frozenset({"gone.jsonl"})
+    )
+
+    assert report is None
+
+
+def test_adapter_drift_ignore_set_does_not_suppress_other_deletions(
+    tmp_path: Path,
+) -> None:
+    """``ignore_deleted_names`` only exempts the named files, nothing else."""
+    com_gone = _write_jsonl(tmp_path / "com/gone.jsonl", ['{"type": "ok"}'])
+    com_also_gone = _write_jsonl(tmp_path / "com/also_gone.jsonl", ['{"type": "ok"}'])
+
+    report = detect_adapter_drift(
+        "claude",
+        [],
+        [com_gone, com_also_gone],
+        ignore_deleted_names=frozenset({"gone.jsonl"}),
+    )
+
+    assert report is not None
+    assert report.deleted_cassettes == [com_also_gone]
+
+
+def test_fleet_drift_passes_per_adapter_ignore_deleted_names(tmp_path: Path) -> None:
+    """``detect_fleet_drift`` threads ``ignore_deleted_names`` per adapter."""
+    repo_root = tmp_path / "repo"
+    rec = _write_jsonl(
+        tmp_path / "rec/claude/stream_001_ping.jsonl", ['{"type": "ok"}']
+    )
+    _write_jsonl(
+        repo_root / "tests/trust/contracts/claude_streams/stream_001_ping.jsonl",
+        ['{"type": "ok"}'],
+    )
+    _write_jsonl(
+        repo_root / "tests/trust/contracts/claude_streams/stream_001_list_primes.jsonl",
+        ['{"type": "session"}'],
+    )
+
+    fleet = detect_fleet_drift(
+        {"claude": [rec]},
+        repo_root,
+        ignore_deleted_names={"claude": frozenset({"stream_001_list_primes.jsonl"})},
+    )
+
+    assert fleet.has_drift is False
+    assert fleet.reports == []
+
+
+# ---------------------------------------------------------------------------
 # Task 17 — claude stream-protocol normalization
 # ---------------------------------------------------------------------------
 

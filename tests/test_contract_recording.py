@@ -328,6 +328,112 @@ def test_record_claude_stream_returns_empty_when_stdout_blank(tmp_path: Path) ->
     assert paths == []
 
 
+def test_record_claude_stream_isolates_from_user_settings(tmp_path: Path) -> None:
+    """The recorder spawn must restrict to project-scope settings.
+
+    Issue #10220: without ``--setting-sources project`` a host-installed
+    plugin's ``SessionStart`` hook (e.g. superpowers) injects its full
+    skill-invocation guidance into every recorded "ping" cassette — a
+    multi-KB payload that changes whenever the plugin's skill content
+    changes and has nothing to do with the stream-json protocol shape
+    this cassette exists to guard.
+    """
+    captured: list[list[str]] = []
+
+    def fake_run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        captured.append(list(argv))
+        return _completed(argv=argv, stdout='{"type": "result", "result": "ok"}\n')
+
+    with patch("contract_recording.subprocess.run", side_effect=fake_run):
+        record_claude_stream(tmp_stream_dir=tmp_path)
+
+    argv = captured[0]
+    assert "--setting-sources" in argv
+    assert argv[argv.index("--setting-sources") + 1] == "project"
+
+
+def test_record_claude_stream_redacts_assistant_text(tmp_path: Path) -> None:
+    """Free-form assistant/result text is replaced with a stable placeholder.
+
+    Issue #10220: live LLM text differs on every call even for the
+    identical "ping" prompt, so byte-for-byte drift comparison could
+    never converge — the claude adapter's attempt counter climbed
+    forever. Redacting the wording at record time keeps the cassette
+    deterministic while preserving the event shape StreamParser's
+    contract actually cares about.
+    """
+    sample_stream = (
+        '{"type": "assistant", "message": {"content": '
+        '[{"type": "text", "text": "Hi there, how can I help today?"}]}}\n'
+        '{"type": "result", "result": "Hi there, how can I help today?"}\n'
+    )
+    with patch(
+        "contract_recording.subprocess.run",
+        side_effect=lambda argv, **_: _completed(argv=argv, stdout=sample_stream),
+    ):
+        paths = record_claude_stream(tmp_stream_dir=tmp_path)
+
+    written = paths[0].read_text(encoding="utf-8")
+    assert "how can I help today" not in written
+    assert "<redacted" in written
+
+
+def test_record_claude_stream_writes_identical_cassette_across_differing_wording(
+    tmp_path: Path,
+) -> None:
+    """Two recordings that differ only in LLM wording produce byte-identical
+    cassettes once redacted — this is what lets the claude adapter reach a
+    genuine clean tick (issue #10220)."""
+    stream_a = (
+        '{"type": "assistant", "message": {"content": '
+        '[{"type": "text", "text": "Sure, ping received!"}]}}\n'
+        '{"type": "result", "result": "Sure, ping received!"}\n'
+    )
+    stream_b = (
+        '{"type": "assistant", "message": {"content": '
+        '[{"type": "text", "text": "Pong — here to help."}]}}\n'
+        '{"type": "result", "result": "Pong — here to help."}\n'
+    )
+
+    with patch(
+        "contract_recording.subprocess.run",
+        side_effect=lambda argv, **_: _completed(argv=argv, stdout=stream_a),
+    ):
+        paths_a = record_claude_stream(tmp_stream_dir=tmp_path / "a")
+    with patch(
+        "contract_recording.subprocess.run",
+        side_effect=lambda argv, **_: _completed(argv=argv, stdout=stream_b),
+    ):
+        paths_b = record_claude_stream(tmp_stream_dir=tmp_path / "b")
+
+    assert paths_a[0].read_text(encoding="utf-8") == paths_b[0].read_text(
+        encoding="utf-8"
+    )
+
+
+def test_record_claude_stream_preserves_empty_text(tmp_path: Path) -> None:
+    """An empty assistant text block is left empty, not redacted.
+
+    Distinguishing "no text produced" from "text produced" is the one bit
+    of shape signal the redaction must not erase.
+    """
+    sample_stream = (
+        '{"type": "assistant", "message": {"content": '
+        '[{"type": "text", "text": ""}]}}\n'
+    )
+    with patch(
+        "contract_recording.subprocess.run",
+        side_effect=lambda argv, **_: _completed(argv=argv, stdout=sample_stream),
+    ):
+        paths = record_claude_stream(tmp_stream_dir=tmp_path)
+
+    import json
+
+    line = paths[0].read_text(encoding="utf-8").splitlines()[0]
+    event = json.loads(line)
+    assert event["message"]["content"][0]["text"] == ""
+
+
 # ---------------------------------------------------------------------------
 # Cross-cutting: logging on failure
 # ---------------------------------------------------------------------------

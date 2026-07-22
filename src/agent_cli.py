@@ -46,8 +46,14 @@ def _plugin_dir_flags() -> list[str]:
 _CONTRACT_SETTING_SOURCES = "project"
 
 
-def _claude_isolation_flags() -> list[str]:
-    """Return flags restricting an isolated claude spawn to project settings."""
+def claude_isolation_flags() -> list[str]:
+    """Return flags restricting an isolated claude spawn to project settings.
+
+    Public (not module-private) so callers outside this module — e.g.
+    :func:`contract_recording.record_claude_stream` — can isolate a raw
+    ``claude`` subprocess the same way :func:`build_agent_command` /
+    :func:`build_lightweight_command` do, without re-deriving the flag.
+    """
     return ["--setting-sources", _CONTRACT_SETTING_SOURCES]
 
 
@@ -127,7 +133,7 @@ def build_agent_command(
     else:
         cmd.extend(["--permission-mode", "bypassPermissions"])
     if isolate_user_settings:
-        cmd.extend(_claude_isolation_flags())
+        cmd.extend(claude_isolation_flags())
     else:
         cmd.extend(_plugin_dir_flags())
     if disallowed_tools:
@@ -245,7 +251,7 @@ def build_lightweight_command(
 
     if tool == "claude":
         if isolate_user_settings:
-            cmd.extend(_claude_isolation_flags())
+            cmd.extend(claude_isolation_flags())
         else:
             cmd.extend(_plugin_dir_flags())
     return cmd, input_bytes

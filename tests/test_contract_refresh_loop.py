@@ -290,6 +290,35 @@ async def test_do_work_no_drift_no_pr(
 
 
 @pytest.mark.asyncio
+async def test_do_work_passes_claude_ignore_deleted_names_to_detect_fleet_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_do_work`` exempts the claude adapter's hand-authored samples.
+
+    ``record_claude_stream`` only ever sends one fixed "ping" prompt, so any
+    other committed ``claude_streams/*.jsonl`` sample (e.g. the StreamParser
+    corpus's ``stream_001_list_primes.jsonl``) can never be "recorded" and
+    must not be flagged ``deleted`` every tick — otherwise the claude
+    adapter's ContractRefreshLoop attempt counter never resets (#10220).
+    """
+    _stub_recording(monkeypatch)
+    captured_kwargs: dict[str, object] = {}
+
+    def _spy(*_args: object, **kwargs: object) -> crl_module.FleetDriftReport:
+        captured_kwargs.update(kwargs)
+        return crl_module.FleetDriftReport(reports=[], has_drift=False)
+
+    monkeypatch.setattr(crl_module, "detect_fleet_drift", _spy)
+
+    loop = _loop(tmp_path)
+    await loop._do_work()
+
+    assert captured_kwargs.get("ignore_deleted_names") == {
+        "claude": frozenset({"stream_001_list_primes.jsonl"})
+    }
+
+
+@pytest.mark.asyncio
 async def test_do_work_drift_opens_refresh_pr_and_records_dedup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
