@@ -724,7 +724,7 @@ const styles = {
   flowFork: {
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 1,
     margin: '0 4px',
   },
