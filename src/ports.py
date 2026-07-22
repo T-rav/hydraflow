@@ -486,11 +486,11 @@ class PRPort(Protocol):
         """Return the number of an OPEN PR that resolves *issue_number*.
 
         A PR "resolves" an issue when its body carries a
-        ``Fixes/Closes/Resolves #N`` link to it. Returns ``None`` when no
-        such PR is open. Used by the label/dispatch reconciliation path
-        (#10260) so a stale ``hitl-escalation``/``diagnose-failed`` label
-        never re-triggers a new auto-agent attempt once a linked PR is
-        already open and green.
+        ``Fixes/Closes/Resolves #N`` link to it. Draft PRs are excluded.
+        Returns ``None`` when no such PR is open. Used by the label/dispatch
+        reconciliation path (#10260) so a stale ``hitl-escalation``/
+        ``diagnose-failed`` label never re-triggers a new auto-agent attempt
+        once a linked PR is already open and green.
         """
         ...
 

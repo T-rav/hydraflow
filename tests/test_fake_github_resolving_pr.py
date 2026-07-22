@@ -83,6 +83,19 @@ class TestFindOpenResolvingPr:
 
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_ignores_draft_pr(self) -> None:
+        """A draft PR is not a reliable "this issue is resolved" signal even
+        with green CI — the author explicitly marked it not ready (#10260
+        review)."""
+        gh = FakeGitHub()
+        gh.add_pr(number=100, issue_number=42, branch="hf/issue-42")
+        gh._prs[100].draft = True
+
+        result = await gh.find_open_resolving_pr(42)
+
+        assert result is None
+
 
 class TestFakeFindLabelDriftEscalatedWithResolvingPr:
     @pytest.mark.asyncio
@@ -132,6 +145,26 @@ class TestFakeFindLabelDriftEscalatedWithResolvingPr:
         gh.add_pr(number=70, issue_number=7, branch="hf/issue-7")
         gh.add_pr_label(70, "hydraflow-review")
         gh._prs[70].checks = [("Tests", "SUCCESS")]
+
+        drift = await gh.find_label_drift()
+
+        assert drift == []
+
+    @pytest.mark.asyncio
+    async def test_not_detected_for_bare_hitl_escalation_without_diagnose_failed(
+        self,
+    ) -> None:
+        """#10260 review: other loops (corpus_learning_loop,
+        trust_fleet_sanity_loop, wiki_rot_detector_loop, ...) file bare
+        ``hitl-escalation`` + their own ``-stuck`` label with no pipeline
+        label — clearing ``hitl-escalation`` there would orphan the issue.
+        Only the diagnostic_loop pairing may be cleared this way."""
+        gh = FakeGitHub()
+        gh.add_issue(
+            42, "stuck", "body", labels=["hitl-escalation", "corpus-learning-stuck"]
+        )
+        gh.add_pr(number=100, issue_number=42, branch="hf/issue-42")
+        gh._prs[100].checks = [("Tests", "SUCCESS")]
 
         drift = await gh.find_label_drift()
 

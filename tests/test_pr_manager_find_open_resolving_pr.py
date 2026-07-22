@@ -117,3 +117,42 @@ async def test_gh_query_scoped_to_open_prs(config, event_bus) -> None:
 
     assert calls
     assert "open" in calls[0]
+
+
+@pytest.mark.asyncio
+async def test_finds_target_issue_when_not_the_first_link_in_body(
+    config, event_bus
+) -> None:
+    """A body can carry more than one Fixes/Closes/Resolves link (e.g. an
+    epic PR resolving several issues) — the target issue's link must be
+    detected even when it isn't the first match in the body (#10260
+    review)."""
+    mgr = make_pr_manager(config, event_bus)
+    prs_json = json.dumps(
+        [{"number": 100, "body": "Closes #999.\n\nAlso fixes #42 in this PR."}]
+    )
+
+    with patch(
+        "pr_manager.run_subprocess_with_retry",
+        new=AsyncMock(return_value=prs_json),
+    ):
+        result = await mgr.find_open_resolving_pr(42)
+
+    assert result == 100
+
+
+@pytest.mark.asyncio
+async def test_ignores_draft_pr(config, event_bus) -> None:
+    """A draft PR is not a reliable "this issue is resolved" signal even
+    with a matching Fixes link — the author explicitly marked it not ready
+    (#10260 review)."""
+    mgr = make_pr_manager(config, event_bus)
+    prs_json = json.dumps([{"number": 100, "body": "Fixes #42", "isDraft": True}])
+
+    with patch(
+        "pr_manager.run_subprocess_with_retry",
+        new=AsyncMock(return_value=prs_json),
+    ):
+        result = await mgr.find_open_resolving_pr(42)
+
+    assert result is None

@@ -701,10 +701,16 @@ class FakeGitHub:
 
         Unlike the real adapter (which parses ``Fixes #N`` from the PR
         body), the fake's ``FakePR.issue_number`` already encodes the link.
+        Draft PRs are excluded, mirroring the real adapter.
         """
         self._maybe_rate_limit()
         for pr in self._prs.values():
-            if pr.issue_number == issue_number and not pr.merged and not pr.closed:
+            if (
+                pr.issue_number == issue_number
+                and not pr.merged
+                and not pr.closed
+                and not pr.draft
+            ):
                 return pr.number
         return None
 
@@ -1009,11 +1015,15 @@ class FakeGitHub:
 
             # More specific — checked first (#10260): a resolved-but-stale
             # escalation label outranks the pipeline-stage drift kinds below.
+            # Requires BOTH labels — see the matching comment in
+            # PRManager.find_label_drift for why bare `hitl-escalation`
+            # (filed by loops other than diagnostic_loop, with no pipeline
+            # label backing it) must not be cleared this way.
             escalations = set(issue.labels) & {"hitl-escalation", "diagnose-failed"}
             kind: str | None = None
             issue_label = issue_pipeline
             if (
-                escalations
+                {"hitl-escalation", "diagnose-failed"} <= set(issue.labels)
                 and pr.checks
                 and all(
                     state.upper() in {"SUCCESS", "NEUTRAL", "SKIPPED"}

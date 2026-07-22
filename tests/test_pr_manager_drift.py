@@ -396,7 +396,9 @@ class TestFindLabelDriftEscalatedWithResolvingPR:
                 }
             ]
         )
-        issue_json = json.dumps({"labels": [{"name": "hitl-escalation"}]})
+        issue_json = json.dumps(
+            {"labels": [{"name": "hitl-escalation"}, {"name": "diagnose-failed"}]}
+        )
         checks_json = json.dumps([{"name": "Tests", "state": "SUCCESS"}])
 
         with patch(
@@ -416,3 +418,38 @@ class TestFindLabelDriftEscalatedWithResolvingPR:
 
         assert len(drift) == 1
         assert drift[0].kind == "escalated_with_resolving_pr"
+
+    @pytest.mark.asyncio
+    async def test_not_detected_for_bare_hitl_escalation_without_diagnose_failed(
+        self, config, event_bus
+    ) -> None:
+        """#10260 review: many OTHER loops (corpus_learning_loop,
+        trust_fleet_sanity_loop, wiki_rot_detector_loop, ...) file bare
+        ``hitl-escalation`` + their own ``-stuck`` label with no pipeline
+        label backing it. Clearing ``hitl-escalation`` for those would
+        orphan the issue — those loops don't re-file until the operator
+        closes the escalation. Only the diagnostic_loop pairing
+        (``hitl-escalation`` + ``diagnose-failed``) may be cleared this way."""
+        mgr = make_pr_manager(config, event_bus)
+        prs_json = json.dumps([{"number": 100, "labels": [], "body": "Fixes #42"}])
+        issue_json = json.dumps(
+            {"labels": [{"name": "hitl-escalation"}, {"name": "corpus-learning-stuck"}]}
+        )
+        checks_json = json.dumps([{"name": "Tests", "state": "SUCCESS"}])
+
+        with patch(
+            "pr_manager.run_subprocess_with_retry",
+            new=AsyncMock(
+                side_effect=_gh_responder(
+                    {
+                        ("pr", "list"): prs_json,
+                        ("pr", "view"): _commits_json(1),
+                        ("issue", "view"): issue_json,
+                        ("pr", "checks"): checks_json,
+                    }
+                )
+            ),
+        ):
+            drift = await mgr.find_label_drift()
+
+        assert drift == []

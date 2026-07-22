@@ -2248,10 +2248,19 @@ class PRManager:
 
             # More specific — checked first (#10260): a resolved-but-stale
             # escalation label outranks the pipeline-stage drift kinds below.
+            # Requires BOTH labels, not just `hitl-escalation`: diagnostic_loop
+            # is the only lineage that pairs them, and it always swaps the
+            # issue to `hydraflow-hitl` first — so clearing still leaves a
+            # durable queue label behind. Other loops (corpus_learning_loop,
+            # trust_fleet_sanity_loop, wiki_rot_detector_loop, etc.) file bare
+            # `hitl-escalation` + their own `-stuck` label with NO pipeline
+            # label; clearing `hitl-escalation` for those would orphan the
+            # issue with no re-escalation path, since those loops don't
+            # re-file until the operator closes it.
             escalations = issue_labels & {"hitl-escalation", "diagnose-failed"}
             kind: str | None = None
             issue_label = issue_pipeline
-            if escalations:
+            if {"hitl-escalation", "diagnose-failed"} <= issue_labels:
                 checks = await self.get_pr_checks(pr_n)
                 if checks and all(
                     c.get("state", "").upper() in self._PASSING_STATES for c in checks
@@ -2290,7 +2299,9 @@ class PRManager:
         """Return the number of an OPEN PR that resolves *issue_number*.
 
         Reuses the ``find_label_drift`` Fixes-regex scan, keyed by issue
-        instead of by PR (#10260).
+        instead of by PR (#10260). Draft PRs are excluded — a PR the author
+        marked not-ready-for-review is not a reliable signal that the issue
+        is actually resolved, even with green CI.
         """
         raw = await self._gh_json_query(
             "gh",
@@ -2303,7 +2314,7 @@ class PRManager:
             "--limit",
             "200",
             "--json",
-            "number,body",
+            "number,body,isDraft",
             dry_run_return=[],
             error_log=f"find_open_resolving_pr: pr list failed for issue #{issue_number}",
         )
@@ -2314,9 +2325,16 @@ class PRManager:
         for pr in raw:
             if not isinstance(pr, dict):
                 continue
+            if pr.get("isDraft"):
+                continue
             body = pr.get("body") or ""
-            m = fixes_re.search(body)
-            if not m or int(m.group(1)) != issue_number:
+            # A body can carry more than one Fixes/Closes/Resolves link (e.g.
+            # an epic PR resolving several issues) — check every match, not
+            # just the first, so this issue's link isn't missed when it
+            # isn't the leftmost one.
+            if not any(
+                int(m.group(1)) == issue_number for m in fixes_re.finditer(body)
+            ):
                 continue
             try:
                 pr_n = int(pr.get("number", 0))

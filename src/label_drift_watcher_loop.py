@@ -79,10 +79,13 @@ class LabelDriftWatcherLoop(BaseBackgroundLoop):
         - ``pr_at_pre_pr_stage``: PR has commits but a pre-PR label
           (ready/plan/find); push the PR forward to ``hydraflow-review``.
           Issue label stays.
-        - ``escalated_with_resolving_pr``: issue carries stale escalation
-          labels while an open, CI-green PR already resolves it — clear the
-          escalation labels so it stops re-triggering auto-agent dispatch
-          (#10260).
+        - ``escalated_with_resolving_pr``: issue carries the diagnostic_loop
+          escalation pair (``hitl-escalation`` + ``diagnose-failed``) while
+          an open, CI-green PR already resolves it — clear the escalation
+          labels so it stops re-triggering auto-agent dispatch (#10260).
+          The issue keeps its ``hydraflow-hitl`` pipeline label, so it stays
+          visible in the HITL queue. Scoped to this exact label pairing —
+          see :class:`models.LabelDrift`.
         """
         if d.kind == "pr_ahead_of_issue":
             await self._prs.swap_pipeline_labels(d.issue, "hydraflow-review")
