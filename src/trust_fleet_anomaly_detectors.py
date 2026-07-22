@@ -187,11 +187,24 @@ def detect_staleness(
     multiplier: float,
     is_enabled: bool,
     now: datetime,
+    max_cycle_s: int = 0,
 ) -> tuple[bool, dict[str, Any]]:
     """Enabled loop hasn't ticked in > multiplier x interval (spec §12.1 bullet 4).
 
     A *disabled* loop not ticking is correct — no breach. A loop
     without a heartbeat at all is new / not-yet-run — no breach.
+
+    ``interval_s`` (the worker's poll cadence) is a safe staleness proxy
+    only when a tick's actual runtime stays far below it. Some loops
+    decouple the two: a fast poll cadence exists purely to check a cheap
+    condition often, but the same tick can synchronously run long work
+    (up to ``max_cycle_s``) once that condition is met, and the heartbeat
+    only advances at cycle completion. ``max_cycle_s`` (the worker's
+    expected max single-cycle duration, e.g. its watchdog bound) floors
+    the threshold at ``interval_s + max_cycle_s`` so one legitimate slow
+    cycle can't look stale on top of one poll interval. Defaulting to 0
+    keeps the plain `multiplier * interval_s` threshold for callers that
+    don't pass it.
     """
     if not is_enabled:
         return False, {"worker": worker, "status": "disabled"}
@@ -204,13 +217,14 @@ def detect_staleness(
     if last_run.tzinfo is None:
         last_run = last_run.replace(tzinfo=UTC)
     elapsed_s = (now - last_run).total_seconds()
-    threshold_s = multiplier * interval_s
+    threshold_s = max(multiplier * interval_s, interval_s + max_cycle_s)
     breached = elapsed_s >= threshold_s
     return breached, {
         "worker": worker,
         "elapsed_s": int(elapsed_s),
         "interval_s": interval_s,
         "multiplier": multiplier,
+        "max_cycle_s": max_cycle_s,
         "threshold_s": int(threshold_s),
         "last_run_iso": last_run_iso,
     }

@@ -41,6 +41,7 @@ def loop_env(tmp_path: Path):
     bg_workers = MagicMock()
     bg_workers.worker_enabled = {}
     bg_workers.get_interval.return_value = 600
+    bg_workers.cycle_timeout.return_value = 7200
     pr_manager = AsyncMock()
     pr_manager.create_issue = AsyncMock(return_value=42)
     dedup = MagicMock()
@@ -252,6 +253,59 @@ async def test_do_work_staleness_detector_uses_bg_worker_state(loop_env) -> None
     loop._reconcile_closed_escalations = AsyncMock(return_value=None)
     loop._load_cost_reader = MagicMock(return_value=None)
     stats = await loop._do_work()
+    assert stats["anomalies"] >= 1
+    title = pr.create_issue.await_args.args[0]
+    assert "rc_budget" in title
+    assert "staleness" in title
+
+
+async def test_do_work_staleness_floor_absorbs_fast_poll_long_cycle(loop_env) -> None:
+    """#10234: staging_bisect's fast poll cadence must not double as its
+    staleness proxy — a legitimate single cycle (bounded by
+    ``cycle_timeout``) shouldn't false-positive escalate."""
+    cfg, state, bg_workers, pr, dedup, bus = loop_env
+    recent = (datetime.now(UTC) - timedelta(seconds=1310)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "staging_bisect": {"status": "ok", "last_run": recent, "details": {}},
+    }
+    bg_workers.worker_enabled = {"staging_bisect": True}
+    bg_workers.get_interval.return_value = 600
+    bg_workers.cycle_timeout.return_value = 2700
+
+    async def fake_load(since):  # noqa: ARG001
+        return []
+
+    bus.load_events_since = fake_load  # type: ignore[method-assign]
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    loop._load_cost_reader = MagicMock(return_value=None)
+    stats = await loop._do_work()
+    assert stats["anomalies"] == 0
+    pr.create_issue.assert_not_awaited()
+
+
+async def test_do_work_staleness_floor_falls_back_to_watchdog_default(loop_env) -> None:
+    """No ``cycle_timeout`` accessor (older BGWorkerManager) falls back to
+    ``loop_watchdog_default_seconds`` rather than crashing or skipping the
+    floor entirely."""
+    cfg, state, bg_workers, pr, dedup, bus = loop_env
+    old = (datetime.now(UTC) - timedelta(seconds=90_000)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "rc_budget": {"status": "ok", "last_run": old, "details": {}},
+    }
+    bg_workers.worker_enabled = {"rc_budget": True}
+    bg_workers.get_interval.return_value = 600
+    del bg_workers.cycle_timeout
+
+    async def fake_load(since):  # noqa: ARG001
+        return []
+
+    bus.load_events_since = fake_load  # type: ignore[method-assign]
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    loop._load_cost_reader = MagicMock(return_value=None)
+    stats = await loop._do_work()
+    # 90_000s elapsed still clears the fallback floor (600 + 7200 = 7800s).
     assert stats["anomalies"] >= 1
     title = pr.create_issue.await_args.args[0]
     assert "rc_budget" in title

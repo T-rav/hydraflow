@@ -158,6 +158,64 @@ def test_staleness_no_heartbeat_is_not_a_breach() -> None:
     assert details["status"] == "no_heartbeat"
 
 
+def test_staleness_floor_absorbs_false_positive_from_10234() -> None:
+    """staging_bisect #10234: fast poll cadence, slow single cycle.
+
+    `elapsed_s=1310` breached the old `multiplier * interval_s` threshold
+    of 1200 even though the loop was still inside one legitimate red-SHA
+    cycle. Flooring the threshold at `interval_s + max_cycle_s` absorbs
+    one full cycle on top of one poll interval.
+    """
+    now = datetime.now(UTC)
+    last_run = (now - timedelta(seconds=1310)).isoformat()
+    breached, details = detect_staleness(
+        "staging_bisect",
+        last_run_iso=last_run,
+        interval_s=600,
+        multiplier=2.0,
+        is_enabled=True,
+        now=now,
+        max_cycle_s=2700,
+    )
+    assert breached is False
+    assert details["threshold_s"] == 3300
+    assert details["max_cycle_s"] == 2700
+
+
+def test_staleness_floor_defaults_to_zero_preserves_prior_behavior() -> None:
+    """Omitting `max_cycle_s` keeps the old `multiplier * interval_s` threshold."""
+    now = datetime.now(UTC)
+    last_run = (now - timedelta(seconds=3000)).isoformat()
+    breached, details = detect_staleness(
+        "rc_budget",
+        last_run_iso=last_run,
+        interval_s=600,
+        multiplier=2.0,
+        is_enabled=True,
+        now=now,
+    )
+    assert breached is True
+    assert details["threshold_s"] == 1200
+    assert details["max_cycle_s"] == 0
+
+
+def test_staleness_floor_breaches_exactly_at_boundary() -> None:
+    """`>=` comparison holds against the floored threshold too."""
+    now = datetime.now(UTC)
+    last_run = (now - timedelta(seconds=3300)).isoformat()
+    breached, details = detect_staleness(
+        "staging_bisect",
+        last_run_iso=last_run,
+        interval_s=600,
+        multiplier=2.0,
+        is_enabled=True,
+        now=now,
+        max_cycle_s=2700,
+    )
+    assert breached is True
+    assert details["threshold_s"] == 3300
+
+
 # --- 5. cost spike ---
 
 

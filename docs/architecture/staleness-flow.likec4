@@ -1,0 +1,16 @@
+// Dynamic view: the false-positive path (incident) and the fixed threshold resolution.
+// Depends on model in staleness-topology.likec4 (same workspace).
+views {
+  dynamic view stalenessFalsePositive {
+    title 'Incident path: mid-cycle bisect branded stale (pre-fix)'
+    stagingBisect -> baseLoop 'red SHA found: _do_work runs flake probes + git bisect (up to 2700s each, 7200s watchdog); heartbeat NOT refreshed mid-cycle'
+    sanityLoop -> stateTracker 'heartbeat last_run = 1310s ago (healthy, in-flight)'
+    sanityLoop -> bgWorkers 'get_interval(staging_bisect) = 600s'
+    sanityLoop -> detectors 'detect_staleness: threshold = 2.0 * 600 = 1200s < 1310s elapsed -> BREACH (false positive)'
+  }
+  dynamic view stalenessFixed {
+    title 'Fixed path: watchdog-bound floor decouples cadence from cycle duration'
+    sanityLoop -> bgWorkers 'get_interval = 600s; cycle_timeout(staging_bisect) = 7200s (override -> loop default -> config)'
+    sanityLoop -> detectors 'detect_staleness(..., max_cycle_s=7200): threshold = max(2.0*600, 600+7200) = 7800s; 1310s elapsed -> no breach; 86400s (wedged) -> still breaches'
+  }
+}

@@ -1,0 +1,53 @@
+specification {
+  element system
+  element container
+  element component
+  relationship calls
+  relationship reads
+}
+
+model {
+  hydraflow = system 'HydraFlow Orchestrator' {
+    trustFleet = container 'Trust-Fleet Meta-Observability (ADR-0046)' {
+      sanityLoop = component 'TrustFleetSanityLoop' {
+        description 'src/trust_fleet_sanity_loop.py — _do_work() scans 9 trust loops each tick, files one-attempt HITL escalations on detector breaches'
+      }
+      detectors = component 'trust_fleet_anomaly_detectors' {
+        description 'src/trust_fleet_anomaly_detectors.py — 5 pure detector functions. detect_staleness: threshold_s = multiplier * interval_s (BUG: conflates poll cadence with cycle duration). FIX: max(multiplier*interval_s, interval_s + max_cycle_s)'
+      }
+    }
+    infra = container 'Loop Infrastructure' {
+      bgWorkers = component 'BGWorkerManager' {
+        description 'src/bg_worker_manager.py — get_interval(name): effective poll interval (operator override -> loop default). cycle_timeout(name): effective per-cycle watchdog bound (delegates to loop._cycle_timeout_seconds(), honors bespoke timeout_cb). cycle_timeout IS the "max legitimate single-cycle duration" contract'
+      }
+      baseLoop = component 'BaseBackgroundLoop' {
+        description 'src/base_background_loop.py — heartbeat refreshes ONLY at cycle COMPLETION; a healthy in-flight long cycle shows a stale-looking heartbeat'
+      }
+      stateTracker = component 'StateTracker' {
+        description 'get_worker_heartbeats() — persisted last_run timestamps per worker'
+      }
+    }
+    watched = container 'Watched Trust Loop (exemplar)' {
+      stagingBisect = component 'StagingBisectLoop' {
+        description 'src/staging_bisect_loop.py — 600s poll interval (cheap last_rc_red_sha check) BUT a red-SHA cycle runs flake probes + git bisect, each capped 2700s, watchdog-bounded 7200s. Poll interval != cycle duration'
+      }
+    }
+  }
+
+  sanityLoop -[calls]-> detectors 'detect_staleness(worker, last_run_iso, interval_s, multiplier, is_enabled, now) — fix adds max_cycle_s'
+  sanityLoop -[reads]-> bgWorkers 'interval_s = get_interval(worker); FIX adds: max_cycle_s = cycle_timeout(worker)'
+  sanityLoop -[reads]-> stateTracker 'heartbeats = get_worker_heartbeats()'
+  stagingBisect -[calls]-> baseLoop 'heartbeat stamped at cycle completion only'
+  bgWorkers -[reads]-> baseLoop 'cycle_timeout delegates to loop._cycle_timeout_seconds()'
+}
+
+views {
+  view index {
+    title 'Issue 10236 — staleness threshold floor: context'
+    include *
+  }
+  view staleness of trustFleet {
+    title 'Staleness detection component view'
+    include *, infra.*, watched.*
+  }
+}

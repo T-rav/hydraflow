@@ -9,6 +9,10 @@ Two existing scenarios (class TestTrustFleetSanityScenario):
   is old enough that the staleness detector fires. The loop should file
   one ``hitl-escalation`` + ``trust-loop-anomaly`` issue with labels
   that include the breached detector kind.
+* ``test_staleness_fast_poll_long_cycle_does_not_false_positive`` — a
+  `staging_bisect`-shaped worker with a fast poll interval but a long
+  legitimate single-cycle bound (`cycle_timeout`); elapsed time between
+  the two must not escalate (#10234 regression, spec §12.1 bullet 4).
 
 New breach-path scenarios (class TestTrustFleetSanityBreachScenario):
 
@@ -128,6 +132,51 @@ class TestTrustFleetSanityScenario:
         labels = issue.labels
         assert "hitl-escalation" in labels
         assert "trust-loop-anomaly" in labels
+
+    async def test_staleness_fast_poll_long_cycle_does_not_false_positive(
+        self, tmp_path
+    ) -> None:
+        """#10234: fast poll cadence + long legitimate single cycle -> no escalation.
+
+        `staging_bisect` polls every 600s but a red-SHA cycle can run
+        synchronously for up to its `cycle_timeout` (2700s here). A
+        heartbeat 1310s old — stale under the old `multiplier * interval_s`
+        threshold (1200s) but well inside one legitimate cycle
+        (`interval_s + cycle_timeout` = 3300s) — must not escalate.
+        """
+        world = MockWorld(tmp_path)
+
+        now = _dt.datetime.now(_dt.UTC)
+        heartbeats = _healthy_heartbeats(now)
+        heartbeats["staging_bisect"] = {
+            "status": "ok",
+            "last_run": (now - _dt.timedelta(seconds=1310)).isoformat(),
+            "details": {},
+        }
+
+        state = MagicMock()
+        state.get_worker_heartbeats.return_value = heartbeats
+        state.get_trust_fleet_sanity_attempts.return_value = 0
+        state.inc_trust_fleet_sanity_attempts.return_value = 1
+        state.get_trust_fleet_sanity_last_seen_counts.return_value = {}
+
+        bg_workers = MagicMock()
+        bg_workers.worker_enabled = dict.fromkeys(heartbeats, True)
+        bg_workers.get_interval = MagicMock(return_value=600)
+        bg_workers.cycle_timeout = MagicMock(return_value=2700)
+
+        _seed_ports(
+            world,
+            trust_fleet_sanity_state=state,
+            trust_fleet_sanity_bg_workers=bg_workers,
+            event_bus=EventBus(),
+        )
+
+        stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
+
+        assert stats["trust_fleet_sanity"]["status"] == "ok", stats
+        assert stats["trust_fleet_sanity"].get("filed", 0) == 0, stats
+        assert world.github._issues == {}
 
 
 # ---------------------------------------------------------------------------
