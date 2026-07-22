@@ -1,13 +1,12 @@
 ---
-id: 0503
+id: 0513
 topic: testing
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-07-22T09:43:13.306382+00:00
-status: superseded
+created_at: 2026-07-22T12:10:40.685053+00:00
+status: active
 corroborations: 1
-supersedes: 0492,0493,0494,0495,0496,0497,0498,0499
-superseded_by: 0510
+supersedes: 0500,0501,0502,0503,0504,0505,0506,0507,0508,0509
 ---
 
 # Test EVENT_TYPE_TO_STAGE and SOURCE_TO_STAGE mappings independently

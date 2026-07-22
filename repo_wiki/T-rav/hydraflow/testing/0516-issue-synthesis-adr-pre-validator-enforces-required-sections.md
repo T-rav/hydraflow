@@ -1,13 +1,12 @@
 ---
-id: 0506
+id: 0516
 topic: testing
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-07-22T09:43:13.311436+00:00
-status: superseded
+created_at: 2026-07-22T12:10:40.687992+00:00
+status: active
 corroborations: 1
-supersedes: 0492,0493,0494,0495,0496,0497,0498,0499
-superseded_by: 0510
+supersedes: 0500,0501,0502,0503,0504,0505,0506,0507,0508,0509
 ---
 
 # ADR pre-validator enforces required sections
