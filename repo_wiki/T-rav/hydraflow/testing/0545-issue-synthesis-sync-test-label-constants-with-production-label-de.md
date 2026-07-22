@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-22T17:03:32.120991+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0531,0532,0533,0534,0535,0536,0537,0538,0539,0540,0541
+superseded_by: 0553
 ---
 
 # Sync test label constants with production label definitions

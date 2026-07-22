@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10173
 source_phase: plan
 created_at: 2026-07-22T16:50:02.909670+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0356
 ---
 
 # CI job `if:` gates using core_python||ci miss convention-only PRs
