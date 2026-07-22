@@ -37,10 +37,15 @@ async def test_staging_bisect_mid_cycle_heartbeat_does_not_false_positive(
 ) -> None:
     """Replays the exact #10234 incident numbers end-to-end through `_do_work`.
 
-    interval_s=600 (staging_bisect_interval), max_cycle_s=2700
-    (staging_bisect_runtime_cap_seconds), elapsed_s=1310. Under the old
-    `multiplier * interval_s` threshold (1200) this breached; the floored
-    threshold (`600 + 2700 = 3300`) correctly reads it as still mid-cycle.
+    interval_s=600 (staging_bisect_interval), elapsed_s=1310. Under the old
+    `multiplier * interval_s` threshold (1200) this breached. max_cycle_s=2700
+    here is a stand-in for `BGWorkerManager.cycle_timeout("staging_bisect")`
+    (in production that resolves to `loop_watchdog_default_seconds`=7200s,
+    since `StagingBisectLoop` doesn't override its per-cycle timeout — not
+    `staging_bisect_runtime_cap_seconds`, which bounds one flake-probe/bisect
+    sub-run, not the whole cycle). 2700 is a deliberately conservative
+    floor for this test: the floored threshold (`600 + 2700 = 3300`) already
+    clears 1310s, and the real 7200s bound clears it with even more margin.
     """
     cfg, state, bg_workers, pr, dedup, bus = loop_env
     recent = (datetime.now(UTC) - timedelta(seconds=1310)).isoformat()
