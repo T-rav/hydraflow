@@ -12,7 +12,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 |---|---|---|---|---|---|---|---|
 | `ADRReviewerLoop` | ✅ [0079] | ✅ [adr-council-reviewer.md, adr-reviewer-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_reviewer_loop.py` | ✅ in catalog | ✅ `s25_adr_reviewer_no_proposed_adrs.py` |
 | `AdrConformanceLoop` | ✅ [0100, 0104] | ❌ | ✅ loops.md | ❌ | ✅ `test_adr_conformance_loop.py` | ✅ in catalog | ❌ |
-| `AdrDriftResolverLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_adr_drift_resolver_loop.py` | ✅ in catalog | ❌ |
+| `AdrDriftResolverLoop` | ❌ | ✅ [feedback-backlog-to-loop-reflection.md] | ✅ loops.md | ❌ | ✅ `test_adr_drift_resolver_loop.py` | ✅ in catalog | ❌ |
 | `AdrTouchpointAuditorLoop` | ✅ [0056, 0089, 0099, 0100] | ✅ [adr-index.md, adr-touchpoint-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_touchpoint_auditor_loop.py` | ✅ in catalog | ✅ `s33_adr_touchpoint_auditor_no_drift.py` |
 | `AutoAgentPreflightLoop` | ✅ [0050, 0063, 0084] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_auto_agent_preflight_loop.py` | ✅ in catalog | ✅ `s31_auto_agent_preflight_no_escalations.py` |
 | `AutoTightenLoop` | ✅ [0104] | ❌ | ✅ loops.md | ❌ | ✅ `test_auto_tighten_loop.py` | ✅ in catalog | ❌ |
@@ -36,7 +36,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `FitnessScorecardLoop` | ✅ [0093, 0100, 0104] | ✅ [fitness-scorecard-loop.md, loop-fitness.md] | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_fitness_scorecard_loop.py` | ✅ in catalog | ❌ |
 | `FlakeTrackerLoop` | ✅ [0045, 0056, 0065, 0089, 0099] | ✅ [flake-tracker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_flake_tracker_loop.py` | ✅ in catalog | ❌ |
 | `GateActivatorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_gate_activator_loop.py` | ✅ in catalog | ✅ `s45_gate_activator_no_proposals.py` |
-| `GateHealthLoop` | ❌ | ✅ [dark-factory.md] | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_gate_health_loop.py` | ✅ in catalog | ❌ |
+| `GateHealthLoop` | ❌ | ✅ [dark-factory.md, feedback-workstream-fixes-over-loops.md] | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_gate_health_loop.py` | ✅ in catalog | ❌ |
 | `GitHubCacheLoop` | ✅ [0076] | ✅ [git-hub-cache-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_github_cache_loop.py` | ✅ in catalog | ✅ `s44_github_cache_idle_poll.py` |
 | `HealthMonitorLoop` | ✅ [0045, 0046, 0093, 0106] | ✅ [gotchas.md, testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_health_monitor_loop_primary_cycle.py` | ✅ in catalog | ✅ `s48_health_monitor_idle_poll.py` |
 | `HumanSteeringLoop` | ✅ [0103] | ✅ [human-steering-loop.md, steering-channel.md, steering-state.md] | ❌ | ❌ | ✅ `test_human_steering_loop.py` | ✅ in catalog | ✅ `s52_human_steering_directive.py` |
@@ -47,7 +47,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `MemoryBacklogLoop` | ✅ [0089] | ✅ [README.md] | ✅ loops.md | ✅ README.md | ✅ `test_memory_backlog_loop.py` | ✅ in catalog | ❌ |
 | `MergeStateWatcherLoop` | ✅ [0075, 0077] | ✅ [merge-state-watcher-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_merge_state_watcher_loop.py` | ✅ in catalog | ✅ `s49_merge_state_watcher_idle_poll.py` |
 | `PRUnstickerLoop` | ✅ [0075, 0077] | ✅ [pr-unsticker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_pr_unsticker_loop.py` | ✅ in catalog | ✅ `s08_pr_unsticker_revives_stuck_pr.py` |
-| `PrRedRepairLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_pr_red_repair_loop.py` | ✅ in catalog | ✅ `s74_pr_red_repair_idle_poll.py` |
+| `PrRedRepairLoop` | ❌ | ✅ [feedback-workstream-fixes-over-loops.md] | ✅ loops.md | ❌ | ✅ `test_pr_red_repair_loop.py` | ✅ in catalog | ✅ `s74_pr_red_repair_idle_poll.py` |
 | `PricingRefreshLoop` | ✅ [0078, 0093] | ✅ [pricing-refresh-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_pricing_refresh_loop_scenario.py` | ✅ in catalog | ❌ |
 | `PrinciplesAuditLoop` | ✅ [0045, 0056] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_principles_audit_loop.py` | ✅ in catalog | ❌ |
 | `RCBudgetLoop` | ✅ [0045] | ✅ [rc-budget-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_rc_budget_loop.py` | ✅ in catalog | ✅ `s20_rc_budget_no_regression.py` |
@@ -55,7 +55,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `ReportIssueLoop` | ✅ [0013, 0018, 0028, 0045] | ✅ [report-issue-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_report_issue_loop.py` | ✅ in catalog | ✅ `s19_report_issue_empty_queue.py` |
 | `RetrospectiveLoop` | ✅ [0074, 0093] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_retrospective_loop.py` | ✅ in catalog | ✅ `s18_retrospective_empty_queue.py` |
 | `RunsGCLoop` | ✅ [0073] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_runs_gc_loop.py` | ✅ in catalog | ✅ `s47_runs_gc_idle_poll.py` |
-| `SandboxFailureFixerLoop` | ✅ [0052, 0063, 0097, 0101] | ✅ [dark-factory.md, disturbance-dampener-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_sandbox_failure_fixer_loop.py` | ✅ in catalog | ✅ `s38_sandbox_fixer_richer_context.py` |
+| `SandboxFailureFixerLoop` | ✅ [0052, 0063, 0097, 0101] | ✅ [dark-factory.md, disturbance-dampener-loop.md, feedback-backlog-to-loop-reflection.md] | ✅ loops.md | ✅ README.md | ✅ `test_sandbox_failure_fixer_loop.py` | ✅ in catalog | ✅ `s38_sandbox_fixer_richer_context.py` |
 | `SecurityPatchLoop` | ✅ [0029, 0065] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_security_patch_loop.py` | ✅ in catalog | ✅ `s21_security_patch_no_alerts.py` |
 | `SentryLoop` | ✅ [0055] | ✅ [sentry-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_sentry_loop.py` | ✅ in catalog | ✅ `s42_sentry_ingest_no_credentials.py` |
 | `SkillPromptEvalLoop` | ✅ [0045] | ✅ [skill-prompt-eval-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_skill_prompt_eval_loop.py` | ✅ in catalog | ✅ `s17_skill_prompt_eval_clean_corpus.py` |
