@@ -34,6 +34,7 @@ issue; see ``_file_repoint_issue``) when the new identity is unambiguous.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING
@@ -406,8 +407,17 @@ class AdrConformanceLoop(BaseBackgroundLoop):
 
         now = datetime.now(UTC)
         adrs = self._adr_index.adrs()
-        results = evaluate_adrs(
-            adrs, self._runner, repo_root=self._repo_root, timestamp=now
+        # Offload to a worker thread: evaluate_adrs runs each ADR's
+        # ``**Enforced by:**`` check as a BLOCKING subprocess.run (pytest/make,
+        # up to 300s each). Running it inline wedges the single asyncio event
+        # loop for the whole sweep and trips the event-loop freeze detector
+        # (120s), taking the entire factory (dashboard + every loop) down.
+        results = await asyncio.to_thread(
+            evaluate_adrs,
+            adrs,
+            self._runner,
+            repo_root=self._repo_root,
+            timestamp=now,
         )
         self._persist_jsonl(results)
 
