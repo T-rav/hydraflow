@@ -1177,6 +1177,12 @@ async def refresh_branch_with_arch_regen(  # noqa: PLR0911 — linear step-by-st
        only if there is a diff.
     4. Push the temp branch to ``origin/{branch}``.
 
+    Before staging (#10167), ``docs/arch/.meta.json`` is restored to the base
+    branch's copy so the committed stamp equals ``base`` — the arch runner
+    regenerates it branch-specifically, which would otherwise re-arm the
+    server-side ``merge=arch-meta`` conflict and re-DIRTY the healed PR on the
+    next staging advance.
+
     The worktree + temp local branch are always removed in a ``finally``.
     Never force-pushes. Returns an :class:`ArchRefreshResult`.
     """
@@ -1281,6 +1287,32 @@ async def refresh_branch_with_arch_regen(  # noqa: PLR0911 — linear step-by-st
             await _abort_merge(worktree_path, gh_token)
             return ArchRefreshResult(
                 status="failed", error=f"arch.runner --emit failed: {exc}"
+            )
+
+        # #10167: pin ``docs/arch/.meta.json`` to the base branch's copy. The
+        # arch runner regenerates it branch-specifically (it's a volatile
+        # per-commit stamp), which makes ``ours != base`` and re-arms the
+        # server-side merge conflict on the very next staging advance — GitHub
+        # can't run the local ``merge=arch-meta`` driver, so a diverged
+        # ``.meta.json`` re-marks every open PR DIRTY. Restoring base's copy
+        # makes the committed ``.meta.json == base``, so GitHub's next 3-way
+        # merge sees ``ours == merge-base`` → no conflict → the healed PR stops
+        # re-DIRTYing. ``.meta.json`` is exempt from arch-drift checks
+        # (arch.runner ignores it; ``test_curated_drift`` skips it), so pinning
+        # base's copy is CI-safe. Best-effort: if base lacks the file the heal
+        # proceeds with the regenerated copy (no worse than before #10167).
+        try:
+            await _git(
+                "checkout", f"origin/{base}", "--", _ARCH_META_PATH, cwd=worktree_path
+            )
+        except RuntimeError as exc:
+            logger.warning(
+                "arch-refresh: could not pin %s to origin/%s for %s (%s); "
+                "committing the regenerated copy",
+                _ARCH_META_PATH,
+                base,
+                branch,
+                exc,
             )
 
         # Stage everything (the merged base files + regenerated artifacts).
