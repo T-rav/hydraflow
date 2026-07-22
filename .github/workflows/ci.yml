@@ -720,6 +720,64 @@ jobs:
           path: /tmp/sandbox-results/
           retention-days: 14
 
+  # Post-merge full-machine smoke (#10309). Every sandbox job above is
+  # PR-gated or scheduled, so a merge that broke the factory's core loop
+  # (issue → build → PR → merge) or the ADR-0042 RC promotion path stayed
+  # invisible until the next PR's gate or the 03:00 UTC nightly. This boots
+  # the real server once (MockWorld at the ports) and drives BOTH merge lanes
+  # via s82 on every push to staging/main — a machine-breaking merge is
+  # caught within minutes of landing. Advisory-but-alerting: not in ci-gate
+  # (push context has no PR to gate); failures roll up into ONE open
+  # post-merge-smoke issue the factory's issue loop picks up.
+  post-merge-smoke:
+    name: Post-merge smoke (full machine, s82)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    timeout-minutes: 20
+    concurrency:
+      # Merge trains (e.g. the staging batch-merge cascade) push in quick
+      # succession; only the newest SHA's verdict matters.
+      group: post-merge-smoke-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install uv && uv pip install --system -e ".[dev]"
+      - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
+      - name: Run s82 (standard PR path + RC promotion path, one boot)
+        run: python scripts/sandbox_scenario.py run s82_full_machine_rc_promotion
+      - name: File or update rolling post-merge-smoke issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Rolling-issue pattern (#9359 issue-hygiene): one open issue tracks
+          # "post-merge smoke is red"; per-push failures append as comments
+          # instead of piling up new issues. Label is provisioned first — a
+          # raw `gh issue create` with a missing label hard-fails (#10297).
+          gh label create post-merge-smoke \
+            --description "Post-merge full-machine smoke (s82) failed" \
+            --color D93F0B || true
+          body="Post-merge smoke failed on \`${{ github.ref_name }}\` at ${{ github.sha }}. The full machine (issue → merged PR, and rc/* cut → promoted) no longer completes after this merge. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          existing=$(gh issue list --label post-merge-smoke --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create \
+              --title "Post-merge smoke failing on ${{ github.ref_name }}" \
+              --label hydraflow-find,post-merge-smoke \
+              --body "$body"
+          fi
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-merge-smoke-results
+          path: /tmp/sandbox-results/
+          retention-days: 7
+
   # Umbrella aggregator (ADR-0082 / add-a-gate runbook). One check that rolls up
   # every conditional CI job. `if: always()` + `needs:` means a path-filtered
   # SKIPPED job is treated as "passed", so requiring ONLY this single context in

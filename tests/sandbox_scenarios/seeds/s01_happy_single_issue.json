@@ -49,6 +49,7 @@
   "sandbox_loop_interval": 60,
   "cycles_to_run": 4,
   "loops_enabled": null,
+  "staging_enabled": false,
   "main_branch_ci_status": [
     "success",
     ""

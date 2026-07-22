@@ -112,6 +112,16 @@ class MockWorldSeed:
     # Subset of loops to enable. None = all registered loops.
     loops_enabled: list[str] | None = None
 
+    # Enable ADR-0042 staging mode (#10309): flips ``config.staging_enabled``
+    # at boot via ``sandbox_main.apply_seed_config_overrides`` so
+    # ``StagingPromotionLoop`` runs its real cut→monitor→merge path instead of
+    # returning ``staging_disabled``. The s82 full-machine smoke seeds this
+    # true; the default keeps every other scenario in the historical no-op —
+    # enabling it globally (e.g. compose env) would have every scenario's
+    # promotion loop minting rc/* FakePRs and shifting PR numbering under
+    # scenarios that assert on it. Per-scenario, like ``loops_enabled``.
+    staging_enabled: bool = False
+
     # (conclusion, url) for the main-branch CI status returned by
     # FakeGitHub.get_latest_ci_status().  Defaults to green so all existing
     # scenarios are unaffected.  CIMonitorLoop sandbox scenarios set this to

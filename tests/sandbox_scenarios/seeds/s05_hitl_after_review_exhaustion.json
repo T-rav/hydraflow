@@ -72,6 +72,7 @@
     "diagnostic",
     "github_cache"
   ],
+  "staging_enabled": false,
   "main_branch_ci_status": [
     "success",
     ""
