@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/models.py:StateData"
 aliases: []
 related: []
-evidence: []
+evidence: ["EXTERNAL-LIVENESS-WATCHDOG-OPERATOR-INSTALL-001"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-01T02:34:42.393265+00:00"
-updated_at: "2026-07-01T02:34:42.393430+00:00"
+updated_at: "2026-07-22T17:36:31.925375+00:00"
 ---
 
 ## Definition
