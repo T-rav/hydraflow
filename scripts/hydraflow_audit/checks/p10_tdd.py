@@ -369,8 +369,20 @@ def _evaluate_pr_regression_delta(root: Path, merge_base: str) -> Finding:
     product = [
         path
         for path in paths
-        if not path.startswith(("tests/", "docs/")) and not _UI_TEST_RE.match(path)
+        if not path.startswith(("tests/", "docs/", ".github/"))
+        and not _UI_TEST_RE.match(path)
     ]
+    if not product:
+        # No product code changed — the PR only touches CI/workflow (.github/),
+        # docs, and/or tests. A Python/UI regression test is not applicable to a
+        # `fix(ci): ...`, `fix(docs): ...`, or test-only fix; requiring one here
+        # was a false failure that reddened every such PR.
+        return finding(
+            "P10.6",
+            Status.PASS,
+            "no product-code delta (CI/workflow/docs/test-only changes) — a "
+            "regression test is not applicable",
+        )
     ui_only = bool(product) and all(path.startswith("src/ui/") for path in product)
     if ui_only and any(_UI_TEST_RE.match(path) for path in paths):
         return finding(

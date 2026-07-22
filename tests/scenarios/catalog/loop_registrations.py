@@ -218,6 +218,25 @@ def _build_dependabot_merge(ports: dict[str, Any], config: Any, deps: Any) -> An
 
         state.get_dependabot_arch_refresh_attempts.side_effect = _get_arch_attempts
         state.bump_dependabot_arch_refresh_attempts.side_effect = _bump_arch_attempts
+
+        # Same fake-fidelity treatment for the sibling update-branch heal counter
+        # (#9889). The CI-failure and conflict paths compare
+        # ``get_dependabot_update_branch_attempts(pr) < cap`` under DEFAULT config
+        # (cap=1, heal enabled), so a bare MagicMock raises "'<' not supported
+        # between 'MagicMock' and 'int'" — the #10276 staging->main RC-promotion
+        # Browser Scenarios failure. The non-browser reference masks it by pinning
+        # HYDRAFLOW_DEPENDABOT_UPDATE_BRANCH_MAX_ATTEMPTS=0.
+        _ub_attempts: dict[int, int] = {}
+
+        def _get_ub_attempts(pr_number: int) -> int:
+            return _ub_attempts.get(pr_number, 0)
+
+        def _bump_ub_attempts(pr_number: int) -> int:
+            _ub_attempts[pr_number] = _ub_attempts.get(pr_number, 0) + 1
+            return _ub_attempts[pr_number]
+
+        state.get_dependabot_update_branch_attempts.side_effect = _get_ub_attempts
+        state.bump_dependabot_update_branch_attempts.side_effect = _bump_ub_attempts
         ports["dependabot_state"] = state
     return DependabotMergeLoop(
         config=config,

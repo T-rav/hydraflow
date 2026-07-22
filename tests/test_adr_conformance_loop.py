@@ -593,6 +593,34 @@ async def test_config_disabled_short_circuits(loop_fixture) -> None:
     assert fakes.pr.created_issues == []
 
 
+async def test_broken_runner_env_skips_tick_and_files_nothing(
+    loop_fixture, caplog
+) -> None:
+    """#10243 pre-flight: when pytest can't launch (a half-synced factory venv
+    where the test extra was dropped), EVERY pytest-kind check would fail
+    identically with "No module named pytest", which the runner maps to FAIL —
+    storming one false-positive drift issue per enforced ADR (#10182–#10195).
+
+    The loop must detect the broken runner env up front, skip the whole tick,
+    file NOTHING, and surface it as a single operational alert (logger.error)
+    instead of a per-ADR issue storm. #10212's per-check FAIL semantics are
+    left intact — this guard fires before any check runs."""
+    import logging
+
+    loop, fakes = loop_fixture
+    fakes.runner._available = False  # simulate pytest-less runner env
+
+    with caplog.at_level(logging.ERROR):
+        result = await run_tick(loop)
+
+    assert result == {"status": "runner_env_unavailable"}
+    assert fakes.pr.created_issues == []  # no storm — nothing filed
+    assert fakes.runner.calls == []  # no check ever executed
+    assert any(
+        "not importable" in r.getMessage() for r in caplog.records
+    )  # one loud ops alert, not N drift issues
+
+
 def test_loop_fitness_is_housekeeping(loop_fixture) -> None:
     loop, _fakes = loop_fixture
     fitness = loop.loop_fitness(_dummy_ctx())
