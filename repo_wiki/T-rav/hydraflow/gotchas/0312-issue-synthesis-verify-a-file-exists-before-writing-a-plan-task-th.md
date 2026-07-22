@@ -1,13 +1,12 @@
 ---
-id: 0304
+id: 0312
 topic: gotchas
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-07-22T09:42:21.676449+00:00
-status: superseded
+created_at: 2026-07-22T12:09:59.034653+00:00
+status: active
 corroborations: 1
-supersedes: 0296,0297,0298,0299,0300,0301
-superseded_by: 0310
+supersedes: 0302,0303,0304,0305,0306,0307,0308,0309
 ---
 
 # Verify a file exists before writing a plan task that edits it
