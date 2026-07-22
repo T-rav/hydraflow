@@ -6,12 +6,12 @@ bounded_context: "caretaker"
 code_anchor: "src/adr_reviewer.py:ADRCouncilReviewer"
 aliases: ["adr council reviewer", "council reviewer"]
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KVHDB0GY6PSQPWY90DH8TNQS"}, {"kind": "depends_on", "target": "01KVJPGB886SYJA08BNCWTAC28"}, {"kind": "depends_on", "target": "01KY4QKSBGMKHY3AV0JJ0QNMMD"}, {"kind": "depends_on", "target": "01KY4QGA4VF2GJDCW3ZVKNBPMY"}, {"kind": "depends_on", "target": "01KY4QF8BE4Y5782543MPQNDQ0"}]
-evidence: []
+evidence: ["01KQP0V9KK99G77287P414NFQR", "01KQP0V9KK99G77287P414NFQT"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-06-12T04:19:40.947529+00:00"
-updated_at: "2026-07-22T15:07:38.028195+00:00"
+updated_at: "2026-07-22T15:07:58.083138+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-06-12T04:19:40.947404+00:00"
 proposal_signals: ["S2"]
