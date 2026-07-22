@@ -14,13 +14,13 @@ model {
     }
 
     preflight = loop 'AutoAgentPreflightLoop' {
-      description 'Polls open hitl-escalation issues lacking human-required (_poll_eligible_issues); one attempt per tick. GAP: no check for an open resolving PR before spawning (src/auto_agent_preflight_loop.py:303)'
+      description 'Polls open hitl-escalation issues lacking human-required (_poll_eligible_issues); one attempt per tick. FIXED (#10260): _select_dispatchable_issue checks for an open resolving PR before spawning (src/auto_agent_preflight_loop.py)'
 
       decision = component 'preflight.decision.apply_decision' {
-        description 'resolved → removes hitl-escalation + human-required, but NOT diagnose-failed (_LABEL_MAP, src/preflight/decision.py:58)'
+        description 'resolved → removes hitl-escalation + human-required + diagnose-failed, unconditionally (_LABEL_MAP, src/preflight/decision.py:62, #10260)'
       }
-      guard = component 'Resolving-PR dispatch guard (NEW)' {
-        description 'Before spawn: find_open_resolving_pr(issue) + get_pr_checks(pr); skip dispatch when an open Fixes-#N PR has commits and no failing checks'
+      guard = component 'Resolving-PR dispatch guard (#10260)' {
+        description 'Before spawn: find_open_resolving_pr(issue) + get_pr_checks(pr); skip dispatch when an open, non-draft Fixes-#N PR has every check green'
       }
     }
 
@@ -50,7 +50,7 @@ model {
   preflight -> prport 'list_issues_by_label(hitl-escalation)'
   preflight.guard -> prport 'find_open_resolving_pr / get_pr_checks (NEW)'
   preflight -> state 'bump attempt, spawn auto-agent'
-  preflight.decision -> issue 'resolved: remove hitl-escalation (diagnose-failed leaks)'
+  preflight.decision -> issue 'resolved: remove hitl-escalation + diagnose-failed, unconditionally'
   driftwatcher -> prport 'find_label_drift (+ NEW escalation kind)'
   driftwatcher -> issue 'NEW: remove hitl-escalation + diagnose-failed, post comment'
   pr -> issue 'Fixes #N linkage'

@@ -2168,7 +2168,7 @@ class PRManager:
             "--limit",
             "200",
             "--json",
-            "number,labels,body",
+            "number,labels,body,isDraft",
             dry_run_return=[],
             error_log="find_label_drift: pr list failed",
         )
@@ -2256,11 +2256,15 @@ class PRManager:
             # `hitl-escalation` + their own `-stuck` label with NO pipeline
             # label; clearing `hitl-escalation` for those would orphan the
             # issue with no re-escalation path, since those loops don't
-            # re-file until the operator closes it.
+            # re-file until the operator closes it. Draft PRs are excluded —
+            # a not-ready-for-review PR isn't a reliable resolved signal even
+            # with green CI (mirrors find_open_resolving_pr's draft check).
             escalations = issue_labels & {"hitl-escalation", "diagnose-failed"}
             kind: str | None = None
             issue_label = issue_pipeline
-            if {"hitl-escalation", "diagnose-failed"} <= issue_labels:
+            if {"hitl-escalation", "diagnose-failed"} <= issue_labels and not pr.get(
+                "isDraft"
+            ):
                 checks = await self.get_pr_checks(pr_n)
                 if checks and all(
                     c.get("state", "").upper() in self._PASSING_STATES for c in checks

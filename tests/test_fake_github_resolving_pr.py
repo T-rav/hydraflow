@@ -139,6 +139,27 @@ class TestFakeFindLabelDriftEscalatedWithResolvingPr:
         assert drift == []
 
     @pytest.mark.asyncio
+    async def test_not_detected_when_resolving_pr_is_draft(self) -> None:
+        """#10260 review: mirrors ``find_open_resolving_pr``'s draft
+        exclusion — a draft PR is not a reliable resolved signal even with
+        green CI, so the reconciliation loop must not clear escalation
+        labels against one."""
+        gh = FakeGitHub()
+        gh.add_issue(
+            42,
+            "stuck",
+            "body",
+            labels=["hitl-escalation", "diagnose-failed"],
+        )
+        gh.add_pr(number=100, issue_number=42, branch="hf/issue-42")
+        gh._prs[100].checks = [("Tests", "SUCCESS")]
+        gh._prs[100].draft = True
+
+        drift = await gh.find_label_drift()
+
+        assert drift == []
+
+    @pytest.mark.asyncio
     async def test_not_detected_without_escalation_labels(self) -> None:
         gh = FakeGitHub()
         gh.add_issue(7, "aligned", "body", labels=["hydraflow-review"])

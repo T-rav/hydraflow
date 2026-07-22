@@ -420,6 +420,40 @@ class TestFindLabelDriftEscalatedWithResolvingPR:
         assert drift[0].kind == "escalated_with_resolving_pr"
 
     @pytest.mark.asyncio
+    async def test_not_detected_when_resolving_pr_is_draft(
+        self, config, event_bus
+    ) -> None:
+        """#10260 review: a draft PR is not a reliable "this issue is
+        resolved" signal even with green CI — mirrors the same guard on
+        ``find_open_resolving_pr``. A stale escalation must not be cleared
+        against a not-ready-for-review PR."""
+        mgr = make_pr_manager(config, event_bus)
+        prs_json = json.dumps(
+            [{"number": 100, "labels": [], "body": "Fixes #42", "isDraft": True}]
+        )
+        issue_json = json.dumps(
+            {"labels": [{"name": "hitl-escalation"}, {"name": "diagnose-failed"}]}
+        )
+        checks_json = json.dumps([{"name": "Tests", "state": "SUCCESS"}])
+
+        with patch(
+            "pr_manager.run_subprocess_with_retry",
+            new=AsyncMock(
+                side_effect=_gh_responder(
+                    {
+                        ("pr", "list"): prs_json,
+                        ("pr", "view"): _commits_json(1),
+                        ("issue", "view"): issue_json,
+                        ("pr", "checks"): checks_json,
+                    }
+                )
+            ),
+        ):
+            drift = await mgr.find_label_drift()
+
+        assert drift == []
+
+    @pytest.mark.asyncio
     async def test_not_detected_for_bare_hitl_escalation_without_diagnose_failed(
         self, config, event_bus
     ) -> None:

@@ -1018,12 +1018,14 @@ class FakeGitHub:
             # Requires BOTH labels — see the matching comment in
             # PRManager.find_label_drift for why bare `hitl-escalation`
             # (filed by loops other than diagnostic_loop, with no pipeline
-            # label backing it) must not be cleared this way.
+            # label backing it) must not be cleared this way. Draft PRs are
+            # excluded — mirrors find_open_resolving_pr's draft check.
             escalations = set(issue.labels) & {"hitl-escalation", "diagnose-failed"}
             kind: str | None = None
             issue_label = issue_pipeline
             if (
                 {"hitl-escalation", "diagnose-failed"} <= set(issue.labels)
+                and not pr.draft
                 and pr.checks
                 and all(
                     state.upper() in {"SUCCESS", "NEUTRAL", "SKIPPED"}
