@@ -835,6 +835,17 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         )
         return FakeOutput(exit_code=0, stdout=f"{logs}\n", stderr="")
 
+    if method == "find_open_resolving_pr":
+        # #10260: label/dispatch reconciliation. Seed an open PR linked to
+        # the issue so the lookup hits, not the None absence sentinel.
+        issue_number = int(args[0])
+        fake.add_pr(number=888, issue_number=issue_number, branch="agent/diag-888")
+        pr_number = await fake.find_open_resolving_pr(issue_number)
+        assert pr_number == 888, (
+            f"find_open_resolving_pr returned the wrong PR: {pr_number}"
+        )
+        return FakeOutput(exit_code=0, stdout=f"{pr_number}\n", stderr="")
+
     msg = f"FakeGitHub has no contract-tested method {method!r}"
     raise NotImplementedError(msg)
 
