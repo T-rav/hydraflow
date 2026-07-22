@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10258
 source_phase: plan
 created_at: 2026-07-22T09:21:49.448742+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0310
 ---
 
 # Write an evidence log to review_logs/ for verify-then-merge landing tasks
