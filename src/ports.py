@@ -852,3 +852,15 @@ class ConformanceRunnerPort(Protocol):
         exactly.
         """
         ...
+
+    def available(self) -> bool:
+        """Return True iff the runner can execute pytest-kind checks.
+
+        Pre-flight for ``AdrConformanceLoop`` (#10243): if pytest can't launch
+        under the runner's interpreter (a half-synced venv with the test extra
+        dropped), every pytest-kind check would fail identically with
+        "No module named pytest" — which ``run`` maps to FAIL, storming one
+        false-positive drift issue per ADR. The loop probes this once per tick
+        and skips (filing nothing) when it returns False.
+        """
+        ...

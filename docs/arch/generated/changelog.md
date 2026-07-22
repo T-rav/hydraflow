@@ -6,9 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
-- `1ea09f0` — Merge remote-tracking branch 'origin/staging' into agent/issue-10260 *(2026-07-22)*
+- `84c91cd` — fix(adr-conformance): pre-flight skip when pytest runner env is broken (#10243) (#10243) *(2026-07-22)*
+- `fec83cb` — Fixes #10260: Fix label/dispatch reconciliation so resolved issues ... (#10268) (#10268) *(2026-07-22)*
 - `1bd34db` — feat(ul): term-proposer batch — 4 drafts (#10266) (#10266) *(2026-07-22)*
-- `569548d` — Fixes #10260: reconcile stale escalation labels against resolving PRs and guard auto-agent dispatch *(2026-07-22)*
 - `e11c542` — feat(ul): entry-evidence — 1 new entry links across 1 terms (#10248) (#10248) *(2026-07-22)*
 - `fc4e755` — feat(ul): entry-evidence — 1 new entry links across 1 terms (#10235) (#10235) *(2026-07-22)*
 - `9516955` — feat(pipeline): hydraflow-in-progress claim label — ready→in-progress→review, durable cross-actor build claim (#10168) (#10172) (#10172) *(2026-07-22)*
