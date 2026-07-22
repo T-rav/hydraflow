@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-22T13:39:13.362709+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0510,0510,0511,0512,0513,0514,0515,0516,0517,0518,0519
+superseded_by: 0531
 ---
 
 # Subprocess CLI stubs (e.g. fake gh) log calls to JSONL
