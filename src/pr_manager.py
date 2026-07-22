@@ -2194,8 +2194,16 @@ class PRManager:
                 for lbl in (pr.get("labels") or [])
                 if isinstance(lbl, dict)
             }
+            # The in-progress claim marker (#10168) is not a pipeline stage —
+            # exclude it so a ready+in-progress issue reads as ``hydraflow-ready``
+            # rather than being mistaken for a stage and mis-classified as drift.
+            claim_labels = set(self._config.in_progress_label)
             pr_pipeline = next(
-                (lbl for lbl in pr_labels if lbl.startswith("hydraflow-")),
+                (
+                    lbl
+                    for lbl in pr_labels
+                    if lbl.startswith("hydraflow-") and lbl not in claim_labels
+                ),
                 "",
             )
             body = pr.get("body") or ""
@@ -2230,7 +2238,11 @@ class PRManager:
                 if isinstance(lbl, dict)
             }
             issue_pipeline = next(
-                (lbl for lbl in issue_labels if lbl.startswith("hydraflow-")),
+                (
+                    lbl
+                    for lbl in issue_labels
+                    if lbl.startswith("hydraflow-") and lbl not in claim_labels
+                ),
                 "",
             )
 

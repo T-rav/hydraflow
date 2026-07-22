@@ -266,6 +266,47 @@ class TestQueueAccessors:
         )
         assert [t.id for t in store.get_plannable(10)] == [23]
 
+    def test_get_implementable_skips_in_progress_claimed(self) -> None:
+        # #10168: a ready issue carrying the durable build-claim marker is
+        # already being built (possibly by another actor). The work-picker
+        # must skip it even though it still carries the ready label — this is
+        # the cross-actor belt-and-suspenders to the in-process eager guard.
+        # ("test-label" is ConfigFactory's ready-stage routing label.)
+        store = _make_store()
+        store._route_issues(
+            [TaskFactory.create(id=30, tags=["test-label", "hydraflow-in-progress"])]
+        )
+        assert store.get_implementable(10) == []
+
+    def test_in_progress_claimed_skipped_but_clean_sibling_returned(self) -> None:
+        # #10168: the claim only sidelines the claimed issue; an unclaimed
+        # ready sibling is still dispatchable on the same tick.
+        store = _make_store()
+        store._route_issues(
+            [
+                TaskFactory.create(id=31, tags=["test-label", "hydraflow-in-progress"]),
+                TaskFactory.create(id=32, tags=["test-label"]),
+            ]
+        )
+        assert [t.id for t in store.get_implementable(10)] == [32]
+
+    def test_in_progress_claim_cleared_makes_issue_re_pickable(self) -> None:
+        # #10168: the claim only sidelines an issue while the marker is
+        # present. Once _release_claim (build abandoned/failed) or an operator
+        # clears it, a fresh ingest of that ready issue is pickable again — the
+        # claim never permanently strands an issue.
+        claimed = _make_store()
+        claimed._route_issues(
+            [TaskFactory.create(id=33, tags=["test-label", "hydraflow-in-progress"])]
+        )
+        assert claimed.get_implementable(10) == []
+
+        # A foreign actor that ingests the same issue after the claim cleared
+        # sees a plain ready issue and picks it.
+        cleared = _make_store()
+        cleared._route_issues([TaskFactory.create(id=33, tags=["test-label"])])
+        assert [t.id for t in cleared.get_implementable(10)] == [33]
+
     def test_get_implementable_excludes_active_issues(self) -> None:
         store = _make_store()
         store._route_issues(

@@ -522,6 +522,17 @@ class IssueStore:
         # queue clean (ADR-0084, pillar C).
         if "human-required" in task.tags:
             return False
+        # Durable cross-actor build claim (#10168): an issue carrying the
+        # in-progress claim marker is already being built — possibly by another
+        # factory instance, a parallel operator session, or an out-of-band
+        # Agent dispatch that stamped the label on GitHub. A fresh process
+        # re-reading GitHub has empty in-memory ``_active``/``_in_flight`` for
+        # that issue, so the in-process ``_eagerly_transitioned`` fast-path
+        # can't see the claim; the durable label can. Skip re-pick — belt-and-
+        # suspenders with the in-process guard (ADR-0002).
+        in_progress = {lbl.lower() for lbl in self._config.in_progress_label}
+        if in_progress & {t.lower() for t in task.tags}:
+            return False
         return not (
             stage != STAGE_FIND
             and self._crate_manager is not None

@@ -971,12 +971,23 @@ class FakeGitHub:
             issue = self._issues.get(pr.issue_number)
             if issue is None:
                 continue
+            # Mirror PRManager.find_label_drift: the in-progress claim marker
+            # (#10168) is not a pipeline stage, so exclude it from the stage
+            # pick — a ready+in-progress issue must read as ``hydraflow-ready``.
             pr_pipeline = next(
-                (lbl for lbl in pr.labels if lbl.startswith("hydraflow-")),
+                (
+                    lbl
+                    for lbl in pr.labels
+                    if lbl.startswith("hydraflow-") and lbl != "hydraflow-in-progress"
+                ),
                 "",
             )
             issue_pipeline = next(
-                (lbl for lbl in issue.labels if lbl.startswith("hydraflow-")),
+                (
+                    lbl
+                    for lbl in issue.labels
+                    if lbl.startswith("hydraflow-") and lbl != "hydraflow-in-progress"
+                ),
                 "",
             )
             commits = pr.commits

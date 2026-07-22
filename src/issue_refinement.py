@@ -494,6 +494,12 @@ _ACTIVE_PIPELINE_PHASE_LABELS: frozenset[str] = frozenset(
         # HITL correction — the refinement loop treats it the same way: don't touch
         # a blocked issue.
         "human-required",
+        # in_progress_label (config.py, #10168) — a durable build-claim marker
+        # that coexists with ``hydraflow-ready`` while a build is running. An
+        # actively-building issue must never be auto-closed out from under its
+        # builder; ``all_pipeline_labels`` includes it, so this mirror must too
+        # (test_all_pipeline_labels_stay_within_guardrail_skip_labels ratchet).
+        "hydraflow-in-progress",
     }
 )
 

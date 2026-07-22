@@ -290,6 +290,77 @@ class TestImplementIncludesPush:
 # ---------------------------------------------------------------------------
 
 
+class TestInProgressBuildClaim:
+    """#10168: a durable ``hydraflow-in-progress`` marker is stamped when a
+    build starts and cleared when it ends, so out-of-band actors skip the
+    ready issue while it is being built."""
+
+    @pytest.mark.asyncio
+    async def test_claim_label_added_at_build_start(
+        self, config: HydraFlowConfig
+    ) -> None:
+        issue = TaskFactory.create(id=71)
+        phase, _, mock_prs = make_implement_phase(config, [issue])
+
+        await phase.run_batch()
+
+        mock_prs.add_labels.assert_any_await(71, config.in_progress_label)
+
+    @pytest.mark.asyncio
+    async def test_claim_label_cleared_after_build(
+        self, config: HydraFlowConfig
+    ) -> None:
+        issue = TaskFactory.create(id=72)
+        phase, _, mock_prs = make_implement_phase(config, [issue])
+
+        await phase.run_batch()
+
+        for label in config.in_progress_label:
+            mock_prs.remove_label.assert_any_await(72, label)
+
+    @pytest.mark.asyncio
+    async def test_claim_cleared_even_when_worker_crashes(
+        self, config: HydraFlowConfig
+    ) -> None:
+        # Abandon/failure must not leave an issue stuck claimed — the finally
+        # release clears it so it stays re-pickable.
+        issue = TaskFactory.create(id=73)
+
+        async def crashing_agent(
+            issue: Task,
+            wt_path: Path,
+            branch: str,
+            worker_id: int = 0,
+            review_feedback: str = "",
+            prior_failure: str = "",
+        ) -> WorkerResult:
+            raise RuntimeError("agent crashed")
+
+        phase, _, mock_prs = make_implement_phase(
+            config, [issue], agent_run=crashing_agent
+        )
+
+        await phase.run_batch()
+
+        mock_prs.add_labels.assert_any_await(73, config.in_progress_label)
+        for label in config.in_progress_label:
+            mock_prs.remove_label.assert_any_await(73, label)
+
+    @pytest.mark.asyncio
+    async def test_claim_stamp_failure_does_not_block_build(
+        self, config: HydraFlowConfig
+    ) -> None:
+        # Best-effort: a GitHub hiccup stamping the claim must not fail the
+        # build (dark-factory contract) — the in-process guards still protect.
+        issue = TaskFactory.create(id=74)
+        phase, _, mock_prs = make_implement_phase(config, [issue])
+        mock_prs.add_labels = AsyncMock(side_effect=RuntimeError("gh down"))
+
+        results, _ = await phase.run_batch()
+
+        assert len(results) == 1
+
+
 class TestWorkerExceptionIsolation:
     @pytest.mark.asyncio
     async def test_worker_exception_returns_failed_result(

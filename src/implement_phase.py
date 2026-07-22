@@ -117,6 +117,49 @@ class ImplementPhase:
     def active_issues(self) -> set[int]:
         return self._active_issues
 
+    async def _claim_issue(self, issue_number: int) -> None:
+        """Stamp the durable build-claim marker on *issue_number* (#10168).
+
+        Adds ``in_progress_label`` the moment a build STARTS on a ready issue.
+        The label coexists with ``hydraflow-ready`` (it is not a stage) and
+        advertises "being built" to any external observer of GitHub labels —
+        a second factory instance, a parallel operator session, or an
+        out-of-band Agent dispatch — so they skip the issue instead of
+        double-picking it (the #10141 cross-actor collision class).
+
+        Best-effort: a GitHub hiccup must never block the build (dark-factory
+        contract). The in-process ``IssueStore`` guards still protect the
+        current process even if the durable stamp fails.
+        """
+        try:
+            await self._prs.add_labels(issue_number, self._config.in_progress_label)
+        except Exception:
+            logger.warning(
+                "Issue #%d: failed to stamp in-progress build claim (continuing)",
+                issue_number,
+                exc_info=True,
+            )
+
+    async def _release_claim(self, issue_number: int) -> None:
+        """Clear the build-claim marker on any build exit (#10168).
+
+        On the success path the ``ready → review`` swap already removed the
+        claim (it is in ``all_pipeline_labels``); this remove is then a no-op.
+        On abandon/failure the issue stays at ``hydraflow-ready``, so removing
+        the claim here is what makes it re-pickable — an issue can never get
+        stuck claimed. Best-effort, like :meth:`_claim_issue`.
+        """
+        for label in self._config.in_progress_label:
+            try:
+                await self._prs.remove_label(issue_number, label)
+            except Exception:
+                logger.warning(
+                    "Issue #%d: failed to clear in-progress build claim '%s'",
+                    issue_number,
+                    label,
+                    exc_info=True,
+                )
+
     def _known_traps_section(self) -> str:
         """Render the harness-insights Known CI Traps section (#9858).
 
@@ -313,6 +356,12 @@ class ImplementPhase:
                 async with store_lifecycle(self._store, issue.id, "implement"):
                     self._state.mark_issue(issue.id, "in_progress")
                     self._state.set_branch(issue.id, branch)
+                    # Durable cross-actor build claim (#10168): stamp the
+                    # in-progress marker on GitHub the moment the build starts
+                    # so out-of-band actors skip this ready issue. Cleared on
+                    # the ready→review swap at PR-open, and in the ``finally``
+                    # below on any abandon/failure exit.
+                    await self._claim_issue(issue.id)
 
                     def _on_worker_failure(exc_name: str) -> WorkerResult:
                         self._state.mark_issue(issue.id, "failed")
@@ -342,6 +391,11 @@ class ImplementPhase:
                             if self._active_issues_cb:
                                 self._active_issues_cb()
                         release_batch_in_flight(self._store, {issue.id})
+                        # Clear the durable build claim on every exit (#10168).
+                        # Success already swapped it away at PR-open (no-op
+                        # here); failure/abandon leaves the issue at ready, so
+                        # this is what makes it re-pickable — never stuck.
+                        await self._release_claim(issue.id)
 
         all_results = await run_refilling_pool(
             supply_fn=_supply_fixed,

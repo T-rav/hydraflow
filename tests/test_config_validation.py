@@ -1162,6 +1162,26 @@ class TestLabelValidation:
         )
         assert "human-required" in cfg.all_pipeline_labels
 
+    def test_in_progress_label_default(self, tmp_path: Path) -> None:
+        """in_progress_label should default to ['hydraflow-in-progress'] (#10168)."""
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.in_progress_label == ["hydraflow-in-progress"]
+
+    def test_in_progress_label_in_all_pipeline_labels(self, tmp_path: Path) -> None:
+        """The build-claim marker must be in all_pipeline_labels so the
+        ready→review swap (and any escalation swap) clears it — an issue can
+        never get stuck claimed (#10168, ADR-0002)."""
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert "hydraflow-in-progress" in cfg.all_pipeline_labels
+
 
 class TestTimeoutConfigFields:
     def test_agent_timeout_default(self) -> None:
