@@ -629,6 +629,16 @@ describe('PipelineFlow visualization', () => {
     expect(fork.textContent).toContain('Needs Human')
     expect(fork.textContent).toContain('Merged')
   })
+
+  it('left-aligns the terminal fork arms so the branch arrows form a column', () => {
+    // flowFork previously centered each [arrow][label] row (alignItems:
+    // 'center'), which left-shifts the wider "Needs Human" row further than
+    // the narrower "Merged" row, misaligning the ↗/↘ glyphs (#10226).
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext())
+    render(<StreamView {...defaultProps} />)
+    const fork = screen.getByTestId('flow-terminal-fork')
+    expect(fork.style.alignItems).toBe('flex-start')
+  })
 })
 
 describe('Merged stage rendering', () => {

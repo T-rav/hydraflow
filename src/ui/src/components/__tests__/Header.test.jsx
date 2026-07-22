@@ -320,6 +320,15 @@ describe('Header component', () => {
       expect(fork).toContainElement(screen.getByTestId('session-stage-hitl'))
       expect(fork).toContainElement(screen.getByTestId('session-stage-merged'))
     })
+
+    it('left-aligns the terminal fork arms so the branch arrows form a column', () => {
+      // pipelineFork previously centered each [arrow][label] row (alignItems:
+      // 'center'), which left-shifts the wider "Needs Human" row further than
+      // the narrower "Merged" row, misaligning the ↗/↘ glyphs (#10226).
+      render(<Header {...defaultProps} />)
+      const fork = screen.getByTestId('review-terminal-fork')
+      expect(fork.style.alignItems).toBe('flex-start')
+    })
   })
 
   describe('Report button', () => {
