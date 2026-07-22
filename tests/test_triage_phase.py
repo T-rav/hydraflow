@@ -288,13 +288,17 @@ class TestTriagePhase:
         assert "Duplicate" in comment
 
     @pytest.mark.asyncio
-    async def test_triage_infra_error_does_not_escalate_to_hitl(
+    async def test_triage_infra_error_parks_for_bounded_retry(
         self,
         config: HydraFlowConfig,
     ) -> None:
-        """RuntimeError (empty LLM response) should NOT send the issue to HITL.
+        """RuntimeError (empty/unparseable LLM response) must PARK the issue.
 
-        The issue should stay in the find queue for retry on the next cycle.
+        Regression: previously the issue was left find-labeled and re-picked on
+        the very next tick, so a persistently-failing issue looped forever — a
+        triage retry storm that burned the usage budget. Parking routes it to
+        TriageRetryLoop (backoff + triage_retry_max_attempts cap → HITL) instead
+        of an unbounded immediate retry. Parking is not HITL escalation.
         """
         phase, _state, triage, prs, store, _stop = make_triage_phase(config)
         issue = TaskFactory.create(id=99, title="Well-formed issue", body="A" * 200)
@@ -306,9 +310,9 @@ class TestTriagePhase:
 
         await phase.triage_issues()
 
-        # Issue should NOT be escalated to HITL
-        prs.swap_pipeline_labels.assert_not_called()
-        prs.post_comment.assert_not_called()
+        # Parked (swapped out of the find queue) so the next tick cannot
+        # immediately re-pick and hot-retry it.
+        prs.swap_pipeline_labels.assert_called_once_with(99, config.parked_label[0])
 
     @pytest.mark.asyncio
     async def test_triage_clear_issue_still_routes_to_plan(

@@ -14,6 +14,7 @@ from adr_utils import (
 from config import HydraFlowConfig
 from convergence_recording import record_stage_verdict
 from events import EventBus, EventType, HydraFlowEvent
+from exception_classify import reraise_on_credit_or_bug
 from issue_decomposer import IssueDecomposer
 from models import Task, TriageResult
 from phase_utils import (
@@ -319,14 +320,32 @@ class TriagePhase:
         try:
             result = await self._triage.evaluate(issue)
         except RuntimeError as exc:
-            # Infrastructure errors (empty LLM response, subprocess crash)
-            # should NOT escalate to HITL.  Leave the issue in the find queue
-            # so it gets retried on the next triage cycle.
+            # Infrastructure errors (empty/unparseable LLM response, subprocess
+            # crash/timeout) must NOT hot-retry. Leaving the issue find-labeled
+            # means the next triage tick re-picks it immediately, so a
+            # persistently-failing issue loops forever — a triage retry storm
+            # that burns the usage budget (a batch of ADR-conformance
+            # false-positives did exactly this). Park it instead: TriageRetryLoop
+            # re-dispatches parked issues with backoff and a
+            # ``triage_retry_max_attempts`` cap, escalating to HITL once the
+            # retry budget is spent — bounded, not infinite.
             logger.warning(
-                "Issue #%d triage skipped (infra error, will retry): %s",
+                "Issue #%d triage infra error — parking for bounded retry: %s",
                 issue.id,
                 exc,
             )
+            try:
+                await self._prs.swap_pipeline_labels(
+                    issue.id, self._config.parked_label[0]
+                )
+            except Exception as park_exc:  # noqa: BLE001
+                reraise_on_credit_or_bug(park_exc)
+                logger.warning(
+                    "Issue #%d: could not park after infra error; it stays "
+                    "find-labeled",
+                    issue.id,
+                    exc_info=True,
+                )
             return 0
 
         if self._config.dry_run:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 from collections.abc import Callable, Coroutine, Iterable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
@@ -1628,6 +1629,20 @@ class HydraFlowOrchestrator:
 
     async def _triage_loop(self) -> None:
         """Continuously poll for find-labeled issues and triage them."""
+        # Operational kill-switch. Triage runs a full agent per issue; a bad
+        # batch (e.g. un-triageable findings) can drive repeated infra errors.
+        # The retry storm is now bounded (infra errors park — see
+        # TriagePhase._triage_single_traced), but this switch lets an operator
+        # hold triage off entirely without stopping the rest of the factory.
+        # Idle on shutdown rather than returning — a bare return makes the loop
+        # supervisor treat it as "completed unexpectedly" and hot-restart it.
+        if os.environ.get("HYDRAFLOW_TRIAGE_DISABLED") == "1":
+            logger.warning(
+                "triage loop DISABLED via HYDRAFLOW_TRIAGE_DISABLED — no issues "
+                "will be triaged until it is unset"
+            )
+            await self._stop_event.wait()
+            return
 
         async def _work() -> object:
             return await self._pipeline_work_wrapper(
