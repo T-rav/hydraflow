@@ -22,6 +22,7 @@ graph LR
     diagramloop["DiagramLoop<br/><i>loop</i>"]
     edgeproposerloop["EdgeProposerLoop<br/><i>loop</i>"]
     entryevidenceloop["EntryEvidenceLoop<br/><i>loop</i>"]
+    escalationreconciler["EscalationReconciler<br/><i>service</i>"]
     fakecoverageauditorloop["FakeCoverageAuditorLoop<br/><i>loop</i>"]
     fitnesscontext["FitnessContext<br/><i>value_object</i>"]
     fitnessscorecardloop["FitnessScorecardLoop<br/><i>loop</i>"]
@@ -48,6 +49,7 @@ graph LR
     botprport["BotPRPort<br/><i>port</i>"]
     controller["Controller<br/><i>control_role</i>"]
     credentials["Credentials<br/><i>value_object</i>"]
+    dedupstore["DedupStore<br/><i>service</i>"]
     dimensionbaseline["DimensionBaseline<br/><i>control_role</i>"]
     disturbancedampenerloop["DisturbanceDampenerLoop<br/><i>loop</i>"]
     error["Error<br/><i>control_role</i>"]
@@ -59,6 +61,7 @@ graph LR
     issuestoreport["IssueStorePort<br/><i>port</i>"]
     observabilityport["ObservabilityPort<br/><i>port</i>"]
     plant["Plant<br/><i>control_role</i>"]
+    prmanager["PRManager<br/><i>adapter</i>"]
     prport["PRPort<br/><i>port</i>"]
     repowikistore["RepoWikiStore<br/><i>service</i>"]
     reviewinsightstoreport["ReviewInsightStorePort<br/><i>port</i>"]
@@ -68,6 +71,7 @@ graph LR
     statetracker["StateTracker<br/><i>service</i>"]
     steeringchannel["SteeringChannel<br/><i>control_role</i>"]
     steeringstate["SteeringState<br/><i>control_role</i>"]
+    subprocessrunner["SubprocessRunner<br/><i>port</i>"]
     tribalwikistore["TribalWikiStore<br/><i>service</i>"]
     violationdetector["ViolationDetector<br/><i>control_role</i>"]
     workspaceport["WorkspacePort<br/><i>port</i>"]
@@ -132,6 +136,24 @@ graph LR
   corpuslearningloop -->|depends_on| statetracker
   corpuslearningloop -->|implements| basebackgroundloop
   corpuslearningloop -->|depends_on| governor
+  dedupstore -->|depends_on| adrcouncilreviewer
+  dedupstore -->|depends_on| adrtouchpointauditorloop
+  dedupstore -->|depends_on| contractrefreshloop
+  dedupstore -->|depends_on| corpuslearningloop
+  dedupstore -->|depends_on| dependabotmergeloop
+  dedupstore -->|depends_on| diagnosticloop
+  dedupstore -->|depends_on| entryevidenceloop
+  dedupstore -->|depends_on| fakecoverageauditorloop
+  dedupstore -->|depends_on| flaketrackerloop
+  dedupstore -->|depends_on| livecorpusreplayloop
+  dedupstore -->|depends_on| mergestatewatcherloop
+  dedupstore -->|depends_on| rcbudgetloop
+  dedupstore -->|depends_on| repowikistore
+  dedupstore -->|depends_on| reportissueloop
+  dedupstore -->|depends_on| sentryloop
+  dedupstore -->|depends_on| skillpromptevalloop
+  dedupstore -->|depends_on| botprport
+  dedupstore -->|depends_on| wikirotdetectorloop
   dependabotmergeloop -->|depends_on| hydraflowconfig
   dependabotmergeloop -->|depends_on| basebackgroundloop
   dependabotmergeloop -->|depends_on| statetracker
@@ -170,6 +192,12 @@ graph LR
   entryevidenceloop -->|depends_on| governor
   error -->|depends_on| hydraflowconfig
   error -->|depends_on| observabilityport
+  escalationreconciler -->|depends_on| adrtouchpointauditorloop
+  escalationreconciler -->|depends_on| fakecoverageauditorloop
+  escalationreconciler -->|depends_on| flaketrackerloop
+  escalationreconciler -->|depends_on| rcbudgetloop
+  escalationreconciler -->|depends_on| skillpromptevalloop
+  escalationreconciler -->|depends_on| wikirotdetectorloop
   fakecoverageauditorloop -->|depends_on| basebackgroundloop
   fakecoverageauditorloop -->|depends_on| hydraflowconfig
   fakecoverageauditorloop -->|depends_on| statetracker
