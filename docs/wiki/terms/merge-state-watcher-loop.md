@@ -6,12 +6,12 @@ bounded_context: "caretaker"
 code_anchor: "src/merge_state_watcher_loop.py:MergeStateWatcherLoop"
 aliases: ["merge state watcher loop", "merge state watcher", "conflict rebase loop"]
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K7"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488H"}]
-evidence: []
+evidence: ["01KQP0XFBGMB32VFGNPV8GZ26N"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T20:00:00.000000+00:00"
-updated_at: "2026-07-18T19:31:17.682213+00:00"
+updated_at: "2026-07-22T02:17:49.296778+00:00"
 ---
 
 ## Definition
