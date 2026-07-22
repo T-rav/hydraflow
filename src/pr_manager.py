@@ -2454,7 +2454,7 @@ class PRManager:
         except (RuntimeError, ValueError):
             return 0
 
-    @port_span("hf.port.pr.create_issue")
+    @port_span("hf.port.pr.ensure_labels_present")
     async def _ensure_labels_present(self, labels: list[str]) -> None:
         """Create any of *labels* the repo doesn't already have.
 
@@ -2501,6 +2501,7 @@ class PRManager:
             except RuntimeError as exc:
                 logger.warning("Could not provision label %r: %s", label, exc)
 
+    @port_span("hf.port.pr.create_issue")
     async def create_issue(
         self,
         title: str,
