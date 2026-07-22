@@ -1,13 +1,12 @@
 ---
-id: 0314
+id: 0324
 topic: gotchas
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-07-22T12:09:59.035962+00:00
-status: superseded
+created_at: 2026-07-22T13:38:34.196736+00:00
+status: active
 corroborations: 1
-supersedes: 0302,0303,0304,0305,0306,0307,0308,0309
-superseded_by: 0317
+supersedes: 0310,0310,0311,0311,0312,0312,0313,0314,0315,0316
 ---
 
 # Reverse label-swap state transitions on non-fatal exceptions

@@ -1,16 +1,15 @@
 ---
-id: 0316
+id: 0326
 topic: gotchas
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-07-22T12:09:59.037407+00:00
-status: superseded
+created_at: 2026-07-22T13:38:34.197808+00:00
+status: active
 corroborations: 1
-supersedes: 0302,0303,0304,0305,0306,0307,0308,0309
-superseded_by: 0317
+supersedes: 0310,0310,0311,0311,0312,0312,0313,0314,0315,0316
 ---
 
-# Expect two independent fix areas when auditing issue #10215/#10256
+# Bundled tracking issues can hide two independent, unverified fixes
 
 A single tracking issue can bundle unrelated fixes in one PR — don't assume a single root cause when auditing history.
 

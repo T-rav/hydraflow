@@ -1,19 +1,18 @@
 ---
-id: 0516
+id: 0527
 topic: testing
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-07-22T12:10:40.687992+00:00
-status: superseded
+created_at: 2026-07-22T13:39:13.368802+00:00
+status: active
 corroborations: 1
-supersedes: 0500,0501,0502,0503,0504,0505,0506,0507,0508,0509
-superseded_by: 0520
+supersedes: 0510,0510,0511,0512,0513,0514,0515,0516,0517,0518,0519
 ---
 
 # ADR pre-validator enforces required sections
 
 All ADRs must pass `tests/test_adr_pre_validator.py`, which enforces required sections (Status, Context, Decision, Consequences) and valid status values.
 
-Example: See also: architecture — ADR number collision and README guards.
+Example: see also architecture — ADR number collision and README guards.
 
 **Why:** Missing sections or invalid status values make ADRs non-machine-readable, breaking automated drift detection and the ADR README completeness guard.

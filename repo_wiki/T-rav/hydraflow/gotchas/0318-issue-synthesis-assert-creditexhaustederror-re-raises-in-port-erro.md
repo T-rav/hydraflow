@@ -1,16 +1,15 @@
 ---
-id: 0310
+id: 0318
 topic: gotchas
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-07-22T12:09:59.033218+00:00
-status: superseded
+created_at: 2026-07-22T13:38:34.193265+00:00
+status: active
 corroborations: 1
-supersedes: 0302,0303,0304,0305,0306,0307,0308,0309
-superseded_by: 0317
+supersedes: 0310,0310,0311,0311,0312,0312,0313,0314,0315,0316
 ---
 
-# Error-tolerance tests must assert CreditExhaustedError re-raises
+# Assert CreditExhaustedError re-raises in port error-tolerance tests
 
 When testing that a loop tolerates port failures, add a second case asserting `CreditExhaustedError` propagates instead of being swallowed.
 
