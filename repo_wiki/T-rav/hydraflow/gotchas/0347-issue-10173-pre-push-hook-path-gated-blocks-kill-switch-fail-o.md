@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10173
 source_phase: plan
 created_at: 2026-07-22T16:50:02.909718+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0348
 ---
 
 # Pre-push hook path-gated blocks: kill-switch + fail-open on unresolvable base ref

@@ -4,9 +4,10 @@ topic: gotchas
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-22T17:02:49.503862+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0327,0328,0329,0330,0331,0332,0333,0334,0335,0336
+superseded_by: 0348
 ---
 
 # Clear hitl-escalation label only alongside diagnose-failed

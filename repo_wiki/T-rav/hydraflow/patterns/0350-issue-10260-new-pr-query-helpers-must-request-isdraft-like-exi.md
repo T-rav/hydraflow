@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10260
 source_phase: review
 created_at: 2026-07-22T11:54:54.586693+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0356
 ---
 
 # New PR-query helpers must request isDraft like existing ones in pr_manager.py
