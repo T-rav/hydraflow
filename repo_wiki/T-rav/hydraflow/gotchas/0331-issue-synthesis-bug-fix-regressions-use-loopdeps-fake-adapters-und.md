@@ -1,13 +1,12 @@
 ---
-id: 0321
+id: 0331
 topic: gotchas
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-07-22T13:38:34.195034+00:00
-status: superseded
+created_at: 2026-07-22T15:33:18.680110+00:00
+status: active
 corroborations: 1
-supersedes: 0310,0310,0311,0311,0312,0312,0313,0314,0315,0316
-superseded_by: 0327
+supersedes: 0317,0318,0319,0320,0321,0322,0323,0324,0325,0326
 ---
 
 # Bug-fix regressions use LoopDeps + Fake* adapters under tests/regressions/
