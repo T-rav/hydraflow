@@ -6,12 +6,12 @@ bounded_context: "caretaker"
 code_anchor: "src/adr_pre_validator.py:ADRPreValidator"
 aliases: ["adr pre-validator", "adr structural validator"]
 related: []
-evidence: []
+evidence: ["01KQP0V9KK99G77287P414NFQR"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-06-20T14:21:10.280395+00:00"
-updated_at: "2026-06-20T14:21:10.280399+00:00"
+updated_at: "2026-07-22T15:07:58.083138+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-06-20T14:21:10.280289+00:00"
 proposal_signals: ["S2"]
