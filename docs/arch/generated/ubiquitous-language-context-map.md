@@ -257,6 +257,7 @@ graph LR
   staleissuegcloop -->|depends_on| prport
   staleissuegcloop -->|implements| basebackgroundloop
   staleissuegcloop -->|depends_on| governor
+  staleissuegcloop -->|depends_on| statetracker
   statetracker -->|depends_on| plant
   steeringchannel -->|depends_on| fitnesscontext
   steeringchannel -->|depends_on| governor
