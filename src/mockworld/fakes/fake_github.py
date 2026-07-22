@@ -686,12 +686,33 @@ class FakeGitHub:
         return ["octocat"]
 
     async def get_pr_checks(self, pr_number: int) -> list[dict[str, str]]:
-        """No CI checks in the air-gapped sandbox. Empty is falsy, so epic
-        detail rendering (EpicManager._enrich_pr_status) derives no CI status
-        rather than AttributeError-ing — which previously dropped any epic with
-        a PR'd child from /api/epics."""
+        """Serve seeded ``FakePR.checks`` (#10260). Defaults to empty — same
+        falsy-empty contract as before, so epic detail rendering
+        (EpicManager._enrich_pr_status) derives no CI status rather than
+        AttributeError-ing when a scenario hasn't seeded checks."""
         self._maybe_rate_limit()
-        return []
+        pr = self._prs.get(pr_number)
+        if pr is None:
+            return []
+        return [{"name": name, "state": state} for name, state in pr.checks]
+
+    async def find_open_resolving_pr(self, issue_number: int) -> int | None:
+        """In-memory mirror of :meth:`PRPort.find_open_resolving_pr` (#10260).
+
+        Unlike the real adapter (which parses ``Fixes #N`` from the PR
+        body), the fake's ``FakePR.issue_number`` already encodes the link.
+        Draft PRs are excluded, mirroring the real adapter.
+        """
+        self._maybe_rate_limit()
+        for pr in self._prs.values():
+            if (
+                pr.issue_number == issue_number
+                and not pr.merged
+                and not pr.closed
+                and not pr.draft
+            ):
+                return pr.number
+        return None
 
     async def get_pr_reviews(self, pr_number: int) -> list[dict[str, str]]:
         """No GitHub reviews in the air-gapped sandbox. Empty → epic detail
@@ -992,17 +1013,39 @@ class FakeGitHub:
             )
             commits = pr.commits
 
+            # More specific — checked first (#10260): a resolved-but-stale
+            # escalation label outranks the pipeline-stage drift kinds below.
+            # Requires BOTH labels — see the matching comment in
+            # PRManager.find_label_drift for why bare `hitl-escalation`
+            # (filed by loops other than diagnostic_loop, with no pipeline
+            # label backing it) must not be cleared this way. Draft PRs are
+            # excluded — mirrors find_open_resolving_pr's draft check.
+            escalations = set(issue.labels) & {"hitl-escalation", "diagnose-failed"}
             kind: str | None = None
+            issue_label = issue_pipeline
             if (
-                issue_pipeline in pre_pr_labels
-                and pr_pipeline == "hydraflow-review"
-                and commits > 0
+                {"hitl-escalation", "diagnose-failed"} <= set(issue.labels)
+                and not pr.draft
+                and pr.checks
+                and all(
+                    state.upper() in {"SUCCESS", "NEUTRAL", "SKIPPED"}
+                    for _name, state in pr.checks
+                )
             ):
-                kind = "pr_ahead_of_issue"
-            elif pr_pipeline in pre_pr_labels and commits > 0:
-                kind = "pr_at_pre_pr_stage"
-            elif pr_pipeline in post_pr_labels and issue_pipeline in pre_pr_labels:
-                kind = "pr_ahead_of_issue"
+                kind = "escalated_with_resolving_pr"
+                issue_label = ",".join(sorted(escalations))
+
+            if kind is None:
+                if (
+                    issue_pipeline in pre_pr_labels
+                    and pr_pipeline == "hydraflow-review"
+                    and commits > 0
+                ):
+                    kind = "pr_ahead_of_issue"
+                elif pr_pipeline in pre_pr_labels and commits > 0:
+                    kind = "pr_at_pre_pr_stage"
+                elif pr_pipeline in post_pr_labels and issue_pipeline in pre_pr_labels:
+                    kind = "pr_ahead_of_issue"
 
             if kind is None:
                 continue
@@ -1011,7 +1054,7 @@ class FakeGitHub:
                     issue=pr.issue_number,
                     pr=pr.number,
                     pr_commits=commits,
-                    issue_label=issue_pipeline,
+                    issue_label=issue_label,
                     pr_label=pr_pipeline,
                     kind=kind,  # type: ignore[arg-type]
                     detected_at=datetime.now(UTC),

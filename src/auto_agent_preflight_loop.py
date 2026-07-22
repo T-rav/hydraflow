@@ -119,14 +119,77 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         if not issues:
             return {"status": "ok", "issues_processed": 0}
 
+        # #10260: an issue already resolved by an open, CI-green PR must not
+        # re-enter a new attempt — LabelDriftWatcherLoop clears the stale
+        # escalation labels asynchronously, but this guard makes the
+        # dispatch loop itself immune to the lag before that reconciliation
+        # runs.
+        issue, suppressed = await self._select_dispatchable_issue(issues)
+        if issue is None:
+            return {"status": "ok", "issues_processed": 0, "suppressed": suppressed}
+
         # Sequential single-issue-per-tick.
-        issue = issues[0]
         result = await self._process_one(issue)
         return {
             "status": "ok",
             "issues_processed": 1,
             "result_status": result.get("status"),
+            "suppressed": suppressed,
         }
+
+    async def _select_dispatchable_issue(
+        self, issues: list[dict[str, Any]]
+    ) -> tuple[dict[str, Any] | None, int]:
+        """Return the first issue not already resolved by an open, CI-green PR.
+
+        Returns ``(issue_or_None, suppressed_count)``. Scans in poll order so
+        the single-issue-per-tick pick still respects the eligible list's
+        ordering.
+        """
+        suppressed = 0
+        for issue in issues:
+            issue_number = int(issue.get("number", 0))
+            if await self._is_resolved_by_open_pr(issue_number):
+                suppressed += 1
+                continue
+            return issue, suppressed
+        return None, suppressed
+
+    async def _is_resolved_by_open_pr(self, issue_number: int) -> bool:
+        """True when an OPEN PR already resolves *issue_number* with every
+        CI check green (#10260). Any lookup failure — including an
+        unconfigured test double returning something other than the
+        declared int/list shape — degrades to False: never suppress a real
+        dispatch on uncertain data."""
+        try:
+            pr_number = await self._prs.find_open_resolving_pr(issue_number)
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.debug(
+                "Auto-agent: resolving-PR lookup failed for #%d: %s",
+                issue_number,
+                exc,
+            )
+            return False
+        if not isinstance(pr_number, int) or pr_number <= 0:
+            return False
+        try:
+            checks = await self._prs.get_pr_checks(pr_number)
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.debug(
+                "Auto-agent: CI-check lookup failed for PR #%d (issue #%d): %s",
+                pr_number,
+                issue_number,
+                exc,
+            )
+            return False
+        if not isinstance(checks, list) or not checks:
+            return False
+        return all(
+            isinstance(c, dict) and c.get("state", "").upper() in _PASSING_CI_STATES
+            for c in checks
+        )
 
     async def _reconcile_closed_issues(self) -> int:
         """Clear auto_agent_attempts for issues that have been closed.
@@ -679,6 +742,10 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
 # together must not flood the eligible pool; the scan re-runs every tick, so
 # the remainder drains over subsequent ticks.
 _REDRIVE_BATCH_CAP = 3
+
+# CI check states that count as a green verdict (#10260) — mirrors
+# PRManager._PASSING_STATES.
+_PASSING_CI_STATES = frozenset({"SUCCESS", "NEUTRAL", "SKIPPED"})
 
 
 def _now_iso() -> str:

@@ -922,6 +922,16 @@ class LabelDrift(BaseModel):
         - ``pr_at_pre_pr_stage``: PR labelled ``hydraflow-ready`` /
           ``hydraflow-plan`` / ``hydraflow-find`` while it has commits
           (PR-stage labels are review/hitl/fixed only).
+        - ``escalated_with_resolving_pr``: issue carries BOTH
+          ``hitl-escalation`` AND ``diagnose-failed`` (the diagnostic_loop
+          escalation lineage, which always leaves the durable
+          ``hydraflow-hitl`` pipeline label behind) while an open PR already
+          resolves it (a ``Fixes #N`` link) with all CI checks green — the
+          escalation labels are stale relative to the already-resolved PR
+          (#10260). Deliberately scoped to this pairing: other loops file
+          bare ``hitl-escalation`` + their own ``-stuck`` label with no
+          pipeline label backing it, and clearing it there would orphan the
+          issue with no re-escalation path.
     """
 
     issue: int = Field(description="Linked issue number")
@@ -929,9 +939,9 @@ class LabelDrift(BaseModel):
     pr_commits: int = Field(ge=0, description="Number of commits on the PR")
     issue_label: str = Field(description="Current pipeline label on the issue")
     pr_label: str = Field(description="Current pipeline label on the PR")
-    kind: Literal["pr_ahead_of_issue", "pr_at_pre_pr_stage"] = Field(
-        description="Drift category — see ADR-0088"
-    )
+    kind: Literal[
+        "pr_ahead_of_issue", "pr_at_pre_pr_stage", "escalated_with_resolving_pr"
+    ] = Field(description="Drift category — see ADR-0088")
     detected_at: datetime = Field(
         description="UTC timestamp when the drift was observed"
     )

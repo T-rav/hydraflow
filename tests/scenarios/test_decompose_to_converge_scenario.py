@@ -262,6 +262,7 @@ class TestExhaustedIssueDecomposesThenParentConverges:
             "status": "ok",
             "issues_processed": 1,
             "result_status": "skipped_decomposed",
+            "suppressed": 0,
         }
 
         # The stuck issue was superseded, closed, and marked decomposed --
@@ -346,6 +347,7 @@ class TestUndecomposableIssueStillEscalatesToHuman:
             "status": "ok",
             "issues_processed": 1,
             "result_status": "skipped_exhausted",
+            "suppressed": 0,
         }
 
         labels = world.github.issue(issue_number).labels

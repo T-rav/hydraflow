@@ -174,6 +174,9 @@ class TestPRPortMethods:
         "transition",
         "close_task",
         "create_task",
+        # Label/dispatch reconciliation (#10260)
+        "get_pr_checks",
+        "find_open_resolving_pr",
     ]
 
     @pytest.mark.parametrize("method", _REQUIRED_METHODS)
@@ -309,6 +312,9 @@ class TestPRPortSignatures:
         "transition",
         "close_task",
         "create_task",
+        # Label/dispatch reconciliation (#10260)
+        "get_pr_checks",
+        "find_open_resolving_pr",
     ]
 
     @pytest.mark.parametrize("method", _SIGNED_METHODS)
