@@ -1,18 +1,17 @@
 ---
-id: 0291
+id: 0299
 topic: gotchas
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-07-22T06:25:49.698112+00:00
-status: superseded
+created_at: 2026-07-22T08:12:52.210367+00:00
+status: active
 corroborations: 1
-supersedes: 0282,0283,0284,0285,0286,0287
-superseded_by: 0296
+supersedes: 0288,0289,0290,0291,0292,0293
 ---
 
 # Run full make quality, not a file-targeted subset, before done
 
-Rule: Always run the full `make quality` gate — never a file-targeted `pytest` subset — before declaring a task complete.
+Always run the full `make quality` gate — never a file-targeted `pytest` subset — before declaring a task complete.
 
 Example: PR #8460 ran 211 tests across three targeted files (all green) but shipped over-pruned defensive guards; `make quality` would have caught 7 failures in `tests/test_audit_prompts.py` and `tests/test_repo_wiki_loop_pr.py`.
 
