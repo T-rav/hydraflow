@@ -34,6 +34,31 @@ class SubprocessConformanceRunner:
     resolve to ``CheckOutcome.MANUAL`` without shelling out.
     """
 
+    def available(self) -> bool:
+        """Return True iff pytest can launch under ``sys.executable``.
+
+        Probes the SAME interpreter the checks use (#10212 pinned it to
+        ``sys.executable``) via ``-m pytest --version``. When it returns False
+        — a half-synced venv where the test extra was dropped (``uv sync``
+        without ``--all-extras``) — every pytest-kind check would fail
+        identically with "No module named pytest", which ``run`` maps to FAIL.
+        ``AdrConformanceLoop`` calls this once per tick and skips (filing
+        nothing) rather than storming one false-positive drift issue per ADR
+        (#10211/#10243). This does not change ``run``'s exit-code mapping: a
+        genuine test failure still returns FAIL.
+        """
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "pytest", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=60.0,
+                check=False,
+            )
+        except (subprocess.SubprocessError, OSError):
+            return False
+        return proc.returncode == 0
+
     def run(
         self, check: Check, *, repo_root: Path, timeout_s: float = 300.0
     ) -> CheckResult:
