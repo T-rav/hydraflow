@@ -59,7 +59,7 @@ echo "Lint checks passed." >&2
 
 # Get staged Python source files (excluding tests, configs, migrations, __init__)
 SOURCE_FILES=$(echo "$STAGED_FILES" | grep '\.py$' \
-  | grep -vE '(test_|_test\.py|conftest\.py|/tests/|__init__\.py|migrations?/|setup\.py|manage\.py)' \
+  | grep -vE '(test_|_test\.py|conftest\.py|(^|/)tests/|__init__\.py|migrations?/|setup\.py|manage\.py)' \
   || true)
 
 # Get staged test files
