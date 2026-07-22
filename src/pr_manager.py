@@ -2455,6 +2455,52 @@ class PRManager:
             return 0
 
     @port_span("hf.port.pr.create_issue")
+    async def _ensure_labels_present(self, labels: list[str]) -> None:
+        """Create any of *labels* the repo doesn't already have.
+
+        ``gh issue/pr create --label X`` (and ``--add-label X``) abort the
+        WHOLE operation when X doesn't exist, so a caller that files with a
+        not-yet-provisioned label silently fails — e.g. the ``health_monitor``
+        loop-stall dead-man-switch files with ``loop-stalled``, which
+        :meth:`ensure_labels_exist` does not create at boot (it only creates
+        the fixed lifecycle set). Provisioning missing labels first means
+        labeling never fails on an unknown label.
+
+        Idempotent and non-mutating: labels that already exist are left
+        untouched (no colour/description reset). Best-effort — a failure to
+        list or create degrades to the pre-existing behaviour rather than
+        blocking the caller.
+        """
+        if self._config.dry_run or not labels:
+            return
+        try:
+            listed = await self._run_gh(
+                "gh",
+                "label",
+                "list",
+                "--repo",
+                self._repo,
+                "--limit",
+                "500",
+                "--json",
+                "name",
+                "-q",
+                ".[].name",
+            )
+        except RuntimeError as exc:
+            logger.warning("Could not list labels to ensure existence: %s", exc)
+            return
+        existing = {n.strip().lower() for n in listed.splitlines() if n.strip()}
+        for label in labels:
+            if label.lower() in existing:
+                continue
+            try:
+                await self._run_gh("gh", "label", "create", label, "--repo", self._repo)
+                existing.add(label.lower())
+                logger.info("Provisioned missing label %r before use", label)
+            except RuntimeError as exc:
+                logger.warning("Could not provision label %r: %s", label, exc)
+
     async def create_issue(
         self,
         title: str,
@@ -2482,6 +2528,10 @@ class PRManager:
                 title,
             )
             return existing
+
+        # Provision any not-yet-existing label so `gh issue create --label X`
+        # can't abort on it (e.g. the health_monitor escalation's loop-stalled).
+        await self._ensure_labels_present(labels or [])
 
         cmd = [
             "gh",
