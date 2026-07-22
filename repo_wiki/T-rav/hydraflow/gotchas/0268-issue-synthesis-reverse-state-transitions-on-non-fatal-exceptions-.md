@@ -1,0 +1,18 @@
+---
+id: 0268
+topic: gotchas
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-07-22T02:39:19.029505+00:00
+status: active
+corroborations: 1
+supersedes: 0214,0215,0216,0217,0218,0219,0220,0221,0222,0223,0224,0225,0226,0227,0228,0229,0230,0231,0232,0233,0234,0235,0236,0237,0238,0239,0240,0241,0242,0243,0244,0245,0246,0247
+---
+
+# Reverse state transitions on non-fatal exceptions to avoid stuck issues
+
+Wrap label-swap + operation + cleanup in a try/except that reverses the transition on non-fatal errors.
+
+Example: if a label is swapped `plan → implement` but the API call fails, swap it back to `plan` before re-raising.
+
+**Why:** An exception after a successful state transition but before cleanup leaves issues stuck in intermediate states with no automated recovery path.
