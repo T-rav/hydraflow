@@ -13,6 +13,7 @@ every non-zero pytest exit to FAIL. Two cases were misread:
 from __future__ import annotations
 
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -66,6 +67,26 @@ def test_pytest_command_clears_marker_deselection(monkeypatch, tmp_path):
     # The trailing `-m ""` (not the `python -m pytest` one) clears the marker
     # deselection so scenario_loops/browser tests aren't skipped.
     assert seen["cmd"][-2:] == ["-m", ""]
+
+
+def test_pytest_command_uses_sys_executable_not_bare_python(monkeypatch, tmp_path):
+    """#10211: a bare "python" can resolve to a pytest-less venv on the
+    background loop's PATH, misreading every pytest check as FAIL. The
+    invocation must pin the exact interpreter running this process."""
+    seen = {}
+
+    def _capture(cmd, **k):
+        seen["cmd"] = cmd
+        return _fake_proc(0)
+
+    monkeypatch.setattr(subprocess, "run", _capture)
+    runner = SubprocessConformanceRunner()
+    runner.run(
+        Check("pytest", "tests/test_x.py", "pytest:tests/test_x.py"),
+        repo_root=tmp_path,
+    )
+    assert seen["cmd"][0] == sys.executable
+    assert seen["cmd"][0] != "python"
 
 
 @pytest.mark.parametrize(
