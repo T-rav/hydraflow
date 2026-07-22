@@ -222,22 +222,31 @@ async def test_reconcile_closed_escalations_clears_dedup(loop_env, monkeypatch) 
     The read routes through ``PRPort.list_closed_issues_by_label`` (shared
     ``EscalationReconciler``) — never a raw ``gh`` subprocess (#9932). The
     ``create_subprocess_exec`` guard fails the test if the reconcile path
-    escapes the MockWorld air-gap.
+    escapes the MockWorld air-gap. ``_reconcile_closed_escalations`` also
+    reconciles closed first-tier ``rc-duration-regression`` issues
+    (#10215) — seed that label's read as empty so this test stays scoped
+    to the escalation tier only.
     """
     cfg, state, pr, dedup = loop_env
     dedup.get.return_value = {"rc_budget:median", "rc_budget:spike"}
     loop = _loop(loop_env)
 
-    pr.list_closed_issues_by_label.return_value = [
-        {
-            "number": 9700,
-            "title": (
-                "HITL: RC gate duration regression (median) unresolved after 3 attempts"
-            ),
-            "body": "",
-            "updated_at": "",
-        }
-    ]
+    async def fake_list_closed(label: str, **_kwargs: object) -> list[dict]:
+        if label == "rc-duration-stuck":
+            return [
+                {
+                    "number": 9700,
+                    "title": (
+                        "HITL: RC gate duration regression (median) "
+                        "unresolved after 3 attempts"
+                    ),
+                    "body": "",
+                    "updated_at": "",
+                }
+            ]
+        return []
+
+    pr.list_closed_issues_by_label = AsyncMock(side_effect=fake_list_closed)
 
     def _no_subprocess(*_args, **_kwargs):
         raise AssertionError("reconcile must route through the PRPort, not raw gh")
@@ -246,14 +255,129 @@ async def test_reconcile_closed_escalations_clears_dedup(loop_env, monkeypatch) 
 
     await loop._reconcile_closed_escalations()
 
-    pr.list_closed_issues_by_label.assert_awaited_once_with(
-        "rc-duration-stuck", limit=100
-    )
+    pr.list_closed_issues_by_label.assert_any_await("rc-duration-stuck", limit=100)
+    pr.list_closed_issues_by_label.assert_any_await("rc-duration-regression", limit=100)
     dedup.set_all.assert_called_once()
     remaining = dedup.set_all.call_args.args[0]
     assert "rc_budget:median" not in remaining
     assert "rc_budget:spike" in remaining
     state.clear_rc_budget_attempts.assert_called_once_with("median")
+
+
+async def test_reconcile_closed_regressions_clears_dedup_without_resetting_attempts(
+    loop_env, monkeypatch
+) -> None:
+    """Closing a first-tier `rc-duration-regression` issue must clear its
+    dedup key so the NEXT signal can re-enter the attempts ladder — but
+    must NOT reset the attempts counter itself. Only the terminal
+    `rc-duration-stuck` escalation-close resets attempts (spec §3.2); a
+    human closing attempt #1 must leave attempts at 1 so a 2nd firing
+    reaches attempt #2, then a 3rd reaches escalation. Resetting attempts
+    here would make the 3-attempt escalation ladder in the module
+    docstring structurally unreachable (#10215).
+    """
+    cfg, state, pr, dedup = loop_env
+    dedup.get.return_value = {"rc_budget:median", "rc_budget:spike"}
+    loop = _loop(loop_env)
+
+    pr.list_closed_issues_by_label.return_value = [
+        {
+            "number": 9200,
+            "title": "RC gate duration regression: 2729s vs 7s (median)",
+            "body": "",
+            "labels": [],
+        }
+    ]
+
+    def _no_subprocess(*_args, **_kwargs):
+        raise AssertionError("reconcile must route through the PRPort, not raw gh")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _no_subprocess)
+
+    await loop._reconcile_closed_regressions()
+
+    pr.list_closed_issues_by_label.assert_awaited_once_with(
+        "rc-duration-regression", limit=100
+    )
+    dedup.set_all.assert_called_once()
+    remaining = dedup.set_all.call_args.args[0]
+    assert "rc_budget:median" not in remaining
+    assert "rc_budget:spike" in remaining
+    state.clear_rc_budget_attempts.assert_not_called()
+
+
+async def test_reconcile_closed_regressions_retains_key_on_bot_close(
+    loop_env, monkeypatch
+) -> None:
+    """A programmatically-closed (bot-marker-stamped) regression issue must
+    NOT clear its dedup key — the subject is still detected at HEAD, so
+    clearing would immediately refile a duplicate (the #9437 guard,
+    mirrored one tier down from ``EscalationReconciler``)."""
+    cfg, state, pr, dedup = loop_env
+    dedup.get.return_value = {"rc_budget:median"}
+    loop = _loop(loop_env)
+
+    pr.list_closed_issues_by_label.return_value = [
+        {
+            "number": 9200,
+            "title": "RC gate duration regression: 2729s vs 7s (median)",
+            "body": "",
+            "labels": [{"name": "hydraflow-auto-resolved"}],
+        }
+    ]
+
+    monkeypatch.setattr(
+        asyncio,
+        "create_subprocess_exec",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no raw gh")),
+    )
+
+    await loop._reconcile_closed_regressions()
+
+    dedup.set_all.assert_not_called()
+
+
+async def test_reconcile_closed_regressions_skips_unparseable_titles(
+    loop_env,
+) -> None:
+    """An operator-created issue that happens to carry the
+    `rc-duration-regression` label but doesn't match our title shape is
+    left untouched — never crashes, never clears a key."""
+    cfg, state, pr, dedup = loop_env
+    dedup.get.return_value = {"rc_budget:median"}
+    loop = _loop(loop_env)
+
+    pr.list_closed_issues_by_label.return_value = [
+        {"number": 1, "title": "Investigate slow RC gate", "body": "", "labels": []}
+    ]
+
+    await loop._reconcile_closed_regressions()
+
+    dedup.set_all.assert_not_called()
+
+
+async def test_reconcile_closed_regressions_ignores_untracked_subject(
+    loop_env,
+) -> None:
+    """A closed `rc-duration-regression` issue whose subject has no
+    matching dedup key (already cleared, or from a stale/foreign issue)
+    is a no-op — nothing to clear, no spurious `set_all` write."""
+    cfg, state, pr, dedup = loop_env
+    dedup.get.return_value = {"rc_budget:spike"}
+    loop = _loop(loop_env)
+
+    pr.list_closed_issues_by_label.return_value = [
+        {
+            "number": 5,
+            "title": "RC gate duration regression: 900s vs 300s (median)",
+            "body": "",
+            "labels": [],
+        }
+    ]
+
+    await loop._reconcile_closed_regressions()
+
+    dedup.set_all.assert_not_called()
 
 
 async def test_fetch_recent_runs_nonzero_returns_empty(
@@ -286,6 +410,37 @@ async def test_fetch_recent_runs_timeout_returns_empty(
     monkeypatch.setattr("rc_budget_loop.run_subprocess_result", fake_result)
 
     assert await loop._fetch_recent_runs() == []
+
+
+async def test_fetch_recent_runs_excludes_cancelled_runs(loop_env) -> None:
+    """A run GH-Actions-cancelled at its own timeout is not real duration
+    data — including it misclassifies a hang as a wall-clock regression
+    (#10215)."""
+    loop = _loop(loop_env)
+    loop._github_cache.get_rc_workflow_runs = AsyncMock(
+        return_value=[
+            {
+                "id": 1,
+                "url": "u1",
+                "status": "completed",
+                "conclusion": "cancelled",
+                "created_at": "2026-07-22T02:16:51Z",
+                "run_started_at": "2026-07-22T01:31:51Z",
+                "updated_at": "2026-07-22T02:16:51Z",
+            },
+            {
+                "id": 2,
+                "url": "u2",
+                "status": "completed",
+                "conclusion": "success",
+                "created_at": "2026-07-21T23:21:55Z",
+                "run_started_at": "2026-07-21T23:21:50Z",
+                "updated_at": "2026-07-21T23:21:55Z",
+            },
+        ]
+    )
+    runs = await loop._fetch_recent_runs()
+    assert [r["databaseId"] for r in runs] == [2]
 
 
 async def test_fetch_job_breakdown_sorts_and_caps_slowest_jobs(

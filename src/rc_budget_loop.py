@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
-from escalation_reconcile import EscalationReconciler
+from escalation_reconcile import EscalationReconciler, is_bot_close
 from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult  # noqa: TCH001
 from subprocess_util import SubprocessTimeoutError, run_subprocess_result
@@ -72,6 +72,18 @@ _ESCALATION_TITLE_RE = re.compile(
 
 def _escalation_subject(title: str) -> str | None:
     m = _ESCALATION_TITLE_RE.match(title)
+    return m.group(1) if m else None
+
+
+# Parses ``_file_regression_issue`` titles back to the dedup-key subject
+# (``median``/``spike``), mirroring ``_ESCALATION_TITLE_RE`` one tier down.
+_REGRESSION_TITLE_RE = re.compile(
+    r"^RC gate duration regression: \d+s vs \d+s \((median|spike)\)$"
+)
+
+
+def _regression_subject(title: str) -> str | None:
+    m = _REGRESSION_TITLE_RE.match(title)
     return m.group(1) if m else None
 
 
@@ -213,6 +225,15 @@ class RCBudgetLoop(BaseBackgroundLoop):
         out: list[dict[str, Any]] = []
         for row in rows:
             if str(row.get("status", "")) != "completed":
+                continue
+            # A run GH-Actions-cancelled at its own job timeout has no real
+            # wall-clock signal to offer: its duration is an artifact of
+            # when the kill landed, not of the gate actually running slow.
+            # Counting it (as either the "current" subject or as baseline
+            # history) is exactly the false positive that produced #10215's
+            # "2729s vs 7s" report for a run that had in fact hung, not
+            # regressed.
+            if str(row.get("conclusion", "")).lower() == "cancelled":
                 continue
             created = _parse_iso(row.get("created_at"))
             started = _parse_iso(row.get("run_started_at") or row.get("created_at"))
@@ -411,15 +432,56 @@ class RCBudgetLoop(BaseBackgroundLoop):
             title, body, ["hitl-escalation", "rc-duration-stuck"]
         )
 
-    async def _reconcile_closed_escalations(self) -> None:
-        """Clear dedup keys + attempt counters for closed HITL issues (§3.2).
+    async def _reconcile_closed_regressions(self) -> None:
+        """Clear dedup keys (NOT attempt counters) for closed first-tier
+        ``rc-duration-regression`` issues.
 
-        Delegates to the shared :class:`EscalationReconciler` (PRPort-based;
-        replaced the raw ``gh issue list`` subprocess — #9932). Subjects
-        (``median``/``spike``) are parsed from the escalation-title shape
-        ``"HITL: RC gate duration regression (<kind>) unresolved after N …"``.
+        Without this, the dedup key set on the first fire never clears
+        (nothing else ever touches an ``rc_budget:*`` key besides the
+        ``rc-duration-stuck`` escalation reconciler), which permanently
+        blocks the ``if key in dedup: continue`` guard in ``_do_work`` —
+        freezing ``attempts`` at 1 forever and making the "escalates after
+        3 unresolved attempts" promise structurally unreachable (#10215).
+        """
+        closed = await self._pr.list_closed_issues_by_label(
+            "rc-duration-regression", limit=100
+        )
+        keys = self._dedup.get()
+        keep = set(keys)
+        for issue in closed:
+            subject = _regression_subject(issue.get("title", ""))
+            if subject is None:
+                continue
+            key = f"rc_budget:{subject}"
+            if key not in keep:
+                continue
+            if is_bot_close(issue):
+                # Programmatic close — the subject is still detected at
+                # HEAD; clearing here would refile a duplicate next tick
+                # (#9437, mirrored from EscalationReconciler).
+                continue
+            keep.discard(key)
+        if keep != keys:
+            self._dedup.set_all(keep)
+
+    async def _reconcile_closed_escalations(self) -> None:
+        """Clear dedup state for closed HITL escalations + regression issues.
+
+        Two tiers, both keyed ``rc_budget:{median,spike}``:
+
+        - Terminal ``rc-duration-stuck`` escalations: delegates to the
+          shared :class:`EscalationReconciler` (PRPort-based; replaced the
+          raw ``gh issue list`` subprocess — #9932); clears dedup key AND
+          resets the attempts counter (§3.2). Subjects are parsed from the
+          escalation-title shape ``"HITL: RC gate duration regression
+          (<kind>) unresolved after N …"``.
+        - First-tier ``rc-duration-regression`` issues: see
+          :meth:`_reconcile_closed_regressions` — clears the dedup key
+          only, leaving attempts to keep climbing toward escalation
+          (#10215).
         """
         await self._escalations.reconcile_closed()
+        await self._reconcile_closed_regressions()
 
     def _emit_trace(self, t0: float, *, runs_seen: int, signals: int) -> None:
         """Best-effort subprocess trace via lazy-imported ``trace_collector``."""
