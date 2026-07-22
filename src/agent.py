@@ -76,6 +76,17 @@ Run through this checklist before your final commit:
 - [ ] **Error messages are clear** — exceptions include context (what failed, what was expected)
 - [ ] **Existing tests still pass** — your changes don't break unrelated tests
 - [ ] **Commit message matches changes** — "Fixes #N: <summary>" accurately describes what changed
+
+### Pre-push self-check — avoid these recurring CI reds
+
+These six patterns pass locally but go red in CI. Check each trigger and apply the one-line fix BEFORE your final commit — CI guards them but does not pre-empt them:
+
+- [ ] **`fix(` commit → `tests/regressions/` delta (P10.6)** — if your commit subject starts with `fix(`, add a test under `tests/regressions/`. For a pure refactor with no behavior change, add a `Skip-Regression:` trailer to the commit. No delta and no trailer → P10.6 WARNs → CI red.
+- [ ] **New subprocess call site → sandbox seam** — if you add a NEW `run_subprocess*` / `stream_claude_process` call site in a `src/*_loop.py` or a runner, declare it in `mockworld.sandbox_main.SANDBOX_SEAMS` (or route it through an injected-fake seam). Otherwise the seam-completeness ratchet goes red.
+- [ ] **ADR `Enforced by:` with multiple checks → bullet lines** — multiple checks MUST be bullet lines (`**Enforced by:**` then `- pytest:a` / `- pytest:b` on their own lines), never inline `pytest:a, pytest:b`. A single inline check is fine; the resolver only parses bullets for multiples.
+- [ ] **Extracting code → do NOT relocate a `# noqa`** — moving code to a new file moves its suppression to a new file-signature, which the disturbance ratchet reads as a NEW violation (it only ever shrinks). Instead narrow the `except` to concrete types, or hoist the import to module top, so no suppression is needed. Never bump the baseline.
+- [ ] **Moving a cited file → update its ADR `Enforced by:` citation** — if you relocate a file named in an ADR `Enforced by:` citation (grep the ADRs for the old path), update that citation in the same commit, or ADR-conformance goes red.
+- [ ] **Relocating a symbol → fix its patchers** — before moving a module-level symbol out of its module, grep tests/scenarios for `patch("oldmodule.symbol")` and repoint them, or the patched test errors at collection.
 """
 
     @staticmethod

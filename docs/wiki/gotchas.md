@@ -859,3 +859,21 @@ Safe because neither file is drift-checked (`arch.runner` exempts `changelog.md`
 ```json:entry
 {"id":"ARCH-META-AUTOMERGE-001","source_type":"manual","topic":"git","tags":["gitattributes","merge-driver","docs/arch",".meta.json","changelog","ensure-hooks"],"rule":"docs/arch/.meta.json (merge=arch-meta, keep-incoming) and docs/arch/generated/changelog.md (merge=union) auto-resolve on merge; run `make ensure-hooks` once per clone to register the arch-meta driver.","anti_pattern":"Hand-resolving docs/arch/.meta.json + changelog.md conflicts on every staging advance","code_refs":[".gitattributes","Makefile:ensure-hooks"],"added":"2026-07-21"}
 ```
+
+
+## Pre-push self-check — six recurring avoidable CI reds
+
+Six patterns that pass `make quality-lite` locally but go red in CI on the first round, forcing a heal round-trip. All are already CI-guarded — the fix is to PRE-EMPT them before the first push. Check each trigger and apply the one-line fix:
+
+1. **`fix(` commit needs a `tests/regressions/` delta (P10.6).** A commit whose subject starts with `fix(` and adds nothing under `tests/regressions/` WARNs → CI red. Add a regression test, or a `Skip-Regression:` commit trailer for a pure refactor with no behavior change. (Bit #10160, #10164.)
+2. **A new subprocess call site needs a sandbox seam.** Any NEW `run_subprocess*` / `stream_claude_process` call site added in a `src/*_loop.py` (or a runner) needs a `mockworld.sandbox_main.SANDBOX_SEAMS` declaration or an injected-fake seam, or the seam-completeness ratchet goes red. (#10155 added `HealthMonitorLoop._repo_probe`'s `git ls-remote` without one.)
+3. **ADR `Enforced by:` with multiple checks must be bullet lines.** The resolver only parses bullets for multiples: `**Enforced by:**` then `- pytest:a` / `- pytest:b` on their own lines — never inline `pytest:a, pytest:b`. A single inline check is fine. (#10164 used the inline form.)
+4. **Extracting code to a new file relocates its `# noqa` → ratchet red.** The disturbance ratchet only shrinks; a suppression moved to a new file-signature reads as a NEW violation. Narrow the `except` to concrete types, or hoist the import to module top, so no suppression is needed. Never bump the baseline. (#10160 PLC0415, #10155 BLE001.)
+5. **Moving a cited test file stales its ADR `Enforced by:` citation.** Relocating a file named in an ADR citation → ADR-conformance red. Grep the ADRs for the old path and update the citation in the same commit. (#10164 staled ADR-0085.)
+6. **A test that `patch()`es a module-level import breaks when the refactor moves it.** Before relocating a symbol out of its module, grep tests/scenarios for `patch("oldmodule.symbol")` and repoint them, or the patched test errors at collection. (#10155 patched `health_monitor_loop.run_subprocess_result` after the refactor moved it out.)
+
+**Why:** These reds are green-locally but caught only in CI, so each one costs a full heal round-trip. Pre-empting them at build time is far cheaper than a post-push fix. Mirrored in the implementer prompt's "Pre-push self-check" section (`src/agent.py:_SELF_CHECK_CHECKLIST`) and `docs/wiki/dark-factory.md` §4.8.
+
+```json:entry
+{"id":"BUILD-PREFLIGHT-SIX-CI-REDS-001","source_type":"manual","topic":"gotchas","tags":["pre-push","ci-red","P10.6","SANDBOX_SEAMS","adr-enforced-by","suppression-ratchet","adr-conformance","patch-target"],"rule":"Before the first push, pre-empt the six recurring green-locally/red-in-CI patterns: fix()→tests/regressions delta (or Skip-Regression: trailer); new run_subprocess*/stream_claude_process call site→SANDBOX_SEAMS or injected-fake seam; multi-check ADR Enforced by:→bullet lines not inline; code extraction→narrow except/hoist import instead of relocating a # noqa; moving a cited file→update its ADR Enforced by: citation; relocating a symbol→repoint tests that patch() it.","anti_pattern":"Shipping a build green-locally that hits an avoidable CI red (P10.6 WARN, seam-completeness ratchet, ADR Enforced-by inline format, suppression-disturbance ratchet, ADR-conformance stale citation, or a broken patch() target) needing a heal round-trip","code_refs":["src/agent.py:AgentRunner._SELF_CHECK_CHECKLIST","docs/wiki/dark-factory.md"],"source_issue":10169,"added":"2026-07-21"}
+```
