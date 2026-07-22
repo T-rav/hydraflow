@@ -1,13 +1,12 @@
 ---
-id: 0333
+id: 0343
 topic: gotchas
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-07-22T15:33:18.681197+00:00
-status: superseded
+created_at: 2026-07-22T17:02:49.507226+00:00
+status: active
 corroborations: 1
-supersedes: 0317,0318,0319,0320,0321,0322,0323,0324,0325,0326
-superseded_by: 0337
+supersedes: 0327,0328,0329,0330,0331,0332,0333,0334,0335,0336
 ---
 
 # Run full make quality, not a file-targeted pytest subset, before done

@@ -1,13 +1,12 @@
 ---
-id: 0539
+id: 0550
 topic: testing
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-07-22T15:34:08.393614+00:00
-status: superseded
+created_at: 2026-07-22T17:03:32.125225+00:00
+status: active
 corroborations: 1
-supersedes: 0520,0521,0522,0523,0524,0525,0526,0527,0528,0529,0530
-superseded_by: 0542
+supersedes: 0531,0532,0533,0534,0535,0536,0537,0538,0539,0540,0541
 ---
 
 # Use public FakeGitHub API in scenario tests
