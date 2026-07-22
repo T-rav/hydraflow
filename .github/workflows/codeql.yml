@@ -1,15 +1,19 @@
 name: "CodeQL"
 
 on:
+  # Run on BOTH main and staging. Under the two-tier model (ADR-0042) all work
+  # PRs target staging, never main — so triggering only on `[main]` meant
+  # CodeQL never scanned normal work and issues surfaced for the first time at
+  # the staging->main RC-promotion PR (e.g. alert #106). Adding staging catches
+  # them at the PR that introduces them, not weeks later at the RC cut.
   push:
-    branches: [main]
+    branches: [main, staging]
   pull_request:
-    branches: [main]
+    branches: [main, staging]
   schedule:
     - cron: "30 3 * * 1"
-  # On-demand runs so a security fix (e.g. a sanitizer model-pack, #9143) can be
-  # validated against a branch without waiting for the weekly scan or an
-  # RC-promotion PR to main — CodeQL otherwise never runs on staging branches.
+  # On-demand runs for validating a security fix (e.g. a sanitizer model-pack,
+  # #9143) against an arbitrary branch without waiting for the scheduled scan.
   workflow_dispatch:
 
 permissions:
@@ -50,6 +54,9 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          # Excludes adversarial/holdout test FIXTURES (synthetic apps that
+          # deliberately plant issues) from analysis — see the config file.
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Perform CodeQL Analysis
         id: analyze
@@ -71,7 +78,7 @@ jobs:
       # default branch (dismissing requires the alert to exist there, and PR
       # runs must never dismiss).
       - name: Apply inline suppressions to code scanning
-        if: matrix.language == 'python' && github.ref == 'refs/heads/main'
+        if: matrix.language == 'python' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         uses: advanced-security/dismiss-alerts@v2
         with:
           sarif-id: ${{ steps.analyze.outputs.sarif-id }}
