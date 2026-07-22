@@ -1,19 +1,18 @@
 ---
-id: 0517
+id: 0528
 topic: testing
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-07-22T12:10:40.689022+00:00
-status: superseded
+created_at: 2026-07-22T13:39:13.369842+00:00
+status: active
 corroborations: 1
-supersedes: 0500,0501,0502,0503,0504,0505,0506,0507,0508,0509
-superseded_by: 0520
+supersedes: 0510,0510,0511,0512,0513,0514,0515,0516,0517,0518,0519
 ---
 
 # Use public FakeGitHub API in scenario tests
 
 Always use the public API to mutate `FakeGitHub` state in scenario tests; never write to private attributes directly.
 
-Example: Bad: `world.github._issues[901].state = "closed"`. Good: `await world.github.close_issue(901)`
+Example: Bad: `world.github._issues[901].state = "closed"`. Good: `await world.github.close_issue(901)`.
 
 **Why:** If `FakeIssue` internals change, direct attribute writes silently remain valid Python while the fake's behavior drifts — the public API is the compatibility boundary.
