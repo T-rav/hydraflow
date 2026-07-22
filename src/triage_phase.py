@@ -339,6 +339,11 @@ class TriagePhase:
             # parked label before removing find, so a failure leaves the issue
             # find-labeled (safe fallback), not label-less.
             await self._prs.swap_pipeline_labels(issue.id, self._config.parked_label[0])
+            # #10290: this is an INFRA park (the infra failed, not "the issue
+            # needs author clarification"). Mark it so TriageRetryLoop re-flows
+            # it on the short triage_infra_retry_interval floor the moment infra
+            # recovers, instead of the 24h clarification backoff.
+            self._state.mark_triage_infra_parked(issue.id)
             return 0
 
         if self._config.dry_run:
@@ -422,6 +427,11 @@ class TriagePhase:
                 parked_label=self._config.parked_label[0],
                 reasons=result.reasons,
             )
+            # #10290: a genuine "needs author clarification" park — NOT infra.
+            # Clear any stale infra marker so this issue keeps the 24h
+            # clarification floor (a prior infra-park shouldn't make a real
+            # clarification need re-flow every 15m).
+            self._state.clear_triage_infra_parked(issue.id)
             await self._bus.publish(
                 HydraFlowEvent(
                     type=EventType.SYSTEM_REROUTE,

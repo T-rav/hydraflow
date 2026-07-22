@@ -613,21 +613,33 @@ or for a claim that is demonstrably false / already implemented (the described p
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
-        # Strategy 2: extract from markdown code fences
+        # Strategy 2 (#10291): brace-matched raw_decode. The regex strategies
+        # below are defeated the moment the verdict QUOTES source code — which
+        # #9127's verify-against-code enrichment does routinely: nested ```
+        # code fences and ``{}`` (e.g. an f-string ``f"[main {sha[:7]}]"``). The
+        # non-greedy fence regex truncates at the first inner ```; the
+        # ``[^{}]`` object regex truncates at the first inner ``{``. A real JSON
+        # parser handles nested braces/strings correctly, so scan each ``{`` and
+        # let ``raw_decode`` consume a full object, taking the first with a
+        # ``"ready"`` key. This is what stopped every code-citing bug from
+        # triaging (the whole backlog parked).
+        decoder = json.JSONDecoder()
+        for idx, ch in enumerate(transcript):
+            if ch != "{":
+                continue
+            try:
+                data, _ = decoder.raw_decode(transcript, idx)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if isinstance(data, dict) and "ready" in data:
+                return TriageRunner._result_from_dict(data, issue_number)
+
+        # Strategy 3: extract from markdown code fences (kept as a fallback for
+        # transcripts where no brace-delimited object decodes cleanly).
         fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", transcript, re.DOTALL)
         if fence_match:
             try:
                 data = json.loads(fence_match.group(1).strip())
-                if isinstance(data, dict) and "ready" in data:
-                    return TriageRunner._result_from_dict(data, issue_number)
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
-
-        # Strategy 3: regex to find JSON object with "ready" key
-        json_match = re.search(r"\{[^{}]*\"ready\"\s*:[^{}]*\}", transcript)
-        if json_match:
-            try:
-                data = json.loads(json_match.group(0))
                 if isinstance(data, dict) and "ready" in data:
                     return TriageRunner._result_from_dict(data, issue_number)
             except (json.JSONDecodeError, TypeError, ValueError):

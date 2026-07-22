@@ -52,6 +52,8 @@ class TestTriageRetryScenario:
         )
 
         state = MagicMock()
+        # #10290: default to clarification-park path (24h floor).
+        state.is_triage_infra_parked.return_value = False
         state.get_triage_retry_attempts.return_value = 0
         state.inc_triage_retry_attempts.return_value = 1
         state.get_triage_retry_last_attempt.return_value = ""
@@ -95,6 +97,8 @@ class TestTriageRetryScenario:
         )
 
         state = MagicMock()
+        # #10290: default to clarification-park path (24h floor).
+        state.is_triage_infra_parked.return_value = False
         # At the cap — the next tick must escalate, not retry.
         state.get_triage_retry_attempts.return_value = 3
         state.inc_triage_retry_attempts.return_value = 4
@@ -141,6 +145,8 @@ class TestTriageRetryScenario:
 
         recent = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
         state = MagicMock()
+        # #10290: default to clarification-park path (24h floor).
+        state.is_triage_infra_parked.return_value = False
         state.get_triage_retry_attempts.return_value = 1
         state.get_triage_retry_last_attempt.return_value = recent
         data = MagicMock()
@@ -180,6 +186,8 @@ class TestTriageRetryScenario:
         )
 
         state = MagicMock()
+        # #10290: default to clarification-park path (24h floor).
+        state.is_triage_infra_parked.return_value = False
         state.get_triage_retry_attempts.return_value = 0
         state.inc_triage_retry_attempts.return_value = 1
         state.get_triage_retry_last_attempt.return_value = ""

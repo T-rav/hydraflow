@@ -6,7 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
-- `84c91cd` — fix(adr-conformance): pre-flight skip when pytest runner env is broken (#10243) (#10243) *(2026-07-22)*
+- `bfc5d9d` — docs(memory-feedback): mirror 3 pending feedback entries + refresh coverage_matrix (#10288) (#10288) *(2026-07-22)*
+- `1cc250d` — feat(ul): entry-evidence — 4 new entry links across 3 terms (#10284) (#10284) *(2026-07-22)*
+- `48aa743` — feat(ul): edge-proposer — 49 new edges across 24 terms (#10283) (#10283) *(2026-07-22)*
+- `f66ad04` — fix(adr-conformance): pre-flight skip when pytest runner env is broken (#10243) (#10277) (#10277) *(2026-07-22)*
 - `fec83cb` — Fixes #10260: Fix label/dispatch reconciliation so resolved issues ... (#10268) (#10268) *(2026-07-22)*
 - `1bd34db` — feat(ul): term-proposer batch — 4 drafts (#10266) (#10266) *(2026-07-22)*
 - `e11c542` — feat(ul): entry-evidence — 1 new entry links across 1 terms (#10248) (#10248) *(2026-07-22)*
