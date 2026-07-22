@@ -14,7 +14,6 @@ from adr_utils import (
 from config import HydraFlowConfig
 from convergence_recording import record_stage_verdict
 from events import EventBus, EventType, HydraFlowEvent
-from exception_classify import reraise_on_credit_or_bug
 from issue_decomposer import IssueDecomposer
 from models import Task, TriageResult
 from phase_utils import (
@@ -334,18 +333,12 @@ class TriagePhase:
                 issue.id,
                 exc,
             )
-            try:
-                await self._prs.swap_pipeline_labels(
-                    issue.id, self._config.parked_label[0]
-                )
-            except Exception as park_exc:  # noqa: BLE001
-                reraise_on_credit_or_bug(park_exc)
-                logger.warning(
-                    "Issue #%d: could not park after infra error; it stays "
-                    "find-labeled",
-                    issue.id,
-                    exc_info=True,
-                )
+            # Park (find -> parked); TriageRetryLoop then re-dispatches with
+            # backoff + the attempt cap. As with the other park sites in this
+            # phase, a swap failure propagates — swap_pipeline_labels adds the
+            # parked label before removing find, so a failure leaves the issue
+            # find-labeled (safe fallback), not label-less.
+            await self._prs.swap_pipeline_labels(issue.id, self._config.parked_label[0])
             return 0
 
         if self._config.dry_run:
