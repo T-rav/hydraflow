@@ -423,6 +423,17 @@ class PlanPhase:
         }
         return any(tag.lower() in escalation_labels for tag in issue.tags)
 
+    def _is_memory_backlog_issue(self, issue: Task) -> bool:
+        """True if *issue* carries a ``config.memory_backlog_label`` tag.
+
+        Memory-backlog issues (ADR-0089) promote a captured *behavioral* memory
+        to the find queue. When the shape gate can't pick one enforcement
+        direction for one, it resolves as captured (closed) rather than a HITL
+        escalation — the memory is already the rule (#10292).
+        """
+        backlog_labels = {lbl.lower() for lbl in self._config.memory_backlog_label}
+        return any(tag.lower() in backlog_labels for tag in issue.tags)
+
     def _should_research(self, issue: Task) -> bool:
         """Return True if the research pre-pass should run before planning *issue*.
 
@@ -1482,6 +1493,39 @@ class PlanPhase:
                                     else "Shaping could not produce directions "
                                     "within the configured turn budget."
                                 )
+                                # #10292: a memory-backlog issue (ADR-0089
+                                # behavioral-memory capture) with no single
+                                # enforcement direction resolves as CAPTURED —
+                                # the memory itself is the rule. Escalating a P4
+                                # behavioral fork to HITL just piles up the
+                                # queue and churns the diagnose loop. Close with
+                                # a re-file path instead of escalating.
+                                if self._is_memory_backlog_issue(issue):
+                                    await self._transitioner.post_comment(
+                                        issue.id,
+                                        "## Shaping — no single enforcement "
+                                        f"direction\n\n{options_text}\n\n---\n"
+                                        "*This is a memory-backlog (behavioral) "
+                                        "issue (ADR-0089): the captured memory "
+                                        "stands as the rule, and no one "
+                                        "enforcement direction is clearly "
+                                        "warranted. Closing as captured rather "
+                                        "than escalating to HITL. Re-file a "
+                                        "`hydraflow-find` with an EXPLICIT "
+                                        "direction if you want enforcement "
+                                        "built (#10292).*",
+                                    )
+                                    await self._transitioner.close_task(issue.id)
+                                    logger.info(
+                                        "Issue #%d memory-backlog shape fork "
+                                        "closed as captured, not HITL-escalated "
+                                        "(#10292)",
+                                        issue.id,
+                                    )
+                                    return PlanResult(
+                                        issue_number=issue.id,
+                                        error="memory_backlog_shape_captured",
+                                    )
                                 try:
                                     await self._prs.post_comment(
                                         issue.id,

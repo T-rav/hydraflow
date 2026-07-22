@@ -49,8 +49,12 @@ def test_quarantine_does_not_hide_more_than_the_known_set() -> None:
     all_mods = load_all_scenarios(include_quarantined=True)
     collective = load_all_scenarios()
     hidden = {m.NAME for m in all_mods} - {m.NAME for m in collective}
-    assert hidden == set(), (
-        f"unexpected quarantine set {hidden} — adding a quarantine requires "
-        f"updating this pin (and a tracking issue), removing one means the "
-        f"fix landed: update both here"
+    # s75_worker_stall_escalation was auto-quarantined by the FlakeTracker
+    # (tracking #10315) but the pin was never acknowledged — a pre-existing
+    # staging-red this un-sticks. Remove from the set when #10315's fix lands.
+    known_quarantined = {"s75_worker_stall_escalation"}
+    assert hidden == known_quarantined, (
+        f"unexpected quarantine set {hidden ^ known_quarantined} — adding a "
+        f"quarantine requires updating this pin (and a tracking issue), "
+        f"removing one means the fix landed: update both here"
     )
