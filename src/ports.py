@@ -299,6 +299,14 @@ class PRPort(Protocol):
         """Return aggregated CI failure logs for *pr_number*."""
         ...
 
+    async def get_pr_checks(self, pr_number: int) -> list[dict[str, str]]:
+        """Return CI check results for *pr_number*.
+
+        Each dict carries ``name`` and ``state`` keys. Returns an empty
+        list on failure or when no checks are registered.
+        """
+        ...
+
     async def fetch_code_scanning_alerts(self, branch: str) -> list[CodeScanningAlert]:
         """Return open code scanning alerts for *branch*."""
         ...
@@ -471,6 +479,18 @@ class PRPort(Protocol):
         Returns a list of :class:`LabelDrift` records — one per drifted
         (issue, PR) pair. See ADR-0088 for the drift kinds and the
         ``LabelDriftWatcherLoop`` reconciliation policy.
+        """
+        ...
+
+    async def find_open_resolving_pr(self, issue_number: int) -> int | None:
+        """Return the number of an OPEN PR that resolves *issue_number*.
+
+        A PR "resolves" an issue when its body carries a
+        ``Fixes/Closes/Resolves #N`` link to it. Returns ``None`` when no
+        such PR is open. Used by the label/dispatch reconciliation path
+        (#10260) so a stale ``hitl-escalation``/``diagnose-failed`` label
+        never re-triggers a new auto-agent attempt once a linked PR is
+        already open and green.
         """
         ...
 

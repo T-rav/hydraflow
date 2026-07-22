@@ -6,10 +6,14 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `e11c542` — feat(ul): entry-evidence — 1 new entry links across 1 terms (#10248) (#10248) *(2026-07-22)*
+- `fc4e755` — feat(ul): entry-evidence — 1 new entry links across 1 terms (#10235) (#10235) *(2026-07-22)*
 - `9516955` — feat(pipeline): hydraflow-in-progress claim label — ready→in-progress→review, durable cross-actor build claim (#10168) (#10172) (#10172) *(2026-07-22)*
 - `21f2343` — docs(build): add pre-push self-check checklist for six recurring CI-red patterns (#10169) (#10171) (#10171) *(2026-07-22)*
 - `6b45686` — feat(merge-heal): pin docs/arch/.meta.json to base in arch-stale heal to stop re-DIRTY churn (#10167) (#10170) (#10170) *(2026-07-22)*
-- `e52c80f` — feat(ul): entry-evidence — 2 new entry links across 2 terms *(2026-07-21)*
+- `c9b9ab6` — feat(ul): edge-proposer — 1 new edges across 1 terms (#10222) (#10222) *(2026-07-21)*
+- `36ac0f4` — feat(ul): edge-proposer — 1 new edges across 1 terms (#10218) (#10218) *(2026-07-21)*
+- `637fbbb` — feat(ul): entry-evidence — 2 new entry links across 2 terms (#10210) (#10210) *(2026-07-21)*
 - `d071fbd` — refactor(pipeline): collapse Discover+Shape into Plan — full removal (#9773) (#10166) (#10166) *(2026-07-21)*
 - `3f833ff` — fix(codeql): model scrub_secrets() as py/clear-text-storage sanitizer (#9143) (#10164) (#10164) *(2026-07-21)*
 - `dc6060b` — test(fake-coverage): cover final FakeGitHub adapter-surface slice — gap→0 (#9768) (#10165) (#10165) *(2026-07-21)*

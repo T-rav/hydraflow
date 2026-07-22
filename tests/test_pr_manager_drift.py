@@ -249,3 +249,170 @@ class TestFindLabelDriftAutoCloseKeywords:
         )
         assert drift[0].issue == 42
         assert drift[0].pr == 500
+
+
+class TestFindLabelDriftEscalatedWithResolvingPR:
+    """#10260: an issue escalated to ``hitl-escalation``/``diagnose-failed``
+    with an open, CI-green resolving PR carries stale labels — surface it so
+    ``LabelDriftWatcherLoop`` can clear them."""
+
+    @pytest.mark.asyncio
+    async def test_detects_escalated_issue_with_green_resolving_pr(
+        self, config, event_bus
+    ) -> None:
+        mgr = make_pr_manager(config, event_bus)
+        prs_json = json.dumps([{"number": 100, "labels": [], "body": "Fixes #42"}])
+        issue_json = json.dumps(
+            {"labels": [{"name": "hitl-escalation"}, {"name": "diagnose-failed"}]}
+        )
+        checks_json = json.dumps(
+            [
+                {"name": "Tests", "state": "SUCCESS"},
+                {"name": "Lint", "state": "SUCCESS"},
+            ]
+        )
+
+        with patch(
+            "pr_manager.run_subprocess_with_retry",
+            new=AsyncMock(
+                side_effect=_gh_responder(
+                    {
+                        ("pr", "list"): prs_json,
+                        ("pr", "view"): _commits_json(1),
+                        ("issue", "view"): issue_json,
+                        ("pr", "checks"): checks_json,
+                    }
+                )
+            ),
+        ):
+            drift = await mgr.find_label_drift()
+
+        assert len(drift) == 1
+        assert drift[0].kind == "escalated_with_resolving_pr"
+        assert drift[0].issue == 42
+        assert drift[0].pr == 100
+        assert "hitl-escalation" in drift[0].issue_label
+        assert "diagnose-failed" in drift[0].issue_label
+
+    @pytest.mark.asyncio
+    async def test_not_detected_when_ci_failing(self, config, event_bus) -> None:
+        mgr = make_pr_manager(config, event_bus)
+        prs_json = json.dumps([{"number": 100, "labels": [], "body": "Fixes #42"}])
+        issue_json = json.dumps({"labels": [{"name": "hitl-escalation"}]})
+        checks_json = json.dumps([{"name": "Tests", "state": "FAILURE"}])
+
+        with patch(
+            "pr_manager.run_subprocess_with_retry",
+            new=AsyncMock(
+                side_effect=_gh_responder(
+                    {
+                        ("pr", "list"): prs_json,
+                        ("pr", "view"): _commits_json(1),
+                        ("issue", "view"): issue_json,
+                        ("pr", "checks"): checks_json,
+                    }
+                )
+            ),
+        ):
+            drift = await mgr.find_label_drift()
+
+        assert drift == []
+
+    @pytest.mark.asyncio
+    async def test_not_detected_when_no_checks_registered(
+        self, config, event_bus
+    ) -> None:
+        """Empty checks list must NOT read as a green verdict (no CI yet)."""
+        mgr = make_pr_manager(config, event_bus)
+        prs_json = json.dumps([{"number": 100, "labels": [], "body": "Fixes #42"}])
+        issue_json = json.dumps({"labels": [{"name": "hitl-escalation"}]})
+
+        with patch(
+            "pr_manager.run_subprocess_with_retry",
+            new=AsyncMock(
+                side_effect=_gh_responder(
+                    {
+                        ("pr", "list"): prs_json,
+                        ("pr", "view"): _commits_json(1),
+                        ("issue", "view"): issue_json,
+                        ("pr", "checks"): json.dumps([]),
+                    }
+                )
+            ),
+        ):
+            drift = await mgr.find_label_drift()
+
+        assert drift == []
+
+    @pytest.mark.asyncio
+    async def test_not_detected_without_escalation_labels(
+        self, config, event_bus
+    ) -> None:
+        """A green resolving PR on a NON-escalated, aligned issue is not this
+        kind — falls through to the existing classification (no drift)."""
+        mgr = make_pr_manager(config, event_bus)
+        prs_json = json.dumps(
+            [
+                {
+                    "number": 100,
+                    "labels": [{"name": "hydraflow-review"}],
+                    "body": "Fixes #42",
+                }
+            ]
+        )
+        issue_json = json.dumps({"labels": [{"name": "hydraflow-review"}]})
+        checks_json = json.dumps([{"name": "Tests", "state": "SUCCESS"}])
+
+        with patch(
+            "pr_manager.run_subprocess_with_retry",
+            new=AsyncMock(
+                side_effect=_gh_responder(
+                    {
+                        ("pr", "list"): prs_json,
+                        ("pr", "view"): _commits_json(1),
+                        ("issue", "view"): issue_json,
+                        ("pr", "checks"): checks_json,
+                    }
+                )
+            ),
+        ):
+            drift = await mgr.find_label_drift()
+
+        assert drift == []
+
+    @pytest.mark.asyncio
+    async def test_takes_priority_over_pre_pr_stage_kind(
+        self, config, event_bus
+    ) -> None:
+        """When BOTH an escalation label and a pre-PR-stage PR label are
+        present, the more specific escalated_with_resolving_pr kind wins."""
+        mgr = make_pr_manager(config, event_bus)
+        prs_json = json.dumps(
+            [
+                {
+                    "number": 100,
+                    "labels": [{"name": "hydraflow-ready"}],
+                    "body": "Fixes #42",
+                }
+            ]
+        )
+        issue_json = json.dumps({"labels": [{"name": "hitl-escalation"}]})
+        checks_json = json.dumps([{"name": "Tests", "state": "SUCCESS"}])
+
+        with patch(
+            "pr_manager.run_subprocess_with_retry",
+            new=AsyncMock(
+                side_effect=_gh_responder(
+                    {
+                        ("pr", "list"): prs_json,
+                        ("pr", "view"): _commits_json(1),
+                        ("issue", "view"): issue_json,
+                        ("pr", "checks"): checks_json,
+                    }
+                )
+            ),
+        ):
+            drift = await mgr.find_label_drift()
+
+        assert len(drift) == 1
+        assert drift[0].kind == "escalated_with_resolving_pr"

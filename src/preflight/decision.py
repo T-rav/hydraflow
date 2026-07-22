@@ -53,9 +53,13 @@ class _PRPort(Protocol):
 #
 # Note: `resolved` removes `human-required` as well as `hitl-escalation` so a
 # previously-failed-then-re-submitted issue (operator manually reset state)
-# doesn't stay in the human queue after a successful auto-fix.
+# doesn't stay in the human queue after a successful auto-fix. `diagnose-failed`
+# is removed unconditionally too (#10260) — the dynamic sub-label removal below
+# only strips ONE sub-label (the alphabetically-first), so an issue carrying
+# `diagnose-failed` alongside another sub-label that sorts first would
+# otherwise keep it stale after a resolve.
 _LABEL_MAP: dict[str, tuple[list[str], list[str]]] = {
-    "resolved": ([], ["hitl-escalation", "human-required"]),
+    "resolved": ([], ["hitl-escalation", "human-required", "diagnose-failed"]),
     # `retry` (ADR-0084 B): a recoverable/low-confidence bail. Add nothing and
     # remove nothing — the issue keeps `hitl-escalation` (no `human-required`)
     # so the loop re-attempts next cycle. If the attempt budget is exhausted,
@@ -119,11 +123,15 @@ async def apply_decision(
     # GitHub UI. The base _LABEL_MAP can't encode this because the sub-label
     # is dynamic per call. Widened issues are exempt: their sub_label is a
     # playbook routing stem derived from hitl_origin, not an issue label.
+    # Guarded against `sub_label` already being in `remove` (e.g. it IS
+    # `diagnose-failed`, which the base map now removes unconditionally) so
+    # remove_label is never called twice for the same label (#10260).
     if (
         result.status == "resolved"
         and sub_label
         and sub_label != "_default"
         and not hitl_widened
+        and sub_label not in remove
     ):
         remove = list(remove) + [sub_label]
 

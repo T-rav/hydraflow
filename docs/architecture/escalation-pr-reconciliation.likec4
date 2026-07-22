@@ -1,0 +1,87 @@
+specification {
+  element system
+  element loop
+  element component
+  element port
+  element store
+}
+
+model {
+  hydraflow = system 'HydraFlow Orchestrator' {
+
+    diagnostic = loop 'DiagnosticLoop' {
+      description 'Polls hydraflow-diagnose issues; on exhausted fix attempts calls _escalate_to_hitl → swaps to hydraflow-hitl and ADDS hitl-escalation + diagnose-failed (src/diagnostic_loop.py:468)'
+    }
+
+    preflight = loop 'AutoAgentPreflightLoop' {
+      description 'Polls open hitl-escalation issues lacking human-required (_poll_eligible_issues); one attempt per tick. GAP: no check for an open resolving PR before spawning (src/auto_agent_preflight_loop.py:303)'
+
+      decision = component 'preflight.decision.apply_decision' {
+        description 'resolved → removes hitl-escalation + human-required, but NOT diagnose-failed (_LABEL_MAP, src/preflight/decision.py:58)'
+      }
+      guard = component 'Resolving-PR dispatch guard (NEW)' {
+        description 'Before spawn: find_open_resolving_pr(issue) + get_pr_checks(pr); skip dispatch when an open Fixes-#N PR has commits and no failing checks'
+      }
+    }
+
+    driftwatcher = loop 'LabelDriftWatcherLoop (ADR-0088)' {
+      description 'Every label_drift_watcher_interval: PRPort.find_label_drift → _reconcile per pair. Today only pipeline-stage kinds (pr_ahead_of_issue, pr_at_pre_pr_stage); NEW kind escalated_with_resolving_pr clears hitl-escalation + diagnose-failed (src/label_drift_watcher_loop.py)'
+    }
+
+    prport = port 'PRPort → PRManager / FakeGitHub' {
+      description 'find_label_drift parses Fixes/Closes/Resolves #N from open PR bodies (src/pr_manager.py:2151). NEW: find_open_resolving_pr(issue)->pr|None; get_pr_checks promoted onto the protocol (impl exists at src/pr_manager.py:2700, fake at src/mockworld/fakes/fake_github.py:688)'
+    }
+
+    state = store 'StateTracker' {
+      description 'auto_agent_attempts counter — bumped per dispatch; the retry storm burns this budget'
+    }
+  }
+
+  github = system 'GitHub' {
+    issue = component 'Escalated issue' {
+      description 'labels: hydraflow-hitl + hitl-escalation + diagnose-failed'
+    }
+    pr = component 'Resolving PR' {
+      description 'open, body "Fixes #N", commits > 0, CI checks green/in-progress'
+    }
+  }
+
+  diagnostic -> issue 'adds hitl-escalation + diagnose-failed'
+  preflight -> prport 'list_issues_by_label(hitl-escalation)'
+  preflight.guard -> prport 'find_open_resolving_pr / get_pr_checks (NEW)'
+  preflight -> state 'bump attempt, spawn auto-agent'
+  preflight.decision -> issue 'resolved: remove hitl-escalation (diagnose-failed leaks)'
+  driftwatcher -> prport 'find_label_drift (+ NEW escalation kind)'
+  driftwatcher -> issue 'NEW: remove hitl-escalation + diagnose-failed, post comment'
+  pr -> issue 'Fixes #N linkage'
+}
+
+views {
+  view index {
+    title 'Escalation/PR label reconciliation — context'
+    include *
+  }
+
+  view components of hydraflow {
+    title 'Loops and ports around the re-dispatch gap'
+    include *
+  }
+
+  dynamic view retryStorm {
+    title 'Bug: stale escalation labels re-trigger dispatch'
+    diagnostic -> issue 'escalate: add hitl-escalation + diagnose-failed'
+    preflight -> prport 'poll: issue still labelled → eligible'
+    preflight -> state 'attempt N spawned (burns budget)'
+    preflight.decision -> issue 'resolved: PR opened, labels partially cleared'
+    diagnostic -> issue 're-escalation / dedup path re-applies labels'
+    preflight -> state 'attempt N+1 re-enters resolved issue  ← the storm'
+  }
+
+  dynamic view fixedFlow {
+    title 'Fix: reconcile + suppress while resolving PR is open'
+    driftwatcher -> prport 'find_label_drift: escalated_with_resolving_pr (CI green)'
+    driftwatcher -> issue 'clear hitl-escalation + diagnose-failed + comment'
+    preflight -> prport 'poll: guard sees open resolving PR, no failing checks'
+    preflight -> state 'no spawn, no attempt bump'
+  }
+}

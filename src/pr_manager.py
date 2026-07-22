@@ -2246,17 +2246,30 @@ class PRManager:
                 "",
             )
 
+            # More specific — checked first (#10260): a resolved-but-stale
+            # escalation label outranks the pipeline-stage drift kinds below.
+            escalations = issue_labels & {"hitl-escalation", "diagnose-failed"}
             kind: str | None = None
-            if (
-                issue_pipeline in pre_pr_labels
-                and pr_pipeline == "hydraflow-review"
-                and commits > 0
-            ):
-                kind = "pr_ahead_of_issue"
-            elif pr_pipeline in pre_pr_labels and commits > 0:
-                kind = "pr_at_pre_pr_stage"
-            elif pr_pipeline in post_pr_labels and issue_pipeline in pre_pr_labels:
-                kind = "pr_ahead_of_issue"
+            issue_label = issue_pipeline
+            if escalations:
+                checks = await self.get_pr_checks(pr_n)
+                if checks and all(
+                    c.get("state", "").upper() in self._PASSING_STATES for c in checks
+                ):
+                    kind = "escalated_with_resolving_pr"
+                    issue_label = ",".join(sorted(escalations))
+
+            if kind is None:
+                if (
+                    issue_pipeline in pre_pr_labels
+                    and pr_pipeline == "hydraflow-review"
+                    and commits > 0
+                ):
+                    kind = "pr_ahead_of_issue"
+                elif pr_pipeline in pre_pr_labels and commits > 0:
+                    kind = "pr_at_pre_pr_stage"
+                elif pr_pipeline in post_pr_labels and issue_pipeline in pre_pr_labels:
+                    kind = "pr_ahead_of_issue"
 
             if kind is None:
                 continue
@@ -2265,13 +2278,53 @@ class PRManager:
                     issue=issue_n,
                     pr=pr_n,
                     pr_commits=commits,
-                    issue_label=issue_pipeline,
+                    issue_label=issue_label,
                     pr_label=pr_pipeline,
                     kind=kind,  # type: ignore[arg-type]
                     detected_at=datetime.now(UTC),
                 )
             )
         return out
+
+    async def find_open_resolving_pr(self, issue_number: int) -> int | None:
+        """Return the number of an OPEN PR that resolves *issue_number*.
+
+        Reuses the ``find_label_drift`` Fixes-regex scan, keyed by issue
+        instead of by PR (#10260).
+        """
+        raw = await self._gh_json_query(
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            self._repo,
+            "--state",
+            "open",
+            "--limit",
+            "200",
+            "--json",
+            "number,body",
+            dry_run_return=[],
+            error_log=f"find_open_resolving_pr: pr list failed for issue #{issue_number}",
+        )
+        if not isinstance(raw, list):
+            return None
+
+        fixes_re = re.compile(r"(?:fixes|closes|resolves)\s+#(\d+)", re.IGNORECASE)
+        for pr in raw:
+            if not isinstance(pr, dict):
+                continue
+            body = pr.get("body") or ""
+            m = fixes_re.search(body)
+            if not m or int(m.group(1)) != issue_number:
+                continue
+            try:
+                pr_n = int(pr.get("number", 0))
+            except (TypeError, ValueError):
+                continue
+            if pr_n > 0:
+                return pr_n
+        return None
 
     async def get_dependabot_alerts(self, state: str = "open") -> list[dict]:
         """Fetch Dependabot alerts for the repository.
