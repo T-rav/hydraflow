@@ -131,6 +131,28 @@ class TestPerPrGate:
 
         assert result.status is Status.PASS
 
+    def test_ci_workflow_only_fix_is_exempt(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A fix(...) PR that only touches .github/ (CI/workflow) cannot carry a
+        # Python or UI regression test. P10.6 previously fell through to WARN and
+        # reddened every such PR (e.g. fix(ci): CodeQL trigger change). With no
+        # product-code delta, the gate must PASS.
+        _pr_repo(
+            tmp_path,
+            subject="fix(ci): run CodeQL on staging",
+            fix_files={
+                ".github/workflows/codeql.yml": "on:\n  push:\n    branches: [main]\n",
+                ".github/codeql/codeql-config.yml": "paths-ignore:\n  - tests/**\n",
+            },
+        )
+        monkeypatch.setenv("HYDRAFLOW_AUDIT_PR_BASE", "main")
+
+        result = _fix_prs_carry_regression_delta(_ctx(tmp_path))
+
+        assert result.status is Status.PASS
+        assert "not applicable" in (result.message or "")
+
     def test_skip_regression_trailer_opts_out_with_reason(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
