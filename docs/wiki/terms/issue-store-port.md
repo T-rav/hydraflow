@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/ports.py:IssueStorePort"
 aliases: ["issue store port", "issue queue port", "work queue port"]
 related: [{"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}]
-evidence: ["01KQNYZRM4B7DX9MWDQFHF488F"]
+evidence: ["01KQNYZRM4B7DX9MWDQFHF488F", "01KQP0AJ4Z2MY1EXMWW9BTXN9B"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668794+00:00"
-updated_at: "2026-06-12T04:18:46.416686+00:00"
+updated_at: "2026-07-22T06:47:02.127140+00:00"
 ---
 
 ## Definition
