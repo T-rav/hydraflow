@@ -1366,6 +1366,22 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-review"],
         description="Labels for issues/PRs under review (OR logic)",
     )
+    in_progress_label: list[str] = Field(
+        default=["hydraflow-in-progress"],
+        description=(
+            "Durable cross-actor build-claim marker (#10168). Added to a "
+            "``hydraflow-ready`` issue the moment a build STARTS on it and "
+            "cleared when the PR opens (``ready → review`` swap removes it, "
+            "since it is in ``all_pipeline_labels``) or on abandon/failure. "
+            "Unlike ``review_label`` it is NOT a pipeline stage — it is an "
+            "orthogonal claim marker that coexists with ``hydraflow-ready`` "
+            "during the build so a second factory instance / parallel "
+            "operator session / out-of-band Agent dispatch reading GitHub "
+            "labels can see the issue is already being built and skip it. "
+            "The in-process ``IssueStore._eagerly_transitioned`` fast-path "
+            "stays; this is the durable belt-and-suspenders (ADR-0002)."
+        ),
+    )
     hitl_label: list[str] = Field(
         default=["hydraflow-hitl"],
         description="Labels for issues escalated to human-in-the-loop (OR logic)",
@@ -4619,6 +4635,7 @@ class HydraFlowConfig(BaseModel):
     @field_validator(
         "ready_label",
         "review_label",
+        "in_progress_label",
         "hitl_label",
         "hitl_active_label",
         "hitl_autofix_label",
@@ -4688,6 +4705,13 @@ class HydraFlowConfig(BaseModel):
         # correction — so a corrected issue re-enters the pipeline clean instead
         # of carrying a stale blocker forever (ADR-0084, pillar C / anti-cycle).
         result.append("human-required")
+        # ``in_progress_label`` is likewise orthogonal — a build-claim marker
+        # (#10168) that coexists with ``hydraflow-ready`` during a build, not a
+        # stage. Listing it here makes every ``swap_pipeline_labels`` call clear
+        # it: the ``ready → review`` swap at PR-open drops the claim, and any
+        # escalation/route-back swap (hitl/diagnose/parked/ready) clears it too,
+        # so an issue can never get stuck claimed (ADR-0002).
+        result.extend(self.in_progress_label)
         return result
 
     @property
