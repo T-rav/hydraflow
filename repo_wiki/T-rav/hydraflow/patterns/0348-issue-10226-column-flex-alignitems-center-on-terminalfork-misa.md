@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10226
 source_phase: plan
 created_at: 2026-07-22T04:13:06.288086+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #10226 closed
 ---
 
 # column-flex + alignItems:center on TerminalFork misaligns arms when labels differ in width

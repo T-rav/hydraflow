@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10226
 source_phase: plan
 created_at: 2026-07-22T04:13:06.288095+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #10226 closed
 ---
 
 # StreamView/Header tests assert layout via element.style.<prop>, not snapshot/CSS-class
