@@ -77,17 +77,15 @@ fi
 
 cd "$WORKSPACE"
 
-# Self-heal the workspace venv on every boot. `make run` has NO `deps`
-# prerequisite, and `uv run` only auto-syncs the base/default dependencies — the
-# test extra (pytest, pytest-xdist, …) can silently be absent in the workspace
-# venv (e.g. after a partial `uv sync`). A pytest-less venv makes pytest-kind
-# sensors misfire: the ADR conformance loop's `sys.executable -m pytest` fails
-# with "No module named pytest" on every enforced ADR at once (#10243). An
-# unconditional `--all-extras` sync guarantees a complete environment each launch
-# — the durable, boot-time half of that fix (the loop-level pre-flight is the
-# runtime half). It is idempotent and near-instant when already in sync.
-echo "[factory] syncing workspace venv (uv sync --all-extras)"
-uv sync --all-extras
+# Self-heal the workspace environment on every boot via the canonical `make env`
+# (uv sync --all-extras + pytest-importable sanity check). `make run` has NO
+# `deps` prerequisite and `uv run` only auto-syncs base deps, so the test extra
+# (pytest, …) can silently be absent — a pytest-less venv makes pytest-kind
+# sensors misfire (the ADR conformance loop storms "No module named pytest" on
+# every enforced ADR at once, #10243). `make env` is the same command a human
+# runs to sanitize their own checkout, so boot-heal and manual-heal never drift.
+echo "[factory] healing environment (make env)"
+make env
 
 echo "[factory] launching from $WORKSPACE (branch: $BRANCH)"
 exec make run
