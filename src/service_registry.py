@@ -907,7 +907,12 @@ def build_services(
 
     # Epic management
     epic_checker = EpicCompletionChecker(config, prs, fetcher, state=state)
-    epic_manager = EpicManager(config, state, prs, fetcher, event_bus)
+    # Inject the RAW IssueStore (not `phase_store`, the CachingIssueStore
+    # decorator) so epic child execution state is worker-derived (#10299):
+    # `_active`/`_in_flight`/`_queues` live on the inner object.
+    epic_manager = EpicManager(
+        config, state, prs, fetcher, event_bus, issue_store=store
+    )
 
     # Beads manager (always active — fails hard if bd not installed)
     beads_mgr = BeadsManager()

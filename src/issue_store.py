@@ -634,6 +634,38 @@ class IssueStore:
         """Return a copy of the active issue tracking dict."""
         return dict(self._active)
 
+    def get_worker_held_issues(self) -> dict[int, str]:
+        """Return ``issue_number -> stage`` for every worker-held issue.
+
+        Ground truth for "a worker is actually on this issue": the union of
+        ``_active`` (a worker has called ``mark_active``) and ``_in_flight``
+        (dequeued but not yet marked active — the dispatch window). Including
+        the in-flight set closes the gap where an issue is being picked up but
+        would otherwise read as idle for one tick. ``_active`` wins on overlap.
+        """
+        held: dict[int, str] = {
+            issue: str(stage) for issue, stage in self._in_flight.items()
+        }
+        held.update({issue: str(stage) for issue, stage in self._active.items()})
+        return held
+
+    def get_queued_issues(self) -> dict[int, str]:
+        """Return ``issue_number -> stage`` for issues awaiting dispatch.
+
+        These sit in a stage queue but are neither worker-held (``_active``)
+        nor in the dispatch window (``_in_flight``). This is the worker-truth
+        source for "queued" as distinct from "running". Parked issues are not
+        represented — they are never fetched into the queues — so an epic whose
+        children are all parked reports zero queued here (and reads as paused).
+        """
+        queued: dict[int, str] = {}
+        for stage, q in self._queues.items():
+            for task in q:
+                if task.id in self._active or task.id in self._in_flight:
+                    continue
+                queued.setdefault(task.id, str(stage))
+        return queued
+
     def release_in_flight(self, issue_numbers: set[int]) -> None:
         """Remove *issue_numbers* from the in-flight protection set.
 
