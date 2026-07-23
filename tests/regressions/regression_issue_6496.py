@@ -155,7 +155,6 @@ class TestTraceRollupExcInfo:
     The current code at line 51-52 logs the filename but not the exception.
     """
 
-    @pytest.mark.xfail(reason="Regression for issue #6496 — fix not yet landed", strict=False)
     def test_skipped_trace_warning_includes_exc_info(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:

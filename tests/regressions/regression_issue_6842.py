@@ -70,7 +70,6 @@ class TestWarmHitlSummaryTaskTracking:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6842 — fix not yet landed", strict=False)
     async def test_task_has_done_callback(
         self, config, event_bus: EventBus, state, tmp_path: Path
     ) -> None:
@@ -104,7 +103,6 @@ class TestWarmHitlSummaryTaskTracking:
         mock_task.add_done_callback.assert_called()
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6842 — fix not yet landed", strict=False)
     async def test_task_reference_is_stored(
         self, config, event_bus: EventBus, state, tmp_path: Path
     ) -> None:

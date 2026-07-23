@@ -79,9 +79,6 @@ class TestCrashVsNoIssueDistinguishable:
     """The return value of _do_work must distinguish crashes from no-issue runs."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6408 — fix not yet landed", strict=False
-    )
     async def test_agent_crash_result_differs_from_no_issue_result(
         self, tmp_path: Path
     ) -> None:
@@ -161,9 +158,6 @@ class TestCrashVsNoIssueDistinguishable:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6408 — fix not yet landed", strict=False
-    )
     async def test_no_issue_result_does_not_signal_crash(self, tmp_path: Path) -> None:
         """A clean no-issue run must NOT have a crash indicator.
 

@@ -69,7 +69,6 @@ class TestFdLeakOnFdopenFailure:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6780 — fix not yet landed", strict=False)
     async def test_fd_is_closed_when_fdopen_raises(self) -> None:
         """Create a real fd via os.pipe, mock mkstemp to return it, make
         os.fdopen raise, then verify the fd was properly closed."""

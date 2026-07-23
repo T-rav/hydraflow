@@ -100,7 +100,6 @@ class TestWorkspaceNotDestroyedOnSuccess:
     """When diagnostic fix succeeds, workspace must be retained for review."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6477 — fix not yet landed", strict=False)
     async def test_workspace_not_destroyed_on_successful_fix(
         self, tmp_path: Path
     ) -> None:

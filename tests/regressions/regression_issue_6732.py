@@ -75,7 +75,6 @@ class TestReviewProposedAdrsPropagatesFatalErrors:
     ``review_proposed_adrs``, not be caught by the per-ADR handler."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6732 — fix not yet landed", strict=False)
     async def test_authentication_error_propagates(self, tmp_path: Path) -> None:
         """AuthenticationError must NOT be caught by except Exception."""
         reviewer = _make_reviewer(tmp_path)
@@ -90,7 +89,6 @@ class TestReviewProposedAdrsPropagatesFatalErrors:
             await reviewer.review_proposed_adrs()
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6732 — fix not yet landed", strict=False)
     async def test_credit_exhausted_error_propagates(self, tmp_path: Path) -> None:
         """CreditExhaustedError must NOT be caught by except Exception."""
         reviewer = _make_reviewer(tmp_path)
