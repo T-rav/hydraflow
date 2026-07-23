@@ -2,9 +2,9 @@
 source: feedback_workstream_fixes_over_loops.md
 name: workstream-fixes-over-loops
 description: 'Travis 2026-07-20: prefer fixing the workstream (pipeline phases/steps, existing loop intakes) over minting new caretaker loops — or do both; new-loop is not the default unit of automation'
-status: pending
-issue: null
-promoted_in: null
+status: promoted
+issue: 10294
+promoted_in: '#10294'
 wontfix_reason: null
 created: '2026-07-19'
 ---
