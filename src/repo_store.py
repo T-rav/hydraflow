@@ -140,15 +140,39 @@ class RepoRegistryStore:
         return record
 
     def remove(self, slug: str) -> bool:
+        """Remove a record by slug — raw OR path-sanitized form (#9887).
+
+        ``/api/repos`` renders ``slug.replace("/", "-")`` (path-safe for the
+        DELETE URL), so the UI can only ever send back the sanitized form —
+        which previously never matched a raw ``owner/name`` record and made
+        idle registrations undeletable (404 on the exact slug the listing
+        emitted).
+        """
         slug = slug.strip()
         if not slug:
             return False
         records = self.load()
-        filtered = [r for r in records if r.slug != slug]
+        filtered = [
+            r for r in records if r.slug != slug and r.slug.replace("/", "-") != slug
+        ]
         if len(filtered) == len(records):
             return False
         self.save(filtered)
         return True
+
+    def resolve_slug(self, slug: str) -> str | None:
+        """Return the RAW record slug for *slug* (raw or sanitized), or None.
+
+        Registry keys use the raw slug; callers holding a sanitized one
+        (every UI DELETE) must resolve before touching the registry (#9887).
+        """
+        slug = slug.strip()
+        if not slug:
+            return None
+        for r in self.load():
+            if r.slug == slug or r.slug.replace("/", "-") == slug:
+                return r.slug
+        return None
 
     def update_overrides(self, slug: str, updates: dict[str, Any]) -> bool:
         slug = slug.strip()

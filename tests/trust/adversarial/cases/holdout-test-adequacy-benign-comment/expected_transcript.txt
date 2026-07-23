@@ -1,0 +1,2 @@
+TEST_ADEQUACY_RESULT: OK
+SUMMARY: comment-only change, no new logic to cover

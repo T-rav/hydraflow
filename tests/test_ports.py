@@ -158,11 +158,13 @@ class TestPRPortMethods:
         "list_conflicting_prs",
         "post_pr_comment",
         "list_issues_by_label",
+        "list_open_issues",
         "list_closed_issues_by_label",
         "list_prs_by_label",
         "find_label_drift",
         "get_issue_state",
         "get_issue_updated_at",
+        "get_issue_labels",
         "update_issue_body",
         "get_latest_ci_status",
         "get_dependabot_alerts",
@@ -172,6 +174,9 @@ class TestPRPortMethods:
         "transition",
         "close_task",
         "create_task",
+        # Label/dispatch reconciliation (#10260)
+        "get_pr_checks",
+        "find_open_resolving_pr",
     ]
 
     @pytest.mark.parametrize("method", _REQUIRED_METHODS)
@@ -291,11 +296,13 @@ class TestPRPortSignatures:
         "list_conflicting_prs",
         "post_pr_comment",
         "list_issues_by_label",
+        "list_open_issues",
         "list_closed_issues_by_label",
         "list_prs_by_label",
         "find_label_drift",
         "get_issue_state",
         "get_issue_updated_at",
+        "get_issue_labels",
         "update_issue_body",
         "get_latest_ci_status",
         "get_dependabot_alerts",
@@ -305,6 +312,9 @@ class TestPRPortSignatures:
         "transition",
         "close_task",
         "create_task",
+        # Label/dispatch reconciliation (#10260)
+        "get_pr_checks",
+        "find_open_resolving_pr",
     ]
 
     @pytest.mark.parametrize("method", _SIGNED_METHODS)

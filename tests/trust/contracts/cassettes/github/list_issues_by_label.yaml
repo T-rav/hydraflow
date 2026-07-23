@@ -4,6 +4,9 @@
 # detected") with the label "hydraflow-ci-failure" and asserts the JSON list
 # back as stdout. The updated_at field is normalised with timestamps.ISO8601
 # so replay is stable across time zones.
+# #9943: the OPEN listing projects labels in gh wire shape ([{"name": ...}])
+# so the preflight human-required filter sees real data — the adapter's
+# --json projection gained "labels" and the fake mirrors it.
 adapter: github
 interaction: list_issues_by_label
 recorded_at: "2026-05-12T00:00:00Z"
@@ -18,7 +21,8 @@ input:
 output:
   exit_code: 0
   stdout: "[{\"number\": 42, \"title\": \"CI failure detected\", \"body\": \"main is red\",
-    \"updated_at\": \"2026-01-01T00:00:00Z\"}]\n"
+    \"updated_at\": \"2026-01-01T00:00:00Z\", \"labels\": [{\"name\":
+    \"hydraflow-ci-failure\"}]}]\n"
   stderr: ""
 normalizers:
   - timestamps.ISO8601

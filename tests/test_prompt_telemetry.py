@@ -481,6 +481,119 @@ class TestPromptTelemetry:
         assert abs(pr_cost - round(single_cost * 3, 6)) < 1e-6
 
 
+class TestEstimatedCostMicrousdAccumulator:
+    """`estimated_cost_microusd` (spec §5 / prompt_efficiency): an int mirror
+    of the float `estimated_cost_usd` accumulator. `get_source_totals()` (and
+    its lifetime/session/PR/issue siblings) filter aggregate payloads to
+    `isinstance(v, int)`, silently dropping `estimated_cost_usd` — this
+    accumulator is what lets per-source cost survive that filter."""
+
+    def test_source_totals_carries_cost_as_microusd_int(self, tmp_path):
+        pricing_path = tmp_path / "pricing.json"
+        pricing_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "models": {
+                        "claude-sonnet-4-20250514": {
+                            "input_cost_per_million": 3.0,
+                            "output_cost_per_million": 15.0,
+                            "aliases": ["sonnet"],
+                        }
+                    },
+                }
+            )
+        )
+        config = ConfigFactory.create(repo_root=tmp_path)
+        pricing = ModelPricingTable(pricing_path)
+        telemetry = PromptTelemetry(config, pricing=pricing)
+        telemetry.record(
+            source="diff-sanity",
+            tool="claude",
+            model="sonnet",
+            issue_number=60,
+            pr_number=800,
+            session_id="sess-microusd",
+            prompt_chars=800,
+            transcript_chars=400,
+            duration_seconds=1.0,
+            success=True,
+            stats={"input_tokens": 1000, "output_tokens": 500},
+        )
+        source_totals = telemetry.get_source_totals()
+        expected_usd = (3.0 * 1000 + 15.0 * 500) / 1_000_000
+        expected_microusd = round(expected_usd * 1_000_000)
+        entry = source_totals["diff-sanity"]
+        assert entry["estimated_cost_microusd"] == expected_microusd
+        # It's an int — unlike `estimated_cost_usd`, which the int-only
+        # filter in `get_source_totals()` drops.
+        assert isinstance(entry["estimated_cost_microusd"], int)
+        assert "estimated_cost_usd" not in entry
+
+    def test_accumulates_across_records_for_same_source(self, tmp_path):
+        pricing_path = tmp_path / "pricing.json"
+        pricing_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "models": {
+                        "claude-opus-4-20250514": {
+                            "input_cost_per_million": 15.0,
+                            "output_cost_per_million": 75.0,
+                            "aliases": ["opus"],
+                        }
+                    },
+                }
+            )
+        )
+        config = ConfigFactory.create(repo_root=tmp_path)
+        pricing = ModelPricingTable(pricing_path)
+        telemetry = PromptTelemetry(config, pricing=pricing)
+        for _ in range(3):
+            telemetry.record(
+                source="test-adequacy",
+                tool="claude",
+                model="opus",
+                issue_number=61,
+                pr_number=801,
+                session_id="sess-microusd-accum",
+                prompt_chars=100,
+                transcript_chars=50,
+                duration_seconds=0.1,
+                success=True,
+                stats={"input_tokens": 1000, "output_tokens": 200},
+            )
+        single_microusd = round((15.0 * 1000 + 75.0 * 200) / 1_000_000 * 1_000_000)
+        entry = telemetry.get_source_totals()["test-adequacy"]
+        assert entry["estimated_cost_microusd"] == single_microusd * 3
+
+    def test_zero_cost_record_leaves_microusd_at_zero(self, tmp_path):
+        """No pricing entry => `estimated_cost_usd` is None => the microusd
+        accumulator stays at its `_new_counter()` default of 0 (matches the
+        existing lazy `estimated_cost_usd` accumulation, which also skips
+        cost-less records)."""
+        pricing_path = tmp_path / "pricing.json"
+        pricing_path.write_text(json.dumps({"schema_version": 1, "models": {}}))
+        config = ConfigFactory.create(repo_root=tmp_path)
+        pricing = ModelPricingTable(pricing_path)
+        telemetry = PromptTelemetry(config, pricing=pricing)
+        telemetry.record(
+            source="scope-check",
+            tool="claude",
+            model="unknown-model",
+            issue_number=62,
+            pr_number=802,
+            session_id="sess-microusd-zero",
+            prompt_chars=100,
+            transcript_chars=50,
+            duration_seconds=0.1,
+            success=True,
+            stats={},
+        )
+        entry = telemetry.get_source_totals()["scope-check"]
+        assert entry.get("estimated_cost_microusd", 0) == 0
+
+
 class TestAsFloat:
     def test_int_value(self):
         assert _as_float(42) == 42.0

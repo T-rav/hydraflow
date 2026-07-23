@@ -68,13 +68,19 @@ async def assert_outcome(api, page) -> None:
     # observable end-to-end signal (the epic + the superseded #1 are not pipeline
     # work-items). >=2 children under the scripted epic title == the terminal
     # decomposed rather than paging a human.
+    # timeout=180.0 (not the original 90.0): the flow needs a full 60s
+    # sandbox_loop_interval tick just to reach cycle 2, plus council LLM
+    # round-trips on top — observed CI durations of 86-90s left almost no
+    # margin and the scenario flaked past 90s under ordinary runner
+    # variance. 180s matches the tier used by other multi-cycle,
+    # council-driven scenarios (s02/s03/s04/s08).
     epic_title = "Epic: split issue #1"
     payload = await api.wait_until(
         "/api/issues/history?limit=500",
         lambda p: (
             sum(1 for it in p.get("items", []) if it.get("epic") == epic_title) >= 2
         ),
-        timeout=90.0,
+        timeout=180.0,
     )
     children = [it for it in payload["items"] if it.get("epic") == epic_title]
     assert len(children) >= 2, (

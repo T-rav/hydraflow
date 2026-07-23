@@ -17,6 +17,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+from dedup_store import DedupStore
+from escalation_reconcile import BOT_CLOSE_MARKER_LABEL, EscalationReconciler
 from issue_decomposer import IssueDecomposer
 from mockworld.fakes.fake_github import FakeGitHub
 from models import EpicDecompResult, EpicState, NewIssueSpec
@@ -105,6 +107,10 @@ class TestCreateEpicFromResult:
         assert source_issue.state == "closed"
         assert any(f"epic #{epic_number}" in c for c in source_issue.comments)
         assert state.to_dict()["processed_issues"]["10"] == "decomposed"
+        # #10095: superseded-by-decompose is a PROGRAMMATIC close — the
+        # source issue must carry the shared bot-close marker so the #9437
+        # guard can tell this apart from a human close.
+        assert BOT_CLOSE_MARKER_LABEL in source_issue.labels
 
     @pytest.mark.asyncio
     async def test_should_decompose_false_returns_none_no_create_issue_calls(
@@ -230,3 +236,62 @@ class TestCreateEpicFromResult:
         assert epic_number is None
         epic_manager.register_epic.assert_not_called()
         prs.close_issue.assert_not_called()
+
+
+class TestSupersededByDecomposeActivatesEscalationGuard:
+    """#10095: the "superseded-by-decompose" close is how
+    ``preflight.decompose_terminal.decompose_or_escalate`` supersedes a
+    ``hitl-escalation`` issue that exhausted its auto-agent attempt budget
+    (``AutoAgentPreflightLoop._process_one``) — a genuine programmatic close
+    of a dual-labeled (``hitl-escalation`` + loop stuck-label) escalation
+    issue. Proves the close activates the #9437 guard end-to-end: the owning
+    loop's ``EscalationReconciler.reconcile_closed`` must retain the dedup
+    key rather than re-arming it, exactly as it would for any other
+    stuck-label escalation this loop tracks.
+    """
+
+    @pytest.mark.asyncio
+    async def test_decompose_close_retains_owning_loop_dedup_key(
+        self, tmp_path: Path
+    ) -> None:
+        decomposer, prs, epic_manager, state, _config = _make_decomposer(tmp_path)
+        # Seed the exact dual-label shape a trust loop's `_file_escalation`
+        # produces (e.g. flake_tracker_loop._file_escalation).
+        prs.add_issue(
+            9618,
+            "HITL: flaky test t unresolved after 3 attempts",
+            "Human review needed.",
+            ["hitl-escalation", "flaky-test-stuck"],
+        )
+        source_task = TaskFactory.create(id=9618)
+        result = _two_child_result()
+
+        dedup = DedupStore("flake_test", tmp_path / "dedup" / "flake_test.json")
+        dedup.set_all({"flake_tracker:t"})
+        cleared: list[str] = []
+        rec = EscalationReconciler(
+            prs=prs,
+            dedup=dedup,
+            key_prefix="flake_tracker",
+            stuck_label="flaky-test-stuck",
+            clear_attempts=cleared.append,
+            subject_from_title=lambda title: "t" if "flaky test t" in title else None,
+        )
+
+        epic_number = await decomposer.create_epic_from_result(
+            source_task=source_task, result=result
+        )
+        assert epic_number is not None
+
+        # The decompose closed #9618 (superseded-by-decompose) and stamped
+        # the marker — confirm before checking the reconciler's reaction.
+        source_issue = prs.issue(9618)
+        assert source_issue.state == "closed"
+        assert BOT_CLOSE_MARKER_LABEL in source_issue.labels
+
+        await rec.reconcile_closed()
+
+        # Retained, not re-armed: flake_tracker must not refile a duplicate
+        # `t` escalation on its next detection tick.
+        assert dedup.get() == {"flake_tracker:t"}
+        assert cleared == []

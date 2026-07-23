@@ -169,6 +169,7 @@ class BugReproducer(BaseRunner):
             self._config.repo_root,
             {"issue": task.id, "source": "bug_reproducer"},
             on_output=_check_repro_complete,
+            issue_labels=task.tags,
         )
 
     def _build_command(self, _worktree_path: Path | None = None) -> list[str]:

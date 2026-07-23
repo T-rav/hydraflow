@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_64 terms across 3 bounded contexts._
+_66 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -179,6 +179,18 @@ A frozen value object that bundles raw infrastructure secrets — GitHub token, 
 - Immutable once constructed (frozen=True); no field may be mutated after build.
 - Never serialized as part of domain state — kept separate from HydraFlowConfig by design.
 
+## DedupStore
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/dedup_store.py:DedupStore` · **Confidence:** `accepted`
+**Aliases:** `dedup tracking set`, `dedup set store`
+
+DedupStore is a file-backed dedup tracking set, persisted as a sorted JSON list via atomic writes. It is the canonical shared-kernel mechanism the caretaker fleet uses to avoid re-filing or re-processing the same finding, case, or issue across ticks: a loop hashes or keys a piece of work, checks the DedupStore to see whether that key has already been handled, and records it once acted upon. It underlies idempotency for nearly every autonomous caretaker loop (ADR review, contract refresh, corpus learning, dependabot merge, diagnostics, entry evidence, fake-coverage audit, flake tracking, live corpus replay, merge-state watching, RC budget, sentry ingestion, skill-prompt eval, term proposal, wiki-rot detection).
+
+**Invariants:**
+- get() returns an empty set rather than raising when the backing file is missing, unreadable, or contains malformed JSON
+- add/discard/set_all persist via atomic_write so a crash mid-write cannot corrupt the stored set
+- discard() is a silent no-op (no write) when the value is not present
+
 ## DependabotMergeLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/dependabot_merge_loop.py:DependabotMergeLoop` · **Confidence:** `accepted`
@@ -269,6 +281,18 @@ The gap between Set-point and measured state that a Controller acts to reduce: u
 **Invariants:**
 - Error is derived (Set-point minus measured state), never authored directly.
 
+## EscalationReconciler
+
+**Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/escalation_reconcile.py:EscalationReconciler` · **Confidence:** `accepted`
+**Aliases:** `escalation lifecycle reconciler`, `hitl escalation reconciler`
+
+EscalationReconciler is the shared reconciliation service that closes the loop on hitl-escalation lifecycle state for trust/caretaker loops. It resolves two lifecycle paths every adopting loop needs: reconcile_closed drops the dedup key and attempt counter when a human/external actor closes an escalation issue (re-arming the detector), while reconcile_open auto-closes an open escalation whose subject is no longer present in the loop's currently-detected set (the gap was fixed or was a false positive), clearing its dedup/attempt state so a genuine recurrence escalates fresh. It encodes the bot-vs-human close distinction via the shared BOT_CLOSE_MARKER_LABEL/is_bot_close predicate so a programmatic close never prematurely re-arms a still-active subject.
+
+**Invariants:**
+- reconcile_open only proceeds when the tick's detection completed (active_subjects is not None) — closing on incomplete/partial scan data would kill real escalations and reset their attempt budgets.
+- A bot/programmatic close (marked with BOT_CLOSE_MARKER_LABEL before closing) retains the dedup key so a still-detected subject does not immediately refile a duplicate; only a human/external close resets dedup state.
+- Unparseable escalation titles (operator-created issues carrying the stuck label) are left untouched by subject_from_title returning None.
+
 ## EventBus
 
 **Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/events.py:EventBus` · **Confidence:** `accepted`
@@ -318,18 +342,6 @@ Read-only caretaker loop (ADR-0029) that produces the per-loop fitness scorecard
 - The loop is read-only: it calls `loop_fitness()` on peer loops but changes no loop config or state.
 - Declares its own fitness as `HOUSEKEEPING` — it produces no GitHub proposals or artifacts that have an acceptance lifecycle.
 
-## FitnessScorecardLoop
-
-**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/fitness_scorecard_loop.py:FitnessScorecardLoop` · **Confidence:** `accepted`
-**Aliases:** `fitness scorecard`, `fitness scorecard loop`, `loop fitness scorecard`
-
-Read-only caretaker loop (ADR-0029) that produces the per-loop fitness scorecard on a configurable cadence (default 86400 s). Each tick it builds one `FitnessContext` per registered loop, calls every loop's `loop_fitness(ctx)`, persists results to `fitness.jsonl`, regenerates `docs/arch/generated/loop-fitness.md`, and emits a `LOOP_FITNESS_UPDATE` event. Mutates no loop state, so it sits off the ADR-0046 recursion ladder. Kill-switch via `enabled_cb("fitness_scorecard")` per ADR-0049. (ADR-0093)
-
-**Invariants:**
-- Kill-switch is via `enabled_cb("fitness_scorecard")` at the top of `_do_work()` (ADR-0049).
-- The loop is read-only: it calls `loop_fitness()` on peer loops but changes no loop config or state.
-- Declares its own fitness as `HOUSEKEEPING` — it produces no GitHub proposals or artifacts that have an acceptance lifecycle.
-
 ## FlakeTrackerLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/flake_tracker_loop.py:FlakeTrackerLoop` · **Confidence:** `accepted`
@@ -342,18 +354,6 @@ Trust-fleet loop that detects persistently flaky tests by parsing JUnit XML from
 - Flake detection requires at least one pass AND one fail within the window — pure-fail tests are not flakes.
 - Maximum 3 repair attempts per test before HITL escalation; the dedup key for the `hydraflow-find` issue does not reset until the escalation is resolved.
 - Kill-switch is via `enabled_cb("flake_tracker")` (ADR-0049).
-
-## GitHubCacheLoop
-
-**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/github_cache_loop.py:GitHubCacheLoop` · **Confidence:** `accepted`
-**Aliases:** `github cache loop`, `github data cache loop`, `github poller`
-
-Centralized GitHub data poller that replaces the pattern where every dashboard endpoint and background worker makes its own `gh api` calls (ADR-0041). A single `GitHubCacheLoop` polls GitHub on a fixed interval and stores results in `GitHubDataCache` — in memory and on disk. Dashboard endpoints and background workers read from the cache instantly rather than hitting the API. Write operations (create PR, merge, comment, label swap) still call `gh` directly because they need immediate confirmation.
-
-**Invariants:**
-- Only one instance per repo runtime; all read consumers share the same cache snapshot.
-- Write operations bypass the cache and call `gh` directly.
-- Cache staleness is observable: each `CacheSnapshot` carries a `fetched_at` timestamp; `age_seconds` is infinite until the first poll completes.
 
 ## GitHubCacheLoop
 
@@ -493,6 +493,18 @@ Daily caretaker loop that fetches LiteLLM's `model_prices_and_context_window.jso
 - Kill-switch is the `HYDRAFLOW_DISABLE_PRICING_REFRESH=1` env var.
 - PR is always on the fixed branch `pricing-refresh-auto`; no-op ticks do not open a PR.
 - Bounds violations are separate from network errors; each has a distinct response path.
+
+## PRManager
+
+**Kind:** `adapter` · **Context:** `shared-kernel` · **Anchor:** `src/pr_manager.py:PRManager` · **Confidence:** `accepted`
+**Aliases:** `pr manager`, `github adapter`, `pull request manager`
+
+PRManager is the gh-CLI-backed adapter that manages the full pull-request and issue lifecycle for HydraFlow: pushing branches, creating and merging PRs, creating/listing/closing GitHub issues, swapping pipeline labels, and posting size-bounded PR/issue comments. It is the single concrete surface that caretaker loops, reviewers, and builders across the system call to talk to GitHub — the label-swap operations it exposes are what drive the label-state-machine transitions (ADR-0002) that move issues through the pipeline, and its cost-alert hooks and pipeline-label listener wire it into cross-cutting dashboard and budgeting concerns.
+
+**Invariants:**
+- Label-count queries are served from an in-memory cache with a 30s TTL (_LABEL_CACHE_TTL) to bound gh API pressure.
+- Successful pipeline-label swaps notify an optional registered listener (_pipeline_label_listener) so dashboard state updates within seconds instead of waiting for the periodic label poll.
+- Comment bodies are chunked to GitHub's comment size limit with truncation markers via CommentFormatter before posting.
 
 ## PRPort
 
@@ -661,6 +673,18 @@ The persisted Error/reference-state register for one issue's `SteeringChannel` (
 **Invariants:**
 - Precedence within one poll is fixed: abort beats pause beats redo beats steer — `apply_steering` checks `flow == abort` first, then `paused`, before considering `redo_phase`.
 - `redo_phase` is only honored while `redo_count < human_steering_max_redos` and the phase name is a known internal stage; otherwise it is silently dropped rather than retried, so a stale or bogus `/redo` cannot stall an issue forever.
+
+## SubprocessRunner
+
+**Kind:** `port` · **Context:** `shared-kernel` · **Anchor:** `src/execution.py:SubprocessRunner` · **Confidence:** `accepted`
+**Aliases:** `subprocess execution port`, `host/docker execution abstraction`
+
+SubprocessRunner is the Protocol that abstracts how a command gets executed — on the host via asyncio.create_subprocess_exec, or inside a Docker container — behind a single interface (create_streaming_process, run_simple, cleanup). Runners and loops that need to spawn a Claude Code process or shell out to git/gh depend on this seam rather than the concrete HostRunner/DockerRunner implementation, so the same call sites work unchanged whether HydraFlow is running bare-metal or containerized.
+
+**Invariants:**
+- Two implementations select the execution environment: HostRunner (asyncio.create_subprocess_exec on the host) and DockerRunner (inside a container)
+- run_simple's cancel_check is polled every cancel_poll_interval seconds; a True verdict tears down the whole process group and raises SubprocessCancelledError rather than a plain timeout (#9577)
+- cleanup() must release any held resources (containers, connections), not just terminate processes
 
 ## Task
 

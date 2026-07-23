@@ -119,6 +119,22 @@ class TestBuildPrompt:
         prompt = PlanReviewer._build_prompt(_task(issue_id=4242), "plan")
         assert "#4242" in prompt
 
+    def test_instructs_verifying_claims_against_source(self) -> None:
+        # The reviewer runs with Bash allowed; the highest-value behaviour is
+        # checking the plan's claims about existing code/ADRs rather than
+        # trusting them. The prompt must direct that, or the review stays at
+        # the level of plausibility instead of correctness.
+        prompt = PlanReviewer._build_prompt(_task(), "plan")
+        lowered = prompt.lower()
+        assert "verify" in lowered
+        assert "grep" in lowered or "read the" in lowered
+
+    def test_frames_the_load_bearing_claim(self) -> None:
+        # A sharper adversarial stance than "be skeptical": find the claim the
+        # plan is organized to prove and try to falsify it.
+        prompt = PlanReviewer._build_prompt(_task(), "plan")
+        assert "load-bearing" in prompt.lower()
+
 
 # ---------------------------------------------------------------------------
 # _parse_findings

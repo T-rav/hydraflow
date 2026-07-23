@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ACTIVE_STATUSES, PIPELINE_STAGES, PIPELINE_LOOPS, INTERVAL_PRESETS, EDITABLE_INTERVAL_WORKERS, REPORT_ISSUE_PRESETS, WORKER_PRESETS, PIPELINE_POLLER_PRESETS, ADR_REVIEWER_PRESETS, DEPENDABOT_MERGE_PRESETS, BACKGROUND_WORKERS, WORKER_GROUPS } from '../../constants'
+import { ACTIVE_STATUSES, PIPELINE_STAGES, PIPELINE_LOOPS, INTERVAL_PRESETS, EDITABLE_INTERVAL_WORKERS, REPORT_ISSUE_PRESETS, WORKER_PRESETS, PIPELINE_POLLER_PRESETS, ADR_REVIEWER_PRESETS, DEPENDABOT_MERGE_PRESETS, BACKGROUND_WORKERS, WORKER_GROUPS, WATCHDOG_TIMEOUT_PRESETS } from '../../constants'
 import { theme } from '../../theme'
 
 describe('ACTIVE_STATUSES', () => {
@@ -32,27 +32,25 @@ describe('ACTIVE_STATUSES', () => {
 })
 
 describe('PIPELINE_STAGES', () => {
-  it('is an array with 7 stages', () => {
+  it('is an array with 6 stages', () => {
     expect(Array.isArray(PIPELINE_STAGES)).toBe(true)
-    expect(PIPELINE_STAGES).toHaveLength(8)
+    expect(PIPELINE_STAGES).toHaveLength(6)
   })
 
   it('contains all pipeline stage keys in order', () => {
     const keys = PIPELINE_STAGES.map(s => s.key)
-    expect(keys).toEqual(['triage', 'discover', 'shape', 'plan', 'implement', 'review', 'hitl', 'merged'])
+    expect(keys).toEqual(['triage', 'plan', 'implement', 'review', 'hitl', 'merged'])
   })
 
   it('has title-case labels for each stage', () => {
     const labels = PIPELINE_STAGES.map(s => s.label)
-    expect(labels).toEqual(['Triage', 'Discover', 'Shape', 'Plan', 'Implement', 'Review', 'Needs Human', 'Merged'])
+    expect(labels).toEqual(['Triage', 'Plan', 'Implement', 'Review', 'Needs Human', 'Merged'])
   })
 
   it('maps each stage to the correct theme color', () => {
     const colorMap = Object.fromEntries(PIPELINE_STAGES.map(s => [s.key, s.color]))
     expect(colorMap).toEqual({
       triage: theme.yellow,
-      discover: theme.cyan,
-      shape: theme.pink,
       plan: theme.purple,
       implement: theme.accent,
       review: theme.orange,
@@ -65,8 +63,6 @@ describe('PIPELINE_STAGES', () => {
     const roleMap = Object.fromEntries(PIPELINE_STAGES.map(s => [s.key, s.role]))
     expect(roleMap).toEqual({
       triage: 'triage',
-      discover: 'discover',
-      shape: 'shape',
       plan: 'planner',
       implement: 'implementer',
       review: 'reviewer',
@@ -79,8 +75,6 @@ describe('PIPELINE_STAGES', () => {
     const configMap = Object.fromEntries(PIPELINE_STAGES.map(s => [s.key, s.configKey]))
     expect(configMap).toEqual({
       triage: 'max_triagers',
-      discover: 'max_triagers',
-      shape: 'max_triagers',
       plan: 'max_planners',
       implement: 'max_workers',
       review: 'max_reviewers',
@@ -93,8 +87,6 @@ describe('PIPELINE_STAGES', () => {
     const subtleMap = Object.fromEntries(PIPELINE_STAGES.map(s => [s.key, s.subtleColor]))
     expect(subtleMap).toEqual({
       triage: theme.yellowSubtle,
-      discover: theme.cyanSubtle,
-      shape: theme.pinkSubtle,
       plan: theme.purpleSubtle,
       implement: theme.accentSubtle,
       review: theme.orangeSubtle,
@@ -142,8 +134,6 @@ describe('PIPELINE_LOOPS', () => {
     const configMap = Object.fromEntries(PIPELINE_LOOPS.map(l => [l.key, l.configKey]))
     expect(configMap).toEqual({
       triage: 'max_triagers',
-      discover: 'max_triagers',
-      shape: 'max_triagers',
       plan: 'max_planners',
       implement: 'max_workers',
       review: 'max_reviewers',
@@ -179,6 +169,32 @@ describe('EDITABLE_INTERVAL_WORKERS', () => {
   it('does not include non-editable workers', () => {
     expect(EDITABLE_INTERVAL_WORKERS.has('triage')).toBe(false)
     expect(EDITABLE_INTERVAL_WORKERS.has('health_monitor')).toBe(false)
+  })
+})
+
+describe('WATCHDOG_TIMEOUT_PRESETS', () => {
+  it('has 5 presets', () => {
+    expect(WATCHDOG_TIMEOUT_PRESETS).toHaveLength(5)
+  })
+
+  it('each preset has label and seconds', () => {
+    for (const preset of WATCHDOG_TIMEOUT_PRESETS) {
+      expect(preset).toHaveProperty('label')
+      expect(preset).toHaveProperty('seconds')
+      expect(typeof preset.seconds).toBe('number')
+    }
+  })
+
+  it('presets are in ascending order', () => {
+    for (let i = 1; i < WATCHDOG_TIMEOUT_PRESETS.length; i++) {
+      expect(WATCHDOG_TIMEOUT_PRESETS[i].seconds).toBeGreaterThan(WATCHDOG_TIMEOUT_PRESETS[i - 1].seconds)
+    }
+  })
+
+  it('includes the config defaults (2h normal, 4h LLM)', () => {
+    const seconds = WATCHDOG_TIMEOUT_PRESETS.map(p => p.seconds)
+    expect(seconds).toContain(7200)
+    expect(seconds).toContain(14400)
   })
 })
 

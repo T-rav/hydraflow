@@ -4,8 +4,6 @@ import { deriveStageStatus } from '../hooks/useStageStatus'
 
 const emptyPipeline = {
   triage: [],
-  discover: [],
-  shape: [],
   plan: [],
   implement: [],
   review: [],
@@ -115,6 +113,17 @@ export function workerKey(repo, id) {
   // repo-tagged pre-multi-repo) so the key is stable; a real slug (host or an
   // aggregated repo) qualifies it as `${repo}#${id}` to de-collide under __all__.
   return repo ? `${repo}#${id}` : String(id)
+}
+
+// Predicate that matches an epic in state by (repo, epic_number). Under
+// repo=__all__ two supervised repos can each have an epic sharing a number, so
+// the aggregate view keys on (repo, epic_number) to de-collide — mirroring
+// issueKey/workerKey. Single-repo keys on epic_number alone (a repo can't
+// collide with itself), mirroring background_worker_status.
+function epicMatcher(state, epicNum, repo) {
+  return state.selectedRepoSlug === REPO_ALL
+    ? (e => e.epic_number === epicNum && (e.repo ?? null) === repo)
+    : (e => e.epic_number === epicNum)
 }
 
 function mergeStageIssues(existingIssues, incomingIssues) {
@@ -537,6 +546,24 @@ export function reducer(state, action) {
       }
     }
 
+    case 'UPDATE_BG_WORKER_WATCHDOG_TIMEOUT': {
+      // Mirrors UPDATE_BG_WORKER_INTERVAL (#9503).
+      const { name: watchdogName, watchdog_timeout_seconds } = action.data
+      const existingBw = state.backgroundWorkers.find(w => w.name === watchdogName)
+      if (existingBw) {
+        return {
+          ...state,
+          backgroundWorkers: state.backgroundWorkers.map(w =>
+            w.name === watchdogName ? { ...w, watchdog_timeout_seconds } : w
+          ),
+        }
+      }
+      return {
+        ...state,
+        backgroundWorkers: [...state.backgroundWorkers, { name: watchdogName, status: 'ok', enabled: true, last_run: null, watchdog_timeout_seconds, details: {} }],
+      }
+    }
+
     case 'METRICS':
       return { ...state, metrics: action.data }
 
@@ -560,26 +587,48 @@ export function reducer(state, action) {
       }
 
     case 'epic_update': {
+      // The EPICS action stores full EpicDetail dumps from /api/epics; this WS
+      // event only carries an EpicProgress payload. MERGE it onto the existing
+      // epic (in place) so detail-only fields (merged_children, active_children,
+      // queued_children, children, readiness) survive until the next fetchEpics
+      // poll, while progress fields (e.g. child_issues) update.
       const progress = action.data?.progress
       if (!progress) return addEvent(state, action)
       const epicNum = progress.epic_number
-      const existingEpics = state.epics.filter(e => e.epic_number !== epicNum)
+      // Key by (repo, epic_number) under __all__ so a WS update for one repo's
+      // epic #5 doesn't overwrite another repo's epic #5. The frame's repo is
+      // threaded via onmessage (action.repo); stamp it onto the stored epic so
+      // later (repo, epic_number) matches resolve it.
+      const repo = action.repo ?? progress.repo ?? null
+      const stamped = repo != null ? { ...progress, repo } : progress
+      const sameEpic = epicMatcher(state, epicNum, repo)
+      const known = state.epics.some(sameEpic)
+      const epics = known
+        ? state.epics.map(e => (sameEpic(e) ? { ...e, ...stamped } : e))
+        : [...state.epics, stamped]
       return {
         ...addEvent(state, action),
-        epics: [...existingEpics, progress],
+        epics,
       }
     }
 
     case 'EPICS':
+      // Full replace with the /api/epics snapshot, which tags every epic with
+      // its repo slug (union across repos under __all__). Two repos' same-number
+      // epics arrive as distinct array elements, so no keying/de-collision is
+      // needed here — the repo tag flows through for the other cases to match on.
       return { ...state, epics: action.data || [] }
 
     case 'EPIC_READY': {
       const readyNum = action.data?.epic_number
       if (!readyNum) return state
+      // Match by (repo, epic_number) under __all__ so only the emitting repo's
+      // epic flips to ready (see epicMatcher).
+      const sameReady = epicMatcher(state, readyNum, action.repo ?? action.data?.repo ?? null)
       return {
         ...state,
         epics: state.epics.map(e =>
-          e.epic_number === readyNum ? { ...e, status: 'ready' } : e
+          sameReady(e) ? { ...e, status: 'ready' } : e
         ),
       }
     }
@@ -589,6 +638,7 @@ export function reducer(state, action) {
       if (!action.data) return { ...state, epicReleasing: null }
       const releasingNum = action.data.epic_number
       if (!releasingNum) return state
+      const sameReleasing = epicMatcher(state, releasingNum, action.repo ?? action.data.repo ?? null)
       return {
         ...state,
         epicReleasing: {
@@ -597,7 +647,7 @@ export function reducer(state, action) {
           total: action.data.total || 0,
         },
         epics: state.epics.map(e =>
-          e.epic_number === releasingNum ? { ...e, status: 'releasing' } : e
+          sameReleasing(e) ? { ...e, status: 'releasing' } : e
         ),
       }
     }
@@ -605,11 +655,12 @@ export function reducer(state, action) {
     case 'EPIC_RELEASED': {
       const releasedNum = action.data?.epic_number
       if (!releasedNum) return state
+      const sameReleased = epicMatcher(state, releasedNum, action.repo ?? action.data?.repo ?? null)
       return {
         ...state,
         epicReleasing: null,
         epics: state.epics.map(e =>
-          e.epic_number === releasedNum
+          sameReleased(e)
             ? { ...e, status: 'released', version: action.data.version || '', released_at: action.data.released_at || new Date().toISOString() }
             : e
         ),
@@ -645,7 +696,7 @@ export function reducer(state, action) {
       // WS frame carries {seq, stages}; REST dispatch passes stages already
       // unwrapped. Normalize both to the bare stage map.
       const incoming = action.data?.stages ?? action.data ?? {}
-      const allStages = ['triage', 'discover', 'shape', 'plan', 'implement', 'review', 'hitl', 'merged']
+      const allStages = ['triage', 'plan', 'implement', 'review', 'hitl', 'merged']
       // REST aggregation tags each issue with its repo; a WS frame's issues are
       // untagged but the event carries event.repo (threaded via onmessage) —
       // stamp it so WS and REST frames key/merge consistently (no dup cards).
@@ -1449,6 +1500,24 @@ export function HydraFlowProvider({ children }) {
     } catch { /* ignore — local state already updated */ }
   }, [applyRepoParam, state.selectedRepoSlug])
 
+  // Mirrors updateBgWorkerInterval for the per-loop watchdog-timeout override
+  // (#9503) — same single-repo constraint (the backend rejects repo=__all__).
+  const updateBgWorkerWatchdogTimeout = useCallback(async (name, timeoutSeconds) => {
+    if (state.selectedRepoSlug === REPO_ALL) return
+    // Optimistic local update
+    dispatch({
+      type: 'UPDATE_BG_WORKER_WATCHDOG_TIMEOUT',
+      data: { name, watchdog_timeout_seconds: timeoutSeconds },
+    })
+    try {
+      await fetch(applyRepoParam('/api/control/bg-worker/watchdog-timeout'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, watchdog_timeout_seconds: timeoutSeconds }),
+      })
+    } catch { /* ignore — local state already updated */ }
+  }, [applyRepoParam, state.selectedRepoSlug])
+
   const requestChanges = useCallback(async (issueNumber, feedback, stage, repo) => {
     try {
       // Escalate against the ROW's repo (not the aggregate selection) so the
@@ -1849,6 +1918,7 @@ export function HydraFlowProvider({ children }) {
     toggleBgWorker,
     triggerBgWorker,
     updateBgWorkerInterval,
+    updateBgWorkerWatchdogTimeout,
     dismissSystemAlert: useCallback(() => dispatch({ type: 'CLEAR_SYSTEM_ALERT' }), [dispatch]),
     refreshCreditStatus,
     clearCreditPause,

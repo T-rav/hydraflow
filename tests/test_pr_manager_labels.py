@@ -521,6 +521,99 @@ class TestSwapPipelineLabels:
 
 
 # ---------------------------------------------------------------------------
+# swap_pipeline_labels → pipeline-label listener (#9842)
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineLabelListener:
+    """Label swaps notify the injected listener so the dashboard's in-memory
+    pipeline moves in seconds instead of waiting for the 300s label poll."""
+
+    @pytest.mark.asyncio
+    async def test_listener_is_notified_after_a_successful_swap(
+        self, config, event_bus
+    ) -> None:
+        mgr = make_pr_manager(config, event_bus)
+        mgr._add_labels_strict = AsyncMock()
+        mgr._remove_label = AsyncMock()
+        calls: list[tuple[int, str]] = []
+        mgr.set_pipeline_label_listener(lambda n, lbl: calls.append((n, lbl)))
+
+        await mgr.swap_pipeline_labels(42, "hydraflow-review")
+
+        assert calls == [(42, "hydraflow-review")]
+
+    @pytest.mark.asyncio
+    async def test_listener_fires_before_stale_label_removals(
+        self, config, event_bus
+    ) -> None:
+        """The board push must not wait on the best-effort removal fan-out."""
+        mgr = make_pr_manager(config, event_bus)
+        order: list[str] = []
+        mgr._add_labels_strict = AsyncMock(
+            side_effect=lambda *a, **kw: order.append("add")
+        )
+        mgr._remove_label = AsyncMock(
+            side_effect=lambda *a, **kw: order.append("remove")
+        )
+        mgr.set_pipeline_label_listener(lambda n, lbl: order.append("notify"))
+
+        await mgr.swap_pipeline_labels(42, "hydraflow-review")
+
+        assert "notify" in order
+        assert order.index("notify") < order.index("remove")
+        assert order.index("add") < order.index("notify")
+
+    @pytest.mark.asyncio
+    async def test_listener_exception_does_not_break_the_swap(
+        self, config, event_bus, caplog
+    ) -> None:
+        mgr = make_pr_manager(config, event_bus)
+        mgr._add_labels_strict = AsyncMock()
+        mgr._remove_label = AsyncMock()
+
+        def _boom(n: int, lbl: str) -> None:
+            raise RuntimeError("listener exploded")
+
+        mgr.set_pipeline_label_listener(_boom)
+
+        with caplog.at_level(logging.WARNING):
+            await mgr.swap_pipeline_labels(42, "hydraflow-review")
+
+        # Swap completed: stale labels were still removed.
+        assert mgr._remove_label.call_count > 0
+        assert "listener" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_listener_not_called_when_the_add_fails(
+        self, config, event_bus
+    ) -> None:
+        """A failed swap left GitHub unchanged — the board must not move."""
+        mgr = make_pr_manager(config, event_bus)
+        mgr._add_labels_strict = AsyncMock(side_effect=RuntimeError("API down"))
+        mgr._remove_label = AsyncMock()
+        calls: list[tuple[int, str]] = []
+        mgr.set_pipeline_label_listener(lambda n, lbl: calls.append((n, lbl)))
+
+        with pytest.raises(RuntimeError, match="API down"):
+            await mgr.swap_pipeline_labels(42, "hydraflow-review")
+
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_no_listener_configured_swaps_normally(
+        self, config, event_bus
+    ) -> None:
+        mgr = make_pr_manager(config, event_bus)
+        mgr._add_labels_strict = AsyncMock()
+        mgr._remove_label = AsyncMock()
+
+        await mgr.swap_pipeline_labels(42, "hydraflow-review")
+
+        mgr._add_labels_strict.assert_any_call("issue", 42, ["hydraflow-review"])
+
+
+# ---------------------------------------------------------------------------
 # TaskTransitioner protocol compliance
 # ---------------------------------------------------------------------------
 

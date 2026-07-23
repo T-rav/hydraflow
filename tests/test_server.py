@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import sys
 import types
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -138,3 +139,64 @@ class TestDetectSubmoduleParent:
         from server import _detect_submodule_parent
 
         assert _detect_submodule_parent(submodule) is None
+
+
+class TestCheckAndPublishBootGap:
+    """#10009: the boot-time "factory was down" seam wired into
+    ``_run_with_dashboard``. Deliberately extracted into its own async
+    function so it's testable without booting the real dashboard (which
+    binds real ports / signal handlers — see the ``TestRunDispatch``
+    precedent above for why that's intentionally not unit-tested whole)."""
+
+    @pytest.mark.asyncio
+    async def test_publishes_alert_for_a_stale_events_log(self, tmp_path: Path) -> None:
+        from server import _check_and_publish_boot_gap
+
+        events_path = tmp_path / "events.jsonl"
+        old_ts = (datetime.now(UTC) - timedelta(hours=5)).isoformat()
+        events_path.write_text('{"timestamp": "' + old_ts + '"}\n', encoding="utf-8")
+
+        config = MagicMock()
+        config.event_log_path = events_path
+        config.boot_gap_alert_threshold_seconds = 600
+        bus = MagicMock()
+        bus.publish = AsyncMock()
+
+        await _check_and_publish_boot_gap(config, bus)
+
+        bus.publish.assert_awaited_once()
+        published_event = bus.publish.call_args.args[0]
+        assert published_event.type.value == "system_alert"
+        assert "factory was down" in published_event.data["message"]
+
+    @pytest.mark.asyncio
+    async def test_no_publish_for_a_fresh_events_log(self, tmp_path: Path) -> None:
+        from server import _check_and_publish_boot_gap
+
+        events_path = tmp_path / "events.jsonl"
+        fresh_ts = datetime.now(UTC).isoformat()
+        events_path.write_text('{"timestamp": "' + fresh_ts + '"}\n', encoding="utf-8")
+
+        config = MagicMock()
+        config.event_log_path = events_path
+        config.boot_gap_alert_threshold_seconds = 600
+        bus = MagicMock()
+        bus.publish = AsyncMock()
+
+        await _check_and_publish_boot_gap(config, bus)
+
+        bus.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_publish_when_events_log_is_missing(self, tmp_path: Path) -> None:
+        from server import _check_and_publish_boot_gap
+
+        config = MagicMock()
+        config.event_log_path = tmp_path / "does-not-exist.jsonl"
+        config.boot_gap_alert_threshold_seconds = 600
+        bus = MagicMock()
+        bus.publish = AsyncMock()
+
+        await _check_and_publish_boot_gap(config, bus)
+
+        bus.publish.assert_not_awaited()

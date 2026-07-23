@@ -43,6 +43,7 @@ from exception_classify import reraise_on_credit_or_bug
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
+    from github_cache_loop import GitHubDataCache
     from models import GitHubIssueSummary
     from pr_manager import PRManager
     from state import StateTracker
@@ -83,6 +84,7 @@ class TriageRetryLoop(BaseBackgroundLoop):
         state: StateTracker,
         pr_manager: PRManager,
         deps: LoopDeps,
+        github_cache: GitHubDataCache,
     ) -> None:
         super().__init__(
             worker_name="triage_retry",
@@ -92,9 +94,15 @@ class TriageRetryLoop(BaseBackgroundLoop):
         )
         self._state = state
         self._pr = pr_manager
+        self._github_cache = github_cache
 
     def _get_default_interval(self) -> int:
-        return self._config.triage_retry_interval
+        # Tick at the short infra floor (#10290) so infra-parks can re-flow on
+        # their fast cadence; the per-issue floors below still gate
+        # clarification-parks at the full triage_retry_interval (24h), so a fast
+        # tick never re-triages a flaky author early. (triage_infra_retry_interval
+        # <= triage_retry_interval by default and by sensible config.)
+        return self._config.triage_infra_retry_interval
 
     async def _do_work(self) -> dict[str, Any] | None:
         """Re-dispatch each parked issue that has waited long enough."""
@@ -129,19 +137,23 @@ class TriageRetryLoop(BaseBackgroundLoop):
             )
 
         parked_label = self._config.parked_label[0]
+        # #9814: served from the shared GitHubDataCache snapshot instead of
+        # a per-tick `gh issue list`. The cache refreshes at most once per
+        # TTL, honors the gh circuit breaker via the port, and degrades to
+        # a stale snapshot (then []) on gh failure — so this read never
+        # crashes the loop. Writes below still go straight to the port.
         try:
-            issues = await self._pr.list_issues_by_label(parked_label)
+            issues = await self._github_cache.get_issues_by_label(parked_label)
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
             logger.warning(
-                "triage_retry: list_issues_by_label(%s) failed",
+                "triage_retry: cached issue list for %s failed",
                 parked_label,
                 exc_info=True,
             )
             return stats
 
         now = datetime.now(UTC)
-        floor = timedelta(seconds=self._config.triage_retry_interval)
 
         for issue in issues:
             number = int(issue.get("number") or 0)
@@ -149,9 +161,17 @@ class TriageRetryLoop(BaseBackgroundLoop):
                 continue
             stats["scanned"] += 1
 
-            # Respect the 24h-between-retries floor independently of the
-            # tick interval. Operators can lower the interval to debug
-            # without accidentally hammering a flaky author.
+            # #10290: infra-parked issues (transient infra failure, not a
+            # clarification need) re-flow on the short infra floor; genuine
+            # clarification-parks keep the 24h floor. Both are gated below
+            # independently of the (now finer) tick interval, so a fast tick
+            # doesn't hammer a flaky author.
+            infra_parked = self._state.is_triage_infra_parked(number)
+            if infra_parked:
+                floor = timedelta(seconds=self._config.triage_infra_retry_interval)
+            else:
+                floor = timedelta(seconds=self._config.triage_retry_interval)
+
             last_attempt_iso = self._state.get_triage_retry_last_attempt(number)
             if last_attempt_iso:
                 try:
@@ -170,7 +190,16 @@ class TriageRetryLoop(BaseBackgroundLoop):
 
             attempts = self._state.get_triage_retry_attempts(number)
             try:
-                if attempts >= self._config.triage_retry_max_attempts:
+                # #10290: infra-parks NEVER escalate to HITL — the failure is
+                # transient infra, not an unclarifiable issue, so escalating
+                # every parked issue during a sustained outage would just
+                # re-create the storm this loop exists to bound. They re-flow on
+                # the short floor until infra recovers; a PERSISTENT infra fault
+                # is caught by TrustFleetSanityLoop's tick-error anomaly detector
+                # (a single fleet signal, not N per-issue HITL escalations).
+                if not infra_parked and (
+                    attempts >= self._config.triage_retry_max_attempts
+                ):
                     await self._escalate_to_hitl(number, issue, attempts)
                     stats["escalated"] += 1
                 else:

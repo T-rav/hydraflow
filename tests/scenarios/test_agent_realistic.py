@@ -1134,3 +1134,104 @@ async def test_A24_rate_limit_in_implement_phase_no_special_handling(tmp_path) -
     assert not result.issue(1).merged, f"unexpected merge; outcome={result.issue(1)}"
     assert world.github.pr_for_issue(1) is None, "no PR should be created"
     assert world.github._rate_limit_remaining == 0, "rate-limit should be consumed"
+
+
+async def test_A25_test_adequacy_verifier_second_opinion_on_explicit_ok(
+    tmp_path,
+) -> None:
+    """A25: explicit adequacy OK dispatches the independent verifier (#9546).
+
+    The verifier is gated on the finder's EXPLICIT ``TEST_ADEQUACY_RESULT: OK``
+    marker — the no-marker default-pass used by every other scenario in this
+    file must stay verifier-free (A0/A10/A11 passing unchanged with the
+    verifier default-enabled IS that pin). Here the finder emits the explicit
+    marker, so the pipeline grows exactly one loop-visible verifier dispatch.
+
+    FakeDocker FIFO (scripts are consumed by ALL calls in order):
+
+      1. Initial agent _execute (streaming) — commits code
+      2. diff-sanity skill _execute — default success (no marker)
+      3. scope-check skill _execute — default success
+         (plan-compliance is skipped: empty prompt with no plan)
+      4. test-adequacy finder _execute — EXPLICIT OK marker via assistant event
+      5. ``make coverage 0`` (run_simple via FakeDocker) — exit 0, no
+         coverage.xml → coverage delta gracefully preserves the pass
+      6. VERIFIER _execute — CONCUR via assistant event  ← the new dispatch
+      7–9. pre-quality review / run-tool / make quality — default success
+
+    The AgentRunner in scenarios builds its own default config
+    (``build_real_agent_runner`` → ``ConfigFactory.create()``), so this test
+    also proves the kill-switch is default-ON and the verifier model default
+    is independent of the finder's: both are read from the invocation argv.
+    """
+    world = MockWorld(tmp_path, use_real_agent_runner=True)
+    world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
+    worktree_cwd = tmp_path / "worktrees" / "issue-1"
+    init_test_worktree(worktree_cwd)
+
+    _ok = [{"type": "result", "success": True, "exit_code": 0}]
+
+    def _text_events(text: str) -> list[dict]:
+        return [
+            {
+                "type": "assistant",
+                "message": {"id": "m1", "content": [{"type": "text", "text": text}]},
+            },
+            {"type": "result", "success": True, "exit_code": 0},
+        ]
+
+    # 1) Initial agent run: commits code
+    world.docker.script_run_with_commits(
+        events=[{"type": "result", "success": True, "exit_code": 0}],
+        commits=[("x.py", "ok")],
+        cwd=worktree_cwd,
+    )
+    # 2–3) diff-sanity + scope-check — default success
+    world.docker.script_run(_ok)
+    world.docker.script_run(_ok)
+    # 4) test-adequacy finder — EXPLICIT OK (the verifier trigger)
+    world.docker.script_run(
+        _text_events("TEST_ADEQUACY_RESULT: OK\nSUMMARY: coverage adequate")
+    )
+    # 5) make coverage 0 — exit 0, no coverage.xml (graceful preserve)
+    world.docker.script_run(_ok)
+    # 6) independent verifier — CONCUR keeps the pass
+    world.docker.script_run(
+        _text_events(
+            "TEST_ADEQUACY_VERIFIER_RESULT: CONCUR\nSUMMARY: independently confirmed"
+        )
+    )
+    # 7–9) pre-quality review, run-tool, make quality — default success
+    world.docker.script_run(_ok)
+    world.docker.script_run(_ok)
+    world.docker.script_run(_ok)
+
+    result = await world.run_pipeline()
+
+    assert result.issue(1).merged, (
+        f"expected merged=True; outcome={result.issue(1)!r}; "
+        f"docker_invocations={len(world.docker.invocations)}"
+    )
+
+    def _model_of(command: list[str]) -> str:
+        return command[command.index("--model") + 1]
+
+    # Exactly one verifier dispatch, identified by its prompt in the argv.
+    verifier_invs = [
+        inv
+        for inv in world.docker.invocations
+        if any("INDEPENDENT Test Adequacy Verifier" in arg for arg in inv.command)
+    ]
+    assert len(verifier_invs) == 1, (
+        f"expected exactly 1 verifier dispatch, got {len(verifier_invs)}; "
+        f"commands={[' '.join(i.command)[:80] for i in world.docker.invocations]}"
+    )
+    finder_invs = [
+        inv
+        for inv in world.docker.invocations
+        if any("Test Adequacy skill" in arg for arg in inv.command)
+    ]
+    assert len(finder_invs) == 1
+    # Model independence, observed at the dispatch boundary: a shared model
+    # would defeat the second opinion.
+    assert _model_of(verifier_invs[0].command) != _model_of(finder_invs[0].command)

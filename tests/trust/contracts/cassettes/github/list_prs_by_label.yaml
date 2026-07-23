@@ -1,0 +1,26 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_prs_by_label lists open PRs carrying a label (`gh pr list
+# --label <label> --state open`). PRInfo carries the full label set so
+# secondary filters (e.g. no-auto-fix) apply without a second call.
+# The dispatcher seeds one matching open PR + one merged PR with the
+# same label to pin the merged-exclusion filter.
+adapter: github
+interaction: list_prs_by_label
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_prs_by_label
+  args:
+  - hydraflow-review
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[{"number": 778, "issue_number": 2, "branch": "feat/x", "url": "https://github.com/test-org/test-repo/pull/101",
+    "draft": false, "labels": ["hydraflow-review"]}]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

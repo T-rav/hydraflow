@@ -19,8 +19,31 @@ from tests.conftest import PRInfoFactory
 from tests.helpers import ConfigFactory
 
 
+class _FakeWorkerStore:
+    """Minimal worker-truth store for exercising #10299 derivation.
+
+    Duck-types the ``WorkerTruthStore`` protocol EpicManager consumes: two
+    ``issue_number -> stage`` maps. Anything not in either map is parked/idle.
+    """
+
+    def __init__(
+        self,
+        worker_held: dict[int, str] | None = None,
+        queued: dict[int, str] | None = None,
+    ) -> None:
+        self._worker_held = dict(worker_held or {})
+        self._queued = dict(queued or {})
+
+    def get_worker_held_issues(self) -> dict[int, str]:
+        return dict(self._worker_held)
+
+    def get_queued_issues(self) -> dict[int, str]:
+        return dict(self._queued)
+
+
 def _make_manager(
     tmp_path: Path,
+    issue_store: _FakeWorkerStore | None = None,
     **config_kw,
 ):
     """Build an EpicManager with standard mocks."""
@@ -35,7 +58,7 @@ def _make_manager(
     bus = EventBus()
     prs = AsyncMock()
     fetcher = AsyncMock()
-    manager = EpicManager(config, state, prs, fetcher, bus)
+    manager = EpicManager(config, state, prs, fetcher, bus, issue_store=issue_store)
     return manager, state, bus, prs, fetcher
 
 
@@ -573,6 +596,109 @@ class TestGetDetailEnriched:
         assert detail.merged_children == 1
         assert detail.active_children == 1
         assert detail.queued_children == 1
+
+
+class TestWorkerDerivedExecutionState:
+    """#10299 — epic child running/queued is worker-derived, not label-derived."""
+
+    @staticmethod
+    def _implement_child(number: int, title: str):
+        from tests.conftest import IssueFactory
+
+        # ``test-label`` is the configured ready/implement label — under the old
+        # label-derived logic this alone made a child read RUNNING.
+        return IssueFactory.create(number=number, title=title, labels=["test-label"])
+
+    @pytest.mark.asyncio
+    async def test_worker_held_child_runs_and_populates_worker(
+        self, tmp_path: Path
+    ) -> None:
+        store = _FakeWorkerStore(worker_held={10: "ready"})
+        mgr, _state, _, prs, fetcher = _make_manager(tmp_path, issue_store=store)
+        await mgr.register_epic(100, "Epic", [10])
+        fetcher.fetch_issue_by_number = AsyncMock(
+            return_value=self._implement_child(10, "Held")
+        )
+        prs.find_open_pr_for_branch = AsyncMock(return_value=None)
+
+        detail = await mgr.get_detail(100)
+        child = detail.children[0]
+        assert child.status == "running"
+        assert child.worker == "ready"
+        assert detail.active_children == 1
+        assert detail.queued_children == 0
+
+    @pytest.mark.asyncio
+    async def test_implement_labeled_but_unheld_is_queued_not_running(
+        self, tmp_path: Path
+    ) -> None:
+        # Labeled for implement, sitting in the queue, but no worker holds it.
+        store = _FakeWorkerStore(queued={10: "ready"})
+        mgr, _state, _, prs, fetcher = _make_manager(tmp_path, issue_store=store)
+        await mgr.register_epic(100, "Epic", [10])
+        fetcher.fetch_issue_by_number = AsyncMock(
+            return_value=self._implement_child(10, "Waiting")
+        )
+        prs.find_open_pr_for_branch = AsyncMock(return_value=None)
+
+        detail = await mgr.get_detail(100)
+        child = detail.children[0]
+        assert child.status == "queued"
+        assert child.worker is None
+        assert detail.active_children == 0
+        assert detail.queued_children == 1
+
+    @pytest.mark.asyncio
+    async def test_all_parked_children_read_as_paused(self, tmp_path: Path) -> None:
+        # Children carry implement labels but are in neither the worker nor the
+        # queue set (parked) — active_children/queued_children are both zero so
+        # the UI derives "paused" instead of the misleading always-active badge.
+        store = _FakeWorkerStore()
+        mgr, _state, _, prs, fetcher = _make_manager(tmp_path, issue_store=store)
+        await mgr.register_epic(100, "Epic", [10, 20])
+        child_map = {
+            10: self._implement_child(10, "Parked A"),
+            20: self._implement_child(20, "Parked B"),
+        }
+        fetcher.fetch_issue_by_number = AsyncMock(side_effect=child_map.get)
+        prs.find_open_pr_for_branch = AsyncMock(return_value=None)
+
+        detail = await mgr.get_detail(100)
+        assert detail.active_children == 0
+        assert detail.queued_children == 0
+        assert all(c.status != "running" for c in detail.children)
+
+    @pytest.mark.asyncio
+    async def test_worker_held_beats_queued(self, tmp_path: Path) -> None:
+        # A child that is both queued-somewhere and worker-held reads running.
+        store = _FakeWorkerStore(worker_held={10: "review"}, queued={10: "ready"})
+        mgr, _state, _, prs, fetcher = _make_manager(tmp_path, issue_store=store)
+        await mgr.register_epic(100, "Epic", [10])
+        fetcher.fetch_issue_by_number = AsyncMock(
+            return_value=self._implement_child(10, "Both")
+        )
+        prs.find_open_pr_for_branch = AsyncMock(return_value=None)
+
+        detail = await mgr.get_detail(100)
+        assert detail.children[0].status == "running"
+        assert detail.children[0].worker == "review"
+        assert detail.active_children == 1
+
+    @pytest.mark.asyncio
+    async def test_legacy_no_store_falls_back_to_label(self, tmp_path: Path) -> None:
+        # With no store wired, behaviour is unchanged: an implement label still
+        # reads RUNNING (graceful degradation), and ``worker`` stays unset.
+        mgr, _state, _, prs, fetcher = _make_manager(tmp_path)  # no issue_store
+        await mgr.register_epic(100, "Epic", [10])
+        fetcher.fetch_issue_by_number = AsyncMock(
+            return_value=self._implement_child(10, "Legacy")
+        )
+        prs.find_open_pr_for_branch = AsyncMock(return_value=None)
+
+        detail = await mgr.get_detail(100)
+        assert detail.children[0].status == "running"
+        assert detail.children[0].worker is None
+        assert detail.active_children == 1
 
 
 class TestReadiness:

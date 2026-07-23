@@ -618,6 +618,27 @@ describe('PipelineFlow visualization', () => {
     expect(activeDot.style.animation).toContain('stream-pulse')
     expect(queuedDot.style.animation).toBe('')
   })
+
+  it('renders the shared terminal fork with hitl and merged as parallel arms', () => {
+    // hitl/merged fork off REVIEW via the shared TerminalFork — the same
+    // topology Header's review-terminal-fork renders (#9564).
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext())
+    render(<StreamView {...defaultProps} />)
+    const fork = screen.getByTestId('flow-terminal-fork')
+    expect(fork).toBeInTheDocument()
+    expect(fork.textContent).toContain('Needs Human')
+    expect(fork.textContent).toContain('Merged')
+  })
+
+  it('left-aligns the terminal fork arms so the branch arrows form a column', () => {
+    // flowFork previously centered each [arrow][label] row (alignItems:
+    // 'center'), which left-shifts the wider "Needs Human" row further than
+    // the narrower "Merged" row, misaligning the ↗/↘ glyphs (#10226).
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext())
+    render(<StreamView {...defaultProps} />)
+    const fork = screen.getByTestId('flow-terminal-fork')
+    expect(fork.style.alignItems).toBe('flex-start')
+  })
 })
 
 describe('Merged stage rendering', () => {
@@ -994,5 +1015,174 @@ describe('StreamView transcript integration', () => {
     }))
     render(<StreamView {...defaultProps} />)
     expect(screen.queryByTestId('transcript-preview')).not.toBeInTheDocument()
+  })
+})
+
+describe('StageSection reconciled queued count (#9793)', () => {
+  it('derives the queued count from the rendered rows, showing snapshot lag as syncing', () => {
+    // Orchestrator says 3 queued, snapshot has 1 row: header must match the
+    // list (1) and surface the lag honestly instead of a phantom count.
+    const ctx = defaultHydraFlowContext({
+      pipelineIssues: {
+        plan: [{ issue_number: 1, title: 'Q1', status: 'queued' }],
+      },
+    })
+    ctx.stageStatus = {
+      ...ctx.stageStatus,
+      plan: { ...(ctx.stageStatus.plan || {}), enabled: true, queuedCount: 3, workerCount: 0 },
+    }
+    mockUseHydraFlow.mockReturnValue(ctx)
+    render(<StreamView {...defaultProps} />)
+
+    const queued = screen.getByTestId('stage-queued-plan')
+    expect(queued.textContent).toContain('1 queued')
+    expect(queued.textContent).toContain('(+2 syncing)')
+  })
+
+  it('shows no syncing suffix when header and list agree', () => {
+    const ctx = defaultHydraFlowContext({
+      pipelineIssues: {
+        plan: [{ issue_number: 2, title: 'Q2', status: 'queued' }],
+      },
+    })
+    ctx.stageStatus = {
+      ...ctx.stageStatus,
+      plan: { ...(ctx.stageStatus.plan || {}), enabled: true, queuedCount: 1, workerCount: 0 },
+    }
+    mockUseHydraFlow.mockReturnValue(ctx)
+    render(<StreamView {...defaultProps} />)
+
+    const queued = screen.getByTestId('stage-queued-plan')
+    expect(queued.textContent).toContain('1 queued')
+    expect(queued.textContent).not.toContain('syncing')
+  })
+})
+
+describe('PipelineFlow dot cap (#9863)', () => {
+  it('caps a large backlog at 10 dots with a +N overflow badge', () => {
+    const many = Array.from({ length: 67 }, (_, i) => ({
+      issue_number: 1000 + i,
+      title: `Q${i}`,
+      status: 'queued',
+    }))
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: { plan: many },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    const overflow = screen.getByTestId('flow-overflow-plan')
+    expect(overflow.textContent).toBe('+57')
+    // Only the capped dots render (first 10 issue numbers).
+    expect(screen.getByTestId('flow-dot-1009')).toBeTruthy()
+    expect(screen.queryByTestId('flow-dot-1010')).toBeNull()
+  })
+
+  it('renders no overflow badge at or under the cap', () => {
+    const few = Array.from({ length: 10 }, (_, i) => ({
+      issue_number: 2000 + i,
+      title: `Q${i}`,
+      status: 'queued',
+    }))
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: { plan: few },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.queryByTestId('flow-overflow-plan')).toBeNull()
+    expect(screen.getByTestId('flow-dot-2009')).toBeTruthy()
+  })
+})
+
+describe('work-queue strategy visualisation (#10067)', () => {
+  it('shows the active strategy badge from config', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      config: { queue_strategy: 'weighted_mix' },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    const badge = screen.getByTestId('queue-strategy-badge')
+    expect(badge.textContent).toContain('weighted')
+  })
+
+  it('shows fifo when the escape hatch is active', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      config: { queue_strategy: 'fifo' },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.getByTestId('queue-strategy-badge').textContent).toContain('fifo')
+  })
+
+  it('renders no strategy badge when config lacks the field (old backend)', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({ config: {} }))
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.queryByTestId('queue-strategy-badge')).toBeNull()
+  })
+
+  it('orders queued cards by dispatch_rank, not arrival order', () => {
+    // Arrival order is 91, 92, 93; the backend says dispatch order is 93, 91, 92
+    // (e.g. a P0 that arrived last). The board must reflect dispatch order so the
+    // top card is what the factory works next.
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        implement: [
+          { issue_number: 91, title: 'first in', status: 'queued', priority: 'P2', dispatch_rank: 1 },
+          { issue_number: 92, title: 'second in', status: 'queued', priority: 'none', dispatch_rank: 2 },
+          { issue_number: 93, title: 'last in, picked first', status: 'queued', priority: 'P0', dispatch_rank: 0 },
+        ],
+      },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    const cards = screen.getAllByTestId(/^stream-card-9[123]$/)
+    const order = cards.map(c => Number(c.getAttribute('data-testid').replace('stream-card-', '')))
+    expect(order).toEqual([93, 91, 92])
+  })
+
+  it('keeps active cards ahead of queued ones regardless of rank', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        implement: [
+          { issue_number: 81, title: 'queued, rank 0', status: 'queued', priority: 'P0', dispatch_rank: 0 },
+          { issue_number: 82, title: 'active', status: 'active', priority: 'P2' },
+        ],
+      },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    const cards = screen.getAllByTestId(/^stream-card-8[12]$/)
+    const order = cards.map(c => Number(c.getAttribute('data-testid').replace('stream-card-', '')))
+    expect(order).toEqual([82, 81])
+  })
+})
+
+describe('Epics moved off the pipeline view (#10306)', () => {
+  // Epics used to render as an EpicOverviewPanel on the stream/pipeline view.
+  // They now live on the Outcomes tab as outcome cards (EpicOutcomeCards), so
+  // StreamView must NOT mount any epic overview panel or epic badge, even when
+  // the context carries epics.
+  const baseEpic = {
+    epic_number: 10239,
+    title: 'Epic Alpha',
+    status: 'active',
+    percent_complete: 0,
+    completed: 0,
+    failed: 0,
+    total_children: 2,
+    in_progress: 2,
+    active_children: 1,
+    queued_children: 0,
+  }
+
+  it('does not render the epic overview panel or epic badges', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      epics: [baseEpic],
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.queryByTestId(`epic-badge-${baseEpic.epic_number}`)).not.toBeInTheDocument()
+    // The panel's "Epics" heading must not appear on the pipeline view.
+    expect(screen.queryByText('Epics')).not.toBeInTheDocument()
   })
 })

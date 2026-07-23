@@ -17,12 +17,25 @@ from typing import TYPE_CHECKING, Any
 
 from audit_chain import AuditChain
 from base_background_loop import BaseBackgroundLoop, LoopDeps
-from config import HydraFlowConfig
+from config import Credentials, HydraFlowConfig
 from dedup_store import DedupStore
+from event_loop_watchdog import (
+    clear_stall_marker,
+    event_loop_stall_marker_path,
+    read_stall_marker,
+)
+from events import EventType, HydraFlowEvent
+from git_revision import get_commits_behind
+from repo_existence_prober import DefaultRepoProber
+from rollup_issue_manager import RollupIssueManager
+from subprocess_util import run_subprocess
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from bg_worker_manager import BGWorkerManager
     from ports import ObservabilityPort, PRPort
+    from repo_existence_prober import RepoProber
     from retrospective_queue import RetrospectiveQueue
     from state import StateTracker
 
@@ -88,6 +101,35 @@ _WORKER_STALL_MULTIPLIER = 3
 # persisted heartbeat after long orchestrator downtime) is harm without
 # benefit, and a truly wedged health_monitor can't sweep itself anyway.
 _WORKER_STALL_EXCLUDED = frozenset({"trust_fleet_sanity", "health_monitor"})
+
+# Bounded pre-read `git fetch` timeout for the stale-code dead-man-switch
+# (#9596). Short and fixed — a single-branch fetch, not a full clone; the
+# check must degrade (skip the tick) rather than hang the health-monitor
+# cycle when the remote is unreachable.
+_STALE_CODE_FETCH_TIMEOUT_SECS = 30.0
+
+# Persistent-error self-repair actuator (#10140, follow-up to #9854's
+# read-only health harness). A registry loop whose heartbeat reports
+# `error` for this many CONSECUTIVE health_monitor ticks either gets a
+# known auto-repair applied or one deduped `hydraflow-find` issue naming
+# it filed — the actuator half of the harness, so a repeatedly-failing
+# loop self-heals (or is at least surfaced) instead of waiting for a human
+# to eyeball the dashboard. Mirrors `_SANITY_NOOP_STREAK_THRESHOLD`'s
+# per-tick (not per-underlying-cycle) counting convention: simple, already
+# proven in this file, and testable without needing to fake a target
+# loop's own cycle cadence.
+_ERROR_STREAK_THRESHOLD = 3
+
+# Loops excluded from persistent-error actuation. health_monitor cannot
+# meaningfully self-diagnose (mirrors `_WORKER_STALL_EXCLUDED`);
+# trust_fleet_sanity already has its own `tick_error_ratio` anomaly
+# detector (spec §12.1) for this exact failure class (a loop that ticks
+# but keeps failing) — double coverage would double-file.
+_PERSISTENT_ERROR_EXCLUDED = frozenset({"trust_fleet_sanity", "health_monitor"})
+
+# RollupIssueManager namespace for the persistent-error actuator's
+# generic (unknown-pattern) issue-filing fallback.
+_PERSISTENT_ERROR_NAMESPACE = "health_monitor_persistent_error"
 
 # ---------------------------------------------------------------------------
 # Trend metrics
@@ -349,6 +391,8 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         state: StateTracker | None = None,
         bg_workers: BGWorkerManager | None = None,
         observability: ObservabilityPort | None = None,
+        credentials: Credentials | None = None,
+        repo_prober: RepoProber | None = None,
     ) -> None:
         super().__init__(
             worker_name="health_monitor",
@@ -359,6 +403,20 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         self._verification_window = verification_window
         self._retrospective_queue = retrospective_queue
         self._decisions_dir: Path = config.memory_dir
+        # Credentials for the stale-code check's own bounded `git fetch`
+        # (issue #9596) — this loop hosts its own pre-read fetch so the
+        # commits-behind snapshot it consumes (git_revision.get_commits_behind,
+        # #9663) is fresh, not the possibly-stale local tracking ref.
+        self._credentials: Credentials = credentials or Credentials()
+        # Repo-existence probe for the persistent-error self-repair actuator's
+        # ``principles_audit`` 404-prune (#10140). Extracted behind a
+        # ``RepoProber`` seam so the raw ``git ls-remote`` spawn lives outside
+        # ``*_loop.py`` (sandbox seam guard) and the sandbox/MockWorld can
+        # inject a fake, air-gapping it. Self-defaults so production wiring
+        # (service_registry) needs no change.
+        self._repo_prober: RepoProber = repo_prober or DefaultRepoProber(
+            self._credentials.gh_token, config.repo_root
+        )
         # §12.1 dead-man-switch inputs — ``state`` is available at
         # service-registry time; ``bg_workers`` is built after the loop
         # registry, so orchestrator injects it via ``set_bg_workers``.
@@ -392,6 +450,25 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             "health_monitor_worker_stall",
             config.data_root / "dedup" / "health_monitor_worker_stall.json",
         )
+        # Dedup for the stale-code dead-man-switch (#9596) — file one
+        # factory-stale-code issue per stall event; clear on recovery.
+        self._stale_code_dedup = DedupStore(
+            "health_monitor_stale_code",
+            config.data_root / "dedup" / "health_monitor_stale_code.json",
+        )
+        # Persistent-error self-repair actuator (#10140) — per-worker
+        # consecutive-error-heartbeat streak, in-memory only (mirrors
+        # `_sanity_noop_streak`'s same tradeoff: a process restart resets
+        # the count, an acceptable bound for this v1 slice).
+        self._error_streaks: dict[str, int] = {}
+        # Known auto-repairable failure patterns, keyed by worker name.
+        # Each repair returns a short description of what it fixed (used in
+        # the SYSTEM_ALERT + log line), or None when it found nothing to
+        # repair this tick (falls through to the generic issue-filing
+        # path). v1 has exactly one entry — the concrete #10140 case.
+        self._known_repairs: dict[str, Callable[[], Awaitable[str | None]]] = {
+            "principles_audit": self._repair_principles_audit_404_repo,
+        }
 
     def set_bg_workers(self, bg_workers: BGWorkerManager) -> None:
         """Late-binding for the post-ctor BGWorkerManager wiring."""
@@ -432,12 +509,35 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         except Exception:  # noqa: BLE001
             logger.debug("wiki-freshness check failed", exc_info=True)
 
+        # Dead-man-switch: detect the running instance loading stale code
+        # (#9596) relative to origin/<base_branch>.
+        try:
+            await self._check_stale_code()
+        except Exception:
+            logger.debug("stale-code check failed", exc_info=True)
+
+        # Escalate a prior synchronous event-loop freeze recorded by the
+        # thread-level EventLoopWatchdog (#9552). The watchdog thread cannot
+        # file issues itself — Ports are async and run on the very loop that
+        # froze — so it leaves a marker this (now-healthy) loop consumes.
+        try:
+            await self._check_event_loop_stall()
+        except Exception:
+            logger.debug("event-loop stall check failed", exc_info=True)
+
         # Generic stall sweep: restart-first for any silent registry loop.
         # Deliberately unwrapped (unlike the grandfathered sibling checks
         # above): a sweep failure propagates to the base cycle handler,
         # which owns credit/auth classification and surfaces a visible
         # cycle error instead of a debug line — the tick retries.
         await self._check_worker_staleness()
+
+        # Persistent-error actuator (#10140): a loop that keeps TICKING but
+        # keeps FAILING (complements the silent-heartbeat sweep above).
+        # Deliberately unwrapped for the same reason — a genuine bug here
+        # should surface as a visible cycle error and retry, not vanish
+        # into a debug line.
+        await self._check_persistent_worker_errors()
 
         metrics = compute_trend_metrics(
             self._outcomes_path, self._scores_path, self._failures_path
@@ -1214,6 +1314,32 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         filed_keys = self._sanity_stall_dedup.get()
         self._sanity_stall_dedup.set_all(filed_keys | {dedup_key})
 
+    def _worker_stall_multiplier(self, name: str) -> int:
+        """Interval multiplier for *name*'s stall-sweep threshold (#10241).
+
+        The blanket ``_WORKER_STALL_MULTIPLIER`` (3) leaves two poll intervals
+        of grace over the worst-case legitimate heartbeat age (one pre-cycle
+        interval + a full ``cycle_timeout``). For a short-poll / long-cycle
+        loop like ``staging_bisect`` that pushes remediation ~30 min past
+        ``TrustFleetSanityLoop``'s own staleness alert, leaving a window where
+        an anomaly issue exists but nothing has been auto-restarted yet
+        (#10234). Opt-in loops (``worker_stall_tight_loops``) use the tighter
+        ``worker_stall_tight_multiplier`` instead, firing the restart closer to
+        that alert window.
+
+        The multiplier stays ``>= 1`` (config floor) so the resulting
+        threshold ``multiplier × interval + cycle_timeout`` remains strictly
+        above ``interval + cycle_timeout`` — the longest a *healthy* cycle can
+        keep the heartbeat stale (the watchdog cancels any cycle at
+        ``cycle_timeout``). A legitimately long in-flight cycle is therefore
+        still never false-restarted; only genuine hangs past the floor trip.
+        """
+        cfg = self._config
+        tight_loops = getattr(cfg, "worker_stall_tight_loops", None) or ()
+        if name in tight_loops:
+            return int(cfg.worker_stall_tight_multiplier)
+        return _WORKER_STALL_MULTIPLIER
+
     async def _check_worker_staleness(self) -> None:
         """Generic restart-first stall sweep across registry loops.
 
@@ -1222,6 +1348,9 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         raises — but a loop that goes *silent* (task wedged outside the
         watchdog window) shows only as a stale heartbeat (#9650). Restart
         it once per stall event; escalate with a ``loop-stalled`` issue
+        (plus a ``worker_stall`` ``SYSTEM_ALERT`` event, #10086 — the only
+        observable signal of a genuine escalation, since this sweep never
+        surfaces per-worker results through ``_do_work()``'s returned stats)
         only when the restart didn't clear it. Recovery auto-closes the
         issue (title-filtered — the label is shared across loops) and
         clears both markers so a future stall restarts fresh.
@@ -1263,9 +1392,8 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                 last_run = last_run.replace(tzinfo=UTC)
             elapsed_s = (now - last_run).total_seconds()
             interval_s = bg_workers.get_interval(name)
-            threshold_s = (
-                _WORKER_STALL_MULTIPLIER * interval_s + bg_workers.cycle_timeout(name)
-            )
+            stall_multiplier = self._worker_stall_multiplier(name)
+            threshold_s = stall_multiplier * interval_s + bg_workers.cycle_timeout(name)
             restart_key = f"health_monitor:worker-stall:restart:{name}"
             filed_key = f"health_monitor:worker-stall:filed:{name}"
             if elapsed_s < threshold_s:
@@ -1325,7 +1453,7 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             body = (
                 f"## Background loop dead-man-switch tripped\n\n"
                 f"`{name}` has not heartbeated in `{int(elapsed_s)}s`, "
-                f"exceeding `{_WORKER_STALL_MULTIPLIER} × interval + "
+                f"exceeding `{stall_multiplier} × interval + "
                 f"cycle_timeout` = `{int(threshold_s)}s`.\n\n"
                 f"- Last heartbeat: `{last_run_iso}`\n"
                 f"- Interval: `{interval_s}s`\n"
@@ -1342,13 +1470,89 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                 f"_Auto-filed by HydraFlow `health_monitor` (generic "
                 f"loop-stall dead-man-switch)._"
             )
-            await prs.create_issue(
+            issue_number = await prs.create_issue(
                 title,
                 body,
                 ["hydraflow-find", "loop-stalled"],
             )
+            # SYSTEM_ALERT alongside the filed issue (mirrors the sibling
+            # stale-code dead-man-switch below) — the sweep itself never
+            # surfaces escalation through ``_do_work()``'s returned stats (it
+            # runs across an arbitrary number of registered workers, not one
+            # fixed metric), so this is the only observable signal that a
+            # stall genuinely escalated rather than merely heartbeated (#10086).
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    data={
+                        "kind": "worker_stall",
+                        "source": "health_monitor",
+                        "worker": name,
+                        "issue": issue_number,
+                        "elapsed_seconds": int(elapsed_s),
+                        "threshold_seconds": int(threshold_s),
+                    },
+                )
+            )
             keys = keys | {filed_key}
             dedup.set_all(keys)
+
+    async def _check_event_loop_stall(self) -> None:
+        """Escalate a synchronous event-loop freeze recorded by the watchdog.
+
+        ``EventLoopWatchdog`` (#9552) is a daemon THREAD: while the event
+        loop is frozen it can dump stacks and write a marker, but it cannot
+        file a GitHub issue — the async Ports run on the very loop that
+        froze. This check runs once the loop is healthy again (in-place
+        recovery, or the first cycles after a process restart), files one
+        ``hydraflow-find`` + ``loop-stalled`` issue per marker, then consumes
+        the marker. File-then-clear: a failed filing leaves the marker in
+        place so the next tick retries; the marker file itself is the dedup.
+        """
+        prs = self._prs
+        if prs is None:
+            return
+        marker_path = event_loop_stall_marker_path(self._config)
+        marker = read_stall_marker(marker_path)
+        if marker is None:
+            return
+        detected_at = marker.get("detected_at", "unknown")
+        stalled_for = marker.get("stalled_for_seconds", "?")
+        threshold = marker.get("threshold_seconds", "?")
+        dump_path = marker.get("dump_path", "unknown")
+        episodes = marker.get("episode_count", 1)
+        hard_restart = marker.get("hard_restart", False)
+        title = (
+            f"event-loop-stalled: process event loop froze synchronously "
+            f"for {stalled_for}s"
+        )
+        body = (
+            f"## Event-loop freeze detected by the thread-level watchdog "
+            f"(#9552)\n\n"
+            f"The asyncio event loop stopped scheduling tasks for "
+            f"`{stalled_for}s` (threshold `{threshold}s`) — a SYNCHRONOUS "
+            f"block (CPU spin, blocking file I/O, non-async subprocess.run) "
+            f"inside a loop's `_do_work` wedged the entire process. The "
+            f"per-cycle asyncio watchdog cannot see this class; the "
+            f"`EventLoopWatchdog` daemon thread caught it from outside the "
+            f"loop.\n\n"
+            f"- Detected at: `{detected_at}`\n"
+            f"- Freeze episodes before this escalation: `{episodes}`\n"
+            f"- All-thread stack dump: `{dump_path}`\n"
+            f"- Hard restart was enabled at trip time: `{hard_restart}`\n\n"
+            f"### Operator playbook\n"
+            f"1. Open the stack dump above — the frozen loop thread's top "
+            f"Python frame IS the offending synchronous call site.\n"
+            f"2. Move that call off-loop (`asyncio.create_subprocess_exec`, "
+            f"`run_in_executor`) and file/fix accordingly.\n"
+            f"3. For recovery-in-place next time, consider enabling "
+            f"`event_loop_watchdog_hard_restart` in the **System** tab "
+            f"(requires a process supervisor with Restart=always).\n\n"
+            f"_Auto-filed by HydraFlow `health_monitor` (event-loop freeze "
+            f"escalation, #9552)._"
+        )
+        await prs.create_issue(title, body, ["hydraflow-find", "loop-stalled"])
+        clear_stall_marker(marker_path)
 
     async def _check_wiki_freshness(self) -> None:
         """Dead-man-switch for `RepoWikiLoop` via `docs/wiki/log.jsonl` mtime.
@@ -1429,6 +1633,127 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         filed_keys = self._wiki_stall_dedup.get()
         self._wiki_stall_dedup.set_all(filed_keys | {dedup_key})
 
+    async def _check_stale_code(self) -> None:
+        """Dead-man-switch: alert when this instance is running stale code.
+
+        Consumes ``git_revision.get_commits_behind`` (#9663) for the
+        commits-behind count against the in-memory boot SHA — this method
+        does NOT recompute staleness itself. ``git_revision`` deliberately
+        performs no network fetch (it only reads local tracking refs), so
+        this loop owns a bounded, pre-read ``git fetch`` of
+        ``origin/<base_branch>`` first; without it the local tracking ref
+        can go stale indefinitely and the check would never trip.
+
+        Files one ``factory-stale-code`` issue (deduped) plus one
+        ``SYSTEM_ALERT`` dashboard event per stall event when
+        ``commits_behind >= stale_code_alert_threshold``. Recovery (a
+        fresh process boots onto current code, or origin catches up)
+        closes the open issue and clears dedup so a future stall re-files.
+
+        Fails safe: an unreachable remote (fetch failure) or an
+        unavailable boot SHA / commit count (``get_commits_behind``
+        returns ``None``) degrades this tick to a silent no-op — neither
+        files nor clears an alert, since neither the stale nor the
+        recovered state was actually confirmed.
+        """
+        prs = self._prs
+        if prs is None:
+            return
+
+        base_branch = self._config.base_branch()
+        try:
+            await run_subprocess(
+                "git",
+                "fetch",
+                "origin",
+                base_branch,
+                cwd=self._config.repo_root,
+                gh_token=self._credentials.gh_token,
+                timeout=_STALE_CODE_FETCH_TIMEOUT_SECS,
+            )
+        except RuntimeError:
+            # Includes SubprocessTimeoutError (RuntimeError subclass).
+            # Degrade — do not compute or alert against a possibly-stale
+            # local tracking ref.
+            logger.warning(
+                "stale-code check: git fetch origin %s failed; skipping this cycle",
+                base_branch,
+                exc_info=True,
+            )
+            return
+
+        commits_behind = get_commits_behind(base_ref=f"origin/{base_branch}")
+        if commits_behind is None:
+            # Boot SHA or commit count unavailable (e.g. not a git checkout)
+            # — fail-safe no-op, per git_revision's own contract.
+            return
+
+        threshold = self._config.stale_code_alert_threshold
+        dedup_key = "health_monitor:stale_code:stale"
+        filed_keys = self._stale_code_dedup.get()
+
+        if commits_behind < threshold:
+            # Recovered (or never stale) — close any open alert and clear
+            # dedup so a future stall re-files (#9359 issue-hygiene).
+            if dedup_key in filed_keys:
+                await self._close_issues_by_label(
+                    prs,
+                    "factory-stale-code",
+                    f"This instance is back within {threshold} commits of "
+                    f"origin/{base_branch} — auto-closing.",
+                )
+                self._stale_code_dedup.set_all(filed_keys - {dedup_key})
+            return
+
+        if dedup_key in filed_keys:
+            # Already filed for the current stall; wait for recovery.
+            return
+
+        title = (
+            f"factory-stale-code: running instance is {commits_behind} "
+            f"commits behind origin/{base_branch} (threshold {threshold})"
+        )
+        body = (
+            f"## Stale-code dead-man-switch tripped\n\n"
+            f"This HydraFlow instance's boot commit is `{commits_behind}` "
+            f"commits behind `origin/{base_branch}`, at or past the "
+            f"configured threshold of `{threshold}` "
+            f"(`stale_code_alert_threshold`).\n\n"
+            f"The boot SHA is captured once, in-memory, at process start "
+            f"and never re-read — a `git pull` without a process restart "
+            f"advances the working-tree HEAD while the process keeps "
+            f"running the stale bytecode, so this check does not "
+            f"self-clear until the process actually restarts onto fresh "
+            f"code.\n\n"
+            f"### Operator playbook\n"
+            f"1. Check `GET /api/control/status` for `boot_sha` / "
+            f"`commits_behind`.\n"
+            f"2. Restart the orchestrator (`systemctl restart hydraflow` "
+            f"or equivalent) to boot onto current `origin/{base_branch}`.\n"
+            f"3. If this keeps tripping right after a restart, check "
+            f"whether the deploy pulls before restarting.\n\n"
+            f"_Auto-filed by HydraFlow `health_monitor` "
+            f"(stale-code dead-man-switch, #9596)._"
+        )
+        await prs.create_issue(
+            title,
+            body,
+            ["hydraflow-find", "factory-stale-code"],
+        )
+        await self._bus.publish(
+            HydraFlowEvent(
+                type=EventType.SYSTEM_ALERT,
+                data={
+                    "kind": "factory_stale_code",
+                    "commits_behind": commits_behind,
+                    "threshold": threshold,
+                    "base_branch": base_branch,
+                },
+            )
+        )
+        filed_keys = self._stale_code_dedup.get()
+        self._stale_code_dedup.set_all(filed_keys | {dedup_key})
+
     async def _close_issues_by_label(
         self,
         prs: PRPort,
@@ -1460,3 +1785,200 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                 continue
             await prs.post_comment(number, comment)
             await prs.close_issue(number)
+
+    # ------------------------------------------------------------------
+    # Persistent-error self-repair actuator (#10140)
+    # ------------------------------------------------------------------
+
+    def _persistent_error_rollup(
+        self, prs: PRPort, state: StateTracker
+    ) -> RollupIssueManager:
+        return RollupIssueManager(
+            pr=prs,
+            state=state,
+            namespace=_PERSISTENT_ERROR_NAMESPACE,
+            labels=["hydraflow-find", "loop-persistent-error"],
+        )
+
+    async def _check_persistent_worker_errors(self) -> None:
+        """Actuator half of #9854's read-only per-loop health harness.
+
+        Complements ``_check_worker_staleness`` (silent — heartbeat stops
+        advancing) with the opposite failure mode: a loop that keeps
+        TICKING but keeps FAILING. When a registry loop's heartbeat
+        reports ``error`` for ``_ERROR_STREAK_THRESHOLD`` consecutive
+        health_monitor ticks, either:
+
+        - a KNOWN auto-repairable pattern (``self._known_repairs``) is
+          applied — v1's concrete case is PrinciplesAuditLoop crashing on
+          a ``managed_repos`` entry whose repo 404s, repaired by pruning
+          (disabling) that entry; or
+        - failing that (unknown pattern, or the known repair found
+          nothing to fix), ONE deduped ``hydraflow-find`` +
+          ``loop-persistent-error`` issue is filed naming the loop, via
+          ``RollupIssueManager`` (one issue per worker, body updated with
+          the growing streak count, auto-closed on recovery) — so the
+          pipeline fixes it rather than a human eyeballing the dashboard.
+
+        ``trust_fleet_sanity`` is excluded — it already runs its own
+        ``tick_error_ratio`` anomaly detector for this exact failure class
+        (spec §12.1); ``health_monitor`` is excluded for the same reason
+        the stall sweep excludes itself (can't meaningfully self-diagnose).
+
+        Streak counters are in-memory only (mirrors ``_sanity_noop_streak``
+        above) and count per health_monitor TICK, not per distinct
+        underlying cycle — the same simplification already accepted for
+        the sanity no-op streak. Silent no-op when ``state``/``prs`` are
+        missing (minimal scenario fixtures) or the actuator is disabled
+        (``self_repair_actuator_enabled`` kill-switch).
+        """
+        state = self._state
+        prs = self._prs
+        if state is None or prs is None:
+            return
+        if not self._config.self_repair_actuator_enabled:
+            return
+
+        heartbeats = state.get_worker_heartbeats()
+        for name, hb in heartbeats.items():
+            if name in _PERSISTENT_ERROR_EXCLUDED or not isinstance(hb, dict):
+                continue
+            status = hb.get("status")
+            last_run = hb.get("last_run")
+
+            if status != "error":
+                # Recovered (or never errored). Close any tracked issue and
+                # reset the streak so a future failure re-escalates cleanly.
+                if self._error_streaks.get(name, 0) >= _ERROR_STREAK_THRESHOLD:
+                    rollup = self._persistent_error_rollup(prs, state)
+                    await rollup.resolve(
+                        name,
+                        comment=(
+                            f"`{name}` is heartbeating `ok` again — auto-closing."
+                        ),
+                    )
+                self._error_streaks[name] = 0
+                continue
+
+            streak = self._error_streaks.get(name, 0) + 1
+            self._error_streaks[name] = streak
+            if streak < _ERROR_STREAK_THRESHOLD:
+                continue
+
+            # Attempt the known repair exactly once per streak (at the
+            # crossing tick) — re-probing every subsequent tick would be
+            # unbounded subprocess overhead for a condition that, once
+            # confirmed absent, won't change tick-to-tick.
+            if streak == _ERROR_STREAK_THRESHOLD:
+                repair = self._known_repairs.get(name)
+                if repair is not None:
+                    repaired = await repair()
+                    if repaired:
+                        logger.warning(
+                            "Self-repair actuator: auto-repaired %r for "
+                            "persistent-error loop %r (%d consecutive error "
+                            "heartbeats)",
+                            repaired,
+                            name,
+                            streak,
+                        )
+                        await self._bus.publish(
+                            HydraFlowEvent(
+                                type=EventType.SYSTEM_ALERT,
+                                data={
+                                    "kind": "loop_self_repair",
+                                    "source": "health_monitor",
+                                    "worker": name,
+                                    "repaired": repaired,
+                                    "streak": streak,
+                                },
+                            )
+                        )
+                        self._error_streaks[name] = 0
+                        continue
+
+            # Unknown pattern (or the known repair found nothing to
+            # repair) — file/refresh one deduped issue naming the loop.
+            rollup = self._persistent_error_rollup(prs, state)
+            has_pattern = name in self._known_repairs
+            title = f"loop-persistent-error: {name} is failing every cycle"
+            body = (
+                f"## Background loop persistent-error actuator tripped\n\n"
+                f"`{name}` has reported an `error` heartbeat for "
+                f"`{streak}` consecutive cycles (threshold "
+                f"`{_ERROR_STREAK_THRESHOLD}`).\n\n"
+                f"- Last heartbeat: `{last_run}`\n"
+                f"- Known auto-repair pattern: `"
+                f"{'attempted — no matching condition found' if has_pattern else 'none registered for this loop'}"
+                f"`\n\n"
+                f"### Operator playbook\n"
+                f"1. Check orchestrator logs for `{name}`'s recent cycle "
+                f"exceptions (heartbeat details carry no error message).\n"
+                f"2. If this is a new recurring failure class, consider "
+                f"adding an entry to `HealthMonitorLoop._known_repairs`.\n\n"
+                f"_Auto-filed by HydraFlow `health_monitor` "
+                f"(persistent-error self-repair actuator, #10140)._"
+            )
+            issue_number = await rollup.ensure(name, title=title, body=body)
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    data={
+                        "kind": "loop_persistent_error",
+                        "source": "health_monitor",
+                        "worker": name,
+                        "issue": issue_number,
+                        "streak": streak,
+                    },
+                )
+            )
+
+    async def _repo_probe(self, slug: str) -> bool | None:
+        """Bounded, fail-open existence probe for a managed-repo slug.
+
+        Delegates to the injected :class:`RepoProber` (production default
+        :class:`DefaultRepoProber`). Extracted from this loop in #10140 so
+        the raw ``git ls-remote`` spawn lives outside ``*_loop.py`` (sandbox
+        seam guard) and the sandbox/MockWorld can inject a fake to air-gap
+        it. Contract unchanged: ``True`` (reachable), ``False`` (confirmed
+        404 — safe to prune), or ``None`` (ambiguous: timeout,
+        circuit-breaker-open, network/auth hiccup — never treated as a 404,
+        so a transient failure can never prune a healthy entry).
+        """
+        return await self._repo_prober.probe(slug)
+
+    async def _repair_principles_audit_404_repo(self) -> str | None:
+        """Known auto-repair: prune a ``managed_repos`` entry whose repo 404s.
+
+        Concrete first case (#10140): PrinciplesAuditLoop keeps failing
+        because one ``managed_repos`` entry points at a repo that no
+        longer exists (or is unreachable) on GitHub —
+        ``_refresh_checkout``'s ``git clone``/``fetch`` fails every cycle.
+        Probes each ENABLED entry with a bounded, fail-open ``git
+        ls-remote`` (:meth:`_repo_probe` — never trips on a network blip
+        or auth hiccup, only a confirmed 404) and disables
+        (``enabled=False``) the first confirmed-gone repo — the same
+        operator kill-switch semantics ``ManagedRepo.enabled`` already
+        documents, so the repair is visible in config and reversible
+        (re-enable once the repo is restored/renamed).
+
+        Returns the pruned slug, or ``None`` if every enabled entry still
+        resolves (nothing to repair this tick — falls through to generic
+        issue filing).
+        """
+        config = self._config
+        managed = list(config.managed_repos)
+        for i, mr in enumerate(managed):
+            if not mr.enabled:
+                continue
+            exists = await self._repo_probe(mr.slug)
+            if exists is False:
+                managed[i] = mr.model_copy(update={"enabled": False})
+                object.__setattr__(config, "managed_repos", managed)
+                logger.warning(
+                    "Self-repair: disabled managed_repos entry %r — repo "
+                    "404 confirmed via `git ls-remote`",
+                    mr.slug,
+                )
+                return mr.slug
+        return None

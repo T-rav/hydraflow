@@ -7,21 +7,24 @@ import contextlib
 import json
 import logging
 import os
-import signal
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+import process_group
 from activity_parser import ActivityParser, get_activity_parser
+from agent_rate_backoff import classify_agent_outcome, get_agent_rate_backoff
 from events import EventBus, EventType, HydraFlowEvent
 from execution import SubprocessRunner, get_default_runner
 from models import TranscriptEventData, TranscriptLinePayload
+from process_group import kill_process_group
 from prompt_gate import PromptGateBlockedError, gate_prompt
 from prompt_telemetry import parse_command_tool_model
 from stream_parser import StreamParser
 from subprocess_util import (
+    PROVIDER_ANTHROPIC,
     CreditExhaustedError,
     is_credit_exhaustion,
     make_clean_env,
@@ -87,6 +90,12 @@ class StreamConfig:
     usage_stats: dict[str, object] | None = field(default=None)
     gh_token: str = ""
     trace_collector: TraceCollector | None = None
+    # #9895: when False, credit exhaustion is detected from stderr (the
+    # CLI's own signal) only — agent stdout prose is NOT scanned. Runners
+    # that analyze failure transcripts (DiagnosticRunner) quote credit-error
+    # prose routinely; scanning it raised a false global CreditExhaustedError
+    # on essentially every diagnostic run (mirrors the _is_auth_failure rule).
+    credit_prose_scan: bool = True
 
 
 def _route_prompt_to_cmd(cmd: list[str], prompt: str) -> tuple[list[str], int]:
@@ -158,7 +167,30 @@ def _post_stream_result(
             "~/.gemini/settings.json / CODEX_HOME)"
         )
 
-    combined = f"{stderr_text}\n{accumulated_text}"
+    combined = (
+        f"{stderr_text}\n{accumulated_text}"
+        if config.credit_prose_scan
+        else stderr_text
+    )
+
+    # Record the run's outcome for the rate-aware agent backoff (#10289). A
+    # truncated mid-run failure (rc != 0 with no terminal result frame) is the
+    # depleted-rate-window signature — distinct from credit exhaustion (a lone
+    # probe on the same auth succeeds) — and repeated occurrences throttle
+    # spawning. Auth failures already raised above and are excluded; credit
+    # exhaustion is classified but deliberately does NOT feed the rate backoff.
+    # Conservatively defaulted: the engine is disabled unless explicitly wired,
+    # so this call is inert by default and can never wedge the pipeline.
+    if not early_killed:
+        get_agent_rate_backoff().record_outcome(
+            classify_agent_outcome(
+                returncode=returncode,
+                has_result_frame=bool(result_text),
+                output_text=combined,
+                early_killed=early_killed,
+            )
+        )
+
     if not early_killed and is_credit_exhaustion(combined):
         resume_at = parse_credit_resume_time(combined)
         raise CreditExhaustedError("API credit limit reached", resume_at=resume_at)
@@ -218,10 +250,9 @@ async def _stream_and_collect(
             and config.on_output(accumulated_text)
         ):
             early_killed = True
-            # The process may have already exited between the last read and
-            # this kill; suppress ProcessLookupError so it does not escape.
-            with contextlib.suppress(ProcessLookupError, OSError):
-                proc.kill()
+            # Group kill (self-suppressing): the early-kill previously
+            # reaped only the direct child, leaking its group (#9911).
+            _kill_proc_group(proc)
             break
 
         # Emit structured activity event (additive — does not replace TRANSCRIPT_LINE)
@@ -304,6 +335,11 @@ async def stream_claude_process(
     runner = config.runner or get_default_runner()
     cmd_to_run, stdin_mode = _route_prompt_to_cmd(cmd, prompt)
 
+    # Rate-aware backpressure (#10289): if repeated mid-run failures have
+    # engaged the backoff, delay this spawn instead of hammering a depleted
+    # rate window. Inert (no delay) unless the engine is explicitly enabled.
+    await get_agent_rate_backoff().wait_if_throttled()
+
     proc = await runner.create_streaming_process(
         cmd_to_run,
         cwd=str(cwd),
@@ -315,6 +351,7 @@ async def stream_claude_process(
         start_new_session=True,  # Own process group for reliable cleanup
     )
     active_procs.add(proc)
+    _ALL_TRACKED_PROCS.add(proc)
 
     stderr_task: asyncio.Task[bytes] | None = None
     try:
@@ -357,30 +394,55 @@ async def stream_claude_process(
         # process raises ProcessLookupError out of the cleanup path. Mirror the
         # guard in terminate_processes().
         with contextlib.suppress(ProcessLookupError, OSError):
-            proc.kill()
+            _kill_proc_group(proc)
             await proc.wait()
         raise RuntimeError(f"Agent process timed out after {config.timeout}s") from exc
     except asyncio.CancelledError:
-        # On cancellation the process may already have exited; suppress
-        # ProcessLookupError so it does not escape the cancel path.
-        with contextlib.suppress(ProcessLookupError, OSError):
-            proc.kill()
+        # On cancellation the process may already have exited; the group
+        # kill is self-suppressing (#9911: group, not just the child).
+        _kill_proc_group(proc)
         raise
     finally:
         if stderr_task is not None and not stderr_task.done():
             stderr_task.cancel()
             await asyncio.gather(stderr_task, return_exceptions=True)
         active_procs.discard(proc)
+        _ALL_TRACKED_PROCS.discard(proc)
+
+
+def _kill_proc_group(proc: asyncio.subprocess.Process) -> None:
+    """SIGKILL *proc*'s whole process group (best-effort, never raises).
+
+    Delegates to the single guarded primitive (#9641) — see
+    ``process_group.kill_process_group`` for the mock-pid/pid-0 hazard
+    this guard exists for.
+    """
+    kill_process_group(proc)
 
 
 def terminate_processes(active_procs: set[asyncio.subprocess.Process]) -> None:
     """Kill all processes in *active_procs* and their process groups."""
     for proc in list(active_procs):
-        with contextlib.suppress(ProcessLookupError, OSError):
-            if proc.pid is not None:
-                os.killpg(proc.pid, signal.SIGKILL)
-            else:
-                proc.kill()
+        _kill_proc_group(proc)
+
+
+# #9911: runtime-wide registry of every live agent subprocess. Per-caller
+# ``active_procs`` ownership is fragmented (four runners the stop path
+# terminates, plus acceptance_criteria / verification_judge / sentry /
+# report_issue sets it never reached — two of those owners have no
+# terminate() at all), so stopping the runtime orphaned their children to
+# launchd for the length of a pytest/make run. stream_claude_process
+# registers every spawn here; the stop/shutdown path reaps the union.
+_ALL_TRACKED_PROCS: set[asyncio.subprocess.Process] = process_group._TRACKED
+
+
+def reap_all_tracked_processes() -> int:
+    """SIGKILL the process group of every tracked live subprocess (#9911).
+
+    Delegates to the shared registry in :mod:`process_group` — run_simple
+    children register there too, so the stop path sees every spawn path.
+    """
+    return process_group.reap_all_tracked()
 
 
 # ---------------------------------------------------------------------------
@@ -640,6 +702,35 @@ def provider_key_presence() -> dict[str, bool]:
     }
 
 
+def normalize_provider(dial: str) -> str:
+    """Map a per-role provider *dial* value to its billing-provider identity.
+
+    The CLI-harness dial (``"claude"``) and anything unrecognized bill against
+    Anthropic (``"anthropic"``); the OpenAI-compatible one-shot dials
+    (``"openrouter"``/``"zai"``/``"kimi"``) are already their own billing
+    identity and map to themselves. This is the single point that reconciles the
+    config's ``*_provider`` Literal namespace (which spells the harness
+    ``"claude"``) with ``CreditExhaustedError.provider`` (which spells it
+    ``"anthropic"``), so the orchestrator can compare a signal's provider
+    against each loop's routed backend."""
+    if dial in _OPENAI_COMPAT_BACKENDS:
+        return dial
+    return PROVIDER_ANTHROPIC
+
+
+def backend_probe_endpoint(provider: str, config: HydraFlowConfig) -> tuple[str, str]:
+    """Resolve ``(base_url, api_key)`` for a one-shot backend's credit probe.
+
+    Returns ``("", "")`` when *provider* is not a known OpenAI-compatible
+    backend (e.g. ``"anthropic"``), which the probe treats as "cannot probe →
+    fail-open". Reuses the registry's own ``base_url``/``api_key`` resolution so
+    the probe hits exactly the endpoint + key a real spawn would use."""
+    backend = _OPENAI_COMPAT_BACKENDS.get(provider)
+    if backend is None:
+        return "", ""
+    return backend.base_url(config), backend.api_key()
+
+
 def _telemetry_cmd(provider: str, tool: str, model: str) -> list[str]:
     """The ``cmd``-shaped descriptor ``_record_inference`` parses into
     ``(tool, model)``. For an OpenAI-compatible backend the 'tool' is the
@@ -732,11 +823,16 @@ async def _openai_compatible_complete(
         raise TimeoutError(str(exc)) from exc
 
     if resp.status_code in (402, 429):
-        raise CreditExhaustedError(f"{provider} {resp.status_code}: {resp.text[:200]}")
+        # Tag the signal with THIS backend so the orchestrator scopes the pause
+        # to loops routed here — a z.ai/kimi cap must not halt Claude work, and
+        # vice-versa (#9807).
+        raise CreditExhaustedError(
+            f"{provider} {resp.status_code}: {resp.text[:200]}", provider=provider
+        )
     if resp.status_code >= 400:
         body = resp.text or ""
         if is_credit_exhaustion(body):
-            raise CreditExhaustedError(f"{provider}: {body[:200]}")
+            raise CreditExhaustedError(f"{provider}: {body[:200]}", provider=provider)
         return SimpleResult(
             stderr=f"{provider} http {resp.status_code}: {body[:300]}",
             returncode=resp.status_code,

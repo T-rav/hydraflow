@@ -18,15 +18,13 @@ const { PipelineControlPanel } = await import('../PipelineControlPanel')
 function buildPipelineStats(caps = {}) {
   const stages = {}
   if (caps.triage != null) stages.triage = { worker_cap: caps.triage }
-  if (caps.discover != null) stages.discover = { worker_cap: caps.discover }
-  if (caps.shape != null) stages.shape = { worker_cap: caps.shape }
   if (caps.plan != null) stages.plan = { worker_cap: caps.plan }
   if (caps.implement != null) stages.implement = { worker_cap: caps.implement }
   if (caps.review != null) stages.review = { worker_cap: caps.review }
   return { stages }
 }
 
-const DEFAULT_CAPS = { triage: 1, discover: 1, shape: 1, plan: 2, implement: 3, review: 2 }
+const DEFAULT_CAPS = { triage: 1, plan: 2, implement: 3, review: 2 }
 
 function defaultMockContext(overrides = {}) {
   const pipelineIssues = overrides.pipelineIssues || {}
@@ -95,6 +93,25 @@ describe('PipelineControlPanel', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({ workers: singleTriageWorker }))
       render(<PipelineControlPanel />)
       expect(screen.getByTestId('loop-count-triage')).toHaveTextContent('1')
+    })
+
+    it('shows an "N active" slot-occupancy badge for a phase with active work', () => {
+      // plan has active=1 (e.g. worked by a non-registered runner such as the
+      // Decomposition Council). The slot must read as occupied even with no
+      // registered plan worker card — "a slot is a slot".
+      const pipelineStats = {
+        stages: {
+          triage: { worker_cap: 1 },
+          plan: { worker_cap: 2, active: 1 },
+          implement: { worker_cap: 3 },
+          review: { worker_cap: 2 },
+        },
+      }
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({ pipelineStats }))
+      render(<PipelineControlPanel />)
+      expect(screen.getByTestId('loop-active-plan')).toHaveTextContent('1 active')
+      // a phase with no active work shows no badge
+      expect(screen.queryByTestId('loop-active-review')).toBeNull()
     })
 
     it('shows "workers" label for all stages when config is available', () => {

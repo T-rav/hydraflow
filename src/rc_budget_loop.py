@@ -1,7 +1,9 @@
 """RCBudgetLoop — 4h RC CI wall-clock regression detector (spec §4.8).
 
-Reads the last 30 days of ``rc-promotion-scenario.yml`` runs via ``gh
-run list``, extracts per-run wall-clock duration, and emits a
+Reads the last 30 days of ``rc-promotion-scenario.yml`` runs from the
+shared ``GitHubDataCache`` run snapshot (#9814 — one staleness-bounded
+gh fetch serves every consumer), extracts per-run wall-clock duration,
+and emits a
 ``hydraflow-find`` + ``rc-duration-regression`` issue when the newest
 run trips either:
 
@@ -21,10 +23,8 @@ Kill-switch: ``LoopDeps.enabled_cb("rc_budget")`` — **no
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import json
 import logging
+import re
 import statistics
 import tempfile
 import time
@@ -34,11 +34,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
+from escalation_reconcile import EscalationReconciler, is_bot_close
+from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult  # noqa: TCH001
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
     from dedup_store import DedupStore
+    from github_cache_loop import GitHubDataCache
     from pr_manager import PRManager
     from state import StateTracker
 
@@ -49,32 +53,62 @@ _WINDOW_DAYS = 30
 _HISTORY_CAP = 60
 _RECENT_N = 5
 _MIN_HISTORY = 5
-_WORKFLOW = "rc-promotion-scenario.yml"
+# The workflow itself is single-sourced as
+# ``github_cache_loop.RC_PROMOTION_WORKFLOW`` (#9814): this loop reads the
+# shared run snapshot, it no longer names the workflow in a gh command.
+
+# Job-name markers for the heavy suite jobs gated behind the workflow's
+# ``gate`` job (``if: needs.gate.outputs.should_run == 'true'``). When the gate
+# resolves ``should_run=false`` (a schedule tick with no open ``rc/*`` PR, or a
+# non-RC PR), every one of these jobs is ``skipped`` and the run finishes in a
+# few seconds — a "gate-only" run that must be excluded from the baseline
+# population so it doesn't deflate the median/spike thresholds (#10254). The
+# shared run snapshot (#9814) carries no per-job data, so a run's gate-only
+# status is resolved from its jobs (``PRPort.get_workflow_run_jobs``) and cached
+# per run id — a completed (immutable) run is classified at most once.
+_SUITE_JOB_MARKERS = ("Scenario Tests", "Browser Scenarios")
+
+# Marker label on the HITL escalation issue (paired with ``hitl-escalation``).
+# Single-sourced so the filing path (`_file_escalation`) and the reconciler
+# can never drift apart.
+_STUCK_LABEL = "rc-duration-stuck"
+
+# Parses ``_file_escalation`` titles back to the dedup-key subject
+# (``median``/``spike``). Returns ``None`` for titles that aren't ours so the
+# shared ``EscalationReconciler`` skips operator-created issues untouched.
+_ESCALATION_TITLE_RE = re.compile(
+    r"^HITL: RC gate duration regression \((median|spike)\) unresolved after "
+)
+
+
+def _escalation_subject(title: str) -> str | None:
+    m = _ESCALATION_TITLE_RE.match(title)
+    return m.group(1) if m else None
+
+
+# Parses ``_file_regression_issue`` titles back to the dedup-key subject
+# (``median``/``spike``), mirroring ``_ESCALATION_TITLE_RE`` one tier down.
+_REGRESSION_TITLE_RE = re.compile(
+    r"^RC gate duration regression: \d+s vs \d+s \((median|spike)\)$"
+)
+
+
+def _regression_subject(title: str) -> str | None:
+    m = _REGRESSION_TITLE_RE.match(title)
+    return m.group(1) if m else None
+
 
 # Hard cap on each ``gh`` read/download. A wedged child must not hang the loop
 # cycle forever and freeze its heartbeat — the #9410 silent-stall failure
-# class (#9454 / #9508).
+# class (#9454 / #9508). Bounded (and, via ``run_subprocess_result``,
+# circuit-breaker/rate-limit/process-group hardened — #9554/#10028) rather
+# than a raw ``create_subprocess_exec``.
 _GH_TIMEOUT_SECONDS = 120
 
 
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process,
-) -> tuple[bytes, bytes]:
-    """``proc.communicate()`` bounded by ``_GH_TIMEOUT_SECONDS``.
-
-    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
-    the caller can treat it as a failed read (rather than hanging the loop
-    cycle indefinitely).
-    """
-    try:
-        return await asyncio.wait_for(proc.communicate(), timeout=_GH_TIMEOUT_SECONDS)
-    except TimeoutError:
-        # proc.kill() itself raises ProcessLookupError when the child already
-        # exited — suppress it too so the TimeoutError propagates. (#9794/#9814)
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
-            await proc.wait()
-        raise
+def _is_suite_job(name: str) -> bool:
+    """True if *name* is one of the heavy suite jobs gated on ``should_run``."""
+    return any(marker in name for marker in _SUITE_JOB_MARKERS)
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -98,6 +132,7 @@ class RCBudgetLoop(BaseBackgroundLoop):
         pr_manager: PRManager,
         dedup: DedupStore,
         deps: LoopDeps,
+        github_cache: GitHubDataCache,
     ) -> None:
         super().__init__(
             worker_name="rc_budget",
@@ -108,6 +143,20 @@ class RCBudgetLoop(BaseBackgroundLoop):
         self._state = state
         self._pr = pr_manager
         self._dedup = dedup
+        self._github_cache = github_cache
+        self._escalations = EscalationReconciler(
+            prs=pr_manager,
+            dedup=dedup,
+            key_prefix="rc_budget",
+            stuck_label=_STUCK_LABEL,
+            clear_attempts=state.clear_rc_budget_attempts,
+            subject_from_title=_escalation_subject,
+        )
+        # gate-only classification cache, keyed by run databaseId. Completed
+        # runs are immutable, so a run is classified via ``gh`` at most once
+        # across the loop's lifetime — amortising the job-level fetch instead
+        # of re-fan-out on every 4h tick (#10254 / respecting #9814).
+        self._gate_only_cache: dict[int, bool] = {}
 
     def _get_default_interval(self) -> int:
         return self._config.rc_budget_interval
@@ -184,69 +233,121 @@ class RCBudgetLoop(BaseBackgroundLoop):
         }
 
     async def _fetch_recent_runs(self) -> list[dict[str, Any]]:
-        """Fetch last 30 days of completed RC runs with per-run wall-clock."""
-        cmd = [
-            "gh",
-            "run",
-            "list",
-            "--repo",
-            self._config.repo,
-            "--workflow",
-            _WORKFLOW,
-            "--limit",
-            "100",
-            "--status",
-            "completed",
-            "--json",
-            "databaseId,url,conclusion,createdAt,updatedAt,startedAt",
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await _communicate_bounded(proc)
-        except TimeoutError:
-            logger.warning(
-                "gh run list timed out after %ss; returning empty",
-                _GH_TIMEOUT_SECONDS,
-            )
-            return []
-        if proc.returncode != 0:
-            logger.warning(
-                "gh run list exit=%d: %s",
-                proc.returncode,
-                stderr.decode(errors="replace")[:400],
-            )
-            return []
-        try:
-            raw = json.loads(stdout.decode() or "[]")
-        except json.JSONDecodeError:
-            return []
+        """Fetch last 30 days of completed RC runs with per-run wall-clock.
+
+        Served from the shared ``GitHubDataCache`` snapshot (#9814)
+        instead of a per-tick raw ``gh run list`` subprocess. The old
+        ``--status completed`` filter becomes a client-side ``status``
+        check on the shared (status-agnostic) snapshot; rows keep the
+        legacy gh-CLI key shape the baselines/issue bodies were built on.
+        """
+        rows = await self._github_cache.get_rc_workflow_runs()
         cutoff = datetime.now(UTC) - timedelta(days=_WINDOW_DAYS)
         out: list[dict[str, Any]] = []
-        for run in raw:
-            created = _parse_iso(run.get("createdAt"))
-            started = _parse_iso(run.get("startedAt") or run.get("createdAt"))
-            updated = _parse_iso(run.get("updatedAt"))
+        for row in rows:
+            if str(row.get("status", "")) != "completed":
+                continue
+            # A run GH-Actions-cancelled at its own job timeout has no real
+            # wall-clock signal to offer: its duration is an artifact of
+            # when the kill landed, not of the gate actually running slow.
+            # Counting it (as either the "current" subject or as baseline
+            # history) is exactly the false positive that produced #10215's
+            # "2729s vs 7s" report for a run that had in fact hung, not
+            # regressed.
+            if str(row.get("conclusion", "")).lower() == "cancelled":
+                continue
+            created = _parse_iso(row.get("created_at"))
+            started = _parse_iso(row.get("run_started_at") or row.get("created_at"))
+            updated = _parse_iso(row.get("updated_at"))
             if not created or not started or not updated or created < cutoff:
                 continue
             out.append(
                 {
-                    **run,
+                    "databaseId": row.get("id"),
+                    "url": row.get("url", ""),
+                    "conclusion": row.get("conclusion", ""),
+                    "createdAt": row.get("created_at", ""),
                     "duration_s": max(0, int((updated - started).total_seconds())),
                 }
             )
         out.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
-        return out[:_HISTORY_CAP]
+        out = out[:_HISTORY_CAP]
+        for run in out:
+            run["gate_only"] = await self._classify_gate_only(run)
+        return out
+
+    async def _classify_gate_only(self, run: dict[str, Any]) -> bool:
+        """Return True when *run* is a gate-only (``should_run=false``) tick.
+
+        The shared run snapshot (#9814) carries no per-job or event data, so a
+        run's gate-only status can only be settled from its jobs: a gate-only
+        run runs the ``gate`` job alone and skips every suite job. Resolved via
+        one ``PRPort.get_workflow_run_jobs`` fetch, cached per run id so an
+        immutable completed run is classified at most once (#10254).
+        """
+        try:
+            run_id = int(run.get("databaseId") or 0)
+        except (TypeError, ValueError):
+            return False
+        if not run_id:
+            return False
+        if run_id in self._gate_only_cache:
+            return self._gate_only_cache[run_id]
+        verdict = self._jobs_indicate_gate_only(await self._run_jobs(run_id))
+        self._gate_only_cache[run_id] = verdict
+        return verdict
+
+    @staticmethod
+    def _jobs_indicate_gate_only(jobs: list[dict[str, Any]]) -> bool:
+        """True iff every present suite job was ``skipped`` (gate-only run).
+
+        A gate-only run skips ``Scenario Tests`` / ``Browser Scenarios``. A full
+        run executes them (``success`` / ``failure`` / ``cancelled``). An
+        unrecognised shape (no suite jobs found — e.g. an empty/failed fetch)
+        fails open: treated as a full run so a transient/odd payload never drops
+        a real run from the baseline.
+        """
+        suite = [j for j in jobs if _is_suite_job(str(j.get("name", "")))]
+        if not suite:
+            return False
+        return all(str(j.get("conclusion", "")).lower() == "skipped" for j in suite)
+
+    async def _run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        """Return raw jobs for *run_id* via the PRPort; fail-soft, billing-safe.
+
+        Shared by gate-only classification and the per-job regression
+        breakdown. Empty list on any failure; credit/bug signals propagate.
+        """
+        try:
+            return await self._pr.get_workflow_run_jobs(run_id)
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "rc_budget: jobs unavailable for run %s",
+                run_id,
+                exc_info=True,
+            )
+            return []
 
     def _compute_baselines(
         self, runs: list[dict[str, Any]]
     ) -> tuple[dict[str, Any], dict[str, int]]:
-        """Return ``(current, {rolling_median, recent_max})`` excluding current."""
+        """Return ``(current, {rolling_median, recent_max})`` excluding current.
+
+        The baseline population (rolling median + recent-5 spike window) is
+        built from real full runs only: gate-only (``should_run=false``) runs
+        are excluded so their near-zero durations don't deflate the thresholds
+        and make a normal full run read as an extreme spike (#10254). The
+        ``current`` run is still the newest run regardless of gate-only status,
+        so its own duration reporting is unaffected.
+        """
         current = max(runs, key=lambda r: r.get("createdAt", ""))
-        others = [r for r in runs if r.get("databaseId") != current.get("databaseId")]
+        others = [
+            r
+            for r in runs
+            if r.get("databaseId") != current.get("databaseId")
+            and not r.get("gate_only", False)
+        ]
         others.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
         durations = [int(r["duration_s"]) for r in others]
         recent = durations[:_RECENT_N]
@@ -273,39 +374,23 @@ class RCBudgetLoop(BaseBackgroundLoop):
         return hits
 
     async def _fetch_job_breakdown(self, run: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return up to 10 slowest jobs for *run* via ``gh run view --json jobs``."""
-        run_id = str(run.get("databaseId", ""))
+        """Return up to 10 slowest jobs for *run* via the PRPort (#9814).
+
+        ``PRPort.get_workflow_run_jobs`` replaced the raw ``gh run view``
+        subprocess; failures stay fail-soft (empty breakdown, the issue
+        body says "unavailable") but billing signals propagate.
+        """
+        try:
+            run_id = int(run.get("databaseId") or 0)
+        except (TypeError, ValueError):
+            return []
         if not run_id:
             return []
-        cmd = [
-            "gh",
-            "run",
-            "view",
-            run_id,
-            "--repo",
-            self._config.repo,
-            "--json",
-            "jobs",
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, _ = await _communicate_bounded(proc)
-        except TimeoutError:
-            return []
-        if proc.returncode != 0:
-            return []
-        try:
-            payload = json.loads(stdout.decode() or "{}")
-        except json.JSONDecodeError:
-            return []
+        jobs = await self._run_jobs(run_id)
         out: list[dict[str, Any]] = []
-        for job in payload.get("jobs") or []:
-            s = _parse_iso(job.get("startedAt"))
-            c = _parse_iso(job.get("completedAt"))
+        for job in jobs:
+            s = _parse_iso(job.get("started_at"))
+            c = _parse_iso(job.get("completed_at"))
             if not s or not c:
                 continue
             out.append(
@@ -335,16 +420,11 @@ class RCBudgetLoop(BaseBackgroundLoop):
                 "--dir",
                 td,
             ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
             try:
-                await _communicate_bounded(proc)
-            except TimeoutError:
+                result = await run_subprocess_result(*cmd, timeout=_GH_TIMEOUT_SECONDS)
+            except SubprocessTimeoutError:
                 return []
-            if proc.returncode != 0:
+            if result.returncode != 0:
                 return []
             results: list[tuple[str, float]] = []
             for xml_path in Path(td).rglob("*.xml"):
@@ -433,53 +513,56 @@ class RCBudgetLoop(BaseBackgroundLoop):
             title, body, ["hitl-escalation", "rc-duration-stuck"]
         )
 
-    async def _reconcile_closed_escalations(self) -> None:
-        """Clear dedup keys + attempt counters for closed HITL issues (§3.2)."""
-        cmd = [
-            "gh",
-            "issue",
-            "list",
-            "--repo",
-            self._config.repo,
-            "--state",
-            "closed",
-            "--label",
-            "hitl-escalation",
-            "--label",
-            "rc-duration-stuck",
-            "--author",
-            "@me",
-            "--limit",
-            "100",
-            "--json",
-            "title",
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+    async def _reconcile_closed_regressions(self) -> None:
+        """Clear dedup keys (NOT attempt counters) for closed first-tier
+        ``rc-duration-regression`` issues.
+
+        Without this, the dedup key set on the first fire never clears
+        (nothing else ever touches an ``rc_budget:*`` key besides the
+        ``rc-duration-stuck`` escalation reconciler), which permanently
+        blocks the ``if key in dedup: continue`` guard in ``_do_work`` —
+        freezing ``attempts`` at 1 forever and making the "escalates after
+        3 unresolved attempts" promise structurally unreachable (#10215).
+        """
+        closed = await self._pr.list_closed_issues_by_label(
+            "rc-duration-regression", limit=100
         )
-        try:
-            stdout, _ = await _communicate_bounded(proc)
-        except TimeoutError:
-            return
-        if proc.returncode != 0:
-            return
-        try:
-            closed = json.loads(stdout.decode() or "[]")
-        except json.JSONDecodeError:
-            return
-        current = self._dedup.get()
-        keep = set(current)
+        keys = self._dedup.get()
+        keep = set(keys)
         for issue in closed:
-            title = issue.get("title", "")
-            for kind in ("median", "spike"):
-                key = f"rc_budget:{kind}"
-                if key in keep and f"({kind})" in title:
-                    keep.discard(key)
-                    self._state.clear_rc_budget_attempts(kind)
-        if keep != current:
+            subject = _regression_subject(issue.get("title", ""))
+            if subject is None:
+                continue
+            key = f"rc_budget:{subject}"
+            if key not in keep:
+                continue
+            if is_bot_close(issue):
+                # Programmatic close — the subject is still detected at
+                # HEAD; clearing here would refile a duplicate next tick
+                # (#9437, mirrored from EscalationReconciler).
+                continue
+            keep.discard(key)
+        if keep != keys:
             self._dedup.set_all(keep)
+
+    async def _reconcile_closed_escalations(self) -> None:
+        """Clear dedup state for closed HITL escalations + regression issues.
+
+        Two tiers, both keyed ``rc_budget:{median,spike}``:
+
+        - Terminal ``rc-duration-stuck`` escalations: delegates to the
+          shared :class:`EscalationReconciler` (PRPort-based; replaced the
+          raw ``gh issue list`` subprocess — #9932); clears dedup key AND
+          resets the attempts counter (§3.2). Subjects are parsed from the
+          escalation-title shape ``"HITL: RC gate duration regression
+          (<kind>) unresolved after N …"``.
+        - First-tier ``rc-duration-regression`` issues: see
+          :meth:`_reconcile_closed_regressions` — clears the dedup key
+          only, leaving attempts to keep climbing toward escalation
+          (#10215).
+        """
+        await self._escalations.reconcile_closed()
+        await self._reconcile_closed_regressions()
 
     def _emit_trace(self, t0: float, *, runs_seen: int, signals: int) -> None:
         """Best-effort subprocess trace via lazy-imported ``trace_collector``."""
@@ -490,7 +573,7 @@ class RCBudgetLoop(BaseBackgroundLoop):
         duration_ms = int((time.perf_counter() - t0) * 1000)
         emit_loop_subprocess_trace(
             loop=self._worker_name,
-            command=["gh", "run", "list", _WORKFLOW],
+            command=["github_cache", "rc_workflow_runs"],
             exit_code=0,
             duration_ms=duration_ms,
             stderr_excerpt=f"runs_seen={runs_seen} signals={signals}",

@@ -1,0 +1,17 @@
+adapter: github
+interaction: rerun_workflow_failed
+recorded_at: "2026-07-20T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: rerun_workflow_failed
+  args:
+    - "123456"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ""
+  stderr: ""
+normalizers: []
+baseline_only: true

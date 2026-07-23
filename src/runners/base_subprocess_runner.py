@@ -54,6 +54,7 @@ class SpawnOutcome:
     crashed: bool
     prompt_hash: str
     cost_usd: float
+    cost_unknown: bool = False
 
 
 def _coerce_int(value: object) -> int:
@@ -116,12 +117,13 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
         """Hook for pre-spawn checks/logging (e.g., warn on backend mismatch)."""
         # Default: no-op.
 
-    def _estimate_cost(self, usage_stats: dict[str, object]) -> float:
+    def _estimate_cost(self, usage_stats: dict[str, object]) -> float | None:
         """Default cost estimate via model_pricing.
 
-        Returns 0.0 when the model isn't in the pricing table or stats are
-        missing. Subclasses may override for custom pricing or no-op for
-        free-tier runs.
+        Returns ``None`` when the model isn't in the pricing table (or the
+        lookup fails) — the caller records the spend as UNKNOWN rather than
+        silently folding it into $0 (#9821). Subclasses may override for
+        custom pricing or no-op for free-tier runs.
         """
         try:
             pricing = load_pricing()
@@ -136,10 +138,10 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
                     usage_stats.get("cache_read_input_tokens")
                 ),
             )
-            return float(estimate or 0.0)
+            return float(estimate) if estimate is not None else None
         except Exception as exc:
             logger.warning("subprocess runner cost estimate failed: %s", exc)
-            return 0.0
+            return None
 
     async def run(
         self,
@@ -273,7 +275,11 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
         except Exception as exc:
             logger.warning("subprocess runner telemetry write failed: %s", exc)
 
-        cost_usd = self._estimate_cost(usage_stats)
+        estimate = self._estimate_cost(usage_stats)
+        # Caps/sums stay numeric on 0.0; the FLAG carries honesty to
+        # display surfaces (#9821).
+        cost_usd = estimate if estimate is not None else 0.0
+        cost_unknown = estimate is None
 
         outcome = SpawnOutcome(
             transcript=transcript,
@@ -282,5 +288,6 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
             crashed=crashed,
             prompt_hash=prompt_hash,
             cost_usd=cost_usd,
+            cost_unknown=cost_unknown,
         )
         return self._make_result(outcome)

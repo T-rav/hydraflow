@@ -1,0 +1,23 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# update_pr_branch rebases the PR head onto its base via GitHub (real:
+# `gh api .../update-branch`), returning True on success and False when the
+# PR is unknown. The dispatcher seeds PR #42 with mergeable=False and
+# asserts the fake's side-effect (mergeable flips True) so the contract has
+# teeth beyond the scalar return.
+adapter: github
+interaction: update_pr_branch
+recorded_at: "2026-07-20T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: update_pr_branch
+  args:
+    - "42"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "True\n"
+  stderr: ""
+normalizers: []
+baseline_only: true

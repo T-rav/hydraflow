@@ -170,11 +170,52 @@ def cmd_run(name: str) -> int:
     return rc
 
 
-def cmd_run_all() -> int:
-    """Iterate every scenario; print summary; exit nonzero on any failure."""
+def _parse_shard(shard: str | None) -> tuple[int, int] | None:
+    """Parse a ``"I/N"`` shard spec (1-indexed) into ``(index0, count)``.
+
+    Returns ``None`` when *shard* is falsy (unsharded — run everything).
+    """
+    if not shard:
+        return None
+    i_str, sep, n_str = shard.partition("/")
+    if not sep:
+        raise ValueError(f"invalid --shard {shard!r}: expected I/N, e.g. 2/6")
+    i, n = int(i_str), int(n_str)
+    if n < 1 or not (1 <= i <= n):
+        raise ValueError(f"invalid --shard {shard!r}: need 1 <= I <= N and N >= 1")
+    return i - 1, n
+
+
+def _select_shard(items: list, shard: str | None) -> list:
+    """Return only the *shard*'s slice of *items* (round-robin stripe).
+
+    ``items[index0::count]`` spreads adjacent (similarly-costed) scenarios
+    across shards so wall-clock is balanced even when durations cluster.
+    *items* must already be in a stable order (load_all_scenarios sorts by
+    NAME) so every shard sees the same partition.
+    """
+    parsed = _parse_shard(shard)
+    if parsed is None:
+        return items
+    index0, count = parsed
+    return items[index0::count]
+
+
+def cmd_run_all(shard: str | None = None) -> int:
+    """Iterate every scenario; print summary; exit nonzero on any failure.
+
+    With ``shard="I/N"`` only the I-th of N round-robin slices runs, so CI can
+    fan the suite across N parallel matrix jobs.
+    """
     from tests.sandbox_scenarios.runner.loader import load_all_scenarios
 
     scenarios = [s for s in load_all_scenarios() if hasattr(s, "assert_outcome")]
+    scenarios = _select_shard(scenarios, shard)
+    if shard:
+        print(
+            f"[shard {shard}] {len(scenarios)} scenarios: "
+            f"{', '.join(s.NAME for s in scenarios)}"
+        )
     results: list[tuple[str, int, float]] = []
     for s in scenarios:
         start = time.monotonic()
@@ -199,18 +240,24 @@ def main() -> int:
     sub.add_parser("status")
     sub.add_parser("down")
     sub.add_parser("shell")
-    sub.add_parser("run-all")
+    p_all = sub.add_parser("run-all")
+    p_all.add_argument(
+        "--shard",
+        default=None,
+        help="Run only shard I of N (1-indexed, round-robin), e.g. --shard 2/6",
+    )
     p_run = sub.add_parser("run")
     p_run.add_argument("name")
     p_seed = sub.add_parser("seed")
     p_seed.add_argument("name")
 
     args = parser.parse_args()
+    if args.cmd == "run-all":
+        return cmd_run_all(shard=args.shard)
     nullary = {
         "status": cmd_status,
         "down": cmd_down,
         "shell": cmd_shell,
-        "run-all": cmd_run_all,
     }
     unary = {
         "run": cmd_run,

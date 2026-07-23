@@ -145,7 +145,9 @@ class TestCompileTopic:
             [
                 {
                     "title": "Error handling patterns",
-                    "content": "Use pattern C (preferred over A and B). See also: gotchas — edge cases.",
+                    # Anchored on a real module so the #9954 repo-specificity
+                    # gate keeps it (generic placeholders are now dropped).
+                    "content": "Use pattern C (preferred over A and B) in `src/error_hierarchy.py`. See also: gotchas — edge cases.",
                     "source_type": "compiled",
                     "source_issue": None,
                 },

@@ -169,6 +169,9 @@ class TestCountCommits:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=None,
+            # #9648: run_simple spawns every child in its own process group
+            # so timeouts can reap the whole tree.
+            start_new_session=True,
         )
 
     @pytest.mark.asyncio

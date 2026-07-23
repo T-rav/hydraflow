@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# transition replaces every hydraflow-* label on the issue with the
+# one mapped from *new_stage* (mirrors PRManager.transition's
+# _STAGE_LABEL table) and returns nothing. The dispatcher seeds an
+# issue at hydraflow-plan, transitions to "review", and asserts the
+# label swapped to hydraflow-review.
+adapter: github
+interaction: transition
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: transition
+  args:
+  - '980'
+  - review
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ''
+  stderr: ''
+normalizers: []
+baseline_only: true

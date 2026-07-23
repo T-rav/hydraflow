@@ -4,10 +4,11 @@
 - **Date:** 2026-05-17
 - **Supersedes:** none
 - **Superseded by:** none
+- **Amended by:** [ADR-0107](0107-collapse-discover-shape-into-plan.md) — retired the standalone Discover and Shape phases, removing the Discover-track `DiscoveryCouncil` / `ComplexityGate` and the Shape-track `ShapeChallenger` / `ShapeExpertCouncil` adversarial stages. The Plan-track adversarial stages (`AssumptionSurfacer`, `PlanCouncil`, pre-impl `SpecJudge`) are unchanged.
 - **Related:** [ADR-0001](0001-five-concurrent-async-loops.md) (five async loops), [ADR-0002](0002-labels-as-state-machine.md) (labels as state machine), [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker loop pattern), [ADR-0051](0051-iterative-production-readiness-review.md) (iterative production-readiness review), [ADR-0053](0053-ubiquitous-language-as-living-artifact.md) (ubiquitous language as living artifact). See also `docs/wiki/dark-factory.md` §3 (convergence loop).
 - **Enforcement:** enforced
-- **Enforced by:** pytest:tests/scenarios/test_adversarial_pipeline.py
-- **Source touchpoints:** `src/adversarial_retry_loop.py:AdversarialRetryLoop` (shared retry primitive), `src/complexity_gate.py:ComplexityGate` (routing), `src/plan_phase.py:PlanPhase` / `src/shape_phase.py:ShapePhase` / `src/discovery_council.py:DiscoveryCouncil` (call sites), `src/wiki_carryover.py:build_wiki_entry` (carryover→knowledge).
+- **Enforced by:** pytest:tests/test_adversarial_retry_loop.py
+- **Source touchpoints:** `src/adversarial_retry_loop.py:AdversarialRetryLoop` (shared retry primitive), `src/plan_phase.py:PlanPhase` (plan-track call site), `src/wiki_carryover.py:build_wiki_entry` (carryover→knowledge). The Discover/Shape adversarial call sites were removed by ADR-0107.
 
 ## Context
 
@@ -27,10 +28,10 @@ Insert three new adversarial stages into the pre-implementation pipeline, plus r
 | Stage | Phase | Component | New / retrofit |
 |---|---|---|---|
 | AssumptionSurfacer | Discover + Plan | `src/assumption_surfacer.py:AssumptionSurfacer` | New |
-| DiscoveryCouncil (Problem-Sharpener, Existing-Solution-Hunter, Cheapest-Test-Advocate) | Discover | `src/discovery_council.py:DiscoveryCouncil` + `src/discovery_council_prompts.py` | New |
+| DiscoveryCouncil (Problem-Sharpener, Existing-Solution-Hunter, Cheapest-Test-Advocate) | Discover | DiscoveryCouncil — **removed by ADR-0107** (standalone Discover phase retired) | New |
 | PlanCouncil (Builder, Tester, Risk-Skeptic) | Plan | `src/plan_council.py:PlanCouncil` + `src/plan_council_prompts.py` | New |
 | Pre-impl SpecJudge | Plan (post-planner, pre-implementer) | `src/spec_ac_generator.py:SpecACGenerator` + `src/spec_judge.py:SpecJudge` | New |
-| Challenger + ExpertCouncil | Shape | `src/shape_challenger.py:ShapeChallenger` + `src/shape_expert_council.py:ShapeExpertCouncil` | Retrofit — already existed; now conforms to the shared contract |
+| Challenger + ExpertCouncil | Shape | ShapeChallenger + ShapeExpertCouncil — **removed by ADR-0107** (standalone Shape phase retired) | Retrofit — later removed |
 
 All five stages are wrapped in a single shared primitive — `src/adversarial_retry_loop.py:AdversarialRetryLoop` — with a uniform contract:
 
@@ -42,7 +43,7 @@ The `Concern` schema (`src/pending_concerns.py:Concern`) is the lingua franca: e
 
 ### Routing — `ComplexityGate`
 
-Not every issue is worth ~30 LLM calls of adversarial machinery. `src/complexity_gate.py:ComplexityGate` classifies each issue as `trivial` or `load_bearing` before the adversarial stages fire. Trivial issues bypass all five stages and route directly to the planner; load-bearing issues run the full pipeline.
+Not every issue is worth ~30 LLM calls of adversarial machinery. `ComplexityGate` classified each issue as `trivial` or `load_bearing` before the adversarial stages fired. (ADR-0107 removed `ComplexityGate` along with the standalone Discover phase it gated; the planner's own decision gate now bounds discover/shape work.)
 
 The gate is a separate component (not buried in `plan_phase`) so its decision is auditable, testable in isolation, and overridable by label.
 
@@ -117,12 +118,12 @@ Flagged during Task 14 reflections — these are *not* in scope for the initial 
 
 - `src/adversarial_retry_loop.py:AdversarialRetryLoop` — shared retry primitive (`AdversarialRetryLoop`, `run_with_metrics`).
 - `src/pending_concerns.py:Concern` — `Concern`, `ConcernResolution`, `AdversarialState` Pydantic models.
-- `src/complexity_gate.py:ComplexityGate` — `ComplexityGate` routing.
+- `ComplexityGate` routing — **removed by ADR-0107** (gated the retired Discover phase).
 - `src/assumption_surfacer.py:AssumptionSurfacer` — Discover + Plan surfacer.
 - `src/plan_council.py:PlanCouncil` + `src/plan_council_prompts.py` — Builder / Tester / Risk-Skeptic voters.
-- `src/discovery_council.py:DiscoveryCouncil` + `src/discovery_council_prompts.py` — Problem-Sharpener / Existing-Solution-Hunter / Cheapest-Test-Advocate voters.
+- DiscoveryCouncil (Problem-Sharpener / Existing-Solution-Hunter / Cheapest-Test-Advocate voters) — **removed by ADR-0107** (standalone Discover phase retired).
 - `src/spec_ac_generator.py:SpecACGenerator` + `src/spec_judge.py:SpecJudge` — pre-impl spec consistency judge (sibling to post-merge AC pipeline).
-- `src/shape_challenger.py:ShapeChallenger` + `src/shape_expert_council.py:ShapeExpertCouncil` + `src/shape_phase.py:ShapePhase` — Shape phase retrofit.
+- ShapeChallenger + ShapeExpertCouncil (Shape phase retrofit) — **removed by ADR-0107** (standalone Shape phase retired).
 - `src/adversarial_labels.py` — three transient labels.
 - `src/wiki_carryover.py:build_wiki_entry` + `src/post_merge_handler.py` — `ShippedWithKnownGap` consumer.
 - `src/events.py:EventType` + `src/models.py` — six new EventBus events + state model evolution.

@@ -1,0 +1,22 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_recent_promotion_prs returns recently closed rc/* promotion PRs
+# ({number, branch, merged, closed_at, url} entries) for RC lifecycle
+# dashboard metrics. A fresh fake has none, so the contract pins the
+# empty-list JSON shape. args carries the default lookback window (days).
+adapter: github
+interaction: list_recent_promotion_prs
+recorded_at: "2026-07-20T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_recent_promotion_prs
+  args:
+    - "7"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "[]\n"
+  stderr: ""
+normalizers: []
+baseline_only: true

@@ -1,0 +1,78 @@
+// Issue #10226 — PIPELINE FLOW terminal-fork arrow alignment
+// Change area: the shared TerminalFork renderer and the two callers'
+// fork-style bundles that own layout (alignItems). Root cause lives in the
+// callers' `fork` container style, not in TerminalFork itself.
+
+specification {
+  element component
+  element data
+  element view
+
+  tag change      // touched by this issue
+  tag shared      // shared, style-agnostic — not changed
+  tag source      // single source of truth
+
+  relationship uses
+  relationship styles
+}
+
+model {
+  ui = component 'HydraFlow Dashboard UI' {
+    description 'React SPA — inline JS style objects + theme tokens (no CSS modules)'
+
+    constants = data 'PIPELINE_STAGES' {
+      #source
+      description 'src/ui/src/constants.js — canonical stage defs incl. terminal hitl/merged'
+    }
+    tracks = component 'splitPipelineTracks' {
+      #source
+      description 'src/ui/src/utils/pipelineTracks.js — triage / postTriage / terminal-fork partition'
+    }
+    fork = component 'TerminalFork' {
+      #shared
+      description 'src/ui/src/components/PipelineFork.jsx — style-agnostic fork markup; emits ↗ (idx 0) / ↘ (rest). Glyph normalization would land here.'
+    }
+
+    streamView = component 'PipelineFlow (StreamView)' {
+      #change
+      description 'src/ui/src/components/StreamView.jsx — Work Stream PIPELINE FLOW bar'
+      swStyles = data 'flowFork / flowForkTop / flowForkArrow' {
+        #change
+        description 'flowFork.alignItems: center → flex-start (root fix, ~L727)'
+      }
+    }
+    header = component 'Header pipeline row' {
+      #change
+      description 'src/ui/src/components/Header.jsx — compact top-of-app pipeline row'
+      hdrStyles = data 'pipelineFork / forkTop / forkArrow' {
+        #change
+        description 'pipelineFork.alignItems: center → flex-start (same pattern, ~L422)'
+      }
+    }
+  }
+
+  tracks -> constants 'derives terminal keys from'
+  streamView -> tracks 'splits stageGroups via'
+  header -> tracks 'splits stages via'
+  streamView -> fork 'renders terminal arms via'
+  header -> fork 'renders terminal arms via'
+  streamView.swStyles -> fork 'passed as forkStyles bundle {fork,forkTop,forkArrow}'
+  header.hdrStyles -> fork 'passed as forkStyles bundle {fork,forkTop,forkArrow}'
+}
+
+views {
+  view index {
+    title 'Issue #10226 — terminal-fork alignment change area'
+    include *
+    include ui.*
+    autoLayout LeftRight
+  }
+
+  dynamic view forkRender {
+    title 'How a terminal fork arm gets its left edge'
+    ui.constants -> ui.tracks 'terminal = [hitl, merged]'
+    ui.tracks -> ui.streamView 'terminal groups'
+    ui.streamView -> ui.fork 'items + forkStyles(fork=flowFork)'
+    ui.fork -> ui.streamView 'column of [arrow][label] rows; alignItems on fork decides shared left edge'
+  }
+}

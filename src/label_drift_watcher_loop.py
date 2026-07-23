@@ -79,6 +79,13 @@ class LabelDriftWatcherLoop(BaseBackgroundLoop):
         - ``pr_at_pre_pr_stage``: PR has commits but a pre-PR label
           (ready/plan/find); push the PR forward to ``hydraflow-review``.
           Issue label stays.
+        - ``escalated_with_resolving_pr``: issue carries the diagnostic_loop
+          escalation pair (``hitl-escalation`` + ``diagnose-failed``) while
+          an open, CI-green PR already resolves it — clear the escalation
+          labels so it stops re-triggering auto-agent dispatch (#10260).
+          The issue keeps its ``hydraflow-hitl`` pipeline label, so it stays
+          visible in the HITL queue. Scoped to this exact label pairing —
+          see :class:`models.LabelDrift`.
         """
         if d.kind == "pr_ahead_of_issue":
             await self._prs.swap_pipeline_labels(d.issue, "hydraflow-review")
@@ -87,12 +94,19 @@ class LabelDriftWatcherLoop(BaseBackgroundLoop):
                 f"`hydraflow-review` to match PR #{d.pr} (which was already "
                 f"at `{d.pr_label}`)."
             )
-        else:  # pr_at_pre_pr_stage
+        elif d.kind == "pr_at_pre_pr_stage":
             await self._prs.swap_pipeline_labels(d.pr, "hydraflow-review")
             moved_clause = (
                 f"PR #{d.pr} moved from `{d.pr_label}` to `hydraflow-review` "
                 f"to match issue #{d.issue} (which was already at "
                 f"`{d.issue_label}`)."
+            )
+        else:  # escalated_with_resolving_pr
+            await self._prs.remove_label(d.issue, "hitl-escalation")
+            await self._prs.remove_label(d.issue, "diagnose-failed")
+            moved_clause = (
+                f"Issue #{d.issue} escalation labels (`{d.issue_label}`) "
+                f"cleared — PR #{d.pr} already resolves it with passing CI."
             )
 
         await self._prs.post_comment(

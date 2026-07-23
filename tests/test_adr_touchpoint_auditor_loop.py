@@ -8,8 +8,8 @@ drifted it. Subsequent ticks update the body. Dedup key is
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -205,8 +205,11 @@ async def test_rollup_zero_sentinel_does_not_record_or_dedup(
     dedup.set_all.assert_not_called()  # no dedup add — retries next cycle
 
 
-async def test_one_pr_drifting_8_adrs_files_8_issues(loop_env, monkeypatch) -> None:
-    """A single PR drifting 8 ADRs files 8 issues (one per ADR)."""
+async def test_one_pr_drifting_8_adrs_files_one_batched_issue(
+    loop_env, monkeypatch
+) -> None:
+    """#9662 — a single fleet PR drifting 8 ADRs (>= threshold 4) files ONE
+    batched issue listing every affected ADR, not 8 per-ADR rollups."""
     cfg, state, pr, dedup, idx = loop_env
     # Add 8 ADRs each citing a distinct file the PR will touch.
     adr_dir = cfg.repo_root / "docs" / "adr"
@@ -221,7 +224,7 @@ async def test_one_pr_drifting_8_adrs_files_8_issues(loop_env, monkeypatch) -> N
 
     idx = ADRIndex(adr_dir)
 
-    pr.create_issue = AsyncMock(side_effect=list(range(200, 208)))
+    pr.create_issue = AsyncMock(return_value=200)
 
     stop = asyncio.Event()
     loop = AdrTouchpointAuditorLoop(
@@ -246,8 +249,74 @@ async def test_one_pr_drifting_8_adrs_files_8_issues(loop_env, monkeypatch) -> N
     monkeypatch.setattr(loop, "_reconcile_closed_escalations", AsyncMock())
 
     stats = await loop._do_work()
-    assert stats["filed"] == 8
-    assert pr.create_issue.await_count == 8
+    assert stats["filed"] == 1
+    assert pr.create_issue.await_count == 1
+    title = pr.create_issue.await_args.args[0]
+    body = pr.create_issue.await_args.args[1]
+    labels = pr.create_issue.await_args.args[2]
+    assert "#8500" in title
+    assert "8 ADRs" in title
+    for i in range(8):
+        assert f"ADR-{100 + i:04d}" in body
+    # Adjusted close semantics are documented in the batched body (#9662).
+    assert "NOT auto-closed" in body
+    assert "hydraflow-adr-drift" in labels
+    # State + dedup recorded under the FLEET-<pr> namespace, not ADR-NNNN.
+    state.set_adr_rollup.assert_called_once()
+    assert state.set_adr_rollup.call_args.args[0] == "FLEET-8500"
+    assert state.set_adr_rollup.call_args.kwargs["pr_numbers"] == [8500]
+    last_dedup = dedup.set_all.call_args.args[0]
+    assert "adr_touchpoint_auditor:FLEET-8500" in last_dedup
+    assert not any("ADR-01" in key for key in last_dedup)
+
+
+async def test_below_threshold_pr_still_files_per_adr_rollups(
+    loop_env, monkeypatch
+) -> None:
+    """#9662 — a PR drifting 3 ADRs (< threshold 4) keeps the per-ADR shape."""
+    cfg, state, pr, dedup, idx = loop_env
+    adr_dir = cfg.repo_root / "docs" / "adr"
+    for i in range(3):
+        _write_adr(
+            adr_dir,
+            number=100 + i,
+            title=f"small{i}",
+            related=[f"src/small{i}.py"],
+        )
+    from adr_index import ADRIndex  # noqa: PLC0415
+
+    idx = ADRIndex(adr_dir)
+
+    pr.create_issue = AsyncMock(side_effect=[201, 202, 203])
+
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+
+    async def fake_list(_cursor):
+        return [
+            {
+                "number": 8501,
+                "mergedAt": "2026-05-07T20:00:00Z",
+                "files": [{"path": f"src/small{i}.py"} for i in range(3)],
+            }
+        ]
+
+    monkeypatch.setattr(loop, "_list_recent_merged_prs", fake_list)
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", AsyncMock())
+
+    stats = await loop._do_work()
+    assert stats["filed"] == 3
+    assert pr.create_issue.await_count == 3
+    recorded_keys = [c.args[0] for c in state.set_adr_rollup.call_args_list]
+    assert recorded_keys == ["ADR-0100", "ADR-0101", "ADR-0102"]
+    assert not any(k.startswith("FLEET-") for k in recorded_keys)
 
 
 async def test_three_prs_drifting_same_adr_file_one_rollup(
@@ -594,26 +663,437 @@ async def test_close_reconcile_clears_dedup(loop_env, monkeypatch) -> None:
         deps=_deps(stop),
     )
 
-    closed_payload = json.dumps(
-        [{"title": f"HITL: ADR drift {stuck_attempt_key} unresolved after 3"}]
-    ).encode()
+    pr.list_closed_issues_by_label.return_value = [
+        {
+            "number": 9701,
+            "title": f"HITL: ADR drift {stuck_attempt_key} unresolved after 3",
+            "body": "",
+            "updated_at": "",
+        }
+    ]
 
-    class _FakeProc:
-        returncode = 0
+    def _no_subprocess(*_args, **_kwargs):
+        raise AssertionError("reconcile must route through the PRPort, not raw gh")
 
-        async def communicate(self):
-            return closed_payload, b""
-
-    async def fake_exec(*_args, **_kwargs):
-        return _FakeProc()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _no_subprocess)
 
     await loop._reconcile_closed_escalations()
 
+    pr.list_closed_issues_by_label.assert_awaited_once_with(
+        cfg.adr_drift_stuck_label[0], limit=100
+    )
     dedup.set_all.assert_called_once()
     remaining = dedup.set_all.call_args.args[0]
     assert full_dedup_key not in remaining
     assert "adr_touchpoint_auditor:ADR-0042" in remaining
     state.clear_adr_audit_attempts.assert_called_with(stuck_attempt_key)
     state.clear_adr_rollup.assert_called_with(stuck_attempt_key)
+
+
+# --- #9554/#10028: gh subprocess sites route through run_subprocess_result ---
+
+
+async def test_list_recent_merged_prs_routes_through_bounded_helper(
+    loop_env, monkeypatch
+) -> None:
+    """Success path: parses gh pr list JSON via the shared helper."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup, idx = loop_env
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+
+    captured: dict[str, Any] = {}
+
+    async def fake_result(*cmd: str, **kwargs: Any) -> SimpleResult:
+        captured["cmd"] = cmd
+        captured["timeout"] = kwargs.get("timeout")
+        return SimpleResult(
+            stdout='[{"number": 1, "mergedAt": "2026-05-02T00:00:00Z"}]',
+            stderr="",
+            returncode=0,
+        )
+
+    monkeypatch.setattr(
+        "adr_touchpoint_auditor_loop.run_subprocess_result", fake_result
+    )
+
+    prs = await loop._list_recent_merged_prs("2026-05-01T00:00:00Z")
+
+    assert prs == [{"number": 1, "mergedAt": "2026-05-02T00:00:00Z"}]
+    assert captured["cmd"][0] == "gh"
+    assert captured["timeout"] == 120
+
+
+async def test_list_recent_merged_prs_nonzero_returns_empty(
+    loop_env, monkeypatch
+) -> None:
+    """Non-zero exit (never raised by the helper) yields an empty list."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup, idx = loop_env
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+
+    async def fake_result(*_cmd: str, **_kwargs: Any) -> SimpleResult:
+        return SimpleResult(stdout="", stderr="rate limited", returncode=1)
+
+    monkeypatch.setattr(
+        "adr_touchpoint_auditor_loop.run_subprocess_result", fake_result
+    )
+
+    assert await loop._list_recent_merged_prs("2026-05-01T00:00:00Z") == []
+
+
+async def test_list_recent_merged_prs_timeout_returns_empty(
+    loop_env, monkeypatch
+) -> None:
+    """A timeout from the shared helper is caught locally and yields []."""
+    from subprocess_util import SubprocessTimeoutError
+
+    cfg, state, pr, dedup, idx = loop_env
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+
+    async def fake_result(*_cmd: str, **_kwargs: Any) -> Any:
+        raise SubprocessTimeoutError("timed out")
+
+    monkeypatch.setattr(
+        "adr_touchpoint_auditor_loop.run_subprocess_result", fake_result
+    )
+
+    assert await loop._list_recent_merged_prs("2026-05-01T00:00:00Z") == []
+
+
+async def test_fetch_pr_changed_files_routes_through_bounded_helper(
+    loop_env, monkeypatch
+) -> None:
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup, idx = loop_env
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+
+    async def fake_result(*_cmd: str, **_kwargs: Any) -> SimpleResult:
+        return SimpleResult(
+            stdout='{"files": [{"path": "src/agent.py"}]}', stderr="", returncode=0
+        )
+
+    monkeypatch.setattr(
+        "adr_touchpoint_auditor_loop.run_subprocess_result", fake_result
+    )
+
+    files = await loop._fetch_pr_changed_files(101)
+
+    assert files == ["src/agent.py"]
+
+
+# --- #9662: fleet-batch guards, namespaces, and close/dedup semantics ---
+
+
+def _fleet_env(monkeypatch, loop, *, pr_number=8500):
+    """Wire a fleet PR (8 drifting ADRs, >= threshold 4) into *loop*."""
+
+    async def fake_list(_cursor):
+        return [
+            {
+                "number": pr_number,
+                "mergedAt": "2026-05-07T20:00:00Z",
+                "files": [{"path": f"src/big{i}.py"} for i in range(8)],
+            }
+        ]
+
+    monkeypatch.setattr(loop, "_list_recent_merged_prs", fake_list)
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", AsyncMock())
+
+
+def _fleet_index(cfg):
+    from adr_index import ADRIndex  # noqa: PLC0415
+
+    adr_dir = cfg.repo_root / "docs" / "adr"
+    for i in range(8):
+        _write_adr(adr_dir, number=100 + i, title=f"big{i}", related=[f"src/big{i}.py"])
+    return ADRIndex(adr_dir)
+
+
+async def test_fleet_batch_not_refiled_when_state_tracked(
+    loop_env, monkeypatch
+) -> None:
+    """Re-scan with the fleet rollup already tracked in state → no re-file."""
+    cfg, state, pr, dedup, idx = loop_env
+    idx = _fleet_index(cfg)
+    state.get_adr_rollup.side_effect = lambda key: (
+        {"issue_number": 777, "pr_numbers": [8500]} if key == "FLEET-8500" else None
+    )
+
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+    _fleet_env(monkeypatch, loop)
+    monkeypatch.setattr(loop, "_reconcile_stale_rollups", AsyncMock(return_value=0))
+
+    stats = await loop._do_work()
+    assert stats["filed"] == 0
+    pr.create_issue.assert_not_awaited()
+    state.set_adr_rollup.assert_not_called()
+
+
+async def test_fleet_batch_not_refiled_when_dedup_key_present(
+    loop_env, monkeypatch
+) -> None:
+    """Dedup key present but state cleared → skip until reconcile catches up."""
+    cfg, state, pr, dedup, idx = loop_env
+    idx = _fleet_index(cfg)
+    dedup.get.return_value = {"adr_touchpoint_auditor:FLEET-8500"}
+
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+    _fleet_env(monkeypatch, loop)
+
+    stats = await loop._do_work()
+    assert stats["filed"] == 0
+    pr.create_issue.assert_not_awaited()
+    state.set_adr_rollup.assert_not_called()
+
+
+async def test_fleet_zero_sentinel_does_not_record_or_dedup(
+    loop_env, monkeypatch
+) -> None:
+    """create_issue's 0 sentinel on a fleet batch records neither state nor
+    dedup — the next tick retries (same contract as per-ADR rollups)."""
+    cfg, state, pr, dedup, idx = loop_env
+    idx = _fleet_index(cfg)
+    pr.create_issue = AsyncMock(return_value=0)
+
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+    _fleet_env(monkeypatch, loop)
+
+    stats = await loop._do_work()
+    pr.create_issue.assert_awaited()  # it tried
+    assert stats["filed"] == 0
+    state.set_adr_rollup.assert_not_called()
+    dedup.set_all.assert_not_called()
+
+
+async def test_fleet_and_per_adr_namespaces_never_collide(
+    loop_env, monkeypatch
+) -> None:
+    """A per-ADR dedup key for ADR 8500 must not suppress the fleet batch for
+    PR 8500 (FLEET-<pr> vs ADR-NNNN are disjoint sub-namespaces)."""
+    cfg, state, pr, dedup, idx = loop_env
+    idx = _fleet_index(cfg)
+    # Same numeral in the per-ADR namespace — must not alias FLEET-8500.
+    dedup.get.return_value = {"adr_touchpoint_auditor:ADR-8500"}
+
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+    _fleet_env(monkeypatch, loop)
+
+    stats = await loop._do_work()
+    assert stats["filed"] == 1
+    assert state.set_adr_rollup.call_args.args[0] == "FLEET-8500"
+    last_dedup = dedup.set_all.call_args.args[0]
+    assert "adr_touchpoint_auditor:FLEET-8500" in last_dedup
+    assert "adr_touchpoint_auditor:ADR-8500" in last_dedup  # untouched
+
+
+async def test_manually_closed_fleet_rollup_state_cleared(loop_env) -> None:
+    """#9662 close semantics: a human-closed batched issue clears the
+    FLEET-<pr> state, attempt counter, and dedup key via the stale-rollup
+    reconcile pass — nothing strands, and re-detection could re-file."""
+    cfg, state, pr, dedup, idx = loop_env
+    state.all_adr_rollups.return_value = {
+        "FLEET-9592": {"issue_number": 777, "pr_numbers": [9592]},
+    }
+    dedup.get.return_value = {"adr_touchpoint_auditor:FLEET-9592"}
+    pr.get_issue_state = AsyncMock(return_value="COMPLETED")
+
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+
+    closed = await loop._reconcile_stale_rollups(
+        drifting_adrs=set(), adrs_resolved_this_tick=set()
+    )
+    assert closed == 1
+    state.clear_adr_rollup.assert_called_with("FLEET-9592")
+    state.clear_adr_audit_attempts.assert_called_with("FLEET-9592")
+    remaining = dedup.set_all.call_args.args[0]
+    assert "adr_touchpoint_auditor:FLEET-9592" not in remaining
+
+
+async def test_open_fleet_rollup_left_alone_by_stale_reconcile(loop_env) -> None:
+    """One-shot semantics: an OPEN batched issue is never auto-closed by the
+    stale-rollup recompute path (no drift recompute for fleet keys)."""
+    cfg, state, pr, dedup, idx = loop_env
+    state.all_adr_rollups.return_value = {
+        "FLEET-9592": {"issue_number": 777, "pr_numbers": [9592]},
+    }
+    pr.get_issue_state = AsyncMock(return_value="OPEN")
+    fetch = AsyncMock(return_value=[])
+
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+    loop._fetch_pr_changed_files = fetch  # type: ignore[method-assign]
+
+    closed = await loop._reconcile_stale_rollups(
+        drifting_adrs=set(), adrs_resolved_this_tick=set()
+    )
+    assert closed == 0
+    pr.close_issue.assert_not_awaited()
+    state.clear_adr_rollup.assert_not_called()
+    # No drift recompute over the fleet PR — one-shot by design.
+    fetch.assert_not_awaited()
+
+
+async def test_closed_fleet_escalation_clears_dedup_and_state(loop_env) -> None:
+    """The shared escalation reconciler handles FLEET-<pr> subjects: closing
+    a fleet escalation clears its dedup key, attempts, and rollup state."""
+    cfg, state, pr, dedup, idx = loop_env
+    full_dedup_key = "adr_touchpoint_auditor:FLEET-9592"
+    dedup.get.return_value = {full_dedup_key, "adr_touchpoint_auditor:ADR-0042"}
+
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+    pr.list_closed_issues_by_label.return_value = [
+        {
+            "number": 9701,
+            "title": "HITL: ADR drift FLEET-9592 unresolved after 3",
+            "body": "",
+            "updated_at": "",
+        }
+    ]
+
+    await loop._reconcile_closed_escalations()
+
+    remaining = dedup.set_all.call_args.args[0]
+    assert full_dedup_key not in remaining
+    assert "adr_touchpoint_auditor:ADR-0042" in remaining
+    state.clear_adr_audit_attempts.assert_called_with("FLEET-9592")
+    state.clear_adr_rollup.assert_called_with("FLEET-9592")
+
+
+# --- #9662 P5: ADR-0056 amendment stays self-covered and in sync ---
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def test_landing_pr_shape_does_not_drift_adr_0056() -> None:
+    """Self-coverage: a diff shaped like the #9662 landing PR (adr_drift +
+    the amended ADR-0056 file) yields zero drift findings for ADR-0056."""
+    from adr_drift import compute_drift  # noqa: PLC0415
+    from adr_index import ADRIndex  # noqa: PLC0415
+
+    idx = ADRIndex(_repo_root() / "docs" / "adr")
+    findings = compute_drift(
+        idx,
+        pr_number=9662,
+        changed_files=[
+            "src/adr_drift.py",
+            "src/adr_touchpoint_auditor_loop.py",
+            "src/config.py",
+            "docs/adr/0056-adr-touchpoint-gate-to-caretaker-loop.md",
+        ],
+    )
+    assert 56 not in {f.adr.number for f in findings}
+
+
+def test_adr_0056_enforced_by_line_intact() -> None:
+    """The amendment must not disturb the `**Enforced by:**` conformance line."""
+    text = (
+        _repo_root() / "docs" / "adr" / "0056-adr-touchpoint-gate-to-caretaker-loop.md"
+    ).read_text()
+    assert "**Enforced by:** pytest:tests/test_adr_touchpoint_auditor_loop.py" in text
+
+
+def test_adr_0056_amendment_matches_config_knob() -> None:
+    """Doc↔config parity: the amended ADR names the knob and its default,
+    matching the live `HydraFlowConfig` Field."""
+    text = (
+        _repo_root() / "docs" / "adr" / "0056-adr-touchpoint-gate-to-caretaker-loop.md"
+    ).read_text()
+    assert "adr_drift_fleet_batch_threshold" in text
+    assert "default 4" in text
+    cfg = HydraFlowConfig()
+    assert cfg.adr_drift_fleet_batch_threshold == 4
+    # The amendment cites the new pure symbols so ADR-0056 stays self-covered.
+    assert "partition_fleet_drift" in text
+    assert "FleetDriftBatch" in text

@@ -13,13 +13,12 @@ gate.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import json
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
+from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
 from memory_backlog_mirror import (
     dedup_key_for,
@@ -28,6 +27,7 @@ from memory_backlog_mirror import (
     update_status,
 )
 from models import WorkCycleResult  # noqa: TCH001
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -44,30 +44,24 @@ _MAX_ATTEMPTS = 3
 _MIRROR_SUBPATH = ("docs", "wiki", "memory-feedback")
 _DEDUP_PREFIX = "memory_backlog:"
 
+# Parses ``_file_escalation`` titles back to the slug subject. Returns
+# ``None`` for titles that aren't ours so the shared ``EscalationReconciler``
+# skips operator-created issues untouched. ``(.+?)`` non-greedy up to the
+# `` unresolved after `` sentinel so spaced slugs stay reconcilable.
+_ESCALATION_TITLE_RE = re.compile(r"^HITL: memory backlog (.+?) unresolved after ")
+
+
+def _escalation_subject(title: str) -> str | None:
+    m = _ESCALATION_TITLE_RE.match(title)
+    return m.group(1) if m else None
+
+
 # Hard cap on each ``git``/``gh`` child. A wedged subprocess must not hang the
 # loop cycle forever and freeze its heartbeat — the #9410 silent-stall failure
-# class (#9454 / #9508).
+# class (#9454 / #9508). Bounded (and, via ``run_subprocess_result``,
+# circuit-breaker/rate-limit/process-group hardened — #9554/#10028) rather
+# than a raw ``create_subprocess_exec``.
 _SUBPROCESS_TIMEOUT_SECONDS = 120
-
-
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process,
-) -> tuple[bytes, bytes]:
-    """``proc.communicate()`` bounded by ``_SUBPROCESS_TIMEOUT_SECONDS``.
-
-    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
-    the caller can treat it as a failed read (rather than hanging the loop
-    cycle indefinitely).
-    """
-    try:
-        return await asyncio.wait_for(
-            proc.communicate(), timeout=_SUBPROCESS_TIMEOUT_SECONDS
-        )
-    except TimeoutError:
-        proc.kill()
-        with contextlib.suppress(ProcessLookupError):
-            await proc.wait()
-        raise
 
 
 class MemoryBacklogLoop(BaseBackgroundLoop):
@@ -91,6 +85,19 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
         self._state = state
         self._pr = pr_manager
         self._dedup = dedup
+        # ``clear_memory_backlog_attempts`` is keyed on the FULL dedup key
+        # (``memory_backlog:<slug>``), not the bare subject — wrap so the
+        # reconciler passes the counter the same key it discards from dedup.
+        self._escalations = EscalationReconciler(
+            prs=pr_manager,
+            dedup=dedup,
+            key_prefix="memory_backlog",
+            stuck_label=config.memory_backlog_stuck_label[0],
+            clear_attempts=lambda subject: state.clear_memory_backlog_attempts(
+                f"{_DEDUP_PREFIX}{subject}"
+            ),
+            subject_from_title=_escalation_subject,
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.memory_backlog_interval_seconds
@@ -182,28 +189,26 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
             joined = ", ".join(f"#{n}" for n in issue_numbers)
             title = f"chore(memory-backlog): file issues {joined}"
 
-        add_proc = await asyncio.create_subprocess_exec(
-            "git",
-            "-C",
-            repo_root,
-            "add",
-            mirror_relpath,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            _, add_err = await _communicate_bounded(add_proc)
-        except TimeoutError:
+            add_result = await run_subprocess_result(
+                "git",
+                "-C",
+                repo_root,
+                "add",
+                mirror_relpath,
+                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+            )
+        except SubprocessTimeoutError:
             logger.warning(
                 "memory_backlog: git add timed out after %ss",
                 _SUBPROCESS_TIMEOUT_SECONDS,
             )
             return
-        if add_proc.returncode != 0:
+        if add_result.returncode != 0:
             logger.warning(
                 "memory_backlog: git add failed (rc=%s): %s",
-                add_proc.returncode,
-                add_err.decode(errors="replace").strip(),
+                add_result.returncode,
+                add_result.stderr,
             )
             return
 
@@ -213,32 +218,30 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
         if self._config.git_user_name:
             identity_args += ["-c", f"user.name={self._config.git_user_name}"]
 
-        commit_proc = await asyncio.create_subprocess_exec(
-            "git",
-            "-C",
-            repo_root,
-            *identity_args,
-            "commit",
-            "-m",
-            title,
-            "--",
-            mirror_relpath,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            _, commit_err = await _communicate_bounded(commit_proc)
-        except TimeoutError:
+            commit_result = await run_subprocess_result(
+                "git",
+                "-C",
+                repo_root,
+                *identity_args,
+                "commit",
+                "-m",
+                title,
+                "--",
+                mirror_relpath,
+                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+            )
+        except SubprocessTimeoutError:
             logger.warning(
                 "memory_backlog: git commit timed out after %ss",
                 _SUBPROCESS_TIMEOUT_SECONDS,
             )
             return
-        if commit_proc.returncode != 0:
+        if commit_result.returncode != 0:
             logger.warning(
                 "memory_backlog: git commit failed (rc=%s): %s",
-                commit_proc.returncode,
-                commit_err.decode(errors="replace").strip(),
+                commit_result.returncode,
+                commit_result.stderr,
             )
 
     async def _file_backlog_issue(self, entry: MirrorEntry) -> int:
@@ -261,56 +264,11 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
     async def _reconcile_closed_escalations(self) -> None:
         """Clear dedup keys + attempt counters for closed escalations.
 
-        Mirrors `FakeCoverageAuditorLoop._reconcile_closed_escalations`:
-        scans `gh issue list --state closed` for memory-backlog-stuck
-        escalations the bot filed, then clears the matching dedup key
-        and StateTracker attempt counter so the entry can re-file fresh.
+        Delegates to the shared :class:`EscalationReconciler` (PRPort-based;
+        replaced the raw ``gh issue list`` subprocess — #9932). Subjects are
+        parsed from the escalation-title shape
+        ``"HITL: memory backlog <slug> unresolved after N"``; the matching
+        ``memory_backlog:<slug>`` dedup key + StateTracker attempt counter are
+        cleared so the entry can re-file fresh.
         """
-        stuck_label = self._config.memory_backlog_stuck_label[0]
-        cmd = [
-            "gh",
-            "issue",
-            "list",
-            "--repo",
-            self._config.repo,
-            "--state",
-            "closed",
-            "--label",
-            "hitl-escalation",
-            "--label",
-            stuck_label,
-            "--author",
-            "@me",
-            "--limit",
-            "100",
-            "--json",
-            "title",
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, _ = await _communicate_bounded(proc)
-        except TimeoutError:
-            return
-        if proc.returncode != 0:
-            return
-        try:
-            closed = json.loads(stdout.decode() or "[]")
-        except json.JSONDecodeError:
-            return
-        current = self._dedup.get()
-        keep = set(current)
-        for issue in closed:
-            title = issue.get("title", "")
-            for key in list(keep):
-                if not key.startswith(_DEDUP_PREFIX):
-                    continue
-                slug = key.split(":", 1)[1]
-                if slug in title:
-                    keep.discard(key)
-                    self._state.clear_memory_backlog_attempts(key)
-        if keep != current:
-            self._dedup.set_all(keep)
+        await self._escalations.reconcile_closed()

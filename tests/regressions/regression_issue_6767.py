@@ -259,7 +259,6 @@ class TestDoWorkCycleResilience:
         assert result["projects_polled"] == 0
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6767 — fix not yet landed", strict=False)
     async def test_fetch_unresolved_failure_still_processes_other_projects(
         self, tmp_path: Path
     ) -> None:

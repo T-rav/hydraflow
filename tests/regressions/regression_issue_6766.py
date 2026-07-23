@@ -119,7 +119,6 @@ class TestExceptBlocksReraisGuard:
         KNOWN_UNGUARDED_SITES,
         ids=[f"{f}:{ln}" for f, ln, _ in KNOWN_UNGUARDED_SITES],
     )
-    @pytest.mark.xfail(reason="Regression for issue #6766 — fix not yet landed", strict=False)
     def test_known_site_has_reraise_guard(
         self, filename: str, approx_line: int, desc: str
     ) -> None:

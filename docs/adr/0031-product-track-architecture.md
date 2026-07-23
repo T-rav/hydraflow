@@ -1,6 +1,7 @@
 # ADR-0031: Product Track Architecture — Discover and Shape Phases
 
-**Status:** Accepted
+**Status:** Superseded
+**Superseded by:** ADR-0107 (Collapse Discover + Shape into Plan — Triage → Plan Directly)
 **Accepted on:** 2026-05-12 — promoted after slice #5 audit confirmed live production usage.
 **Date:** 2026-04-04
 **Enforcement:** enforced
@@ -184,6 +185,9 @@ as all other pipeline labels.
 
 ## Related
 
+- Superseded by: ADR-0107 (Collapse Discover + Shape into Plan — Triage → Plan
+  Directly) — retires the standalone Discover/Shape phases, labels, and loops;
+  discovery/shaping become planner-invoked helpers.
 - ADR-0001 (Five Concurrent Async Loops) — the original 5-stage pipeline
   that this ADR extends to 7 stages
 - ADR-0002 (GitHub Labels as Pipeline State Machine) — the label-based state

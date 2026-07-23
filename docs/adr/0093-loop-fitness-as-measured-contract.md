@@ -57,7 +57,7 @@ The generated artifact (`docs/arch/generated/loop-fitness.md`) MUST present per-
 
 ### 5. Confidence by `sample_count`, not wall-clock window
 
-Slow loops (e.g., daily) accumulate ~30 samples in a 30-day window; fast loops (~120 s) accumulate ~21,600. A fixed wall-clock window cannot express whether a sample is sufficient for either. Confidence is therefore keyed off `src/loop_fitness.py:LoopFitness.sample_count` against a per-loop threshold (default `min_samples = 20`).
+Slow loops (e.g., daily) accumulate ~30 samples in a 30-day window; fast loops (~120 s) accumulate ~21,600. A fixed wall-clock window cannot express whether a sample is sufficient for either. Confidence is therefore keyed off `src/loop_fitness.py:LoopFitness.sample_count` against a per-loop threshold (default `min_samples = 5`, capped per loop at the cadence-achievable sample count by `src/loop_fitness.py:cadence_min_samples`; the original global default of 20 was unreachable at real proposer throughput and left every row permanently `INSUFFICIENT_DATA` — #9841).
 
 `src/loop_fitness.py:Confidence` has two values: `OK` (score is trustworthy) and `INSUFFICIENT_DATA` (score is `None`; more observations needed). Slow loops sit in `INSUFFICIENT_DATA` for a long time — this is correct behavior and, deliberately, keeps the future optimizer's hands off loops with insufficient evidence.
 

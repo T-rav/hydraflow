@@ -48,9 +48,11 @@ def _make_loop(
         side_effect=AuthenticationError("gh: authentication required"),
     )
 
+    pr_manager.list_open_issue_numbers = AsyncMock(return_value=[])
     loop = StaleIssueGCLoop(
         config=deps.config,
         pr_manager=pr_manager,
+        state=MagicMock(),
         deps=deps.loop_deps,
     )
     return loop, deps.stop_event, pr_manager

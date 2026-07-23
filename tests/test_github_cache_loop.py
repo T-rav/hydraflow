@@ -734,3 +734,34 @@ class TestGitHubCacheLoopRun:
         await loop.run()
 
         cache.poll.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# xdist-audit workflow-run snapshot (#10141)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_xdist_audit_runs_refreshes_then_serves_cached(
+    tmp_path: Path,
+) -> None:
+    cache, prs, _ = _make_cache(tmp_path)
+    rows = [{"id": 1, "url": "u", "conclusion": "success", "created_at": "t"}]
+    prs.list_runs_for_workflow = AsyncMock(return_value=rows)
+
+    first = await cache.get_xdist_audit_runs()
+    assert first == rows
+    prs.list_runs_for_workflow.assert_awaited_once_with("xdist-audit.yml", limit=20)
+
+    # Second call within the freshness window is served from the snapshot.
+    second = await cache.get_xdist_audit_runs()
+    assert second == rows
+    prs.list_runs_for_workflow.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_xdist_audit_runs_empty_on_refresh_failure(tmp_path: Path) -> None:
+    cache, prs, _ = _make_cache(tmp_path)
+    prs.list_runs_for_workflow = AsyncMock(side_effect=RuntimeError("gh down"))
+
+    assert await cache.get_xdist_audit_runs() == []

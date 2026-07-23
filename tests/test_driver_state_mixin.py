@@ -24,7 +24,7 @@ class TestDriverStateMixin:
             reason="shape_human_select",
             suspended_at="2026-06-30T12:00:00+00:00",
             wake_signal="comment",
-            resume_state="SHAPE",
+            resume_state="PLAN",
         )
         tracker.suspend_driver(7, rec)
 
@@ -32,7 +32,7 @@ class TestDriverStateMixin:
         reloaded.load()
         led = reloaded.get_convergence_ledger(7)
         assert led is not None and led.suspend is not None
-        assert led.suspend.resume_state == "SHAPE"
+        assert led.suspend.resume_state == "PLAN"
 
         reloaded.clear_suspend(7)
         again = make_tracker(tmp_path)

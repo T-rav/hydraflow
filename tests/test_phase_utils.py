@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
 from collections.abc import Generator
 from pathlib import Path
@@ -196,6 +197,89 @@ class TestRunRefillingPool:
 
         results = await run_refilling_pool(supply, worker, 2, stop)
         assert sorted(results) == [1, 2, 3, 4]
+
+    @pytest.mark.asyncio
+    async def test_refills_free_slot_from_midrun_enqueue(self) -> None:
+        """A new item enqueued mid-run is dispatched into a free slot on the
+        next poll wake — not deferred until the in-flight task completes.
+
+        Regression for issue #10296: with ``poll_interval`` set the pool
+        wakes periodically to re-run ``supply_fn`` into free slots. A long
+        task holds 1 of 3 slots open; a new item enqueued while the queue is
+        otherwise empty must run *before* the long task finishes. Without the
+        opt-in wake timeout the pool blocks on ``asyncio.wait`` until the
+        long task completes, so the new item would never dispatch here (the
+        long task only releases *after* dispatch), and the test times out.
+        """
+        max_concurrent = 3
+        stop = asyncio.Event()
+        long_started = asyncio.Event()
+        long_release = asyncio.Event()
+        new_dispatched = asyncio.Event()
+        queue: list[int] = []
+        supplied_long = False
+
+        def supply() -> list[int]:
+            nonlocal supplied_long
+            if not supplied_long:
+                supplied_long = True
+                return [0]  # long-running item fills 1 of 3 slots
+            if queue:
+                return [queue.pop(0)]
+            return []  # queue empty when the pool first fills
+
+        async def worker(_idx: int, item: int) -> int:
+            if item == 0:
+                long_started.set()
+                await long_release.wait()  # holds its slot open
+                return item
+            new_dispatched.set()  # a mid-run item ran in a free slot
+            return item
+
+        pool_task = asyncio.create_task(
+            run_refilling_pool(supply, worker, max_concurrent, stop, poll_interval=0.01)
+        )
+        try:
+            await asyncio.wait_for(long_started.wait(), timeout=2.0)
+            # Enqueue a new item while the long task still holds its slot.
+            queue.append(99)
+            # With mid-run refill the new item dispatches before the long task
+            # completes; without it this waits forever (the long task is
+            # blocked on long_release, which we only set after dispatch).
+            await asyncio.wait_for(new_dispatched.wait(), timeout=2.0)
+            assert not long_release.is_set()  # long task still in flight
+            long_release.set()
+            results = await asyncio.wait_for(pool_task, timeout=2.0)
+            assert sorted(results) == [0, 99]
+        finally:
+            long_release.set()
+            stop.set()
+            pool_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await pool_task
+
+    @pytest.mark.asyncio
+    async def test_no_poll_interval_preserves_completion_only_refill(self) -> None:
+        """Default (poll_interval=None) still refills correctly on completion.
+
+        Guards the opt-in contract: existing callers that don't pass
+        ``poll_interval`` keep the original completion-only refill behavior
+        and process every supplied item.
+        """
+        items = list(range(5))
+        stop = asyncio.Event()
+
+        def supply() -> list[int]:
+            if items:
+                return [items.pop(0)]
+            return []
+
+        async def worker(_idx: int, item: int) -> int:
+            await asyncio.sleep(0)
+            return item * 2
+
+        results = await run_refilling_pool(supply, worker, 2, stop)
+        assert sorted(results) == [0, 2, 4, 6, 8]
 
     @pytest.mark.asyncio
     async def test_stop_event_cancels_pool(self) -> None:
@@ -686,10 +770,12 @@ class TestMemorySuggester:
         config = MagicMock()
 
         suggest = MemorySuggester(config)
+        mock_sfms = AsyncMock()
 
-        with patch(
-            "phase_utils.safe_file_memory_suggestion", new_callable=AsyncMock
-        ) as mock_sfms:
+        with patch.dict(
+            MemorySuggester.__call__.__globals__,
+            {"safe_file_memory_suggestion": mock_sfms},
+        ):
             await suggest("transcript text", "planner", "issue #42")
 
             mock_sfms.assert_awaited_once_with(
@@ -705,10 +791,12 @@ class TestMemorySuggester:
         config = MagicMock()
 
         suggest = MemorySuggester(config)
+        mock_sfms = AsyncMock()
 
-        with patch(
-            "phase_utils.safe_file_memory_suggestion", new_callable=AsyncMock
-        ) as mock_sfms:
+        with patch.dict(
+            MemorySuggester.__call__.__globals__,
+            {"safe_file_memory_suggestion": mock_sfms},
+        ):
             await suggest("t1", "src1", "ref1")
             await suggest("t2", "src2", "ref2")
 

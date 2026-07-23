@@ -104,6 +104,62 @@ class TestWorktreeConfigHealing:
         assert _git(repo, "status", "--porcelain") == ""
 
     @pytest.mark.asyncio
+    async def test_heal_leaves_absolute_core_worktree_inside_root(
+        self, tmp_path: Path
+    ) -> None:
+        """Fail-safe predicate (#9723): a ``core.worktree`` resolving to the
+        checkout root is a legitimately-configured worktree — never unset."""
+        repo = _make_repo(tmp_path, "repo")
+        _git(repo, "config", "core.worktree", str(repo))
+        mgr = self._make_manager(tmp_path, repo)
+
+        await mgr._heal_worktree_config(repo, "")
+
+        assert _git(repo, "config", "--get", "core.worktree") == str(repo)
+        assert _git(repo, "status", "--porcelain") == ""
+
+    @pytest.mark.asyncio
+    async def test_heal_leaves_relative_core_worktree_inside_root(
+        self, tmp_path: Path
+    ) -> None:
+        """git resolves a relative ``core.worktree`` against the ``.git``
+        dir; ``..`` therefore points at the checkout root and is legitimate."""
+        repo = _make_repo(tmp_path, "repo")
+        _git(repo, "config", "core.worktree", "..")
+        mgr = self._make_manager(tmp_path, repo)
+
+        await mgr._heal_worktree_config(repo, "")
+
+        assert _git(repo, "config", "--get", "core.worktree") == ".."
+        assert _git(repo, "status", "--porcelain") == ""
+
+    @pytest.mark.asyncio
+    async def test_repo_root_heal_unsets_container_path(self, tmp_path: Path) -> None:
+        """Fix J (#9723): the MAIN checkout gets the same guarded heal the
+        worktrees got in WS-8 — a container path is unset, git works again."""
+        repo = _make_repo(tmp_path, "repo")
+        _git(repo, "config", "core.worktree", "/nonexistent/workspace")
+        mgr = self._make_manager(tmp_path, repo)
+
+        healed = await mgr._heal_repo_root_config()
+
+        assert healed is True
+        assert "/nonexistent/workspace" not in (repo / ".git" / "config").read_text()
+        assert _git(repo, "status", "--porcelain") == ""
+
+    @pytest.mark.asyncio
+    async def test_repo_root_heal_is_noop_without_corruption(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _make_repo(tmp_path, "repo")
+        mgr = self._make_manager(tmp_path, repo)
+
+        healed = await mgr._heal_repo_root_config()
+
+        assert healed is False
+        assert _git(repo, "status", "--porcelain") == ""
+
+    @pytest.mark.asyncio
     async def test_salvage_heals_corruption_then_commits(self, tmp_path: Path) -> None:
         repo = _make_repo(tmp_path, "repo")
         mgr = self._make_manager(tmp_path, repo)

@@ -1,0 +1,23 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_open_issue_numbers returns the numbers of ALL open issues,
+# sorted ascending and capped at *limit* (#9905). The dispatcher seeds
+# two open issues (out of insertion order, to pin the sort) plus one
+# closed issue that must be excluded.
+adapter: github
+interaction: list_open_issue_numbers
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_open_issue_numbers
+  args: []
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[110, 120]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

@@ -51,6 +51,14 @@ _GH_TIMEOUT_SECONDS = 30.0
 # ``_MERGED_PR_SCAN_LIMIT`` in approval_records.py).
 _MERGED_RC_SCAN_LIMIT = 20
 
+# #10009: multiplier on rc_cadence_hours for the boot-time "missed cadence by
+# a wide margin" warning. The ordinary cadence gate (_cadence_elapsed) already
+# cuts immediately once >= rc_cadence_hours has passed — that's normal
+# steady-state behaviour, not evidence of downtime. Crossing 1.5x is wide
+# enough to signal the factory PROCESS itself was likely down (crash, host
+# reboot, deploy gap) rather than just landing on a routine tick late.
+_MISSED_CADENCE_ALERT_MULTIPLIER = 1.5
+
 
 class StagingPromotionLoop(BaseBackgroundLoop):
     """Periodic staging→main release-candidate promoter. See ADR-0042."""
@@ -80,25 +88,41 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             "policy_deny_alerts",
             config.data_root / "dedup" / "policy_deny_alerts.json",
         )
+        # #10009: fires the missed-cadence boot check at most once per loop
+        # lifetime — the loop's own catch-up cycle already runs _do_work
+        # immediately after downtime (BaseBackgroundLoop._should_run_catchup),
+        # so subsequent steady-state ticks must not re-log the boot warning.
+        self._boot_cadence_checked = False
 
     def _get_default_interval(self) -> int:
         return self._config.staging_promotion_interval
 
-    def _rollups(self) -> RollupIssueManager | None:
-        """One rolling "promotion CI is failing" issue, auto-closed on a green
-        promotion — replaces the per-PR ``RC promotion #N failed CI`` pile-up
-        (#9219..#9342). ``None`` when state is absent (unit tests fall back to
-        create_issue's stable-title dedup)."""
+    def _rollups(self, labels: list[str] | None = None) -> RollupIssueManager | None:
+        """One rolling issue per subject under the ``staging_promotion``
+        namespace — ``rc_ci`` ("promotion CI is failing", #9359) and
+        ``rc_promotion_stuck`` (the streak escalation, #10015) — auto-closed
+        on a green promotion. Replaces the per-PR ``RC promotion #N failed
+        CI`` pile-up (#9219..#9342). ``None`` when state is absent (unit
+        tests fall back to create_issue's stable-title dedup). *labels*
+        overrides the default find-label set at create time; ``resolve`` is
+        label-independent, so any instance can close any tracked subject."""
         if self._state is None:
             return None
         return RollupIssueManager(
             pr=self._prs,
             state=self._state,
             namespace="staging_promotion",
-            labels=list(self._config.find_label or ["hydraflow-find"]),
+            labels=(
+                labels
+                if labels is not None
+                else list(self._config.find_label or ["hydraflow-find"])
+            ),
         )
 
     async def _do_work(self) -> dict[str, Any] | None:
+        if not self._boot_cadence_checked:
+            self._check_missed_cadence_at_boot()
+
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
 
@@ -227,6 +251,19 @@ class StagingPromotionLoop(BaseBackgroundLoop):
                             comment=(
                                 f"RC promotion to {self._config.main_branch} "
                                 "succeeded — auto-closing."
+                            ),
+                        )
+                        # #10015: the streak escalation gets the same green-path
+                        # resolve as rc_ci — before this it was a dead letter
+                        # (a green promotion only reset the counter; #9867
+                        # closed only via an unrelated PR body). Idempotent
+                        # no-op when no escalation is tracked.
+                        await rollups.resolve(
+                            "rc_promotion_stuck",
+                            comment=(
+                                f"RC promotion to {self._config.main_branch} "
+                                "succeeded — the consecutive-failure streak is "
+                                "broken; auto-closing this escalation."
                             ),
                         )
                 # CH-4 (#9732): the promotion succeeded — compile its release
@@ -516,12 +553,20 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         ``rc_consecutive_failure_escalation_threshold`` consecutive failures we
         file ONE ``hitl-escalation`` issue so a human looks at the pipeline, not
         just the latest red PR.
+
+        #10015: tracked as the ``rc_promotion_stuck`` rollup subject so the
+        next green promotion auto-closes it (mirrors ``rc_ci``). The title is
+        STABLE per the rollup contract — the streak size and latest PR number
+        live in the body.
         """
         labels = list(self._config.hitl_escalation_label or ["hitl-escalation"])
         for lbl in self._config.rc_promotion_stuck_label:
             if lbl not in labels:
                 labels.append(lbl)
-        title = f"staging→main promotion stuck: {failures} consecutive RC failures"
+        title = (
+            f"staging→{self._config.main_branch} promotion stuck: "
+            "repeated consecutive RC failures"
+        )
         body = (
             f"The StagingPromotionLoop has failed to promote `staging` → "
             f"`{self._config.main_branch}` **{failures} times in a row** "
@@ -533,8 +578,13 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             "- a systemic CI/promotion-loop defect (e.g. the #9351 timeout "
             "misclassification that silently force-closed green PRs).\n\n"
             "This fires once per failure streak; the next successful promotion "
-            "clears the counter."
+            "clears the counter and auto-closes this escalation (#10015)."
         )
+        rollups = self._rollups(labels=labels)
+        if rollups is not None:
+            return await rollups.ensure("rc_promotion_stuck", title=title, body=body)
+        # State-less fallback (unit tests): create_issue's exact-title dedup on
+        # the now-stable title still prevents per-streak pile-up.
         try:
             return await self._prs.create_issue(title, body, labels)
         except Exception:  # noqa: BLE001
@@ -632,6 +682,42 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         path = self._cadence_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(when.isoformat())
+
+    def _check_missed_cadence_at_boot(self) -> None:
+        """Log loudly if the last RC cut is more than
+        :data:`_MISSED_CADENCE_ALERT_MULTIPLIER` x ``rc_cadence_hours`` behind
+        (#10009). Runs once per loop lifetime (guarded by
+        ``self._boot_cadence_checked`` in ``_do_work``) — this is a
+        diagnostic signal for "the factory process itself was down", not a
+        behaviour change: :meth:`_cadence_elapsed` already cuts a new RC
+        immediately once the plain cadence has elapsed, on this same first
+        tick.
+        """
+        self._boot_cadence_checked = True
+        path = self._cadence_path()
+        if not path.exists():
+            return  # no prior marker (first-ever run) — nothing was "missed"
+        try:
+            last = datetime.fromisoformat(path.read_text().strip())
+        except ValueError:
+            return
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=UTC)
+        elapsed_hours = (datetime.now(UTC) - last).total_seconds() / 3600
+        threshold_hours = (
+            self._config.rc_cadence_hours * _MISSED_CADENCE_ALERT_MULTIPLIER
+        )
+        if elapsed_hours > threshold_hours:
+            logger.warning(
+                "StagingPromotionLoop missed its RC cadence by a wide "
+                "margin: last RC cut %.1fh ago (cadence=%dh, alert "
+                "threshold=%.1fh) — the factory process was likely down; "
+                "cutting an RC immediately instead of waiting for the next "
+                "cadence tick.",
+                elapsed_hours,
+                self._config.rc_cadence_hours,
+                threshold_hours,
+            )
 
     def _sweep_path(self) -> Path:
         return self._config.data_root / "memory" / ".staging_promotion_last_sweep"

@@ -26,3 +26,7 @@ fi
 
 echo "pre-push: running make quality-lite..."
 make quality-lite
+
+# Regression-rot working-tree advisory (#9597 Surface 2) — offline (git
+# status only, no gh calls), fast, and never blocks the push.
+python3 scripts/check_regression_rot_working_tree.py

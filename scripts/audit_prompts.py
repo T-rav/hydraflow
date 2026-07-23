@@ -177,6 +177,13 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "src/test_adequacy.py:13",
     ),
     AuditTarget(
+        "test_adequacy_verifier",
+        "test_adequacy.build_test_adequacy_verifier_prompt",
+        "tests/fixtures/prompts/test_adequacy_verifier.json",
+        "Adjacent",
+        "src/test_adequacy.py:98",
+    ),
+    AuditTarget(
         "spec_match_requirements_gap",
         "spec_match.build_requirements_gap_prompt",
         "tests/fixtures/prompts/spec_match_requirements_gap.json",
@@ -196,13 +203,6 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "tests/fixtures/prompts/conflict_rebuild.json",
         "Adjacent",
         "src/conflict_prompt.py:71",
-    ),
-    AuditTarget(
-        "expert_council_vote",
-        "expert_council.ExpertCouncil._build_vote_prompt",
-        "tests/fixtures/prompts/expert_council_vote.json",
-        "Adjacent",
-        "src/expert_council.py:278",
     ),
     AuditTarget(
         "diagnostic_runner",

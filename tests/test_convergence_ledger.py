@@ -187,6 +187,36 @@ class TestDetectCrossBoundaryOscillation:
         ledger = ConvergenceLedger(issue_number=7)
         assert ledger.oscillation_escalated is False
 
+    def test_legacy_ledger_dict_missing_oscillation_escalated_loads_false(
+        self,
+    ) -> None:
+        """A pre-#9693 persisted ledger dict has no ``oscillation_escalated`` key.
+
+        Regression for #9685 (2d): ``oscillation_escalated`` was added to the
+        ConvergenceLedger model after the field already had live on-disk
+        state.json ledgers. Deserializing one of those legacy dicts (as
+        StateTracker.load() does on every boot) must not raise and must
+        default the field to False rather than requiring the key to be
+        present.
+        """
+        legacy_data = {
+            "issue_number": 7,
+            "laps": 2,
+            "blast_radius": "medium",
+            "stage_state": {
+                "triage": {"last_verdict": "LOOP_BACK", "attempts": 1},
+            },
+            # No "oscillation_escalated" key — simulates a ledger persisted
+            # before the field existed.
+        }
+        assert "oscillation_escalated" not in legacy_data
+        ledger = ConvergenceLedger.model_validate(legacy_data)
+        assert ledger.oscillation_escalated is False
+        # Sanity: the rest of the legacy data still loaded correctly.
+        assert ledger.issue_number == 7
+        assert ledger.laps == 2
+        assert ledger.stage_state["triage"].last_verdict == "LOOP_BACK"
+
     def test_oscillation_escalated_round_trips(self) -> None:
         ledger = ConvergenceLedger(issue_number=7)
         ledger.oscillation_escalated = True

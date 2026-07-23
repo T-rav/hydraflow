@@ -32,8 +32,34 @@ os.environ["HYDRAFLOW_SENTRY_DISABLED"] = "1"
 os.environ.pop("SENTRY_DSN", None)
 
 
+# #10094: committed sandbox seeds under tests/sandbox_scenarios/seeds/ must
+# never be mutated by the test suite (write_seed() materializing a
+# MockWorldSeed round-trip back onto its own source path adds schema
+# defaults like "comments": {} that then leak into unrelated commits).
+# tests/regressions/regression_issue_10094.py's `test_seed_dir_is_git_clean`
+# proves the dir was clean at ONE point in collection order; under
+# `-n auto --dist loadscope` a later test on a DIFFERENT xdist worker could
+# still dirty it afterward and go uncaught there. Snapshotting mtimes at
+# import time (before this process — controller or worker — runs its first
+# test) and re-checking after EVERY test's teardown closes that gap and, like
+# the MagicMock guard below, pins the exact offending test by name instead of
+# surfacing as an unexplained ` M` diff days later.
+_SANDBOX_SEEDS_DIR = Path(__file__).resolve().parent / "sandbox_scenarios" / "seeds"
+
+
+def _sandbox_seed_mtimes() -> dict[str, int]:
+    if not _SANDBOX_SEEDS_DIR.is_dir():
+        return {}
+    return {p.name: p.stat().st_mtime_ns for p in _SANDBOX_SEEDS_DIR.glob("*.json")}
+
+
+_sandbox_seed_baseline_mtimes = _sandbox_seed_mtimes()
+
+
 def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> None:  # noqa: ARG001 — nextitem required by pytest hook signature
-    """Fail any test that leaves a ``MagicMock/`` directory in the repo root.
+    """Fail any test that leaves a ``MagicMock/`` directory in the repo root,
+
+    or that mutates a committed sandbox seed (#10094).
 
     Caused by passing a bare ``MagicMock()`` where production code expects a
     ``Path`` / config and calls ``.mkdir()`` on the result — the str() of the
@@ -55,6 +81,80 @@ def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> 
             "A MagicMock was used where a Path/config was expected. "
             "Use `MagicMock(spec=HydraFlowConfig)` or a real tmp_path-backed config."
         )
+
+    current_seed_mtimes = _sandbox_seed_mtimes()
+    mutated_seeds = sorted(
+        name
+        for name, mtime in current_seed_mtimes.items()
+        if _sandbox_seed_baseline_mtimes.get(name) != mtime
+    )
+    if mutated_seeds:
+        # Absorb into the baseline so only the offending test is blamed —
+        # tests/regressions/regression_issue_10094.py::test_seed_dir_is_git_clean
+        # still catches the leftover git dirt from the actual content change.
+        _sandbox_seed_baseline_mtimes.update(
+            {name: current_seed_mtimes[name] for name in mutated_seeds}
+        )
+        pytest.fail(
+            f"Sandbox-seed tree-clean violation: test {item.nodeid} mutated "
+            f"committed seed(s) {mutated_seeds} in "
+            "tests/sandbox_scenarios/seeds/. Seeds are golden generated "
+            "artifacts — a test/fixture must never re-serialize a "
+            "materialized MockWorldSeed back to the source path; redirect the "
+            "write to tmp_path instead (#10094)."
+        )
+
+
+# --- Test-duration ratchet (CI-speedup Tier 4a) -----------------------------
+# Prevent the suite from silently accumulating slow / hung tests. A test whose
+# CALL phase exceeds a deliberately generous budget FAILS with a clear message,
+# unless it is in the explicit shrink-only grandfather set below. This catches
+# new pathologically-slow or hung tests (a real one recently hung ~300s under
+# parallel execution) without flaking on ordinary machine variance.
+#
+# Follow-up (deliberately NOT done here): move genuinely-slow tests behind a
+# `@pytest.mark.slow` marker and run them in a dedicated nightly "slow" lane
+# instead of grandfathering them. That is a separate change; this ratchet only
+# guards the fast lane against regressions.
+_SLOW_TEST_BUDGET_S = 60.0
+# Tests legitimately over budget today (measured under parallel CPU contention,
+# so these are upper bounds). SHRINK-ONLY: optimize a test and remove it here;
+# never add a new one without justification. Optimizing these is tracked as a
+# follow-up.
+_SLOW_TEST_GRANDFATHER = frozenset(
+    {
+        "tests/test_audit_prompts.py::test_main_emits_report_to_expected_path",
+        "tests/test_audit_prompts.py::test_canary_cross_check_passes_when_every_trace_builder_registered",
+        "tests/test_audit_prompts.py::test_canary_cross_check_flags_drift_over_threshold",
+        "tests/test_orchestrator_integration.py::test_credit_pause_publishes_alerts_and_restores_loops",
+    }
+)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]):  # noqa: ARG001 — call required by pytest hook signature
+    """Fail any test whose CALL phase exceeds the slow-test budget.
+
+    Grandfathered node ids are exempt (shrink-only — see
+    ``_SLOW_TEST_GRANDFATHER``). The budget is intentionally generous so normal
+    machine variance never trips it; only pathologically-slow or hung tests do.
+    """
+    outcome = yield
+    report = outcome.get_result()
+    if (
+        report.when == "call"
+        and report.passed
+        and report.duration > _SLOW_TEST_BUDGET_S
+    ):
+        nodeid = item.nodeid
+        if nodeid not in _SLOW_TEST_GRANDFATHER:
+            report.outcome = "failed"
+            report.longrepr = (
+                f"Duration ratchet: {nodeid} took {report.duration:.1f}s "
+                f"(> {_SLOW_TEST_BUDGET_S:.0f}s budget). Optimize it, or if it is "
+                f"unavoidably slow add it to _SLOW_TEST_GRANDFATHER in "
+                f"tests/conftest.py (shrink-only)."
+            )
 
 
 # Ensure source modules are importable from src/ layout.
@@ -197,6 +297,36 @@ def _reset_otel_tracer_provider():
     _trace._TRACER_PROVIDER = None  # noqa: SLF001
     _trace._TRACER_PROVIDER_SET_ONCE._done = False  # noqa: SLF001
     _get_tracer.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _restore_phase_utils_memory_seams():
+    """Snapshot + restore the ``phase_utils`` memory-suggestion seams per test.
+
+    Many modules patch ``phase_utils.file_memory_suggestion`` /
+    ``safe_file_memory_suggestion`` (review/implement/HITL phase hooks,
+    review-phase-metrics, phase-utils' own suite). If a patch escapes its test —
+    which xdist's cross-module worker scheduling can trigger — the module
+    attribute is left pointing at a stale ``AsyncMock``, so a LATER test's own
+    ``with patch(...)`` never rebinds the value the code under test resolves, and
+    that test's mock is "awaited 0 times". Snapshot + restore contains the leak
+    regardless of which test caused it (mirrors ``_restore_auto_pr_seams`` in
+    tests/scenarios/conftest.py). Fixes the whole memory-suggestion category
+    under -n auto (#10119 and the phase_utils flake).
+    """
+    import phase_utils
+
+    saved = (
+        phase_utils.file_memory_suggestion,
+        phase_utils.safe_file_memory_suggestion,
+    )
+    try:
+        yield
+    finally:
+        (
+            phase_utils.file_memory_suggestion,
+            phase_utils.safe_file_memory_suggestion,
+        ) = saved
 
 
 @pytest.fixture(autouse=True)

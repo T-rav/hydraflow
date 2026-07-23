@@ -11,15 +11,21 @@ imports this module — Fakes are unreachable from the production code path.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
+from bg_worker_manager import BGWorkerManager
+from branch_protection_audit import AuditReport, audit_repo
 from dashboard import HydraFlowDashboard
-from events import EventBus
+from events import EventBus, EventLog, EventType, HydraFlowEvent
+from file_util import append_jsonl, atomic_write
 from mockworld.fakes import (
     FakeGitHub,
     FakeIssueFetcher,
@@ -30,10 +36,13 @@ from mockworld.fakes import (
 from mockworld.fakes.fake_docker import FakeDocker
 from mockworld.fakes.fake_subprocess_runner import FakeSubprocessRunner
 from mockworld.seed import MockWorldSeed
+from models import BackgroundWorkerStatusPayload, EpicState
 from orchestrator import HydraFlowOrchestrator
 from ports import IssueFetcherPort, IssueStorePort, PRPort, WorkspacePort
+from repo_wiki import RepoWikiStore, WikiEntry
 from runtime_config import load_runtime_config
 from service_registry import (
+    ServiceRegistry,
     WorkerRegistryCallbacks,
     build_services,
     build_state_tracker,
@@ -41,6 +50,76 @@ from service_registry import (
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
+
+# --- Air-gap seam registry (#10012) ----------------------------------------
+#
+# Every loop/runner module that can lexically spawn an LLM or a subprocess
+# (run_lightweight_agent / get_default_runner / stream_claude_process /
+# create_subprocess_exec / run_subprocess / run_subprocess_result call sites
+# in src/*_loop.py, src/*_runner.py, and src/runners/**) must either declare
+# here HOW the sandbox air-gaps it, or sit in the shrink-only grandfathered
+# baseline of tests/architecture/test_sandbox_seam_completeness.py. That
+# guard AST-enumerates the call sites and reddens when a NEW spawn path
+# appears without a declaration — turning the next s51/s56/s57 wedged-sandbox
+# incident (#9919, #9925, #10006) into a red unit test at PR time.
+#
+# Keys are module stems (the loop/worker's module name); values are one of
+# SEAM_KINDS:
+#
+# - "fake_llm_runner": the runner instance is rebound wholesale via
+#   ``runners=fake_llm`` in ``build_services`` (triage/plan/implement/review);
+#   remaining BaseRunner constructions thread ``runner=subprocess_runner``,
+#   which main() below injects as FakeSubprocessRunner.
+# - "fake_subprocess_runner": the spawn only happens through the injected
+#   SubprocessRunner; main() passes FakeSubprocessRunner so the real docker/
+#   host dispatch is never constructed.
+# - "mockworld_sentinel": subclasses consult ``_mockworld_fake_llm``
+#   (attached by main() below) in their dispatch method and route to FakeLLM
+#   before reaching the real spawn; ShapeRunner is dropped to None outright.
+# - "seed_seam": main() below injects seed-scripted stand-ins onto the loop
+#   instance when the scenario seeds them (and the scenario is crafted to
+#   stay within the seam's coverage — see the per-loop comments in main()).
+# - "config_disable": ``_apply_sandbox_config_overrides`` turns the spawning
+#   code path off wholesale.
+SEAM_KINDS: frozenset[str] = frozenset(
+    {
+        "fake_llm_runner",
+        "fake_subprocess_runner",
+        "mockworld_sentinel",
+        "seed_seam",
+        "config_disable",
+    }
+)
+
+SANDBOX_SEAMS: dict[str, str] = {
+    # The four phase runners (triage/plan/implement/review) are replaced by
+    # ``runners=fake_llm``; every other build_services BaseRunner gets the
+    # injected FakeSubprocessRunner via ``runner=subprocess_runner``.
+    "base_runner": "fake_llm_runner",
+    # ADR-0063 runners (discover/plan-review/council/spec-review/diagnostic/
+    # decompose) consult the ``_mockworld_fake_llm`` sentinel before their
+    # BaseSubprocessRunner.run spawn; sentinels are attached in main().
+    "base_subprocess_runner": "mockworld_sentinel",
+    # ``get_docker_runner`` is the default only when no ``subprocess_runner``
+    # is injected; main() always injects FakeSubprocessRunner.
+    "docker_runner": "fake_subprocess_runner",
+    # External recorders + replay gate path off via
+    # ``contract_refresh_external_enabled=False`` (s30).
+    "contract_refresh_loop": "config_disable",
+    # s56: ``skill_prompt_corpus_cases`` / ``skill_prompt_refine_patch`` seed
+    # seams replace ``_run_corpus`` and ``_refine_llm``; the seeded patch trips
+    # the tripwire so the loop returns before ``_open_refine_pr``'s raw spawns.
+    "skill_prompt_eval_loop": "seed_seam",
+    # s57: ``issue_refinement_backlog`` / ``issue_refinement_verdicts`` seed
+    # seams replace ``_refinement_llm`` so dup/priority judgments never shell
+    # out to a real ``claude``.
+    "issue_refinement_loop": "seed_seam",
+    # FlakeTrackerLoop reads CI JUnit / xdist-audit reports via raw ``gh run
+    # download`` (_download_junit, _download_xdist_audit). It is a caretaker
+    # loop no sandbox scenario exercises, so the whole loop is config-disabled
+    # below rather than seeding those reads.
+    "flake_tracker_loop": "config_disable",
+}
 
 
 def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
@@ -65,11 +144,55 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
       with "not a git repository", so EVERY approved PR's merge raises and no
       issue reaches the "merged" outcome (s01's happy path). The compliance
       gate has its own unit tests; the sandbox exercises the pipeline.
+    - ``auto_pr_preflight_gate`` (#10013): the pre-flight gate runs
+      ``uv run pytest/ruff/arch.runner`` inside bot-PR worktrees; on the
+      air-gapped network ``uv``'s environment sync cannot reach PyPI, so
+      every full-set stage would hang-then-red and block every bot PR a
+      scenario asserts on. The gate has its own unit + regression tests;
+      the sandbox exercises the PR pipeline.
     """
     config.transcript_summarization_enabled = False  # type: ignore[misc]
     config.research_enabled = False  # type: ignore[misc]
     config.contract_refresh_external_enabled = False  # type: ignore[misc]
     config.merge_policy_enabled = False  # type: ignore[misc]
+    # Frozen-model bypass (the same write the runtime PATCH route uses) —
+    # avoids adding another suppression to the disturbance ratchet.
+    object.__setattr__(config, "auto_pr_preflight_gate_enabled", False)
+    # ``approval_records`` (#9543): MergeStateWatcherLoop's CH-2 reconciler
+    # tick reads merged PRs at the raw ``gh`` subprocess boundary
+    # (approval_records._list_recently_merged — deliberately not on PRPort, so
+    # FakeGitHub never sees it). Under the air-gapped network that read raises
+    # every cycle, so ``_do_work`` never returns its conflict-handling stats
+    # and the watcher's active outcome is unobservable. The reconciler has its
+    # own unit tests; the sandbox exercises the conflict watcher.
+    object.__setattr__(config, "approval_records_enabled", False)
+    # FlakeTrackerLoop (#10141): both its CI-report reads (_download_junit RC
+    # JUnit, _download_xdist_audit) are raw ``gh run download`` spawns that hang
+    # on the air-gapped network. No sandbox scenario exercises this caretaker
+    # loop, so disable it wholesale (retires the grandfathered _download_junit
+    # spawn and air-gaps the new xdist-audit read).
+    object.__setattr__(config, "flake_tracker_loop_enabled", False)
+    # StagingPromotionLoop's CH-4 evidence machinery (#10309): once a scenario
+    # seeds ``staging_enabled`` the loop's every tick runs the reconcile sweep
+    # (``_list_merged_promotion_prs`` — a raw ``gh pr list`` subprocess, the
+    # grandfathered spawn in test_sandbox_seam_completeness) and each promoted
+    # RC triggers the pack compiler. Both reach the network; both have their
+    # own unit tests. The sandbox exercises the cut→monitor→merge promotion
+    # path itself (s82).
+    object.__setattr__(config, "evidence_pack_enabled", False)
+
+
+def apply_seed_config_overrides(config: HydraFlowConfig, seed: MockWorldSeed) -> None:
+    """Apply per-scenario config knobs carried on the seed (#10309).
+
+    Runs after ``_apply_sandbox_config_overrides`` (the unconditional air-gap
+    set) — these are scenario-chosen, not environment-forced. Currently just
+    ADR-0042 staging mode: ``seed.staging_enabled=True`` activates
+    StagingPromotionLoop's real promotion path (see the seed field docstring
+    for why this must stay per-scenario rather than compose-wide).
+    """
+    if seed.staging_enabled:
+        object.__setattr__(config, "staging_enabled", True)
 
 
 def _load_seed() -> MockWorldSeed:
@@ -80,6 +203,90 @@ def _load_seed() -> MockWorldSeed:
     if not path:
         return MockWorldSeed()
     return MockWorldSeed.from_json(Path(path).read_text())
+
+
+class _SeededRefineLLM:
+    """Air-gapped stand-in for ``SkillPromptEvalLoop``'s one-shot refine client.
+
+    Returns a scenario-scripted raw response (a ```diff fence) so refine
+    synthesis never shells out to a real ``claude`` under the sandbox's
+    air-gapped network — the same escape class that wedged discover/shape in
+    #9796. Structurally satisfies the loop's private ``_RefineLLM`` protocol
+    (a single ``async complete(prompt) -> str``); ``_refine_llm_complete``
+    uses it verbatim once ``sandbox_main`` injects it onto the loop.
+    """
+
+    def __init__(self, response: str) -> None:
+        self._response = response
+
+    async def complete(self, prompt: str) -> str:
+        # ``prompt`` is ignored by design — the response is scenario-scripted.
+        _ = prompt
+        return self._response
+
+
+class _SeededRefinementLLM:
+    """Air-gapped stand-in for ``IssueRefinementLoop``'s one-shot judgment client.
+
+    The refinement loop makes two kinds of structured LLM call per tick — a
+    duplicate judgment (``build_dup_judgment_prompt``) and a priority score
+    (``build_priority_prompt``) — and BOTH shell out to a real ``claude`` via
+    ``run_lightweight_agent`` in production (the #9796 real-claude-wedge class
+    that wedged discover/shape on the air-gapped sandbox). This stand-in answers
+    both from scenario data so nothing escapes the air-gapped network:
+
+    * Dup-judgment prompts — identified by the fixed ``Canonical-selection
+      rubric`` header the loop's prompt template always emits (never issue
+      content, so a crafted body can't spoof the dispatch) — return the next
+      scripted verdict from ``seed.issue_refinement_verdicts``, consumed FIFO
+      and reusing the last once exhausted.
+    * Priority prompts get a benign ``{"priority": "none"}`` — a deliberate
+      no-op: the loop skips a ``none`` verdict on an unlabelled issue, so the
+      scenario's only observable action is the dup proposal, not a relabel.
+
+    Structurally satisfies the loop's private ``_RefinementLLM`` protocol (a
+    single ``async complete(prompt) -> str``); ``_refinement_complete`` uses it
+    verbatim once ``sandbox_main`` injects it onto ``svc.issue_refinement_loop``.
+    """
+
+    # Unique to the dup-judgment rubric (issue_refinement._DUP_JUDGMENT_RUBRIC);
+    # absent from the priority rubric and from any issue title/body.
+    _DUP_MARKER = "Canonical-selection rubric"
+    _PRIORITY_NOOP = '{"priority": "none", "reason": "sandbox no-op"}'
+
+    def __init__(self, verdicts: list[str]) -> None:
+        self._verdicts = list(verdicts)
+        self._next = 0
+
+    async def complete(self, prompt: str) -> str:
+        if self._DUP_MARKER not in prompt:
+            # A priority-scoring prompt — answer with the deliberate no-op.
+            return self._PRIORITY_NOOP
+        if not self._verdicts:
+            # Defensive: no dup verdict scripted (a scenario always provides at
+            # least one). Degrade to the no-op rather than IndexError; the loop
+            # treats an unparseable dup verdict as a low-confidence proposal.
+            return self._PRIORITY_NOOP
+        idx = min(self._next, len(self._verdicts) - 1)
+        self._next += 1
+        return self._verdicts[idx]
+
+
+class _FakeRepoProber:
+    """Air-gapped stand-in for ``HealthMonitorLoop``'s repo-existence probe.
+
+    Production ``repo_existence_prober.DefaultRepoProber.probe`` shells out to a
+    raw ``git ls-remote`` (#10140, the persistent-error self-repair actuator's
+    ``principles_audit`` 404-prune); on the sandbox's air-gapped network that
+    call hangs on its timeout. Reports every slug as reachable (``True``)
+    without spawning — so the actuator never prunes a ``managed_repos`` entry in
+    the sandbox, which no scenario asserts on. Structurally satisfies the
+    ``RepoProber`` protocol (a single ``async probe(slug) -> bool | None``).
+    """
+
+    async def probe(self, slug: str) -> bool | None:
+        _ = slug  # ignored by design — always "reachable", never spawns
+        return True
 
 
 def _load_phase_script(
@@ -171,13 +378,485 @@ def _build_caretaker_enabled_cb(
     return lambda name, *_a, **_kw: name in allowed
 
 
+def seed_stale_workspaces(
+    state: Any, config: HydraFlowConfig, seed: MockWorldSeed
+) -> None:
+    """Register seeded stale worktrees in StateTracker (#9543).
+
+    WorkspaceGCLoop's phase-1 sweep reads ``state.get_active_workspaces()``;
+    seeding an entry here (path derived from config, mirroring the production
+    WorkspaceManager layout) gives a GC cycle a tracked worktree to judge.
+    Empty ``stale_workspaces`` (every other scenario) touches nothing.
+    """
+    for entry in seed.stale_workspaces:
+        number = int(entry["number"])
+        branch = str(entry.get("branch") or f"agent/issue-{number}")
+        path = config.workspace_base / config.repo_slug / f"issue-{number}"
+        state.set_workspace(number, str(path))
+        state.set_branch(number, branch)
+
+
+def materialize_expired_runs(config: HydraFlowConfig, seed: MockWorldSeed) -> None:
+    """Create back-dated run-artifact dirs for RunsGCLoop to purge (#9543).
+
+    RunRecorder derives a run's age from its ``%Y%m%dT%H%M%SZ`` directory
+    name, so materializing ``<runs>/<issue>/<old-timestamp>/`` at boot is all
+    an expired artifact takes. Empty ``expired_run_dirs`` creates nothing.
+    """
+
+    runs_dir = config.repo_data_path("runs")
+    for entry in seed.expired_run_dirs:
+        issue = int(entry["issue"])
+        age_days = int(entry.get("age_days", 90))
+        stamp = (datetime.now(UTC) - timedelta(days=age_days)).strftime(
+            "%Y%m%dT%H%M%SZ"
+        )
+        run_dir = runs_dir / str(issue) / stamp
+        run_dir.mkdir(parents=True, exist_ok=True)
+        # A marker file so the purged directory is a realistic non-empty run.
+        (run_dir / "transcript.log").write_text("seeded expired run (#9543)\n")
+
+
+def materialize_epic_states(state: Any, seed: MockWorldSeed) -> None:
+    """Upsert seeded EpicState records into StateTracker (#9643).
+
+    EpicMonitorLoop's stale sweep reads ``state.get_all_epic_states()``; the
+    seed-only ``last_activity_age_days`` key is popped and converted to a
+    tz-AWARE ``last_activity`` back-dated from boot, so seeds stay
+    time-independent (mirroring ``expired_run_dirs.age_days``) and can never
+    hit the naive-timestamp footgun (``EpicManager._is_stale`` swallows the
+    naive/aware ``TypeError`` and reads the epic as fresh). Empty
+    ``epic_states`` (every other scenario) touches nothing.
+    """
+    for entry in seed.epic_states:
+        payload = dict(entry)
+        age_days = payload.pop("last_activity_age_days", None)
+        if age_days is not None:
+            payload["last_activity"] = (
+                datetime.now(UTC) - timedelta(days=float(age_days))
+            ).isoformat()
+        state.upsert_epic_state(EpicState.model_validate(payload))
+
+
+# The fixed ``health_metrics`` artifact allowlist. Paths mirror
+# ``HealthMonitorLoop._outcomes_path`` / ``_scores_path`` / ``_failures_path``
+# exactly — a wrong root yields a silently-idle loop reading zero metrics.
+_HEALTH_METRIC_KEYS: frozenset[str] = frozenset(
+    {"outcomes", "item_scores", "harness_failures"}
+)
+
+
+def materialize_health_metrics(config: HydraFlowConfig, seed: MockWorldSeed) -> None:
+    """Write seeded health trend artifacts to the paths the loop reads (#9643).
+
+    ``outcomes.jsonl`` + ``item_scores.json`` are FLAT under
+    ``config.memory_dir``; ``harness_failures.jsonl`` is repo-scoped under
+    ``config.repo_memory_dir``. Unknown keys raise ``ValueError`` (fail-closed
+    — a typo'd artifact name must not silently seed nothing). Empty
+    ``health_metrics`` (every other scenario) creates no files.
+    """
+    metrics = seed.health_metrics
+    if not metrics:
+        return
+    unknown = set(metrics) - _HEALTH_METRIC_KEYS
+    if unknown:
+        msg = (
+            f"Unknown health_metrics keys: {sorted(unknown)}; "
+            f"valid: {sorted(_HEALTH_METRIC_KEYS)}"
+        )
+        raise ValueError(msg)
+    for rec in metrics.get("outcomes") or []:
+        append_jsonl(config.memory_dir / "outcomes.jsonl", json.dumps(rec))
+    item_scores = metrics.get("item_scores") or {}
+    if item_scores:
+        atomic_write(
+            config.memory_dir / "item_scores.json", json.dumps(item_scores, indent=2)
+        )
+    for rec in metrics.get("harness_failures") or []:
+        append_jsonl(config.repo_memory_dir / "harness_failures.jsonl", json.dumps(rec))
+
+
+def materialize_worker_heartbeats(state: Any, seed: MockWorldSeed) -> None:
+    """Persist seeded worker heartbeats into StateTracker (#9643/#9904).
+
+    HealthMonitorLoop's dead-man-switch reads (``_check_worker_staleness`` /
+    ``_check_sanity_loop_staleness``) consume ``state.get_worker_heartbeats()``;
+    the relative ``age_seconds`` back-dates ``last_run`` from boot (tz-aware),
+    so a seeded stall stays a stall regardless of clock. Empty
+    ``worker_heartbeats`` (every other scenario) touches nothing.
+    """
+    for name, entry in seed.worker_heartbeats.items():
+        age_seconds = float(entry.get("age_seconds", 0))
+        last_run = (datetime.now(UTC) - timedelta(seconds=age_seconds)).isoformat()
+        state.set_worker_heartbeat(
+            name,
+            {
+                "status": str(entry.get("status", "running")),
+                "last_run": last_run,
+                "details": dict(entry.get("details") or {}),
+            },
+        )
+
+
+def materialize_worker_status_history(
+    config: HydraFlowConfig, seed: MockWorldSeed
+) -> None:
+    """Append seeded BACKGROUND_WORKER_STATUS rows to the on-disk event log (#10133).
+
+    ``TrustFleetSanityLoop._collect_window_metrics`` computes its 24h
+    ticks/repair/error window via ``EventBus.load_events_since`` — a DISK
+    read (``EventLog.load``), not the in-memory ``EventBus._history`` list
+    ``/api/events`` falls back to. Each row is appended in the exact
+    ``HydraFlowEvent.model_dump_json()`` format ``EventLog.append`` writes
+    (mirrors that method's own ``append_jsonl`` call, minus its lock file —
+    nothing else writes to the log this early in boot). Each entry's relative
+    ``age_seconds`` (mirrors ``worker_heartbeats``) back-dates the row's
+    ``timestamp`` from boot, so the seed never rots. Writing the rows alone
+    is not sufficient — the caller must ALSO attach a real
+    ``EventLog(config.event_log_path)`` to the shared event bus (see
+    ``main()`` / ``MockWorld._wire_seed_loop_seams``), since the loop's read
+    goes through the bus, not this file directly. Empty
+    ``worker_status_history`` (every other scenario) writes nothing.
+    """
+    now = datetime.now(UTC)
+    for worker, entries in seed.worker_status_history.items():
+        for entry in entries:
+            age_seconds = float(entry.get("age_seconds", 0))
+            ts = (now - timedelta(seconds=age_seconds)).isoformat()
+            event = HydraFlowEvent(
+                type=EventType.BACKGROUND_WORKER_STATUS,
+                timestamp=ts,
+                data=BackgroundWorkerStatusPayload(
+                    worker=worker,
+                    status=str(entry.get("status", "ok")),
+                    last_run=ts,
+                    details=dict(entry.get("details") or {}),
+                ),
+            )
+            append_jsonl(config.event_log_path, event.model_dump_json())
+
+
+def resolve_self_wiki_root(config: HydraFlowConfig) -> Path:
+    """Return the wiki_root a fresh ``RepoWikiStore`` should point at (#10133).
+
+    MIRRORS ``service_registry.build_services``'s ``repo_wiki_store``
+    construction EXACTLY (same fallback order): the self-repo's wiki lives
+    at ``docs/wiki/`` when it exists (git-tracked alongside the code), else
+    the runtime-cache ``config.data_path("repo_wiki")``. Dockerfile.agent
+    does NOT ship ``docs/`` into the sandbox image (only ``src``/``tests``/
+    ``templates``/``static`` are copied), so the docker tier always takes the
+    fallback branch; the in-process ``MockWorld`` harness usually does too
+    (its ``config.repo_root`` is a bare ``tmp_path``). A single source of
+    truth here keeps ``materialize_wiki_fixtures`` (below) and any port a
+    caller builds pointed at the exact same directory the real (read-only)
+    ``repo_wiki_store`` reads from.
+    """
+    wiki_root = config.repo_root / "docs" / "wiki"
+    if not wiki_root.exists():
+        wiki_root = config.data_path("repo_wiki")
+    return wiki_root
+
+
+def materialize_wiki_fixtures(config: HydraFlowConfig, seed: MockWorldSeed) -> None:
+    """Ingest seeded repo-wiki fixture entries via a REAL ``RepoWikiStore`` (#10133).
+
+    ``WikiRotDetectorLoop`` reads wiki content through the same structured
+    ``parse_topic_page`` parse ``RepoWikiStore`` uses to write itself (issue
+    #9936): a hand-written markdown blob falls back to the legacy whole-file
+    regex row and never carries ``source_type``/``source_issue``/
+    ``fixed_in_pr``/``code_refs`` as modeled ``WikiEntry`` fields. Routing
+    each fixture through ``RepoWikiStore.ingest`` — the same call the real
+    ingest pipeline makes — is what GUARANTEES that structured shape rather
+    than merely approximating it.
+
+    A throwaway WRITABLE store is built here (the composition root's own
+    ``repo_wiki_store`` is ``read_only=True`` — its roots live under the
+    operator's main checkout, see ``service_registry.build_services``) —
+    pointed at :func:`resolve_self_wiki_root` so it lands exactly where the
+    loop's own store later reads from. See ``MockWorldSeed.repo_wiki_
+    fixtures`` for the per-entry field shape and why each fixture names its
+    own ``repo_slug`` rather than always targeting the (empty-in-sandbox)
+    self-repo slug. Empty ``repo_wiki_fixtures`` (every other scenario)
+    creates nothing.
+    """
+    if not seed.repo_wiki_fixtures:
+        return
+    store = RepoWikiStore(
+        wiki_root=resolve_self_wiki_root(config),
+        tracked_root=config.repo_root / config.repo_wiki_path,
+        self_slug=config.repo,
+        read_only=False,
+    )
+    by_repo: dict[str, list[WikiEntry]] = {}
+    for fixture in seed.repo_wiki_fixtures:
+        repo_slug = str(fixture["repo_slug"])
+        source_issue = fixture.get("source_issue")
+        entry = WikiEntry(
+            title=str(fixture["title"]),
+            content=str(fixture.get("content", "")),
+            source_type=str(fixture.get("source_type", "manual")),
+            source_issue=int(source_issue) if source_issue is not None else None,
+            fixed_in_pr=fixture.get("fixed_in_pr"),
+            code_refs=tuple(fixture.get("code_refs") or ()),
+        )
+        by_repo.setdefault(repo_slug, []).append(entry)
+    for repo_slug, entries in by_repo.items():
+        store.ingest(repo_slug, entries)
+
+
+@dataclass
+class SeededRegisteredLoop:
+    """Duck-typed ``BaseBackgroundLoop`` stand-in for a seeded registered worker.
+
+    ``BGWorkerManager.get_interval`` / ``cycle_timeout`` / ``run_started_at``
+    read through ``loop._get_default_interval()`` / ``loop._cycle_timeout_
+    seconds()`` / ``loop._run_started_at`` on whatever object is registered
+    under a name in its ``_bg_loop_registry`` dict. Production populates that
+    dict from the orchestrator's REAL loop instances (a chicken-and-egg with
+    ``BGWorkerManager`` itself — see ``orchestrator.py``); a seeded scenario
+    doesn't need a fully-wired ``BaseBackgroundLoop`` (LoopDeps, ports, ...),
+    only these three duck-typed members traversed by
+    ``HealthMonitorLoop._check_worker_staleness`` (#10086). Mirrors the
+    ``stalled_loop = MagicMock()`` shape used by
+    ``tests/scenarios/test_loop_stall_restart_scenario.py``, but as a plain
+    class (no ``unittest.mock`` import in production composition-root code).
+    """
+
+    _interval_seconds: int
+    _timeout_seconds: int
+    _run_started_at: datetime | None = None
+
+    def _get_default_interval(self) -> int:
+        return self._interval_seconds
+
+    def _cycle_timeout_seconds(self) -> int:
+        return self._timeout_seconds
+
+
+def materialize_registered_workers(
+    state: Any, config: HydraFlowConfig, seed: MockWorldSeed
+) -> BGWorkerManager | None:
+    """Build a ``BGWorkerManager`` whose registered-loop set matches the seed (#10086).
+
+    ``HealthMonitorLoop._check_worker_staleness`` filters every heartbeat
+    through ``bg_workers.registered_loop_names()`` (backed by
+    ``BGWorkerManager``'s ``_bg_loop_registry`` dict) — a heartbeat for a name
+    absent from that set never reaches the restart/escalate logic at all, so
+    seeding ``worker_heartbeats`` (#9643/#9904) alone can only exercise the
+    dead-man-switch's *read* path, never a genuine stall escalation. Each
+    seed entry optionally carries ``interval_seconds`` / ``cycle_timeout_
+    seconds`` (both default 60) consumed by a lightweight
+    ``SeededRegisteredLoop`` stand-in — no real loop boot required. Returns
+    ``None`` (no-op) when ``registered_workers`` is empty; the caller must
+    then leave ``HealthMonitorLoop._bg_workers`` unset, exactly as before
+    #10086 — every existing scenario is unaffected.
+    """
+    if not seed.registered_workers:
+        return None
+    registry: dict[str, Any] = {
+        name: SeededRegisteredLoop(
+            _interval_seconds=int(entry.get("interval_seconds", 60)),
+            _timeout_seconds=int(entry.get("cycle_timeout_seconds", 60)),
+        )
+        for name, entry in seed.registered_workers.items()
+    }
+    return BGWorkerManager(config, state, registry)
+
+
+@dataclass(frozen=True)
+class SeededActivationProposal:
+    """Duck-typed stand-in for ``scripts.gates.activation.ActivationProposal``.
+
+    GateActivatorLoop touches only these attributes (``_proposal_key`` /
+    ``_issue_body``); its own ``ActivationProposal`` import is
+    TYPE_CHECKING-only. A local mirror keeps the composition root off the
+    ``scripts`` package, which Dockerfile.agent does NOT ship into the
+    sandbox image (only ``src``/``tests``/``templates``/``static`` are
+    copied) — a real import would crash the entrypoint at boot.
+    """
+
+    name: str
+    dimension: str
+    required_on: tuple[str, ...]
+    workflow: str
+    job: str
+    make_target: str
+
+
+def build_seeded_gate_detector(
+    gate_activations: list[dict[str, Any]],
+) -> Callable[[], Any]:
+    """Detector stand-in returning seed-scripted activation proposals (#9543).
+
+    The production detector reads the repo's real gates.toml / workflows /
+    Makefile — all steady-state (no planned gates) in the baked sandbox image,
+    so the file-a-proposal path could never fire. Swapping the loop's existing
+    ``detector=`` injection point for this closure at the composition root is
+    the same DI pattern as the ``_mockworld_fake_llm`` sentinel wiring.
+    """
+    proposals = [
+        SeededActivationProposal(
+            name=str(entry["name"]),
+            dimension=str(entry.get("dimension", "tests")),
+            required_on=tuple(entry.get("required_on", ("main",))),
+            workflow=str(entry.get("workflow", "test.yml")),
+            job=str(entry.get("job", "tests")),
+            make_target=str(entry.get("make_target", "")),
+        )
+        for entry in gate_activations
+    ]
+
+    async def _detect() -> list[SeededActivationProposal]:
+        return list(proposals)
+
+    return _detect
+
+
+# Fixed canonical baseline served to the seeded auditor. Deliberately NOT the
+# repo's real contract: Dockerfile.agent ships no ``docs/`` into the sandbox
+# image, and a copy of the live contract in a seed would rot as gates.toml
+# evolves. The seam tests audit MECHANICS (normalize/diff/missing-ruleset
+# detection + issue filing) through the real ``audit_repo``; a scenario seeds
+# live rulesets against this stable baseline to produce drift (or cleanness).
+_CANONICAL_BASELINE: dict[str, dict[str, Any]] = {
+    "main protect": {
+        "name": "main protect",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+        "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}],
+    },
+    "staging protect": {
+        "name": "staging protect",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["refs/heads/staging"], "exclude": []}},
+        "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}],
+    },
+}
+
+
+def materialize_canonical_rulesets(config: HydraFlowConfig) -> Path:
+    """Write the fixed canonical ruleset baseline to disk; return its dir.
+
+    ``branch_protection_audit.load_canonical`` reads
+    ``main_ruleset.json``/``staging_ruleset.json`` from a directory; both
+    loaders materialize this one under the writable data root so the REAL
+    audit code runs unmodified with no dependency on repo ``docs/`` (absent
+    from the sandbox image). Idempotent.
+    """
+    canonical_dir = config.repo_data_path("sandbox_canonical_rulesets")
+    canonical_dir.mkdir(parents=True, exist_ok=True)
+    (canonical_dir / "main_ruleset.json").write_text(
+        json.dumps(_CANONICAL_BASELINE["main protect"], indent=2)
+    )
+    (canonical_dir / "staging_ruleset.json").write_text(
+        json.dumps(_CANONICAL_BASELINE["staging protect"], indent=2)
+    )
+    return canonical_dir
+
+
+def build_seeded_branch_protection_auditor(
+    config: HydraFlowConfig,
+    github: FakeGitHub,
+    canonical_dir: Path | None = None,
+) -> Callable[[], Any]:
+    """Auditor stand-in serving live rulesets from FakeGitHub (#9543/#9644).
+
+    Runs the REAL ``audit_repo`` diff — its inputs are swapped: the
+    live-ruleset fetch moves from the raw-``gh`` ``gh_fetch_rulesets``
+    (unreachable on the air-gapped network) to ``FakeGitHub.fetch_rulesets``
+    serving ``seed.rulesets``, the legacy-branch-protection fetch moves to
+    ``FakeGitHub.fetch_legacy_protection`` (empty by default — #10148), and
+    ``canonical_dir`` defaults to the materialized fixed baseline (see
+    ``materialize_canonical_rulesets``).
+    """
+    if canonical_dir is None:
+        canonical_dir = materialize_canonical_rulesets(config)
+
+    async def _audit() -> AuditReport:
+        return await asyncio.to_thread(
+            audit_repo,
+            config.repo,
+            canonical_dir,
+            fetch_rulesets=github.fetch_rulesets,
+            fetch_legacy_protection=github.fetch_legacy_protection,
+        )
+
+    return _audit
+
+
+def air_gap_runner_sentinels(svc: ServiceRegistry, fake_llm: FakeLLM) -> None:
+    """Route every remaining raw ``claude``/``git`` spawn on ``svc`` to the fakes.
+
+    ``build_services`` already air-gaps the four phase runners (``runners=
+    fake_llm``) and the docker dispatch (``subprocess_runner=``). This attaches
+    the fake-LLM sentinels + fake repo-prober for the paths those two seams do
+    NOT cover, so no runner or background loop can reach the network via a raw
+    spawn:
+
+    - ``HealthMonitorLoop._repo_prober`` — production ``DefaultRepoProber``
+      shells a raw ``git ls-remote`` (#10140); the persistent-error self-repair
+      path reaches it whenever the health monitor runs. Swap in a fake that
+      reports "reachable" without spawning.
+    - ``svc.reviewers`` advisor routing — ``ReviewPhase._build_post_verify_
+      runner``'s adapter probes ``_mockworld_fake_llm`` before falling through
+      to ``ReviewRunner._execute`` (a real Claude spawn). With ``runners=
+      fake_llm`` ``svc.reviewers`` IS the fake runner, whose ``__dict__``
+      carries the assignment cleanly.
+    - ADR-0063/ADR-0107 engines (discover/shape/plan-review/spec-review/
+      diagnostic/decompose-council) each consult ``getattr(self,
+      "_mockworld_fake_llm", None)`` in their subprocess-dispatch method before
+      the real ``claude`` spawn (#9796).
+
+    Shared by :func:`main` (the docker sandbox entrypoint) and
+    ``tests.scenarios.fakes.mock_world.MockWorld._build_wired_orchestrator``
+    (the in-process browser-scenario wired orch) so the two air-gaps cannot
+    drift — a single missed path re-opens the exact hang class
+    #9796/#10140/#10215 document (#10253).
+    """
+    svc.health_monitor_loop._repo_prober = _FakeRepoProber()
+    svc.reviewers._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    discover_runner = getattr(svc, "discover_runner", None)
+    if discover_runner is not None:
+        discover_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    shape_runner = getattr(svc, "shape_runner", None)
+    if shape_runner is not None:
+        shape_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    plan_reviewer = getattr(svc.planner_phase, "_plan_reviewer", None)
+    if plan_reviewer is not None:
+        plan_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    spec_reviewer = getattr(svc.implementer, "_spec_reviewer", None)
+    if spec_reviewer is not None:
+        spec_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    diagnostic_runner = getattr(svc.diagnostic_loop, "_runner", None)
+    if diagnostic_runner is not None:
+        diagnostic_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    decompose_council = getattr(svc.auto_agent_preflight_loop, "_council", None)
+    if decompose_council is not None:
+        decompose_council._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+
+
 async def main() -> None:
     config = load_runtime_config()
     # Disable production code paths that reach services unreachable on the
     # air-gapped sandbox network (see the helper for the per-flag rationale).
     _apply_sandbox_config_overrides(config)
     seed = _load_seed()
-    event_bus = EventBus()
+    # Scenario-chosen config knobs carried on the seed (e.g. s82's ADR-0042
+    # staging mode) — after the unconditional air-gap overrides above.
+    apply_seed_config_overrides(config, seed)
+    # A real EventLog is only attached when a scenario seeds worker-status
+    # history (#10133) — every other scenario keeps the historical no-log
+    # ``EventBus()`` so ``/api/events`` continues falling back to in-memory
+    # history exactly as before. TrustFleetSanityLoop's window read
+    # (``EventBus.load_events_since``) needs the disk-backed log to see
+    # anything materialize_worker_status_history writes below.
+    event_bus = EventBus(
+        event_log=EventLog(config.event_log_path)
+        if seed.worker_status_history
+        else None
+    )
     state = build_state_tracker(config)
     stop_event = asyncio.Event()
 
@@ -238,6 +917,25 @@ async def main() -> None:
         for _ in range(count):
             state.bump_auto_agent_attempts(int(issue_number))
 
+    # Stale-worktree + expired-run seeding (#9543). Both act on state/disk
+    # before the loops boot; empty seed fields are no-ops.
+    seed_stale_workspaces(state, config, seed)
+    materialize_expired_runs(config, seed)
+
+    # EpicState / health-metrics / heartbeat seeding (#9643). All act on
+    # state/disk before build_services wires the REAL EpicManager and
+    # HealthMonitorLoop over them; empty seed fields are no-ops.
+    materialize_epic_states(state, seed)
+    materialize_health_metrics(config, seed)
+    materialize_worker_heartbeats(state, seed)
+    # Worker-status event HISTORY (#10133) — pairs with the event_bus/EventLog
+    # wiring above; empty seed field writes nothing.
+    materialize_worker_status_history(config, seed)
+    # Repo-wiki fixture entries (#10133 PIECE 2) — ingested into the SAME
+    # wiki_root the real (read-only) ``repo_wiki_store`` below reads from;
+    # empty seed field writes nothing.
+    materialize_wiki_fixtures(config, seed)
+
     # Every async-touched ``subprocess.run`` site in production code now
     # specifies ``timeout=`` (PRs #8454, #8456, #8468 — enforced by
     # ``tests/regressions/test_async_subprocess_timeouts.py``), so caretaker
@@ -256,6 +954,9 @@ async def main() -> None:
         update_status=lambda *_a, **_kw: None,
         is_enabled=_build_caretaker_enabled_cb(seed.loops_enabled),
         get_interval=lambda *_a, _iv=_loop_interval, **_kw: _iv,
+        # No sandbox scenario relies on watchdog firing early — real config
+        # defaults keep the per-cycle bound generous (#9503).
+        get_watchdog_timeout=lambda *_a, **_kw: config.loop_watchdog_default_seconds,
     )
 
     # FakeSubprocessRunner short-circuits every remaining shell-out to
@@ -283,61 +984,107 @@ async def main() -> None:
         subprocess_runner=fake_subprocess_runner,
     )
 
-    # Attach the advisor-routing sentinel — mirrors
-    # tests/scenarios/fakes/mock_world.py::_wire_targets so
-    # ReviewPhase._build_post_verify_runner's ``_PostVerifyRunner.run``
-    # adapter routes advisor consults into FakeLLM (via
-    # ``pop_advisor_result``) instead of falling through to
-    # ``ReviewRunner._execute``, which would spawn a real Claude
-    # subprocess and fail under the sandbox's air-gapped network.
+    # Registered-worker SET for the dead-man-switch stall/escalate sweep
+    # (#10086). ``HealthMonitorLoop._check_worker_staleness`` only sweeps
+    # names present in a wired BGWorkerManager's ``registered_loop_names()``
+    # — without this, a seeded ``worker_heartbeats`` stale entry (#9643/#9904)
+    # can never reach the restart/escalate path. None when
+    # seed.registered_workers is empty — HealthMonitorLoop._bg_workers stays
+    # unset, unchanged from pre-#10086 behavior.
     #
-    # The sentinel must land on the SAME object the production runner
-    # adapter probes (``parent._reviewers.__dict__``). With
-    # ``runners=fake_llm`` above, ``svc.reviewers`` IS the
-    # ``_FakeReviewRunner`` — a plain Python instance whose ``__dict__``
-    # carries the assignment cleanly.
-    svc.reviewers._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    # NOTE: this manager is BUILT here but WIRED onto the health monitor only
+    # after the orchestrator is constructed (see below, #10315) — the
+    # orchestrator's ``__init__`` re-calls ``set_bg_workers`` and would clobber
+    # a seeded wiring done here.
+    bg_workers = materialize_registered_workers(state, config, seed)
 
-    # ADR-0063 sentinel wiring (W3a/W3b/W4/W5). Each runner consults the
-    # sentinel via ``getattr(self, "_mockworld_fake_llm", None)`` in its
-    # subprocess-dispatch method; setting the attribute here lets sandbox
-    # scenarios drive failure-path recovery without producing synthetic
-    # subprocess transcripts.
-    discover_runner = getattr(svc.discover_phase, "_runner", None)
-    if discover_runner is not None:
-        discover_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-    plan_reviewer = getattr(svc.planner_phase, "_plan_reviewer", None)
-    if plan_reviewer is not None:
-        plan_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-    expert_council = getattr(svc.shape_phase, "_council", None)
-    if expert_council is not None:
-        expert_council._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-    # ShapeRunner post-dates the ``runners=fake_llm`` rebinding seam (which
-    # covers only triage/plan/implement/review), so build_services constructs
-    # a REAL one whose ``run_turn`` subprocess wedges the air-gapped sandbox
-    # exactly like the DiscoverRunner spawn (#9796 — froze the shape loop
-    # heartbeat once discover was unblocked). Drop it to None: ShapePhase's
-    # no-runner path posts stub Direction A/B options and the scripted
-    # ExpertCouncil (sentinel attached above) selects the direction —
-    # mirroring the Tier-1 in-process harness, which wires no shape runner
-    # either (tests/scenarios/fakes/mock_world.py).
-    svc.shape_phase._runner = None
-    spec_reviewer = getattr(svc.implementer, "_spec_reviewer", None)
-    if spec_reviewer is not None:
-        spec_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-    # DiagnosticRunner.diagnose spawns a real ``claude`` subprocess that hangs
-    # in the air-gapped sandbox; the sentinel routes it to a not-fixable
-    # diagnosis so review-fix-cap escalations reach HITL (s05).
-    diagnostic_runner = getattr(svc.diagnostic_loop, "_runner", None)
-    if diagnostic_runner is not None:
-        diagnostic_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-    # DecompositionCouncil (decompose-to-converge, ADR-0105): route its two
-    # seam calls (direction + validation) to scripted transcripts so a scenario
-    # (s54) can drive the decompose terminal deterministically. The council
-    # lives on the auto-agent loop when epic_manager/runner were wired.
-    decompose_council = getattr(svc.auto_agent_preflight_loop, "_council", None)
-    if decompose_council is not None:
-        decompose_council._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    # Air-gap every remaining raw ``claude``/``git`` spawn path the
+    # ``runners=fake_llm`` / injected ``subprocess_runner`` seams above do not
+    # cover — the fake-LLM sentinels + fake repo-prober (#9796/#10140). Shared
+    # with MockWorld's in-process wired orch so the two air-gaps can't drift
+    # (#10253); see ``air_gap_runner_sentinels`` for the per-path rationale.
+    air_gap_runner_sentinels(svc, fake_llm)
+
+    # Prompt self-refinement (#9724) air-gap seam. SkillPromptEvalLoop's refine
+    # path has two pre-PR escape points that ``runners=fake_llm`` does NOT cover:
+    # ``_run_corpus`` spawns ``make trust-adversarial`` and ``_refine_llm_complete``
+    # spawns a real ``claude`` via run_lightweight_agent (the #9796 real-claude
+    # wedge class). When a scenario (s56) scripts a corpus regression, replace
+    # both with air-gapped stand-ins so refine runs on FakeLLM/FakeGitHub state:
+    # ``_run_corpus`` returns the seeded PASS→FAIL case and ``_refine_llm`` returns
+    # the seeded patch. The seeded patch is crafted to trip ``check_tripwires`` so
+    # the loop exercises the full synth→parse→tripwire chain and returns BEFORE
+    # ``_open_refine_pr`` — whose live-validation ``corpus_runner`` subprocess and
+    # raw git/gh PR-open have no Fake seam and cannot be air-gapped. Empty seed
+    # fields (every other scenario, incl. s17) leave production ``_run_corpus`` /
+    # ``_refine_llm`` untouched.
+    if seed.skill_prompt_corpus_cases:
+        _refine_loop = svc.skill_prompt_eval_loop
+        _seeded_cases: list[dict[str, Any]] = [
+            dict(c) for c in seed.skill_prompt_corpus_cases
+        ]
+
+        async def _seeded_run_corpus(
+            _cases: list[dict[str, Any]] = _seeded_cases,
+        ) -> list[dict[str, Any]]:
+            return [dict(c) for c in _cases]
+
+        # vars() assignment: instance-level seam without tripping the
+        # method-assign checker or ruff's B010 setattr rewrite.
+        vars(_refine_loop)["_run_corpus"] = _seeded_run_corpus
+        _refine_loop._refine_llm = _SeededRefineLLM(seed.skill_prompt_refine_patch)
+
+    # IssueRefinementLoop (#9957) air-gap seam. The loop reads the whole open
+    # backlog via PRPort (Faked) and then spends one structured LLM call per dup
+    # candidate / priority target — the judgment call shells out to a real
+    # ``claude`` via run_lightweight_agent in production (the #9796
+    # real-claude-wedge class). When a scenario (s57) seeds a backlog, populate
+    # the shared FakeGitHub with it as open issues (label-free, so the pipeline's
+    # ``hydraflow-*``-only store refresh never picks them up — only the
+    # backlog-wide refinement sweep sees them) and inject a scripted refinement
+    # LLM so judgment/priority never reach a real ``claude``. The scripted dup
+    # verdict is a likely_dup/medium PROPOSE (not an auto-close), so the tick
+    # renders an operator digest without any GitHub close write. Empty seed
+    # (every other scenario, incl. s16/s56) leaves production ``_refinement_llm``
+    # untouched.
+    if seed.issue_refinement_backlog:
+        for entry in seed.issue_refinement_backlog:
+            number = int(entry["number"])
+            shared_github.add_issue(
+                number=number,
+                title=str(entry.get("title", "")),
+                body=str(entry.get("body", "")),
+                labels=list(entry.get("labels", []) or []),
+            )
+            updated_at = entry.get("updated_at")
+            if updated_at:
+                shared_github.set_issue_updated_at(number, str(updated_at))
+        # Instance-level data attribute (not a method) — a plain assignment is
+        # the sanctioned seam here, mirroring ``_refine_loop._refine_llm`` above.
+        svc.issue_refinement_loop._refinement_llm = _SeededRefinementLLM(
+            list(seed.issue_refinement_verdicts)
+        )
+
+    # GateActivatorLoop (#9543) air-gap seam: when the scenario scripts
+    # activation proposals, swap the loop's existing ``detector=`` injection
+    # point for a closure returning them — the same composition-root DI as the
+    # ``_mockworld_fake_llm`` sentinel wiring. ``create_issue`` already routes
+    # through FakeGitHub. Empty seed: production detector untouched.
+    if seed.gate_activations:
+        svc.gate_activator_loop._detector = build_seeded_gate_detector(
+            seed.gate_activations
+        )
+
+    # BranchProtectionAuditorLoop (#9543/#9644) air-gap seam: when the
+    # scenario seeds live rulesets, rebind the auditor so the REAL
+    # ``audit_repo`` diff runs against ``FakeGitHub.fetch_rulesets`` instead
+    # of the raw-``gh`` ``gh_fetch_rulesets`` (which errors every cycle on the
+    # air-gapped network, reducing s41's heartbeat to an ``{'error': True}``
+    # tick). Empty seed: production auditor untouched.
+    if seed.rulesets:
+        svc.branch_protection_auditor_loop._auditor = (
+            build_seeded_branch_protection_auditor(config, shared_github)
+        )
 
     orch = HydraFlowOrchestrator(
         config,
@@ -345,6 +1092,23 @@ async def main() -> None:
         state=state,
         services=svc,
     )
+
+    # Wire the seeded registered-worker set onto the health monitor's stall
+    # sweep AFTER constructing the orchestrator (#10315). The orchestrator's
+    # ``__init__`` builds its OWN BGWorkerManager from the REAL loop registry
+    # and re-calls ``svc.health_monitor_loop.set_bg_workers(...)``
+    # (orchestrator.py) — doing this wiring before the orchestrator existed
+    # (as #10086 originally did) silently loses it, because that call replaces
+    # the lightweight ``SeededRegisteredLoop`` (interval 5s,
+    # ``_run_started_at=None``, no ``restart_cb`` → escalates on the first
+    # stale sweep) with the real ``workspace_gc`` loop (interval 1800s, a
+    # boot-time ``_run_started_at`` that holds the sweep's young-task window
+    # open for the entire scenario, and a wired ``restart_cb``) — so the
+    # seeded stall never escalates. Re-applying it here makes the seeded
+    # manager the one the sweep actually reads. No-op when
+    # ``seed.registered_workers`` is empty (every other scenario).
+    if bg_workers is not None:
+        svc.health_monitor_loop.set_bg_workers(bg_workers)
 
     dashboard = HydraFlowDashboard(
         config=config,

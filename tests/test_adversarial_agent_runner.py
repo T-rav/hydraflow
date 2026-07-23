@@ -44,7 +44,8 @@ class FakeRunner:
         input=None,
         timeout=None,
         env=None,
-        cwd=None,  # noqa: A002
+        cwd=None,  # noqa: A002,
+        **_kwargs: object,  # #9577 cancel_check/cancel_poll_interval
     ) -> subprocess.CompletedProcess[str]:
         self.calls.append(
             {"cmd": list(cmd), "input": input, "timeout": timeout, "env": env}

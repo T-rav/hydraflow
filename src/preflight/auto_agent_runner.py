@@ -92,6 +92,7 @@ class AutoAgentRunner(BaseSubprocessRunner[PreflightSpawn]):
             process=None,
             output_text=outcome.transcript,
             cost_usd=outcome.cost_usd,
+            cost_unknown=outcome.cost_unknown,
             tokens=_coerce_int(outcome.usage_stats.get("total_tokens")),
             crashed=outcome.crashed,
             prompt_hash=outcome.prompt_hash,

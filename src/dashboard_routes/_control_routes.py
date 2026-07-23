@@ -21,9 +21,14 @@ from admin_tasks import (
 )
 from app_version import get_app_version
 from config import HydraFlowConfig, save_config_file
-from dashboard_routes._common import _INTERVAL_BOUNDS
+from dashboard_routes._common import (
+    _INTERVAL_BOUNDS,
+    _WATCHDOG_TIMEOUT_BOUNDS,
+    _WATCHDOG_TIMEOUT_EXCLUDED_WORKERS,
+)
 from dashboard_routes._routes import RouteContext
 from events import EventType, HydraFlowEvent
+from git_revision import get_boot_sha, get_commits_behind
 from models import (
     BackgroundWorkersResponse,
     BackgroundWorkerState,
@@ -293,6 +298,31 @@ _bg_worker_defs = [
         "Purges expired pipeline run artifacts per TTL and size-cap config; keeps the runs store from growing unbounded.",
     ),
     (
+        "gate_health",
+        "Gate Health",
+        "Weekly read-only CI-gate auditor: pass-rate distributions, blame-correlation, missing failure artifacts, stale quarantines.",
+    ),
+    (
+        "pr_red_repair",
+        "PR Red Repair",
+        "Detects settled-red open PRs and bounded-reruns infra-flake CI; escalates via rollup issue once the rerun budget is exhausted (#10027 Phase 1).",
+    ),
+    (
+        "erosion_metrics",
+        "Erosion Metrics",
+        "v1: runs the change-spread and concept-scatter sensors over commits merged since the last tick; files above-baseline drift as hydraflow-find issues for human triage (Pattern B). See #10107, epic #10104.",
+    ),
+    (
+        "adr_drift_resolver",
+        "ADR Drift Resolver",
+        "Triage-before-escalate for adr_touchpoint_auditor's ADR-drift rollups: one LLM call classifies each as consistent (auto-close), real/over/dead-citation drift (relabel hydraflow-find with an ADR-edit brief), or low-confidence (HITL, rare). Fail-closed — only a confident consistent verdict auto-closes. See #9976.",
+    ),
+    (
+        "issue_refinement",
+        "Issue Refinement",
+        "Backlog-wide duplicate detection, priority scoring, and a rolling operator digest issue.",
+    ),
+    (
         "sandbox_failure_fixer",
         "Sandbox Failure Fixer",
         "Auto-fixes promotion PRs failing sandbox CI by dispatching the auto-agent",
@@ -488,12 +518,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             )
             return JSONResponse({"status": "started"})
 
-        # Legacy single-repo/test wiring (no registry): create+run the host orch.
+        # Legacy single-repo/test wiring (no registry): run the host orch.
         orch = ctx.get_orchestrator()
         if orch and orch.running:
             return JSONResponse({"error": "already running"}, status_code=409)
-
-        from orchestrator import HydraFlowOrchestrator
 
         # Remove pipeline workers from the disabled set
         existing_disabled = ctx.state.get_disabled_workers()
@@ -502,14 +530,25 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         if cleaned != existing_disabled:
             ctx.state.set_disabled_workers(cleaned)
 
-        new_orch = HydraFlowOrchestrator(
-            ctx.config,
-            event_bus=ctx.event_bus,
-            state=ctx.state,
-            pipeline_enabled=False,
-        )
-        ctx.set_orchestrator(new_orch)
-        ctx.set_run_task(asyncio.create_task(new_orch.run()))
+        # REUSE an already-wired orchestrator when one is set (e.g. MockWorld's
+        # air-gapped fake-wired orch, or an orch a prior Start left stopped)
+        # instead of discarding it for a fresh HydraFlowOrchestrator built with
+        # REAL Docker/gh services. In the browser-scenario harness that swap
+        # replaced the fake-wired orch with one running ~60 real background
+        # loops in-process, wedging the shared event loop (the 2715s RC hang,
+        # #10253/#10215). Only construct one when none exists (the legacy
+        # production-less path); never replace a live wiring.
+        if orch is None:
+            from orchestrator import HydraFlowOrchestrator
+
+            orch = HydraFlowOrchestrator(
+                ctx.config,
+                event_bus=ctx.event_bus,
+                state=ctx.state,
+                pipeline_enabled=False,
+            )
+            ctx.set_orchestrator(orch)
+        ctx.set_run_task(asyncio.create_task(orch.run()))
         await ctx.event_bus.publish(
             HydraFlowEvent(
                 type=EventType.ORCHESTRATOR_STATUS,
@@ -575,12 +614,19 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
     )
 
     def _control_status_config(
-        cfg: HydraFlowConfig, *, latest_version: str, update_available: bool
+        cfg: HydraFlowConfig,
+        *,
+        latest_version: str,
+        update_available: bool,
+        boot_sha: str | None,
+        commits_behind: int | None,
     ) -> ControlStatusConfig:
         return ControlStatusConfig(
             app_version=get_app_version(),
             latest_version=latest_version,
             update_available=update_available,
+            boot_sha=boot_sha,
+            commits_behind=commits_behind,
             repo=cfg.repo,
             ready_label=cfg.ready_label,
             find_label=cfg.find_label,
@@ -595,6 +641,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             max_reviewers=cfg.max_reviewers,
             max_hitl_workers=cfg.max_hitl_workers,
             batch_size=cfg.batch_size,
+            queue_strategy=str(cfg.queue_strategy),
+            queue_weight_p1=cfg.queue_weight_p1,
+            queue_weight_p2=cfg.queue_weight_p2,
+            queue_weight_unprioritised=cfg.queue_weight_unprioritised,
             model=cfg.model,
             pr_unstick_batch_size=cfg.pr_unstick_batch_size,
             workspace_base=str(cfg.workspace_base),
@@ -637,6 +687,11 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         update_available = (
             update_result.update_available if update_result is not None else False
         )
+        # Boot SHA + commits-behind describe the running *process*, not any one
+        # managed repo, so compute them once and reuse across the rollup. Both
+        # are cheap, local, failure-tolerant git reads (None when unavailable).
+        boot_sha = get_boot_sha()
+        commits_behind = get_commits_behind()
 
         if repo is not None and repo.strip().lower() == REPO_ALL:
             per_repo: list[dict[str, Any]] = []
@@ -659,6 +714,8 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                             _cfg,
                             latest_version=latest_version,
                             update_available=update_available,
+                            boot_sha=boot_sha,
+                            commits_behind=commits_behind,
                         ).model_dump(),
                     }
                 )
@@ -673,6 +730,8 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                     d_cfg,
                     latest_version=latest_version,
                     update_available=update_available,
+                    boot_sha=boot_sha,
+                    commits_behind=commits_behind,
                 ),
                 mockworld_active=mockworld_any,
                 repos=per_repo,
@@ -692,6 +751,8 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 _cfg,
                 latest_version=latest_version,
                 update_available=update_available,
+                boot_sha=boot_sha,
+                commits_behind=commits_behind,
             ),
             mockworld_active=mockworld_active,
         )
@@ -931,6 +992,18 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 # loops without inventing intervals for event-driven ones.
                 interval = orch.get_bg_worker_interval(name)
 
+            # Determine watchdog-timeout override for this worker (#9503).
+            # Only resolvable with a live orchestrator — registered_loop_names()
+            # needs the real bg_loop_registry, and excludes principles_audit
+            # (its cycle bound bypasses the operator override entirely, #9639).
+            watchdog_timeout: int | None = None
+            if (
+                orch
+                and name in orch.registered_bg_loop_names()
+                and name not in _WATCHDOG_TIMEOUT_EXCLUDED_WORKERS
+            ):
+                watchdog_timeout = orch.get_bg_worker_timeout(name)
+
             entry = bg_states.get(name) or persisted_states.get(name)
             if entry:
                 last_run = entry.get("last_run")
@@ -952,6 +1025,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                         enabled=enabled,
                         last_run=last_run,
                         interval_seconds=interval,
+                        watchdog_timeout_seconds=watchdog_timeout,
                         next_run=_compute_next_run(last_run, interval),
                         details=details,
                         repo=slug,
@@ -965,6 +1039,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                         description=description,
                         enabled=enabled,
                         interval_seconds=interval,
+                        watchdog_timeout_seconds=watchdog_timeout,
                         details=inference_by_worker.get(name, {}),
                         repo=slug,
                     )
@@ -1065,6 +1140,55 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         orch.set_bg_worker_interval(name, interval)
         return JSONResponse(
             {"status": "ok", "name": name, "interval_seconds": interval}
+        )
+
+    @router.post("/api/control/bg-worker/watchdog-timeout")
+    async def set_bg_worker_watchdog_timeout(
+        body: dict[str, Any], repo: RepoSlugParam = None
+    ) -> JSONResponse:
+        """Update the per-cycle watchdog-timeout override for a background worker.
+
+        Mirrors ``/api/control/bg-worker/interval`` (#9503), with one ordering
+        difference: the editable-worker allowlist here is the LIVE
+        ``registered_loop_names()`` registry (minus principles_audit, whose
+        cycle bound bypasses the operator override, #9639) rather than a
+        static dict, so it can only be checked after the orchestrator is
+        resolved.
+        """
+        name = body.get("name")
+        timeout = body.get("watchdog_timeout_seconds")
+        if not name or timeout is None:
+            return JSONResponse(
+                {"error": "name and watchdog_timeout_seconds are required"},
+                status_code=400,
+            )
+        try:
+            timeout = int(timeout)
+        except (TypeError, ValueError):
+            return JSONResponse(
+                {"error": "watchdog_timeout_seconds must be an integer"},
+                status_code=400,
+            )
+        orch, rejected = _resolve_orch_for(repo)
+        if rejected is not None:
+            return rejected
+        if (
+            name not in orch.registered_bg_loop_names()
+            or name in _WATCHDOG_TIMEOUT_EXCLUDED_WORKERS
+        ):
+            return JSONResponse(
+                {"error": f"watchdog timeout not editable for worker '{name}'"},
+                status_code=400,
+            )
+        lo, hi = _WATCHDOG_TIMEOUT_BOUNDS
+        if timeout < lo or timeout > hi:
+            return JSONResponse(
+                {"error": (f"watchdog_timeout_seconds must be between {lo} and {hi}")},
+                status_code=422,
+            )
+        orch.set_bg_worker_timeout(name, timeout)
+        return JSONResponse(
+            {"status": "ok", "name": name, "watchdog_timeout_seconds": timeout}
         )
 
     @router.post("/api/admin/setup-staging-branch")

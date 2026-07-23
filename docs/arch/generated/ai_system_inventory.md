@@ -44,6 +44,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_BACKGROUND` | `background_tool` | `background_model` |
 | `HYDRAFLOW_IMPLEMENT` | `implementation_tool` | `model` |
 | `HYDRAFLOW_REVIEW` | `review_tool` | `review_model` |
+| `HYDRAFLOW_TEST_ADEQUACY_VERIFIER` | `test_adequacy_verifier_tool` | `test_adequacy_verifier_model` |
 | `HYDRAFLOW_PLANNER` | `planner_tool` | `planner_model` |
 | `HYDRAFLOW_TRIAGE` | `triage_tool` | `triage_model` |
 | `HYDRAFLOW_AC` | `ac_tool` | `ac_model` |
@@ -53,12 +54,14 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_ADR_REVIEW` | `adr_review_tool` | `adr_review_model` |
 | `HYDRAFLOW_REPORT_ISSUE` | `report_issue_tool` | `report_issue_model` |
 | `HYDRAFLOW_TERM_PROPOSER` | `term_proposer_tool` | `term_proposer_model` |
+| `HYDRAFLOW_ADR_DRIFT_RESOLVER` | `adr_drift_resolver_tool` | `adr_drift_resolver_model` |
 
-## Background loops (54)
+## Background loops (59)
 
 | Worker | Loop class | Area | Model role(s) | Long LLM cycle | Oversight | Purpose |
 |---|---|---|---|---|---|---|
 | `adr_conformance` | `AdrConformanceLoop` | Trust Fleet | — | — | HITL escalation | Evaluates every Accepted ADR's `Enforced by:` checks and files/updates remediation issues on drift. See ADR-0100. |
+| `adr_drift_resolver` | `AdrDriftResolverLoop` | Trust Fleet | — | — | HITL escalation | Triage-before-escalate for adr_touchpoint_auditor's ADR-drift rollups: one LLM call classifies each as consistent (auto-close), real/over/dead-citation drift (relabel hydraflow-find with an ADR-edit brief), or low-confidence (HITL, rare). Fail-closed — only a confident consistent verdict auto-closes. See #9976. |
 | `adr_reviewer` | `ADRReviewerLoop` | Caretaking | `adr_review_model` | — | — | Reviews proposed ADRs via a 3-judge council and routes to accept, reject, or escalate. |
 | `adr_touchpoint_auditor` | `AdrTouchpointAuditorLoop` | Trust Fleet | — | — | HITL escalation | Scans recently-merged PRs for ADR drift — cited src/ modules changed without the ADR being updated. Replaces the synchronous touchpoint gate. See ADR-0056. |
 | `auto_agent_preflight` | `AutoAgentPreflightLoop` | Auto-Agent (HITL Pre-Flight) | `adr_review_model`, `model` | — | HITL escalation | Intercepts hitl-escalation issues; runs an emulated-engineer subprocess to attempt autonomous resolution before the issue surfaces to a human (spec §1–§11; ADR-0050). |
@@ -67,7 +70,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `ci_monitor` | `CIMonitorLoop` | Quality Gates | — | — | — | Detects failing CI on main and files/auto-closes issues. |
 | `contract_refresh` | `ContractRefreshLoop` | Trust Fleet | — | — | HITL escalation; PR review + merge gate | Re-records fake-adapter cassettes and opens refresh PRs when committed cassettes drift from live behavior. |
 | `convergence_oscillation` | `ConvergenceOscillationLoop` | Auto-Agent (HITL Pre-Flight) | — | — | HITL escalation | Scans issue convergence ledgers for cross-boundary oscillation (repeated LOOP_BACK across triage/shape/plan or recurring review-lap findings) and escalates stuck issues to HITL, once each. See ADR-0098. |
-| `corpus_learning` | `CorpusLearningLoop` | Trust Fleet | `corpus_learning_synthesis_model` | — | HITL escalation; PR review + merge gate | Synthesizes adversarial cases from skill/discover/shape escape signals and opens corpus-update PRs. |
+| `corpus_learning` | `CorpusLearningLoop` | Trust Fleet | `corpus_learning_synthesis_model`, `review_model`, `test_adequacy_verifier_model` | — | HITL escalation; PR review + merge gate | Synthesizes adversarial cases from skill/discover/shape escape signals and opens corpus-update PRs. |
 | `cost_budget_watcher` | `CostBudgetWatcherLoop` | Caretaking | — | — | — | Polls rolling-24h LLM spend; disables caretaker loops when daily cap exceeded. Default unlimited. |
 | `dependabot_merge` | `DependabotMergeLoop` | Caretaking | — | — | HITL escalation | Auto-merges dependency update PRs from configured bots after CI passes. |
 | `detector_calibration` | `DetectorCalibrationLoop` | Auto-Agent (HITL Pre-Flight) | — | — | HITL escalation | Mines closed escalations for repeat-offender subjects — churn means the detector is miscalibrated, not the code. |
@@ -78,18 +81,22 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `entry_evidence` | `EntryEvidenceLoop` | Caretaking | — | — | — | Caretaker that links wiki entries to UL terms via LLM matching, populating Term.evidence so the Atlas Domain view can render entry leaves under their term parents. See ADR-0062. |
 | `epic_monitor` | `EpicMonitorLoop` | Caretaking | — | — | — | Detects stale epics and refreshes progress cache so the dashboard shows accurate sub-issue rollups. |
 | `epic_sweeper` | `EpicSweeperLoop` | Caretaking | — | — | — | Periodically sweeps open epics and auto-closes those with all sub-issues resolved. |
+| `erosion_metrics` | `ErosionMetricsLoop` | Trust Fleet | — | — | — | v1: runs the change-spread and concept-scatter sensors over commits merged since the last tick; files above-baseline drift as hydraflow-find issues for human triage (Pattern B). See #10107, epic #10104. |
 | `fake_coverage_auditor` | `FakeCoverageAuditorLoop` | Trust Fleet | — | — | HITL escalation | Flags fake-adapter methods without cassettes and scenario helpers nobody calls. |
 | `fitness_scorecard` | `FitnessScorecardLoop` | Caretaking | — | — | — | Computes per-loop fitness scores each tick by combining event history and issue attribution. Persists to fitness.jsonl and regenerates docs/arch/generated/loop-fitness.md. Read-only caretaker per ADR-0029. |
 | `flake_tracker` | `FlakeTrackerLoop` | Trust Fleet | — | — | HITL escalation | Detects persistently flaky tests across recent RC runs and files flake-tracker issues. |
 | `gate_activator` | `GateActivatorLoop` | Quality Gates | — | — | — | Proposes activating planned gates in gates.toml once the surface each protects exists (producing job + make target present, profile matches); files a reviewed issue. See ADR-0082. |
+| `gate_health` | `GateHealthLoop` | Caretaking | — | — | — | Weekly read-only CI-gate auditor: pass-rate distributions, blame-correlation, missing failure artifacts, stale quarantines. |
 | `github_cache` | `GitHubCacheLoop` | Caretaking | — | — | HITL escalation | Single-poller cache for GitHub data; serves all dashboard + loop consumers from one shared snapshot to avoid rate-limit fan-out. |
 | `health_monitor` | `HealthMonitorLoop` | Caretaking | — | — | HITL escalation | Analyzes pipeline trends, auto-tunes parameters, detects knowledge gaps, and ingests log patterns. |
 | `human_steering` | `HumanSteeringLoop` | Auto-Agent (HITL Pre-Flight) | — | — | — | Senses per-issue GitHub-comment steering directives (/steer, /pause, /resume, /redo, /abort) each tick and writes the steering reference (ADR-0099 #4). |
-| `label_drift_watcher` | `LabelDriftWatcherLoop` | Caretaking | — | — | — | Periodic scan for cross-entity issue/PR label drift (e.g., issue at hydraflow-ready while linked PR at hydraflow-review with commits); reconciles via per-entity swap_pipeline_labels. See ADR-0088. |
+| `issue_refinement` | `IssueRefinementLoop` | Caretaking | `background_model`, `issue_refinement_model` | ✅ | — | Backlog-wide duplicate detection, priority scoring, and a rolling operator digest issue. |
+| `label_drift_watcher` | `LabelDriftWatcherLoop` | Caretaking | — | — | HITL escalation | Periodic scan for cross-entity issue/PR label drift (e.g., issue at hydraflow-ready while linked PR at hydraflow-review with commits); reconciles via per-entity swap_pipeline_labels. See ADR-0088. |
 | `live_corpus_replay` | `LiveCorpusReplayLoop` | Trust Fleet | — | — | HITL escalation | Diffs fresh shadow-corpus samples against fake-adapter outputs to catch value-level drift between real and fake adapters; files one hydraflow-find issue per unique drift signature. See #8786 / ADR-0045. |
 | `log_ingest` | `LogIngestLoop` | Caretaking | — | — | — | Clusters and dedups recurring errors/warnings in HydraFlow's own server log and files them as fix-issues for the pipeline. |
 | `memory_backlog` | `MemoryBacklogLoop` | Caretaking | — | — | HITL escalation | Files hydraflow-find issues for pending entries in docs/wiki/memory-feedback/. |
 | `merge_state_watcher` | `MergeStateWatcherLoop` | Caretaking | — | — | HITL escalation | Auto-rebases or HITL-escalates open PRs flagged mergeable=CONFLICTING (RC, dependabot, agent). |
+| `pr_red_repair` | `PrRedRepairLoop` | Quality Gates | `model` | — | HITL escalation | Detects settled-red open PRs and bounded-reruns infra-flake CI; escalates via rollup issue once the rerun budget is exhausted (#10027 Phase 1). |
 | `pr_unsticker` | `PRUnstickerLoop` | Caretaking | `background_model` | — | HITL escalation | Requeues stalled HITL PRs by validating requirements and reopening flow. |
 | `pricing_refresh` | `PricingRefreshLoop` | Caretaking | — | — | PR review + merge gate | Daily upstream-pricing refresh caretaker — fetches LiteLLM JSON, opens PR on drift; bounds-guarded, always human-reviewed. |
 | `principles_audit` | `PrinciplesAuditLoop` | Trust Fleet | — | — | HITL escalation | Weekly ADR-0044 audit of HydraFlow-self plus managed repos; blocks onboarding on P1–P5 fails. |
@@ -101,7 +108,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `sandbox_failure_fixer` | `SandboxFailureFixerLoop` | Auto-Agent (HITL Pre-Flight) | `model` | — | HITL escalation | Auto-fixes promotion PRs failing sandbox CI by dispatching the auto-agent |
 | `security_patch` | `SecurityPatchLoop` | Caretaking | — | — | — | Polls Dependabot alerts and files issues for fixable vulnerabilities. |
 | `sentry_ingest` | `SentryLoop` | Caretaking | `sentry_model` | ✅ | — | Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline. |
-| `skill_prompt_eval` | `SkillPromptEvalLoop` | Caretaking | — | — | HITL escalation | Weekly adversarial-corpus gate against built-in skills; flags PASS→FAIL regressions. |
+| `skill_prompt_eval` | `SkillPromptEvalLoop` | Caretaking | `background_model`, `skill_prompt_refine_model` | — | HITL escalation; PR review + merge gate | Weekly adversarial-corpus gate against built-in skills; flags PASS→FAIL regressions. |
 | `staging_bisect` | `StagingBisectLoop` | Trust Fleet | — | — | HITL escalation; PR review + merge gate | Bisects RC red between last-green and current-red; opens auto-revert PRs and watches the next RC. |
 | `staging_promotion` | `StagingPromotionLoop` | Caretaking | `ac_model`, `adr_review_model`, `background_model`, `corpus_learning_synthesis_model`, `debug_model`, `planner_model`, `report_issue_model`, `review_model`, `sentry_model`, `subskill_model`, `system_model`, `transcript_summary_model`, `triage_model`, `wiki_compilation_model` | — | HITL escalation; PR review + merge gate | Cuts release-candidate snapshots from staging and auto-promotes them to main on green CI. See ADR-0042. |
 | `stale_issue` | `StaleIssueLoop` | Caretaking | — | — | HITL escalation | Auto-closes stale general issues (excludes HydraFlow lifecycle labels). Per-tag thresholds, configurable. Distinct from Stale Issue GC, which handles HITL escalations. |
@@ -119,7 +126,7 @@ Dashboard workers that are not background loops: the label-routed pipeline phase
 
 | Worker | Model role(s) | Oversight | Purpose |
 |---|---|---|---|
-| `implement` | `model`, `planner_model`, `review_model`, `transcript_summary_model` | HITL escalation; PR review + merge gate | Runs coding agents to implement planned issues and open pull requests. |
+| `implement` | `model`, `planner_model`, `review_model`, `test_adequacy_verifier_model`, `transcript_summary_model` | HITL escalation; PR review + merge gate | Runs coding agents to implement planned issues and open pull requests. |
 | `pipeline_poller` | — | — | Refreshes live pipeline snapshots for dashboard queue/status rendering. |
 | `plan` | `planner_model`, `transcript_summary_model`, `wiki_compilation_model` | HITL escalation | Builds implementation plans for triaged issues that are ready to execute. |
 | `review` | `review_model`, `transcript_summary_model`, `wiki_compilation_model` | HITL escalation | Reviews PRs, applies fixes, and merges approved work when checks pass. |

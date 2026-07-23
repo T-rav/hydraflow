@@ -7,11 +7,15 @@ run the pipeline, and assert on the world's final state.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import faulthandler
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
+from events import EventBus, EventLog
 from mockworld.fakes.fake_clock import FakeClock
 
 if TYPE_CHECKING:
@@ -32,6 +36,12 @@ from tests.scenarios.catalog import (
     loop_registrations as _loop_registrations,  # noqa: F401
 )
 from tests.scenarios.fakes.scenario_result import IssueOutcome, ScenarioResult
+
+#: Upper bound for ``orchestrator.stop()`` during teardown (#10073). Generous —
+#: a healthy stop path finishes in well under a second; the bound exists only to
+#: convert a wedged shutdown into a loud, attributed failure instead of a silent
+#: 20-minute CI cancel at event-loop close.
+_ORCHESTRATOR_STOP_TIMEOUT = 60.0
 
 
 class _SafeProxy:
@@ -250,6 +260,10 @@ class MockWorld:
         self._issues: dict[int, dict[str, Any]] = {}
         self._phase_hooks: list[tuple[str, Callable[[], None]]] = []
         self._ran = False
+        # Last seed given to apply_seed — run_with_loops wires the seed-seam
+        # loop overrides (stale worktrees, gate proposals, rulesets, expired
+        # runs) from it, mirroring sandbox_main's composition root (#9543).
+        self._applied_seed: MockWorldSeed | None = None
         self._dashboard: Any = None
         self._dashboard_url: str | None = None
 
@@ -356,6 +370,8 @@ class MockWorld:
         title: str,
         body: str,
         labels: list[str] | None = None,
+        state: str = "open",
+        updated_at: str | None = None,
     ) -> MockWorld:
         self._issues[number] = {
             "number": number,
@@ -363,7 +379,9 @@ class MockWorld:
             "body": body,
             "labels": labels or ["hydraflow-find"],
         }
-        self._github.add_issue(number, title, body, labels=labels)
+        self._github.add_issue(
+            number, title, body, labels=labels, state=state, updated_at=updated_at
+        )
         return self
 
     def add_repo(
@@ -467,6 +485,7 @@ class MockWorld:
         test code that wants to consume a sandbox scenario's seed() output
         without rewriting it as a fluent chain. Returns self for chaining.
         """
+        self._applied_seed = seed
         for repo_slug, repo_path in seed.repos:
             self.add_repo(repo_slug, repo_path)
         for issue_dict in seed.issues:
@@ -475,6 +494,8 @@ class MockWorld:
                 title=issue_dict["title"],
                 body=issue_dict["body"],
                 labels=list(issue_dict.get("labels", [])),
+                state=issue_dict.get("state", "open"),
+                updated_at=issue_dict.get("updated_at"),
             )
         for pr_dict in seed.prs:
             self._github.add_pr(
@@ -483,9 +504,12 @@ class MockWorld:
                 branch=pr_dict["branch"],
                 ci_status=pr_dict.get("ci_status", "pass"),
                 merged=pr_dict.get("merged", False),
+                mergeable=pr_dict.get("mergeable", True),
             )
             for label in pr_dict.get("labels", []):
                 self._github.add_pr_label(pr_dict["number"], label)
+        for name, cfg in seed.rulesets.items():
+            self._github.add_ruleset(name, cfg)
         for phase, by_issue in seed.scripts.items():
             for issue_number, results in by_issue.items():
                 for result in results:
@@ -758,8 +782,21 @@ class MockWorld:
             self._loop_ports["workspace"] = self._workspace
             self._loop_ports["state"] = self._harness.state
 
+        # Mirror sandbox_main's seed-seam composition wiring (#9543) so the
+        # in-process tier exercises the same active-trigger paths the docker
+        # tier does (dual-loader parity).
+        self._wire_seed_loop_seams(config)
+
         loop_instances = []
         for name in loops:
+            if name == "pipeline_poller":
+                # pipeline_poller is the orchestrator-level
+                # `_pipeline_stats_loop` (src/orchestrator.py ~965), NOT a
+                # BaseBackgroundLoop subclass, so LoopCatalog has no builder
+                # for it and instantiate() would raise "Unknown loop" (#9441).
+                # Handled as a special case in the execution loop below.
+                loop_instances.append((name, None))
+                continue
             instance = LoopCatalog.instantiate(
                 name, ports=self._loop_ports, config=config, deps=loop_deps
             )
@@ -767,11 +804,182 @@ class MockWorld:
 
         results: dict[str, dict[str, Any] | None] = {}
         for name, loop in loop_instances:
+            if name == "pipeline_poller":
+                orchestrator = await self._pipeline_poller_orchestrator()
+                stats: dict[str, Any] | None = None
+                for _ in range(cycles):
+                    await orchestrator.emit_pipeline_stats()
+                    stats = orchestrator.build_pipeline_stats().model_dump()
+                results[name] = stats
+                continue
             for _ in range(cycles):
                 stats = await loop._do_work()
                 results[name] = stats
 
         return results
+
+    async def _pipeline_poller_orchestrator(self) -> Any:
+        """Lazily build (and cache) a real orchestrator to drive pipeline_poller.
+
+        ``pipeline_poller`` is the orchestrator-level ``_pipeline_stats_loop``
+        (src/orchestrator.py ~965), not a ``BaseBackgroundLoop`` subclass, so
+        it has no ``_do_work()`` and ``LoopCatalog`` has no builder for it
+        (#9441). Rather than faking the emission, reuse the same
+        ``_build_wired_orchestrator`` helper the dashboard's
+        ``with_orchestrator=True`` path uses to construct a real
+        ``HydraFlowOrchestrator`` wired to this world's fakes, so
+        ``run_with_loops`` drives the genuine ``emit_pipeline_stats()`` and
+        publishes a real ``PIPELINE_STATS`` event on the harness bus — exactly
+        what happens in the docker sandbox stack. Cached on the world so
+        repeated calls (e.g. multiple scenarios in one test session) reuse the
+        same instance instead of re-wiring on every cycle.
+        """
+        if not hasattr(self, "_pipeline_orchestrator"):
+            self._pipeline_orchestrator = await self._build_wired_orchestrator(
+                self._harness.config, self._harness.bus, self._harness.state
+            )
+        return self._pipeline_orchestrator
+
+    def _wire_seed_loop_seams(self, config: Any) -> None:
+        """Wire seed-seam loop overrides from the last applied seed (#9543).
+
+        The dual-loader parity contract: any composition-root seam
+        ``sandbox_main`` wires from a ``MockWorldSeed`` field must be wired
+        here too, so ``test_sandbox_parity`` runs every scenario's active
+        path in-process as well. Reuses sandbox_main's public builders — one
+        implementation, no drift. Empty seed fields (or no ``apply_seed``
+        call at all) leave every port default untouched.
+        """
+        seed = self._applied_seed
+        if seed is None:
+            return
+        from mockworld.sandbox_main import (  # noqa: PLC0415
+            build_seeded_branch_protection_auditor,
+            build_seeded_gate_detector,
+            materialize_epic_states,
+            materialize_expired_runs,
+            materialize_health_metrics,
+            materialize_registered_workers,
+            materialize_wiki_fixtures,
+            materialize_worker_heartbeats,
+            materialize_worker_status_history,
+            resolve_self_wiki_root,
+            seed_stale_workspaces,
+        )
+
+        if seed.registered_workers:
+            # Mirrors sandbox_main's post-``build_services`` wiring: a
+            # BGWorkerManager backed by the seeded name set is handed to the
+            # catalog's health_monitor builder via the ``bg_workers`` port
+            # (``_build_health_monitor`` calls ``loop.set_bg_workers(...)``
+            # when the port is present), so
+            # ``HealthMonitorLoop._check_worker_staleness`` can traverse a
+            # seeded stall exactly as the docker tier does (#10086).
+            bg_workers = materialize_registered_workers(
+                self._harness.state, config, seed
+            )
+            if bg_workers is not None:
+                self._loop_ports.setdefault("bg_workers", bg_workers)
+
+        if seed.epic_states:
+            # Materialize into the REAL harness StateTracker and hand the loop
+            # builder a real EpicManager over the shared FakeGitHub (its
+            # default is a MagicMock whose check_stale_epics can never flag
+            # anything) — same dual-loader parity as sandbox_main, which gets
+            # a real EpicManager from build_services over the same state.
+            from epic import EpicManager  # noqa: PLC0415
+            from mockworld.fakes.fake_issue_fetcher import (  # noqa: PLC0415
+                FakeIssueFetcher,
+            )
+
+            materialize_epic_states(self._harness.state, seed)
+            self._loop_ports.setdefault(
+                "epic_manager",
+                EpicManager(
+                    config,
+                    self._harness.state,
+                    self._github,
+                    FakeIssueFetcher(github=self._github),
+                    self._harness.bus,
+                ),
+            )
+        if seed.health_metrics:
+            # Written via the run config: its memory_dir/repo_memory_dir are
+            # the paths the catalog-built HealthMonitorLoop reads (both derive
+            # from the same tmp repo_root as harness.config).
+            materialize_health_metrics(config, seed)
+        if seed.worker_heartbeats:
+            materialize_worker_heartbeats(self._harness.state, seed)
+        if seed.worker_status_history:
+            # Mirrors sandbox_main's ``main()`` wiring (#10133): the seeded
+            # rows only become readable once the loop's ``event_bus`` port
+            # has a REAL ``EventLog`` attached (``TrustFleetSanityLoop._
+            # collect_window_metrics`` reads via ``EventBus.load_events_
+            # since``, a disk read — the harness's default ``event_bus``
+            # port, when unseeded, falls back to a bare ``MagicMock`` whose
+            # ``load_events_since`` isn't awaitable at all, see
+            # ``_build_trust_fleet_sanity``).
+            materialize_worker_status_history(config, seed)
+            self._loop_ports.setdefault(
+                "event_bus", EventBus(event_log=EventLog(config.event_log_path))
+            )
+        if seed.stale_workspaces:
+            # Register the worktrees in the REAL harness StateTracker and hand
+            # that tracker to the loop builder (its default is an empty-world
+            # MagicMock, which can never surface a tracked workspace).
+            seed_stale_workspaces(self._harness.state, config, seed)
+            self._loop_ports.setdefault("workspace_gc_state", self._harness.state)
+        if seed.gate_activations:
+            self._loop_ports.setdefault(
+                "gate_activation_detect",
+                build_seeded_gate_detector(seed.gate_activations),
+            )
+        if seed.rulesets:
+            # Default canonical_dir: the same fixed baseline sandbox_main
+            # materializes under the (tmp-rooted) data root — both tiers
+            # audit seeded live rulesets against one deterministic contract.
+            self._loop_ports.setdefault(
+                "branch_protection_audit",
+                build_seeded_branch_protection_auditor(config, self._github),
+            )
+        if seed.expired_run_dirs:
+            from run_recorder import RunRecorder  # noqa: PLC0415
+
+            materialize_expired_runs(config, seed)
+            self._loop_ports.setdefault("run_recorder", RunRecorder(config))
+        if seed.repo_wiki_fixtures:
+            # Mirrors sandbox_main's ``main()`` wiring (#10133 PIECE 2): the
+            # catalog's ``wiki_store`` port defaults to a MagicMock whose
+            # ``list_repos`` returns ``[]`` (see ``_build_wiki_rot_detector``),
+            # so a seeded fixture is invisible to WikiRotDetectorLoop unless a
+            # REAL ``RepoWikiStore`` pointed at the exact same wiki_root the
+            # materializer wrote to replaces it — ``resolve_self_wiki_root``
+            # is the single source of truth both loaders share, so this
+            # never drifts from sandbox_main's own construction.
+            from repo_wiki import RepoWikiStore  # noqa: PLC0415
+
+            materialize_wiki_fixtures(config, seed)
+            self._loop_ports.setdefault(
+                "wiki_store",
+                RepoWikiStore(
+                    wiki_root=resolve_self_wiki_root(config),
+                    tracked_root=config.repo_root / config.repo_wiki_path,
+                    self_slug=config.repo,
+                ),
+            )
+        epic_labels = set(getattr(config, "epic_label", None) or ["hydraflow-epic"])
+        if any(epic_labels & set(i.get("labels", [])) for i in seed.issues):
+            # Give epic_sweeper a real fetcher over the shared FakeGitHub so a
+            # seeded epic (and its closed children) is actually swept; the
+            # builder default is an empty-world MagicMock.
+            from mockworld.fakes.fake_issue_fetcher import (  # noqa: PLC0415
+                FakeIssueFetcher,
+            )
+
+            self._loop_ports.setdefault(
+                "issue_fetcher", FakeIssueFetcher(github=self._github)
+            )
+            self._loop_ports.setdefault("epic_sweeper_state", self._harness.state)
 
     # --- Dashboard lifecycle ---
 
@@ -848,13 +1056,36 @@ class MockWorld:
         self._dashboard_url = f"http://127.0.0.1:{port}"
         return self._dashboard_url
 
-    async def stop_dashboard(self) -> None:
-        """Shut down uvicorn task, stop orchestrator if present."""
+    async def stop_dashboard(
+        self, *, orchestrator_stop_timeout: float = _ORCHESTRATOR_STOP_TIMEOUT
+    ) -> None:
+        """Shut down uvicorn task, stop orchestrator if present.
+
+        ``orchestrator.stop()`` is bounded (#10073): a stop path that blocks —
+        or any task surviving shutdown — used to wedge the in-process harness
+        at event-loop close, hanging pytest until the CI job's 20-minute
+        timeout with zero output. On timeout we dump live asyncio task names
+        and faulthandler stacks to stderr, then raise a TimeoutError naming
+        the survivors, so the failure is loud and attributed.
+        """
         if self._dashboard is None:
             return
         try:
             if self._dashboard._orchestrator and self._dashboard._orchestrator.running:
-                await self._dashboard._orchestrator.stop()
+                try:
+                    await asyncio.wait_for(
+                        self._dashboard._orchestrator.stop(),
+                        timeout=orchestrator_stop_timeout,
+                    )
+                except TimeoutError:
+                    live = self._dump_stuck_teardown_diagnostics(
+                        orchestrator_stop_timeout
+                    )
+                    raise TimeoutError(
+                        "MockWorld.stop_dashboard: orchestrator.stop() did not "
+                        f"complete within {orchestrator_stop_timeout}s (#10073); "
+                        f"live tasks: {live}"
+                    ) from None
 
             uv_server = getattr(self._dashboard, "_uvicorn_server", None)
             if uv_server is not None:
@@ -871,6 +1102,34 @@ class MockWorld:
             self._dashboard = None
             self._dashboard_url = None
 
+    @staticmethod
+    def _dump_stuck_teardown_diagnostics(timeout: float) -> list[str]:
+        """Dump live task names + faulthandler stacks to stderr; return the names.
+
+        Called when ``orchestrator.stop()`` exceeds its bound (#10073). The
+        task-name dump attributes the wedge (the #10071 orphan-probe
+        technique); the faulthandler dump adds thread stacks. Both are
+        best-effort diagnostics — the load-bearing signal is the TimeoutError
+        the caller raises with the returned names.
+        """
+        current = asyncio.current_task()
+        live = sorted(
+            task.get_name()
+            for task in asyncio.all_tasks()
+            if task is not current and not task.done()
+        )
+        print(
+            f"MockWorld.stop_dashboard: orchestrator.stop() timed out after {timeout}s; "
+            f"live tasks: {live}",
+            file=sys.stderr,
+            flush=True,
+        )
+        # capsys-style captures replace sys.stderr with a fileno-less buffer,
+        # which faulthandler rejects — never let diagnostics mask the timeout.
+        with contextlib.suppress(Exception):
+            faulthandler.dump_traceback(file=sys.stderr)
+        return live
+
     async def _await_dashboard_port(self, dashboard: Any, timeout: float = 5.0) -> int:
         """Poll ``dashboard._uvicorn_server`` for the bound port up to ``timeout`` seconds."""
         deadline = time.monotonic() + timeout
@@ -883,31 +1142,83 @@ class MockWorld:
         raise TimeoutError("dashboard did not bind a port within 5s")
 
     async def _build_wired_orchestrator(self, config: Any, bus: Any, state: Any) -> Any:
-        """Construct a real HydraFlowOrchestrator wired against this world's fakes.
+        """Construct a HydraFlowOrchestrator whose services are air-gapped Fakes.
 
-        Uses a small adapter class to map ServiceRegistry attribute names to
-        the shape _wire_targets expects (prs / triage_runner / planners /
-        agents / reviewers / workspaces).  ServiceRegistry uses ``triage``
-        instead of ``triage_runner``; the other five names already match.
+        Threads this world's Fakes through ``build_services`` exactly as
+        ``mockworld.sandbox_main.main`` does — ``subprocess_runner=Fake…`` plus
+        the Fake ports/runners and the claude/git-spawn sentinels
+        (``air_gap_runner_sentinels``) — so the ~60 BACKGROUND caretaker loops
+        the orchestrator supervises can never spawn real Docker/gh/claude on the
+        shared event loop.
+
+        Before #10253 this built a REAL ``ServiceRegistry`` (real Docker
+        ``SubprocessRunner``, real ``gh``) and monkeypatched only the four
+        PIPELINE runners after the fact via ``_wire_targets``; every background
+        loop kept its real adapter. Clicking the dashboard Start button then ran
+        those real loops in-process and a single blocking caretaker call wedged
+        the loop shared by the test, the dashboard, and Playwright — the 2715s
+        RC hang (#10215). Air-gapping the whole registry here is what makes the
+        started orchestrator's background loops non-blocking.
         """
-        from orchestrator import HydraFlowOrchestrator  # noqa: PLC0415
-
-        orch = HydraFlowOrchestrator(
-            config=config, event_bus=bus, state=state, pipeline_enabled=False
+        from mockworld.fakes.fake_issue_fetcher import FakeIssueFetcher
+        from mockworld.fakes.fake_issue_store import FakeIssueStore
+        from mockworld.fakes.fake_subprocess_runner import FakeSubprocessRunner
+        from mockworld.sandbox_main import (
+            _apply_sandbox_config_overrides,
+            air_gap_runner_sentinels,
         )
+        from orchestrator import HydraFlowOrchestrator
+        from ports import (
+            IssueFetcherPort,
+            IssueStorePort,
+            PRPort,
+            WorkspacePort,
+        )
+        from service_registry import WorkerRegistryCallbacks, build_services
 
-        # Wrap the ServiceRegistry so _wire_targets sees the attribute shape
-        # it expects (prs / triage_runner / planners / agents / reviewers /
-        # workspaces). ServiceRegistry uses `triage` instead of
-        # `triage_runner`; the other five attribute names already match.
-        class _SvcAdapter:
-            def __init__(self, svc: Any) -> None:
-                self.prs = svc.prs
-                self.triage_runner = svc.triage  # renamed!
-                self.planners = svc.planners
-                self.agents = svc.agents
-                self.reviewers = svc.reviewers
-                self.workspaces = svc.workspaces
+        # The same air-gap config overrides the docker sandbox applies: turn off
+        # the production code paths that reach the network via a RAW gh/git
+        # subprocess (merge_policy, approval_records, flake_tracker,
+        # evidence_pack, …) rather than through a Faked Port. Without this a
+        # background caretaker's raw ``gh`` call can still block the shared loop.
+        _apply_sandbox_config_overrides(config)
 
-        self._wire_targets(_SvcAdapter(orch._svc))
-        return orch
+        shared_github = self._github
+        callbacks = WorkerRegistryCallbacks(
+            update_status=lambda *_a, **_kw: None,
+            # Enable every caretaker loop (mirrors sandbox_main's
+            # ``loops_enabled=None``) so the started orch genuinely exercises the
+            # background fleet the Start button spins up — the fleet that wedged.
+            is_enabled=lambda *_a, **_kw: True,
+            get_interval=lambda *_a, **_kw: 60,
+            get_watchdog_timeout=(
+                lambda *_a, **_kw: config.loop_watchdog_default_seconds
+            ),
+        )
+        svc = build_services(
+            config,
+            bus,
+            state,
+            asyncio.Event(),
+            callbacks,
+            prs=cast(PRPort, shared_github),
+            workspaces=cast(WorkspacePort, self._workspace),
+            store=cast(
+                IssueStorePort,
+                FakeIssueStore(github=shared_github, event_bus=bus),
+            ),
+            fetcher=cast(IssueFetcherPort, FakeIssueFetcher(github=shared_github)),
+            runners=self._llm,
+            subprocess_runner=FakeSubprocessRunner(self._docker),
+        )
+        # Attach the fake-LLM sentinels + fake repo-prober (the paths
+        # build_services' two seams don't cover); shared with sandbox_main.
+        air_gap_runner_sentinels(svc, self._llm)
+
+        return HydraFlowOrchestrator(
+            config=config,
+            event_bus=bus,
+            state=state,
+            pipeline_enabled=False,
+            services=svc,
+        )

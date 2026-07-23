@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_dependabot_alerts returns Dependabot alert dicts
+# (`gh api repos/{repo}/dependabot/alerts`). FIDELITY GAP: FakeGitHub has
+# no dependabot seed hook and always returns [] (the air-gapped sandbox
+# surfaces no supply-chain alerts). This pins the empty-list shape the
+# real adapter also returns in dry-run / on-error mode.
+adapter: github
+interaction: get_dependabot_alerts
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_dependabot_alerts
+  args: []
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

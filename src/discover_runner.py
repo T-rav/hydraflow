@@ -127,9 +127,11 @@ class DiscoverRunner(BaseRunner):
     ) -> None:
         """Wire issue-filing + dedup deps used by evaluator escalation.
 
-        Called by :class:`DiscoverPhase` after construction. Without
-        binding, escalation logs a warning and returns — evaluator
-        dispatch and bounded retry still run.
+        Bound by the service factory (``service_registry.build_services``)
+        right after construction (ADR-0107 — this engine is invoked as a
+        planner helper, not a standalone phase). Without binding, escalation
+        logs a warning and returns — evaluator dispatch and bounded retry
+        still run.
         """
         self._prs = prs
         self._dedup = dedup
@@ -339,6 +341,7 @@ class DiscoverRunner(BaseRunner):
                 self._config.repo_root,
                 {"issue": task.id, "source": f"discover:attempt-{attempt}"},
                 on_output=_check_complete,
+                issue_labels=task.tags,
             )
 
             parsed = self._extract_result(transcript, task.id)
@@ -425,6 +428,11 @@ class DiscoverRunner(BaseRunner):
                 prompt,
                 self._config.repo_root,
                 {"issue": task.id, "source": "discover:evaluator"},
+                issue_labels=task.tags,
+                # #9998: telemetry keys on the skill name so prompt-efficiency
+                # ordering matches the corpus's expected_catcher names; the
+                # event source stays "discover:evaluator" for scenario scripts.
+                telemetry_source=skill.name,
             )
         except Exception as exc:
             reraise_on_credit_or_bug(exc)

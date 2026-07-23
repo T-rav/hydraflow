@@ -13,6 +13,7 @@ every non-zero pytest exit to FAIL. Two cases were misread:
 from __future__ import annotations
 
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -68,6 +69,26 @@ def test_pytest_command_clears_marker_deselection(monkeypatch, tmp_path):
     assert seen["cmd"][-2:] == ["-m", ""]
 
 
+def test_pytest_command_uses_sys_executable_not_bare_python(monkeypatch, tmp_path):
+    """#10211: a bare "python" can resolve to a pytest-less venv on the
+    background loop's PATH, misreading every pytest check as FAIL. The
+    invocation must pin the exact interpreter running this process."""
+    seen = {}
+
+    def _capture(cmd, **k):
+        seen["cmd"] = cmd
+        return _fake_proc(0)
+
+    monkeypatch.setattr(subprocess, "run", _capture)
+    runner = SubprocessConformanceRunner()
+    runner.run(
+        Check("pytest", "tests/test_x.py", "pytest:tests/test_x.py"),
+        repo_root=tmp_path,
+    )
+    assert seen["cmd"][0] == sys.executable
+    assert seen["cmd"][0] != "python"
+
+
 @pytest.mark.parametrize(
     ("rc", "expected"),
     [
@@ -93,3 +114,36 @@ def test_make_check_still_binary_pass_fail(monkeypatch, tmp_path):
     # exit 5 is pytest-specific; a make target returning 5 is still a failure.
     res = runner.run(Check("make", "arch-check", "make:arch-check"), repo_root=tmp_path)
     assert res.outcome is CheckOutcome.FAIL
+
+
+def test_available_probes_sys_executable_pytest_version(monkeypatch):
+    """#10243 pre-flight: ``available()`` probes the SAME interpreter the
+    checks use (``sys.executable -m pytest``) so the loop can skip a tick when
+    pytest can't launch, rather than storming a FAIL per ADR."""
+    seen = {}
+
+    def _capture(cmd, **k):
+        seen["cmd"] = cmd
+        return _fake_proc(0, "pytest 9.0.3")
+
+    monkeypatch.setattr(subprocess, "run", _capture)
+    assert SubprocessConformanceRunner().available() is True
+    assert seen["cmd"][:3] == [sys.executable, "-m", "pytest"]
+    assert "--version" in seen["cmd"]
+
+
+def test_available_false_when_pytest_not_importable(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: _fake_proc(1, "", f"{sys.executable}: No module named pytest"),
+    )
+    assert SubprocessConformanceRunner().available() is False
+
+
+def test_available_false_on_launch_error(monkeypatch):
+    def _boom(*a, **k):
+        raise OSError("interpreter gone")
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    assert SubprocessConformanceRunner().available() is False
