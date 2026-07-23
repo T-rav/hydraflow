@@ -291,3 +291,81 @@ async def test_missing_deps_is_silent_noop(hm_env) -> None:
     hm._bg_workers = None  # minimal scenario fixtures omit the injection
     await hm._check_worker_staleness()
     prs.create_issue.assert_not_awaited()
+
+
+# --- Per-loop tight remediation multiplier (#10241) ------------------------
+#
+# Short-poll / long-cycle loops (staging_bisect: 600s poll, 7200s watchdog)
+# opt into a tighter sweep multiplier so remediation fires closer to
+# TrustFleetSanityLoop's own staleness alert (max(2xinterval, cycle_timeout)
+# = 7200s) instead of ~30 min later at the blanket 3xinterval+cycle_timeout
+# = 9000s window that left #10234 with nothing to act on.
+
+
+def test_config_defaults_opt_in_staging_bisect() -> None:
+    """staging_bisect ships opted-in; the tight multiplier defaults to 2."""
+    cfg = HydraFlowConfig(repo="hydra/hydraflow")
+    assert cfg.worker_stall_tight_loops == ["staging_bisect"]
+    assert cfg.worker_stall_tight_multiplier == 2
+
+
+def test_multiplier_helper_tight_for_opt_in_blanket_otherwise(hm_env) -> None:
+    hm, *_ = hm_env
+    assert hm._worker_stall_multiplier("staging_bisect") == 2
+    assert hm._worker_stall_multiplier("workspace_gc") == 3
+
+
+@pytest.mark.asyncio
+async def test_opt_in_loop_restarted_inside_the_alert_to_remediation_gap(
+    hm_env,
+) -> None:
+    """staging_bisect hung at 8500s (past tight 8400s, inside blanket 9000s)
+    is auto-restarted — the ~30-min gap #10241 closes."""
+    hm, state, bg_workers, prs, bus = hm_env
+    bg_workers.registered_loop_names.return_value = {"staging_bisect"}
+    bg_workers.cycle_timeout.return_value = 7200  # 2h watchdog bound
+    state.get_worker_heartbeats.return_value = {"staging_bisect": _hb(8500)}
+    await hm._check_worker_staleness()
+    bg_workers.restart.assert_awaited_once_with("staging_bisect")
+
+
+@pytest.mark.asyncio
+async def test_opt_in_legit_long_cycle_not_false_restarted(hm_env) -> None:
+    """The tighter threshold (8400s) must still sit above the worst-case
+    legitimate heartbeat age (interval + cycle_timeout = 7800s): a healthy
+    max-length bisect cycle is not restarted."""
+    hm, state, bg_workers, prs, bus = hm_env
+    bg_workers.registered_loop_names.return_value = {"staging_bisect"}
+    bg_workers.cycle_timeout.return_value = 7200
+    state.get_worker_heartbeats.return_value = {"staging_bisect": _hb(7800)}
+    await hm._check_worker_staleness()
+    bg_workers.restart.assert_not_awaited()
+    prs.create_issue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_non_opt_in_loop_keeps_blanket_window(hm_env) -> None:
+    """Same shape, but not opted in: the blanket 9000s window still applies,
+    so 8500s is not yet actionable — the tightening is scoped, not global."""
+    hm, state, bg_workers, prs, bus = hm_env
+    bg_workers.registered_loop_names.return_value = {"workspace_gc"}
+    bg_workers.cycle_timeout.return_value = 7200
+    state.get_worker_heartbeats.return_value = {"workspace_gc": _hb(8500)}
+    await hm._check_worker_staleness()
+    bg_workers.restart.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_filed_issue_body_reports_the_loops_own_multiplier(hm_env) -> None:
+    """The escalation body must quote the multiplier actually used for the
+    loop, not the blanket constant."""
+    hm, state, bg_workers, prs, bus = hm_env
+    bg_workers.registered_loop_names.return_value = {"staging_bisect"}
+    bg_workers.cycle_timeout.return_value = 7200
+    state.get_worker_heartbeats.return_value = {"staging_bisect": _hb(8500)}
+    await hm._check_worker_staleness()  # restart tick
+    await hm._check_worker_staleness()  # still stale — file
+    prs.create_issue.assert_awaited_once()
+    _title, body, _labels = prs.create_issue.await_args.args
+    assert "2 × interval + cycle_timeout" in body
+    assert "8400s" in body
