@@ -143,6 +143,8 @@ async def run_refilling_pool(
     worker_fn: Callable[[int, T], Coroutine[Any, Any, T_Result]],
     max_concurrent: int,
     stop_event: asyncio.Event,
+    *,
+    poll_interval: float | None = None,
 ) -> list[T_Result]:
     """Run *worker_fn* in a slot-filling pool, pulling new items as slots free.
 
@@ -153,6 +155,15 @@ async def run_refilling_pool(
 
     *supply_fn* should return up to N available items (non-blocking).
     It is called each time a slot frees up to refill the pool.
+
+    *poll_interval* (opt-in): when set to a positive number of seconds, the
+    pool wakes at least that often to re-run *supply_fn* into any free slots,
+    rather than only waking when an in-flight task completes. This lets work
+    enqueued mid-run (e.g. an eager triage→plan handoff) be dispatched into a
+    free slot without waiting for a long-running task to finish (issue
+    #10296). When ``None`` (the default) the pool blocks on
+    :func:`asyncio.wait` until a task completes, preserving the original
+    completion-only refill behavior.
     """
     results: list[T_Result] = []
     pending: dict[asyncio.Task[T_Result], int] = {}  # task -> worker id placeholder
@@ -166,7 +177,9 @@ async def run_refilling_pool(
             if not pending:
                 break
             done, _ = await asyncio.wait(
-                pending.keys(), return_when=asyncio.FIRST_COMPLETED
+                pending.keys(),
+                timeout=poll_interval,
+                return_when=asyncio.FIRST_COMPLETED,
             )
             await _process_done_tasks(done, pending, results)
     finally:
