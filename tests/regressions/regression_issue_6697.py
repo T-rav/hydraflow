@@ -17,8 +17,6 @@ mutations are made atomic (e.g. via ``dict.setdefault``).
 
 from __future__ import annotations
 
-import pytest
-
 import asyncio
 import threading
 from pathlib import Path
@@ -52,7 +50,6 @@ class _RacyDict(dict):
 class TestIssue6697FetchLockRace:
     """_repo_fetch_lock() TOCTOU: two threads must get the same Lock object."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6697 — fix not yet landed", strict=False)
     def test_concurrent_callers_get_same_fetch_lock(self, tmp_path: Path) -> None:
         """Two threads calling _repo_fetch_lock() for the same repo key must
         receive the identical asyncio.Lock instance.
@@ -103,7 +100,6 @@ class TestIssue6697FetchLockRace:
 class TestIssue6697WorkspaceLockRace:
     """_repo_workspace_lock() TOCTOU: two threads must get the same Lock object."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6697 — fix not yet landed", strict=False)
     def test_concurrent_callers_get_same_workspace_lock(self, tmp_path: Path) -> None:
         """Two threads calling _repo_workspace_lock() for the same repo slug
         must receive the identical asyncio.Lock instance.

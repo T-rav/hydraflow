@@ -150,7 +150,6 @@ class TestIssue6602SilentExceptPass:
             "they contribute no category matches)"
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6602 — fix not yet landed", strict=False)
     def test_corrupt_scores_logs_warning(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -178,7 +177,6 @@ class TestIssue6602SilentExceptPass:
             "silently swallowed the error with no operator visibility"
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6602 — fix not yet landed", strict=False)
     def test_corrupt_data_indistinguishable_from_empty(self, tmp_path: Path) -> None:
         """Corrupt data and missing data produce identical TrendMetrics.
 

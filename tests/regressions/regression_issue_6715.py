@@ -70,7 +70,6 @@ class TestAuthenticationErrorPropagates:
     """AuthenticationError must escape _do_work, not be swallowed."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6715 — fix not yet landed", strict=False)
     async def test_auth_error_propagates_from_retro_patterns(
         self, tmp_path: Path
     ) -> None:
@@ -88,7 +87,6 @@ class TestAuthenticationErrorPropagates:
             await loop._do_work()
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6715 — fix not yet landed", strict=False)
     async def test_auth_error_propagates_from_review_patterns(
         self, tmp_path: Path
     ) -> None:
@@ -106,7 +104,6 @@ class TestCreditExhaustedErrorPropagates:
     """CreditExhaustedError must escape _do_work, not be swallowed."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6715 — fix not yet landed", strict=False)
     async def test_credit_error_propagates_from_retro_patterns(
         self, tmp_path: Path
     ) -> None:
@@ -128,7 +125,6 @@ class TestCreditExhaustedErrorPropagates:
             await loop._do_work()
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6715 — fix not yet landed", strict=False)
     async def test_credit_error_propagates_from_verify_proposals(
         self, tmp_path: Path
     ) -> None:

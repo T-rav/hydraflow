@@ -60,7 +60,6 @@ class TestOrchestratorCrashLogged:
     """RepoRuntime must log orchestrator exceptions, not swallow them."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6844 — fix not yet landed", strict=False)
     async def test_orchestrator_exception_is_logged_at_error(
         self, tmp_path, caplog
     ) -> None:
@@ -103,7 +102,6 @@ class TestCrashLogIncludesSlug:
     """The error log must identify *which* repo crashed (critical in multi-repo)."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6844 — fix not yet landed", strict=False)
     async def test_error_log_contains_repo_slug(self, tmp_path, caplog) -> None:
         """Operators need to know which repo's orchestrator failed.
 

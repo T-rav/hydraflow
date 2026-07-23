@@ -80,7 +80,6 @@ class TestIssue6626SilentPassOnErrors:
 
     # --- outcomes.jsonl: malformed lines should log at debug level ---
 
-    @pytest.mark.xfail(reason="Regression for issue #6626 — fix not yet landed", strict=False)
     def test_malformed_outcome_lines_log_debug(
         self, tmp_path: Path, caplog: logging.LogRecord
     ) -> None:
@@ -123,7 +122,6 @@ class TestIssue6626SilentPassOnErrors:
 
     # --- item_scores.json: parse error should log, not pass silently ---
 
-    @pytest.mark.xfail(reason="Regression for issue #6626 — fix not yet landed", strict=False)
     def test_corrupt_item_scores_logs_warning(
         self, tmp_path: Path, caplog: logging.LogRecord
     ) -> None:
@@ -159,7 +157,6 @@ class TestIssue6626SilentPassOnErrors:
 
     # --- harness_failures.jsonl: OSError should log a warning ---
 
-    @pytest.mark.xfail(reason="Regression for issue #6626 — fix not yet landed", strict=False)
     def test_failures_oserror_logs_warning(
         self, tmp_path: Path, caplog: logging.LogRecord
     ) -> None:
@@ -206,7 +203,6 @@ class TestIssue6626SilentPassOnErrors:
 
     # --- harness_failures.jsonl: malformed lines should log ---
 
-    @pytest.mark.xfail(reason="Regression for issue #6626 — fix not yet landed", strict=False)
     def test_malformed_failure_lines_log_debug(
         self, tmp_path: Path, caplog: logging.LogRecord
     ) -> None:
