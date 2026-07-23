@@ -13,7 +13,7 @@ vi.mock('../../context/HydraFlowContext', async (importOriginal) => ({
   useHydraFlow: (...args) => mockUseHydraFlow(...args),
 }))
 
-const { StreamView, toStreamIssue, findWorkerTranscript, deriveEpicExecutionState } = await import('../StreamView')
+const { StreamView, toStreamIssue, findWorkerTranscript } = await import('../StreamView')
 
 function defaultHydraFlowContext(overrides = {}) {
   const defaultPipeline = { triage: [], plan: [], implement: [], review: [], merged: [] }
@@ -1157,9 +1157,11 @@ describe('work-queue strategy visualisation (#10067)', () => {
   })
 })
 
-describe('Epic execution-state badge (#10299)', () => {
-  // Base epic in the "active" persisted status — the misleading case where the
-  // panel used to always show a green `active` badge regardless of factory work.
+describe('Epics moved off the pipeline view (#10306)', () => {
+  // Epics used to render as an EpicOverviewPanel on the stream/pipeline view.
+  // They now live on the Outcomes tab as outcome cards (EpicOutcomeCards), so
+  // StreamView must NOT mount any epic overview panel or epic badge, even when
+  // the context carries epics.
   const baseEpic = {
     epic_number: 10239,
     title: 'Epic Alpha',
@@ -1169,79 +1171,18 @@ describe('Epic execution-state badge (#10299)', () => {
     failed: 0,
     total_children: 2,
     in_progress: 2,
-    active_children: 0,
+    active_children: 1,
     queued_children: 0,
   }
 
-  describe('deriveEpicExecutionState', () => {
-    it('returns "running" when a child is held by a worker', () => {
-      expect(deriveEpicExecutionState({ ...baseEpic, active_children: 1 })).toBe('running')
-    })
-
-    it('returns "queued" when no child is running but one is queued', () => {
-      expect(
-        deriveEpicExecutionState({ ...baseEpic, active_children: 0, queued_children: 1 }),
-      ).toBe('queued')
-    })
-
-    it('returns "paused" when open children exist but none are running or queued', () => {
-      // The screenshot case: 0/2 done, 0 active, 0 queued — must NOT read "active".
-      const state = deriveEpicExecutionState(baseEpic)
-      expect(state).toBe('paused')
-      expect(state).not.toBe('active')
-    })
-
-    it('returns "idle" when nothing is open, running, or queued', () => {
-      expect(
-        deriveEpicExecutionState({
-          ...baseEpic,
-          in_progress: 0,
-          active_children: 0,
-          queued_children: 0,
-        }),
-      ).toBe('idle')
-    })
-
-    it('prefers running over queued when both counts are non-zero', () => {
-      expect(
-        deriveEpicExecutionState({ ...baseEpic, active_children: 2, queued_children: 3 }),
-      ).toBe('running')
-    })
-
-    it.each(['completed', 'blocked', 'stale', 'ready', 'releasing', 'released'])(
-      'passes through the non-active status %s unchanged',
-      (status) => {
-        expect(deriveEpicExecutionState({ ...baseEpic, status })).toBe(status)
-      },
-    )
-
-    it('tolerates a missing/undefined status by refining execution state', () => {
-      const { status, ...noStatus } = baseEpic
-      expect(deriveEpicExecutionState(noStatus)).toBe('paused')
-    })
-  })
-
-  it('renders a non-"active" execution badge when nothing is running or queued', () => {
+  it('does not render the epic overview panel or epic badges', () => {
     mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
       epics: [baseEpic],
     }))
     render(<StreamView {...defaultProps} />)
 
-    const badge = screen.getByTestId(`epic-badge-${baseEpic.epic_number}`)
-    expect(badge.textContent).toBe('paused')
-    expect(badge.textContent).not.toBe('active')
-    // Must not use the green (occupied) styling when idle/parked.
-    expect(badge.style.color).not.toBe('var(--green)')
-  })
-
-  it('renders a green "running" badge when a child is held by a worker', () => {
-    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
-      epics: [{ ...baseEpic, active_children: 1 }],
-    }))
-    render(<StreamView {...defaultProps} />)
-
-    const badge = screen.getByTestId(`epic-badge-${baseEpic.epic_number}`)
-    expect(badge.textContent).toBe('running')
-    expect(badge.style.color).toBe('var(--green)')
+    expect(screen.queryByTestId(`epic-badge-${baseEpic.epic_number}`)).not.toBeInTheDocument()
+    // The panel's "Epics" heading must not appear on the pipeline view.
+    expect(screen.queryByText('Epics')).not.toBeInTheDocument()
   })
 })

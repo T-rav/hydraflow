@@ -542,4 +542,46 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
       expect(updatedHeaders[1]).toHaveTextContent('Title')
     })
   })
+
+  describe('epic outcome cards (#10306)', () => {
+    const epic = {
+      epic_number: 30001,
+      title: 'Auth epic',
+      url: 'https://github.com/acme/webapp/issues/30001',
+      status: 'active',
+      total_children: 4,
+      completed: 2,
+      failed: 1,
+      in_progress: 1,
+      merged_children: 2,
+      active_children: 1,
+      queued_children: 0,
+      children: [],
+    }
+
+    it('renders epic outcome cards above the issue table when epics are present', () => {
+      mockUseHydraFlow.mockReturnValue({
+        issueHistory: makePayload(),
+        selectedRepoSlug: null,
+        epics: [epic],
+      })
+      render(<OutcomesPanel />)
+      // Epic card section + this epic's card and progress render on the tab.
+      expect(screen.getByTestId('epic-outcome-cards')).toBeInTheDocument()
+      expect(screen.getByTestId('epic-outcome-card-30001')).toBeInTheDocument()
+      expect(screen.getByTestId('epic-progress-30001').textContent).toContain('2/4 done')
+      // The issue rows still render below.
+      expect(screen.getByText('Fix auth cache')).toBeInTheDocument()
+    })
+
+    it('renders no epic card section when there are no epics', () => {
+      mockUseHydraFlow.mockReturnValue({
+        issueHistory: makePayload(),
+        selectedRepoSlug: null,
+        epics: [],
+      })
+      render(<OutcomesPanel />)
+      expect(screen.queryByTestId('epic-outcome-cards')).not.toBeInTheDocument()
+    })
+  })
 })
