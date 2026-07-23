@@ -130,6 +130,14 @@ SANDBOX_SEAMS: dict[str, str] = {
     # rc_auto_recut_enabled, rc_promotion_health_enabled), so no spawn is
     # reachable — the sandbox still exercises the cut→monitor→merge path (s82).
     "staging_promotion_loop": "config_disable",
+    # SampledAuditLoop's adversarial re-audit is a real ``run_lightweight_agent``
+    # (``claude``) spawn — the exact s51/s56 wedge class on the air-gapped
+    # network. ``sampled_audit_reaudit_enabled`` is pinned OFF in
+    # ``_apply_sandbox_config_overrides`` so ``_sample_and_audit`` returns before
+    # the spawn; the loop still primes its cursor + ticks (s84 idle-poll), it
+    # just never re-audits. The full sample→audit→cross-link path is covered by
+    # the Tier-1 MockWorld scenario with an injected fake auditor (#10370).
+    "sampled_audit_loop": "config_disable",
 }
 
 
@@ -205,6 +213,13 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     object.__setattr__(config, "rc_observed_advance_close_enabled", False)
     object.__setattr__(config, "rc_auto_recut_enabled", False)
     object.__setattr__(config, "rc_promotion_health_enabled", False)
+    # SampledAuditLoop (#10370): the adversarial re-audit shells out to a real
+    # ``claude`` (``run_lightweight_agent``) that hangs on the air-gapped
+    # network — the s51/s56 wedge class. Pin the re-audit spawn OFF so the
+    # ``sampled_audit_loop`` config_disable seam is TRUE; the loop still primes
+    # its cursor + heartbeats (s84 idle-poll), it just never re-audits. The
+    # sample→audit→cross-link path has its own unit + MockWorld scenario cover.
+    object.__setattr__(config, "sampled_audit_reaudit_enabled", False)
 
 
 def apply_seed_config_overrides(config: HydraFlowConfig, seed: MockWorldSeed) -> None:

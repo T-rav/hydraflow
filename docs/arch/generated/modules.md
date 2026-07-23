@@ -10,6 +10,7 @@ graph LR
     src_arch["src.arch"]
     src_arch_extractors["src.arch.extractors"]
     src_arch_generators["src.arch.generators"]
+    src_audit["src.audit"]
     src_auto_tighten["src.auto_tighten"]
     src_contracts["src.contracts"]
     src_dashboard_routes["src.dashboard_routes"]
@@ -29,20 +30,22 @@ graph LR
     src_state["src.state"]
     src_telemetry["src.telemetry"]
     src -- "7" --> src_arch
+    src -- "11" --> src_audit
     src -- "14" --> src_auto_tighten
     src -- "30" --> src_contracts
     src -- "4" --> src_dashboard_routes
     src -- "5" --> src_disturbance
     src -- "16" --> src_erosion
-    src -- "8" --> src_escape
+    src -- "9" --> src_escape
     src -- "1" --> src_observability
     src -- "16" --> src_preflight
     src -- "1" --> src_review_phase
-    src -- "58" --> src_state
+    src -- "59" --> src_state
     src -- "7" --> src_telemetry
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "14" --> src_arch
+    src_audit -- "1" --> src_escape
     src_dashboard_routes -- "3" --> src_onboarding
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "2" --> src_state

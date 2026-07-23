@@ -170,6 +170,56 @@ def _build_escape_ledger(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
+def _build_sampled_audit(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build SampledAuditLoop for scenarios (#10370).
+
+    Mirrors ``_build_escape_ledger``: ``state`` defaults to a MagicMock whose
+    SHA cursor + governed-rate + disagreement-history are clean-slate in-memory
+    values (the first tick primes the cursor, matching a fresh install), and
+    ``dedup`` defaults to a clean-slate MagicMock. The loop samples merged PRs
+    from ``config.repo_root`` on disk (``merged_changes_for_range``); its
+    adversarial re-audit is an injected ``auditor`` fake so no scenario shells
+    out to a real ``claude`` — see ``tests/scenarios/test_sampled_audit_scenario.py``.
+    """
+    from sampled_audit_loop import SampledAuditLoop  # noqa: PLC0415
+
+    state = ports.get("sampled_audit_state")
+    if state is None:
+        state = MagicMock()
+        store: dict[str, Any] = {"sha": "", "rate": 0.0, "history": []}
+
+        state.get_sampled_audit_last_processed_sha.side_effect = lambda: store["sha"]
+        state.set_sampled_audit_last_processed_sha.side_effect = lambda sha: (
+            store.__setitem__("sha", sha)
+        )
+        state.get_sampled_audit_governed_rate.side_effect = lambda: store["rate"]
+        state.set_sampled_audit_governed_rate.side_effect = lambda rate: (
+            store.__setitem__("rate", rate)
+        )
+        state.get_sampled_audit_disagreement_history.side_effect = lambda: list(
+            store["history"]
+        )
+        state.set_sampled_audit_disagreement_history.side_effect = lambda h: (
+            store.__setitem__("history", list(h))
+        )
+        ports["sampled_audit_state"] = state
+
+    dedup = ports.get("sampled_audit_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["sampled_audit_dedup"] = dedup
+
+    return SampledAuditLoop(
+        config=config,
+        pr_manager=ports["github"],
+        state=state,
+        dedup=dedup,
+        deps=deps,
+        auditor=ports.get("sampled_audit_auditor"),
+    )
+
+
 def _build_issue_refinement(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build IssueRefinementLoop for scenarios (#9957).
 
@@ -2052,6 +2102,7 @@ _BUILDERS: dict[str, Any] = {
     "pr_red_repair": _build_pr_red_repair,
     "erosion_metrics": _build_erosion_metrics,
     "escape_ledger": _build_escape_ledger,
+    "sampled_audit": _build_sampled_audit,
     "issue_refinement": _build_issue_refinement,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,

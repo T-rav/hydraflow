@@ -318,6 +318,11 @@ _bg_worker_defs = [
         "Falsification instrument (read-only, Pattern B): records post-merge escapes (revert/hotfix/regression-pin/bug-issue/Sentry) to an append-only ledger with mechanical attribution, and renders escapes-per-100-merges + month-over-month erosion trend surfaces. Never gates or fixes. See #10367.",
     ),
     (
+        "sampled_audit",
+        "Sampled Audit",
+        "The silent-escape estimator (read-only, Pattern B): re-audits a governed random sample of merged PRs with a fresh adversarial context, records agree/disagree to audit_samples.jsonl, and renders the disagreement rate + confidence interval as a statistical bound on undetected escapes. Upheld disagreements cross-link into the escape ledger. Never gates, reverts, or fixes. See #10370.",
+    ),
+    (
         "adr_drift_resolver",
         "ADR Drift Resolver",
         "Triage-before-escalate for adr_touchpoint_auditor's ADR-drift rollups: one LLM call classifies each as consistent (auto-close), real/over/dead-citation drift (relabel hydraflow-find with an ADR-edit brief), or low-confidence (HITL, rare). Fail-closed — only a confident consistent verdict auto-closes. See #9976.",

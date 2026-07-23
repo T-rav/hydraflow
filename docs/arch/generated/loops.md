@@ -52,6 +52,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **ReportIssueLoop** | `src.report_issue_loop` | 30 | — | REPORT_UPDATE | — |
 | **RetrospectiveLoop** | `src.retrospective_loop` | 1800 | — | RETROSPECTIVE_UPDATE | — |
 | **RunsGCLoop** | `src.runs_gc_loop` | 3600 | — | SYSTEM_ALERT | — |
+| **SampledAuditLoop** | `src.sampled_audit_loop` | 14400 | — | — | — |
 | **SandboxFailureFixerLoop** | `src.sandbox_failure_fixer_loop` | 3600 | — | — | ADR-0049 |
 | **SecurityPatchLoop** | `src.security_patch_loop` | 3600 | — | — | — |
 | **SentryLoop** | `src.sentry_loop` | 600 | — | — | — |
