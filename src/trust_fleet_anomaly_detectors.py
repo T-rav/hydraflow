@@ -187,8 +187,22 @@ def detect_staleness(
     multiplier: float,
     is_enabled: bool,
     now: datetime,
+    max_cycle_s: int = 0,
 ) -> tuple[bool, dict[str, Any]]:
-    """Enabled loop hasn't ticked in > multiplier x interval (spec §12.1 bullet 4).
+    """Enabled loop idle past its expected-idle window (spec §12.1 bullet 4).
+
+    The breach threshold is ``max(multiplier * interval_s, max_cycle_s)`` (#10236).
+    ``interval_s`` is the watched worker's *poll* cadence and, for most trust
+    loops (hours-to-days intervals doing bounded fast work), ``multiplier *
+    interval_s`` sits far above any legitimate single-tick duration. But a loop
+    whose poll interval is short by design yet whose expected *cycle duration*
+    is long — ``staging_bisect`` polls ``last_rc_red_sha`` every 600s but a
+    confirmed red synchronously runs flake probes plus a full ``git bisect``,
+    each capped at ``staging_bisect_runtime_cap_seconds``, inside the per-cycle
+    watchdog — would otherwise be false-flagged stale mid-cycle (#10234).
+    ``max_cycle_s`` is that per-worker "expected max single-cycle duration"
+    floor (the loop's own watchdog / cycle-timeout bound), decoupled from poll
+    cadence; the default ``0`` leaves the poll-based threshold unchanged.
 
     A *disabled* loop not ticking is correct — no breach. A loop
     without a heartbeat at all is new / not-yet-run — no breach.
@@ -204,13 +218,14 @@ def detect_staleness(
     if last_run.tzinfo is None:
         last_run = last_run.replace(tzinfo=UTC)
     elapsed_s = (now - last_run).total_seconds()
-    threshold_s = multiplier * interval_s
+    threshold_s = max(multiplier * interval_s, float(max_cycle_s))
     breached = elapsed_s >= threshold_s
     return breached, {
         "worker": worker,
         "elapsed_s": int(elapsed_s),
         "interval_s": interval_s,
         "multiplier": multiplier,
+        "max_cycle_s": max_cycle_s,
         "threshold_s": int(threshold_s),
         "last_run_iso": last_run_iso,
     }

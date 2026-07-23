@@ -280,6 +280,16 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                     if bg is not None and hasattr(bg, "get_interval")
                     else 86400
                 )
+                # Expected max single-cycle duration floor (#10236): a loop
+                # whose poll cadence is short but whose real work-cycle is long
+                # (e.g. staging_bisect) must not be flagged stale mid-cycle.
+                # Its own per-cycle watchdog bound is the natural upper bound on
+                # a legitimate cycle, decoupled from poll interval.
+                max_cycle_s = (
+                    int(bg.cycle_timeout(worker))
+                    if bg is not None and hasattr(bg, "cycle_timeout")
+                    else cfg.loop_watchdog_default_seconds
+                )
                 is_enabled = bool(enabled_map.get(worker, True))
                 breached, details = detect_staleness(
                     worker,
@@ -288,6 +298,7 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                     multiplier=cfg.loop_anomaly_staleness_multiplier,
                     is_enabled=is_enabled,
                     now=now,
+                    max_cycle_s=max_cycle_s,
                 )
                 if breached:
                     per_worker_breaches.append(("staleness", details))
