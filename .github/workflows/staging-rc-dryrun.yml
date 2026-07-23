@@ -1,0 +1,151 @@
+name: Staging RC Dry-Run
+
+# G2 / #10352 — a SENSOR, not a gate.
+#
+# The RC-required sandbox suite is advisory on `staging` but required at the
+# `rc/* -> main` promotion (ADR-0042). A scenario that breaks on staging is
+# therefore invisible until the next RC cut — multi-day feedback dead time that
+# was the root cause of the RC jam. This workflow closes that loop: it runs the
+# exact RC-required suite against staging HEAD on a cadence, reusing the sharded
+# `run-all` (#10308) so it finishes in ~one shard's wall-clock (~10 min), and on
+# a failure files a `hydraflow-find` issue naming the broken scenario(s) + the
+# staging HEAD SHA. Feedback delay days -> hours.
+#
+# HARD CONSTRAINT (issue #10352): this must NOT become a blocking required check
+# on staging (that re-introduces the throughput problem the advisory design
+# avoids). It is triggered by `schedule` + `workflow_dispatch` ONLY — never
+# `pull_request`/`push` — so it can never attach to, or gate, a staging PR.
+
+on:
+  schedule:
+    # Every 6h — turns "surfaces at the next RC" (up to days) into <=6h, in the
+    # same ballpark as the default 4h RC cadence. Tune the cron to trade runner
+    # cost against feedback latency; nothing depends on the exact interval.
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Only the newest dry-run matters; cancel an in-flight one when a new cadence
+  # tick (or manual dispatch) starts.
+  group: staging-rc-dryrun
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    name: Resolve staging HEAD
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: staging
+      - name: Capture staging HEAD SHA
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  # The RC sandbox suite fanned across the same round-robin shards the RC gate
+  # uses (#10308). Each runner boots its own docker sandbox, so shards are fully
+  # isolated. Every shard pins the SAME resolved SHA so the report names one
+  # exact commit. Shards are allowed to go red — this is advisory; the signal is
+  # the aggregated issue, plus the red matrix in the Actions tab.
+  dryrun-shard:
+    name: Staging RC dry-run shard
+    runs-on: ubuntu-latest
+    needs: [resolve]
+    strategy:
+      fail-fast: false # run every shard so all failures surface in one pass
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install uv && uv pip install --system -e ".[dev]"
+      - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
+      - name: Run shard ${{ matrix.shard }}/6 against staging HEAD
+        run: |
+          python scripts/sandbox_scenario.py run-all \
+            --shard ${{ matrix.shard }}/6 \
+            --summary-json /tmp/summary.json
+      - name: Upload shard run summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-rc-dryrun-summary-shard-${{ matrix.shard }}
+          path: /tmp/summary.json
+          retention-days: 7
+      - name: Upload shard failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-rc-dryrun-results-shard-${{ matrix.shard }}
+          path: /tmp/sandbox-results/
+          retention-days: 7
+
+  # Aggregate the per-shard summaries and, on any break, file/update a rolling
+  # hydraflow-find issue naming the broken scenario(s) + staging HEAD SHA. Runs
+  # even when shards went red (`if: always()`). Never fails the workflow on the
+  # break itself — it is a reporter, not a gate.
+  report:
+    name: Report broken RC-gate scenarios
+    runs-on: ubuntu-latest
+    needs: [resolve, dryrun-shard]
+    if: always()
+    # The failure path provisions a label + files/updates a rolling issue; the
+    # workflow-level contents:read default can do neither, so grant issues:write.
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Pin the reporter to the exact commit the shards tested, not a
+          # possibly-advanced staging tip.
+          ref: ${{ needs.resolve.outputs.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Download shard summaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: staging-rc-dryrun-summary-shard-*
+          path: /tmp/dryrun-summaries
+          merge-multiple: false
+      - name: Aggregate failures into an issue body
+        id: aggregate
+        run: |
+          python scripts/staging_rc_dryrun_report.py \
+            --results-dir /tmp/dryrun-summaries \
+            --sha "${{ needs.resolve.outputs.sha }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      - name: File or update rolling hydraflow-find issue on break
+        if: steps.aggregate.outputs.has_failures == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: ${{ steps.aggregate.outputs.title }}
+          BODY: ${{ steps.aggregate.outputs.body }}
+        run: |
+          # Rolling-issue pattern (#9359 issue-hygiene): one open issue tracks
+          # "an RC-gate scenario is broken on staging"; each dry-run appends as a
+          # comment instead of piling up new issues. Provision the label first —
+          # a raw `gh issue create` with a missing label hard-fails (#10297).
+          gh label create staging-rc-dryrun \
+            --description "Staging RC dry-run sensor (#10352) found a broken RC-gate scenario" \
+            --color D93F0B || true
+          existing=$(gh issue list --label staging-rc-dryrun --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$BODY"
+          else
+            gh issue create \
+              --title "$TITLE" \
+              --label hydraflow-find,staging-rc-dryrun \
+              --body "$BODY"
+          fi
