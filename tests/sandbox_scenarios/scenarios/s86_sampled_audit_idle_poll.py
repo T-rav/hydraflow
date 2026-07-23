@@ -1,4 +1,4 @@
-"""s84 - SampledAuditLoop emits worker status for an idle poll.
+"""s86 - SampledAuditLoop emits worker status for an idle poll.
 
 Golden path: the sandbox runtime starts the real ``SampledAuditLoop`` and an
 idle cycle (no seeded commit-range state — the cursor primes on the first tick)
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from mockworld.seed import MockWorldSeed
 
-NAME = "s84_sampled_audit_idle_poll"
+NAME = "s86_sampled_audit_idle_poll"
 DESCRIPTION = "SampledAuditLoop performs an idle scan and emits worker status."
 
 
