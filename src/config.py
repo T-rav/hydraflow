@@ -198,6 +198,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ),
     ("loop_watchdog_llm_seconds", "HYDRAFLOW_LOOP_WATCHDOG_LLM_SECONDS", 14400),
     (
+        "worker_stall_tight_multiplier",
+        "HYDRAFLOW_WORKER_STALL_TIGHT_MULTIPLIER",
+        2,
+    ),
+    (
         "boot_gap_alert_threshold_seconds",
         "HYDRAFLOW_BOOT_GAP_ALERT_THRESHOLD_SECONDS",
         600,
@@ -2975,6 +2980,39 @@ class HydraFlowConfig(BaseModel):
             "default 4 h). Such cycles legitimately run far longer than poll "
             "cycles, so they get a wider bound than loop_watchdog_default_seconds. "
             "Env: HYDRAFLOW_LOOP_WATCHDOG_LLM_SECONDS."
+        ),
+    )
+    worker_stall_tight_loops: list[str] = Field(
+        default_factory=lambda: ["staging_bisect"],
+        description=(
+            "HealthMonitorLoop generic stall sweep (#10241): loops that opt "
+            "into worker_stall_tight_multiplier instead of the blanket "
+            "3×interval+cycle_timeout remediation threshold. A short-poll / "
+            "long-cycle loop like staging_bisect (600s poll, 7200s watchdog) "
+            "has a blanket threshold (9000s) that sits ~30 min past "
+            "TrustFleetSanityLoop's own staleness alert (max(2×interval, "
+            "cycle_timeout)=7200s), leaving an alert→remediation gap in which "
+            "an anomaly issue exists but nothing remediates (#10234). Names "
+            "here fire the auto-restart closer to that alert window while "
+            "keeping the no-false-restart floor (see "
+            "worker_stall_tight_multiplier)."
+        ),
+    )
+    worker_stall_tight_multiplier: int = Field(
+        default=2,
+        ge=1,
+        le=100,
+        description=(
+            "HealthMonitorLoop stall sweep (#10241): interval multiplier for "
+            "loops in worker_stall_tight_loops (default 2 vs the blanket 3). "
+            "The sweep RESTARTS a loop, so its threshold "
+            "(multiplier×interval + cycle_timeout) must stay strictly above "
+            "the worst-case legitimate heartbeat age — one pre-cycle poll "
+            "interval plus a full cycle_timeout (the watchdog bound a healthy "
+            "cycle cannot exceed). ge=1 preserves that no-false-restart floor "
+            "(multiplier×interval + cycle_timeout > interval + cycle_timeout) "
+            "while firing remediation ~1 interval closer to the trust-fleet "
+            "staleness alert. Env: HYDRAFLOW_WORKER_STALL_TIGHT_MULTIPLIER."
         ),
     )
     # -- thread-level event-loop freeze detector (#9552) ----------------------

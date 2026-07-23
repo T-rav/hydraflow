@@ -1314,6 +1314,32 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         filed_keys = self._sanity_stall_dedup.get()
         self._sanity_stall_dedup.set_all(filed_keys | {dedup_key})
 
+    def _worker_stall_multiplier(self, name: str) -> int:
+        """Interval multiplier for *name*'s stall-sweep threshold (#10241).
+
+        The blanket ``_WORKER_STALL_MULTIPLIER`` (3) leaves two poll intervals
+        of grace over the worst-case legitimate heartbeat age (one pre-cycle
+        interval + a full ``cycle_timeout``). For a short-poll / long-cycle
+        loop like ``staging_bisect`` that pushes remediation ~30 min past
+        ``TrustFleetSanityLoop``'s own staleness alert, leaving a window where
+        an anomaly issue exists but nothing has been auto-restarted yet
+        (#10234). Opt-in loops (``worker_stall_tight_loops``) use the tighter
+        ``worker_stall_tight_multiplier`` instead, firing the restart closer to
+        that alert window.
+
+        The multiplier stays ``>= 1`` (config floor) so the resulting
+        threshold ``multiplier × interval + cycle_timeout`` remains strictly
+        above ``interval + cycle_timeout`` — the longest a *healthy* cycle can
+        keep the heartbeat stale (the watchdog cancels any cycle at
+        ``cycle_timeout``). A legitimately long in-flight cycle is therefore
+        still never false-restarted; only genuine hangs past the floor trip.
+        """
+        cfg = self._config
+        tight_loops = getattr(cfg, "worker_stall_tight_loops", None) or ()
+        if name in tight_loops:
+            return int(cfg.worker_stall_tight_multiplier)
+        return _WORKER_STALL_MULTIPLIER
+
     async def _check_worker_staleness(self) -> None:
         """Generic restart-first stall sweep across registry loops.
 
@@ -1366,9 +1392,8 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                 last_run = last_run.replace(tzinfo=UTC)
             elapsed_s = (now - last_run).total_seconds()
             interval_s = bg_workers.get_interval(name)
-            threshold_s = (
-                _WORKER_STALL_MULTIPLIER * interval_s + bg_workers.cycle_timeout(name)
-            )
+            stall_multiplier = self._worker_stall_multiplier(name)
+            threshold_s = stall_multiplier * interval_s + bg_workers.cycle_timeout(name)
             restart_key = f"health_monitor:worker-stall:restart:{name}"
             filed_key = f"health_monitor:worker-stall:filed:{name}"
             if elapsed_s < threshold_s:
@@ -1428,7 +1453,7 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             body = (
                 f"## Background loop dead-man-switch tripped\n\n"
                 f"`{name}` has not heartbeated in `{int(elapsed_s)}s`, "
-                f"exceeding `{_WORKER_STALL_MULTIPLIER} × interval + "
+                f"exceeding `{stall_multiplier} × interval + "
                 f"cycle_timeout` = `{int(threshold_s)}s`.\n\n"
                 f"- Last heartbeat: `{last_run_iso}`\n"
                 f"- Interval: `{interval_s}s`\n"
