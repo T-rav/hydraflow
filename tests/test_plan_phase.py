@@ -1989,7 +1989,8 @@ class TestPlanPhaseDiscoverShapeHelpers:
             return_value=ShapeTurnResult(content="Direction A vs B", is_final=False)
         )
         phase._shape_runner = shape_mock
-        issue = TaskFactory.create(id=1)
+        # #10311: only PRIORITIZED forks escalate to HITL, so pin a priority.
+        issue = TaskFactory.create(id=1, tags=["P1"])
         store.get_plannable = supply_once([issue])
 
         results = await phase.plan_issues()

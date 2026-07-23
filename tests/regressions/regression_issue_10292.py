@@ -66,7 +66,8 @@ async def test_memory_backlog_shape_fork_closes_not_hitl(config) -> None:
 async def test_non_memory_backlog_shape_fork_still_escalates(config) -> None:
     phase, _state, planners, prs, store, _stop = make_plan_phase(config)
     _wire_shape_fork(phase)
-    issue = TaskFactory.create(id=1)  # no memory-backlog label
+    # #10311: only a PRIORITIZED (P0-P2) fork escalates to HITL; pin a priority.
+    issue = TaskFactory.create(id=1, tags=["P1"])
     store.get_plannable = supply_once([issue])
 
     results = await phase.plan_issues()

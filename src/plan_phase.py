@@ -83,6 +83,11 @@ _PLAN_VERDICT_MAP: dict[str, str] = {
 # Minimum body length for auto-filed sub-issues discovered during planning.
 _MIN_ISSUE_BODY_CHARS: int = 50
 
+# Priority labels IssueRefinementLoop manages (#9957). Mirrors
+# ``issue_refinement_loop._PRIORITY_LABELS`` — an unprioritized shape fork is
+# deferred, not HITL-escalated (#10311).
+_PRIORITY_LABELS: tuple[str, ...] = ("P0", "P1", "P2")
+
 
 def _run_fallback_ingest_plan(
     *,
@@ -433,6 +438,17 @@ class PlanPhase:
         """
         backlog_labels = {lbl.lower() for lbl in self._config.memory_backlog_label}
         return any(tag.lower() in backlog_labels for tag in issue.tags)
+
+    def _has_priority_label(self, issue: Task) -> bool:
+        """True if *issue* carries a P0/P1/P2 priority label (#10311).
+
+        Mirrors ``issue_refinement_loop._PRIORITY_LABELS`` (the labels
+        ``IssueRefinementLoop`` manages). A shape fork on an issue WITHOUT one is
+        deferred rather than HITL-escalated: HITL is for prioritized human
+        direction choices, not unrefined/low-value forks.
+        """
+        priority = {lbl.lower() for lbl in _PRIORITY_LABELS}
+        return any(tag.lower() in priority for tag in issue.tags)
 
     def _should_research(self, issue: Task) -> bool:
         """Return True if the research pre-pass should run before planning *issue*.
@@ -1493,38 +1509,55 @@ class PlanPhase:
                                     else "Shaping could not produce directions "
                                     "within the configured turn budget."
                                 )
-                                # #10292: a memory-backlog issue (ADR-0089
-                                # behavioral-memory capture) with no single
-                                # enforcement direction resolves as CAPTURED —
-                                # the memory itself is the rule. Escalating a P4
-                                # behavioral fork to HITL just piles up the
-                                # queue and churns the diagnose loop. Close with
-                                # a re-file path instead of escalating.
-                                if self._is_memory_backlog_issue(issue):
+                                # A shape fork does NOT escalate to HITL unless
+                                # it's a prioritized human-direction choice. A
+                                # memory-backlog issue (ADR-0089 behavioral
+                                # capture) resolves as CAPTURED — the memory IS
+                                # the rule (#10292); any other UNPRIORITIZED issue
+                                # is DEFERRED — HITL is for P0-P2 forks (#10311).
+                                # Both close with a re-engage path instead of
+                                # piling a low-value fork into HITL + the diagnose
+                                # loop.
+                                is_backlog = self._is_memory_backlog_issue(issue)
+                                if is_backlog or not self._has_priority_label(issue):
+                                    if is_backlog:
+                                        detail = (
+                                            "*This is a memory-backlog "
+                                            "(behavioral) issue (ADR-0089): the "
+                                            "captured memory stands as the rule "
+                                            "and no one enforcement direction is "
+                                            "clearly warranted. Closed as "
+                                            "captured. Re-file a `hydraflow-find` "
+                                            "with an EXPLICIT direction to build "
+                                            "enforcement (#10292).*"
+                                        )
+                                        error = "memory_backlog_shape_captured"
+                                        why = "memory-backlog fork closed as captured"
+                                    else:
+                                        detail = (
+                                            "*This issue has no P0/P1/P2 priority, "
+                                            "so divergent directions were surfaced "
+                                            "but NOT escalated to HITL (reserved "
+                                            "for prioritized choices). Deferred — "
+                                            "set a P0-P2 priority or re-file with "
+                                            "an explicit direction to proceed "
+                                            "(#10311).*"
+                                        )
+                                        error = "shape_deferred_unprioritized"
+                                        why = "unprioritized fork deferred"
                                     await self._transitioner.post_comment(
                                         issue.id,
-                                        "## Shaping — no single enforcement "
-                                        f"direction\n\n{options_text}\n\n---\n"
-                                        "*This is a memory-backlog (behavioral) "
-                                        "issue (ADR-0089): the captured memory "
-                                        "stands as the rule, and no one "
-                                        "enforcement direction is clearly "
-                                        "warranted. Closing as captured rather "
-                                        "than escalating to HITL. Re-file a "
-                                        "`hydraflow-find` with an EXPLICIT "
-                                        "direction if you want enforcement "
-                                        "built (#10292).*",
+                                        "## Shaping — no HITL escalation\n\n"
+                                        f"{options_text}\n\n---\n{detail}",
                                     )
                                     await self._transitioner.close_task(issue.id)
                                     logger.info(
-                                        "Issue #%d memory-backlog shape fork "
-                                        "closed as captured, not HITL-escalated "
-                                        "(#10292)",
+                                        "Issue #%d %s, not HITL-escalated",
                                         issue.id,
+                                        why,
                                     )
                                     return PlanResult(
-                                        issue_number=issue.id,
-                                        error="memory_backlog_shape_captured",
+                                        issue_number=issue.id, error=error
                                     )
                                 try:
                                     await self._prs.post_comment(
