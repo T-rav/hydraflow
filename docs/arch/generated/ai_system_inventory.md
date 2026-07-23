@@ -56,7 +56,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_TERM_PROPOSER` | `term_proposer_tool` | `term_proposer_model` |
 | `HYDRAFLOW_ADR_DRIFT_RESOLVER` | `adr_drift_resolver_tool` | `adr_drift_resolver_model` |
 
-## Background loops (60)
+## Background loops (61)
 
 | Worker | Loop class | Area | Model role(s) | Long LLM cycle | Oversight | Purpose |
 |---|---|---|---|---|---|---|
@@ -83,6 +83,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `epic_sweeper` | `EpicSweeperLoop` | Caretaking | — | — | — | Periodically sweeps open epics and auto-closes those with all sub-issues resolved. |
 | `erosion_metrics` | `ErosionMetricsLoop` | Trust Fleet | — | — | — | v1: runs the change-spread and concept-scatter sensors over commits merged since the last tick; files above-baseline drift as hydraflow-find issues for human triage (Pattern B). See #10107, epic #10104. |
 | `escape_ledger` | `EscapeLedgerLoop` | Trust Fleet | — | — | HITL escalation | Falsification instrument (read-only, Pattern B): records post-merge escapes (revert/hotfix/regression-pin/bug-issue/Sentry) to an append-only ledger with mechanical attribution, and renders escapes-per-100-merges + month-over-month erosion trend surfaces. Never gates or fixes. See #10367. |
+| `fail_open_monitor` | `FailOpenMonitorLoop` | Trust Fleet | `background_model`, `judge_independent_model`, `review_model` | — | — | Watches the judge fail-open ledger; applies a Shewhart control limit to the daily fail-open rate and files a hydraflow-find above-limit (Pattern B). Part of the judge-independence budget + fail-visible dispatch (#10371). |
 | `fake_coverage_auditor` | `FakeCoverageAuditorLoop` | Trust Fleet | — | — | HITL escalation | Flags fake-adapter methods without cassettes and scenario helpers nobody calls. |
 | `fitness_scorecard` | `FitnessScorecardLoop` | Caretaking | — | — | — | Computes per-loop fitness scores each tick by combining event history and issue attribution. Persists to fitness.jsonl and regenerates docs/arch/generated/loop-fitness.md. Read-only caretaker per ADR-0029. |
 | `flake_tracker` | `FlakeTrackerLoop` | Trust Fleet | — | — | HITL escalation | Detects persistently flaky tests across recent RC runs and files flake-tracker issues. |
@@ -130,7 +131,7 @@ Dashboard workers that are not background loops: the label-routed pipeline phase
 | `implement` | `model`, `planner_model`, `review_model`, `test_adequacy_verifier_model`, `transcript_summary_model` | HITL escalation; PR review + merge gate | Runs coding agents to implement planned issues and open pull requests. |
 | `pipeline_poller` | — | — | Refreshes live pipeline snapshots for dashboard queue/status rendering. |
 | `plan` | `planner_model`, `transcript_summary_model`, `wiki_compilation_model` | HITL escalation | Builds implementation plans for triaged issues that are ready to execute. |
-| `review` | `review_model`, `transcript_summary_model`, `wiki_compilation_model` | HITL escalation | Reviews PRs, applies fixes, and merges approved work when checks pass. |
+| `review` | `background_model`, `judge_independent_model`, `review_model`, `transcript_summary_model`, `wiki_compilation_model` | HITL escalation | Reviews PRs, applies fixes, and merges approved work when checks pass. |
 | `review_insights` | — | HITL escalation | Aggregates recurring review feedback into improvement opportunities. |
 | `triage` | `planner_model`, `triage_model` | HITL escalation | Classifies freshly discovered issues and routes them into the pipeline. |
 

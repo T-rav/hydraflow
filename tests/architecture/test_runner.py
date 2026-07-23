@@ -76,6 +76,7 @@ def test_emit_writes_all_artifacts(populated_repo: Path):
         "adr-conformance.md",
         "ai_system_inventory.md",
         "traceability_matrix.md",
+        "gauntlet-calibration.md",
     }
     assert {p.name for p in out.iterdir() if p.suffix == ".md"} == expected
     assert (out.parent / ".meta.json").exists()

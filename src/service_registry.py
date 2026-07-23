@@ -67,6 +67,7 @@ from escape.ledger import EscapeLedger
 from escape_ledger_loop import EscapeLedgerLoop
 from events import EventBus
 from execution import SubprocessRunner
+from fail_open_monitor_loop import FailOpenMonitorLoop
 from fake_coverage_auditor_loop import FakeCoverageAuditorLoop
 from fitness_scorecard_loop import FitnessScorecardLoop
 from flake_tracker_loop import FlakeTrackerLoop
@@ -330,6 +331,7 @@ class ServiceRegistry:
     gate_health_loop: GateHealthLoop
     pr_red_repair_loop: PrRedRepairLoop
     erosion_metrics_loop: ErosionMetricsLoop
+    fail_open_monitor_loop: FailOpenMonitorLoop
     escape_ledger_loop: EscapeLedgerLoop
     issue_refinement_loop: IssueRefinementLoop
     ci_monitor_loop: CIMonitorLoop
@@ -1391,6 +1393,16 @@ def build_services(
         dedup=erosion_metrics_dedup,
         deps=loop_deps,
     )
+    fail_open_monitor_dedup = DedupStore(
+        "fail_open_monitor_filed_breaches",
+        config.data_root / "dedup" / "fail_open_monitor_filed.json",
+    )
+    fail_open_monitor_loop = FailOpenMonitorLoop(
+        config=config,
+        pr_manager=prs,
+        dedup=fail_open_monitor_dedup,
+        deps=loop_deps,
+    )
     escape_ledger_dedup = DedupStore(
         "escape_ledger_recorded",
         config.data_root / "dedup" / "escape_ledger.json",
@@ -1986,6 +1998,7 @@ def build_services(
         gate_health_loop=gate_health_loop,
         pr_red_repair_loop=pr_red_repair_loop,
         erosion_metrics_loop=erosion_metrics_loop,
+        fail_open_monitor_loop=fail_open_monitor_loop,
         escape_ledger_loop=escape_ledger_loop,
         issue_refinement_loop=issue_refinement_loop,
         ci_monitor_loop=ci_monitor_loop,

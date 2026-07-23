@@ -40,6 +40,7 @@ from arch.generators.changelog import render_changelog
 from arch.generators.coverage_matrix import render_coverage_matrix
 from arch.generators.event_bus import render_event_bus
 from arch.generators.functional_areas import render_functional_areas
+from arch.generators.gauntlet_calibration import render_gauntlet_calibration
 from arch.generators.label_state import render_label_state
 from arch.generators.loop_registry import render_loop_registry
 from arch.generators.mockworld_map import render_mockworld_map
@@ -67,6 +68,7 @@ _ARTIFACT_FILES = [
     "adr-conformance.md",
     "ai_system_inventory.md",
     "traceability_matrix.md",
+    "gauntlet-calibration.md",
 ]
 
 
@@ -169,6 +171,10 @@ def _compute_artifacts(repo_root: Path) -> dict[str, str]:
         "traceability_matrix.md": render_traceability_matrix(
             _git_log_traceability(repo_root), repo_root=repo_root
         ),
+        # Deterministic instrument-spec version (#10371): live values render on
+        # the dashboard panel from the runtime ledger, never baked into the
+        # committed arch artifact (would drift against a populated data_root).
+        "gauntlet-calibration.md": render_gauntlet_calibration(None),
     }
     if fa_path.exists():
         fa = load_functional_areas(fa_path)

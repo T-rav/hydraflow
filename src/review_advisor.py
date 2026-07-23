@@ -16,12 +16,16 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, Protocol, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from opentelemetry import metrics
 from pydantic import BaseModel, Field
 
+import judge_independence as ji
 from human_steering import fenced_steering_guidance
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from events import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +248,24 @@ def resolve_model(surface: str, role: str, default: str) -> str:
     if global_val:
         return global_val
     return default
+
+
+# Judge-independence budget + fail-visible dispatch (#10371). The LEDGER and
+# dashboard ALARM are always live (a fail-open must never be silent). The two
+# behaviours that change a MERGE OUTCOME are feature-flagged OFF by default so
+# they are opt-in until validated:
+#   * routing a classed change's verdict to an independent model family
+#     (HYDRAFLOW_JUDGE_INDEPENDENCE_ENABLED)
+#   * the self-modification fail-closed STOP / HITL escalation
+#     (HYDRAFLOW_JUDGE_SELF_MOD_FAIL_CLOSED)
+def env_judge_independence_enabled() -> bool:
+    """Master switch for routing classed changes to an independent judge family."""
+    return _env_truthy(os.environ.get("HYDRAFLOW_JUDGE_INDEPENDENCE_ENABLED")) is True
+
+
+def env_self_mod_fail_closed_enabled() -> bool:
+    """Switch for the self-modification fail-closed STOP + HITL escalation."""
+    return _env_truthy(os.environ.get("HYDRAFLOW_JUDGE_SELF_MOD_FAIL_CLOSED")) is True
 
 
 class PreFlightTrigger:
@@ -584,6 +606,11 @@ class PostVerifyAdvisor:
         log_path: Path | None = None,
         pr_number: int | None = None,
         authority_override: Literal["advisory", "veto"] | None = None,
+        ledger_path: Path | None = None,
+        event_bus: EventBus | None = None,
+        judge_independence_enabled: bool = False,
+        self_mod_fail_closed_enabled: bool = False,
+        independent_model: str = "",
     ) -> None:
         self._runner = runner
         self._cfg = surface_config
@@ -598,10 +625,37 @@ class PostVerifyAdvisor:
         # surface config's configured authority. None means "fall through
         # to surface_config.post_verify_authority".
         self._authority_override = authority_override
+        # #10371 judge-independence budget + fail-visible dispatch.
+        # ``ledger_path`` (``<data_root>/diagnostics/fail_open_ledger.jsonl``)
+        # enables the always-live fail-open / independence-unavailable ledger;
+        # ``event_bus`` raises the dashboard alarm. The two flags gate the
+        # merge-outcome-changing behaviours (independent routing / self-mod
+        # STOP). ``independent_model`` is the resolved cross-family judge model
+        # ("" when no second family is configured → degraded mode).
+        self._ledger_path = ledger_path
+        self._event_bus = event_bus
+        self._judge_independence_enabled = judge_independence_enabled
+        self._self_mod_fail_closed_enabled = self_mod_fail_closed_enabled
+        self._independent_model = independent_model
 
     async def run(self, inp: PostVerifyInput) -> PostVerifyResult:
-        prompt = self._build_prompt(inp)
         start = time.monotonic()
+        # #10371: classify the diff's blast radius once. Unclassed changes take
+        # exactly the pre-#10371 path (the spec's non-goal: the ordinary review
+        # path is untouched). Classification is cheap and side-effect-free.
+        classes = ji.classify_diff(inp.diff)
+        # Independence routing (flagged). Resolves the model this pass dispatches
+        # to (an independent family for classed changes when available) and may
+        # short-circuit self-modification changes to a HITL escalation when no
+        # independent family is configured and fail-closed is on.
+        dispatch_model, independent, judge_family, hitl_result = (
+            self._resolve_independence(inp, classes)
+        )
+        if hitl_result is not None:
+            self._emit_metrics(start=start, outcome="success", verdict="veto")
+            return hitl_result
+
+        prompt = self._build_prompt(inp)
         _role = cast(
             Literal[
                 "pre_flight",
@@ -615,7 +669,7 @@ class PostVerifyAdvisor:
         )
         try:
             payload = await self._runner.run(
-                model=self._cfg.advisor_model,
+                model=dispatch_model,
                 subagent_type="hydraflow-review-advisor",
                 prompt=prompt,
                 role=_role,
@@ -637,7 +691,9 @@ class PostVerifyAdvisor:
                 )
                 self._emit_metrics(start=start, outcome="error", verdict=None)
                 raise
-            result = self._handle_failure(reason=f"runner-error: {exc!r}")
+            reason = f"runner-error: {exc!r}"
+            result = self._handle_failure(reason=reason, inp=inp, classes=classes)
+            await self._alarm_fail_open(inp, classes, reason=reason, result=result)
             self._emit_log(
                 prompt=prompt, payload=None, start=start, error="runner-error"
             )
@@ -650,7 +706,9 @@ class PostVerifyAdvisor:
             data = json.loads(_extract_json_block(payload))
             result = PostVerifyResult.model_validate(data)
         except Exception as exc:
-            result = self._handle_failure(reason=f"parse-error: {exc!r}")
+            reason = f"parse-error: {exc!r}"
+            result = self._handle_failure(reason=reason, inp=inp, classes=classes)
+            await self._alarm_fail_open(inp, classes, reason=reason, result=result)
             self._emit_log(
                 prompt=prompt, payload=payload, start=start, error="parse-error"
             )
@@ -704,7 +762,160 @@ class PostVerifyAdvisor:
         self._emit_metrics(
             start=start, outcome="success", verdict=result.verdict.lower()
         )
+        # #10371: record coverage for classed changes — whether this verdict
+        # carried an independent family, and whether that judge dissented
+        # (disagreement-by-family). Feeds the gauntlet-calibration report.
+        self._record_classed_verdict(
+            inp,
+            classes,
+            independent=independent,
+            judge_family=judge_family,
+            result=result,
+        )
         return result
+
+    def _resolve_independence(
+        self,
+        inp: PostVerifyInput,
+        classes: frozenset[ji.BlastRadiusClass],
+    ) -> tuple[str, bool, str, PostVerifyResult | None]:
+        """Resolve the dispatch model + independence bookkeeping for this pass.
+
+        Returns ``(dispatch_model, independent, judge_family, hitl_result)``.
+        When ``hitl_result`` is non-None the caller must return it immediately
+        (a self-modification change with no independent family and fail-closed
+        on → HITL escalation, never a silent same-family pass).
+
+        No-op for unclassed changes or when the independence feature flag is
+        off: dispatch stays on the configured advisor model. Degraded paths
+        (classed change, no independent family) write a ledgered
+        ``independence-unavailable`` record so the degradation is never silent.
+        """
+        default_model = self._cfg.advisor_model
+        default_family = ji.model_family(default_model)
+        if not self._judge_independence_enabled or not ji.requires_independent_verdict(
+            classes
+        ):
+            return (default_model, False, default_family, None)
+
+        disp = ji.disposition_for_independence(
+            classes, independent_available=bool(self._independent_model)
+        )
+        if disp == ji.IndependenceDisposition.INDEPENDENT_AVAILABLE:
+            model = self._independent_model
+            return (model, True, ji.model_family(model), None)
+
+        # Degraded: no independent family configured/reachable. Ledger it.
+        self._ledger_independence_unavailable(inp, classes, disp)
+        if (
+            disp == ji.IndependenceDisposition.DEGRADED_SELF_MOD_HITL
+            and self._self_mod_fail_closed_enabled
+        ):
+            # A missing independent verdict on the verdict-machinery is a stop:
+            # escalate to HITL instead of merging on a same-family verdict.
+            hitl = PostVerifyResult(
+                verdict="VETO",
+                reasoning=(
+                    "judge-independence: self-modification change requires an "
+                    "independent verdict but no independent model family is "
+                    "configured — escalating to HITL rather than passing on a "
+                    "same-family verdict (fail-closed, #10371)."
+                ),
+                disagreements=[],
+            )
+            return (default_model, False, default_family, hitl)
+        # Non-self-mod (or self-mod with fail-closed off): proceed same-family,
+        # but the degradation is ledgered above (never silent).
+        return (default_model, False, default_family, None)
+
+    def _record_classed_verdict(
+        self,
+        inp: PostVerifyInput,
+        classes: frozenset[ji.BlastRadiusClass],
+        *,
+        independent: bool,
+        judge_family: str,
+        result: PostVerifyResult,
+    ) -> None:
+        """Ledger a verdict on a classed change (coverage + disagreement-by-family)."""
+        if self._ledger_path is None or not self._judge_independence_enabled:
+            return
+        if not ji.requires_independent_verdict(classes):
+            return
+        dissent = result.verdict == "VETO" or any(
+            d.severity == "blocking" for d in result.disagreements
+        )
+        ji.record_classed_verdict(
+            self._ledger_path,
+            lens=inp.lens,
+            pr=self._pr_number,
+            surface=self._cfg.surface,
+            classes=classes,
+            independent=independent,
+            judge_family=judge_family,
+            verdict=result.verdict,
+            dissent=dissent,
+        )
+
+    def _ledger_independence_unavailable(
+        self,
+        inp: PostVerifyInput,
+        classes: frozenset[ji.BlastRadiusClass],
+        disposition: ji.IndependenceDisposition,
+    ) -> None:
+        if self._ledger_path is None:
+            return
+        ji.record_independence_unavailable(
+            self._ledger_path,
+            lens=inp.lens,
+            pr=self._pr_number,
+            surface=self._cfg.surface,
+            classes=classes,
+            disposition=disposition,
+        )
+
+    async def _alarm_fail_open(
+        self,
+        inp: PostVerifyInput,
+        classes: frozenset[ji.BlastRadiusClass],
+        *,
+        reason: str,
+        result: PostVerifyResult,
+    ) -> None:
+        """Raise the dashboard alarm for a fail-open event. Never raises.
+
+        The ledger row is written synchronously in ``_handle_failure``; this
+        publishes the SYSTEM_ALERT so a fail-open is loud, not silent. Publish
+        failures are swallowed — a broken alarm must not break the pipeline.
+        """
+        if self._event_bus is None:
+            return
+        try:
+            from events import EventType, HydraFlowEvent
+
+            await self._event_bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    data={
+                        "kind": "judge_fail_open",
+                        "surface": self._cfg.surface,
+                        "pr": self._pr_number,
+                        "lens": inp.lens,
+                        "failure_class": ji.classes_label(classes),
+                        "self_modification": ji.is_self_modification(classes),
+                        "disposition": (
+                            "fail_closed_stop"
+                            if result.verdict == "VETO"
+                            and ji.is_self_modification(classes)
+                            and self._self_mod_fail_closed_enabled
+                            else "fail_open_ledgered"
+                        ),
+                        "reason": reason,
+                    },
+                )
+            )
+        except Exception:
+            logger.warning("judge_fail_open SYSTEM_ALERT publish failed", exc_info=True)
 
     def _emit_log(
         self,
@@ -777,14 +988,56 @@ class PostVerifyAdvisor:
             # Telemetry must never alter business control flow (ADR-0055).
             logger.debug("advisor metrics emit failed", exc_info=True)
 
-    def _handle_failure(self, *, reason: str) -> PostVerifyResult:
+    def _handle_failure(
+        self,
+        *,
+        reason: str,
+        inp: PostVerifyInput | None = None,
+        classes: frozenset[ji.BlastRadiusClass] | None = None,
+    ) -> PostVerifyResult:
+        """Degraded-path verdict for a dispatch/parse failure (#10371).
+
+        Ledgers the fail-open event (always live when ``ledger_path`` is set —
+        a fail-open must never be silent) and resolves the verdict:
+
+        - **Self-modification class + fail-closed flag on → VETO (STOP).** A
+          missing verdict on the machinery that produces verdicts is a stop,
+          not a degraded pass.
+        - Otherwise the pre-#10371 behaviour: ``HYDRAFLOW_REVIEW_POSTVERIFY_
+          FAIL_AS_VETO`` forces VETO, else fail-open (APPROVE).
+        """
+        classes = classes if classes is not None else frozenset()
+        disposition = ji.disposition_for_fail_open(
+            classes, self_mod_fail_closed_enabled=self._self_mod_fail_closed_enabled
+        )
+        # Fail-visible: append the ledger row for every fail-open event.
+        if self._ledger_path is not None:
+            ji.record_fail_open(
+                self._ledger_path,
+                lens=inp.lens if inp is not None else None,
+                pr=self._pr_number,
+                surface=self._cfg.surface,
+                classes=classes,
+                disposition=disposition,
+                reason=reason,
+            )
+
         fail_as_veto = _env_truthy(
             os.environ.get("HYDRAFLOW_REVIEW_POSTVERIFY_FAIL_AS_VETO")
         )
-        verdict: Literal["APPROVE", "VETO"] = "VETO" if fail_as_veto else "APPROVE"
+        fail_closed = disposition == ji.FailOpenDisposition.FAIL_CLOSED_STOP
+        verdict: Literal["APPROVE", "VETO"] = (
+            "VETO" if (fail_closed or fail_as_veto) else "APPROVE"
+        )
+        reasoning = (
+            f"judge-independence fail-closed (self-modification): {reason}"
+            if fail_closed
+            else f"advisor-degraded: {reason}"
+        )
         logger.warning(
-            "post_verify advisor degraded surface=%s reason=%s -> %s",
+            "post_verify advisor degraded surface=%s classes=%s reason=%s -> %s",
             self._cfg.surface,
+            ji.classes_label(classes),
             reason,
             verdict,
         )
@@ -794,7 +1047,7 @@ class PostVerifyAdvisor:
             logger.debug("advisor degraded-counter emit failed", exc_info=True)
         return PostVerifyResult(
             verdict=verdict,
-            reasoning=f"advisor-degraded: {reason}",
+            reasoning=reasoning,
             disagreements=[],
         )
 
