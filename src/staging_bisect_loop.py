@@ -18,6 +18,8 @@ HydraFlow's existing cadence-style loops; no new event infra.
 from __future__ import annotations
 
 import logging
+import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
@@ -136,9 +138,6 @@ class StagingBisectLoop(BaseBackgroundLoop):
         the last subprocess command issued, and — when a watchdog is pending —
         its deadline and remaining seconds. Never mutates loop state.
         """
-        import time  # noqa: PLC0415
-        from datetime import UTC, datetime  # noqa: PLC0415
-
         now = time.time()
         if self._bisect_started_ts is not None:
             phase = "bisecting"
@@ -301,8 +300,6 @@ class StagingBisectLoop(BaseBackgroundLoop):
         self, red_sha: str, probe_output: str
     ) -> dict[str, Any]:
         """End-to-end pipeline: bisect → attribute → guardrail → revert → retry."""
-        import time  # noqa: PLC0415
-
         # Mark the loop as actively bisecting for the stall-state drill-down
         # (#10240). Cleared in the ``finally`` regardless of which branch
         # returns; if a watchdog is scheduled, the read-time phase then

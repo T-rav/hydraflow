@@ -239,14 +239,19 @@ def _read_stall_state(bg_workers: Any, worker: str) -> dict[str, Any] | None:
         return None
     try:
         loop = getter(worker)
-    except Exception:  # noqa: BLE001
+    except (AttributeError, TypeError, KeyError):
+        # get_loop is a dict lookup on the real BGWorkerManager; only a
+        # mis-wired stand-in can raise. Absent > crashing the fleet payload.
         return None
     accessor = getattr(loop, "stall_state", None)
     if not callable(accessor):
         return None
     try:
         snapshot = accessor()
-    except Exception:  # noqa: BLE001
+    except (AttributeError, TypeError, KeyError, ValueError):
+        # stall_state() is a pure snapshot over ints/dicts/timestamps; these
+        # are the only failures a buggy loop could raise. Anything else is a
+        # real defect and must propagate rather than be silently swallowed.
         logger.debug("stall_state() failed for %s", worker, exc_info=True)
         return None
     if not isinstance(snapshot, dict):
