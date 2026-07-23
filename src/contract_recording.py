@@ -878,10 +878,15 @@ def record_github(sandbox_repo: str, tmp_cassette_dir: Path) -> list[Path]:
 def record_git(sandbox_dir: Path, tmp_cassette_dir: Path) -> list[Path]:
     """Record cassettes for the git adapter against a fixture sandbox.
 
-    ``sandbox_dir`` is expected to contain at least one file (Task 0 seeds
-    ``tests/trust/contracts/fixtures/git_sandbox`` with a ``hello.txt``).
-    The recorder runs ``git init`` / ``git add -A`` / ``git commit`` in
-    that directory and captures the commit output.
+    ``sandbox_dir`` is expected to contain at least one file. The committed
+    ``tests/trust/contracts/fixtures/git_sandbox`` fixture is seeded with three
+    tracked files (``.gitkeep``, ``README.md``, ``file.txt``), so ``git commit``
+    produces the full root-commit summary — the ``(root-commit)`` header, a
+    ``N files changed, M insertions(+)`` shortstat, and one ``create mode`` line
+    per file. The recorder runs ``git init`` / ``git add -A`` / ``git commit``
+    in that directory and captures the commit output verbatim; the replay-side
+    fake (``_invoke_fake_git``) reproduces the same summary from a live scan of
+    the fixture, so both stay in lockstep as the fixture changes.
 
     Returns ``[]`` if the sandbox does not exist, ``git`` is missing, or
     any step exits non-zero.
