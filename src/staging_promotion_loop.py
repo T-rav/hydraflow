@@ -552,8 +552,12 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         first observation so a fresh deploy against pre-existing merged RCs never
         false-closes a legitimately open tracker. Fail-open: a sweep error never
         affects the tick's promotion work.
+
+        Kill-switch ``rc_observed_advance_close_enabled`` (default ON): the raw
+        ``gh pr list`` read bypasses FakeGitHub, so the sandbox disables this
+        sweep to stay air-gapped (see mockworld.sandbox_main.SANDBOX_SEAMS).
         """
-        if self._state is None:
+        if self._state is None or not self._config.rc_observed_advance_close_enabled:
             return None
         try:
             merged = await self._list_merged_promotion_prs()

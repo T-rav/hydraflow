@@ -1729,6 +1729,27 @@ class TestObservedMainAdvanceClosesTrackers:
         assert await loop._reconcile_observed_main_advance() is None
 
     @pytest.mark.asyncio
+    async def test_kill_switch_off_disables_the_sweep(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # rc_observed_advance_close_enabled=False (the sandbox air-gap pin): the
+        # sweep does NOT spawn `gh pr list` and never closes a tracker.
+        monkeypatch.setenv("HYDRAFLOW_RC_OBSERVED_ADVANCE_CLOSE_ENABLED", "false")
+        loop, prs, state = self._loop_with_open_trackers(
+            tmp_path, monkeypatch, mark=100
+        )
+        _install_gh_fake(
+            monkeypatch,
+            merged_prs=[{"number": 150, "headRefName": "rc/2026-07-23-1200"}],
+        )
+        closed = await loop._reconcile_observed_main_advance()
+        assert closed is None
+        assert (
+            state.get_rollup_issue("staging_promotion:rc_promotion_stuck") is not None
+        )
+        prs.close_issue.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_do_work_manual_promotion_closes_trackers(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

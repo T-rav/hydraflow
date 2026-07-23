@@ -690,6 +690,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("staging_enabled", "HYDRAFLOW_STAGING_ENABLED", False),
     ("rc_auto_recut_enabled", "HYDRAFLOW_RC_AUTO_RECUT_ENABLED", False),
+    (
+        "rc_observed_advance_close_enabled",
+        "HYDRAFLOW_RC_OBSERVED_ADVANCE_CLOSE_ENABLED",
+        True,
+    ),
     ("otel_enabled", "HYDRAFLOW_OTEL_ENABLED", False),
     (
         "shadow_corpus_coverage_pruning_enabled",
@@ -2928,6 +2933,18 @@ class HydraFlowConfig(BaseModel):
             "is open AND staging CI is green again (the blocking gate cleared). "
             "Default OFF — inert until explicitly enabled; the live blocker-clear "
             "signal needs validation against a real RC before opt-in."
+        ),
+    )
+    rc_observed_advance_close_enabled: bool = Field(
+        default=True,
+        description=(
+            "G1 (#10353): when true, StagingPromotionLoop closes the RC-stuck "
+            "trackers whenever `main` is observed to advance via a merged rc/* "
+            "promotion PR (a manual/operator merge included), not only on the "
+            "loop's own merge. Default ON (live). Kill-switch: the sandbox turns "
+            "it OFF because the observed-advance sweep reads merged PRs via a raw "
+            "`gh pr list` that bypasses FakeGitHub and would hang the air-gapped "
+            "network (same class as evidence_pack / approval_records)."
         ),
     )
     staging_promotion_interval: int = Field(
