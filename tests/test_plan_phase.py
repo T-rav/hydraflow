@@ -2000,6 +2000,46 @@ class TestPlanPhaseDiscoverShapeHelpers:
         assert prs.post_comment.await_count >= 1
 
     @pytest.mark.asyncio
+    async def test_memory_backlog_shape_fork_closes_as_captured_not_hitl(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """#10292: a memory-backlog (behavioral) issue that shape-forks resolves
+        as CAPTURED (closed) instead of escalating to HITL — the captured memory
+        is the rule, so a P4 fork must not pile into the HITL queue."""
+        from unittest.mock import MagicMock
+
+        phase, _state, planners, prs, store, _stop = make_plan_phase(config)
+        record = MagicMock()
+        record.payload = {"clarity_score": 2, "needs_discovery": True}
+        mock_cache = MagicMock()
+        mock_cache.latest_classification.return_value = record
+        phase._issue_cache = mock_cache
+        discover_mock = AsyncMock()
+        discover_mock.discover = AsyncMock(
+            return_value=DiscoverResult(
+                issue_number=1,
+                research_brief="Discovered context",
+                opportunities=["A", "B"],
+            )
+        )
+        phase._discover_runner = discover_mock
+        shape_mock = AsyncMock()
+        shape_mock.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="Direction A vs B", is_final=False)
+        )
+        phase._shape_runner = shape_mock
+        # The ONLY difference from the escalation test: the memory-backlog label.
+        issue = TaskFactory.create(id=1, tags=[config.memory_backlog_label[0]])
+        store.get_plannable = supply_once([issue])
+
+        results = await phase.plan_issues()
+
+        planners.plan.assert_not_awaited()
+        prs.close_task.assert_awaited_once_with(1)  # closed, not escalated
+        assert any(r.error == "memory_backlog_shape_captured" for r in results)
+        assert not any(r.error == "shape_escalated" for r in results)
+
+    @pytest.mark.asyncio
     async def test_finalized_shape_injects_decomposition_guidance(
         self, config: HydraFlowConfig
     ) -> None:
