@@ -776,13 +776,19 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install uv && uv pip install --system -e ".[dev]"
+      - name: Install dependencies
+        run: uv sync --all-extras
       - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
       - name: Run s82 (standard PR path + RC promotion path, one boot)
-        run: python scripts/sandbox_scenario.py run s82_full_machine_rc_promotion
+        run: make post-merge-smoke
       - name: File or update rolling post-merge-smoke issue on failure
         if: failure()
         env:
