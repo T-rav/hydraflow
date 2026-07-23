@@ -313,6 +313,11 @@ _bg_worker_defs = [
         "v1: runs the change-spread and concept-scatter sensors over commits merged since the last tick; files above-baseline drift as hydraflow-find issues for human triage (Pattern B). See #10107, epic #10104.",
     ),
     (
+        "fail_open_monitor",
+        "Fail-Open Monitor",
+        "Watches the judge fail-open ledger; applies a Shewhart control limit to the daily fail-open rate and files a hydraflow-find above-limit (Pattern B). Part of the judge-independence budget + fail-visible dispatch (#10371).",
+    ),
+    (
         "escape_ledger",
         "Escape Ledger",
         "Falsification instrument (read-only, Pattern B): records post-merge escapes (revert/hotfix/regression-pin/bug-issue/Sentry) to an append-only ledger with mechanical attribution, and renders escapes-per-100-merges + month-over-month erosion trend surfaces. Never gates or fixes. See #10367.",
