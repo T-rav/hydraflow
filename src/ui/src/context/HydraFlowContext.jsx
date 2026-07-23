@@ -115,6 +115,17 @@ export function workerKey(repo, id) {
   return repo ? `${repo}#${id}` : String(id)
 }
 
+// Predicate that matches an epic in state by (repo, epic_number). Under
+// repo=__all__ two supervised repos can each have an epic sharing a number, so
+// the aggregate view keys on (repo, epic_number) to de-collide — mirroring
+// issueKey/workerKey. Single-repo keys on epic_number alone (a repo can't
+// collide with itself), mirroring background_worker_status.
+function epicMatcher(state, epicNum, repo) {
+  return state.selectedRepoSlug === REPO_ALL
+    ? (e => e.epic_number === epicNum && (e.repo ?? null) === repo)
+    : (e => e.epic_number === epicNum)
+}
+
 function mergeStageIssues(existingIssues, incomingIssues) {
   // Server snapshot is authoritative: items absent from incoming are removed
   // (prevents ghost cards) and incoming fields (including status) override
@@ -584,10 +595,17 @@ export function reducer(state, action) {
       const progress = action.data?.progress
       if (!progress) return addEvent(state, action)
       const epicNum = progress.epic_number
-      const known = state.epics.some(e => e.epic_number === epicNum)
+      // Key by (repo, epic_number) under __all__ so a WS update for one repo's
+      // epic #5 doesn't overwrite another repo's epic #5. The frame's repo is
+      // threaded via onmessage (action.repo); stamp it onto the stored epic so
+      // later (repo, epic_number) matches resolve it.
+      const repo = action.repo ?? progress.repo ?? null
+      const stamped = repo != null ? { ...progress, repo } : progress
+      const sameEpic = epicMatcher(state, epicNum, repo)
+      const known = state.epics.some(sameEpic)
       const epics = known
-        ? state.epics.map(e => (e.epic_number === epicNum ? { ...e, ...progress } : e))
-        : [...state.epics, progress]
+        ? state.epics.map(e => (sameEpic(e) ? { ...e, ...stamped } : e))
+        : [...state.epics, stamped]
       return {
         ...addEvent(state, action),
         epics,
@@ -595,15 +613,22 @@ export function reducer(state, action) {
     }
 
     case 'EPICS':
+      // Full replace with the /api/epics snapshot, which tags every epic with
+      // its repo slug (union across repos under __all__). Two repos' same-number
+      // epics arrive as distinct array elements, so no keying/de-collision is
+      // needed here — the repo tag flows through for the other cases to match on.
       return { ...state, epics: action.data || [] }
 
     case 'EPIC_READY': {
       const readyNum = action.data?.epic_number
       if (!readyNum) return state
+      // Match by (repo, epic_number) under __all__ so only the emitting repo's
+      // epic flips to ready (see epicMatcher).
+      const sameReady = epicMatcher(state, readyNum, action.repo ?? action.data?.repo ?? null)
       return {
         ...state,
         epics: state.epics.map(e =>
-          e.epic_number === readyNum ? { ...e, status: 'ready' } : e
+          sameReady(e) ? { ...e, status: 'ready' } : e
         ),
       }
     }
@@ -613,6 +638,7 @@ export function reducer(state, action) {
       if (!action.data) return { ...state, epicReleasing: null }
       const releasingNum = action.data.epic_number
       if (!releasingNum) return state
+      const sameReleasing = epicMatcher(state, releasingNum, action.repo ?? action.data.repo ?? null)
       return {
         ...state,
         epicReleasing: {
@@ -621,7 +647,7 @@ export function reducer(state, action) {
           total: action.data.total || 0,
         },
         epics: state.epics.map(e =>
-          e.epic_number === releasingNum ? { ...e, status: 'releasing' } : e
+          sameReleasing(e) ? { ...e, status: 'releasing' } : e
         ),
       }
     }
@@ -629,11 +655,12 @@ export function reducer(state, action) {
     case 'EPIC_RELEASED': {
       const releasedNum = action.data?.epic_number
       if (!releasedNum) return state
+      const sameReleased = epicMatcher(state, releasedNum, action.repo ?? action.data?.repo ?? null)
       return {
         ...state,
         epicReleasing: null,
         epics: state.epics.map(e =>
-          e.epic_number === releasedNum
+          sameReleased(e)
             ? { ...e, status: 'released', version: action.data.version || '', released_at: action.data.released_at || new Date().toISOString() }
             : e
         ),
