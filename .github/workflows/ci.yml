@@ -717,6 +717,12 @@ jobs:
     name: Sandbox (nightly regression)
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
+    # Workflow-level default is contents:read; the failure step files a
+    # hydraflow-find issue, which needs issues:write (#10309 follow-up — the
+    # nightly's issue-create had silently lacked the scope).
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -757,6 +763,12 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
     timeout-minutes: 20
+    # The failure step provisions a label + files/updates a rolling
+    # hydraflow-find issue; the workflow-level contents:read default can do
+    # neither, so grant issues:write here (#10309 follow-up).
+    permissions:
+      contents: read
+      issues: write
     concurrency:
       # Merge trains (e.g. the staging batch-merge cascade) push in quick
       # succession; only the newest SHA's verdict matters.
