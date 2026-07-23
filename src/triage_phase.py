@@ -177,6 +177,11 @@ class TriagePhase:
             worker_fn=_triage_one,
             max_concurrent=self._config.max_triagers,
             stop_event=self._stop_event,
+            # Opt in to mid-run refill (issue #10312, extending #10296): wake
+            # at least every poll_interval to dispatch items enqueued while a
+            # long triage holds a slot, instead of only refilling when a
+            # triage completes.
+            poll_interval=self._config.poll_interval,
         )
         return sum(results)
 

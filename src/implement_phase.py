@@ -402,6 +402,11 @@ class ImplementPhase:
             worker_fn=_worker,
             max_concurrent=self._config.max_workers,
             stop_event=self._stop_event,
+            # Opt in to mid-run refill (issue #10312, extending #10296): wake
+            # at least every poll_interval to dispatch items enqueued while a
+            # long implement worker holds a slot, instead of only refilling
+            # when a worker completes.
+            poll_interval=self._config.poll_interval,
         )
         return all_results, issues
 
