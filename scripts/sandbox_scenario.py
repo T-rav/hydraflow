@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
 import subprocess
 import sys
 import time
@@ -201,11 +202,35 @@ def _select_shard(items: list, shard: str | None) -> list:
     return items[index0::count]
 
 
-def cmd_run_all(shard: str | None = None) -> int:
+def _summary_payload(results: list[tuple[str, int, float]], shard: str | None) -> dict:
+    """JSON-serializable run summary: which scenarios ran, and which failed.
+
+    Consumed by the staging RC dry-run sensor (issue #10352). Each shard writes
+    this file so the aggregating reporter can name the failing scenario(s)
+    without scraping log output.
+    """
+    return {
+        "shard": shard,
+        "scenarios": [
+            {"name": name, "rc": rc, "elapsed": round(elapsed, 2)}
+            for name, rc, elapsed in results
+        ],
+        "failed": [name for name, rc, _ in results if rc != 0],
+    }
+
+
+def cmd_run_all(
+    shard: str | None = None, summary_json: str | Path | None = None
+) -> int:
     """Iterate every scenario; print summary; exit nonzero on any failure.
 
     With ``shard="I/N"`` only the I-th of N round-robin slices runs, so CI can
     fan the suite across N parallel matrix jobs.
+
+    When ``summary_json`` is set, a machine-readable run summary (per-scenario
+    name/rc + the list of failures) is written to that path *even when scenarios
+    fail* — this is how the staging RC dry-run sensor (#10352) learns which
+    scenario(s) broke the RC gate.
     """
     from tests.sandbox_scenarios.runner.loader import load_all_scenarios
 
@@ -222,6 +247,11 @@ def cmd_run_all(shard: str | None = None) -> int:
         rc = cmd_run(s.NAME)
         elapsed = time.monotonic() - start
         results.append((s.NAME, rc, elapsed))
+
+    if summary_json is not None:
+        Path(summary_json).write_text(
+            json.dumps(_summary_payload(results, shard), indent=2)
+        )
 
     print("\n--- Summary ---")
     fails = 0
@@ -246,6 +276,15 @@ def main() -> int:
         default=None,
         help="Run only shard I of N (1-indexed, round-robin), e.g. --shard 2/6",
     )
+    p_all.add_argument(
+        "--summary-json",
+        default=None,
+        help=(
+            "Write a JSON run summary (per-scenario name/rc + failures) to PATH. "
+            "Used by the staging RC dry-run sensor (#10352) to name broken "
+            "scenarios."
+        ),
+    )
     p_run = sub.add_parser("run")
     p_run.add_argument("name")
     p_seed = sub.add_parser("seed")
@@ -253,7 +292,7 @@ def main() -> int:
 
     args = parser.parse_args()
     if args.cmd == "run-all":
-        return cmd_run_all(shard=args.shard)
+        return cmd_run_all(shard=args.shard, summary_json=args.summary_json)
     nullary = {
         "status": cmd_status,
         "down": cmd_down,
