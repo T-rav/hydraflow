@@ -79,6 +79,7 @@ areas:
       - ContractRefreshLoop
       - CorpusLearningLoop
       - ErosionMetricsLoop
+      - EscapeLedgerLoop
       - FailOpenMonitorLoop
       - FakeCoverageAuditorLoop
       - FlakeTrackerLoop

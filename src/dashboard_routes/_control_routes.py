@@ -318,6 +318,11 @@ _bg_worker_defs = [
         "Watches the judge fail-open ledger; applies a Shewhart control limit to the daily fail-open rate and files a hydraflow-find above-limit (Pattern B). Part of the judge-independence budget + fail-visible dispatch (#10371).",
     ),
     (
+        "escape_ledger",
+        "Escape Ledger",
+        "Falsification instrument (read-only, Pattern B): records post-merge escapes (revert/hotfix/regression-pin/bug-issue/Sentry) to an append-only ledger with mechanical attribution, and renders escapes-per-100-merges + month-over-month erosion trend surfaces. Never gates or fixes. See #10367.",
+    ),
+    (
         "adr_drift_resolver",
         "ADR Drift Resolver",
         "Triage-before-escalate for adr_touchpoint_auditor's ADR-drift rollups: one LLM call classifies each as consistent (auto-close), real/over/dead-citation drift (relabel hydraflow-find with an ADR-edit brief), or low-confidence (HITL, rare). Fail-closed — only a confident consistent verdict auto-closes. See #9976.",

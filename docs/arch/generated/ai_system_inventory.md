@@ -56,7 +56,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_TERM_PROPOSER` | `term_proposer_tool` | `term_proposer_model` |
 | `HYDRAFLOW_ADR_DRIFT_RESOLVER` | `adr_drift_resolver_tool` | `adr_drift_resolver_model` |
 
-## Background loops (60)
+## Background loops (61)
 
 | Worker | Loop class | Area | Model role(s) | Long LLM cycle | Oversight | Purpose |
 |---|---|---|---|---|---|---|
@@ -82,6 +82,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `epic_monitor` | `EpicMonitorLoop` | Caretaking | — | — | — | Detects stale epics and refreshes progress cache so the dashboard shows accurate sub-issue rollups. |
 | `epic_sweeper` | `EpicSweeperLoop` | Caretaking | — | — | — | Periodically sweeps open epics and auto-closes those with all sub-issues resolved. |
 | `erosion_metrics` | `ErosionMetricsLoop` | Trust Fleet | — | — | — | v1: runs the change-spread and concept-scatter sensors over commits merged since the last tick; files above-baseline drift as hydraflow-find issues for human triage (Pattern B). See #10107, epic #10104. |
+| `escape_ledger` | `EscapeLedgerLoop` | Trust Fleet | — | — | HITL escalation | Falsification instrument (read-only, Pattern B): records post-merge escapes (revert/hotfix/regression-pin/bug-issue/Sentry) to an append-only ledger with mechanical attribution, and renders escapes-per-100-merges + month-over-month erosion trend surfaces. Never gates or fixes. See #10367. |
 | `fail_open_monitor` | `FailOpenMonitorLoop` | Trust Fleet | `background_model`, `judge_independent_model`, `review_model` | — | — | Watches the judge fail-open ledger; applies a Shewhart control limit to the daily fail-open rate and files a hydraflow-find above-limit (Pattern B). Part of the judge-independence budget + fail-visible dispatch (#10371). |
 | `fake_coverage_auditor` | `FakeCoverageAuditorLoop` | Trust Fleet | — | — | HITL escalation | Flags fake-adapter methods without cassettes and scenario helpers nobody calls. |
 | `fitness_scorecard` | `FitnessScorecardLoop` | Caretaking | — | — | — | Computes per-loop fitness scores each tick by combining event history and issue attribution. Persists to fitness.jsonl and regenerates docs/arch/generated/loop-fitness.md. Read-only caretaker per ADR-0029. |
@@ -108,7 +109,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `runs_gc` | `RunsGCLoop` | Caretaking | — | — | — | Purges expired pipeline run artifacts per TTL and size-cap config; keeps the runs store from growing unbounded. |
 | `sandbox_failure_fixer` | `SandboxFailureFixerLoop` | Auto-Agent (HITL Pre-Flight) | `model` | — | HITL escalation | Auto-fixes promotion PRs failing sandbox CI by dispatching the auto-agent |
 | `security_patch` | `SecurityPatchLoop` | Caretaking | — | — | — | Polls Dependabot alerts and files issues for fixable vulnerabilities. |
-| `sentry_ingest` | `SentryLoop` | Caretaking | `sentry_model` | ✅ | — | Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline. |
+| `sentry_ingest` | `SentryLoop` | Caretaking | `sentry_model` | ✅ | HITL escalation | Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline. |
 | `skill_prompt_eval` | `SkillPromptEvalLoop` | Caretaking | `background_model`, `skill_prompt_refine_model` | — | HITL escalation; PR review + merge gate | Weekly adversarial-corpus gate against built-in skills; flags PASS→FAIL regressions. |
 | `staging_bisect` | `StagingBisectLoop` | Trust Fleet | — | — | HITL escalation; PR review + merge gate | Bisects RC red between last-green and current-red; opens auto-revert PRs and watches the next RC. |
 | `staging_promotion` | `StagingPromotionLoop` | Caretaking | `ac_model`, `adr_review_model`, `background_model`, `corpus_learning_synthesis_model`, `debug_model`, `planner_model`, `report_issue_model`, `review_model`, `sentry_model`, `subskill_model`, `system_model`, `transcript_summary_model`, `triage_model`, `wiki_compilation_model` | — | HITL escalation; PR review + merge gate | Cuts release-candidate snapshots from staging and auto-promotes them to main on green CI. See ADR-0042. |

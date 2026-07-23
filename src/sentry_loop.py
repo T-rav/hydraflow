@@ -20,10 +20,12 @@ import httpx
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import Credentials, HydraFlowConfig
 from dedup_store import DedupStore
+from escape.models import EscapeCandidate, EscapeRecord
 from exception_classify import reraise_on_credit_or_bug
 from subprocess_util import AuthenticationError, CreditExhaustedError
 
 if TYPE_CHECKING:
+    from escape.ledger import EscapeLedger
     from execution import SubprocessRunner
     from issue_store import IssueStore  # noqa: TCH004 — used in __init__ signature
     from pr_manager import PRManager
@@ -52,6 +54,7 @@ class SentryLoop(BaseBackgroundLoop):
         credentials: Credentials | None = None,
         dedup: DedupStore | None = None,
         state: StateTracker | None = None,
+        escape_ledger: EscapeLedger | None = None,
     ) -> None:
         super().__init__(
             worker_name="sentry_ingest",
@@ -68,6 +71,12 @@ class SentryLoop(BaseBackgroundLoop):
         # In-memory hot cache seeded from persistent DedupStore
         self._filed: set[str] = dedup.get() if dedup else set()
         self._state = state
+        # Escape ledger (#10367): a Sentry incident filed as a GitHub issue is
+        # a post-merge escape. When present, record one agent-research /
+        # low-confidence row per filed issue — best-effort, never blocks the
+        # ingest. Attribution to the originating merge is left for the HITL
+        # surface (mechanical git attribution can't see a Sentry stacktrace).
+        self._escape_ledger = escape_ledger
 
     def _get_default_interval(self) -> int:
         return self._config.sentry_poll_interval
@@ -465,6 +474,7 @@ class SentryLoop(BaseBackgroundLoop):
                     issue_number,
                     title,
                 )
+                self._record_escape(str(sentry_id), issue_number)
                 return True
             logger.warning(
                 "Agent ran for Sentry %s but no issue URL found in transcript",
@@ -475,3 +485,31 @@ class SentryLoop(BaseBackgroundLoop):
             reraise_on_credit_or_bug(exc)
             logger.exception("Agent failed for Sentry %s", sentry_id)
             return False
+
+    def _record_escape(self, sentry_id: str, issue_number: int) -> None:
+        """Append one Sentry-sourced escape row to the ledger (#10367).
+
+        A Sentry incident filed as a GitHub issue is a post-merge escape by
+        definition. Best-effort and non-blocking: a ledger write failure must
+        never fail the ingest. Attribution is ``agent-research`` /
+        ``low`` — mechanical git attribution can't see a stacktrace, so the
+        originating merge is left for the HITL surface to complete.
+        """
+        if self._escape_ledger is None:
+            return
+        try:
+            candidate = EscapeCandidate(
+                detection_source="sentry",
+                detection_ref=sentry_id,
+                detected_at=datetime.now(UTC).isoformat(),
+                attribution_method="agent-research",
+                attribution_confidence="low",
+                notes=f"Sentry incident filed as GitHub issue #{issue_number}.",
+            )
+            if candidate.id in self._escape_ledger.existing_ids():
+                return
+            self._escape_ledger.append(EscapeRecord.from_candidate(candidate))
+        except OSError:
+            logger.warning(
+                "Sentry escape-ledger record failed for %s", sentry_id, exc_info=True
+            )

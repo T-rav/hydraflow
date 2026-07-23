@@ -8,11 +8,16 @@ import re
 import subprocess
 from pathlib import Path
 
-from ..false_close import SKIP_REGRESSION_RE as _SKIP_REGRESSION_RE
-from ..false_close import UI_TEST_RE as _UI_TEST_RE
-from ..false_close import closing_issue_refs as _closing_issue_refs
-from ..false_close import has_regression_delta as _has_regression_delta
-from ..false_close import product_paths as _product_paths
+# ``false_close`` lives in ``src`` (#10365) — ``src`` must never import from
+# ``scripts`` (the container runs ``PYTHONPATH=src``). The package ``__init__``
+# adds ``src`` to ``sys.path`` so this top-level import resolves under both
+# ``make audit`` (root on path) and the test suite (root + src on path).
+from false_close import SKIP_REGRESSION_RE as _SKIP_REGRESSION_RE
+from false_close import UI_TEST_RE as _UI_TEST_RE
+from false_close import closing_issue_refs as _closing_issue_refs
+from false_close import has_regression_delta as _has_regression_delta
+from false_close import product_paths as _product_paths
+
 from ..models import CheckContext, Finding, Status
 from ..registry import register
 from ._helpers import finding

@@ -15,9 +15,12 @@ scattered across the loop layer, so there is no single clean pre-close choke
 point. Reopening after the fact is one place, testable with a fake PRPort, and
 can never wedge a legitimate close.
 
-Reuses the P10.7 classifier verbatim (``scripts.hydraflow_audit.false_close``)
-so the sensor and the actuator can never disagree on what "false close" means,
-honouring the identical ``Skip-Regression:`` opt-out.
+Reuses the P10.7 classifier verbatim (``src/false_close.py``, imported by both
+this controller and ``scripts/hydraflow_audit/checks/p10_tdd.py``) so the sensor
+and the actuator can never disagree on what "false close" means, honouring the
+identical ``Skip-Regression:`` opt-out. The classifier lives in ``src`` — never
+``scripts`` — because the container runs ``PYTHONPATH=src`` and ``src`` must not
+import from ``scripts`` (see #10365).
 
 Default-OFF behind ``config.close_verification_enabled``
 (``HYDRAFLOW_CLOSE_VERIFICATION_ENABLED``, default false): fully inert — makes
@@ -31,10 +34,9 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from scripts.hydraflow_audit.false_close import has_skip_regression, is_false_close
-
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
+from false_close import has_skip_regression, is_false_close
 from models import SystemAlertPayload
 
 if TYPE_CHECKING:
