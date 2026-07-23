@@ -215,7 +215,20 @@ _GRANDFATHERED_LOOPS: frozenset[str] = frozenset(
 # intake) that was considered and why it could not own the behaviour — the
 # same "name the intended HOST explicitly" discipline the memory doc asks for.
 # Empty is the healthy default: the first choice is always a workstream fix.
-_JUSTIFIED_NEW_LOOPS: dict[str, str] = {}
+_JUSTIFIED_NEW_LOOPS: dict[str, str] = {
+    # EscapeLedgerLoop (#10367): a standalone outer-loop falsification
+    # instrument. Considered hosting it on SentryLoop (an existing intake) and
+    # on the triage phase, but rejected — the ledger spans FIVE detection
+    # sources (revert/hotfix/regression-pin/bug-issue git scans + Sentry) and
+    # needs its own base-branch commit cursor + cadence over the whole merge
+    # stream, which no single existing phase/loop observes. Sentry is only one
+    # source and appends to the same ledger via a hook, not a host.
+    "EscapeLedgerLoop": (
+        "outer-loop falsification instrument spanning 5 detection sources with "
+        "its own merged-commit cursor; SentryLoop/triage host rejected (single "
+        "source / no commit-stream cadence)"
+    ),
+}
 
 
 def test_new_loops_justify_workstream_alternative(real_repo_root: Path):

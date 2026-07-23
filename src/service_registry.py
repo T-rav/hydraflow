@@ -63,6 +63,8 @@ from epic import EpicCompletionChecker, EpicManager
 from epic_monitor_loop import EpicMonitorLoop
 from epic_sweeper_loop import EpicSweeperLoop
 from erosion_metrics_loop import ErosionMetricsLoop
+from escape.ledger import EscapeLedger
+from escape_ledger_loop import EscapeLedgerLoop
 from events import EventBus
 from execution import SubprocessRunner
 from fake_coverage_auditor_loop import FakeCoverageAuditorLoop
@@ -328,6 +330,7 @@ class ServiceRegistry:
     gate_health_loop: GateHealthLoop
     pr_red_repair_loop: PrRedRepairLoop
     erosion_metrics_loop: ErosionMetricsLoop
+    escape_ledger_loop: EscapeLedgerLoop
     issue_refinement_loop: IssueRefinementLoop
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
@@ -1332,6 +1335,9 @@ def build_services(
         credentials=credentials,
         dedup=sentry_dedup,
         state=state,
+        # Sentry-attributed escapes append a row to the same escape ledger
+        # EscapeLedgerLoop writes (#10367); agent-research / low confidence.
+        escape_ledger=EscapeLedger(config.diagnostics_dir / "escape_ledger.jsonl"),
     )
     log_ingest_dedup = DedupStore(
         "log_ingest_filed_sighashes",
@@ -1383,6 +1389,17 @@ def build_services(
         pr_manager=prs,
         state=state,
         dedup=erosion_metrics_dedup,
+        deps=loop_deps,
+    )
+    escape_ledger_dedup = DedupStore(
+        "escape_ledger_recorded",
+        config.data_root / "dedup" / "escape_ledger.json",
+    )
+    escape_ledger_loop = EscapeLedgerLoop(
+        config=config,
+        pr_manager=prs,
+        state=state,
+        dedup=escape_ledger_dedup,
         deps=loop_deps,
     )
     issue_refinement_dedup = DedupStore(
@@ -1969,6 +1986,7 @@ def build_services(
         gate_health_loop=gate_health_loop,
         pr_red_repair_loop=pr_red_repair_loop,
         erosion_metrics_loop=erosion_metrics_loop,
+        escape_ledger_loop=escape_ledger_loop,
         issue_refinement_loop=issue_refinement_loop,
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,
