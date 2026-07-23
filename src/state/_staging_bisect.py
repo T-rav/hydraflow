@@ -60,6 +60,24 @@ class StagingBisectStateMixin:
             self._data.consecutive_rc_failures = 0
             self.save()
 
+    # --- last_observed_promotion_pr (G1 #10353 observed-main-advance) ---
+
+    def get_last_observed_promotion_pr(self) -> int:
+        """Newest merged rc/* promotion PR number the loop has observed.
+
+        High-water mark used by ``StagingPromotionLoop`` to close the
+        RC-stuck trackers whenever ``main`` is seen to advance via a
+        promotion merge — the loop's own OR a manual/operator one. ``0``
+        means "never observed" (bootstrap: record without closing).
+        """
+        return int(self._data.last_observed_promotion_pr)
+
+    def set_last_observed_promotion_pr(self, pr_number: int) -> None:
+        """Record the newest observed promotion PR number (monotonic)."""
+        if int(pr_number) > int(self._data.last_observed_promotion_pr):
+            self._data.last_observed_promotion_pr = int(pr_number)
+            self.save()
+
     # --- last_rc_red_sha + rc_cycle_id ---
 
     def get_last_rc_red_sha(self) -> str:

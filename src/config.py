@@ -689,6 +689,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("staging_enabled", "HYDRAFLOW_STAGING_ENABLED", False),
+    ("rc_auto_recut_enabled", "HYDRAFLOW_RC_AUTO_RECUT_ENABLED", False),
     ("otel_enabled", "HYDRAFLOW_OTEL_ENABLED", False),
     (
         "shadow_corpus_coverage_pruning_enabled",
@@ -2918,6 +2919,16 @@ class HydraFlowConfig(BaseModel):
     rc_branch_prefix: str = Field(
         default="rc/",
         description="Prefix for release-candidate branch names",
+    )
+    rc_auto_recut_enabled: bool = Field(
+        default=False,
+        description=(
+            "G1 (#10353): when true, StagingPromotionLoop re-cuts a fresh RC "
+            "ahead of the normal cadence once the rc-promotion-stuck escalation "
+            "is open AND staging CI is green again (the blocking gate cleared). "
+            "Default OFF — inert until explicitly enabled; the live blocker-clear "
+            "signal needs validation against a real RC before opt-in."
+        ),
     )
     staging_promotion_interval: int = Field(
         default=300,
