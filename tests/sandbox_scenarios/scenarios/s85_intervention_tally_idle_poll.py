@@ -1,4 +1,4 @@
-"""s84 - InterventionTallyLoop emits worker status for an idle poll.
+"""s85 - InterventionTallyLoop emits worker status for an idle poll.
 
 Golden path: the sandbox runtime starts the real ``InterventionTallyLoop`` and
 an idle cycle (no seeded human touches — the timestamp cursor primes on the
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from mockworld.seed import MockWorldSeed
 
-NAME = "s84_intervention_tally_idle_poll"
+NAME = "s85_intervention_tally_idle_poll"
 DESCRIPTION = "InterventionTallyLoop performs an idle scan and emits worker status."
 
 
