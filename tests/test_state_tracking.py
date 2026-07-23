@@ -122,6 +122,7 @@ class TestInitialization:
             "last_rc_red_sha",
             "consecutive_rc_failures",
             "last_observed_promotion_pr",
+            "last_successful_promotion_at",
             "managed_repos_onboarding_status",
             "onboarding_drafts",
             "principles_drift_attempts",
