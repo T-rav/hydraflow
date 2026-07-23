@@ -16,6 +16,22 @@ forward. ``FakePR.commits`` defaults to 1, so no new ``MockWorldSeed`` field
 is needed — the existing ``issues``/``prs`` seed fields already express the
 trigger.
 
+Why the fixture also carries ``hydraflow-in-progress``. Unlike the other
+active-trigger governance scenarios (s57 seeds label-free issues, s68 uses
+``hydraflow-epic``), a ``pr_ahead_of_issue`` fixture *must* sit at a live
+pre-PR pipeline label — and the sandbox runs the real phase orchestrators
+(they consult ``BGWorkerManager``, not ``loops_enabled``, so ``loops_enabled``
+can't switch them off). The plan phase polls ``hydraflow-plan`` issues, so a
+bare ``hydraflow-plan`` fixture gets picked up and advanced
+plan→ready→review→merged within the first ~60s — destroying the drift before
+the watcher's default-60s poll ever sees it (the RC-gate hang this scenario
+repairs). The durable build-claim marker (#10168) is exactly the guard for
+this: ``IssueStore._is_eligible`` skips any in-progress-claimed issue at every
+stage, so #8100 stays put at ``hydraflow-plan`` for the whole run.
+``FakeGitHub.find_label_drift`` explicitly ignores the in-progress marker when
+picking the stage label, so the ``pr_ahead_of_issue`` classification is
+unchanged — the drift now simply *persists* until the watcher reconciles it.
+
 The loop's real side effect (``LabelDriftWatcherLoop._reconcile``) is a
 ``swap_pipeline_labels`` call moving the issue to ``hydraflow-review`` plus
 an audit comment on the issue — not a heartbeat. This scenario asserts the
@@ -43,13 +59,23 @@ _PR = 8101
 def seed() -> MockWorldSeed:
     return MockWorldSeed(
         loops_enabled=["label_drift_watcher"],
+        # Tick fast so the watcher's first cycle lands well within the 90s
+        # assert window on CI's slower runners (mirrors s57). The default 60s
+        # cadence pushed the first poll to ~57s — right at the edge.
+        sandbox_loop_interval=10,
         cycles_to_run=2,
         issues=[
             {
                 "number": _ISSUE,
                 "title": "Feature work lagging its PR",
                 "body": "Issue label hasn't caught up to the PR's review stage.",
-                "labels": ["hydraflow-plan"],
+                # ``hydraflow-in-progress`` is the durable build-claim marker
+                # (#10168) — it keeps the live sandbox pipeline from consuming
+                # this pre-PR-labelled fixture and advancing it out of the drift
+                # state before the watcher polls (see the module docstring).
+                # ``find_label_drift`` ignores it when picking the stage label,
+                # so the ``pr_ahead_of_issue`` classification is unchanged.
+                "labels": ["hydraflow-plan", "hydraflow-in-progress"],
             }
         ],
         # No explicit commits field on the seed's ``prs`` dict — ``FakePR``
