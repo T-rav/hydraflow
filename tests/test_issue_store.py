@@ -418,6 +418,40 @@ class TestActiveTracking:
         active[3] = STAGE_READY
         assert 3 not in store._active
 
+    def test_get_worker_held_unions_active_and_in_flight(self) -> None:
+        # Worker truth (#10299): both the mark_active set and the
+        # dequeue→mark_active window count as "a worker is on it".
+        store = _make_store()
+        store.mark_active(1, STAGE_READY)
+        store._in_flight[2] = STAGE_REVIEW
+
+        held = store.get_worker_held_issues()
+        assert held == {1: STAGE_READY, 2: STAGE_REVIEW}
+
+    def test_get_worker_held_active_wins_on_overlap(self) -> None:
+        store = _make_store()
+        store._in_flight[7] = STAGE_PLAN
+        store.mark_active(7, STAGE_READY)  # mark_active pops from in_flight
+
+        held = store.get_worker_held_issues()
+        assert held == {7: STAGE_READY}
+
+    def test_get_queued_issues_maps_issue_to_stage(self) -> None:
+        store = _make_store()
+        store._route_issues([TaskFactory.create(id=11, tags=["hydraflow-plan"])])
+
+        assert store.get_queued_issues() == {11: STAGE_PLAN}
+
+    def test_get_queued_excludes_active_and_in_flight(self) -> None:
+        # A queued task that is also worker-held must not double-count as queued.
+        store = _make_store()
+        store._route_issues([TaskFactory.create(id=21, tags=["hydraflow-plan"])])
+        store._route_issues([TaskFactory.create(id=22, tags=["hydraflow-plan"])])
+        store.mark_active(21, STAGE_PLAN)
+        store._in_flight[22] = STAGE_PLAN
+
+        assert store.get_queued_issues() == {}
+
     def test_clear_active_clears_all(self) -> None:
         store = _make_store()
         store.mark_active(1, STAGE_FIND)

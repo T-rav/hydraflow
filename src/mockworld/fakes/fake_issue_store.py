@@ -299,6 +299,23 @@ class FakeIssueStore:
     def get_active_issues(self) -> dict[int, str]:
         return dict(self._active)
 
+    def get_worker_held_issues(self) -> dict[int, str]:
+        """Worker-held issues (``_active`` ∪ ``_in_flight``); mirrors IssueStore.
+
+        Ground truth for worker-derived epic execution state (#10299).
+        """
+        held: dict[int, str] = {num: str(s) for num, s in self._in_flight.items()}
+        held.update({num: str(s) for num, s in self._active.items()})
+        return held
+
+    def get_queued_issues(self) -> dict[int, str]:
+        """Issues awaiting dispatch in a stage queue (not active/in-flight)."""
+        queued: dict[int, str] = {}
+        for stage in (STAGE_FIND, STAGE_PLAN, STAGE_READY, STAGE_REVIEW):
+            for task in self._queued_for_stage(stage):
+                queued.setdefault(task.id, stage)
+        return queued
+
     def clear_active(self) -> None:
         self._active.clear()
         self._in_flight.clear()
