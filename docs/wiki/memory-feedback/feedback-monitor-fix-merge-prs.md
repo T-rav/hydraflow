@@ -2,9 +2,9 @@
 source: feedback_monitor_fix_merge_prs.md
 name: monitor-fix-merge-prs
 description: 'Travis 2026-07-19: monitoring open PRs and fixing/merging broken ones is PART of the backlog-drive goal — arming auto-merge is not the end of ownership'
-status: pending
-issue: null
-promoted_in: null
+status: promoted
+issue: 10293
+promoted_in: '#10293'
 wontfix_reason: null
 created: '2026-07-19'
 ---
