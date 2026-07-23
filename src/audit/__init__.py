@@ -28,8 +28,12 @@ forking the ledger writer):
 * ``crosslink`` — build an ``escape.models.EscapeRecord`` for an upheld
   disagreement (``detection_source: sampled-audit``), reusing the escape
   ledger writer/schema.
-* ``report`` — render the additive ``## Sampled adversarial re-audit`` section
-  of ``docs/arch/generated/gauntlet-calibration.md``.
+
+Metrics surface on the shared gauntlet-calibration dashboard panel
+(``/api/diagnostics/gauntlet-calibration``, which reads ``audit_samples.jsonl``);
+the committed ``docs/arch/generated/gauntlet-calibration.md`` is a deterministic
+instrument spec rendered by ``arch.generators.gauntlet_calibration`` (shared with
+#10371). The loop writes no git-committed artifact at runtime.
 
 The consuming caretaker is ``sampled_audit_loop.SampledAuditLoop`` — a
 read-only ADR-0029 Pattern-B sensor: it samples, audits, records, files

@@ -277,6 +277,33 @@ def build_diagnostics_router(
         events = _load(range, repo)
         return headline_metrics(events)
 
+    @router.get("/gauntlet-calibration")
+    def gauntlet_calibration(repo: RepoSlugParam = None) -> dict[str, Any]:
+        """Judge-independence + fail-visible dispatch calibration panel (#10371).
+
+        Reads the append-only fail-open ledger and returns the calibration
+        metrics: percent of classed merges carrying an independent verdict, the
+        fail-open rate + Shewhart control limit (and whether it is breached), the
+        independence-unavailable rate, and disagreement-by-family. This is the
+        dashboard panel's data source (the generated arch doc stays a
+        deterministic instrument spec).
+        """
+        import judge_independence as ji
+        from audit.metrics import calibration_metrics as sampled_audit_metrics
+        from audit.store import AuditSampleLedger
+
+        cfg = _config_for(repo) if repo is not None else config
+        records = ji.read_records(ji.ledger_path_for(cfg))
+        result = ji.calibration_metrics(records)
+        # Sampled adversarial re-audit (#10370): merge the silent-escape
+        # estimator's metrics from its own append-only ledger into the shared
+        # panel, alongside the judge-independence fail-open metrics.
+        samples = AuditSampleLedger(
+            cfg.diagnostics_dir / "audit_samples.jsonl"
+        ).read_all()
+        result["sampled_audit"] = sampled_audit_metrics(samples)
+        return result
+
     @router.get("/tools")
     def tools(
         range: str = Query("7d"),

@@ -31,9 +31,15 @@ Each tick:
 6. **Govern** — record this tick's disagreement observation and update the
    sample rate by Shewhart's rule (``audit.governance``): widen toward the 20%
    ceiling above the control limit, narrow toward the 2% floor when quiet.
-7. **Render** the ``## Sampled adversarial re-audit`` section of
-   ``docs/arch/generated/gauntlet-calibration.md`` (additive — #10371 owns a
-   separate marker-delimited section in the same file).
+
+**Surfaces.** The metrics (disagreement rate + Wilson CI, false-alarm rate,
+per-gate-class calibration) render on the shared gauntlet-calibration dashboard
+panel (``/api/diagnostics/gauntlet-calibration``, reading this loop's
+``audit_samples.jsonl`` alongside the judge-independence fail-open ledger). The
+committed ``docs/arch/generated/gauntlet-calibration.md`` is a DETERMINISTIC
+instrument spec (``arch.generators.gauntlet_calibration``) — the loop writes no
+git-committed artifact at runtime, avoiding the factory-on-stale-main drift a
+data-bearing generated doc would cause (#10371's decision, adopted here).
 
 **Air-gap seam (config_disable).** ``_AuditLLM`` is a real ``run_lightweight_agent``
 spawn. ``sampled_audit_reaudit_enabled`` gates it; the sandbox pins it OFF in
@@ -60,14 +66,12 @@ from audit.detect import (
 )
 from audit.disposition import reconcile_disposition
 from audit.governance import DEFAULT_BASE_RATE, govern_rate, trim_history
-from audit.metrics import summarize
 from audit.models import (
     AUDIT_INPUT_SOURCES,
     AuditSample,
     DisagreementObservation,
     MergedChange,
 )
-from audit.report import render_sampled_audit_section, upsert_section
 from audit.sampling import select_sample
 from audit.store import AuditSampleLedger
 from audit.stratify import classify_blast_radius
@@ -92,7 +96,6 @@ _AUDIT_LLM_TIMEOUT_S = 300
 
 _ISSUE_LABELS = ["hydraflow-find", "sampled-audit"]
 
-_REPORT_REL = Path("docs/arch/generated/gauntlet-calibration.md")
 _SAMPLES_FILENAME = "audit_samples.jsonl"
 _ESCAPE_LEDGER_FILENAME = "escape_ledger.jsonl"
 
@@ -256,11 +259,11 @@ class SampledAuditLoop(BaseBackgroundLoop):
 
         resolved = self._resolve_range()
         if isinstance(resolved, dict):
-            # Even with no new commits, reconcile prior pending disagreements +
-            # re-render so adjudication outcomes surface on a quiet tick.
+            # Even with no new commits, reconcile prior pending disagreements so
+            # adjudication outcomes (upheld cross-links / refutations) surface on
+            # a quiet tick.
             await self._file_findings()
             reconciled = await self._reconcile_pending()
-            self._render_report()
             resolved["reconciled"] = reconciled
             return resolved
         repo_root, commit_range, changes, current_sha = resolved
@@ -270,7 +273,6 @@ class SampledAuditLoop(BaseBackgroundLoop):
         filed = await self._file_findings()
         reconciled = await self._reconcile_pending()
         self._govern(audited)
-        self._render_report()
 
         # Advance the cursor unconditionally: this range has been fully sampled.
         self._state.set_sampled_audit_last_processed_sha(current_sha)
@@ -525,18 +527,6 @@ class SampledAuditLoop(BaseBackgroundLoop):
             [o.to_json_dict() for o in series]
         )
         self._state.set_sampled_audit_governed_rate(new_rate)
-
-    # --- report ----------------------------------------------------------
-
-    def _render_report(self) -> None:
-        """Upsert the sampled-audit section of gauntlet-calibration.md (additive)."""
-        samples = AuditSampleLedger(self._samples_path).read_all()
-        summary = summarize(samples, governed_rate=self._current_rate())
-        section = render_sampled_audit_section(summary, now=datetime.now(UTC))
-        path = Path(self._config.repo_root) / _REPORT_REL
-        existing = path.read_text(encoding="utf-8") if path.exists() else ""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(upsert_section(existing, section), encoding="utf-8")
 
 
 def _with_find_issue(sample: AuditSample, issue: int) -> AuditSample:

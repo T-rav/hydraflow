@@ -490,6 +490,7 @@ def build_scripted_services(
     services.gate_health_loop = FakeBackgroundLoop()
     services.pr_red_repair_loop = FakeBackgroundLoop()
     services.erosion_metrics_loop = FakeBackgroundLoop()
+    services.fail_open_monitor_loop = FakeBackgroundLoop()
     services.escape_ledger_loop = FakeBackgroundLoop()
     services.sampled_audit_loop = FakeBackgroundLoop()
     services.issue_refinement_loop = FakeBackgroundLoop()

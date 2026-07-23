@@ -4,7 +4,8 @@ Covers the acceptance-criteria-bearing pure functions: stratified sampling
 selection, Shewhart rate governance (widen/narrow within floor/ceiling against a
 synthetic disagreement series), token-budget capping under a synthetic backlog,
 the upheld→escape-ledger cross-link (reusing escape.models), refuted→false-alarm
-accounting, no-verdict-contamination, and the additive report splice.
+accounting, no-verdict-contamination, and the dashboard/arch calibration-metrics
+shape.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from audit.governance import (
     upper_control_limit,
 )
 from audit.metrics import (
+    calibration_metrics,
     disagreement_rate_ci,
     false_alarm_rate,
     per_gate_class_calibration,
@@ -35,7 +37,6 @@ from audit.models import (
     DisagreementObservation,
     MergedChange,
 )
-from audit.report import BEGIN_MARKER, END_MARKER, render_full_report, upsert_section
 from audit.sampling import inclusion_probability, select_sample
 from audit.stratify import classify_blast_radius, stratum_weight
 
@@ -397,41 +398,40 @@ class TestNoContamination:
         assert not contaminated.no_verdict_contamination()
 
 
-# --- report splice (additive with #10371) ---------------------------------
+# --- dashboard/arch calibration_metrics shape -----------------------------
 
 
-class TestReportSplice:
-    def test_upsert_preserves_foreign_section(self) -> None:
-        """A merge with #10371's section is a clean concatenation, not a clobber."""
-        foreign = (
-            "# Gauntlet calibration\n\n"
-            "<!-- BEGIN judge-independence (#10371) -->\n"
-            "## Judge independence\nsome content\n"
-            "<!-- END judge-independence (#10371) -->\n"
-        )
-        merged = render_full_report(
-            [_sample()], now=_now(), governed_rate=0.05, existing=foreign
-        )
-        assert "Judge independence" in merged
-        assert "Sampled adversarial re-audit" in merged
-        assert BEGIN_MARKER in merged and END_MARKER in merged
+class TestCalibrationMetrics:
+    def test_empty_shape(self) -> None:
+        m = calibration_metrics([])
+        assert m["samples"] == 0
+        assert m["disagreement_rate"] == 0.0
+        assert m["governed_rate"] == 0.0
+        assert m["per_gate_class"] == {}
 
-    def test_upsert_replaces_own_section_idempotently(self) -> None:
-        first = render_full_report(
-            [_sample()], now=_now(), governed_rate=0.05, existing=""
-        )
-        second = render_full_report(
-            [_sample()], now=_now(), governed_rate=0.05, existing=first
-        )
-        assert second.count(BEGIN_MARKER) == 1
-        assert second.count(END_MARKER) == 1
-
-    def test_upsert_section_seeds_title_when_empty(self) -> None:
-        out = upsert_section(
-            "",
-            "<!-- BEGIN sampled-adversarial-reaudit (#10370) -->\nx\n<!-- END sampled-adversarial-reaudit (#10370) -->",
-        )
-        assert "# Gauntlet calibration" in out
+    def test_populated_shape(self) -> None:
+        samples = [
+            _sample(
+                sid="1",
+                verdict="disagree",
+                cls="gauntlet",
+                disposition="upheld",
+                rate=0.1,
+            ),
+            _sample(
+                sid="2", verdict="agree", cls="gauntlet", disposition="n/a", rate=0.1
+            ),
+            _sample(
+                sid="3", verdict="agree", cls="routine", disposition="n/a", rate=0.1
+            ),
+        ]
+        m = calibration_metrics(samples)
+        assert m["samples"] == 3
+        assert 0.0 <= m["ci_lower"] <= m["disagreement_rate"] <= m["ci_upper"] <= 1.0
+        # governed_rate reads the latest sample's recorded rate (no state handle).
+        assert m["governed_rate"] == 0.1
+        assert m["per_gate_class"]["gauntlet"]["sampled"] == 2
+        assert m["per_gate_class"]["gauntlet"]["upheld"] == 1
 
 
 # --- detect PR parsing -----------------------------------------------------
@@ -446,9 +446,3 @@ class TestDetectParsing:
 
     def test_no_pr(self) -> None:
         assert parse_pr_number("just a commit") == 0
-
-
-def _now():
-    from datetime import UTC, datetime
-
-    return datetime(2026, 7, 23, tzinfo=UTC)

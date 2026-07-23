@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from typing import Any
 
 from audit.models import (
     AuditSample,
@@ -104,3 +105,33 @@ def summarize(
         total_samples=len(samples),
         governed_rate=governed_rate,
     )
+
+
+def calibration_metrics(samples: list[AuditSample]) -> dict[str, Any]:
+    """Dashboard/arch render shape for the sampled re-audit (#10370).
+
+    Mirrors ``judge_independence.calibration_metrics``: a flat JSON-safe dict the
+    ``/api/diagnostics/gauntlet-calibration`` panel returns and the arch
+    generator renders into the sampled-audit live-observations table. The
+    governed rate is read from the most recent sample's recorded ``sample_rate``
+    (each row records the rate it was sampled at), so the shape needs no state
+    handle. Pure over the recorded ledger rows.
+    """
+    ci = disagreement_rate_ci(samples)
+    governed = samples[-1].sample_rate if samples else 0.0
+    return {
+        "samples": len(samples),
+        "disagreement_rate": round(ci.rate, 4),
+        "ci_lower": round(ci.lower, 4),
+        "ci_upper": round(ci.upper, 4),
+        "false_alarm_rate": round(false_alarm_rate(samples), 4),
+        "governed_rate": round(governed, 4),
+        "per_gate_class": {
+            row.blast_radius_class: {
+                "sampled": row.sampled,
+                "disagreements": row.disagreements,
+                "upheld": row.upheld,
+            }
+            for row in per_gate_class_calibration(samples)
+        },
+    }

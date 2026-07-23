@@ -53,6 +53,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "gate_health": (3600, 2592000),
     "pr_red_repair": (60, 86400),  # 1m min, 1d max (default 5m, #10027)
     "erosion_metrics": (900, 604800),  # 15m min, 7d max (default 4h, #10107)
+    "fail_open_monitor": (900, 604800),  # 15m min, 7d max (default 4h, #10371)
     "escape_ledger": (900, 604800),  # 15m min, 7d max (default 4h, #10367)
     "sampled_audit": (900, 604800),  # 15m min, 7d max (default 4h, #10370)
     "issue_refinement": (3600, 604800),  # 1h min, 7d max (default 24h, #9957)

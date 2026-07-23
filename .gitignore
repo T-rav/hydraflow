@@ -276,8 +276,3 @@ docs/arch/generated/loop-fitness.md
 # mirroring loop-fitness.md above (#10367).
 docs/arch/generated/escape-ledger.md
 docs/arch/generated/erosion-trends.md
-
-# SampledAuditLoop (+ #10371 judge-independence) co-write this into the live
-# repo root every tick (src/sampled_audit_loop.py) — a runtime report, not an
-# arch-regen artifact, mirroring escape-ledger.md above (#10370).
-docs/arch/generated/gauntlet-calibration.md
