@@ -31,6 +31,7 @@
   "loops_enabled": [
     "auto_agent_preflight"
   ],
+  "staging_enabled": false,
   "main_branch_ci_status": [
     "success",
     ""

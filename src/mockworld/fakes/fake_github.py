@@ -89,6 +89,13 @@ class FakeIssue:
     state_reason: str = ""
 
 
+# RC promotion naming (#10309). Matches config's ``rc_branch_prefix`` default —
+# the fake serves one repo's worth of state under default naming. The fixed
+# date mirrors FakeIssue's hard-coded timestamps: deterministic, no wall clock.
+_RC_BRANCH_PREFIX = "rc/"
+_RC_FIXED_DATE = "2026-01-01T00:00:00Z"
+
+
 @dataclass
 class FakePR:
     number: int
@@ -138,6 +145,13 @@ class FakeGitHub:
         self._workflow_reruns: list[int] = []
         self._prs: dict[int, FakePR] = {}
         self._pr_counter = 10_000
+        # #10309: rc/* branches created via create_rc_branch, branch → ISO
+        # committer date, so the promotion read side (find_open_promotion_pr /
+        # list_rc_branches / list_recent_promotion_prs) is backed by real
+        # state and StagingPromotionLoop can cut → find → monitor → merge its
+        # own RC end-to-end against the fake (previously the reads were
+        # hard-coded None/[] stubs).
+        self._rc_branches: dict[str, str] = {}
         self._ci_scripts: dict[int, deque[tuple[bool, str]]] = {}
         self._comments: list[tuple[int, str]] = []
         self._ci_main_status: tuple[str, str] = ("success", "")
@@ -551,6 +565,12 @@ class FakeGitHub:
             # Mirror gh: `--reason "not planned"` -> stateReason NOT_PLANNED;
             # no --reason -> COMPLETED (get_issue_state's empty fallback).
             issue.state_reason = reason.upper().replace(" ", "_") if reason else ""
+        elif issue_number in self._prs:
+            # gh treats PRs as issues — `gh issue close <pr#>` closes the PR.
+            # StagingPromotionLoop closes red promotion PRs through this exact
+            # call (#10309); without the fallthrough the fake left them open
+            # and the loop re-found the same "open" PR every tick.
+            self._prs[issue_number].closed = True
         return True
 
     async def close_pr(self, pr_number: int) -> bool:
@@ -1218,8 +1238,16 @@ class FakeGitHub:
         return ""
 
     # --- Staging / RC promotion PRPort methods ---
+    #
+    # Mirrors the real PRManager semantics (#10309): a "promotion PR" is an
+    # open PR whose head branch starts with the RC prefix; the listing methods
+    # serve the same projections the real gh-backed reads produce. The prefix
+    # matches config's ``rc_branch_prefix`` default — the fake serves one
+    # repo's worth of state under default naming, like FakeIssue's fixed
+    # timestamps.
 
     async def create_rc_branch(self, rc_branch: str) -> str:
+        self._rc_branches[rc_branch] = _RC_FIXED_DATE
         return f"sha-{rc_branch}"
 
     async def push_synthetic_commit(self, branch: str, message: str) -> str:
@@ -1244,6 +1272,20 @@ class FakeGitHub:
         return num
 
     async def find_open_promotion_pr(self) -> Any:
+        """First open ``rc/*`` PR, as PRInfo — the real read's projection."""
+        for pr in sorted(self._prs.values(), key=lambda p: p.number):
+            if (
+                pr.branch.startswith(_RC_BRANCH_PREFIX)
+                and not pr.merged
+                and not pr.closed
+            ):
+                return PRInfoFactory.create(
+                    number=pr.number,
+                    issue_number=0,
+                    branch=pr.branch,
+                    url=pr.url,
+                    draft=pr.draft,
+                )
         return None
 
     async def merge_promotion_pr(self, pr_number: int, **_kw: Any) -> bool:
@@ -1270,15 +1312,26 @@ class FakeGitHub:
         return False
 
     async def list_rc_branches(self) -> list[tuple[str, str]]:
-        return []
+        return list(self._rc_branches.items())
 
     async def delete_branch(self, branch: str) -> bool:
-        _ = branch
+        self._rc_branches.pop(branch, None)
         return True
 
     async def list_recent_promotion_prs(self, days: int = 7) -> list[dict[str, Any]]:
-        _ = days
-        return []
+        """Closed ``rc/*`` PRs in the ``GhPromotionPR`` projection shape."""
+        _ = days  # every fake entry is "recent" — fixed dates, no wall clock
+        return [
+            {
+                "number": pr.number,
+                "branch": pr.branch,
+                "merged": pr.merged,
+                "closed_at": _RC_FIXED_DATE,
+                "url": pr.url,
+            }
+            for pr in sorted(self._prs.values(), key=lambda p: p.number)
+            if pr.branch.startswith(_RC_BRANCH_PREFIX) and (pr.merged or pr.closed)
+        ]
 
     async def ensure_branch_exists(self, branch: str, *, base: str) -> bool:
         _ = (branch, base)

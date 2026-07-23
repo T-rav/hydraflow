@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `b28837f` — feat(ul): entry-evidence — 2 new entry links across 2 terms (#10305) (#10305) *(2026-07-22)*
+- `bb77fb1` — fix(triage): parse code-quoting verdicts + raise turn budget (#10291); infra-park != clarification-park (#10290) (#10300) (#10300) *(2026-07-22)*
+- `b1cde30` — feat(ul): entry-evidence — 5 new entry links across 5 terms (#10295) (#10295) *(2026-07-22)*
 - `bfc5d9d` — docs(memory-feedback): mirror 3 pending feedback entries + refresh coverage_matrix (#10288) (#10288) *(2026-07-22)*
 - `1cc250d` — feat(ul): entry-evidence — 4 new entry links across 3 terms (#10284) (#10284) *(2026-07-22)*
 - `48aa743` — feat(ul): edge-proposer — 49 new edges across 24 terms (#10283) (#10283) *(2026-07-22)*

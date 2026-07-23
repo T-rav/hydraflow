@@ -687,3 +687,37 @@ def test_auditor_defaults_to_materialized_canonical_baseline(tmp_path) -> None:
     assert (canonical_dir / "main_ruleset.json").exists()
     assert (canonical_dir / "staging_ruleset.json").exists()
     assert not report.clean  # drifted main + missing staging vs the baseline
+
+
+def test_sandbox_overrides_disable_evidence_pack(tmp_path) -> None:
+    """#10309: CH-4's raw ``gh`` reconcile sweep + compiler are air-gapped off.
+
+    Both fire on every StagingPromotionLoop tick once ``staging_enabled`` is
+    seeded true — ``_list_merged_promotion_prs`` is a raw ``gh pr list``
+    subprocess (grandfathered spawn) that would hang-then-fail on the
+    air-gapped network each cycle.
+    """
+    config = _seed_config(tmp_path)
+    assert config.evidence_pack_enabled is True  # production default
+
+    sandbox_main._apply_sandbox_config_overrides(config)
+
+    assert config.evidence_pack_enabled is False
+
+
+def test_seed_staging_enabled_applies_to_config(tmp_path) -> None:
+    """#10309: ``seed.staging_enabled`` flips the config so the s82 scenario
+    activates StagingPromotionLoop; the default leaves every other scenario
+    in the historical ``staging_disabled`` no-op."""
+    from mockworld.seed import MockWorldSeed
+
+    config = _seed_config(tmp_path)
+    assert config.staging_enabled is False
+
+    sandbox_main.apply_seed_config_overrides(config, MockWorldSeed())
+    assert config.staging_enabled is False
+
+    sandbox_main.apply_seed_config_overrides(
+        config, MockWorldSeed(staging_enabled=True)
+    )
+    assert config.staging_enabled is True

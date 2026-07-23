@@ -171,6 +171,27 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # loop, so disable it wholesale (retires the grandfathered _download_junit
     # spawn and air-gaps the new xdist-audit read).
     object.__setattr__(config, "flake_tracker_loop_enabled", False)
+    # StagingPromotionLoop's CH-4 evidence machinery (#10309): once a scenario
+    # seeds ``staging_enabled`` the loop's every tick runs the reconcile sweep
+    # (``_list_merged_promotion_prs`` — a raw ``gh pr list`` subprocess, the
+    # grandfathered spawn in test_sandbox_seam_completeness) and each promoted
+    # RC triggers the pack compiler. Both reach the network; both have their
+    # own unit tests. The sandbox exercises the cut→monitor→merge promotion
+    # path itself (s82).
+    object.__setattr__(config, "evidence_pack_enabled", False)
+
+
+def apply_seed_config_overrides(config: HydraFlowConfig, seed: MockWorldSeed) -> None:
+    """Apply per-scenario config knobs carried on the seed (#10309).
+
+    Runs after ``_apply_sandbox_config_overrides`` (the unconditional air-gap
+    set) — these are scenario-chosen, not environment-forced. Currently just
+    ADR-0042 staging mode: ``seed.staging_enabled=True`` activates
+    StagingPromotionLoop's real promotion path (see the seed field docstring
+    for why this must stay per-scenario rather than compose-wide).
+    """
+    if seed.staging_enabled:
+        object.__setattr__(config, "staging_enabled", True)
 
 
 def _load_seed() -> MockWorldSeed:
@@ -770,6 +791,9 @@ async def main() -> None:
     # air-gapped sandbox network (see the helper for the per-flag rationale).
     _apply_sandbox_config_overrides(config)
     seed = _load_seed()
+    # Scenario-chosen config knobs carried on the seed (e.g. s82's ADR-0042
+    # staging mode) — after the unconditional air-gap overrides above.
+    apply_seed_config_overrides(config, seed)
     # A real EventLog is only attached when a scenario seeds worker-status
     # history (#10133) — every other scenario keeps the historical no-log
     # ``EventBus()`` so ``/api/events`` continues falling back to in-memory

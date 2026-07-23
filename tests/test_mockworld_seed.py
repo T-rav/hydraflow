@@ -434,3 +434,18 @@ def test_seed_round_trips_active_trigger_seams_through_json() -> None:
     assert restored.stale_workspaces == original.stale_workspaces
     assert restored.gate_activations == original.gate_activations
     assert restored.expired_run_dirs == original.expired_run_dirs
+
+
+def test_default_seed_staging_disabled() -> None:
+    """Back-compat: every pre-#10309 scenario seed predates ``staging_enabled``."""
+    assert MockWorldSeed().staging_enabled is False
+
+
+def test_seed_round_trips_staging_enabled_through_json() -> None:
+    """JSON round-trip preserves the RC-promotion staging knob (#10309)."""
+    original = MockWorldSeed(staging_enabled=True)
+
+    parsed = MockWorldSeed.from_json(original.to_json())
+
+    assert parsed == original
+    assert parsed.staging_enabled is True
