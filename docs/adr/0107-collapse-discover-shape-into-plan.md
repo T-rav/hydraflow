@@ -191,7 +191,7 @@ removed now that the collapsed topology is the only path.
   human-interactive shaping instead of a dedicated Shape loop.
 - ADR-0042 (Two-Tier Branch Release Promotion) — precedent for landing a
   topology change behind a boolean rollout flag.
-- `src/triage_phase.py` — routing; the Discover branch is removed, so a ready
+- `src/triage_phase.py:_triage_single` — routing; the Discover branch is removed, so a ready
   issue always transitions to `hydraflow-plan`.
 - `src/plan_phase.py:_should_research` — existing gate the planner discovery
   decision extends.

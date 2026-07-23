@@ -13,7 +13,7 @@ Detecting "event loop alive as a process but frozen solid" requires an in-proces
 
 ## Decision
 
-`src/event_loop_watchdog.py` adds the missing layer: a daemon OS **thread** started by `HydraFlowOrchestrator.run()` in `src/orchestrator.py` alongside the loops.
+`src/event_loop_watchdog.py` adds the missing layer: a daemon OS **thread** started by `HydraFlowOrchestrator.run()` in `src/orchestrator.py:HydraFlowOrchestrator.run` alongside the loops.
 
 - **Beacon.** A trivial repeating asyncio task stamps a monotonic timestamp (`EventLoopBeacon`) every 1s. While the loop is synchronously blocked the task is simply never scheduled — which is exactly the signal. The stamp is a GIL-atomic float write; cost is negligible.
 - **Detector.** The daemon thread polls the beacon's age against the `event_loop_watchdog_stall_seconds` threshold (default 120s — generous; a true synchronous wedge is multi-minute). One trip per freeze episode, not per poll tick; a fresh beacon closes the episode.
