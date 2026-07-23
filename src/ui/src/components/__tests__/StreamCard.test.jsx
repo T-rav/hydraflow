@@ -159,6 +159,20 @@ describe('StageRow queued presentation', () => {
   })
 })
 
+describe('StageRow hitl presentation', () => {
+  it('renders the hitl stage node in HITL-red, not Triage-yellow', () => {
+    const issue = makeIssue({ overallStatus: 'hitl', currentStage: 'review' })
+    issue.stages.review = { ...issue.stages.review, status: 'hitl' }
+
+    const { getByTestId } = render(<StreamCard issue={issue} defaultExpanded />)
+    const node = getByTestId('stage-node-review')
+
+    expect(node.style.background).toBe(theme.red)
+    expect(node.style.borderColor).toBe(theme.red)
+    expect(node.style.background).not.toBe(theme.yellow)
+  })
+})
+
 describe('StreamCard phase-aware styling', () => {
   it('aligns border and accent to stage color when collapsed', () => {
     const issue = makeIssue({ overallStatus: 'active', currentStage: 'review' })

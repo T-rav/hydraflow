@@ -42,7 +42,7 @@ function StageRow({ stageKey, stageData, isLast }) {
       : stageData.status === 'failed'
         ? { ...stageNodeBase, background: theme.red, borderColor: theme.red }
         : stageData.status === 'hitl'
-          ? { ...stageNodeBase, background: theme.yellow, borderColor: theme.yellow }
+          ? { ...stageNodeBase, background: theme.red, borderColor: theme.red }
           : stageData.status === 'queued'
             ? { ...stageNodeBase, background: meta.subtleColor, borderColor: meta.color }
             : { ...stageNodeBase, background: meta.color, borderColor: meta.color }
