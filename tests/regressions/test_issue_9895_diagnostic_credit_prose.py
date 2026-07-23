@@ -104,6 +104,10 @@ class TestEscalateCommentDedup:
         prs.post_comment = AsyncMock()
         prs.swap_pipeline_labels = AsyncMock()
         prs.add_labels = AsyncMock()
+        # #10262: _escalate_to_hitl consults find_open_pr_for_branch before
+        # re-arming the hitl labels. Without this stub a bare (truthy) MagicMock
+        # would make the guard both non-awaitable and read as "PR open".
+        prs.find_open_pr_for_branch = AsyncMock(return_value=None)
         loop = DiagnosticLoop(
             config=deps.config,
             runner=MagicMock(),
