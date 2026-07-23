@@ -80,6 +80,7 @@ areas:
       - CorpusLearningLoop
       - ErosionMetricsLoop
       - EscapeLedgerLoop
+      - InterventionTallyLoop
       - FakeCoverageAuditorLoop
       - FlakeTrackerLoop
       - LiveCorpusReplayLoop

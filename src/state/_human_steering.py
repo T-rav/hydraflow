@@ -18,6 +18,15 @@ class HumanSteeringStateMixin:
     def get_human_steering(self, issue: str) -> SteeringState:
         return self._data.human_steering.get(issue, SteeringState())
 
+    def get_all_human_steering(self) -> dict[str, SteeringState]:
+        """Return every per-issue steering directive (read-only snapshot copy).
+
+        Used by InterventionTallyLoop (#10369) to sense steering interventions
+        across the whole backlog. A shallow copy so callers cannot mutate the
+        persisted map through the returned dict.
+        """
+        return dict(self._data.human_steering)
+
     def set_human_steering(self, issue: str, state: SteeringState) -> None:
         self._data.human_steering[issue] = state
         self.save()

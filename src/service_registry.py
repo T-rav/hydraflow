@@ -80,6 +80,7 @@ from hitl_phase import HITLPhase
 from hitl_runner import HITLRunner
 from human_steering_loop import HumanSteeringLoop
 from implement_phase import ImplementPhase
+from intervention_tally_loop import InterventionTallyLoop
 from issue_cache import IssueCache
 from issue_fetcher import GitHubTaskFetcher, IssueFetcher
 from issue_refinement_loop import IssueRefinementLoop
@@ -331,6 +332,7 @@ class ServiceRegistry:
     pr_red_repair_loop: PrRedRepairLoop
     erosion_metrics_loop: ErosionMetricsLoop
     escape_ledger_loop: EscapeLedgerLoop
+    intervention_tally_loop: InterventionTallyLoop
     issue_refinement_loop: IssueRefinementLoop
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
@@ -1402,6 +1404,16 @@ def build_services(
         dedup=escape_ledger_dedup,
         deps=loop_deps,
     )
+    intervention_tally_dedup = DedupStore(
+        "intervention_tally_recorded",
+        config.data_root / "dedup" / "intervention_tally.json",
+    )
+    intervention_tally_loop = InterventionTallyLoop(
+        config=config,
+        state=state,
+        dedup=intervention_tally_dedup,
+        deps=loop_deps,
+    )
     issue_refinement_dedup = DedupStore(
         "issue_refinement",
         config.data_root / "dedup" / "issue_refinement.json",
@@ -1987,6 +1999,7 @@ def build_services(
         pr_red_repair_loop=pr_red_repair_loop,
         erosion_metrics_loop=erosion_metrics_loop,
         escape_ledger_loop=escape_ledger_loop,
+        intervention_tally_loop=intervention_tally_loop,
         issue_refinement_loop=issue_refinement_loop,
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,

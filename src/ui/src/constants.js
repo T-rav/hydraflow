@@ -251,7 +251,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'auto_tighten', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry', 'convergence_oscillation', 'gate_health', 'issue_refinement', 'pr_red_repair', 'erosion_metrics', 'escape_ledger', 'adr_drift_resolver'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'auto_tighten', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry', 'convergence_oscillation', 'gate_health', 'issue_refinement', 'pr_red_repair', 'erosion_metrics', 'escape_ledger', 'intervention_tally', 'adr_drift_resolver'])
 
 /**
  * Preset options for the per-loop watchdog-timeout override (#9503).
@@ -313,6 +313,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   pr_red_repair: 300,
   erosion_metrics: 14400,
   escape_ledger: 14400,
+  intervention_tally: 14400,
   issue_refinement: 86400,
   label_drift_watcher: 600,
   triage_retry: 86400,
@@ -398,6 +399,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'pr_red_repair', label: 'PR Red Repair', description: 'Detects settled-red open PRs and bounded-reruns infra-flake CI (cancelled runs, zero-failed-step jobs, failed setup steps, vanished logs). Escalates via rollup issue once the rerun budget is exhausted. Phase 1 of #10027 — real-red auto-agent dispatch is Phase 2.', color: theme.orange, group: 'repo_health', tags: ['recovery', 'quality'] },
   { key: 'erosion_metrics', label: 'Erosion Metrics', description: 'v1: runs the change-spread and concept-scatter sensors over commits merged since the last tick; files above-baseline drift as hydraflow-find issues for human triage (Pattern B — never opens a fix PR). See #10107, epic #10104.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },
   { key: 'escape_ledger', label: 'Escape Ledger', description: 'Falsification instrument (read-only, Pattern B — never opens a fix PR): records post-merge escapes (revert/hotfix/regression-pin/bug-issue/Sentry) to an append-only ledger with mechanical attribution, and renders escapes-per-100-merges + month-over-month erosion trend surfaces. See #10367.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },
+  { key: 'intervention_tally', label: 'Intervention Tally', description: 'Attention-side telemetry (read-only, Pattern B — never opens a fix PR): senses human touches (steering/HITL/control-route/CLI), classifies them into a fixed taxonomy (mechanical + bounded cheap-LLM for free-text, confidence recorded), and renders interventions-per-100-merges (same denominator as the escape ledger), the per-loop trust table, and loops-per-governor. See #10369.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },
   { key: 'issue_refinement', label: 'Issue Refinement', description: 'Backlog-wide duplicate detection, priority scoring, and a rolling operator digest issue. Auto-closes confirmed duplicates and relabels safe priority deltas.', color: theme.orange, group: 'repo_health', tags: ['hygiene'] },
 ]
 

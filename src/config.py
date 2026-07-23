@@ -248,6 +248,12 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_ESCAPE_LEDGER_ENCODING_AGE_DAYS",
         14,
     ),
+    ("intervention_tally_interval", "HYDRAFLOW_INTERVENTION_TALLY_INTERVAL", 14400),
+    (
+        "intervention_tally_max_classify_per_tick",
+        "HYDRAFLOW_INTERVENTION_TALLY_MAX_CLASSIFY_PER_TICK",
+        5,
+    ),
     ("adr_drift_resolver_interval", "HYDRAFLOW_ADR_DRIFT_RESOLVER_INTERVAL", 3600),
     (
         "adr_drift_resolver_max_triage_per_tick",
@@ -519,6 +525,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("otel_environment", "HF_ENV", "local"),
     ("issue_refinement_model", "HYDRAFLOW_ISSUE_REFINEMENT_MODEL", ""),
     ("skill_prompt_refine_model", "HYDRAFLOW_SKILL_PROMPT_REFINE_MODEL", ""),
+    ("intervention_tally_model", "HYDRAFLOW_INTERVENTION_TALLY_MODEL", ""),
 ]
 
 _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
@@ -841,6 +848,16 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "escape_ledger_loop_enabled",
         "HYDRAFLOW_ESCAPE_LEDGER_LOOP_ENABLED",
+        True,
+    ),
+    (
+        "intervention_tally_loop_enabled",
+        "HYDRAFLOW_INTERVENTION_TALLY_LOOP_ENABLED",
+        True,
+    ),
+    (
+        "intervention_tally_classify_enabled",
+        "HYDRAFLOW_INTERVENTION_TALLY_CLASSIFY_ENABLED",
         True,
     ),
     (
@@ -1829,6 +1846,28 @@ class HydraFlowConfig(BaseModel):
             "How long an escape may stay `encoded_as: none-yet` before "
             "EscapeLedgerLoop surfaces it for human triage (#10367). Every "
             "escape should terminate in an encoding (test/lesson/detector/ADR)."
+        ),
+    )
+    intervention_tally_interval: int = Field(
+        default=14400,
+        ge=900,
+        le=604800,
+        description=(
+            "InterventionTallyLoop cycle interval in seconds (#10369: "
+            "attention-side telemetry — human touches per 100 merges + "
+            "loops-per-governor; v1 provisional cadence, default 4h)"
+        ),
+    )
+    intervention_tally_max_classify_per_tick: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description=(
+            "Budget: max free-text steering directives InterventionTallyLoop "
+            "sends to the cheap LLM in one tick (#10369). Bounds classification "
+            "spend under a synthetic flood; over budget, rows keep their raw "
+            "text at low confidence for later re-label. Recording is never "
+            "capped — only LLM classification."
         ),
     )
     adr_drift_resolver_interval: int = Field(
@@ -4751,6 +4790,33 @@ class HydraFlowConfig(BaseModel):
             "escape ledger + erosion trend surfaces, read-only ADR-0029 "
             "Pattern B). Records escapes and renders trend reports; the "
             "finding-rate budget bounds any issue filing."
+        ),
+    )
+    intervention_tally_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for InterventionTallyLoop (#10369: "
+            "attention-side telemetry, read-only ADR-0029 Pattern B). Senses "
+            "+ records human touches (steering/HITL/control-route/CLI) and "
+            "renders the rate report; never gates, blocks, or fixes."
+        ),
+    )
+    intervention_tally_classify_enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether InterventionTallyLoop may send free-text steering "
+            "directives to the cheap LLM for classification (#10369). OFF "
+            "keeps free-text rows at low confidence with raw text preserved; "
+            "the air-gapped sandbox pins this OFF (config_disable seam) so no "
+            "classification spawn is reachable there."
+        ),
+    )
+    intervention_tally_model: str = Field(
+        default="",
+        description=(
+            "Model for InterventionTallyLoop's free-text steering "
+            "classification (#10369); empty falls back to background_model, "
+            "then 'sonnet'. Also stamped as each row's model_version_context."
         ),
     )
     adr_drift_resolver_loop_enabled: bool = Field(

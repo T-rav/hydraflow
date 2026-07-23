@@ -2347,6 +2347,12 @@ class StateData(BaseModel):
     # finished analyzing. Empty = never run; primed to current HEAD (no
     # back-analysis) on the first tick, mirroring erosion_last_processed_sha.
     escape_ledger_last_processed_sha: str = Field(default="")
+    # InterventionTallyLoop (#10369) — ISO-8601 timestamp the attention-side
+    # telemetry loop last processed the event/steering streams up to. Empty =
+    # never run; primed to NOW (no back-analysis) on the first tick, mirroring
+    # escape_ledger_last_processed_sha (a ts cursor, not a SHA — the source is
+    # an event stream, not a commit range).
+    intervention_tally_last_processed_ts: str = Field(default="")
     last_updated: str | None = None
 
 
