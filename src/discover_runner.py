@@ -11,6 +11,7 @@ from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from discover_expander import expand_research_brief, format_queries_for_prompt
 from exception_classify import reraise_on_credit_or_bug
+from human_steering import fenced_steering_guidance
 from models import DiscoverResult
 from plugin_skill_registry import (
     discover_plugin_skills,
@@ -36,6 +37,19 @@ _JSON_BLOCK_RE = re.compile(r"```json\s*\n(.*?)\n```", re.DOTALL)
 _SKILL_NAME = "discover-completeness"
 _ESCALATION_LABEL_STUCK = "discover-stuck"
 _ESCALATION_LABEL_HITL = "hitl-escalation"
+
+
+def _mockworld_sentinel_active(runner: DiscoverRunner) -> bool:
+    """True when the ADR-0063 MockWorld sentinel is attached to *runner*.
+
+    Under the sentinel the runner must NEVER dispatch a subprocess: in the
+    air-gapped docker sandbox a real ``claude -p`` spawn blocks for the full
+    ``agent_timeout``, wedging the discover phase loop mid-tick (frozen
+    heartbeat) and starving every scenario that routes an issue through
+    discover (#9796 — s51 failed every rc/* promotion this way).
+    """
+    fake_llm = getattr(runner, "_mockworld_fake_llm", None)
+    return fake_llm is not None and bool(getattr(fake_llm, "_is_fake_adapter", False))
 
 
 def _consume_mockworld_discover_script(
@@ -113,14 +127,18 @@ class DiscoverRunner(BaseRunner):
     ) -> None:
         """Wire issue-filing + dedup deps used by evaluator escalation.
 
-        Called by :class:`DiscoverPhase` after construction. Without
-        binding, escalation logs a warning and returns — evaluator
-        dispatch and bounded retry still run.
+        Bound by the service factory (``service_registry.build_services``)
+        right after construction (ADR-0107 — this engine is invoked as a
+        planner helper, not a standalone phase). Without binding, escalation
+        logs a warning and returns — evaluator dispatch and bounded retry
+        still run.
         """
         self._prs = prs
         self._dedup = dedup
 
-    async def discover(self, task: Task, worker_id: int = 0) -> DiscoverResult:
+    async def discover(
+        self, task: Task, worker_id: int = 0, *, guidance: str = ""
+    ) -> DiscoverResult:
         """Run product discovery with post-output evaluation (§4.10).
 
         When ``config.max_discover_attempts > 0`` the runner evaluates
@@ -137,6 +155,15 @@ class DiscoverRunner(BaseRunner):
         attempt's prompt before re-running discovery. One expansion per
         issue by default — further coherence failures fall through to
         normal retry + escalation.
+
+        ``guidance`` (ADR-0099 #4, human-on-the-loop continuous steering)
+        is live operator guidance for this issue, sourced by
+        :class:`DiscoverPhase` from ``StateTracker.get_human_steering``.
+        It is folded, fenced, into BOTH prompt-construction sites: the
+        main discovery-brief prompt (:meth:`_build_prompt`) and the
+        ``discover-completeness`` evaluator prompt (:meth:`_evaluate_brief`).
+        Empty string when the feature is off or no guidance was posted —
+        reference signal only, never blocking.
         """
         result = DiscoverResult(issue_number=task.id)
         if self._config.dry_run:
@@ -153,12 +180,12 @@ class DiscoverRunner(BaseRunner):
         last_findings: list[str] = []
         for attempt in range(1, max_attempts + 1):
             result = await self._run_discovery_once(
-                task, attempt, expanded_queries=expanded_queries
+                task, attempt, expanded_queries=expanded_queries, guidance=guidance
             )
             if not evaluator_enabled:
                 return result
             passed, summary, findings = await self._evaluate_brief(
-                task, result.research_brief
+                task, result.research_brief, guidance=guidance
             )
             last_summary, last_findings = summary, findings
             if passed:
@@ -246,6 +273,7 @@ class DiscoverRunner(BaseRunner):
         attempt: int,
         *,
         expanded_queries: list[str] | None = None,
+        guidance: str = "",
     ) -> DiscoverResult:
         """Run a single discovery pass — produces one :class:`DiscoverResult`.
 
@@ -254,14 +282,29 @@ class DiscoverRunner(BaseRunner):
         (ADR-0063 W3a) carries research queries the discover-expander
         subagent produced after a prior coherence failure; when present
         they are appended to the prompt so the next brief explicitly
-        addresses each one.
+        addresses each one. ``guidance`` (ADR-0099 #4) is live operator
+        steering, folded fenced into the prompt by :meth:`_build_prompt`.
         """
         result = DiscoverResult(issue_number=task.id)
         transcript = ""
 
+        # MockWorld bypass (ADR-0063 sentinel): never spawn a subprocess in
+        # the sandbox. Without this, the air-gapped ``claude -p`` spawn blocks
+        # for the full agent_timeout and wedges the discover loop (#9796).
+        # ``_evaluate_brief`` still consumes any scripted coherence verdict,
+        # so failure-path scenarios keep working against this stub brief.
+        if _mockworld_sentinel_active(self):
+            result.research_brief = (
+                f"MockWorld discovery brief for issue #{task.id} (attempt "
+                f"{attempt}). Deterministic sandbox stub — no subprocess was "
+                f"dispatched."
+            )
+            result.opportunities = ["MockWorld sandbox stub"]
+            return result
+
         try:
             cmd = self._build_command()
-            prompt = self._build_prompt(task)
+            prompt = self._build_prompt(task, guidance=guidance)
 
             # Inject memory context (prior learnings, ADRs, retrospectives)
             memory_section = await self._inject_memory(
@@ -298,6 +341,7 @@ class DiscoverRunner(BaseRunner):
                 self._config.repo_root,
                 {"issue": task.id, "source": f"discover:attempt-{attempt}"},
                 on_output=_check_complete,
+                issue_labels=task.tags,
             )
 
             parsed = self._extract_result(transcript, task.id)
@@ -336,12 +380,18 @@ class DiscoverRunner(BaseRunner):
         return result
 
     async def _evaluate_brief(
-        self, task: Task, brief: str
+        self, task: Task, brief: str, *, guidance: str = ""
     ) -> tuple[bool, str, list[str]]:
         """Dispatch ``discover-completeness`` against *brief*.
 
         A missing skill (registry disabled) fails open so this extension
         never blocks discovery on its own absence.
+
+        ``guidance`` (ADR-0099 #4) is live operator steering, folded
+        fenced into the evaluator prompt via
+        :func:`build_discover_completeness_prompt` — the second of
+        discover's two prompt-construction sites (the first being
+        :meth:`_build_prompt`).
 
         MockWorld bypass: when the instance carries a ``_mockworld_fake_llm``
         sentinel attribute and the scenario has scripted a coherence verdict
@@ -354,6 +404,14 @@ class DiscoverRunner(BaseRunner):
         if scripted is not None:
             return scripted
 
+        # MockWorld fail-open (companion to the ``_run_discovery_once``
+        # bypass): a scenario that seeded no ``discover`` script must not
+        # fall through to a real evaluator subprocess — that spawn wedges
+        # the air-gapped sandbox exactly like the main discovery pass
+        # (#9796). Scripted verdicts were already consumed above.
+        if _mockworld_sentinel_active(self):
+            return True, "MockWorld sandbox: no scripted verdict — fail open", []
+
         skill = next((s for s in BUILTIN_SKILLS if s.name == _SKILL_NAME), None)
         if skill is None:
             return True, f"{_SKILL_NAME} not registered — fail open", []
@@ -362,6 +420,7 @@ class DiscoverRunner(BaseRunner):
             issue_title=task.title,
             issue_body=task.body or "",
             brief=brief or "",
+            guidance=guidance,
         )
         try:
             transcript = await self._execute(
@@ -369,6 +428,11 @@ class DiscoverRunner(BaseRunner):
                 prompt,
                 self._config.repo_root,
                 {"issue": task.id, "source": "discover:evaluator"},
+                issue_labels=task.tags,
+                # #9998: telemetry keys on the skill name so prompt-efficiency
+                # ordering matches the corpus's expected_catcher names; the
+                # event source stays "discover:evaluator" for scenario scripts.
+                telemetry_source=skill.name,
             )
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
@@ -446,8 +510,14 @@ class DiscoverRunner(BaseRunner):
             effort="max",
         )
 
-    def _build_prompt(self, task: Task) -> str:
-        """Build the product discovery prompt with deep product thinking frameworks."""
+    def _build_prompt(self, task: Task, *, guidance: str = "") -> str:
+        """Build the product discovery prompt with deep product thinking frameworks.
+
+        ``guidance`` (ADR-0099 #4) is live operator steering for this
+        issue; folded in fenced via :func:`fenced_steering_guidance`,
+        which returns ``""`` when there is no guidance so behavior is
+        unchanged when the feature is off.
+        """
         prompt = f"""You are a senior product strategist conducting deep discovery research.
 Think through the tradeoffs carefully before producing your analysis.
 
@@ -556,6 +626,7 @@ Each opportunity should be:
         )
         if plugin_skills_section:
             prompt = f"{prompt}\n\n{plugin_skills_section}"
+        prompt += fenced_steering_guidance(guidance)
         return prompt
 
     def _extract_result(

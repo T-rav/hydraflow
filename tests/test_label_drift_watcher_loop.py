@@ -254,3 +254,50 @@ def test_label_drift_kind_rejects_pr_behind_issue() -> None:
             kind="pr_behind_issue",  # type: ignore[arg-type]
             detected_at=datetime.now(UTC),
         )
+
+
+@pytest.mark.asyncio
+async def test_reconciles_escalated_with_resolving_pr(loop_env) -> None:
+    """#10260: an escalated issue with an open, CI-green resolving PR gets
+    its stale ``hitl-escalation``/``diagnose-failed`` labels cleared."""
+    cfg, pr = loop_env
+    drift = LabelDrift(
+        issue=42,
+        pr=100,
+        pr_commits=1,
+        issue_label="diagnose-failed,hitl-escalation",
+        pr_label="",
+        kind="escalated_with_resolving_pr",
+        detected_at=datetime.now(UTC),
+    )
+    pr.find_label_drift = AsyncMock(return_value=[drift])
+    pr.remove_label = AsyncMock(return_value=None)
+
+    stop = asyncio.Event()
+    loop = LabelDriftWatcherLoop(config=cfg, pr_manager=pr, deps=_deps(stop))
+
+    stats = await loop._do_work()
+
+    assert stats == {"detected": 1, "reconciled": 1}
+    pr.remove_label.assert_any_await(42, "hitl-escalation")
+    pr.remove_label.assert_any_await(42, "diagnose-failed")
+    pr.swap_pipeline_labels.assert_not_awaited()
+    pr.post_comment.assert_awaited_once()
+    body = pr.post_comment.await_args.args[1]
+    assert "escalated_with_resolving_pr" in body
+    assert "100" in body
+
+
+def test_label_drift_kind_accepts_escalated_with_resolving_pr() -> None:
+    """#10260: ``escalated_with_resolving_pr`` is a valid drift kind — an
+    open PR with passing CI already resolves an escalated issue."""
+    drift = LabelDrift(
+        issue=1,
+        pr=2,
+        pr_commits=1,
+        issue_label="hitl-escalation,diagnose-failed",
+        pr_label="",
+        kind="escalated_with_resolving_pr",
+        detected_at=datetime.now(UTC),
+    )
+    assert drift.kind == "escalated_with_resolving_pr"

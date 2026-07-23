@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -20,6 +20,7 @@ from config import Credentials, HydraFlowConfig
 from events import EventBus
 from execution import get_default_runner
 from models import LoopResult, TranscriptEventData
+from prompt_gate import GateResult, gate_prompt
 from prompt_telemetry import PromptTelemetry, parse_command_tool_model
 from runner_utils import (
     AuthenticationRetryError,
@@ -65,6 +66,12 @@ class BaseRunner:
 
     _log: ClassVar[logging.Logger]
     _phase_name: ClassVar[str] = "unknown"
+    # #9895: opt-out for scanning agent stdout prose for credit-exhaustion
+    # phrases. Runners whose agents ANALYZE failure transcripts (and thus
+    # quote credit-error prose) must set this False so only the CLI's own
+    # stderr signal can raise CreditExhaustedError. Mirrors the
+    # LONG_LLM_CYCLE ClassVar opt-in pattern.
+    CREDIT_PROSE_SCAN: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -151,12 +158,58 @@ class BaseRunner:
         *,
         on_output: Callable[[str], bool] | None = None,
         telemetry_stats: Mapping[str, object] | None = None,
+        issue_labels: Sequence[str] | None = None,
+        telemetry_source: str | None = None,
     ) -> str:
         """Run a claude subprocess and stream its output.
 
         Retries up to ``_AUTH_RETRY_MAX`` times on transient authentication
         failures (OAuth token refresh blips) with exponential backoff.
+
+        *telemetry_source* overrides the ``PromptTelemetry.record`` source
+        attribution only (#9998: skill spawns tag their skill name — e.g.
+        ``"diff-sanity"`` — so ``get_source_totals()`` keys match the
+        adversarial corpus's ``expected_catcher`` names and
+        ``pick_refine_order`` gets real per-skill signal). It deliberately
+        does NOT touch ``event_data["source"]``: that phase tag is
+        load-bearing for scenario transcript scripting and the dashboard
+        event stream.
+
+        *issue_labels* feeds the CH-6 data-governance gate's upward-only
+        ``data-class:`` label override. The contract is NOT optional: every
+        runner call site passes it (``task.tags`` / ``issue.tags`` /
+        ``issue.labels``, or labels threaded in by the caller) — enforced by
+        ``tests/test_prompt_gate_completeness.py::``
+        ``test_every_runner_execute_call_passes_issue_labels``, which fails
+        on any ``self._execute(...)`` call in a runner module that omits the
+        kwarg. Omitting it silently disables label-based elevation for that
+        spawn; the repo-declared class is enforced either way.
         """
+        # CH-6 data-governance gate (#9734): redact/block BEFORE any content
+        # reaches the vendor subprocess. Regulated-class blocks raise
+        # PromptGateBlockedError — a pre-spawn hard failure the phase
+        # escalation machinery routes to HITL. No-op for internal/public-code.
+        gate_tool, _gate_model = parse_command_tool_model(cmd)
+        raw_issue = event_data.get("issue")
+
+        # #9879: the gate regex-redacts the WHOLE prompt — pure CPU. On a
+        # large prompt (diagnostic prompts embed CI logs/diffs) running it
+        # inline starved the event loop for ~15s per Stage-1 run, freezing
+        # the dashboard and every other coroutine. Offload to a thread;
+        # regex matching over an immutable str is thread-safe.
+        def _run_gate() -> GateResult:
+            return gate_prompt(
+                prompt,
+                config=self._config,
+                source=str(event_data.get("source", "unknown")),
+                tool=gate_tool,
+                issue_number=raw_issue if isinstance(raw_issue, int) else None,
+                issue_labels=issue_labels or (),
+            )
+
+        gated = await asyncio.to_thread(_run_gate)
+        prompt = gated.prompt
+
         start = time.monotonic()
         transcript = ""
         succeeded = False
@@ -216,6 +269,7 @@ class BaseRunner:
                             usage_stats=usage_stats,
                             gh_token=self._credentials.gh_token,
                             trace_collector=trace_collector,
+                            credit_prose_scan=self.CREDIT_PROSE_SCAN,
                         ),
                     )
                     succeeded = True
@@ -256,7 +310,7 @@ class BaseRunner:
             raise
         finally:
             duration = time.monotonic() - start
-            source = str(event_data.get("source", "unknown"))
+            source = telemetry_source or str(event_data.get("source", "unknown"))
             issue_number = event_data.get("issue")
             pr_number = event_data.get("pr")
             tool, model = parse_command_tool_model(cmd)

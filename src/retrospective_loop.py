@@ -17,6 +17,7 @@ from config import HydraFlowConfig
 from events import EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from retrospective_queue import QueueKind
+from review_insights import reconcile_closed_insight_escalations
 
 if TYPE_CHECKING:
     from ports import PRPort
@@ -260,15 +261,14 @@ class RetrospectiveLoop(BaseBackgroundLoop):
         return {"stale_proposals": len(stale)}
 
     async def _reconcile_closed_insight_escalations(self) -> None:
-        """Clear the in-memory window-tracker for closed stale-insight escalations.
+        """Clear the in-memory window-tracker for HUMAN-closed stale-insight
+        escalations only — bot/programmatic closes must not re-arm (#8996).
 
-        Mirrors :meth:`FakeCoverageAuditorLoop._reconcile_closed_escalations`:
-        a closed escalation (the factory merged a fix, or a human dismissed it)
-        is the re-arm signal — the next stale tick should be free to file fresh.
-
-        Inspects closed issues carrying the configured ``find_label`` and
-        matches by title prefix :data:`PERSISTENT_FINDING_PREFIX` to scope the
-        clear to this loop's own escalations.
+        Delegates to :func:`review_insights.reconcile_closed_insight_escalations`,
+        the single shared implementation this loop and the ``ReviewPhase``
+        fallback (``review_phase/_phase.py``) both call so the two writers
+        can't drift apart. See that function's docstring for the full
+        bot-vs-human contract.
         """
         if self._prs is None:
             return
@@ -279,41 +279,11 @@ class RetrospectiveLoop(BaseBackgroundLoop):
         if not find_labels:
             return
 
-        try:
-            closed = await self._prs.list_closed_issues_by_label(find_labels[0])
-        except Exception as exc:  # noqa: BLE001
-            reraise_on_credit_or_bug(exc)
-            # The lookup is best-effort; reraising would block the entire
-            # verify-proposals tick on a transient GitHub fault.
-            logger.debug(
-                "Retrospective: could not list closed find issues for re-arm",
-                exc_info=True,
-            )
-            return
-
-        from review_insights import (  # noqa: PLC0415
-            CATEGORY_DESCRIPTIONS,
-            PERSISTENT_FINDING_PREFIX,
+        cleared = await reconcile_closed_insight_escalations(
+            prs=self._prs,
+            insight_escalated_at=self._insight_escalated_at,
+            find_label=find_labels[0],
         )
-
-        prefix = PERSISTENT_FINDING_PREFIX
-        # Build desc → category reverse lookup once.
-        desc_to_category = {
-            CATEGORY_DESCRIPTIONS.get(cat, cat): cat
-            for cat in list(self._insight_escalated_at.keys())
-        }
-
-        cleared: list[str] = []
-        for entry in closed:
-            title = entry.get("title", "") if isinstance(entry, dict) else ""
-            if not title.startswith(prefix):
-                continue
-            desc = title[len(prefix) :]
-            category = desc_to_category.get(desc) or desc
-            if category in self._insight_escalated_at:
-                del self._insight_escalated_at[category]
-                cleared.append(category)
-
         if cleared:
             logger.info(
                 "Retrospective: re-armed stale-insight tracker for %s",

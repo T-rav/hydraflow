@@ -5,15 +5,19 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Callable, Coroutine
+import os
+from collections.abc import Callable, Coroutine, Iterable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from adr_utils import is_adr_issue_title
 from bg_worker_manager import BGWorkerManager
 from config import HydraFlowConfig
+from event_loop_watchdog import build_event_loop_watchdog
 from events import EventBus, EventType, HydraFlowEvent
 from hitl_controller import HITLController
+from human_steering import apply_steering, resolve_redo_phase
+from issue_store import STAGE_NAME_MAP, IssueStoreStage
 from models import (
     BackgroundWorkerState,
     ErrorPayload,
@@ -26,15 +30,22 @@ from models import (
     SessionStartPayload,
     SessionStatus,
     StageStats,
+    SteeringState,
     SystemAlertPayload,
     Task,
     ThroughputStats,
     WorkFn,
 )
 from phase_utils import (
+    escalate_to_hitl,
     is_likely_bug,
     log_exception_with_bug_classification,
     release_batch_in_flight,
+)
+from runner_utils import (
+    backend_probe_endpoint,
+    normalize_provider,
+    reap_all_tracked_processes,
 )
 from service_registry import (
     ServiceRegistry,
@@ -45,8 +56,11 @@ from service_registry import (
 from state import StateTracker
 from state_restorer import StateRestorer
 from subprocess_util import (
+    PROVIDER_ANTHROPIC,
     AuthenticationError,
     CreditExhaustedError,
+    probe_auth_availability,
+    probe_credit_availability,
 )
 
 if TYPE_CHECKING:
@@ -75,6 +89,33 @@ def _log_deferred_task_failure(task: asyncio.Task[Any]) -> None:
 
 # Delay after a merge to allow GitHub to propagate the merge state.
 _POST_MERGE_DELAY: int = 5
+
+# Delay before restarting a loop whose AuthenticationError was refuted by the
+# live probe (a transient blip). A restart with no delay would let a loop that
+# runs-on-startup re-crash immediately while a sustained blip lasts, spinning
+# the supervisor and storming WARNING logs — the same hot-loop pathology #9924
+# guarded against on the credit false-positive path. The delay lives inside the
+# recreated task, so it never blocks supervision of the other loops (#9621).
+_AUTH_TRANSIENT_RESTART_DELAY_S: float = 30.0
+
+# Loops whose primary LLM work routes through a per-role provider dial (the
+# one-shot OpenAI-compatible backends — z.ai / kimi / openrouter). Maps each
+# such loop to the ``HydraFlowConfig`` field holding its dial. EVERY other loop
+# runs on the Claude harness and bills against Anthropic; only these can route
+# elsewhere, so only these can survive an Anthropic credit pause (or be the sole
+# casualty of a backend cap). See :meth:`HydraFlowOrchestrator._loop_providers`.
+# A loop that does MIXED work (dial'd one-shot + some harness spawns, e.g.
+# pr_unsticker's HITL analysis) self-heals: while it survives an Anthropic pause
+# its harness sub-call re-raises an ``anthropic`` signal that the already-active
+# pause absorbs. Keep in sync with the ``*_provider`` dials in config.py.
+_BACKEND_WORKER_LOOPS: dict[str, str] = {
+    "repo_wiki": "wiki_compilation_provider",
+    "adr_reviewer": "adr_review_provider",
+    "pr_unsticker": "pr_unstick_provider",
+    "term_proposer": "term_proposer_provider",
+    "entry_evidence": "term_proposer_provider",
+    "adr_drift_resolver": "adr_drift_resolver_provider",
+}
 
 
 class HydraFlowOrchestrator:
@@ -117,6 +158,15 @@ class HydraFlowOrchestrator:
         self._auth_failed = False
         # Credit pause — set when API credits are exhausted
         self._credits_paused_until: datetime | None = None
+        # Which billing provider the active pause is scoped to (#9807): a backend
+        # name ("zai"/"kimi"/"openrouter") pauses only loops routed there;
+        # "anthropic" pauses everything except surviving backend workers; ``None``
+        # is the global fallback (unknown provider → pause all). Purely for
+        # status/UI + observability; the affected-loop set is computed at pause
+        # time and threaded through resume.
+        self._credit_paused_provider: str | None = None
+        # Per-source last false-positive suppression (#9888 throttle).
+        self._credit_fp_last: dict[str, datetime] = {}
         self._credit_pause_lock = asyncio.Lock()
         self._credit_resume_event = asyncio.Event()
         # Session tracking
@@ -124,6 +174,9 @@ class HydraFlowOrchestrator:
         self._session_issue_results: dict[int, bool] = {}
         # Loop tasks (set by _supervise_loops for stop() to cancel)
         self._loop_tasks: dict[str, asyncio.Task[None]] = {}
+        # Loop factories (retained by _supervise_loops so restart_loop_task
+        # can cancel-and-recreate a silently-stalled loop task)
+        self._loop_factories: dict[str, Callable[[], Coroutine[Any, Any, None]]] = {}
         # Strong references for fire-and-forget background tasks (#6513) —
         # without this the GC can collect the Task before it completes.
         self._deferred_tasks: set[asyncio.Task[None]] = set()
@@ -144,6 +197,7 @@ class HydraFlowOrchestrator:
                     update_status=self.update_bg_worker_status,
                     is_enabled=self.is_bg_worker_enabled,
                     get_interval=self.get_bg_worker_interval,
+                    get_watchdog_timeout=self.get_bg_worker_timeout,
                 ),
                 active_issues_cb=self._sync_active_issue_numbers,
             )
@@ -173,6 +227,10 @@ class HydraFlowOrchestrator:
             "log_ingest": svc.log_ingest_loop,
             "github_cache": svc.github_cache_loop,
             "stale_issue_gc": svc.stale_issue_gc_loop,
+            "gate_health": svc.gate_health_loop,
+            "pr_red_repair": svc.pr_red_repair_loop,
+            "erosion_metrics": svc.erosion_metrics_loop,
+            "issue_refinement": svc.issue_refinement_loop,
             "ci_monitor": svc.ci_monitor_loop,
             "branch_protection_auditor": svc.branch_protection_auditor_loop,
             "gate_activator": svc.gate_activator_loop,
@@ -185,6 +243,9 @@ class HydraFlowOrchestrator:
             "skill_prompt_eval": svc.skill_prompt_eval_loop,
             "fake_coverage_auditor": svc.fake_coverage_auditor_loop,
             "adr_touchpoint_auditor": svc.adr_touchpoint_auditor_loop,
+            "adr_drift_resolver": svc.adr_drift_resolver_loop,
+            "adr_conformance": svc.adr_conformance_loop,
+            "auto_tighten": svc.auto_tighten_loop,
             "memory_backlog": svc.memory_backlog_loop,
             "rc_budget": svc.rc_budget_loop,
             "wiki_rot_detector": svc.wiki_rot_detector_loop,
@@ -193,7 +254,10 @@ class HydraFlowOrchestrator:
             "contract_refresh": svc.contract_refresh_loop,
             "corpus_learning": svc.corpus_learning_loop,
             "auto_agent_preflight": svc.auto_agent_preflight_loop,
+            "detector_calibration": svc.detector_calibration_loop,
             "sandbox_failure_fixer": svc.sandbox_failure_fixer_loop,
+            "disturbance_dampener": svc.disturbance_dampener_loop,
+            "human_steering": svc.human_steering_loop,
             "diagram_loop": svc.diagram_loop,
             "pricing_refresh": svc.pricing_refresh_loop,
             "cost_budget_watcher": svc.cost_budget_watcher_loop,
@@ -202,9 +266,15 @@ class HydraFlowOrchestrator:
             "edge_proposer": svc.edge_proposer_loop,
             "live_corpus_replay": svc.live_corpus_replay_loop,
             "triage_retry": svc.triage_retry_loop,
+            "convergence_oscillation": svc.convergence_oscillation_loop,
             "entry_evidence": svc.entry_evidence_loop,
+            "fitness_scorecard": svc.fitness_scorecard_loop,
         }
         self._bg_workers = BGWorkerManager(config, self._state, bg_loop_registry)
+        # The restart verb reads self._loop_tasks/_loop_factories lazily, so
+        # binding it here (before _supervise_loops populates them) is safe.
+        self._bg_workers.set_restart_cb(self.restart_loop_task)
+        svc.fitness_scorecard_loop.set_loops(bg_loop_registry)
         # Loops that need a reference to BGWorkerManager cannot take one
         # at construction time (chicken-and-egg: BGWorkerManager takes the
         # loop registry). Inject it now, post-construction.
@@ -367,9 +437,19 @@ class HydraFlowOrchestrator:
             return self._credits_paused_until
         return None
 
+    @property
+    def credits_paused_provider(self) -> str | None:
+        """The billing provider the ACTIVE credit pause is scoped to, or ``None``
+        (no active pause, or a global/legacy pause). Surfaced in the status
+        payload so the UI can show *which* backend is paused (#9807)."""
+        if self.credits_paused_until is not None:
+            return self._credit_paused_provider
+        return None
+
     def clear_credit_pause(self) -> None:
         """Clear a credit pause early, waking ``_sleep_until_resume``."""
         self._credits_paused_until = None
+        self._credit_paused_provider = None
         self._credit_resume_event.set()
 
     @property
@@ -430,6 +510,17 @@ class HydraFlowOrchestrator:
         self._svc.agents.terminate()
         self._svc.reviewers.terminate()
         self._svc.hitl_runner.terminate()
+        # #9911: the four runner sets above are only part of the picture —
+        # acceptance_criteria / verification_judge / sentry / report_issue
+        # (and any future stream_claude_process caller) register in the
+        # runtime-wide registry; reap the union so nothing reparents to
+        # launchd and burns CPU after "idle".
+        reaped = reap_all_tracked_processes()
+        if reaped:
+            logger.info(
+                "Stop: reaped %d subprocess group(s) beyond the runner-owned sets",
+                reaped,
+            )
 
         # Checkpoint interrupted issues before cancelling tasks
         interrupted = await self._build_interrupted_issues()
@@ -496,6 +587,7 @@ class HydraFlowOrchestrator:
         self._running = False
         self._auth_failed = False
         self._credits_paused_until = None
+        self._credit_paused_provider = None
         # ``clear_active`` is orchestrator-only — not on IssueStorePort.
         cast("IssueStore", self._svc.store).clear_active()
         self._svc.implementer.active_issues.clear()
@@ -524,6 +616,139 @@ class HydraFlowOrchestrator:
     def _hitl_corrections(self) -> dict[int, str]:
         """Backward-compatible access to HITL corrections dict."""
         return self._hitl_ctrl.hitl_corrections
+
+    async def _apply_human_steering(self) -> None:
+        """Actuate pending steering directives for active issues (ADR-0099 #4).
+
+        Pure decision logic lives in ``human_steering.apply_steering``; this
+        method only enumerates active issues and enacts the decision —
+        phase-boundary actuation, not a mid-phase interrupt (a running phase
+        always completes first; see steering-global-constraints). No-op when
+        ``human_steering_enabled`` is off.
+
+        - ``skip`` (paused): drop from this cycle — simply don't re-enqueue.
+        - ``park`` (abort): escalate to HITL (``hitl_label``) with a distinct
+          ``operator-abort`` origin so the issue leaves active scheduling but
+          a human can un-escalate it later, exactly like any other HITL
+          escalation — while the dashboard can still tell an operator abort
+          apart from a failure-driven escalation. Guarded for idempotency: a
+          new ``/abort`` on an issue already at the ``operator-abort`` origin
+          does not re-fire the (non-idempotent) escalation.
+        - ``redo_phase``: resolve a dashboard-facing or internal phase token
+          (``human_steering.resolve_redo_phase``) then re-enqueue to the
+          resolved phase (when valid and under the redo cap) and persist the
+          incremented ``redo_count`` with ``redo_phase`` cleared so it isn't
+          replayed next cycle. An unrecognized token or a redo dropped by the
+          cap gets one operator-facing PR comment (gated on the same
+          ``redo_phase`` high-water-mark so it posts once, not every tick)
+          and ``redo_phase`` is cleared the same way.
+        """
+        if not self._config.human_steering_enabled:
+            return
+
+        known_phases = {stage.value for stage in IssueStoreStage} - {
+            IssueStoreStage.MERGED.value
+        }
+        store: IssueStore = cast("IssueStore", self._svc.store)
+        active_issues = store.get_active_issues()
+        if not active_issues:
+            return
+
+        for issue_number in active_issues:
+            key = str(issue_number)
+            prev = self._state.get_human_steering(key)
+            raw_token = prev.redo_phase
+            resolved_phase = (
+                resolve_redo_phase(raw_token) if raw_token is not None else None
+            )
+            lookup_state = (
+                prev
+                if raw_token is None
+                else SteeringState(
+                    guidance=prev.guidance,
+                    flow=prev.flow,
+                    redo_phase=resolved_phase,
+                    redo_count=prev.redo_count,
+                    last_applied_ts=prev.last_applied_ts,
+                )
+            )
+            decision = apply_steering(
+                lookup_state, key, known_phases, self._config.human_steering_max_redos
+            )
+
+            if decision.park:
+                # Idempotency guard: `escalate_to_hitl` increments a
+                # lifetime counter on every call, so a fresh `/abort` on an
+                # issue that's already parked with the operator-abort origin
+                # must not re-fire it (the steering high-water-mark already
+                # prevents the *same* comment from re-triggering; this
+                # guards a *new* /abort on an already-aborted issue).
+                if self._state.get_hitl_origin(issue_number) != "operator-abort":
+                    await escalate_to_hitl(
+                        self._state,
+                        self._svc.prs,
+                        issue_number,
+                        cause="/abort steering directive",
+                        origin_label="operator-abort",
+                        hitl_label=self._config.hitl_label[0],
+                    )
+                continue
+
+            if decision.skip:
+                # Paused — leave the issue exactly where it is this cycle;
+                # the next phase-poll simply won't pick it up as new work.
+                continue
+
+            if raw_token is not None and decision.redo_phase is None:
+                # Redo was present this cycle but dropped: either the token
+                # didn't resolve to a known phase, or it resolved but was
+                # dropped by the redo cap. Gated on raw_token being freshly
+                # consumed (not None), so this fires once per directive, not
+                # every tick — matches the redo high-water-mark semantics.
+                reason = (
+                    "unknown phase" if resolved_phase is None else "redo cap reached"
+                )
+                # Derive the operator-facing list from known_phases (the same
+                # source of truth apply_steering validates against) mapped
+                # through STAGE_NAME_MAP to dashboard-facing display names,
+                # so it can't drift out of sync with what /redo actually
+                # accepts (e.g. missing "triage", the display name for FIND).
+                valid_phase_names = ", ".join(
+                    STAGE_NAME_MAP[stage]
+                    for stage in IssueStoreStage
+                    if stage.value in known_phases
+                )
+                await self._svc.prs.post_comment(
+                    issue_number,
+                    f"⚠️ steering: /redo '{raw_token}' not applied — {reason}; "
+                    f"valid: {valid_phase_names}",
+                )
+                self._state.set_human_steering(
+                    key,
+                    SteeringState(
+                        guidance=prev.guidance,
+                        flow=prev.flow,
+                        redo_phase=None,
+                        redo_count=decision.new_redo_count,
+                        last_applied_ts=prev.last_applied_ts,
+                    ),
+                )
+                continue
+
+            if decision.redo_phase is not None:
+                task = store.get_cached(issue_number)
+                if task is not None:
+                    store.enqueue_transition(task, decision.redo_phase)
+                self._state.set_human_steering(
+                    key,
+                    SteeringState(
+                        guidance=prev.guidance,
+                        flow=prev.flow,
+                        redo_phase=None,
+                        redo_count=decision.new_redo_count,
+                        last_applied_ts=prev.last_applied_ts,
+                    ),
+                )
 
     def _sync_active_issue_numbers(self) -> None:
         """Persist the combined active issue set to state.
@@ -563,6 +788,15 @@ class HydraFlowOrchestrator:
         """Return a copy of all background worker states with enabled flag."""
         return self._bg_workers.get_states()
 
+    def registered_bg_loop_names(self) -> set[str]:
+        """Names of workers backed by a registered ``BaseBackgroundLoop``.
+
+        Public passthrough for the System-tab route layer (#9503) — the
+        watchdog-timeout knob is only meaningful for loop-backed workers
+        (pipeline phases and other non-loop workers have no watchdog cycle).
+        """
+        return self._bg_workers.registered_loop_names()
+
     def trigger_bg_worker(self, name: str) -> bool:
         """Trigger an immediate execution of a background worker.
 
@@ -582,11 +816,26 @@ class HydraFlowOrchestrator:
         """
         return self._bg_workers.get_interval(name)
 
+    def set_bg_worker_timeout(self, name: str, seconds: int) -> None:
+        """Set a dynamic watchdog-timeout override for a background worker (#9503)."""
+        self._bg_workers.set_timeout(name, seconds)
+
+    def get_bg_worker_timeout(self, name: str) -> int:
+        """Return the effective per-cycle watchdog bound for a background worker.
+
+        Returns the dynamic override if set, otherwise the loop's own
+        (LONG_LLM_CYCLE-aware) config default. Mirrors
+        :meth:`get_bg_worker_interval` (#9503).
+        """
+        return self._bg_workers.get_timeout(name)
+
     async def _publish_status(self) -> None:
         """Broadcast the current orchestrator status to all subscribers."""
         data: OrchestratorStatusPayload = {"status": self.run_status}
         if self.credits_paused_until:
             data["credits_paused_until"] = self.credits_paused_until.isoformat()
+            if self.credits_paused_provider is not None:
+                data["credits_paused_provider"] = self.credits_paused_provider
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.ORCHESTRATOR_STATUS,
@@ -612,8 +861,6 @@ class HydraFlowOrchestrator:
         # Map stage keys to config worker caps
         stage_caps: dict[str, int] = {
             "triage": self._config.max_triagers,
-            "discover": self._config.max_triagers,
-            "shape": self._config.max_triagers,
             "plan": self._config.max_planners,
             "implement": self._config.max_workers,
             "review": self._config.max_reviewers,
@@ -632,8 +879,6 @@ class HydraFlowOrchestrator:
         # Map IssueStore stage names to our stage keys
         store_stage_map: dict[str, str] = {
             "find": "triage",
-            "discover": "discover",
-            "shape": "shape",
             "plan": "plan",
             "ready": "implement",
             "review": "review",
@@ -644,8 +889,6 @@ class HydraFlowOrchestrator:
         session_counters = self._state.get_session_counters()
         session_counter_map: dict[str, str] = {
             "triage": "triaged",
-            "discover": "discovered",
-            "shape": "shaped",
             "plan": "planned",
             "implement": "implemented",
             "review": "reviewed",
@@ -655,8 +898,6 @@ class HydraFlowOrchestrator:
         stages: dict[str, StageStats] = {}
         for stage_key in (
             "triage",
-            "discover",
-            "shape",
             "plan",
             "implement",
             "review",
@@ -833,6 +1074,14 @@ class HydraFlowOrchestrator:
         """
         self._stop_event.clear()
         self._running = True
+        # #9552: arm the thread-level event-loop freeze detector before any
+        # loop starts, so a synchronous block anywhere in the fleet is
+        # observable from OUTSIDE the (then-frozen) event loop. Builder
+        # returns None when disabled or under pytest; start() is a passive
+        # no-op when another orchestrator on this process already armed one.
+        event_loop_watchdog = build_event_loop_watchdog(self._config)
+        if event_loop_watchdog is not None:
+            event_loop_watchdog.start()
         try:
             self._restore_state()
             await self._publish_status()
@@ -890,6 +1139,12 @@ class HydraFlowOrchestrator:
                 await self._publish_status()
                 logger.info("HydraFlow stopped")
         finally:
+            # #9552: disarm the freeze detector on ANY exit path — the thread
+            # exits within one poll tick of the stop event; a leaked daemon
+            # thread can't wedge teardown, but a prompt stop keeps restarts
+            # (and tests that force=True the builder) clean.
+            if event_loop_watchdog is not None:
+                event_loop_watchdog.stop()
             # Safety net: if run() is cancelled or raises during the setup
             # phase above (before the supervise-loops try-block), the inner
             # finally never executes and the line would stay stuck reporting
@@ -915,8 +1170,60 @@ class HydraFlowOrchestrator:
                 self._config.repo_root,
             )
 
-    async def _handle_auth_error(self, loop_name: str) -> None:
-        """Set auth_failed, publish SYSTEM_ALERT, stop all loops."""
+    async def _handle_auth_error(
+        self,
+        loop_name: str,
+        exc: BaseException,
+        tasks: dict[str, asyncio.Task[None]],
+        loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
+    ) -> None:
+        """Corroborate the auth signal with a live probe before halting the factory.
+
+        A single gh call's stderr can match an auth pattern during a transient
+        network/API blip; that used to propagate fatally and stop ALL loops for
+        hours (#9621 — a momentary blip stalled the factory ~2.5h; a restart
+        recovered instantly because the token was fine the whole time).
+
+        Mirror the credit-pause corroboration (#9807/#9924): probe live auth
+        with ``gh auth status`` before committing a global halt. If auth is
+        actually fine the signal is a transient false positive — restart the
+        crashed loop (non-fatal, retried next tick) instead of stopping. Only a
+        probe-confirmed, PERSISTENT auth rejection halts the factory (fail-safe).
+        Kill-switch: ``auth_failure_require_probe=False`` reverts to
+        halt-on-signal. ``and`` short-circuits so the probe is skipped when the
+        kill-switch is off.
+        """
+        if self._config.auth_failure_require_probe and await probe_auth_availability():
+            logger.warning(
+                "GitHub auth-failure signal from %r NOT corroborated by a live "
+                "`gh auth status` probe — treating as a transient blip; "
+                "restarting the loop instead of pausing all loops (#9621).",
+                loop_name,
+            )
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    data={
+                        "message": (
+                            "GitHub auth signal not corroborated by a live probe "
+                            "— treating as a transient blip; not pausing."
+                        ),
+                        "source": loop_name,
+                        # Benign: a transient blip was absorbed, nothing paused.
+                        # Render yellow, not the red critical banner.
+                        "severity": "warning",
+                    },
+                )
+            )
+            await self._restart_loop(
+                loop_name,
+                exc,
+                tasks,
+                loop_factories,
+                restart_delay=_AUTH_TRANSIENT_RESTART_DELAY_S,
+            )
+            return
+
         logger.error(
             "GitHub authentication failed in %r — pausing all loops",
             loop_name,
@@ -943,8 +1250,31 @@ class HydraFlowOrchestrator:
         tasks: dict[str, asyncio.Task[None]],
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
     ) -> None:
-        """Delegate to _pause_for_credits."""
-        await self._pause_for_credits(exc, loop_name, tasks, loop_factories)
+        """Pause on a corroborated credit signal; otherwise restart the loop.
+
+        A probe-refuted (false-positive) signal must not leave the crashed
+        loop's completed-with-exception task orphaned in ``_supervise_loops``'s
+        task map: the supervisor would re-observe the same dead task every
+        iteration and hot-loop the credit handler (alert storm), and the phase
+        would stay permanently dead. Recreating the task via ``_restart_loop``
+        — the same path used for any other loop crash — kills the hot loop and
+        self-heals the phase. See #9924.
+        """
+        paused = await self._pause_for_credits(exc, loop_name, tasks, loop_factories)
+        if not paused:
+            # Suppressed false positive: restart with a delay so a loop that
+            # re-raises the same quoted-prose signal cannot tight-spin the
+            # supervisor (#9888). The delay lives inside the restarted task,
+            # never blocking supervision of other loops.
+            await self._restart_loop(
+                loop_name,
+                exc,
+                tasks,
+                loop_factories,
+                restart_delay=min(
+                    float(self._config.credit_fp_suppress_cooldown_seconds), 60.0
+                ),
+            )
 
     async def _restart_loop(
         self,
@@ -952,8 +1282,14 @@ class HydraFlowOrchestrator:
         exc: BaseException,
         tasks: dict[str, asyncio.Task[None]],
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
+        restart_delay: float = 0.0,
     ) -> None:
-        """Log, publish ERROR event, create a new loop task."""
+        """Log, publish ERROR event, create a new loop task.
+
+        ``restart_delay`` > 0 sleeps INSIDE the recreated task before the
+        loop body starts (#9888 suppressed-credit backoff) — the supervisor
+        is never blocked and the task stays tracked in the map.
+        """
         logger.error("Loop %r crashed — restarting: %s", loop_name, exc)
         data: ErrorPayload = {
             "message": f"Loop {loop_name} crashed and was restarted",
@@ -966,9 +1302,50 @@ class HydraFlowOrchestrator:
             )
         )
         factory_fn = dict(loop_factories)[loop_name]
+
+        async def _run_after_delay() -> None:
+            if restart_delay > 0:
+                await asyncio.sleep(restart_delay)
+            await factory_fn()
+
         tasks[loop_name] = asyncio.create_task(
-            factory_fn(), name=f"hydraflow-{loop_name}"
+            _run_after_delay(), name=f"hydraflow-{loop_name}"
         )
+
+    async def restart_loop_task(self, name: str) -> bool:
+        """Cancel a (possibly silently-stalled) loop task and start a fresh one.
+
+        The restart verb behind ``BGWorkerManager.restart`` — used by
+        HealthMonitorLoop's restart-first stall policy. The supervisor only
+        wakes on task *completion*, so a loop blocked forever on an ``await``
+        is invisible to it; this cancels the wedged task and recreates it
+        from the factory retained by :meth:`_supervise_loops`.
+
+        The replacement is registered in ``self._loop_tasks`` *synchronously*
+        after ``cancel()`` (no await between) so the supervisor's identity
+        check sees old task and replacement atomically.
+
+        Deliberately does NOT await the old task's drain: that await would
+        deliver — and a suppress would swallow — the *caller's* own
+        cancellation (e.g. the health-monitor work task being cancelled by
+        a credit-pause shutdown), letting the staleness sweep escape its
+        one cancel and spawn rogue loop tasks against an exhausted billing
+        signal. The supervisor drains the cancelled old task through its
+        done-set via the identity check; cancelled tasks emit no
+        never-retrieved warnings.
+
+        Returns ``False`` for unknown names or before supervision started.
+        """
+        old = self._loop_tasks.get(name)
+        factory = self._loop_factories.get(name)
+        if old is None or factory is None:
+            return False
+        old.cancel()
+        self._loop_tasks[name] = asyncio.create_task(
+            factory(), name=f"hydraflow-{name}"
+        )
+        logger.info("Loop %r restarted via restart_loop_task", name)
+        return True
 
     async def _handle_loop_exception(
         self,
@@ -979,7 +1356,7 @@ class HydraFlowOrchestrator:
     ) -> None:
         """Handle a crashed loop task — auth failure, credit exhaustion, or generic restart."""
         if isinstance(exc, AuthenticationError):
-            await self._handle_auth_error(name)
+            await self._handle_auth_error(name, exc, tasks, loop_factories)
             return
 
         if isinstance(exc, CreditExhaustedError):
@@ -1004,12 +1381,11 @@ class HydraFlowOrchestrator:
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]] = [
             ("store", _store_loop),
             ("triage", self._triage_loop),
-            ("discover", self._discover_loop),
-            ("shape", self._shape_loop),
             ("plan", self._plan_loop),
             ("implement", self._implement_loop),
             ("review", self._review_loop),
             ("hitl", self._hitl_loop),
+            ("human_steering_actuator", self._human_steering_actuator_loop),
             ("pr_unsticker", self._svc.pr_unsticker_loop.run),
             ("merge_state_watcher", self._svc.merge_state_watcher_loop.run),
             ("report_issue", self._svc.report_issue_loop.run),
@@ -1037,12 +1413,19 @@ class HydraFlowOrchestrator:
             ("repo_wiki", self._svc.repo_wiki_loop.run),
             ("security_patch", self._svc.security_patch_loop.run),
             ("stale_issue_gc", self._svc.stale_issue_gc_loop.run),
+            ("gate_health", self._svc.gate_health_loop.run),
+            ("pr_red_repair", self._svc.pr_red_repair_loop.run),
+            ("erosion_metrics", self._svc.erosion_metrics_loop.run),
+            ("issue_refinement", self._svc.issue_refinement_loop.run),
             ("retrospective", self._svc.retrospective_loop.run),
             ("principles_audit", self._svc.principles_audit_loop.run),
             ("flake_tracker", self._svc.flake_tracker_loop.run),
             ("skill_prompt_eval", self._svc.skill_prompt_eval_loop.run),
             ("fake_coverage_auditor", self._svc.fake_coverage_auditor_loop.run),
             ("adr_touchpoint_auditor", self._svc.adr_touchpoint_auditor_loop.run),
+            ("adr_drift_resolver", self._svc.adr_drift_resolver_loop.run),
+            ("adr_conformance", self._svc.adr_conformance_loop.run),
+            ("auto_tighten", self._svc.auto_tighten_loop.run),
             ("memory_backlog", self._svc.memory_backlog_loop.run),
             ("rc_budget", self._svc.rc_budget_loop.run),
             ("wiki_rot_detector", self._svc.wiki_rot_detector_loop.run),
@@ -1051,7 +1434,10 @@ class HydraFlowOrchestrator:
             ("contract_refresh", self._svc.contract_refresh_loop.run),
             ("corpus_learning", self._svc.corpus_learning_loop.run),
             ("auto_agent_preflight", self._svc.auto_agent_preflight_loop.run),
+            ("detector_calibration", self._svc.detector_calibration_loop.run),
             ("sandbox_failure_fixer", self._svc.sandbox_failure_fixer_loop.run),
+            ("disturbance_dampener", self._svc.disturbance_dampener_loop.run),
+            ("human_steering", self._svc.human_steering_loop.run),
             ("diagram_loop", self._svc.diagram_loop.run),
             ("pricing_refresh", self._svc.pricing_refresh_loop.run),
             ("cost_budget_watcher", self._svc.cost_budget_watcher_loop.run),
@@ -1060,7 +1446,9 @@ class HydraFlowOrchestrator:
             ("edge_proposer", self._svc.edge_proposer_loop.run),
             ("live_corpus_replay", self._svc.live_corpus_replay_loop.run),
             ("triage_retry", self._svc.triage_retry_loop.run),
+            ("convergence_oscillation", self._svc.convergence_oscillation_loop.run),
             ("entry_evidence", self._svc.entry_evidence_loop.run),
+            ("fitness_scorecard", self._svc.fitness_scorecard_loop.run),
         ]
 
         # Hindsight WAL replay loop removed in Phase 3 cutover — the wiki
@@ -1068,6 +1456,7 @@ class HydraFlowOrchestrator:
         known_worker_names = {n for n, _ in loop_factories}
         self._state_restorer.prune_stale_disabled_workers(known_worker_names)
         self._state_restorer.prune_stale_worker_states(known_worker_names)
+        self._loop_factories = dict(loop_factories)
         tasks: dict[str, asyncio.Task[None]] = {}
         for name, factory in loop_factories:
             tasks[name] = asyncio.create_task(factory(), name=f"hydraflow-{name}")
@@ -1081,6 +1470,24 @@ class HydraFlowOrchestrator:
                 for task in done:
                     name = task.get_name().removeprefix("hydraflow-")
                     if self._stop_event.is_set():
+                        break
+                    if tasks.get(name) is not task:
+                        # Externally restarted (restart_loop_task) — the
+                        # replacement is already registered and supervised;
+                        # this is the drained old task. Calling .exception()
+                        # on it would raise CancelledError here.
+                        continue
+                    if task.cancelled():
+                        # Cancelled outside shutdown and not replaced —
+                        # crash-equivalent; recreate to maintain supervision.
+                        logger.warning(
+                            "Loop %r was cancelled unexpectedly — restarting",
+                            name,
+                        )
+                        factory_fn = dict(loop_factories)[name]
+                        tasks[name] = asyncio.create_task(
+                            factory_fn(), name=f"hydraflow-{name}"
+                        )
                         break
                     exc = task.exception()
                     if exc is not None:
@@ -1102,6 +1509,10 @@ class HydraFlowOrchestrator:
             for task in tasks.values():
                 task.cancel()
             await asyncio.gather(*tasks.values(), return_exceptions=True)
+            # #9911: cancelled loop bodies unwind without running their
+            # subprocess cleanup when cancellation lands inside wait_for;
+            # reap whatever the drained loops left behind.
+            reap_all_tracked_processes()
 
     async def _polling_loop(
         self,
@@ -1218,6 +1629,20 @@ class HydraFlowOrchestrator:
 
     async def _triage_loop(self) -> None:
         """Continuously poll for find-labeled issues and triage them."""
+        # Operational kill-switch. Triage runs a full agent per issue; a bad
+        # batch (e.g. un-triageable findings) can drive repeated infra errors.
+        # The retry storm is now bounded (infra errors park — see
+        # TriagePhase._triage_single_traced), but this switch lets an operator
+        # hold triage off entirely without stopping the rest of the factory.
+        # Idle on shutdown rather than returning — a bare return makes the loop
+        # supervisor treat it as "completed unexpectedly" and hot-restart it.
+        if os.environ.get("HYDRAFLOW_TRIAGE_DISABLED") == "1":
+            logger.warning(
+                "triage loop DISABLED via HYDRAFLOW_TRIAGE_DISABLED — no issues "
+                "will be triaged until it is unset"
+            )
+            await self._stop_event.wait()
+            return
 
         async def _work() -> object:
             return await self._pipeline_work_wrapper(
@@ -1229,38 +1654,6 @@ class HydraFlowOrchestrator:
             _work,
             self._config.poll_interval,
             enabled_name="triage",
-            is_pipeline=True,
-        )
-
-    async def _discover_loop(self) -> None:
-        """Continuously poll for discover-labeled issues."""
-
-        async def _work() -> object:
-            return await self._pipeline_work_wrapper(
-                self._config.repo, self._svc.discover_phase.discover_issues
-            )
-
-        await self._polling_loop(
-            "discover",
-            _work,
-            self._config.poll_interval,
-            enabled_name="discover",
-            is_pipeline=True,
-        )
-
-    async def _shape_loop(self) -> None:
-        """Continuously poll for shape-labeled issues awaiting direction selection."""
-
-        async def _work() -> object:
-            return await self._pipeline_work_wrapper(
-                self._config.repo, self._svc.shape_phase.shape_issues
-            )
-
-        await self._polling_loop(
-            "shape",
-            _work,
-            self._config.poll_interval,
-            enabled_name="shape",
             is_pipeline=True,
         )
 
@@ -1324,6 +1717,29 @@ class HydraFlowOrchestrator:
             "hitl",
             _work,
             self._config.poll_interval,
+            is_pipeline=True,
+        )
+
+    async def _human_steering_actuator_loop(self) -> None:
+        """Continuously enact pending steering directives (ADR-0099 #4).
+
+        Runs as its own single-task polling loop — not folded into the
+        6 phase loops' shared ``_pipeline_work_wrapper`` — so pause/abort/redo
+        decisions for a given issue are enacted from exactly one coroutine at
+        a time. The phase loops themselves are unaware of steering; they
+        simply won't see a paused/parked/re-enqueued issue reappear until the
+        next phase-poll after this loop acts. No-op when
+        ``human_steering_enabled`` is off (checked inside ``_apply_human_steering``).
+        """
+
+        async def _work() -> object:
+            await self._apply_human_steering()
+            return False  # never "did work" — always sleep the full interval
+
+        await self._polling_loop(
+            "human_steering_actuator",
+            _work,
+            self._config.human_steering_interval_seconds,
             is_pipeline=True,
         )
 
@@ -1432,12 +1848,17 @@ class HydraFlowOrchestrator:
                 active_in_store, prefetched_issues=[gh_issue]
             )
             if not prs:
-                # PR not visible yet — wait before re-queuing so the
-                # review pool doesn't tight-loop on issues whose PRs
-                # haven't propagated to the GitHub API yet.
+                # PR not visible yet — usually propagation delay, but after a
+                # restart mid-implement the PR may NOT EXIST and the issue
+                # would otherwise sit review-labeled forever (#9815). Count
+                # strikes; at the threshold, requeue with fresh budget
+                # (bounded, then HITL) instead of waiting eternally.
+                if await self._handle_review_orphan(issue):
+                    return False
                 await self._sleep_or_stop(min(self._config.poll_interval, 30))
                 self._svc.store.enqueue_transition(issue, "review")
                 return False
+            self._state.clear_review_orphan_strikes(issue.id)
 
             review_results = await self._svc.reviewer.review_prs(
                 prs, [i.to_task() for i in gh_issues]
@@ -1451,10 +1872,118 @@ class HydraFlowOrchestrator:
         finally:
             release_batch_in_flight(self._svc.store, {issue.id})
 
+    async def _handle_review_orphan(self, issue: Task) -> bool:
+        """Requeue a review-labeled issue whose agent PR does not exist (#9815).
+
+        Returns True when the issue was requeued (to ready) or escalated (to
+        HITL) — the caller must NOT re-enqueue it to review. Returns False
+        while strikes are below the threshold (normal PR-propagation wait) or
+        when the feature is disabled (``review_orphan_max_requeues=0``).
+        Every gh failure is fail-soft back to the legacy wait path.
+        """
+        if self._config.review_orphan_max_requeues <= 0:
+            return False
+        strikes = self._state.increment_review_orphan_strike(issue.id)
+        if strikes < self._config.review_orphan_strike_threshold:
+            return False
+
+        self._state.clear_review_orphan_strikes(issue.id)
+        requeues = self._state.increment_review_orphan_requeue(issue.id)
+        try:
+            if requeues > self._config.review_orphan_max_requeues:
+                cause = (
+                    f"review-labeled with no agent PR after "
+                    f"{requeues - 1} orphan requeue(s) — needs a human"
+                )
+                self._state.set_hitl_cause(issue.id, cause)
+                await self._svc.prs.swap_pipeline_labels(
+                    issue.id, self._config.hitl_label[0]
+                )
+                await self._svc.prs.post_comment(
+                    issue.id,
+                    "## Review Orphan Escalation\n\n"
+                    f"{cause}. Escalating to HITL (#9815).",
+                )
+                logger.warning(
+                    "Issue #%d: review orphan exhausted %d requeues — HITL",
+                    issue.id,
+                    self._config.review_orphan_max_requeues,
+                )
+                return True
+
+            self._state.reset_issue_attempts(issue.id)
+            self._state.clear_diagnostic_state(issue.id)
+            await self._svc.prs.swap_pipeline_labels(
+                issue.id, self._config.ready_label[0]
+            )
+            await self._svc.prs.post_comment(
+                issue.id,
+                "## Review Orphan Requeue\n\n"
+                "This issue was review-labeled with no open agent PR "
+                "(interrupted implement, e.g. a factory restart). Attempt "
+                f"counters reset; requeued to ready for a fresh build "
+                f"(requeue {requeues}/"
+                f"{self._config.review_orphan_max_requeues}, #9815).",
+            )
+            logger.info(
+                "Issue #%d: review orphan requeued to ready (%d/%d)",
+                issue.id,
+                requeues,
+                self._config.review_orphan_max_requeues,
+            )
+            return True
+        except RuntimeError as exc:
+            logger.warning(
+                "Issue #%d: review orphan handling failed (%s) — keeping "
+                "legacy review wait",
+                issue.id,
+                exc,
+            )
+            return False
+
     async def _sleep_or_stop(self, seconds: int | float) -> None:
         """Sleep for *seconds*, waking early if stop is requested."""
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(self._stop_event.wait(), timeout=seconds)
+
+    def _loop_providers(self, loop_names: Iterable[str]) -> dict[str, str]:
+        """Map each loop name to the billing provider its LLM work routes to.
+
+        Loops in ``_BACKEND_WORKER_LOOPS`` read their configured ``*_provider``
+        dial (normalized: the harness dial ``"claude"`` → ``"anthropic"``); every
+        other loop runs on the Claude harness → ``"anthropic"``. Read from live
+        config so an operator's dial change takes effect on the next pause."""
+        providers: dict[str, str] = {}
+        for name in loop_names:
+            dial_field = _BACKEND_WORKER_LOOPS.get(name)
+            if dial_field is None:
+                providers[name] = PROVIDER_ANTHROPIC
+            else:
+                providers[name] = normalize_provider(getattr(self._config, dial_field))
+        return providers
+
+    def _affected_loops(
+        self, provider: str, loop_names: Iterable[str], source: str
+    ) -> tuple[set[str], bool]:
+        """Which loops a *provider* exhaustion must pause, + whether to terminate
+        the shared Claude-harness runner pools.
+
+        - Unknown provider (``normalize_provider`` changes it) → GLOBAL fallback:
+          pause every loop and terminate the runner pools (today's behavior).
+        - ``"anthropic"`` → pause every anthropic-routed loop (all but the
+          surviving backend workers) and terminate the harness pools.
+        - A backend (``"zai"``/``"kimi"``/``"openrouter"``) → pause only loops
+          routed there (always including *source*, which demonstrably routes to
+          it since it raised the signal) and leave the harness pools running."""
+        names = list(loop_names)
+        provider_map = self._loop_providers(names)
+        if normalize_provider(provider) != provider:
+            # Provider the registry doesn't recognize — fail safe to a global pause.
+            return set(names), True
+        affected = {n for n, p in provider_map.items() if p == provider}
+        if provider != PROVIDER_ANTHROPIC and source in provider_map:
+            affected.add(source)
+        return affected, provider == PROVIDER_ANTHROPIC
 
     def _compute_resume_time(self, exc: CreditExhaustedError) -> datetime:
         """Compute the UTC datetime at which credit pause should end."""
@@ -1465,16 +1994,32 @@ class HydraFlowOrchestrator:
         return now + timedelta(hours=5) + buffer
 
     async def _cancel_all_loops_and_runners(
-        self, tasks: dict[str, asyncio.Task[None]]
+        self,
+        tasks: dict[str, asyncio.Task[None]],
+        affected: set[str] | None = None,
+        *,
+        terminate_runners: bool = True,
     ) -> None:
-        """Cancel all loop tasks and terminate active subprocesses."""
-        for task in tasks.values():
+        """Cancel the *affected* loop tasks and (optionally) terminate the
+        Claude-harness subprocess pools.
+
+        *affected* ``None`` means every loop (the global / Anthropic pause).
+        A backend-scoped pause (z.ai/kimi/openrouter) passes only the loops
+        routed to that backend and ``terminate_runners=False`` so the shared
+        harness runner pools — which bill against Anthropic and belong to the
+        surviving loops — are left untouched (#9807)."""
+        to_cancel = (
+            tasks if affected is None else {n: tasks[n] for n in affected if n in tasks}
+        )
+        for task in to_cancel.values():
             task.cancel()
-        await asyncio.gather(*tasks.values(), return_exceptions=True)
-        self._svc.planners.terminate()
-        self._svc.agents.terminate()
-        self._svc.reviewers.terminate()
-        self._svc.hitl_runner.terminate()
+        await asyncio.gather(*to_cancel.values(), return_exceptions=True)
+        if terminate_runners:
+            self._svc.planners.terminate()
+            self._svc.agents.terminate()
+            self._svc.reviewers.terminate()
+            self._svc.hitl_runner.terminate()
+            reap_all_tracked_processes()
 
     async def _sleep_until_resume(self, resume_at: datetime) -> None:
         """Sleep until *resume_at* (interruptible by stop or credit-resume event)."""
@@ -1499,11 +2044,16 @@ class HydraFlowOrchestrator:
         source: str,
         tasks: dict[str, asyncio.Task[None]],
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
-    ) -> None:
+    ) -> bool:
         """Pause all loops until API credits reset, then restart them.
 
         Uses ``asyncio.Lock`` to prevent multiple loops from racing into
         the pause logic simultaneously.
+
+        Returns ``True`` when a pause is committed (or one is already active) —
+        the crashed task will be recreated by the resume path — and ``False``
+        when the probe refutes the signal as a false positive and no pause
+        happens, so the caller must restart the crashed loop itself (#9924).
         """
         async with self._credit_pause_lock:
             # If another loop already triggered a pause, skip
@@ -1511,23 +2061,110 @@ class HydraFlowOrchestrator:
                 self._credits_paused_until is not None
                 and self._credits_paused_until > datetime.now(UTC)
             ):
-                return
+                return True
+
+            # Which backend hit the limit (#9807). Default "anthropic" — the
+            # Claude harness — so every legacy raise site stays global-scoped;
+            # the one-shot backends (z.ai/kimi/openrouter) tag their own signal.
+            provider = (
+                getattr(exc, "provider", PROVIDER_ANTHROPIC) or PROVIDER_ANTHROPIC
+            )
+
+            # Corroborate the text-detected signal with a live API probe before
+            # committing a GLOBAL pause. ``is_credit_exhaustion`` matches
+            # credit-error PROSE, so a diagnostic/reviewer run that merely quotes
+            # a prior cap in its analysis would otherwise trigger a multi-hour
+            # false global pause (#9807). The probe is ground truth: it returns
+            # False only when the API itself confirms exhaustion, and fails open
+            # (True on no-key/network error) so a flaky probe delays a real pause
+            # by at most one detection cycle rather than masking it. Kill-switch:
+            # ``credit_pause_require_probe=False`` reverts to pause-on-text.
+            # ``and`` short-circuits: with the kill-switch off, the probe is
+            # never called (pause-on-text, the legacy behavior).
+            # Throttle repeat false positives from the same source (#9888):
+            # within the cooldown, skip the probe AND the banner — log-only.
+            # Six suppression banners landed in 3ms before this guard.
+            fp_last = self._credit_fp_last.get(source)
+            cooldown = float(self._config.credit_fp_suppress_cooldown_seconds)
+            if (
+                self._config.credit_pause_require_probe
+                and fp_last is not None
+                and (datetime.now(UTC) - fp_last).total_seconds() < cooldown
+            ):
+                logger.debug(
+                    "Credit FP from %r within %.0fs cooldown — suppressed (log-only)",
+                    source,
+                    cooldown,
+                )
+                return False
+
+            # Probe the AFFECTED backend, not always Anthropic (#9807): a z.ai
+            # 429 is corroborated against z.ai's endpoint, a Claude cap against
+            # Anthropic. Endpoint (base_url/api_key) resolves from the provider
+            # registry; anthropic → ("","") which the probe ignores.
+            probe_base_url, probe_api_key = backend_probe_endpoint(
+                provider, self._config
+            )
+            if (
+                self._config.credit_pause_require_probe
+                and await probe_credit_availability(
+                    provider, base_url=probe_base_url, api_key=probe_api_key
+                )
+            ):
+                self._credit_fp_last[source] = datetime.now(UTC)
+                logger.warning(
+                    "Credit-exhaustion signal from %r (provider=%s) NOT "
+                    "corroborated by live API probe — treating as a false "
+                    "positive (likely quoted credit-error prose); not pausing.",
+                    source,
+                    provider,
+                )
+                await self._bus.publish(
+                    HydraFlowEvent(
+                        type=EventType.SYSTEM_ALERT,
+                        data={
+                            "message": (
+                                "Credit signal not corroborated by API probe "
+                                "— ignoring as a false positive."
+                            ),
+                            "source": source,
+                            "provider": provider,
+                            # Benign: a false positive was suppressed, nothing
+                            # paused. Render yellow, not the red critical banner.
+                            "severity": "warning",
+                        },
+                    )
+                )
+                return False
 
             resume_at = self._compute_resume_time(exc)
             self._credits_paused_until = resume_at
+            self._credit_paused_provider = provider
             pause_seconds = max((resume_at - datetime.now(UTC)).total_seconds(), 0)
 
+            # Scope the pause to the loops routed to this backend. Anthropic (or
+            # an unrecognized provider) still pauses the whole factory except the
+            # surviving backend workers; a z.ai/kimi cap pauses only its own
+            # loops and leaves Claude work running (#9807).
+            affected, terminate_runners = self._affected_loops(
+                provider, tasks.keys(), source
+            )
+            scope = "all loops" if terminate_runners else f"{provider} loops"
+
             logger.warning(
-                "Credit limit reached (detected in %r). "
-                "Pausing all loops until %s (%.0f minutes).",
+                "Credit limit reached (detected in %r, provider=%s). "
+                "Pausing %s until %s (%.0f minutes).",
                 source,
+                provider,
+                scope,
                 resume_at.isoformat(),
                 pause_seconds / 60,
             )
 
             data: SystemAlertPayload = {
-                "message": "Credit limit reached. Pausing all loops.",
+                "message": f"Credit limit reached ({provider}). Pausing {scope}.",
                 "source": source,
+                "provider": provider,
                 "resume_at": resume_at.isoformat(),
             }
             await self._bus.publish(
@@ -1537,31 +2174,47 @@ class HydraFlowOrchestrator:
                 )
             )
 
-            await self._cancel_all_loops_and_runners(tasks)
+            await self._cancel_all_loops_and_runners(
+                tasks, affected, terminate_runners=terminate_runners
+            )
 
         await self._sleep_until_resume(resume_at)
 
         if self._stop_event.is_set():
             self._credits_paused_until = None
+            self._credit_paused_provider = None
             self._credit_resume_event.clear()
-            return
+            return True
 
-        await self._resume_loops_after_credit_pause(tasks, loop_factories, source)
+        await self._resume_loops_after_credit_pause(
+            tasks, loop_factories, source, affected
+        )
+        return True
 
     async def _resume_loops_after_credit_pause(
         self,
         tasks: dict[str, asyncio.Task[None]],
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
         source: str,
+        affected: set[str] | None = None,
     ) -> None:
-        """Clear pause state and restart all loops after credit pause."""
+        """Clear pause state and restart the loops paused for this credit pause.
+
+        *affected* ``None`` restarts every loop (global/legacy). A scoped pause
+        passes the same set it cancelled so only those loops are recreated —
+        the surviving backend/harness loops were never touched (#9807)."""
+        provider = self._credit_paused_provider
         self._credits_paused_until = None
+        self._credit_paused_provider = None
         self._credit_resume_event.clear()
-        logger.info("Credit pause ended — restarting all loops")
+        scope = "all loops" if affected is None else f"{len(affected)} loop(s)"
+        logger.info("Credit pause ended — restarting %s", scope)
         data: SystemAlertPayload = {
-            "message": "Credit pause ended. Resuming all loops.",
+            "message": "Credit pause ended. Resuming loops.",
             "source": source,
         }
+        if provider is not None:
+            data["provider"] = provider
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.SYSTEM_ALERT,
@@ -1569,6 +2222,8 @@ class HydraFlowOrchestrator:
             )
         )
         for loop_name, factory in loop_factories:
+            if affected is not None and loop_name not in affected:
+                continue
             tasks[loop_name] = asyncio.create_task(
                 factory(), name=f"hydraflow-{loop_name}"
             )

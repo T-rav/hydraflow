@@ -2,9 +2,18 @@
 
 # Ubiquitous Language
 
-_43 terms across 3 bounded contexts._
+_66 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
+
+## Actuator
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/base_runner.py:BaseRunner` · **Confidence:** `accepted`
+
+The component that applies a Controller's action to the Plant: dispatches an agent runner, opens a PR, swaps a pipeline label. BaseRunner is the canonical actuator; PRManager realizes the PR-creation and label-swap actions.
+
+**Invariants:**
+- Every Actuator action is subject to the Governor's saturation and safety limits.
 
 ## ADRCouncilReviewer
 
@@ -17,6 +26,29 @@ ADRCouncilReviewer is the domain service that runs multi-agent council review se
 - CreditExhaustedError and AuthenticationError propagate out of the review batch rather than being swallowed per-item, so BaseBackgroundLoop can pause on a fatal billing signal.
 - Every ADR that reaches Accepted status is guaranteed to carry an **Enforced by:** line (injected as '(none)' if absent) before it is written back.
 - Pre-validation must pass before a council session is started; a failing ADR is routed and counted separately without blocking the rest of the batch.
+
+## ADRIndex
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/adr_index.py:ADRIndex` · **Confidence:** `accepted`
+**Aliases:** `adr cache`, `adr catalog`, `architecture decision index`
+
+Mtime-based runtime cache over the ADR directory that parses docs/adr/*.md on first access and re-scans only when the directory mtime changes. Exposes parsed ADR records — including normalized status, context summary, cited source files, and symbol-level citations — to caretaker loops and agent prompts. Acts as the authoritative in-process view of architecture decisions, enabling loops such as AdrTouchpointAuditorLoop to check which Accepted ADRs cite a given source file without re-reading the filesystem on every tick. The module docstring frames it explicitly as load-bearing: agents must know what has already been decided before they plan.
+
+**Invariants:**
+- Re-scans the ADR directory only when its mtime changes; returns the cached ADR list on a stable directory
+- Status values are normalized to one of Accepted, Proposed, Superseded, Deprecated, or Unknown — no raw status strings escape the parser
+
+## ADRPreValidator
+
+**Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/adr_pre_validator.py:ADRPreValidator` · **Confidence:** `accepted`
+**Aliases:** `adr pre-validator`, `adr structural validator`
+
+A service that validates ADR structure before submission to the ADRCouncilReviewer, catching structural defects early in the review pipeline. Checks include: status field presence and validity, required section presence and non-emptiness (Context, Decision, Consequences), ADR number collisions, supersession integrity, volatile line citations, stale 'requires amending' notes, bare ADR references lacking title annotations, source-symbol references against the live repo, and cross-reference title accuracy. Returns an ADRValidationResult that distinguishes auto-fixable issues from blocking ones, allowing the council to skip reviews for trivially malformed drafts.
+
+**Invariants:**
+- Runs all structural checks in a single `validate()` call and returns an ADRValidationResult — never raises on malformed input.
+- Issues are classified as fixable or non-fixable; `has_fixable_only` lets callers auto-repair before escalating to the council.
+- Cross-ADR checks (number collision, supersession, cross-reference titles) are skipped when `all_adrs` is not supplied, so single-ADR validation is always safe.
 
 ## ADRReviewerLoop
 
@@ -115,6 +147,15 @@ Trust-fleet loop that refreshes cassettes for fake contract tests on a weekly ca
 - The replay gate failure opens a companion issue but does not block the auto-merge PR.
 - Kill-switch is via `enabled_cb("contract_refresh")` (ADR-0049); no config field.
 
+## Controller
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/issue_store.py:IssueStore` · **Confidence:** `accepted`
+
+The component that converts Error into a control action — which unit to act on next and how hard. HydraFlow has a supervisory controller (which issue to admit/route, today FIFO in IssueStore) and an inner controller (the per-issue gate decision, e.g. the review_advisor PostVerifyResult APPROVE/VETO).
+
+**Invariants:**
+- A Controller decides; it does not itself touch the Plant (that is the Actuator).
+
 ## CorpusLearningLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/corpus_learning_loop.py:CorpusLearningLoop` · **Confidence:** `accepted`
@@ -126,6 +167,29 @@ Trust-fleet loop that autonomously grows the adversarial test corpus from escape
 - All three validation gates must pass before a case reaches disk: harness accepts it, expected catcher trips, no other catcher also trips.
 - Cases that trip more than one catcher are rejected as ambiguous before they can corrupt the corpus.
 - No `corpus_learning_enabled` config field exists — kill-switch is purely via `enabled_cb("corpus_learning")` (spec §12.2, ADR-0049).
+
+## Credentials
+
+**Kind:** `value_object` · **Context:** `shared-kernel` · **Anchor:** `src/config.py:Credentials` · **Confidence:** `accepted`
+**Aliases:** `infrastructure credentials`, `secrets bundle`
+
+A frozen value object that bundles raw infrastructure secrets — GitHub token, Sentry auth token, and WhatsApp API credentials — needed by runners and loops to authenticate with external services. Explicitly separated from HydraFlowConfig to ensure secrets never appear in domain-model serialization. Built from environment variables at startup via build_credentials() and injected as a constructor parameter into every loop or runner that calls an authenticated external API.
+
+**Invariants:**
+- Immutable once constructed (frozen=True); no field may be mutated after build.
+- Never serialized as part of domain state — kept separate from HydraFlowConfig by design.
+
+## DedupStore
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/dedup_store.py:DedupStore` · **Confidence:** `accepted`
+**Aliases:** `dedup tracking set`, `dedup set store`
+
+DedupStore is a file-backed dedup tracking set, persisted as a sorted JSON list via atomic writes. It is the canonical shared-kernel mechanism the caretaker fleet uses to avoid re-filing or re-processing the same finding, case, or issue across ticks: a loop hashes or keys a piece of work, checks the DedupStore to see whether that key has already been handled, and records it once acted upon. It underlies idempotency for nearly every autonomous caretaker loop (ADR review, contract refresh, corpus learning, dependabot merge, diagnostics, entry evidence, fake-coverage audit, flake tracking, live corpus replay, merge-state watching, RC budget, sentry ingestion, skill-prompt eval, term proposal, wiki-rot detection).
+
+**Invariants:**
+- get() returns an empty set rather than raising when the backing file is missing, unreadable, or contains malformed JSON
+- add/discard/set_all persist via atomic_write so a crash mid-write cannot corrupt the stored set
+- discard() is a silent no-op (no write) when the value is not present
 
 ## DependabotMergeLoop
 
@@ -163,6 +227,26 @@ Caretaker loop (L24) that keeps `docs/arch/generated/` in sync with `src/` by ru
 - The functional-area coverage issue is separate from the regen PR — one concern per artifact.
 - Kill-switch is `HYDRAFLOW_DISABLE_DIAGRAM_LOOP=1` (ADR-0049 convention; no config field).
 
+## DimensionBaseline
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/disturbance/registry.py:DimensionSpec` · **Confidence:** `accepted`
+
+The Set-point (ADR-0094) for one disturbance dimension in the Disturbance Dampener (ADR-0095): a version-controlled, count-per-signature YAML snapshot (disturbance/baselines/<dimension>.yaml) of a dimension's known violations at the point it was last accepted. DimensionSpec is the registry entry binding a dimension's name, its ViolationDetector, its baseline path, and its fix prompt. The feedforward ratchet gate (src/disturbance/gate.py:run_gate) diffs a fresh detector pass against this baseline: any signature exceeding its baselined count is new and blocks the PR; a signature below its baselined count is burn-down progress. DisturbanceDampenerLoop's fix agents are instructed to prune resolved signatures from this baseline as part of each fix.
+
+**Invariants:**
+- A baseline only blocks growth past its recorded per-signature count; it never requires the pre-existing backlog to be cleared before the gate can be enabled for a dimension.
+- Pruning a baseline entry without actually fixing the underlying violation is self-correcting: the next gate run re-diffs the detector's live findings against the pruned baseline and reports the signature as new, blocking the PR.
+
+## DisturbanceDampenerLoop
+
+**Kind:** `loop` · **Context:** `shared-kernel` · **Anchor:** `src/disturbance_dampener_loop.py:DisturbanceDampenerLoop` · **Confidence:** `accepted`
+
+The burn-down actuator half of the Disturbance Dampener (ADR-0095). Each tick it runs every registered dimension's ViolationDetector, loads that dimension's baseline, and selects a capped, smallest-first, deduped batch of BurndownUnits (one per dimension+file). For each unit it dispatches a coding agent via generate_and_open_pr_async to fix the violations in that file and prune the corresponding baseline entries, opening one PR per file (Pattern A). It follows SandboxFailureFixerLoop's caretaker shape: LoopDeps wiring, a kill-switch, max-PRs-per-tick saturation, per-unit attempt caps, and dedup so an already-opened unit is not redispatched.
+
+**Invariants:**
+- Every per-unit exception handler calls reraise_on_credit_or_bug before recording a failure, so a credit-exhaustion signal is never absorbed as a per-file crash.
+- A unit is only marked opened (and deduped) after generate_and_open_pr_async reports status == 'opened'; a crashed or skipped unit leaves the unit eligible for retry up to auto_agent_max_attempts.
+
 ## EdgeProposerLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/edge_proposer_loop.py:EdgeProposerLoop` · **Confidence:** `accepted`
@@ -187,6 +271,27 @@ Caretaker loop that backfills `Term.evidence` links by matching wiki entries to 
 - The `hydraflow-ul-evidence` label causes `review_phase` to skip agent pipeline routing; the LLM-driven matching IS the work (ADR-0062).
 - Kill-switch is via `enabled_cb("entry_evidence")` (ADR-0049); no config field.
 - `entry_evidence_max_entries_per_tick` bounds the LLM spend per cycle.
+
+## Error
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/harness_insights.py:FailureRecord` · **Confidence:** `accepted`
+
+The gap between Set-point and measured state that a Controller acts to reduce: unresolved review concerns, a REQUEST_CHANGES verdict, route-backs, or a recorded FailureRecord. On main the signal is largely binary; a continuous per-issue error is a known-open surface.
+
+**Invariants:**
+- Error is derived (Set-point minus measured state), never authored directly.
+
+## EscalationReconciler
+
+**Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/escalation_reconcile.py:EscalationReconciler` · **Confidence:** `accepted`
+**Aliases:** `escalation lifecycle reconciler`, `hitl escalation reconciler`
+
+EscalationReconciler is the shared reconciliation service that closes the loop on hitl-escalation lifecycle state for trust/caretaker loops. It resolves two lifecycle paths every adopting loop needs: reconcile_closed drops the dedup key and attempt counter when a human/external actor closes an escalation issue (re-arming the detector), while reconcile_open auto-closes an open escalation whose subject is no longer present in the loop's currently-detected set (the gap was fixed or was a false positive), clearing its dedup/attempt state so a genuine recurrence escalates fresh. It encodes the bot-vs-human close distinction via the shared BOT_CLOSE_MARKER_LABEL/is_bot_close predicate so a programmatic close never prematurely re-arms a still-active subject.
+
+**Invariants:**
+- reconcile_open only proceeds when the tick's detection completed (active_subjects is not None) — closing on incomplete/partial scan data would kill real escalations and reset their attempt budgets.
+- A bot/programmatic close (marked with BOT_CLOSE_MARKER_LABEL before closing) retains the dedup key so a still-detected subject does not immediately refile a duplicate; only a human/external close resets dedup state.
+- Unparseable escalation titles (operator-created issues carrying the stuck label) are left untouched by subject_from_title returning None.
 
 ## EventBus
 
@@ -213,6 +318,30 @@ Trust-fleet loop that detects uncovered methods on fake adapters under `src/mock
 - Maximum 3 repair attempts before HITL escalation.
 - Kill-switch is via `enabled_cb("fake_coverage_auditor")` (ADR-0049).
 
+## FitnessContext
+
+**Kind:** `value_object` · **Context:** `caretaker` · **Anchor:** `src/loop_fitness.py:FitnessContext` · **Confidence:** `accepted`
+**Aliases:** `fitness context`, `loop fitness context`
+
+Frozen, data-only Pydantic model that is the **sole input** to any `loop_fitness()` call. Carries the evaluation window (`window_start`, `window_end`), this loop's `BACKGROUND_WORKER_STATUS` events pre-filtered to the window, a snapshot list of `IssueRecord`s relevant to the loop, and optional per-loop cost. Contains no live GitHub client. The purity constraint (ADR-0093 §2) requires that `loop_fitness()` reads only from `ctx` — no network, no clock, no mutable self state — which lets the same function score live history now and replayed history in the future optimizer.
+
+**Invariants:**
+- Carries no live client or callable; the model is frozen (`model_config = {"frozen": True}`).
+- `issues` is a snapshot list of `IssueRecord` rows; each loop attributes its own artifacts by querying this list for its label.
+- The same `FitnessContext` instance that powers the live scorecard can power an offline optimizer replay — that equivalence is the design invariant this type enforces.
+
+## FitnessScorecardLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/fitness_scorecard_loop.py:FitnessScorecardLoop` · **Confidence:** `accepted`
+**Aliases:** `fitness scorecard`, `fitness scorecard loop`, `loop fitness scorecard`
+
+Read-only caretaker loop (ADR-0029) that produces the per-loop fitness scorecard on a configurable cadence (default 86400 s). Each tick it builds one `FitnessContext` per registered loop, calls every loop's `loop_fitness(ctx)`, persists results to `fitness.jsonl`, regenerates `docs/arch/generated/loop-fitness.md`, and emits a `LOOP_FITNESS_UPDATE` event. Mutates no loop state, so it sits off the ADR-0046 recursion ladder. Kill-switch via `enabled_cb("fitness_scorecard")` per ADR-0049. (ADR-0093)
+
+**Invariants:**
+- Kill-switch is via `enabled_cb("fitness_scorecard")` at the top of `_do_work()` (ADR-0049).
+- The loop is read-only: it calls `loop_fitness()` on peer loops but changes no loop config or state.
+- Declares its own fitness as `HOUSEKEEPING` — it produces no GitHub proposals or artifacts that have an acceptance lifecycle.
+
 ## FlakeTrackerLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/flake_tracker_loop.py:FlakeTrackerLoop` · **Confidence:** `accepted`
@@ -238,17 +367,24 @@ Centralized GitHub data poller that replaces the pattern where every dashboard e
 - Write operations bypass the cache and call `gh` directly.
 - Cache staleness is observable: each `CacheSnapshot` carries a `fetched_at` timestamp; `age_seconds` is infinite until the first poll completes.
 
-## GitHubCacheLoop
+## Governor
 
-**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/github_cache_loop.py:GitHubCacheLoop` · **Confidence:** `accepted`
-**Aliases:** `github cache loop`, `github data cache loop`, `github poller`
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/base_background_loop.py:LoopDeps` · **Confidence:** `accepted`
 
-Centralized GitHub data poller that replaces the pattern where every dashboard endpoint and background worker makes its own `gh api` calls (ADR-0041). A single `GitHubCacheLoop` polls GitHub on a fixed interval and stores results in `GitHubDataCache` — in memory and on disk. Dashboard endpoints and background workers read from the cache instantly rather than hitting the API. Write operations (create PR, merge, comment, label swap) still call `gh` directly because they need immediate confirmation.
+The saturation limiter and safety interlock that bounds every Actuator regardless of Controller intent. LoopDeps carries a loop's per-cycle safety controls — the kill switch (enabled_cb) and the watchdog timeout bound (timeout_cb); the wider Governor role (concurrency caps, credit holds) is realized elsewhere, by the max_workers/max_planners semaphores and the credit-exhaustion signal. The v2 Governor generalizes these into an explicit capacity-and-safety authority.
 
 **Invariants:**
-- Only one instance per repo runtime; all read consumers share the same cache snapshot.
-- Write operations bypass the cache and call `gh` directly.
-- Cache staleness is observable: each `CacheSnapshot` carries a `fetched_at` timestamp; `age_seconds` is infinite until the first poll completes.
+- The Governor can veto or throttle any actuation; a Controller cannot override it.
+
+## HumanSteeringLoop
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/human_steering_loop.py:HumanSteeringLoop` · **Confidence:** `accepted`
+
+The Sensor half of the `SteeringChannel` (ADR-0099 §6 surface #4, closed by ADR-0103): a `BaseBackgroundLoop` that, each tick, fetches GitHub comments for every active issue and calls the pure parser `human_steering.parse_directives` to derive the latest `SteeringState`, then persists it via `state.set_human_steering`. Purely a sensor: it never mutates issue phase, labels, or the pipeline directly — the orchestrator's actuator half reads the persisted state and enacts it at the next phase boundary. Gated by `human_steering_enabled` (default `True` since 2026-07-05, env-controllable via `HYDRAFLOW_HUMAN_STEERING_ENABLED`) and a kill-switch (`enabled_cb`), per ADR-0049. Default-on is safe because `parse_directives` honors nobody when `human_steering_authorized_users` is empty.
+
+**Invariants:**
+- `_do_work` never applies a decision to the plant; it only fetches comments, parses, and writes `SteeringState` — enactment is the orchestrator's job, keeping the sensor/actuator split total.
+- On a comment-fetch failure for one issue, the loop logs and continues to the next issue rather than aborting the whole tick, so one flaky issue cannot starve steering for the rest of the fleet.
 
 ## HydraFlowConfig
 
@@ -301,6 +437,18 @@ configured drift retry budget is exhausted.
 - Drift issues are auto-agent routed before any human escalation.
 - Dispatcher registration is keyed by `(adapter, command)` so cassette
 
+## LoopFitness
+
+**Kind:** `value_object` · **Context:** `caretaker` · **Anchor:** `src/loop_fitness.py:LoopFitness` · **Confidence:** `accepted`
+**Aliases:** `loop fitness`, `loop fitness score`, `fitness result`
+
+The result of calling a background loop's `loop_fitness(ctx)` method for one evaluation window. Carries `kind` (`SCORED` or `HOUSEKEEPING`), an optional normalized `score` in [0, 1] valid only for intra-loop trend comparison, raw `components` for diagnosis, `sample_count`, and a `Confidence` signal (`OK` or `INSUFFICIENT_DATA`) keyed off `sample_count` vs a per-loop threshold. Produced by every `BaseBackgroundLoop` subclass; consumed by `FitnessScorecardLoop` and persisted to `fitness.jsonl`. (ADR-0093)
+
+**Invariants:**
+- `score` is normalized 0–1 and valid **only for intra-loop use** (trend over time, or intra-loop config ranking). Cross-loop comparison of `score` is architecturally invalid.
+- When `kind` is `HOUSEKEEPING`, `score` is always `None`; `components` carries raw counters.
+- `confidence` is `INSUFFICIENT_DATA` when `sample_count` is below the loop's `min_samples` threshold; `score` is `None` in that case regardless of `kind`.
+
 ## MergeStateWatcherLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/merge_state_watcher_loop.py:MergeStateWatcherLoop` · **Confidence:** `accepted`
@@ -325,6 +473,15 @@ Hexagonal port for the observability boundary (ADR-0044 P7.7). Exposes five meth
 - The adapter is a no-op when `sentry_sdk` is absent; every method returns silently so callers never need a try/except around port calls.
 - Domain code never imports `sentry_sdk` directly; all observability routes through the injected `ObservabilityPort` so a future OTLP, structured-log, or sidecar adapter can replace Sentry without touching call sites.
 
+## Plant
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/models.py:StateData` · **Confidence:** `accepted`
+
+The process an orchestration loop drives and observes: the repository plus an issue's lifecycle. Its durable, observable state is captured in StateData (and, in v2, the ConvergenceLedger). Controllers act on the Plant through Actuators; Sensors read it.
+
+**Invariants:**
+- The Plant is only mutated through an Actuator, never by a Controller directly.
+
 ## PricingRefreshLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/pricing_refresh_loop.py:PricingRefreshLoop` · **Confidence:** `accepted`
@@ -336,6 +493,18 @@ Daily caretaker loop that fetches LiteLLM's `model_prices_and_context_window.jso
 - Kill-switch is the `HYDRAFLOW_DISABLE_PRICING_REFRESH=1` env var.
 - PR is always on the fixed branch `pricing-refresh-auto`; no-op ticks do not open a PR.
 - Bounds violations are separate from network errors; each has a distinct response path.
+
+## PRManager
+
+**Kind:** `adapter` · **Context:** `shared-kernel` · **Anchor:** `src/pr_manager.py:PRManager` · **Confidence:** `accepted`
+**Aliases:** `pr manager`, `github adapter`, `pull request manager`
+
+PRManager is the gh-CLI-backed adapter that manages the full pull-request and issue lifecycle for HydraFlow: pushing branches, creating and merging PRs, creating/listing/closing GitHub issues, swapping pipeline labels, and posting size-bounded PR/issue comments. It is the single concrete surface that caretaker loops, reviewers, and builders across the system call to talk to GitHub — the label-swap operations it exposes are what drive the label-state-machine transitions (ADR-0002) that move issues through the pipeline, and its cost-alert hooks and pipeline-label listener wire it into cross-cutting dashboard and budgeting concerns.
+
+**Invariants:**
+- Label-count queries are served from an in-memory cache with a 30s TTL (_LABEL_CACHE_TTL) to bound gh API pressure.
+- Successful pipeline-label swaps notify an optional registered listener (_pipeline_label_listener) so dashboard state updates within seconds instead of waiting for the periodic label poll.
+- Comment bodies are chunked to GitHub's comment size limit with truncation markers via CommentFormatter before posting.
 
 ## PRPort
 
@@ -419,6 +588,15 @@ Hexagonal port for the per-issue route-back counter. Lives in `src/route_back.py
 - Three methods: `get_route_back_count` reads the current count; `increment_route_back_count` returns the new count after incrementing; `decrement_route_back_count` rolls back an increment when a subsequent label swap fails, preventing transient network blips from burning route-back budget without any actual route-back occurring.
 - `decrement_route_back_count` must be a no-op (returning 0) when the counter is already at zero.
 
+## Sensor
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/models.py:MetricsSnapshot` · **Confidence:** `accepted`
+
+Any component that measures the current state of the Plant and emits a signal a Controller can read — deterministic (drift detectors, lint) or LLM-based (spec/review judges). MetricsSnapshot is the canonical aggregate reading.
+
+**Invariants:**
+- A Sensor observes; it does not mutate the Plant.
+
 ## SentryLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/sentry_loop.py:SentryLoop` · **Confidence:** `accepted`
@@ -430,6 +608,15 @@ Background loop that polls the Sentry API for unresolved issues across configure
 - Issues are deduplicated before filing; re-ingestion of the same Sentry event does not produce duplicate GitHub issues.
 - Kill-switch is via `enabled_cb("sentry")` (ADR-0049).
 - Sentry errors in the `ERROR+` level range trigger the issue-filing path; `WARNING` and below are skipped.
+
+## Set-point
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/issue_store.py:IssueStoreStage` · **Confidence:** `accepted`
+
+The desired state an orchestration loop drives toward — an issue reaching its terminal pipeline stage (the MERGED value of the IssueStoreStage state space), or a regulator holding a quantity at zero. A first-class converged flag arrives with the v2 ConvergenceLedger.
+
+**Invariants:**
+- The Set-point is the loop's target, not its current state (that is the Sensor reading).
 
 ## SkillPromptEvalLoop
 
@@ -467,6 +654,38 @@ JSON-file backed state service for crash recovery. Composes ~30 domain mixins (i
 - Issue/PR/epic numbers are stored as string keys; helpers convert to int on read.
 - On corrupt primary file, load() falls back to the most recent .bak before defaulting to an empty StateData.
 
+## SteeringChannel
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/human_steering_loop.py:HumanSteeringLoop` · **Confidence:** `accepted`
+
+The continuous Human reference-input path (ADR-0099 §6 surface #4, closed by ADR-0103): a live, per-issue channel from an operator's GitHub comments into the running pipeline, replacing the discrete single-shot `pending_correction` + suspend/wake mechanism. The channel has a sensor half (`HumanSteeringLoop` parses `/steer`, `/pause`, `/resume`, `/redo`, `/abort` comment directives into a persisted `SteeringState` each tick) and an actuator half (the orchestrator's `_apply_human_steering` enacts the latest state at the next phase boundary — skip, park, redo, or fold guidance into the next prompt). The two halves never share a process step: the sensor only senses, the actuator only enacts, so the orchestrator stays thin.
+
+**Invariants:**
+- The channel applies at phase boundaries only; it never interrupts a running phase mid-flight (the only mid-phase stop is the fleet-wide `SIGKILL`).
+- Declarative directives (`/steer`, `/pause`, `/resume`) are recomputed latest-wins from the full comment history every tick; imperative directives (`/redo`, `/abort`) fire at most once, gated by a per-issue `created_at` high-water-mark so a re-tick cannot replay them.
+
+## SteeringState
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/models.py:SteeringState` · **Confidence:** `accepted`
+
+The persisted Error/reference-state register for one issue's `SteeringChannel` (ADR-0099 §6 surface #4, closed by ADR-0103): a `guidance` string, a `flow` (`running` | `paused` | `abort`), a pending `redo_phase`, a `redo_count`, and a `last_applied_ts` high-water-mark gating imperative directives. `HumanSteeringLoop` (Sensor) writes it each tick from parsed comments; the orchestrator's `apply_steering` (Controller) reads it to compute a `SteeringDecision` that the orchestrator (Actuator) enacts at the next phase boundary. Keyed `str(issue_number)` in `StateData.human_steering`, matching the per-issue-map convention.
+
+**Invariants:**
+- Precedence within one poll is fixed: abort beats pause beats redo beats steer — `apply_steering` checks `flow == abort` first, then `paused`, before considering `redo_phase`.
+- `redo_phase` is only honored while `redo_count < human_steering_max_redos` and the phase name is a known internal stage; otherwise it is silently dropped rather than retried, so a stale or bogus `/redo` cannot stall an issue forever.
+
+## SubprocessRunner
+
+**Kind:** `port` · **Context:** `shared-kernel` · **Anchor:** `src/execution.py:SubprocessRunner` · **Confidence:** `accepted`
+**Aliases:** `subprocess execution port`, `host/docker execution abstraction`
+
+SubprocessRunner is the Protocol that abstracts how a command gets executed — on the host via asyncio.create_subprocess_exec, or inside a Docker container — behind a single interface (create_streaming_process, run_simple, cleanup). Runners and loops that need to spawn a Claude Code process or shell out to git/gh depend on this seam rather than the concrete HostRunner/DockerRunner implementation, so the same call sites work unchanged whether HydraFlow is running bare-metal or containerized.
+
+**Invariants:**
+- Two implementations select the execution environment: HostRunner (asyncio.create_subprocess_exec on the host) and DockerRunner (inside a container)
+- run_simple's cancel_check is polled every cancel_poll_interval seconds; a True verdict tears down the whole process group and raises SubprocessCancelledError rather than a plain timeout (#9577)
+- cleanup() must release any held resources (containers, connections), not just terminate processes
+
 ## Task
 
 **Kind:** `entity` · **Context:** `builder` · **Anchor:** `src/models.py:Task` · **Confidence:** `accepted`
@@ -491,6 +710,28 @@ Caretaker background loop that autonomously prunes stale terms from the ubiquito
 - Opens at most one PR per tick, bundling all eligible terms into a single `hydraflow-ul-deprecated`-labelled PR.
 - `ReviewPhase` skips routing for PRs carrying `TERM_PRUNER_PR_LABEL` so the deprecation PR is not sent through the agent pipeline.
 - Companion to `TermProposerLoop`: together they implement the two-tick grow/prune cycle that keeps `make lint-ul` anchor-resolution green without human intervention.
+
+## TribalWikiStore
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/tribal_wiki.py:TribalWikiStore` · **Confidence:** `accepted`
+**Aliases:** `tribal wiki`, `global wiki`, `cross-repo wiki`
+
+Cross-repo knowledge store that mirrors the per-repo wiki layout (index.json + topic.md pages) but is not namespaced by repo. All entries carry source_repo='global' and are written only by the generalization pass (src/wiki_compiler.py) when the same principle is observed in two or more per-repo wikis. Loaded at every plan/implement/review phase alongside the target repo's wiki so tribal rules apply regardless of which repo is being worked on. Routes reads, writes, staleness filtering, and contradiction marking through the underlying RepoWikiStore to keep on-disk format consistent with per-repo wikis.
+
+**Invariants:**
+- All entries carry source_repo='global'; the store is pinned to a single 'global' slug.
+- Entries are written only by the generalization pass when the same principle is observed in ≥2 per-repo wikis; direct modification from agent code is not a supported use case.
+- On-disk layout, staleness filtering, contradiction marking, and supersession are delegated to the underlying RepoWikiStore so per-repo and tribal formats stay consistent.
+
+## ViolationDetector
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/disturbance/detectors/base.py:ViolationDetector` · **Confidence:** `accepted`
+
+The Sensor role (ADR-0094) in the Disturbance Dampener (ADR-0095): a pluggable protocol with a single pure method, detect(repo_root) -> list[Finding], that reads files only and produces no side effects. Each dimension in the registry (mock_spec, suppressions) binds one concrete ViolationDetector implementation. Findings carry a stable per-occurrence signature so the ratchet gate and the burn-down loop can count and diff violations per signature rather than as an undifferentiated total.
+
+**Invariants:**
+- detect() must be pure: it reads repository files and returns Findings, and must not mutate the repository or any baseline.
+- Every Finding's signature must be stable across repeated detect() calls against unchanged source, since the ratchet gate diffs signatures against a persisted baseline.
 
 ## WikiRotDetectorLoop
 

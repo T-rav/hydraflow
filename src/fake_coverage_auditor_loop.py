@@ -37,9 +37,9 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import contextlib
 import json
 import logging
+import re
 import shutil
 import time
 from collections.abc import Callable
@@ -48,7 +48,9 @@ from typing import TYPE_CHECKING
 import yaml
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
+from escalation_reconcile import EscalationReconciler
 from models import WorkCycleResult  # noqa: TCH001
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -60,30 +62,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.fake_coverage_auditor_loop")
 
+# Parses ``_file_escalation`` titles back to the ``{fake}:{kind}`` subject.
+_ESCALATION_TITLE_RE = re.compile(r"^HITL: fake coverage gap (\S+) unresolved after ")
+
+
+def _escalation_subject(title: str) -> str | None:
+    m = _ESCALATION_TITLE_RE.match(title)
+    return m.group(1) if m else None
+
+
 # Hard cap on each ``gh``/``rg`` read. A wedged child must not hang the loop
 # cycle forever and freeze its heartbeat — the #9410 silent-stall failure
-# class (#9454 / #9508).
+# class (#9454 / #9508). Bounded (and, via ``run_subprocess_result``,
+# circuit-breaker/rate-limit/process-group hardened — #9554/#10028) rather
+# than a raw ``create_subprocess_exec``.
 _SUBPROCESS_TIMEOUT_SECONDS = 120
-
-
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process,
-) -> tuple[bytes, bytes]:
-    """``proc.communicate()`` bounded by ``_SUBPROCESS_TIMEOUT_SECONDS``.
-
-    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
-    the caller can treat it as a failed read (rather than hanging the loop
-    cycle indefinitely).
-    """
-    try:
-        return await asyncio.wait_for(
-            proc.communicate(), timeout=_SUBPROCESS_TIMEOUT_SECONDS
-        )
-    except TimeoutError:
-        proc.kill()
-        with contextlib.suppress(ProcessLookupError):
-            await proc.wait()
-        raise
 
 
 _MAX_ATTEMPTS = 3
@@ -303,6 +296,14 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         self._state = state
         self._pr = pr_manager
         self._dedup = dedup
+        self._escalations = EscalationReconciler(
+            prs=pr_manager,
+            dedup=dedup,
+            key_prefix="fake_coverage_auditor",
+            stuck_label=config.fake_coverage_stuck_label[0],
+            clear_attempts=state.clear_fake_coverage_attempts,
+            subject_from_title=_escalation_subject,
+        )
         # #8786 Phase 9 — when set, the loop runs the cassette retirement
         # audit each tick. Injected after construction by service_registry
         # so the callback can point at LiveCorpusReplayLoop's
@@ -343,21 +344,18 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 needle,
                 str(tests_dir),
             ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
             try:
-                stdout, _ = await _communicate_bounded(proc)
-            except TimeoutError:
+                result = await run_subprocess_result(
+                    *cmd, timeout=_SUBPROCESS_TIMEOUT_SECONDS
+                )
+            except SubprocessTimeoutError:
                 logger.warning(
                     "rg helper-usage scan timed out after %ss; treating as no match",
                     _SUBPROCESS_TIMEOUT_SECONDS,
                 )
                 return False
             # rg exits 0 on match, 1 on no-match, 2+ on error.
-            return proc.returncode == 0 and bool(stdout.strip())
+            return result.returncode == 0 and bool(result.stdout.strip())
 
         # Fallback when ripgrep isn't on PATH (e.g. CI runners, or a deploy
         # host without it) — a stdlib scan with identical fixed-string
@@ -510,64 +508,13 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
     async def _reconcile_closed_escalations(self) -> None:
         """Clear dedup keys for closed fake-coverage-stuck escalations.
 
-        Escalations are now filed at rollup granularity (``{Fake}:{kind}``),
-        so the title-substring match works against the new key shape. Old
-        per-method dedup keys (pre-#8986) carry a ``.method`` segment and
-        will simply not match any open escalation title — they age out
-        silently on the next non-escalated tick.
+        Delegates to the shared :class:`EscalationReconciler` (PRPort-based;
+        replaced the raw ``gh issue list`` subprocess). Subjects are parsed
+        from the escalation title, so old per-method dedup keys (pre-#8986,
+        ``.method`` segment) simply never match — they age out silently on
+        the next non-escalated tick, as before.
         """
-        cmd = [
-            "gh",
-            "issue",
-            "list",
-            "--repo",
-            self._config.repo,
-            "--state",
-            "closed",
-        ]
-        for label in (
-            *self._config.hitl_escalation_label,
-            *self._config.fake_coverage_stuck_label,
-        ):
-            cmd.extend(["--label", label])
-        cmd.extend(
-            [
-                "--author",
-                "@me",
-                "--limit",
-                "100",
-                "--json",
-                "title",
-            ]
-        )
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, _ = await _communicate_bounded(proc)
-        except TimeoutError:
-            return
-        if proc.returncode != 0:
-            return
-        try:
-            closed = json.loads(stdout.decode() or "[]")
-        except json.JSONDecodeError:
-            return
-        current = self._dedup.get()
-        keep = set(current)
-        for issue in closed:
-            title = issue.get("title", "")
-            for key in list(keep):
-                if (
-                    key.startswith("fake_coverage_auditor:")
-                    and key.split(":", 1)[1] in title
-                ):
-                    keep.discard(key)
-                    self._state.clear_fake_coverage_attempts(key.split(":", 1)[1])
-        if keep != current:
-            self._dedup.set_all(keep)
+        await self._escalations.reconcile_closed()
 
     async def _list_open_rollup_titles(self) -> set[str]:
         """Return the set of titles of currently-open rollup issues we filed.
@@ -596,16 +543,13 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         for label in self._config.fake_coverage_gap_label:
             cmd.extend(["--label", label])
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            result = await run_subprocess_result(
+                *cmd, timeout=_SUBPROCESS_TIMEOUT_SECONDS
             )
-            stdout, _ = await _communicate_bounded(proc)
-            if proc.returncode != 0:
+            if result.returncode != 0:
                 return set()
-            data = json.loads(stdout.decode() or "[]")
-        except (OSError, TimeoutError, json.JSONDecodeError):
+            data = json.loads(result.stdout or "[]")
+        except (OSError, SubprocessTimeoutError, json.JSONDecodeError):
             return set()
         return {entry.get("title", "") for entry in data}
 
@@ -649,9 +593,14 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
 
         filed = 0
         updated = 0
+        rollups_closed = 0
         escalated = 0
         dedup = self._dedup.get()
         all_known: dict[str, list[str]] = {}
+        # Subjects with a live gap THIS tick — drives open-escalation
+        # re-verification below. Populated only on a completed scan (any
+        # exception aborts the cycle before reconcile_open runs).
+        active_subjects: set[str] = set()
         for fake, sets in catalog.items():
             helper_methods = sets["test-helper"]
             # Adapter-surface (cassette) auditing only applies to fakes
@@ -701,6 +650,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
 
             # --- adapter-surface rollup ---
             if uncovered_surface:
+                active_subjects.add(f"{fake}:adapter-surface")
                 action, _did_file = await self._handle_rollup(
                     fake=fake,
                     kind="adapter-surface",
@@ -718,12 +668,13 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
             else:
                 # Gap closed — clear attempts + drop the rollup mapping so
                 # the next regression re-files cleanly.
-                await self._clear_rollup_state(
+                rollups_closed += await self._clear_rollup_state(
                     fake, "adapter-surface", dedup, recovered=recovered_surface
                 )
 
             # --- test-helper rollup ---
             if uncovered_helpers:
+                active_subjects.add(f"{fake}:test-helper")
                 action, _did_file = await self._handle_rollup(
                     fake=fake,
                     kind="test-helper",
@@ -739,7 +690,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 elif action == "updated":
                     updated += 1
             else:
-                await self._clear_rollup_state(
+                rollups_closed += await self._clear_rollup_state(
                     fake, "test-helper", dedup, recovered=recovered_helpers
                 )
 
@@ -753,6 +704,12 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
 
         self._state.set_fake_coverage_last_known(all_known)
 
+        # Open-escalation re-verify: gaps fixed by later PRs (or false
+        # positives) auto-close their stuck escalations instead of waiting
+        # for a human (#9618 sat six days). Runs only after a COMPLETED
+        # scan — any exception above aborts the cycle first.
+        autoclosed = await self._escalations.reconcile_open(active_subjects)
+
         # #8786 Phase 9 — cassette retirement audit. Runs each tick;
         # ``_retirement_keys_cb`` is wired by service_registry from
         # LiveCorpusReplayLoop's registered dispatcher set.
@@ -765,7 +722,9 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
             "status": "ok",
             "filed": filed,
             "updated": updated,
+            "rollups_closed": rollups_closed,
             "escalated": escalated,
+            "autoclosed": autoclosed,
             "fakes_seen": len(catalog),
             "retirement_filed": retirement_filed,
         }
@@ -859,31 +818,43 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         kind: str,
         dedup: set[str],
         recovered: list[str] | None = None,
-    ) -> None:
+    ) -> int:
         """Reset rollup tracking when the gap closes (no uncovered methods).
 
         Drops the attempt counter, dedup key, and rollup-issue mapping so
-        a future regression re-files cleanly. When the previous tick had
-        an actual gap (``recovered`` is non-empty) AND a rollup issue is
-        tracked, repaint the body with the "all covered" view first so
-        humans looking at the open issue see the resolution rather than
-        a stale list of methods. The issue itself is left open for humans
-        to close.
+        a future regression re-files cleanly (fresh number, fresh
+        3-strikes clock). When the previous tick had an actual gap
+        (``recovered`` non-empty) AND a rollup issue is tracked, repaint
+        the body with the recovery trajectory, comment, and CLOSE the
+        issue (#9541) — leaving it open for a human was the #9183
+        dead-letter shape every other caretaker rollup has since dropped
+        (#9359, #10015/#10022 precedents). Returns 1 when a rollup was
+        auto-closed, else 0.
         """
         key = f"{fake}:{kind}"  # shared key for attempts + rollup mapping
         dedup_key = f"fake_coverage_auditor:{fake}:{kind}"
         tracked_number = self._state.get_fake_coverage_rollup_issue(key)
+        closed = 0
         if tracked_number and recovered:
             if kind == "adapter-surface":
                 body = self._render_surface_body(fake, [], recovered)
             else:
                 body = self._render_helper_body(fake, [], recovered)
             await self._pr.update_issue_body(tracked_number, body)
+            await self._pr.post_comment(
+                tracked_number,
+                f"All {len(recovered)} {kind} method(s) recovered — coverage "
+                "restored, auto-closing (#9541). A future regression files a "
+                "FRESH rollup with a fresh escalation clock.",
+            )
+            await self._pr.close_issue(tracked_number)
+            closed = 1
         self._state.clear_fake_coverage_attempts(key)
         self._state.clear_fake_coverage_rollup_issue(key)
         if dedup_key in dedup:
             dedup.discard(dedup_key)
             self._dedup.set_all(dedup)
+        return closed
 
     async def _audit_retirement(self, cassette_root: Path) -> int:
         """Find baseline_only cassettes covered by live dispatchers; file

@@ -33,6 +33,7 @@ class TermKind(StrEnum):
     POLICY = "policy"
     LOOP = "loop"
     RUNNER = "runner"
+    CONTROL_ROLE = "control_role"
 
 
 class BoundedContext(StrEnum):
@@ -243,6 +244,18 @@ def _slugify_term_name(name: str) -> str:
     return step4.strip("-")
 
 
+def _updated_at_sort_key(term: Term) -> datetime:
+    """Parse ``updated_at`` for freshest-record comparison; unparseable
+    timestamps sort oldest so a well-formed record always wins."""
+    try:
+        parsed = datetime.fromisoformat(term.updated_at)
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
 class TermStore:
     """File-based store for Term records (one file per term)."""
 
@@ -256,10 +269,30 @@ class TermStore:
         return path
 
     def list(self) -> list[Term]:
+        """Return one Term per id, sorted by name.
+
+        Two files sharing an id are a forked duplicate (#9938/#9981): a
+        hand-authored file whose basename wasn't the canonical slug of its
+        name got re-written by a UL loop at the slug path, stranding the
+        stale original. Collapse such records to the freshest ``updated_at``
+        (ties prefer the canonical-slug file) so renderers and loops never
+        double-count a term. ``lint_term_uniqueness`` rejects the duplicate
+        files themselves at CI time.
+        """
         if not self._root.is_dir():
             return []
+        best: dict[str, tuple[tuple[datetime, bool], Term]] = {}
+        for path in sorted(self._root.glob("*.md")):
+            term = load_term_file(path)
+            rank = (
+                _updated_at_sort_key(term),
+                path.name == f"{_slugify_term_name(term.name)}.md",
+            )
+            current = best.get(term.id)
+            if current is None or rank > current[0]:
+                best[term.id] = (rank, term)
         return sorted(
-            (load_term_file(p) for p in self._root.glob("*.md")),
+            (record for _, record in best.values()),
             key=lambda t: t.name.lower(),
         )
 
@@ -385,6 +418,42 @@ def lint_reverse_coverage(terms: list[Term], src_root: Path) -> list[str]:
     return sorted(uncovered)
 
 
+def lint_term_uniqueness(terms_root: Path) -> list[str]:
+    """One file per term: unique id, unique name, canonical filename.
+
+    Returns human-readable failure strings; empty list = clean. Duplicate
+    ids/names across term files corrupt the store (#9938/#9981). The
+    filename check closes the fork mechanism itself: ``TermStore.write``
+    and the UL loops key the file path on ``_slugify_term_name(name)``, so
+    a file parked at any other basename gets forked into a second file on
+    the next loop write — exactly how the fitness-scorecard and
+    github-cache-loop duplicates were minted.
+    """
+    if not terms_root.is_dir():
+        return []
+    failures: list[str] = []
+    by_id: dict[str, list[str]] = {}
+    by_name: dict[str, list[str]] = {}
+    for path in sorted(terms_root.glob("*.md")):
+        term = load_term_file(path)
+        by_id.setdefault(term.id, []).append(path.name)
+        by_name.setdefault(term.name.lower(), []).append(path.name)
+        expected = f"{_slugify_term_name(term.name)}.md"
+        if path.name != expected:
+            failures.append(
+                f"{path.name}: filename is not the canonical slug of "
+                f"name {term.name!r} — expected {expected} (a UL loop "
+                "write would fork a duplicate file)"
+            )
+    for term_id, filenames in sorted(by_id.items()):
+        if len(filenames) > 1:
+            failures.append(f"duplicate term id {term_id}: {', '.join(filenames)}")
+    for name, filenames in sorted(by_name.items()):
+        if len(filenames) > 1:
+            failures.append(f"duplicate term name {name!r}: {', '.join(filenames)}")
+    return failures
+
+
 def render_glossary(terms: list[Term]) -> str:
     """Render an alphabetical glossary as Markdown."""
     sorted_terms = sorted(terms, key=lambda t: t.name.lower())
@@ -420,13 +489,53 @@ def render_glossary(terms: list[Term]) -> str:
     return "\n".join(lines)
 
 
+def _mermaid_node_id(name: str) -> str:
+    """Slugify a term name into a Mermaid-safe node-id base.
+
+    Mermaid unquoted node ids must be alphanumeric/underscore; a bare hyphen
+    (e.g. in ``Set-point``) is not universally valid and is fragile across
+    renderers (see #9680). Collapse any run of non-alphanumeric characters to a
+    single underscore, lowercase, and guard against empty / digit-leading
+    results so the id is always a valid identifier.
+    """
+    slug = re.sub(r"[^0-9a-zA-Z]+", "_", name).strip("_").lower()
+    if not slug:
+        slug = "term"
+    if slug[0].isdigit():
+        slug = f"t_{slug}"
+    return slug
+
+
+def _assign_node_ids(terms: list[Term]) -> dict[str, str]:
+    """Map each term id to a stable, unique, Mermaid-safe node id.
+
+    The node id is a slug of the term name. Two *distinct* terms sharing a name
+    (or names that slug to the same base) would otherwise render as a single
+    Mermaid node (see #9938), so colliding bases get a numeric suffix. Terms
+    that share an ``id`` are the same graph identity (e.g. a duplicate term
+    file — a data bug handled elsewhere), so the id is mapped once and not
+    double-suffixed. Assignment order is keyed on ``(name.lower(), id)`` —
+    independent of the caller's list order — so the artifact is byte-stable.
+    """
+    node_ids: dict[str, str] = {}
+    used: dict[str, int] = {}
+    for t in sorted(terms, key=lambda x: (x.name.lower(), x.id)):
+        if t.id in node_ids:
+            continue
+        base = _mermaid_node_id(t.name)
+        seen = used.get(base, 0)
+        used[base] = seen + 1
+        node_ids[t.id] = base if seen == 0 else f"{base}_{seen + 1}"
+    return node_ids
+
+
 def render_context_map(terms: list[Term]) -> str:
     """Render a Mermaid graph: one subgraph per bounded context, typed edges."""
     by_context: dict[BoundedContext, list[Term]] = {}
     for t in terms:
         by_context.setdefault(t.bounded_context, []).append(t)
 
-    id_to_name = {t.id: t.name for t in terms}
+    node_ids = _assign_node_ids(terms)
 
     lines = [
         "<!-- DO NOT EDIT — generated by src/ubiquitous_language.py:render_context_map -->",
@@ -439,14 +548,14 @@ def render_context_map(terms: list[Term]) -> str:
     for ctx, ctx_terms in sorted(by_context.items(), key=lambda kv: kv[0].value):
         lines.append(f"  subgraph {ctx.value}")
         for t in sorted(ctx_terms, key=lambda x: x.name.lower()):
-            lines.append(f'    {t.name}["{t.name}<br/><i>{t.kind.value}</i>"]')
+            lines.append(f'    {node_ids[t.id]}["{t.name}<br/><i>{t.kind.value}</i>"]')
         lines.append("  end")
     for t in terms:
         for rel in t.related:
-            target_name = id_to_name.get(rel.target)
-            if target_name is None:
+            target_id = node_ids.get(rel.target)
+            if target_id is None:
                 continue
-            lines.append(f"  {t.name} -->|{rel.kind.value}| {target_name}")
+            lines.append(f"  {node_ids[t.id]} -->|{rel.kind.value}| {target_id}")
     lines.append("```")
     lines.append("")
     return "\n".join(lines)

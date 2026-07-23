@@ -50,6 +50,7 @@ Ubiquitous language
 
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 from datetime import UTC, datetime
@@ -57,6 +58,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from agent_cli import claude_isolation_flags
 
 logger = logging.getLogger("hydraflow.contract_recording")
 
@@ -235,6 +238,23 @@ def _require_success(
     return True
 
 
+def _gh_api_scalar(argv: list[str], *, label: str) -> str | None:
+    """Run a scalar-returning ``gh api`` call and return its stripped, non-empty
+    stdout — or ``None`` (warn-logged) on a missing binary, non-zero exit, or
+    empty output. Collapses the run → require-success → strip → non-empty guard
+    that every Git-Data-API read/write in ``_provision_scratch_branch`` repeats.
+    """
+    proc = _run(argv)
+    if not _require_success(proc, label=label):
+        return None
+    assert proc is not None
+    value = proc.stdout.strip().strip('"')
+    if not value:
+        logger.warning("contract_recording: %s returned empty output", label)
+        return None
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Public recorders
 # ---------------------------------------------------------------------------
@@ -245,6 +265,57 @@ def _require_success(
 # The recorder captures the real CLI exit code but stores this constant so the
 # replay test compares apples-to-apples (same pattern as record_docker).
 _FAKE_CREATE_ISSUE_STDOUT = "https://github.com/test-org/test-repo/issues/9001\n"
+
+# Fixed scratch branch + synthetic-commit message used by
+# ``_provision_scratch_branch``. The branch name is intentionally constant (not
+# per-run) for determinism: the happy-path ``gh pr merge --delete-branch``
+# removes it, and the best-effort pre-delete in ``_provision_scratch_branch``
+# makes the fixed name idempotent across a prior interrupted tick.
+_SCRATCH_BRANCH = "contract-recorder-scratch"
+_SCRATCH_COMMIT_MESSAGE = "contract recorder scratch commit"
+
+# Stable logical PR/issue numbers written into the merge_pr / close_issue
+# cassettes. The live sandbox numbers are volatile, and
+# ``contract_diff._canonical_payload`` does NOT normalize ``input.args`` (it
+# drops only ``recorded_at``/``recorder_sha`` and runs normalizers on
+# ``stdin``/``stdout``/``stderr`` only). Recording the live number would diff
+# against the committed cassettes' ``args: ["42"]`` and file a phantom
+# ``contract-refresh`` PR on every weekly tick. We store these constants (which
+# match the committed cassettes byte-for-byte) in the cassette and use the live
+# numbers only for the side-effecting CLI calls — mirroring the stable-shape
+# ``_FAKE_CREATE_ISSUE_STDOUT`` pattern.
+_FAKE_MERGE_PR_NUMBER = "42"
+_FAKE_CLOSE_ISSUE_NUMBER = "42"
+
+# Fixed scratch branches for the create_pr / create_promotion_pr recorders —
+# distinct names from _SCRATCH_BRANCH (merge_pr's) so all mutations can run in
+# the same tick without one recorder's provisioning/cleanup stepping on
+# another's branch ref.
+_CREATE_PR_SCRATCH_BRANCH = "contract-recorder-create-pr-scratch"
+_PROMOTION_SCRATCH_BRANCH = "contract-recorder-promotion-scratch"
+
+# Stable logical args + fake-shaped stdout for the create_pr cassette.
+# Filename/interaction stay "pr_create" (not "create_pr") to match the
+# pre-existing hand-authored baseline (tests/trust/contracts/cassettes/github/
+# pr_create.yaml) this recorder promotes to machine-recorded —
+# contract_diff.detect_adapter_drift matches recorded vs committed cassettes
+# by filename, so keeping the name lands the diff on the SAME committed
+# fixture instead of creating an orphaned duplicate (mirrors #8693's in-place
+# close_issue/create_issue/merge_pr conversion). ["42", "contract-branch"] and
+# the test-org/test-repo URL mirror the committed baseline exactly so a
+# correctly-recorded cassette is drift-free against it on day one (#9535
+# pattern) regardless of the sandbox's live PR number.
+_FAKE_CREATE_PR_ARGS = ["42", "contract-branch"]
+_FAKE_CREATE_PR_STDOUT = "https://github.com/test-org/test-repo/pull/101\n"
+
+# Stable logical rc-branch arg + fake-shaped stdout for create_promotion_pr —
+# matches the hand-authored baseline from #10092
+# (create_promotion_pr.yaml). FakeGitHub.create_promotion_pr stores the PR
+# under the "test/repo" host (NOT test-org/test-repo — see that cassette's
+# comment) at _pr_counter's starting value (10_000) for a fresh FakeGitHub
+# instance.
+_FAKE_PROMOTION_RC_BRANCH = "rc/2026-05-13-0000"
+_FAKE_CREATE_PROMOTION_PR_STDOUT = "https://github.com/test/repo/pull/10000\n"
 
 
 def _parse_trailing_int(url: str) -> int | None:
@@ -281,7 +352,21 @@ def _record_close_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
         )
         return None
 
-    close = _run(["gh", "issue", "close", str(issue_number), "--repo", sandbox_repo])
+    # `--reason "not planned"` exercises the reason-threading path (#10025):
+    # PRManager.close_issue(reason=...) is how automated dedup closes record
+    # stateReason=NOT_PLANNED instead of gh's default COMPLETED.
+    close = _run(
+        [
+            "gh",
+            "issue",
+            "close",
+            str(issue_number),
+            "--repo",
+            sandbox_repo,
+            "--reason",
+            "not planned",
+        ]
+    )
     if not _require_success(close, label="gh issue close"):
         return None
     assert close is not None
@@ -291,7 +376,13 @@ def _record_close_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
         interaction="close_issue",
         fixture_repo=sandbox_repo,
         command="close_issue",
-        args=[str(issue_number)],
+        # STABLE logical arg (#9535) composed with the #10025 reason flags —
+        # the live ``issue_number`` still drives the side-effecting
+        # ``gh issue close`` above, but ``input.args`` is compared verbatim by
+        # the drift layer, so it must equal the committed cassette's
+        # ["42", "--reason", "not planned"] to avoid a phantom refresh PR
+        # every tick.
+        args=[_FAKE_CLOSE_ISSUE_NUMBER, "--reason", "not planned"],
         exit_code=close.returncode,
         # Fake-shaped: FakeGitHub.close_issue returns empty stdout/stderr.
         # Real gh CLI may print a confirmation line; we discard it so the
@@ -307,7 +398,7 @@ def _record_close_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
 
 
 def _record_create_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
-    """Create a sandbox issue; write create_issue cassette."""
+    """Create a sandbox issue; write create_issue cassette; close the issue."""
     create = _run(
         [
             "gh",
@@ -323,6 +414,9 @@ def _record_create_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
     )
     if not _require_success(create, label="gh issue create (create_issue)"):
         return None
+    assert create is not None
+
+    issue_number = _parse_trailing_int(create.stdout)
 
     payload = _build_cassette_payload(
         adapter="github",
@@ -341,24 +435,75 @@ def _record_create_issue(sandbox_repo: str, tmp_dir: Path) -> Path | None:
     payload["baseline_only"] = False
     path = tmp_dir / "create_issue.yaml"
     _write_yaml_cassette(path, payload)
+
+    # Clean up: close the scratch issue so no durable open issues accumulate
+    # in the sandbox repo across ContractRefreshLoop ticks.
+    if issue_number is not None:
+        close = _run(
+            ["gh", "issue", "close", str(issue_number), "--repo", sandbox_repo]
+        )
+        if not _require_success(close, label="gh issue close (create_issue cleanup)"):
+            logger.warning(
+                "contract_recording: cleanup close of issue #%s failed — cassette "
+                "was written successfully but the sandbox issue remains open",
+                issue_number,
+            )
+    else:
+        logger.warning(
+            "contract_recording: could not parse issue number from %r — "
+            "sandbox issue was not closed",
+            create.stdout,
+        )
+
     return path
 
 
-def _record_merge_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
-    """Create a scratch branch + PR in the sandbox, merge it; write merge_pr cassette."""
-    get_sha = _run(
+def _provision_scratch_branch(sandbox_repo: str, *, branch: str) -> str | None:
+    """Create *branch* in *sandbox_repo* carrying a single tree-identical commit.
+
+    GitHub rejects ``gh pr create`` when the head branch has no commits between
+    it and its base ("No commits between main and <branch>"). The old recorder
+    created the branch ref at ``main``'s SHA with no further commit, so it never
+    produced a mergeable PR. We POST a commit whose tree equals ``main``'s tree
+    (an empty-diff commit) parented on ``main`` and fast-forward the branch ref
+    to it — the PR carries one commit (zero file changes) which GitHub accepts,
+    and the eventual merge leaves ``main``'s tree unchanged, so every refresh
+    tick is idempotent. Mirrors the proven ``PRManager.push_synthetic_commit``.
+
+    Best-effort deletes any stale ref left by a prior interrupted recording so
+    the fixed branch name is re-runnable. Returns the new commit SHA on success,
+    or ``None`` (warn-logged) on any failed step — the recorder degrades to "no
+    cassette written" rather than raising into the background loop.
+
+    This helper deliberately shells out to the real ``gh`` CLI via ``_run``
+    (not ``PRPort``): the whole point of the recorder is to capture the *live*
+    contract, so routing through the fake would defeat it.
+    """
+    # Best-effort cleanup of a stale scratch ref (a prior tick interrupted
+    # before ``gh pr merge --delete-branch``). A 404/422 here is expected and
+    # deliberately NOT gated on ``_require_success``.
+    _run(
+        [
+            "gh",
+            "api",
+            f"repos/{sandbox_repo}/git/refs/heads/{branch}",
+            "--method",
+            "DELETE",
+        ]
+    )
+
+    main_sha = _gh_api_scalar(
         [
             "gh",
             "api",
             f"repos/{sandbox_repo}/git/ref/heads/main",
             "--jq",
             ".object.sha",
-        ]
+        ],
+        label="gh api get main sha",
     )
-    if not _require_success(get_sha, label="gh api get main sha"):
+    if main_sha is None:
         return None
-    assert get_sha is not None
-    sha = get_sha.stdout.strip()
 
     create_branch = _run(
         [
@@ -366,12 +511,79 @@ def _record_merge_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
             "api",
             f"repos/{sandbox_repo}/git/refs",
             "--raw-field",
-            "ref=refs/heads/contract-recorder-scratch",
+            f"ref=refs/heads/{branch}",
             "--raw-field",
-            f"sha={sha}",
+            f"sha={main_sha}",
         ]
     )
     if not _require_success(create_branch, label="gh api create branch"):
+        return None
+
+    tree_sha = _gh_api_scalar(
+        [
+            "gh",
+            "api",
+            f"repos/{sandbox_repo}/git/commits/{main_sha}",
+            "--jq",
+            ".tree.sha",
+        ],
+        label="gh api get main tree",
+    )
+    if tree_sha is None:
+        return None
+
+    # Tree-identical (empty-diff) commit parented on main: the branch gains one
+    # commit (so ``gh pr create`` is accepted) without changing main's tree.
+    commit_sha = _gh_api_scalar(
+        [
+            "gh",
+            "api",
+            f"repos/{sandbox_repo}/git/commits",
+            "--method",
+            "POST",
+            "--raw-field",
+            f"message={_SCRATCH_COMMIT_MESSAGE}",
+            "--raw-field",
+            f"tree={tree_sha}",
+            "--raw-field",
+            f"parents[]={main_sha}",
+            "--jq",
+            ".sha",
+        ],
+        label="gh api create commit",
+    )
+    if commit_sha is None:
+        return None
+
+    patch_ref = _run(
+        [
+            "gh",
+            "api",
+            f"repos/{sandbox_repo}/git/refs/heads/{branch}",
+            "--method",
+            "PATCH",
+            "--raw-field",
+            f"sha={commit_sha}",
+        ]
+    )
+    if not _require_success(patch_ref, label="gh api patch branch ref"):
+        return None
+
+    return commit_sha
+
+
+def _record_merge_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
+    """Provision a scratch branch with a synthetic commit, open + merge a PR;
+    write the merge_pr cassette with STABLE logical args.
+
+    ``_provision_scratch_branch`` puts one tree-identical (empty-diff) commit on
+    the scratch branch so ``gh pr create`` is accepted while the sandbox
+    ``main`` tree never grows. The cassette records the stable logical PR number
+    (``"42"``), never the volatile live sandbox number — ``input.args`` is
+    compared verbatim by the drift layer, so a live number would phantom-drift
+    every tick.
+    """
+    if not _provision_scratch_branch(sandbox_repo, branch=_SCRATCH_BRANCH):
         return None
 
     create_pr = _run(
@@ -382,7 +594,7 @@ def _record_merge_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
             "--repo",
             sandbox_repo,
             "--head",
-            "contract-recorder-scratch",
+            _SCRATCH_BRANCH,
             "--base",
             "main",
             "--title",
@@ -401,6 +613,7 @@ def _record_merge_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
         )
         return None
 
+    # The side-effecting merge targets the LIVE PR number; the cassette does not.
     merge = _run(
         [
             "gh",
@@ -417,15 +630,19 @@ def _record_merge_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
         return None
     assert merge is not None
 
-    # Fake-shaped stdout mirrors FakeGitHub.merge_pr; pr_number normalizer
-    # collapses the sandbox PR number so replay is deterministic.
-    fake_stdout = f"merged pull request https://github.com/_/_/pull/{pr_number}\n"
+    # Fake-shaped stdout mirrors FakeGitHub.merge_pr; the pr_number normalizer
+    # collapses the number so replay is deterministic. Both stdout and args use
+    # the STABLE _FAKE_MERGE_PR_NUMBER — args are compared verbatim by the drift
+    # layer, so they must equal the committed cassette's ["42"].
+    fake_stdout = (
+        f"merged pull request https://github.com/_/_/pull/{_FAKE_MERGE_PR_NUMBER}\n"
+    )
     payload = _build_cassette_payload(
         adapter="github",
         interaction="merge_pr",
         fixture_repo=sandbox_repo,
         command="merge_pr",
-        args=[str(pr_number)],
+        args=[_FAKE_MERGE_PR_NUMBER],
         exit_code=merge.returncode,
         stdout=fake_stdout,
         stderr="",
@@ -434,6 +651,168 @@ def _record_merge_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
     payload["baseline_only"] = False
     path = tmp_dir / "merge_pr.yaml"
     _write_yaml_cassette(path, payload)
+    return path
+
+
+def _record_create_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
+    """Provision a scratch branch with a synthetic commit, open a PR against
+    main (without merging), write the pr_create cassette with STABLE logical
+    args, then best-effort close+delete-branch so the sandbox doesn't
+    accumulate open scratch PRs across ContractRefreshLoop ticks.
+
+    Uses ``_provision_scratch_branch`` (the same no-diff-PR guard #9535 added
+    for merge_pr) so ``gh pr create`` is accepted on a tree-identical commit.
+    """
+    if not _provision_scratch_branch(sandbox_repo, branch=_CREATE_PR_SCRATCH_BRANCH):
+        return None
+
+    create_pr = _run(
+        [
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            sandbox_repo,
+            "--head",
+            _CREATE_PR_SCRATCH_BRANCH,
+            "--base",
+            "main",
+            "--title",
+            "contract recorder scratch",
+            "--body",
+            "",
+        ]
+    )
+    if not _require_success(create_pr, label="gh pr create (pr_create)"):
+        return None
+    assert create_pr is not None
+    pr_number = _parse_trailing_int(create_pr.stdout)
+    if pr_number is None:
+        logger.warning(
+            "contract_recording: could not parse PR number from %r", create_pr.stdout
+        )
+        return None
+
+    # Fake-shaped stdout mirrors FakeGitHub.create_pr (via PRInfoFactory's
+    # default URL); both stdout and args use the STABLE logical values that
+    # match the committed pr_create.yaml baseline byte-for-byte —
+    # input.args is compared verbatim by the drift layer, so the live PR
+    # number/branch would phantom-drift every tick (#9535 pattern).
+    payload = _build_cassette_payload(
+        adapter="github",
+        interaction="pr_create",
+        fixture_repo=sandbox_repo,
+        command="create_pr",
+        args=list(_FAKE_CREATE_PR_ARGS),
+        exit_code=create_pr.returncode,
+        stdout=_FAKE_CREATE_PR_STDOUT,
+        stderr="",
+        normalizers=["pr_number"],
+    )
+    payload["baseline_only"] = False
+    path = tmp_dir / "pr_create.yaml"
+    _write_yaml_cassette(path, payload)
+
+    # Best-effort cleanup: close (never merge — nothing exercises the merge
+    # path here) the scratch PR and delete its branch so the sandbox doesn't
+    # accumulate open PRs across weekly ticks. A failure here does not
+    # invalidate the cassette that was already written.
+    close = _run(
+        [
+            "gh",
+            "pr",
+            "close",
+            str(pr_number),
+            "--repo",
+            sandbox_repo,
+            "--delete-branch",
+        ]
+    )
+    if not _require_success(close, label="gh pr close (pr_create cleanup)"):
+        logger.warning(
+            "contract_recording: cleanup close of PR #%s failed — cassette "
+            "was written successfully but the sandbox PR/branch remains open",
+            pr_number,
+        )
+
+    return path
+
+
+def _record_create_promotion_pr(sandbox_repo: str, tmp_dir: Path) -> Path | None:
+    """Provision a scratch branch with a synthetic commit, open a promotion
+    PR against main, write the create_promotion_pr cassette with STABLE
+    logical args, then best-effort close+delete-branch.
+
+    Mirrors PRManager.create_promotion_pr's real shape (``gh pr create
+    --base main``) closely enough for contract purposes; the recorded
+    cassette never carries the live rc-branch name or PR number — both are
+    volatile per real StagingPromotionLoop tick — only the fixed logical
+    values already committed by #10092's hand-authored baseline.
+    """
+    if not _provision_scratch_branch(sandbox_repo, branch=_PROMOTION_SCRATCH_BRANCH):
+        return None
+
+    create_pr = _run(
+        [
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            sandbox_repo,
+            "--head",
+            _PROMOTION_SCRATCH_BRANCH,
+            "--base",
+            "main",
+            "--title",
+            "Promote staging to main",
+            "--body",
+            "Automated RC promotion (ADR-0042).",
+        ]
+    )
+    if not _require_success(create_pr, label="gh pr create (create_promotion_pr)"):
+        return None
+    assert create_pr is not None
+    pr_number = _parse_trailing_int(create_pr.stdout)
+    if pr_number is None:
+        logger.warning(
+            "contract_recording: could not parse PR number from %r", create_pr.stdout
+        )
+        return None
+
+    payload = _build_cassette_payload(
+        adapter="github",
+        interaction="create_promotion_pr",
+        fixture_repo=sandbox_repo,
+        command="create_promotion_pr",
+        args=[_FAKE_PROMOTION_RC_BRANCH],
+        exit_code=create_pr.returncode,
+        stdout=_FAKE_CREATE_PROMOTION_PR_STDOUT,
+        stderr="",
+        normalizers=["pr_number"],
+    )
+    payload["baseline_only"] = False
+    path = tmp_dir / "create_promotion_pr.yaml"
+    _write_yaml_cassette(path, payload)
+
+    close = _run(
+        [
+            "gh",
+            "pr",
+            "close",
+            str(pr_number),
+            "--repo",
+            sandbox_repo,
+            "--delete-branch",
+        ]
+    )
+    if not _require_success(close, label="gh pr close (create_promotion_pr cleanup)"):
+        logger.warning(
+            "contract_recording: cleanup close of promotion PR #%s failed — "
+            "cassette was written successfully but the sandbox PR/branch "
+            "remains open",
+            pr_number,
+        )
+
     return path
 
 
@@ -451,7 +830,8 @@ def record_github_mutation(sandbox_repo: str, tmp_cassette_dir: Path) -> list[Pa
       ``_run()``, skip-if-no-binary, refuse-to-overwrite-with-degenerate-output
       via ``_write_yaml_cassette()``.
 
-    Command allow-list: close_issue, create_issue, merge_pr.
+    Command allow-list: close_issue, create_issue, merge_pr, create_pr
+    (pr_create.yaml), create_promotion_pr.
     """
     tmp_cassette_dir = Path(tmp_cassette_dir)
     tmp_cassette_dir.mkdir(parents=True, exist_ok=True)
@@ -469,6 +849,14 @@ def record_github_mutation(sandbox_repo: str, tmp_cassette_dir: Path) -> list[Pa
     if merge_path:
         paths.append(merge_path)
 
+    pr_create_path = _record_create_pr(sandbox_repo, tmp_cassette_dir)
+    if pr_create_path:
+        paths.append(pr_create_path)
+
+    create_promotion_path = _record_create_promotion_pr(sandbox_repo, tmp_cassette_dir)
+    if create_promotion_path:
+        paths.append(create_promotion_path)
+
     return paths
 
 
@@ -476,9 +864,10 @@ def record_github(sandbox_repo: str, tmp_cassette_dir: Path) -> list[Path]:
     """Record cassettes for the GitHub adapter against the sandbox repo.
 
     Delegates to :func:`record_github_mutation` which provisions fresh sandbox
-    resources (issues, scratch PR) and records the mutating operations
-    (close_issue, create_issue, merge_pr) following the record_git/record_docker
-    safety contract — real CLI exit codes, fake-shaped output.
+    resources (issues, scratch PRs) and records the mutating operations
+    (close_issue, create_issue, merge_pr, create_pr, create_promotion_pr)
+    following the record_git/record_docker safety contract — real CLI exit
+    codes, fake-shaped output.
     """
     return record_github_mutation(
         sandbox_repo=sandbox_repo,
@@ -489,10 +878,15 @@ def record_github(sandbox_repo: str, tmp_cassette_dir: Path) -> list[Path]:
 def record_git(sandbox_dir: Path, tmp_cassette_dir: Path) -> list[Path]:
     """Record cassettes for the git adapter against a fixture sandbox.
 
-    ``sandbox_dir`` is expected to contain at least one file (Task 0 seeds
-    ``tests/trust/contracts/fixtures/git_sandbox`` with a ``hello.txt``).
-    The recorder runs ``git init`` / ``git add -A`` / ``git commit`` in
-    that directory and captures the commit output.
+    ``sandbox_dir`` is expected to contain at least one file. The committed
+    ``tests/trust/contracts/fixtures/git_sandbox`` fixture is seeded with three
+    tracked files (``.gitkeep``, ``README.md``, ``file.txt``), so ``git commit``
+    produces the full root-commit summary — the ``(root-commit)`` header, a
+    ``N files changed, M insertions(+)`` shortstat, and one ``create mode`` line
+    per file. The recorder runs ``git init`` / ``git add -A`` / ``git commit``
+    in that directory and captures the commit output verbatim; the replay-side
+    fake (``_invoke_fake_git``) reproduces the same summary from a live scan of
+    the fixture, so both stay in lockstep as the fixture changes.
 
     Returns ``[]`` if the sandbox does not exist, ``git`` is missing, or
     any step exits non-zero.
@@ -611,13 +1005,85 @@ def record_docker(tmp_cassette_dir: Path) -> list[Path]:
     return [path]
 
 
+CLAUDE_STREAM_FILENAME = "stream_001_ping.jsonl"
+
+# Placeholder substituted for live assistant/result text (see
+# ``_redact_claude_text``). Deliberately unambiguous so anyone reading a
+# committed cassette can tell at a glance that the wording was redacted,
+# not really said by the model.
+_CLAUDE_TEXT_PLACEHOLDER = "<redacted: non-deterministic assistant text>"
+
+
+def _redact_claude_text(raw_stdout: str) -> str:
+    """Replace free-form assistant/result text with a stable placeholder.
+
+    ``claude -p`` text is live LLM output — it varies on every call even
+    for the identical "ping" prompt (issue #10220: the claude adapter's
+    ContractRefreshLoop attempt counter never reset because a fresh
+    recording essentially never matched the previously committed one, so
+    the adapter could never reach a clean tick and kept re-escalating).
+    The StreamParser contract only requires a non-empty display/result —
+    see ``tests/trust/contracts/test_fake_llm_contract.py`` — not any
+    particular wording, so pinning the wording to a fixed placeholder
+    keeps the recording deterministic without weakening the structural
+    (event-shape) contract. Only the ``assistant`` message's ``text``
+    content blocks and the terminal ``result`` event's ``result`` string
+    are touched; empty strings are left empty so "no text produced" is
+    still distinguishable from "text produced".
+    """
+    out_lines: list[str] = []
+    for raw_line in raw_stdout.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            out_lines.append(raw_line)
+            continue
+        try:
+            event = json.loads(stripped)
+        except json.JSONDecodeError:
+            out_lines.append(raw_line)
+            continue
+        if not isinstance(event, dict):
+            out_lines.append(raw_line)
+            continue
+        _redact_event_text(event)
+        out_lines.append(json.dumps(event))
+    trailing_newline = "\n" if raw_stdout.endswith("\n") else ""
+    return "\n".join(out_lines) + trailing_newline
+
+
+def _redact_event_text(event: dict[str, Any]) -> None:
+    """Mutate *event* in place, redacting its free-form text fields."""
+    if event.get("type") == "assistant":
+        message = event.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list):
+            for block in content:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "text"
+                    and block.get("text")
+                ):
+                    block["text"] = _CLAUDE_TEXT_PLACEHOLDER
+    elif event.get("type") == "result":
+        if isinstance(event.get("result"), str) and event["result"]:
+            event["result"] = _CLAUDE_TEXT_PLACEHOLDER
+
+
 def record_claude_stream(tmp_stream_dir: Path) -> list[Path]:
     """Record a minimal ``claude`` stream JSONL.
 
     Runs ``claude -p "ping" --output-format stream-json --verbose`` and
-    writes the raw stdout to ``<tmp_stream_dir>/stream_001_ping.jsonl``.
-    The Claude adapter cassette is *not* YAML — it is a raw JSONL file
-    because the fake replays lines verbatim.
+    writes the redacted stdout (see ``_redact_claude_text``) to
+    ``<tmp_stream_dir>/stream_001_ping.jsonl``. The Claude adapter
+    cassette is *not* YAML — it is a raw JSONL file because the fake
+    replays lines verbatim.
+
+    ``claude_isolation_flags()`` restricts the spawn to project-scope
+    settings so a host/user-level plugin's ``SessionStart`` hook (e.g.
+    superpowers) can't inject its skill-invocation guidance into the
+    recording — that guidance is large, changes whenever the plugin's
+    skill content changes, and has nothing to do with the stream-json
+    protocol shape this cassette exists to guard (issue #10220).
 
     Returns ``[]`` if ``claude`` is missing, exits non-zero, or produces
     empty stdout (a zero-byte stream is useless as a fixture and would
@@ -633,6 +1099,7 @@ def record_claude_stream(tmp_stream_dir: Path) -> list[Path]:
         "--output-format",
         "stream-json",
         "--verbose",
+        *claude_isolation_flags(),
     ]
     proc = _run(argv)
     if not _require_success(proc, label="claude -p ping"):
@@ -645,7 +1112,7 @@ def record_claude_stream(tmp_stream_dir: Path) -> list[Path]:
         )
         return []
 
-    path = tmp_stream_dir / "stream_001_ping.jsonl"
+    path = tmp_stream_dir / CLAUDE_STREAM_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(proc.stdout, encoding="utf-8")
+    path.write_text(_redact_claude_text(proc.stdout), encoding="utf-8")
     return [path]

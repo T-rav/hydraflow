@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import subprocess
 import sys
 from operator import attrgetter
 from pathlib import Path
@@ -28,6 +30,7 @@ def _make_callbacks() -> WorkerRegistryCallbacks:
         update_status=lambda *args, **kwargs: None,
         is_enabled=lambda name: True,
         get_interval=lambda name: 60,
+        get_watchdog_timeout=lambda name: 7200,
     )
 
 
@@ -61,6 +64,27 @@ class TestBuildServices:
             if field_name in optional_fields:
                 continue
             assert getattr(registry, field_name) is not None, f"{field_name} is None"
+
+    def test_pipeline_label_listener_is_wired_to_the_store(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """#9842: label swaps must reach the in-memory pipeline immediately.
+
+        The wiring is hasattr-gated (sandbox fakes read labels live and skip
+        it), so a rename on either side would silently sever the event-driven
+        card path and quietly reintroduce the 5-minute poll lag — pin it.
+        """
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        stop_event = asyncio.Event()
+        callbacks = _make_callbacks()
+
+        registry = build_services(config, bus, state, stop_event, callbacks)
+
+        listener = registry.prs._pipeline_label_listener
+        assert listener is not None, "pipeline label listener not wired"
+        assert listener.__func__ is type(registry.store).apply_label_transition
+        assert listener.__self__ is registry.store
 
     def test_agents_runner_is_shared(self, config: HydraFlowConfig) -> None:
         """Agents, planners, reviewers, and HITL runner should share the subprocess runner."""
@@ -271,10 +295,15 @@ class TestServiceRegistryWiring:
 
 
 class TestWorkerRegistryCallbacks:
-    def test_has_three_fields_only(self) -> None:
-        """WorkerRegistryCallbacks should expose exactly 3 focused callbacks."""
+    def test_has_four_fields_only(self) -> None:
+        """WorkerRegistryCallbacks should expose exactly 4 focused callbacks."""
         fields = set(WorkerRegistryCallbacks.__dataclass_fields__)
-        assert fields == {"update_status", "is_enabled", "get_interval"}
+        assert fields == {
+            "update_status",
+            "is_enabled",
+            "get_interval",
+            "get_watchdog_timeout",
+        }
 
     def test_is_frozen(self) -> None:
         """WorkerRegistryCallbacks should be immutable."""
@@ -284,6 +313,7 @@ class TestWorkerRegistryCallbacks:
             update_status=lambda *a, **kw: None,
             is_enabled=lambda _: True,
             get_interval=lambda _: 60,
+            get_watchdog_timeout=lambda _: 7200,
         )
         with pytest.raises(AttributeError):
             cb.update_status = lambda *a, **kw: None  # type: ignore[misc]
@@ -323,13 +353,61 @@ class TestWorkerRegistryCallbacks:
         assert isinstance(registry, ServiceRegistry)
 
 
+class TestHumanSteeringLoopActiveIssuesCb:
+    """The steering sensor must widen to the full-pipeline active set.
+
+    ``human_steering_loop.active_issues_cb`` used to read
+    ``state.get_active_issue_numbers`` — the narrower implement/review/HITL
+    set the orchestrator maintains via ``_sync_active_issue_numbers``. A
+    ``/pause`` posted while an issue sits in triage/discover/shape/plan was
+    never sensed. The cb must instead mirror the actuator's own
+    enumeration: ``store.get_active_issues()`` (every active phase).
+    """
+
+    def test_cb_returns_stores_full_active_issue_numbers(
+        self, config: HydraFlowConfig
+    ) -> None:
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        stop_event = asyncio.Event()
+        callbacks = _make_callbacks()
+
+        registry = build_services(config, bus, state, stop_event, callbacks)
+
+        # Simulate issues active in phases the old, narrower cb could not
+        # see (shape) alongside one it could (review).
+        registry.store.mark_active(7, "shape")
+        registry.store.mark_active(9, "review")
+
+        assert sorted(registry.human_steering_loop._active_issues_cb()) == [7, 9]
+
+    def test_cb_reflects_store_not_state_active_issue_numbers(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Regression guard: the cb must read the store, not the narrower
+        state-tracker set — even when the two disagree."""
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        stop_event = asyncio.Event()
+        callbacks = _make_callbacks()
+
+        registry = build_services(config, bus, state, stop_event, callbacks)
+
+        # state's narrower set has nothing; the store has a shape-phase issue
+        # the old wiring would have missed entirely.
+        state.set_active_issue_numbers([])
+        registry.store.mark_active(7, "shape")
+
+        assert registry.human_steering_loop._active_issues_cb() == [7]
+
+
 class TestAdversarialPipelineWiring:
     """Factory wiring for the earlier-adversarial pipeline (ADR-0064).
 
-    The pipeline is now unconditional: ``DiscoverPhase`` always gets a
-    ``ComplexityGate`` attached AND all three phases (plan, discover,
-    shape) always get ``SubprocessAgentRunner`` adapters wired into
-    every adversarial-stage slot. No config flag, no opt-out.
+    ADR-0107 retired the standalone Discover/Shape phases, so the adversarial
+    council/surfacer wiring now lives only on the plan phase. The discover/shape
+    engines are the ``DiscoverRunner`` / ``ShapeRunner`` the planner invokes on
+    demand; the factory constructs them and binds their escalation deps.
     """
 
     @staticmethod
@@ -340,17 +418,26 @@ class TestAdversarialPipelineWiring:
         callbacks = _make_callbacks()
         return build_services(config, bus, state, stop_event, callbacks)
 
-    def test_complexity_gate_attached(self, config: HydraFlowConfig) -> None:
-        """DiscoverPhase gets a heuristic-only ComplexityGate."""
-        from complexity_gate import ComplexityGate
+    def test_discover_shape_runners_wired_with_escalation_deps(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ADR-0107: the factory builds the discover/shape engines, binds their
+        escalation deps, and hands them to the planner as on-demand helpers."""
+        from discover_runner import DiscoverRunner
+        from shape_runner import ShapeRunner
 
         registry = self._build(config)
-        gate = registry.discover_phase._complexity_gate
-        assert gate is not None
-        assert isinstance(gate, ComplexityGate)
-        # Heuristic-only — no LLM callable. The gate falls back to
-        # LOAD_BEARING on uncertainty so this is safe.
-        assert gate.llm is None
+
+        assert isinstance(registry.discover_runner, DiscoverRunner)
+        assert isinstance(registry.shape_runner, ShapeRunner)
+        # bind_escalation_deps ran at wire-up: prs + dedup are set.
+        assert registry.discover_runner._prs is not None
+        assert registry.discover_runner._dedup is not None
+        assert registry.shape_runner._prs is not None
+        assert registry.shape_runner._dedup is not None
+        # The planner borrows the SAME engine instances for its decision gate.
+        assert registry.planner_phase._discover_runner is registry.discover_runner
+        assert registry.planner_phase._shape_runner is registry.shape_runner
 
     def test_plan_phase_adversarial_agents_attached(
         self, config: HydraFlowConfig
@@ -373,40 +460,174 @@ class TestAdversarialPipelineWiring:
         assert isinstance(plan_phase._spec_ac_agent, SubprocessAgentRunner)
         assert isinstance(plan_phase._spec_judge_agent, SubprocessAgentRunner)
 
-    def test_discover_phase_adversarial_agents_attached(
+
+class TestAutoTightenGhClosures:
+    """Unit tests for the two gh-shelling closures the AutoTighten factory
+    wiring builds: ``make_gh_coverage_fetch`` and ``make_gh_merged_pr_lister``.
+
+    Both take an injectable ``runner`` (mirrors ``auto_pr._run_gh``'s shape)
+    so these tests never shell out to the real ``gh`` CLI.
+    """
+
+    def test_coverage_fetch_picks_latest_successful_run_and_downloads_it(
+        self, config: HydraFlowConfig, tmp_path: Path
+    ) -> None:
+        from service_registry import make_gh_coverage_fetch
+
+        runs_json = (
+            '[{"databaseId": 42, "headSha": "deadbeef", "status": "completed", '
+            '"conclusion": "success"}, '
+            '{"databaseId": 41, "headSha": "old", "status": "completed", '
+            '"conclusion": "failure"}]'
+        )
+        calls = []
+
+        def fake_runner(cmd, *, cwd):
+            calls.append(cmd)
+            if cmd[:3] == ["gh", "run", "list"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout=runs_json, stderr="")
+            if cmd[:3] == ["gh", "run", "download"]:
+                # Simulate `gh run download` writing coverage.json into --dir.
+                download_dir = Path(cmd[cmd.index("--dir") + 1])
+                (download_dir / "coverage.json").write_text(
+                    '{"totals": {"percent_covered": 91.5}}'
+                )
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            raise AssertionError(f"unexpected gh command: {cmd}")
+
+        fetch = make_gh_coverage_fetch(config, runner=fake_runner)
+        result = fetch()
+
+        assert result is not None
+        run_id, head_sha, cov_text = result
+        assert run_id == "42"
+        assert head_sha == "deadbeef"
+        assert json.loads(cov_text)["totals"]["percent_covered"] == 91.5
+        # The download must target the latest *successful* run, not run 41.
+        download_cmd = next(c for c in calls if c[:3] == ["gh", "run", "download"])
+        assert "42" in download_cmd
+
+    def test_coverage_fetch_returns_none_when_no_successful_runs(
         self, config: HydraFlowConfig
     ) -> None:
-        """DiscoverPhase surfacer + three-voter council both wired."""
-        from adversarial_agent_runner import SubprocessAgentRunner
+        from service_registry import make_gh_coverage_fetch
 
-        registry = self._build(config)
-        discover_phase = registry.discover_phase
+        def fake_runner(cmd, *, cwd):
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout=(
+                    '[{"databaseId": 1, "headSha": "x", '
+                    '"status": "completed", "conclusion": "failure"}]'
+                ),
+                stderr="",
+            )
 
-        assert isinstance(discover_phase._surfacer_agent, SubprocessAgentRunner)
-        assert discover_phase._council_agents is not None
-        assert set(discover_phase._council_agents.keys()) == {
-            "problem_sharpener",
-            "existing_solution_hunter",
-            "cheapest_test_advocate",
-        }
-        for voter in discover_phase._council_agents.values():
-            assert isinstance(voter, SubprocessAgentRunner)
+        fetch = make_gh_coverage_fetch(config, runner=fake_runner)
+        assert fetch() is None
 
-    def test_shape_phase_adversarial_agents_attached(
+    def test_coverage_fetch_returns_none_on_nonzero_exit(
         self, config: HydraFlowConfig
     ) -> None:
-        """ShapePhase challenger + three-voter council both wired."""
-        from adversarial_agent_runner import SubprocessAgentRunner
+        from service_registry import make_gh_coverage_fetch
 
-        registry = self._build(config)
-        shape_phase = registry.shape_phase
+        def fake_runner(cmd, *, cwd):
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
 
-        assert isinstance(shape_phase._challenger_agent, SubprocessAgentRunner)
-        assert shape_phase._shape_council_agents is not None
-        assert set(shape_phase._shape_council_agents.keys()) == {
-            "user_advocate",
-            "tech_lead",
-            "product_strategist",
-        }
-        for voter in shape_phase._shape_council_agents.values():
-            assert isinstance(voter, SubprocessAgentRunner)
+        fetch = make_gh_coverage_fetch(config, runner=fake_runner)
+        assert fetch() is None
+
+    def test_merged_pr_lister_maps_file_objects_to_path_strings(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """The load-bearing mapping: gh returns files as [{"path": ...}],
+        AttributionResolver expects a flat list[str] of paths."""
+        from service_registry import make_gh_merged_pr_lister
+
+        prs_json = (
+            '[{"number": 7, "files": [{"path": "src/foo.py"}, '
+            '{"path": "tests/test_foo.py"}], "mergedAt": "2026-07-01T00:00:00Z"}]'
+        )
+
+        def fake_runner(cmd, *, cwd):
+            return subprocess.CompletedProcess(cmd, 0, stdout=prs_json, stderr="")
+
+        lister = make_gh_merged_pr_lister(config, runner=fake_runner)
+        result = lister("2026-06-01T00:00:00Z")
+
+        assert result == [
+            {
+                "number": 7,
+                "files": ["src/foo.py", "tests/test_foo.py"],
+                "merged_at": "2026-07-01T00:00:00Z",
+            }
+        ]
+
+    def test_merged_pr_lister_passes_since_into_search_query(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from service_registry import make_gh_merged_pr_lister
+
+        captured = {}
+
+        def fake_runner(cmd, *, cwd):
+            captured["cmd"] = cmd
+            return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
+
+        lister = make_gh_merged_pr_lister(config, runner=fake_runner)
+        lister("2026-06-15T00:00:00Z")
+
+        search_arg = captured["cmd"][captured["cmd"].index("--search") + 1]
+        assert "2026-06-15T00:00:00Z" in search_arg
+
+    def test_merged_pr_lister_returns_empty_on_nonzero_exit(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from service_registry import make_gh_merged_pr_lister
+
+        def fake_runner(cmd, *, cwd):
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
+
+        lister = make_gh_merged_pr_lister(config, runner=fake_runner)
+        assert lister("2026-06-01T00:00:00Z") == []
+
+    def test_open_pr_exists_true_and_probes_the_head_branch(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from service_registry import make_gh_open_pr_exists
+
+        captured = {}
+
+        def fake_runner(cmd, *, cwd):
+            captured["cmd"] = cmd
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout='[{"number": 42}]', stderr=""
+            )
+
+        probe = make_gh_open_pr_exists(config, runner=fake_runner)
+        assert probe("auto-tighten/coverage-77.0") is True
+        assert "--head" in captured["cmd"]
+        assert "auto-tighten/coverage-77.0" in captured["cmd"]
+
+    def test_open_pr_exists_false_when_none_listed(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from service_registry import make_gh_open_pr_exists
+
+        def fake_runner(cmd, *, cwd):
+            return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
+
+        probe = make_gh_open_pr_exists(config, runner=fake_runner)
+        assert probe("auto-tighten/coverage-77.0") is False
+
+    def test_open_pr_exists_fails_open_on_nonzero_exit(
+        self, config: HydraFlowConfig
+    ) -> None:
+        # A gh error must not block a legitimate tightening: fail open (False).
+        from service_registry import make_gh_open_pr_exists
+
+        def fake_runner(cmd, *, cwd):
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
+
+        probe = make_gh_open_pr_exists(config, runner=fake_runner)
+        assert probe("auto-tighten/coverage-77.0") is False

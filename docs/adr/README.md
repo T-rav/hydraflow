@@ -4,30 +4,36 @@ Lightweight ADRs documenting key design decisions in HydraFlow.
 
 ## Format
 
-Each ADR has: **Status**, **Date**, **Enforced by**, **Context**, **Decision**,
-**Consequences**, and optionally **Alternatives considered** and **Related** links.
+Each ADR has: **Status**, **Date**, **Enforcement**, **Enforced by** (when
+required), **Context**, **Decision**, **Consequences**, and optionally
+**Alternatives considered** and **Related** links.
 
 When referencing source code anywhere in an ADR (Related, Context, Decision,
 Consequences), use `module:function_or_class` format (e.g. `src/config.py:HydraFlowConfig`).
 **Omit line numbers** — they drift as code evolves and become stale quickly.
 
-### Enforced by
+### Enforcement
 
-Every ADR with **Status: Accepted** MUST declare how it's enforced. Value is one of:
+Every ADR with **Status: Accepted** (outside a shrinking grandfather list)
+MUST declare an `**Enforcement:**` kind — see [ADR-0100](0100-adr-conformance-as-a-measured-contract.md).
+Value is one of:
 
-- **Test references** — comma-separated paths to test files/functions that would fail
-  if the decision were violated (e.g. `tests/test_worktree.py`,
-  `tests/test_state_machine.py::test_labels_transition`). Files named here must exist.
-- `(process)` — the ADR enforces a workflow/convention (e.g. branch protection,
-  ADR authoring style) rather than code behaviour.
-- `(historical)` — the ADR codifies a past decision worth keeping but no longer
-  directly testable.
-- `(none)` — placeholder for Accepted ADRs still awaiting an enforcement test.
-  Flagged by `tests/test_adr_enforcement.py` for follow-up; should be replaced
-  with real references over time.
+- `enforced` — asserts a runnable invariant. Requires an `**Enforced by:**`
+  line naming typed-prefix checks (`pytest:tests/test_x.py`,
+  `make:some-target`) that must resolve (the file/function/target must exist)
+  and be side-effect-free.
+- `manual` — a real guardrail that is human-verified rather than
+  machine-run. Requires an `**Enforced by:**` process pointer.
+- `decision-of-record` — a choice with no runtime predicate to check (no
+  `**Enforced by:**` required).
 
-`tests/test_adr_enforcement.py` validates this line exists on every Accepted
-ADR and that named test files actually exist.
+`tests/test_adr_conformance_coverage.py` is the CI-blocking coverage ratchet:
+it validates every non-grandfathered Accepted ADR declares a recognized
+`**Enforcement:**` value, that `enforced` checks resolve to a real
+pytest node or Makefile target and aren't on the mutating-target denylist,
+and that the grandfather list only shrinks. `AdrConformanceLoop` is the
+post-merge companion that actually executes `enforced` checks on a slow
+cadence and files remediation issues on drift.
 
 ## Index
 
@@ -47,7 +53,7 @@ ADR and that named test files actually exist.
 | [0012](0012-epic-merge-coordination-architecture.md) | Epic Merge Coordination Architecture | Accepted |
 | [0013](0013-screenshot-capture-pipeline.md) | Screenshot Capture Pipeline Architecture | Superseded |
 | [0014](0014-session-counter-forward-progression-semantics.md) | Session Counter Forward-Progression Semantics | Accepted |
-| [0015](0015-protocol-callback-gate-pattern.md) | Protocol-Based Callback Injection Gate Pattern | Proposed |
+| [0015](0015-protocol-callback-gate-pattern.md) | Protocol-Based Callback Injection Gate Pattern | Accepted |
 | [0016](0016-visual-validation-skipped-override-semantics.md) | VisualValidation SKIPPED Override Semantics | Accepted |
 | [0017](0017-auto-decompose-triage-counter-exclusion.md) | Auto-Decompose Triage Counter Exclusion | Accepted |
 | [0018](0018-screenshot-capture-pipeline.md) | Screenshot Capture Pipeline Architecture | Accepted |
@@ -55,19 +61,19 @@ ADR and that named test files actually exist.
 | [0020](0020-autoApproveRow-border-context-awareness.md) | autoApproveRow Border Context Awareness | Superseded |
 | [0021](0021-persistence-architecture-and-data-layout.md) | Persistence Architecture and Data Layout | Accepted |
 | [0022](0022-integration-test-architecture-cross-phase.md) | Integration Test Architecture — Cross-Phase Pipeline Harness | Accepted |
-| [0023](0023-dead-class-artifacts-in-mock-based-tests.md) | Require Instantiation Verification for Test-Local Classes | Proposed |
+| [0023](0023-dead-class-artifacts-in-mock-based-tests.md) | Require Instantiation Verification for Test-Local Classes | Accepted |
 | [0024](0024-implementation-retry-recovery-architecture.md) | Implementation Retry Recovery Architecture | Accepted |
 | [0025](0025-symmetric-field-assertion-checklist-shared-return-types.md) | Symmetric Field Assertion Checklist for Shared Return Types | Accepted |
-| [0027](0027-duplicate-class-merge-artifact-pattern.md) | Duplicate Class Definitions — Merge-Artifact Pattern | Proposed |
+| [0027](0027-duplicate-class-merge-artifact-pattern.md) | Duplicate Class Definitions — Merge-Artifact Pattern | Accepted |
 | [0028](0028-event-driven-report-pipeline.md) | Event-Driven Report Pipeline with Extractable Widget | Accepted |
 | [0029](0029-caretaker-loop-pattern.md) | Caretaker Background Loop Pattern | Accepted |
 | [0030](0030-routes-domain-decomposition.md) | Dashboard Routes Domain Decomposition | Accepted |
-| [0031](0031-product-track-architecture.md) | Product Track Architecture — Discover and Shape Phases | Proposed |
+| [0031](0031-product-track-architecture.md) | Product Track Architecture — Discover and Shape Phases | Superseded |
 | [0032](0032-per-repo-wiki-knowledge-base.md) | Per-Repo Wiki Knowledge Base (Karpathy Pattern) | Accepted |
 | [0033](0033-gate-triage-call-not-hitl-fallback.md) | Gate Triage Call on Config Toggle, Not Just HITL Fallback | Superseded |
 | [0034](0034-auto-triage-toggle-must-gate-routing.md) | Auto-Triage Toggle Must Gate Routing, Not Just Stat Tracking | Accepted |
-| [0035](0035-tests-must-match-toggle-state-they-assert.md) | Tests Must Match Toggle State They Assert | Proposed |
-| [0036](0036-cli-argparse-config-builder-pattern.md) | CLI Architecture — argparse with Config Builder Pattern | Proposed |
+| [0035](0035-tests-must-match-toggle-state-they-assert.md) | Tests Must Match Toggle State They Assert | Accepted |
+| [0036](0036-cli-argparse-config-builder-pattern.md) | CLI Architecture — argparse with Config Builder Pattern | Superseded |
 | [0037](0037-supersession-regex-all-verb-forms.md) | Supersession Regex Must Include All Verb Forms | Accepted |
 | [0038](0038-multi-repo-architecture-wiring-pattern.md) | Multi-Repo Architecture Wiring Pattern | Proposed |
 | [0039](0039-stats-counter-placement-in-delegating-helpers.md) | Stats Counter Placement in Delegating Helpers | Rejected |
@@ -78,7 +84,7 @@ ADR and that named test files actually exist.
 | [0044](0044-hydraflow-principles.md) | HydraFlow Principles — the audit contract for new and existing repos | Proposed |
 | [0045](0045-trust-architecture-hardening.md) | Trust Architecture Hardening — Lights-Off Trust Fleet (10 loops + 2 non-loop subsystems) | Accepted |
 | [0046](0046-meta-observability-bounded-recursion.md) | Meta-observability with bounded recursion — one layer of meta, no more | Proposed |
-| [0047](0047-fake-adapter-contract-testing-cassettes.md) | Fake-adapter contract testing via cassette record/replay | Proposed |
+| [0047](0047-fake-adapter-contract-testing-cassettes.md) | Fake-adapter contract testing via cassette record/replay | Accepted |
 | [0048](0048-auto-revert-on-rc-red.md) | Auto-revert on RC red (extends ADR-0042) | Proposed |
 | [0049](0049-trust-loop-kill-switch-convention.md) | Trust-loop kill-switch convention (`enabled_cb` only, no config-only) | Accepted |
 | [0050](0050-auto-agent-hitl-preflight.md) | Auto-Agent HITL Pre-Flight Loop | Accepted |
@@ -91,18 +97,18 @@ ADR and that named test files actually exist.
 | [0057](0057-term-pruner-loop.md) | Term-Pruner Loop (Dark-Factory Glossary Hygiene) | Accepted |
 | [0058](0058-edge-proposer-loop.md) | Edge-Proposer Loop (Dark-Factory Graph Densification) | Accepted |
 | [0059](0059-advisor-pattern-self-repairing-review.md) | Advisor Pattern — Self-Repairing Review | Proposed |
-| [0060](0060-atlas-graph-view-and-provenance.md) | Atlas Graph View and Provenance | Proposed |
-| [0061](0061-atlas-entries-as-evidence.md) | Atlas Entries as Evidence | Proposed |
+| [0060](0060-atlas-graph-view-and-provenance.md) | Atlas Graph View and Provenance | Accepted |
+| [0061](0061-atlas-entries-as-evidence.md) | Atlas Entries as Evidence | Accepted |
 | [0062](0062-entry-evidence-loop.md) | Entry-Evidence Loop | Accepted |
 | [0063](0063-factory-phase-drift-mitigation.md) | Factory-Phase Drift Mitigation | Proposed |
-| [0064](0064-earlier-adversarial-pipeline.md) | Earlier Adversarial Pipeline | Proposed |
+| [0064](0064-earlier-adversarial-pipeline.md) | Earlier Adversarial Pipeline | Accepted |
 | [0065](0065-remove-code-grooming-loop.md) | Remove CodeGroomingLoop | Accepted |
 | [0066](0066-agent-port.md) | AgentPort: Dependency-Injection Boundary for Agent Runner | Proposed |
 | [0067](0067-issue-fetcher-port.md) | IssueFetcherPort: GitHub Issue Fetching Boundary | Proposed |
 | [0068](0068-bot-pr-port.md) | BotPRPort: Minimal Interface for Caretaker Bot-PRs | Proposed |
 | [0069](0069-workspace-gc-loop.md) | WorkspaceGCLoop: Autonomous Worktree Garbage Collection | Proposed |
 | [0070](0070-review-insight-store-port.md) | ReviewInsightStorePort: Persistence Boundary for Review Feedback Patterns | Proposed |
-| [0071](0071-route-back-counter-port.md) | RouteBackCounterPort: Testable Counter for Precondition Route-Backs | Proposed |
+| [0071](0071-route-back-counter-port.md) | RouteBackCounterPort: Testable Counter for Precondition Route-Backs | Accepted |
 | [0072](0072-stale-issue-loop.md) | StaleIssueLoop: Auto-Close Stale General Issues | Proposed |
 | [0073](0073-runs-gc-loop.md) | RunsGCLoop: Artifact Retention Enforcement | Proposed |
 | [0074](0074-retrospective-loop.md) | RetrospectiveLoop: Durable-Queue Pattern Analysis | Proposed |
@@ -124,8 +130,50 @@ ADR and that named test files actually exist.
 | [0090](0090-atlas-knowledge-graph-dashboard.md) | Atlas — Knowledge Graph Dashboard Surface | Accepted |
 | [0091](0091-epic-monitor-completion-sweep.md) | Fold Epic Completion Sweep into Epic Monitor | Accepted |
 | [0092](0092-untrusted-text-trust-boundary.md) | Untrusted-text trust boundary for agent prompts | Accepted |
+| [0093](0093-loop-fitness-as-measured-contract.md) | Loop fitness as a measured contract | Accepted |
+| [0094](0094-two-level-convergence-gate-and-ledger.md) | Two-level convergence: Gate + ConvergenceLedger | Accepted |
+| [0095](0095-approve-path-gating-and-converged.md) | Approve-path gating and live convergence (Phase 2a) | Accepted |
+| [0096](0096-boundary-verdict-recording.md) | Boundary verdict recording (Phase 2b) | Accepted |
+| [0097](0097-attempt-counter-migration-to-ledger.md) | Attempt counter migration into the ledger (Phase 2c) | Accepted |
+| [0098](0098-convergence-oscillation-caretaker.md) | Convergence oscillation caretaker (Phase 2d) | Accepted |
+| [0099](0099-orchestration-as-a-control-system.md) | Orchestration as a Control System | Accepted |
+| [0100](0100-adr-conformance-as-a-measured-contract.md) | ADR conformance as a measured contract | Accepted |
+| [0101](0101-disturbance-dampener.md) | Disturbance Dampener — feedforward ratchet + burn-down loop | Proposed |
+| [0102](0102-convergence-gate-general-availability.md) | Convergence gate general availability (flag removed) | Accepted |
+| [0103](0103-continuous-human-steering-channel.md) | Continuous Human-on-the-Loop Steering Channel | Accepted |
+| [0104](0104-auto-tightening-ratchet.md) | Auto-tightening ratchet | Accepted |
+| [0105](0105-autonomous-convergence-via-decomposition.md) | Autonomous Convergence via Decomposition | Proposed |
+| [0106](0106-thread-level-event-loop-freeze-detector.md) | Thread-level event-loop freeze detector | Accepted |
+| [0107](0107-collapse-discover-shape-into-plan.md) | Collapse Discover + Shape into Plan — Triage → Plan Directly | Accepted |
 
 ## Adding a new ADR
 
-Copy the template, increment the number, fill in the sections.
+Increment the number and copy an existing ADR's metadata block (e.g.
+[ADR-0002](0002-labels-as-state-machine.md) for a single check, or
+[ADR-0049](0049-trust-loop-kill-switch-convention.md) / [ADR-0053](0053-ubiquitous-language-as-living-artifact.md)
+for multiple), then fill in the sections. There is no separate template file.
+
+Every **Accepted** ADR MUST declare an `**Enforcement:**` line — see the
+[Enforcement](#enforcement) section above for the three kinds and what each
+requires. The coverage ratchet blocks a new Accepted ADR that omits or
+mis-declares it. When you choose `enforced`, get the `**Enforced by:**`
+SHAPE right (this is the common footgun):
+
+- Each check is TYPED: it starts with `pytest:` (e.g.
+  `pytest:tests/test_foo.py` or `pytest:tests/test_foo.py::test_bar`) or
+  `make:` (a non-mutating target). A bare or backtick-wrapped path parses as
+  prose and fails the ratchet.
+- ONE check goes inline on the marker: `**Enforced by:** pytest:tests/test_foo.py`.
+- For MULTIPLE checks, put the marker on its own line and list one check per
+  plain continuation line:
+
+  ```
+  **Enforced by:**
+  pytest:tests/test_a.py
+  pytest:tests/test_b.py
+  ```
+
+- Never repeat the `**Enforced by:**` marker (only the first is parsed, so the
+  rest are silently dropped); never comma-join checks on one line.
+
 Mark superseded ADRs by setting `**Status:** Superseded` and adding a `Superseded by: ADR-XXXX` entry in the Related section rather than deleting them.

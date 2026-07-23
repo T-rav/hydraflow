@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, ClassVar
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from exception_classify import reraise_on_credit_or_bug
+from human_steering import fenced_steering_guidance
 from models import ProductDirection, ShapeConversation, ShapeResult, ShapeTurnResult
 from plugin_skill_registry import (
     discover_plugin_skills,
@@ -57,9 +58,11 @@ class ShapeRunner(BaseRunner):
     ) -> None:
         """Wire issue-filing + dedup deps used by evaluator escalation.
 
-        Called by :class:`ShapePhase` after construction. Without
-        binding, escalation logs a warning and returns — evaluator
-        dispatch and bounded retry still run.
+        Bound by the service factory (``service_registry.build_services``)
+        right after construction (ADR-0107 — this engine is invoked as a
+        planner helper, not a standalone phase). Without binding, escalation
+        logs a warning and returns — evaluator dispatch and bounded retry
+        still run.
         """
         self._prs = prs
         self._dedup = dedup
@@ -70,6 +73,8 @@ class ShapeRunner(BaseRunner):
         conversation: ShapeConversation,
         research_brief: str = "",
         learned_preferences: str = "",
+        *,
+        guidance: str = "",
     ) -> ShapeTurnResult:
         """Run a single conversation turn with post-finalize evaluation (§4.10).
 
@@ -78,6 +83,16 @@ class ShapeRunner(BaseRunner):
         proposal with options. When ``is_final`` is set, the runner
         evaluates the content; on RETRY it re-runs the SAME turn up to
         ``config.max_shape_attempts`` before escalating.
+
+        ``guidance`` (ADR-0099 #4, human-on-the-loop continuous steering)
+        is live operator guidance for this issue, sourced by
+        ``ShapePhase`` and threaded through to both of shape's
+        prompt-construction sites — the turn prompt
+        (:meth:`_build_turn_prompt`) and the ``shape-coherence``
+        evaluator prompt (:func:`build_shape_coherence_prompt`) — each
+        folding it in fenced via :func:`fenced_steering_guidance`.
+        Empty string when the feature is off or no guidance was posted —
+        behavior is unchanged in that case.
         """
         if self._config.dry_run:
             logger.info("[dry-run] Would run shape turn for issue #%d", task.id)
@@ -92,12 +107,17 @@ class ShapeRunner(BaseRunner):
         result = ShapeTurnResult()
         for attempt in range(1, max_attempts + 1):
             result = await self._run_turn_once(
-                task, conversation, research_brief, learned_preferences, attempt
+                task,
+                conversation,
+                research_brief,
+                learned_preferences,
+                attempt,
+                guidance=guidance,
             )
             if not result.is_final or not evaluator_enabled:
                 return result
             passed, summary, findings = await self._evaluate_proposal(
-                task, research_brief, result.content
+                task, research_brief, result.content, guidance=guidance
             )
             last_summary, last_findings = summary, findings
             if passed:
@@ -119,6 +139,8 @@ class ShapeRunner(BaseRunner):
         research_brief: str,
         learned_preferences: str,
         attempt: int,
+        *,
+        guidance: str = "",
     ) -> ShapeTurnResult:
         """Run a single conversation turn — one agent invocation.
 
@@ -139,7 +161,11 @@ class ShapeRunner(BaseRunner):
                 learned_preferences = memory_section
 
             prompt = self._build_turn_prompt(
-                task, conversation, research_brief, learned_preferences
+                task,
+                conversation,
+                research_brief,
+                learned_preferences,
+                guidance=guidance,
             )
 
             def _check_complete(accumulated: str) -> bool:
@@ -157,6 +183,7 @@ class ShapeRunner(BaseRunner):
                 self._config.repo_root,
                 {"issue": task.id, "source": f"shape:attempt-{attempt}"},
                 on_output=_check_complete,
+                issue_labels=task.tags,
             )
             result.transcript = transcript
 
@@ -205,12 +232,20 @@ class ShapeRunner(BaseRunner):
         return result
 
     async def _evaluate_proposal(
-        self, task: Task, discover_brief: str, proposal: str
+        self,
+        task: Task,
+        discover_brief: str,
+        proposal: str,
+        *,
+        guidance: str = "",
     ) -> tuple[bool, str, list[str]]:
         """Dispatch ``shape-coherence`` against *proposal*.
 
         A missing skill (registry disabled) fails open so this extension
-        never blocks shaping on its own absence.
+        never blocks shaping on its own absence. ``guidance`` (ADR-0099
+        #4) is live operator steering, forwarded to the skill's
+        ``prompt_builder`` (:func:`build_shape_coherence_prompt`), which
+        folds it in fenced via :func:`fenced_steering_guidance`.
         """
         skill = next((s for s in BUILTIN_SKILLS if s.name == _SKILL_NAME), None)
         if skill is None:
@@ -220,6 +255,7 @@ class ShapeRunner(BaseRunner):
             issue_title=task.title,
             discover_brief=discover_brief or "",
             proposal=proposal or "",
+            guidance=guidance,
         )
         try:
             transcript = await self._execute(
@@ -227,6 +263,11 @@ class ShapeRunner(BaseRunner):
                 prompt,
                 self._config.repo_root,
                 {"issue": task.id, "source": "shape:evaluator"},
+                issue_labels=task.tags,
+                # #9998: telemetry keys on the skill name so prompt-efficiency
+                # ordering matches the corpus's expected_catcher names; the
+                # event source stays "shape:evaluator" for scenario scripts.
+                telemetry_source=skill.name,
             )
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
@@ -308,8 +349,16 @@ class ShapeRunner(BaseRunner):
         conversation: ShapeConversation,
         research_brief: str = "",
         learned_preferences: str = "",
+        *,
+        guidance: str = "",
     ) -> str:
-        """Build the conversation-aware prompt for this turn."""
+        """Build the conversation-aware prompt for this turn.
+
+        ``guidance`` (ADR-0099 #4) is live operator steering for this
+        issue; folded in fenced via :func:`fenced_steering_guidance`,
+        which returns ``""`` when there is no guidance so behavior is
+        unchanged when the feature is off.
+        """
         turn_count = len(conversation.turns)
 
         # Format conversation history
@@ -460,6 +509,7 @@ a final specification for the engineering team:
         if plugin_skills_section:
             prompt = f"{prompt}\n\n{plugin_skills_section}"
 
+        prompt += fenced_steering_guidance(guidance)
         return prompt
 
     @staticmethod

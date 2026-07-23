@@ -9,12 +9,17 @@ The fake Process exposes: stdout/stderr (StreamReader), stdin
 terminate(). pid is None so ``terminate_processes`` in ``runner_utils`` skips
 ``killpg`` (no real process group exists for a fake process).
 
-``run_simple`` dispatches real ``git`` commands to the host (via
-``asyncio.create_subprocess_exec``) so that ``AgentRunner._count_commits`` and
-``_force_commit_uncommitted`` observe the actual worktree state.  All other
-commands (``make``, agent CLI) route through FakeDocker and return its scripted
-default success event; scenarios that need a real ``make quality`` signal must
-extend ``_HOST_COMMANDS`` or script a specific FakeDocker response.
+``run_simple`` dispatches real ``git`` commands to the host so that
+``AgentRunner._count_commits`` and ``_force_commit_uncommitted`` observe the
+actual worktree state.  That host path (``_run_on_host``) delegates straight to
+``HostRunner.run_simple`` (``src/execution.py``) rather than re-implementing the
+spawn/reap dance, so the fake and the real runner share ONE host-process
+lifecycle contract — ``start_new_session=True`` at spawn and the same
+whole-process-group reap on both ``TimeoutError`` and ``asyncio.CancelledError``
+(#9624). All other commands (``make``, agent CLI) route through FakeDocker and
+return its scripted default success event; scenarios that need a real
+``make quality`` signal must extend ``_HOST_COMMANDS`` or script a specific
+FakeDocker response.
 """
 
 from __future__ import annotations
@@ -22,10 +27,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any, cast
 
-from execution import SimpleResult
+from execution import HostRunner, SimpleResult
 from mockworld.fakes.fake_docker import FakeDocker
 
 # Commands that must run on the real host rather than through FakeDocker.
@@ -140,15 +145,23 @@ class FakeSubprocessRunner:
         env: dict[str, str] | None = None,
         timeout: float = 120.0,
         input: bytes | None = None,  # noqa: A002
+        cancel_check: Callable[[], bool] | None = None,
+        cancel_poll_interval: float = 5.0,
     ) -> SimpleResult:
         # Host-side utilities (git, make) run for real so that AgentRunner's
         # commit-counting and quality-gate checks observe the actual worktree.
         if cmd and cmd[0] in _HOST_COMMANDS:
             return await self._run_on_host(
-                cmd, cwd=cwd, env=env, timeout=timeout, input=input
+                cmd,
+                cwd=cwd,
+                env=env,
+                timeout=timeout,
+                input=input,
+                cancel_check=cancel_check,
+                cancel_poll_interval=cancel_poll_interval,
             )
 
-        _ = (cwd, input)
+        _ = (cwd, input, cancel_check, cancel_poll_interval)
 
         async def _drain() -> tuple[str, int]:
             event_iter = await self._docker.run_agent(command=list(cmd), env=env)
@@ -171,33 +184,32 @@ class FakeSubprocessRunner:
         env: dict[str, str] | None = None,
         timeout: float = 120.0,
         input: bytes | None = None,  # noqa: A002
+        cancel_check: Callable[[], bool] | None = None,
+        cancel_poll_interval: float = 5.0,
     ) -> SimpleResult:
-        """Run *cmd* directly on the host via asyncio subprocess."""
-        stdin_pipe = asyncio.subprocess.PIPE if input is not None else None
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
+        """Run *cmd* directly on the host, sharing ``HostRunner``'s lifecycle.
+
+        Delegates to ``HostRunner.run_simple`` (``src/execution.py``) instead of
+        re-implementing the spawn/reap dance, so the fake's host path and the
+        real runner cannot diverge (#9624): same ``start_new_session=True``
+        spawn, same stop-registry registration, and the same whole-process-group
+        reap on both ``TimeoutError`` and ``asyncio.CancelledError``. This was
+        previously a near-duplicate that only killed the direct child on timeout
+        and had no cancel handler — so a forking host command (or a cancelled
+        cycle) leaked the grandchildren the real runner reaps.
+
+        ``cancel_check``/``cancel_poll_interval`` (#9577) thread straight through
+        to ``HostRunner.run_simple`` so the fake's host path gets the same
+        cooperative kill-switch cancellation as production instead of ignoring it.
+        """
+        return await HostRunner().run_simple(
+            cmd,
             cwd=cwd,
-            stdin=stdin_pipe,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
             env=env,
-        )
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(input=input), timeout=timeout
-            )
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-            raise
-        return SimpleResult(
-            stdout=stdout_bytes.decode(errors="replace").strip()
-            if stdout_bytes
-            else "",
-            stderr=stderr_bytes.decode(errors="replace").strip()
-            if stderr_bytes
-            else "",
-            returncode=proc.returncode if proc.returncode is not None else -1,
+            timeout=timeout,
+            input=input,
+            cancel_check=cancel_check,
+            cancel_poll_interval=cancel_poll_interval,
         )
 
     async def cleanup(self) -> None:

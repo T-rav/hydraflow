@@ -124,7 +124,8 @@ class RetrospectiveCollector:
         )
 
         meta = self._state.get_worker_result_meta(issue_number)
-        quality_fix_rounds = meta.get("quality_fix_attempts", 0)
+        led = self._state.get_convergence_ledger(issue_number)
+        quality_fix_rounds = led.get_attempts("quality_fix") if led else 0
         impl_duration = meta.get("duration_seconds", 0.0)
 
         return RetrospectiveEntry(

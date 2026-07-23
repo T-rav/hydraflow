@@ -49,10 +49,13 @@ class TestInitialization:
             "bg_worker_states",
             "dependabot_merge_processed",
             "dependabot_arch_refresh_attempts",
+            "dependabot_update_branch_attempts",
             "dependabot_merge_settings",
             "ci_monitor_settings",
             "ci_monitor_tracked_failures",
             "cost_budget_killed_workers",
+            "detector_calibration_attempts",
+            "cost_throttled_workers",
             "default_disabled_workers_seeded",
             "disabled_workers",
             "epic_states",
@@ -77,8 +80,7 @@ class TestInitialization:
             "tracked_reports",
             "processed_issues",
             "releases",
-            "review_attempts",
-            "review_blast_radii",
+            "convergence_ledgers",
             "review_feedback",
             "completed_timelines",
             "digest_hashes",
@@ -94,6 +96,7 @@ class TestInitialization:
             "verification_issues",
             "worker_heartbeats",
             "worker_intervals",
+            "watchdog_timeouts",
             "worker_result_meta",
             "escalation_contexts",
             "diagnostic_attempts",
@@ -102,6 +105,8 @@ class TestInitialization:
             "log_ingest_cursor",
             "sentry_signal_cooldown",
             "trace_runs",
+            "review_orphan_requeues",
+            "review_orphan_strikes",
             "route_back_counts",
             # Trust-arch-hardening mixins (spec §4.1–§4.9 + §12.1)
             "auto_reverts_in_cycle",
@@ -127,6 +132,8 @@ class TestInitialization:
             "rc_cycle_id",
             "skill_prompt_attempts",
             "skill_prompt_last_green",
+            "skill_prompt_refine_proposals",
+            "prompt_efficiency_baseline",
             "trust_fleet_sanity_attempts",
             "trust_fleet_sanity_last_run",
             "trust_fleet_sanity_last_seen_counts",
@@ -140,25 +147,45 @@ class TestInitialization:
             "live_corpus_drift_rollup",
             "live_corpus_escalation_issue",
             # Auto-Agent — AutoAgentPreflightLoop (spec §3.6)
-            "auto_agent_attempts",
+            # auto_agent_attempts migrated to convergence_ledgers (Task 1)
             "auto_agent_daily_spend",
+            "auto_agent_redrive",
             # SandboxFailureFixerLoop (sandbox-tier scenario testing track)
-            "sandbox_failure_fixer_attempts",
+            # sandbox_failure_fixer_attempts migrated to convergence_ledgers (Task 2)
+            # DisturbanceDampenerLoop (ADR-0101, Pattern A)
+            "disturbance_dampener_attempts",
             # AdrTouchpointAuditorLoop (ADR-0056)
             "adr_audit_cursor",
             "adr_audit_attempts",
             # Per-ADR rollup tracking (#8987) — see ADR-0056 amendment.
             "adr_rollup_issues",
             "rollup_issues",
+            # AdrConformanceLoop (ADR-0100) — mirrors adr_audit_attempts/
+            # adr_rollup_issues above under a distinct namespace.
+            "adr_conformance_attempts",
+            "adr_conformance_rollup_issues",
             # MemoryBacklogLoop (ADR-0089)
             "memory_backlog_attempts",
             # TriageRetryLoop (ADR-0063 W2)
             "triage_retry_attempts",
             "triage_retry_last_attempt",
+            "triage_infra_parked",  # #10290
             # Earlier-adversarial pipeline (#8953) — pulled in by the
             # rebase; the enumeration needs the entry so set-equality
             # holds against the live StateData.
             "adversarial_states",
+            # HumanSteeringLoop per-issue steering reference (ADR-0099 #4)
+            "human_steering",
+            # IssueRefinementLoop (spec #9957) — change-detection index, judged-
+            # pair cache, weekly full-sweep marker, rolling digest issue,
+            # cross-tick open operator questions.
+            "refinement_index",
+            "refinement_judged_pairs",
+            "refinement_last_full_sweep",
+            "refinement_digest_issue",
+            "refinement_open_proposals",
+            # ErosionMetricsLoop (#10107, epic #10104) — last-processed-SHA cursor.
+            "erosion_last_processed_sha",
         }
         assert set(d.keys()) == expected_keys
 
@@ -200,6 +227,42 @@ class TestInitialization:
 # ---------------------------------------------------------------------------
 # Persistence (load / save round-trip)
 # ---------------------------------------------------------------------------
+
+
+class TestAdrRollupTracking:
+    """Per-ADR rollup accessors (#8987) incl. all_adr_rollups (#9622)."""
+
+    def test_all_adr_rollups_empty_by_default(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        assert tracker.all_adr_rollups() == {}
+
+    def test_all_adr_rollups_returns_every_tracked_entry(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_adr_rollup("ADR-0038", issue_number=9418, pr_numbers=[9100, 9101])
+        tracker.set_adr_rollup("ADR-0042", issue_number=8800, pr_numbers=[7000])
+
+        rollups = tracker.all_adr_rollups()
+        assert set(rollups) == {"ADR-0038", "ADR-0042"}
+        assert rollups["ADR-0038"] == {
+            "issue_number": 9418,
+            "pr_numbers": [9100, 9101],
+        }
+        assert rollups["ADR-0042"] == {"issue_number": 8800, "pr_numbers": [7000]}
+
+    def test_all_adr_rollups_reflects_clear(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_adr_rollup("ADR-0038", issue_number=9418, pr_numbers=[9100])
+        tracker.clear_adr_rollup("ADR-0038")
+        assert tracker.all_adr_rollups() == {}
+
+    def test_all_adr_rollups_is_a_copy(self, tmp_path: Path) -> None:
+        """Mutating the returned mapping must not corrupt persisted state."""
+        tracker = make_tracker(tmp_path)
+        tracker.set_adr_rollup("ADR-0038", issue_number=9418, pr_numbers=[9100])
+        rollups = tracker.all_adr_rollups()
+        rollups.pop("ADR-0038")
+        rollups_again = tracker.all_adr_rollups()
+        assert "ADR-0038" in rollups_again
 
 
 class TestLoadSave:
@@ -952,8 +1015,6 @@ class TestToDict:
             "reviewed_prs",
             "hitl_origins",
             "hitl_causes",
-            "review_attempts",
-            "review_blast_radii",
             "review_feedback",
             "worker_result_meta",
             "issue_attempts",
@@ -1091,3 +1152,15 @@ class TestLifetimeStats:
         assert stats.total_hitl_escalations == 0
         # Existing data is preserved
         assert tracker.to_dict()["processed_issues"].get(str(1)) == "success"
+
+
+def test_human_steering_get_set_round_trip(tmp_path: Path) -> None:
+    from models import SteeringState
+
+    t = make_tracker(tmp_path)
+    assert t.get_human_steering("7").flow == "running"  # default
+    t.set_human_steering("7", SteeringState(guidance="g", flow="paused"))
+    fresh = make_tracker(tmp_path)  # reload from disk
+    fresh.load()
+    assert fresh.get_human_steering("7").guidance == "g"
+    assert fresh.get_human_steering("7").flow == "paused"

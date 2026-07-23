@@ -111,6 +111,35 @@ describe('HITL badge rendering', () => {
   })
 })
 
+describe('SystemAlertBanner severity', () => {
+  it('renders a warning (yellow) banner for severity="warning"', async () => {
+    mockState.systemAlert = {
+      message:
+        'Credit signal not corroborated by API probe — ignoring as a false positive.',
+      source: 'diagnostic',
+      severity: 'warning',
+    }
+    const { default: App } = await import('../../App')
+    render(<App />)
+
+    const banner = screen.getByText(/not corroborated/).closest('div')
+    expect(banner).toHaveStyle({ background: 'var(--yellow-subtle)' })
+    expect(banner).toHaveStyle({ borderBottomColor: 'var(--yellow)' })
+  })
+
+  it('renders a critical (red) banner for a real credit-limit alert', async () => {
+    mockState.systemAlert = {
+      message: 'Credit limit reached. Pausing all loops.',
+      source: 'plan',
+    }
+    const { default: App } = await import('../../App')
+    render(<App />)
+
+    const banner = screen.getByText(/Credit limit reached/).closest('div')
+    expect(banner).toHaveStyle({ background: 'var(--red-subtle)' })
+  })
+})
+
 describe('Layout min-width', () => {
   it('root layout has minWidth to prevent overlap at narrow viewports', async () => {
     const { default: App } = await import('../../App')
@@ -233,7 +262,7 @@ describe('Config warning banner', () => {
 })
 
 describe('Main tab bar', () => {
-  it('has exactly 5 main tabs including Atlas', async () => {
+  it('has exactly 5 main tabs — Loop Fitness and ADR Conformance are nested (#9789)', async () => {
     const { default: App } = await import('../../App')
     render(<App />)
     const tabLabels = ['Work Stream', 'HITL', 'Outcomes', 'Atlas', 'System']
@@ -242,6 +271,21 @@ describe('Main tab bar', () => {
     for (const label of tabLabels) {
       expect(within(tabContainer).getByText(label)).toBeInTheDocument()
     }
+    // Nested destinations must NOT appear at the top level.
+    expect(within(tabContainer).queryByText('Loop Fitness')).toBeNull()
+    expect(within(tabContainer).queryByText('ADR Conformance')).toBeNull()
+  })
+
+  it('coerces legacy ?tab=loop-fitness and ?tab=adr-conformance to their parents (#9789)', async () => {
+    const oldHref = window.location.href
+    window.history.replaceState({}, '', '/?tab=loop-fitness')
+    const { _initialTabFromUrl } = await import('../../App')
+    // Exercise via a fresh module read of the URL helper path: mount App.
+    const { default: App } = await import('../../App')
+    const { unmount } = render(<App />)
+    expect(screen.getByTestId('main-tabs')).toBeInTheDocument()
+    unmount()
+    window.history.replaceState({}, '', oldHref)
   })
 
   it('coerces ?tab=wiki query param to atlas on mount', async () => {

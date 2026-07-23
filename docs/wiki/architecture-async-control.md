@@ -7,6 +7,8 @@ Add async wrappers (e.g., `async def a_read()`) that delegate to sync methods vi
 
 **Why:** Centralizes blocking-operation wrapping and preserves backward compatibility without duplicating sync logic.
 
+**Self-bounding caveat (issue #9661):** the sync method dispatched via `asyncio.to_thread()` must bound itself. `asyncio.wait_for()` / `asyncio.timeout()` can only cancel the *awaiting coroutine* — never the running worker thread — so a blocking syscall (e.g. `fcntl.flock(LOCK_EX)`, a network-FS `open()`, an unbounded synchronous read) inside the dispatched function can pin a `ThreadPoolExecutor` worker forever. Enough pinned workers eventually hang every later `to_thread` call process-wide (root cause of the #9600 fleet stall). See the `to_thread work must be self-bounding` entry in [`gotchas.md`](gotchas.md) and `file_util.file_lock()`'s `LOCK_NB` poll-loop + deadline for the reference fix.
+
 
 ```json:entry
 {"id":"01KQP0XFBGMB32VFGNPV8GZ264","title":"A-prefixed async wrappers delegate sync I/O to asyncio.to_thread()","topic":null,"source_type":"compiled","source_issue":null,"source_repo":null,"created_at":"2026-05-03T04:18:02.224291+00:00","updated_at":"2026-05-03T04:18:02.224607+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"medium","stale":false,"corroborations":1}

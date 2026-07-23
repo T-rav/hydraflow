@@ -199,7 +199,6 @@ class TestRunnerFixAuthErrorPropagates:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6809 — fix not yet landed", strict=False)
     async def test_authentication_error_from_fix_propagates(
         self, tmp_path: Path
     ) -> None:
@@ -211,7 +210,6 @@ class TestRunnerFixAuthErrorPropagates:
             await loop._process_issue(42, "Title", "Body")
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6809 — fix not yet landed", strict=False)
     async def test_credit_exhausted_error_from_fix_propagates(
         self, tmp_path: Path
     ) -> None:

@@ -1,0 +1,18 @@
+{
+  "name": "novel_truthy_asyncmock",
+  "language": "python",
+  "transcript": "assistant: `tests/test_dispatcher.py::test_drain_until_empty` hangs under CI. The loop is `while queue_probe(): await drain_one()`. In the test `queue_probe` is a bare `AsyncMock()`; every call returns a new AsyncMock, which is always truthy, so the `while` condition is never falsy and `drain_one()` is awaited forever.\nassistant: Fix: give the mock a concrete side effect — `probe = AsyncMock(side_effect=[True, True, False])` — so the guard actually goes falsy. The production guard also now compares `probe_result.depth > 0` instead of relying on truthiness. Test completes immediately.\ntool_result: pytest tests/test_dispatcher.py::test_drain_until_empty -q -> 1 passed in 0.12s\nassistant: Root cause — a bare AsyncMock stood in for a boolean probe; because every AsyncMock is truthy the drain loop never terminated. General fix: assert on a concrete attribute/return value, never on the raw mock's truthiness.",
+  "known_patterns": [
+    {
+      "pattern_name": "unbounded_communicate",
+      "description": "An unbounded `await proc.communicate()` on a long-lived subprocess blocks the async cycle until the watchdog fires."
+    },
+    {
+      "pattern_name": "missing_await_sleep_zero",
+      "description": "Asserting on a created task before `await asyncio.sleep(0)` sees stale state because the task never got a chance to run."
+    }
+  ],
+  "expect_novel": true,
+  "must_mention": ["asyncmock", "truthy"],
+  "notes": "Root cause = a bare AsyncMock is always truthy, so a while-guard never terminates. Distinct from the subprocess and sleep(0) patterns known, so novel is expected; a faithful pattern names AsyncMock and its truthiness."
+}

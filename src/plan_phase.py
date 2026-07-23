@@ -5,20 +5,26 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from analysis import PlanAnalyzer
 from config import HydraFlowConfig
+from convergence_recording import record_stage_verdict, signatures_from_concerns
 from events import EventBus
 from exception_classify import reraise_on_credit_or_bug
 from harness_insights import FailureCategory, HarnessInsightStore
 from models import (
+    ConversationTurn,
+    DiscoverResult,
     EpicGapReview,
     IssueOutcomeType,
     PipelineStage,
     PlanResult,
     PlanReview,
+    ShapeConversation,
+    ShapeTurnResult,
     Task,
 )
 from phase_utils import (
@@ -47,21 +53,40 @@ from src.spec_ac_generator import SpecACGenerator
 from src.spec_judge import JudgeResult, SpecJudge
 from state import StateTracker
 from task_source import TaskTransitioner
+from traceability import extract_req_id, missing_required_req_id
 from transcript_summarizer import TranscriptSummarizer
+from wiki_maint_queue import enqueue_wiki_ingest
 
 if TYPE_CHECKING:
     from beads_manager import BeadsManager
+    from discover_runner import DiscoverRunner
     from epic import EpicManager
     from issue_cache import IssueCache
     from plan_reviewer import PlanReviewer
     from plan_touchpoint_expander import PlanTouchpointExpander
     from ports import IssueStorePort, PRPort
+    from shape_runner import ShapeRunner
     from wiki_compiler import CorroborationDecision, WikiCompiler  # noqa: TCH004
 
 logger = logging.getLogger("hydraflow.plan_phase")
 
+# Verdict map for ConvergenceLedger boundary recording (ADR-0096 / convergence gate).
+# "ADVANCE" = issue moves forward in the pipeline.
+# "LOOP_BACK" = issue failed planning and must re-enter the plan stage.
+# "ESCALATE" = issue is handed off to HITL.
+_PLAN_VERDICT_MAP: dict[str, str] = {
+    "success": "ADVANCE",
+    "failed": "LOOP_BACK",
+    "escalated": "ESCALATE",
+}
+
 # Minimum body length for auto-filed sub-issues discovered during planning.
 _MIN_ISSUE_BODY_CHARS: int = 50
+
+# Priority labels IssueRefinementLoop manages (#9957). Mirrors
+# ``issue_refinement_loop._PRIORITY_LABELS`` — an unprioritized shape fork is
+# deferred, not HITL-escalated (#10311).
+_PRIORITY_LABELS: tuple[str, ...] = ("P0", "P1", "P2")
 
 
 def _run_fallback_ingest_plan(
@@ -116,6 +141,8 @@ class PlanPhase:
         issue_cache: IssueCache | None = None,
         plan_reviewer: PlanReviewer | None = None,
         touchpoint_expander: PlanTouchpointExpander | None = None,
+        discover_runner: DiscoverRunner | None = None,
+        shape_runner: ShapeRunner | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -134,6 +161,14 @@ class PlanPhase:
         self._wiki_compiler = wiki_compiler
         self._issue_cache = issue_cache
         self._plan_reviewer = plan_reviewer
+        # ADR-0107: the discover/shape engines (DiscoverRunner / ShapeRunner),
+        # reused as on-demand helpers the planner's decision gate invokes
+        # (_should_discover_helper / _should_shape_helper) instead of them
+        # running as standalone pipeline phases. Optional — when None (e.g.
+        # tests that build PlanPhase directly without the factory), the gates
+        # always return False and the planner plans without a research pre-pass.
+        self._discover_runner = discover_runner
+        self._shape_runner = shape_runner
         # Touchpoint expander (ADR-0063 W3b). Dispatched on the FIRST
         # PlanReviewer blocking-finding failure to enrich the next
         # review pass with cross-referenced ADRs, recent PR conflict
@@ -380,6 +415,41 @@ class PlanPhase:
         )
         self._persist_adversarial_state(issue, adv)
 
+    def _has_escalation_label(self, issue: Task) -> bool:
+        """True if *issue* carries one of ``config.research_escalation_labels``.
+
+        Shared by :meth:`_should_research` and the ADR-0107 discover-helper
+        gate (:meth:`_should_discover_helper`) — both treat an
+        operator/loop-applied escalation label as a signal that the issue
+        warrants deeper pre-planning work.
+        """
+        escalation_labels = {
+            lbl.lower() for lbl in self._config.research_escalation_labels
+        }
+        return any(tag.lower() in escalation_labels for tag in issue.tags)
+
+    def _is_memory_backlog_issue(self, issue: Task) -> bool:
+        """True if *issue* carries a ``config.memory_backlog_label`` tag.
+
+        Memory-backlog issues (ADR-0089) promote a captured *behavioral* memory
+        to the find queue. When the shape gate can't pick one enforcement
+        direction for one, it resolves as captured (closed) rather than a HITL
+        escalation — the memory is already the rule (#10292).
+        """
+        backlog_labels = {lbl.lower() for lbl in self._config.memory_backlog_label}
+        return any(tag.lower() in backlog_labels for tag in issue.tags)
+
+    def _has_priority_label(self, issue: Task) -> bool:
+        """True if *issue* carries a P0/P1/P2 priority label (#10311).
+
+        Mirrors ``issue_refinement_loop._PRIORITY_LABELS`` (the labels
+        ``IssueRefinementLoop`` manages). A shape fork on an issue WITHOUT one is
+        deferred rather than HITL-escalated: HITL is for prioritized human
+        direction choices, not unrefined/low-value forks.
+        """
+        priority = {lbl.lower() for lbl in _PRIORITY_LABELS}
+        return any(tag.lower() in priority for tag in issue.tags)
+
     def _should_research(self, issue: Task) -> bool:
         """Return True if the research pre-pass should run before planning *issue*.
 
@@ -404,10 +474,187 @@ class PlanPhase:
         if self._state.get_route_back_count(issue.id) > 0:
             return True
         # Escalated: operator/loop flagged the issue for deeper handling.
-        escalation_labels = {
-            lbl.lower() for lbl in self._config.research_escalation_labels
-        }
-        return any(tag.lower() in escalation_labels for tag in issue.tags)
+        return self._has_escalation_label(issue)
+
+    def _triage_hints(self, issue: Task) -> tuple[int, bool]:
+        """Return ``(clarity_score, needs_discovery)`` triage HINTS for *issue*.
+
+        ADR-0107: Triage no longer treats these as a routing verdict — it
+        records them on the issue's ``IssueCache`` classification record and
+        the planner's decision gate reads them back here. Missing cache / no
+        classification record yet
+        (e.g. ``issue_cache`` disabled, or the issue predates classification)
+        reads as the well-specified default ``(10, False)`` — the gate's
+        conservative "no helper needed" reading.
+        """
+        if self._issue_cache is None:
+            return 10, False
+        record = self._issue_cache.latest_classification(issue.id)
+        if record is None:
+            return 10, False
+        return (
+            int(record.payload.get("clarity_score", 10)),
+            bool(record.payload.get("needs_discovery", False)),
+        )
+
+    def _should_discover_helper(self, issue: Task) -> bool:
+        """ADR-0107 planner decision gate: run the discover helper before planning?
+
+        Consulted only when a ``DiscoverRunner`` is wired — with no runner
+        (e.g. tests that build PlanPhase directly), this always returns False
+        and the planner plans without a discovery pre-pass.
+
+        Conservative default (per ADR-0107): a well-specified issue plans
+        directly with no helper. The gate fires when any of —
+
+        - **needs_discovery hint** — Triage's LLM flagged the issue as vague.
+        - **clarity_score hint** below ``config.clarity_threshold``.
+        - **Cycled / failing to land** — routed back to plan at least once
+          (``StateTracker.get_route_back_count``).
+        - **Escalated** — issue carries a ``research_escalation_labels`` tag.
+
+        Epic children are excluded outright: they are already-scoped
+        decomposition output from a parent epic's planning pass, so
+        re-running product discovery on them would be redundant.
+        """
+        if self._discover_runner is None:
+            return False
+        if self._is_epic_child(issue):
+            return False
+        clarity_score, needs_discovery = self._triage_hints(issue)
+        return (
+            needs_discovery
+            or clarity_score < self._config.clarity_threshold
+            or self._state.get_route_back_count(issue.id) > 0
+            or self._has_escalation_label(issue)
+        )
+
+    async def _run_discover_helper(
+        self, issue: Task, *, guidance: str
+    ) -> DiscoverResult | None:
+        """Invoke ``DiscoverRunner`` as an on-demand research pre-pass (ADR-0107).
+
+        This is a synchronous in-process helper call, not a stage transition —
+        the engine is reused unmodified; only the caller changes. Bounded
+        internally by ``config.max_discover_attempts`` /
+        ``max_discover_expansions`` (read by ``DiscoverRunner.discover``
+        itself), the same knobs that bounded the standalone Discover phase —
+        they now bound this planner-invoked sub-step instead. Returns
+        ``None`` (never raises) on failure so planning proceeds without a
+        research brief rather than being blocked by it.
+        """
+        assert self._discover_runner is not None  # guarded by caller
+        try:
+            result = await self._discover_runner.discover(issue, guidance=guidance)
+        except Exception as exc:
+            # Dark-factory contract: credit/auth/likely-bug exceptions must
+            # propagate so the loop pauses on the billing signal instead of
+            # silently planning without research.
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "Discover helper failed for issue #%d — planning without a "
+                "research brief",
+                issue.id,
+                exc_info=True,
+            )
+            return None
+        try:
+            await self._prs.post_comment(
+                issue.id, self._format_discover_brief(issue, result)
+            )
+        except Exception:
+            logger.warning(
+                "Failed to post discover-helper brief for issue #%d",
+                issue.id,
+                exc_info=True,
+            )
+        return result
+
+    @staticmethod
+    def _format_discover_brief(issue: Task, result: DiscoverResult) -> str:
+        """Format a ``DiscoverResult`` as a GitHub comment for the audit trail."""
+        lines = [
+            "## Discovery Research (planner-invoked helper)",
+            "",
+            f"*ADR-0107 — issue #{issue.id} routed Triage → Plan directly; "
+            f"the planner's decision gate determined discovery research was "
+            f"warranted before planning.*",
+            "",
+            result.research_brief,
+        ]
+        if result.opportunities:
+            lines.extend(["", "### Opportunities", ""])
+            lines.extend(f"- {o}" for o in result.opportunities)
+        return "\n".join(lines)
+
+    def _should_shape_helper(
+        self, issue: Task, discover_result: DiscoverResult | None
+    ) -> bool:
+        """ADR-0107 planner decision gate: does discovery warrant a shaping turn?
+
+        Only consulted after the discover helper has already run — shaping
+        without a discovery brief has nothing to shape. Fires when the brief
+        surfaced genuinely divergent opportunities (2+) that need a human
+        choice, per ADR-0107's framing of shaping as direction-selection
+        rather than open-ended exploration. Requires a ``ShapeRunner`` to be
+        wired; with no runner this always returns False.
+        """
+        if self._shape_runner is None or discover_result is None:
+            return False
+        return len(discover_result.opportunities) >= 2
+
+    async def _run_shape_helper(
+        self, issue: Task, discover_result: DiscoverResult, *, guidance: str
+    ) -> ShapeTurnResult | None:
+        """Invoke ``ShapeRunner`` for one bounded conversation turn (ADR-0107).
+
+        Reuses the same ``ShapeConversation`` state slot the standalone Shape
+        phase used (``StateTracker.get/set_shape_conversation``) so this
+        helper composes with that machinery rather than reimplementing it.
+        Bounded by ``config.max_shape_turns`` (conversation-length ceiling —
+        returns ``None`` once hit, same as the standalone phase forcing
+        finalization) and ``config.max_shape_attempts`` (retried internally
+        by ``ShapeRunner.run_turn`` against the shape-coherence evaluator).
+
+        Because shaping is human-interactive, a non-final result is NOT
+        waited on synchronously — the caller (``_plan_one``) escalates to
+        HITL per ADR-0107's "yield to the existing human-steering channel"
+        design rather than blocking the plan tick.
+        """
+        assert self._shape_runner is not None  # guarded by caller
+        conv = self._state.get_shape_conversation(issue.id) or ShapeConversation(
+            issue_number=issue.id,
+            started_at=datetime.now(UTC).isoformat(),
+        )
+        if len(conv.turns) >= self._config.max_shape_turns:
+            logger.warning(
+                "Shape helper hit max_shape_turns (%d) for issue #%d without "
+                "finalizing",
+                self._config.max_shape_turns,
+                issue.id,
+            )
+            return None
+        try:
+            result = await self._shape_runner.run_turn(
+                issue,
+                conv,
+                research_brief=discover_result.research_brief,
+                guidance=guidance,
+            )
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning("Shape helper failed for issue #%d", issue.id, exc_info=True)
+            return None
+        conv.turns.append(
+            ConversationTurn(
+                role="agent",
+                content=result.content,
+                timestamp=datetime.now(UTC).isoformat(),
+            )
+        )
+        conv.last_activity_at = datetime.now(UTC).isoformat()
+        self._state.set_shape_conversation(issue.id, conv)
+        return result
 
     async def _handle_already_satisfied(self, issue: Task, result: PlanResult) -> bool:
         """Validate evidence and close issue as already-satisfied.
@@ -474,6 +721,7 @@ class PlanPhase:
                     issue_title=issue.title,
                     duration_seconds=result.duration_seconds,
                     log_file=self._plan_log_reference(issue.id),
+                    issue_labels=issue.tags,
                 )
             except (RuntimeError, OSError):
                 logger.exception(
@@ -537,8 +785,32 @@ class PlanPhase:
         if diagram_attachments:
             diagram_section = f"\n\n## Architecture Diagrams\n\n{diagram_attachments}\n"
 
+        # CH-5 traceability: carry the requirement ID (req:<id> label or
+        # Req-ID: body line) into the plan comment immediately AFTER the
+        # "## Implementation Plan" heading, ABOVE the plan body. The
+        # implementer prompt extracts the plan from the heading up to the
+        # FIRST ^---$ line (AgentRunner._strip_plan_noise, agent.py) — a
+        # bare horizontal rule inside the plan body would sever anything
+        # placed below it, so the Req-ID must lead.
+        req_id = extract_req_id(labels=issue.tags, body=issue.body)
+        req_line = f"**Req-ID:** `{req_id}`\n\n" if req_id else ""
+        req_warning = ""
+        if missing_required_req_id(
+            labels=issue.tags,
+            body=issue.body,
+            regulated_labels=self._config.regulated_label_set(),
+        ):
+            req_warning = (
+                "> ⚠️ **Req-ID required:** this issue is in the regulated "
+                "change class but declares no requirement ID. Add a "
+                "`req:<id>` label or a `Req-ID:` line to the issue body so "
+                "the change is traceable in the requirements matrix.\n\n"
+            )
+
         comment_body = (
             f"## Implementation Plan\n\n"
+            f"{req_line}"
+            f"{req_warning}"
             f"{result.plan}\n\n"
             f"{diagram_section}"
             f"**Branch:** `{branch}`\n\n"
@@ -834,12 +1106,17 @@ class PlanPhase:
                             decisions=decisions,
                         )
                     else:
-                        self._wiki_store.ingest(repo, entries)
+                        # No issue worktree (git-backed off, or worktree
+                        # gone): the boot store is read-only, so route the
+                        # entries through the maintenance queue for the
+                        # worktree-isolated PR instead of dirtying repo_root
+                        # (#9836).
+                        enqueue_wiki_ingest(self._config, repo, entries)
                     self._wiki_store.mark_ingested(repo, issue_number, "plan")
                     return
 
             # Fallback: mechanical section extraction
-            from repo_wiki_ingest import ingest_from_plan  # noqa: PLC0415
+            from repo_wiki_ingest import build_plan_entries  # noqa: PLC0415
 
             if tracked_store is not None and worktree_path is not None:
                 # Offload the sync write + commit.
@@ -853,7 +1130,11 @@ class PlanPhase:
                     path_prefix=self._config.repo_wiki_path,
                 )
             else:
-                ingest_from_plan(self._wiki_store, repo, issue_number, plan_text)
+                enqueue_wiki_ingest(
+                    self._config,
+                    repo,
+                    [e for e, _ in build_plan_entries(issue_number, plan_text)],
+                )
             self._wiki_store.mark_ingested(repo, issue_number, "plan")
         except Exception:  # noqa: BLE001
             logger.warning(
@@ -1042,6 +1323,7 @@ class PlanPhase:
                     issue_title=issue.title,
                     duration_seconds=result.duration_seconds,
                     log_file=self._plan_log_reference(issue.id),
+                    issue_labels=issue.tags,
                 )
             except (RuntimeError, OSError):
                 logger.exception(
@@ -1151,6 +1433,19 @@ class PlanPhase:
 
             with _sentry_transaction("pipeline.plan", f"plan:#{issue.id}"):
                 async with store_lifecycle(self._store, issue.id, "plan"):
+                    # Human-on-the-loop continuous steering (ADR-0099 #4):
+                    # fold live operator guidance into the plan prompt.
+                    # Reference signal only — never blocking; empty when
+                    # the feature is off or no guidance was posted for
+                    # this issue. Named `human_guidance` (not bare
+                    # `guidance`) to avoid colliding with the unrelated
+                    # `EpicGapReview.guidance` field used elsewhere in
+                    # this module. Fetched up front (not just before the
+                    # planner call) so the ADR-0107 discover/shape helpers
+                    # below can also thread it into their prompts.
+                    human_guidance = (
+                        self._state.get_human_steering(str(issue.id)).guidance or ""
+                    )
                     research_context = ""
                     if self._should_research(issue):
                         research_result = await self._research_runner.research(issue)  # type: ignore[union-attr]
@@ -1180,6 +1475,156 @@ class PlanPhase:
                                 issue.id,
                                 research_result.error,
                             )
+
+                    # ADR-0107: the planner's on-demand discover/shape
+                    # decision gate. Both gates return False when no runner is
+                    # wired (e.g. tests that build PlanPhase directly), so this
+                    # block is a no-op there; in production the gate decides,
+                    # per issue, whether a discovery pre-pass / shaping turn is
+                    # warranted before planning.
+                    discover_result: DiscoverResult | None = None
+                    if self._should_discover_helper(issue):
+                        discover_result = await self._run_discover_helper(
+                            issue, guidance=human_guidance
+                        )
+                        if discover_result is not None:
+                            research_context = (
+                                f"{research_context}\n\n{discover_result.research_brief}"
+                            ).strip()
+
+                        if self._should_shape_helper(issue, discover_result):
+                            assert discover_result is not None  # gate requires it
+                            shape_result = await self._run_shape_helper(
+                                issue, discover_result, guidance=human_guidance
+                            )
+                            if shape_result is None or not shape_result.is_final:
+                                # Divergent directions need a human choice.
+                                # Shaping is human-interactive (ADR-0107) —
+                                # yield to the existing HITL / human-steering
+                                # channel instead of blocking this plan tick
+                                # on a synchronous wait for a reply.
+                                options_text = (
+                                    shape_result.content
+                                    if shape_result is not None
+                                    else "Shaping could not produce directions "
+                                    "within the configured turn budget."
+                                )
+                                # A shape fork does NOT escalate to HITL unless
+                                # it's a prioritized human-direction choice. A
+                                # memory-backlog issue (ADR-0089 behavioral
+                                # capture) resolves as CAPTURED — the memory IS
+                                # the rule (#10292); any other UNPRIORITIZED issue
+                                # is DEFERRED — HITL is for P0-P2 forks (#10311).
+                                # Both close with a re-engage path instead of
+                                # piling a low-value fork into HITL + the diagnose
+                                # loop.
+                                is_backlog = self._is_memory_backlog_issue(issue)
+                                if is_backlog or not self._has_priority_label(issue):
+                                    if is_backlog:
+                                        detail = (
+                                            "*This is a memory-backlog "
+                                            "(behavioral) issue (ADR-0089): the "
+                                            "captured memory stands as the rule "
+                                            "and no one enforcement direction is "
+                                            "clearly warranted. Closed as "
+                                            "captured. Re-file a `hydraflow-find` "
+                                            "with an EXPLICIT direction to build "
+                                            "enforcement (#10292).*"
+                                        )
+                                        error = "memory_backlog_shape_captured"
+                                        why = "memory-backlog fork closed as captured"
+                                    else:
+                                        detail = (
+                                            "*This issue has no P0/P1/P2 priority, "
+                                            "so divergent directions were surfaced "
+                                            "but NOT escalated to HITL (reserved "
+                                            "for prioritized choices). Deferred — "
+                                            "set a P0-P2 priority or re-file with "
+                                            "an explicit direction to proceed "
+                                            "(#10311).*"
+                                        )
+                                        error = "shape_deferred_unprioritized"
+                                        why = "unprioritized fork deferred"
+                                    await self._transitioner.post_comment(
+                                        issue.id,
+                                        "## Shaping — no HITL escalation\n\n"
+                                        f"{options_text}\n\n---\n{detail}",
+                                    )
+                                    await self._transitioner.close_task(issue.id)
+                                    logger.info(
+                                        "Issue #%d %s, not HITL-escalated",
+                                        issue.id,
+                                        why,
+                                    )
+                                    return PlanResult(
+                                        issue_number=issue.id, error=error
+                                    )
+                                try:
+                                    await self._prs.post_comment(
+                                        issue.id,
+                                        "## Product Directions (planner-invoked "
+                                        f"shaping helper)\n\n{options_text}\n\n"
+                                        "---\n*A human choice is needed before "
+                                        "planning can continue — reply with your "
+                                        "preferred direction or use human "
+                                        "steering, then re-queue for planning.*",
+                                    )
+                                except Exception:
+                                    logger.warning(
+                                        "Failed to post shape-helper options "
+                                        "for issue #%d",
+                                        issue.id,
+                                        exc_info=True,
+                                    )
+                                await self._escalator(
+                                    issue,
+                                    cause="Shape helper surfaced divergent "
+                                    "product directions needing a human choice",
+                                    details=options_text[:500],
+                                    category=FailureCategory.HITL_ESCALATION,
+                                )
+                                logger.info(
+                                    "Issue #%d shape helper escalated to HITL "
+                                    "for a direction choice",
+                                    issue.id,
+                                )
+                                return PlanResult(
+                                    issue_number=issue.id, error="shape_escalated"
+                                )
+                            # Finalized on this turn — fold the selected
+                            # direction into research_context (synchronous,
+                            # no re-fetch needed) and require the same
+                            # decomposition the standalone Shape phase asked
+                            # for, since this is still a broad product
+                            # direction rather than one implementable task.
+                            research_context = (
+                                f"{research_context}\n\n{shape_result.content}\n\n"
+                                "IMPORTANT — DECOMPOSITION REQUIRED: this issue "
+                                "came through the ADR-0107 planner-invoked shaping "
+                                "helper and MUST be decomposed into 3-8 concrete "
+                                "sub-issues using NEW_ISSUES_START/NEW_ISSUES_END "
+                                "markers."
+                            ).strip()
+                            try:
+                                await self._prs.post_comment(
+                                    issue.id,
+                                    "## Final Product Direction (planner-invoked "
+                                    f"shaping helper)\n\n{shape_result.content}\n\n"
+                                    "\n### Planning Guidance — DECOMPOSITION "
+                                    "REQUIRED\n\nThis issue was shaped via the "
+                                    "planner's on-demand helper. It is a BROAD "
+                                    "product direction, NOT a single "
+                                    "implementable task. You MUST decompose this "
+                                    "into 3-8 concrete sub-issues using the "
+                                    "NEW_ISSUES_START/NEW_ISSUES_END format.",
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "Failed to post finalized shape direction "
+                                    "for issue #%d",
+                                    issue.id,
+                                    exc_info=True,
+                                )
 
                     from trace_rollup import write_phase_rollup  # noqa: PLC0415
                     from tracing_context import (  # noqa: PLC0415
@@ -1226,6 +1671,7 @@ class PlanPhase:
                             issue,
                             worker_id=idx,
                             research_context=research_context,
+                            guidance=human_guidance,
                         )
                     finally:
                         self._planners.clear_tracing_context()
@@ -1303,6 +1749,15 @@ class PlanPhase:
                         else:
                             closed = await self._handle_already_satisfied(issue, result)
                             if closed:
+                                record_stage_verdict(
+                                    self._state,
+                                    issue_number=issue.id,
+                                    stage="plan",
+                                    decision="ADVANCE",
+                                    signatures=signatures_from_concerns(
+                                        adv.pending_concerns
+                                    ),
+                                )
                                 return result
                             # Evidence validation failed — escalate directly
                             # to HITL (do NOT fall through to _handle_plan_failure
@@ -1347,6 +1802,15 @@ class PlanPhase:
                         ts_status = "failed"
 
                     await self._post_plan_transcript(issue, result, status=ts_status)
+                    _verdict = _PLAN_VERDICT_MAP.get(ts_status)
+                    if _verdict is not None:
+                        record_stage_verdict(
+                            self._state,
+                            issue_number=issue.id,
+                            stage="plan",
+                            decision=_verdict,
+                            signatures=signatures_from_concerns(adv.pending_concerns),
+                        )
                     return result
 
     def _plan_one_with_context(
@@ -1431,6 +1895,12 @@ class PlanPhase:
             return results
 
         # Phase 2: gap review loop
+        # The gap-review prompt embeds every reviewed child's plan, so the
+        # CH-6 prompt gate must see the union of those children's labels
+        # (any data-class:<class> elevation on ANY child applies).
+        gap_review_labels = sorted(
+            {tag for c in children if c.id in plan_map for tag in c.tags}
+        )
         for iteration in range(1, max_iterations + 1):
             if self._stop_event.is_set():
                 break
@@ -1442,7 +1912,7 @@ class PlanPhase:
                 max_iterations,
             )
             transcript = await self._planners.run_gap_review(
-                epic_number, plan_map, title_map
+                epic_number, plan_map, title_map, issue_labels=gap_review_labels
             )
             review = self._parse_gap_review(transcript, epic_number)
 
@@ -1536,6 +2006,10 @@ class PlanPhase:
             worker_fn=_plan_worker,
             max_concurrent=self._config.max_planners,
             stop_event=self._stop_event,
+            # Opt in to mid-run refill (issue #10296): wake at least every
+            # poll_interval to dispatch items enqueued while a long plan holds
+            # a slot, instead of only refilling when a plan completes.
+            poll_interval=self._config.poll_interval,
         )
 
         return epic_results + standalone_results

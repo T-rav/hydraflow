@@ -124,9 +124,23 @@ def test_sandbox_scenarios_are_not_placeholders(module_name: str) -> None:
 def test_sandbox_runner_catalog_matches_scenario_files() -> None:
     from tests.sandbox_scenarios.runner.loader import load_all_scenarios
 
-    discovered = {module.NAME for module in load_all_scenarios()}
+    # Full-catalog integrity: every scenario file on disk must be importable
+    # and enumerable — a quarantined scenario is still part of the catalog
+    # (it stays runnable one-off), it is only excluded from COLLECTIVE runs.
+    full = {module.NAME for module in load_all_scenarios(include_quarantined=True)}
     expected = set(_scenario_module_names())
-    assert discovered == expected
+    assert full == expected
+
+    # Collective-run set == catalog minus the explicitly quarantined modules.
+    # Quarantine semantics (marker format, loud skip, exact hidden set) are
+    # pinned in tests/test_sandbox_scenario_quarantine.py.
+    quarantined = {
+        module.NAME
+        for module in load_all_scenarios(include_quarantined=True)
+        if getattr(module, "QUARANTINED", None)
+    }
+    collective = {module.NAME for module in load_all_scenarios()}
+    assert collective == expected - quarantined
 
 
 def test_every_tier2_scenario_has_assert_outcome_except_smoke() -> None:

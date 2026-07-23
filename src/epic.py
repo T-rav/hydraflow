@@ -8,12 +8,18 @@ import re
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Protocol
 
 from changelog import generate_changelog
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from issue_fetcher import IssueFetcher
+from merge_policy import (
+    ROLE_ORCHESTRATOR_REVIEWER,
+    MergeApproval,
+    enforce_merge_policy,
+)
 from models import (
     CIStatus,
     EpicChildInfo,
@@ -40,6 +46,25 @@ from pr_manager import PRManager
 from state import StateTracker
 
 logger = logging.getLogger("hydraflow.epic")
+
+
+class WorkerTruthStore(Protocol):
+    """Minimal ``IssueStore`` surface the EpicManager needs for worker-derived
+    epic execution state (issue #10299).
+
+    Both accessors map ``issue_number -> stage``. The real ``IssueStore``
+    satisfies this structurally; tests can pass a lightweight stub. Injecting
+    the *raw* store (not the ``CachingIssueStore`` decorator) matters — queue
+    state lives on the inner object.
+    """
+
+    def get_worker_held_issues(self) -> dict[int, str]:
+        """Issues a worker is actually on (``_active`` ∪ ``_in_flight``)."""
+        ...
+
+    def get_queued_issues(self) -> dict[int, str]:
+        """Issues sitting in a stage queue awaiting dispatch."""
+        ...
 
 
 class ReleaseEpicResultError(RuntimeError):
@@ -234,6 +259,25 @@ class EpicCompletionChecker:
                 continue
 
             if issue.state == GitHubIssueState.CLOSED:
+                # #9757 defense-in-depth: a decomposed child is closed the moment
+                # its replacement epic is created, but its work lives on there.
+                # Don't treat it as resolved until that replacement epic's GitHub
+                # issue closes — the same gate EpicSweeperLoop applies. This path
+                # (checker) is dormant when EpicManager is wired, but gating it
+                # keeps the nested-convergence invariant for any future caller.
+                replacement = (
+                    self._state.get_replacement_epic(issue_number)
+                    if self._state is not None
+                    else None
+                )
+                if replacement is not None:
+                    rep_issue = await self._fetcher.fetch_issue_by_number(
+                        replacement.epic_number
+                    )
+                    if rep_issue is not None and rep_issue.state != (
+                        GitHubIssueState.CLOSED
+                    ):
+                        return False
                 excluded_issues.append(issue_number)
                 logger.info(
                     "Sub-issue #%d closed without fixed label — treating as excluded "
@@ -550,12 +594,17 @@ class EpicManager:
         prs: PRManager,
         fetcher: IssueFetcher,
         event_bus: EventBus,
+        issue_store: WorkerTruthStore | None = None,
     ) -> None:
         self._config = config
         self._state = state
         self._prs = prs
         self._fetcher = fetcher
         self._bus = event_bus
+        # Ground truth for factory occupancy (issue #10299). Optional so legacy
+        # construction (and tests that don't care) keep working — child
+        # execution state then falls back to label-derived.
+        self._issue_store = issue_store
         self._checker = EpicCompletionChecker(config, prs, fetcher, state=state)
         # Background cache: keyed by epic_number → EpicDetail
         self._detail_cache: dict[int, EpicDetail] = {}
@@ -809,16 +858,30 @@ class EpicManager:
         active_count = 0
         queued_count = 0
 
+        # Worker-truth snapshots (issue #10299): a child is "running" only when
+        # a worker actually holds it, and "queued" only when it sits in a stage
+        # queue — not because it carries an implement/review label. Parked
+        # children appear in neither set, so an all-parked epic reports
+        # active=0/queued=0 and the panel reads paused instead of active.
+        store = self._issue_store
+        worker_held = store.get_worker_held_issues() if store is not None else {}
+        queued = store.get_queued_issues() if store is not None else {}
+
         for child_num in epic.child_issues:
             child_info = await self._build_child_info(
-                child_num, epic, repo, fixed_label
+                child_num, epic, repo, fixed_label, worker_held, queued
             )
             # Count by status (failed is tracked via progress.failed; exclude here)
             if child_info.status == EpicChildStatus.DONE:
                 merged_count += 1
             elif child_info.status == EpicChildStatus.RUNNING:
                 active_count += 1
-            elif child_info.status != EpicChildStatus.FAILED:
+            # With a store wired, only children genuinely awaiting dispatch
+            # count as queued; parked/idle children (in neither worker nor
+            # queue set) drop out so the epic reads paused, not queued.
+            elif child_info.status != EpicChildStatus.FAILED and (
+                store is None or child_info.issue_number in queued
+            ):
                 queued_count += 1
             children.append(child_info)
 
@@ -858,8 +921,17 @@ class EpicManager:
         epic: EpicState,
         repo: str,
         fixed_label: str,
+        worker_held: dict[int, str] | None = None,
+        queued: dict[int, str] | None = None,
     ) -> EpicChildInfo:
-        """Build enriched child info for a single sub-issue."""
+        """Build enriched child info for a single sub-issue.
+
+        ``worker_held``/``queued`` are the worker-truth snapshots (issue
+        #10299). When omitted, they default to empty and — combined with no
+        wired store — the child's running/queued state falls back to labels.
+        """
+        worker_held = worker_held or {}
+        queued = queued or {}
         is_completed = child_num in epic.completed_children
         is_failed = child_num in epic.failed_children
         is_approved = child_num in epic.approved_children
@@ -887,21 +959,25 @@ class EpicManager:
                 child_info.title = gh_issue.title
                 if fixed_label and fixed_label in gh_issue.labels:
                     child_info.state = EpicChildState.CLOSED
-                # Derive stage from labels if not already set
+                # Derive stage from labels for display. A ``merged`` label is
+                # terminal (DONE); running-vs-queued is decided by worker truth
+                # below, NOT by the implement/review label alone (#10299).
                 if not child_info.current_stage:
                     stage = _stage_from_labels(gh_issue.labels, self._config)
                     child_info.stage = stage
                     child_info.current_stage = stage
-                    if stage in ("implement", "review"):
-                        child_info.status = EpicChildStatus.RUNNING
-                    elif stage == "merged":
+                    if stage == "merged":
                         child_info.status = EpicChildStatus.DONE
-                    elif stage:
-                        child_info.status = EpicChildStatus.QUEUED
         except RuntimeError:
             logger.debug(
                 "Could not fetch child #%d for epic detail", child_num, exc_info=True
             )
+
+        # Worker-derived execution state (#10299): only a worker actually
+        # holding the child makes it RUNNING; a store-wired-but-unheld child is
+        # QUEUED regardless of an implement/review label. Skip terminal states.
+        if child_info.status not in (EpicChildStatus.DONE, EpicChildStatus.FAILED):
+            self._apply_execution_state(child_info, worker_held, queued)
 
         # Enrich with branch/PR data from state
         branch = self._state.get_branch(child_num)
@@ -930,6 +1006,39 @@ class EpicManager:
                 )
 
         return child_info
+
+    def _apply_execution_state(
+        self,
+        child_info: EpicChildInfo,
+        worker_held: dict[int, str],
+        queued: dict[int, str],
+    ) -> None:
+        """Set a non-terminal child's running/queued status + worker.
+
+        Worker-truth path (a store is wired): a child is RUNNING only when it
+        appears in ``worker_held`` (``IssueStore._active`` ∪ ``_in_flight``),
+        and it carries the holding stage in ``worker``. Otherwise it is QUEUED,
+        even if it carries an implement/review label — a label no longer
+        implies a worker is on it. Parked/idle children land here as QUEUED but
+        are excluded from the epic's ``queued_children`` count (they are in
+        neither the worker nor queue set), so the epic reads paused.
+
+        Legacy path (no store wired): fall back to the child's stage label so
+        prior behaviour is preserved (implement/review -> RUNNING).
+        """
+        if self._issue_store is None:
+            if child_info.current_stage in ("implement", "review"):
+                child_info.status = EpicChildStatus.RUNNING
+            elif child_info.current_stage:
+                child_info.status = EpicChildStatus.QUEUED
+            return
+
+        issue_number = child_info.issue_number
+        if issue_number in worker_held:
+            child_info.status = EpicChildStatus.RUNNING
+            child_info.worker = worker_held[issue_number]
+        else:
+            child_info.status = EpicChildStatus.QUEUED
 
     async def _enrich_pr_status(
         self, child_info: EpicChildInfo, pr_number: int
@@ -1316,6 +1425,32 @@ class EpicManager:
                     # Halt on missing PR — bundle guarantee requires all PRs to merge
                     results.append({"issue": child_num, "status": "no_pr"})
                     halt_msg = f"no PR found for child #{child_num}; bundle halted"
+                elif not (
+                    policy_verdict := await enforce_merge_policy(
+                        config=self._config,
+                        prs=self._prs,
+                        pr_number=pr_number,
+                        actor="hydraflow:epic_release",
+                        approvals=[
+                            MergeApproval(
+                                actor=f"epic-{epic_number}",
+                                role=ROLE_ORCHESTRATOR_REVIEWER,
+                                source="epic_children_approved",
+                            )
+                        ],
+                        lane="epic_release",
+                    )
+                ).allowed:
+                    # CH-3 (#9731): the bundle only releases when every child
+                    # passed review (ready_to_merge) — that approval is this
+                    # lane's evidence. A policy deny halts the bundle.
+                    results.append(
+                        {"issue": child_num, "pr": pr_number, "status": "policy_denied"}
+                    )
+                    halt_msg = (
+                        f"merge policy denied child #{child_num} "
+                        f"(PR #{pr_number}): {policy_verdict.reason}; bundle halted"
+                    )
                 else:
                     merged = await self._prs.merge_pr(pr_number)
                     if merged:
@@ -1374,6 +1509,17 @@ class EpicManager:
                 parents.append(epic.epic_number)
         return parents
 
+    async def _propagate_epic_close(self, epic_number: int) -> None:
+        """When *epic_number* (a decompose replacement) closes, record its
+        superseded child completed in the parent epic and re-run the parent's
+        auto-close. on_child_completed → _try_auto_close → (if it closes the
+        parent) this helper again → recursion up the parent_epic chain until the
+        root (parent_epic None). Inert for every ordinary epic (#9757)."""
+        epic = self._state.get_epic_state(epic_number)
+        if epic is None or epic.parent_epic is None or epic.superseded_issue is None:
+            return
+        await self.on_child_completed(epic.parent_epic, epic.superseded_issue)
+
     async def _try_auto_close(self, epic_number: int) -> None:
         """Attempt to auto-close an epic if all children are resolved."""
         epic = self._state.get_epic_state(epic_number)
@@ -1392,6 +1538,7 @@ class EpicManager:
             self._state.close_epic(epic_number)
             await self._publish_update(epic_number, "closed")
             logger.info("Epic #%d auto-closed — all children resolved", epic_number)
+            await self._propagate_epic_close(epic_number)
             return
 
         if result is False:
@@ -1421,6 +1568,7 @@ class EpicManager:
         self._state.close_epic(epic_number)
         await self._publish_update(epic_number, "closed")
         logger.info("Epic #%d auto-closed — all children resolved", epic_number)
+        await self._propagate_epic_close(epic_number)
 
     def _is_stale(self, epic: EpicState) -> bool:
         """Return True if the epic has had no activity within the stale threshold."""

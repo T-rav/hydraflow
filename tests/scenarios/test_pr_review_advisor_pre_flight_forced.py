@@ -58,7 +58,7 @@ class TestPRReviewPreFlightForcedOn:
         )
         world._llm.script_advisor(
             31,
-            "post_verify",
+            "post_verify:correctness",
             [
                 json.dumps(
                     {
@@ -77,4 +77,4 @@ class TestPRReviewPreFlightForcedOn:
         # FORCE_ON bypasses the composite trigger's False branch; pre-flight
         # runs once. Post-verify always runs once on the APPROVE path.
         assert world._llm.advisor_call_count_for("pre_flight") == 1
-        assert world._llm.advisor_call_count_for("post_verify") == 1
+        assert world._llm.advisor_call_count_for("post_verify:correctness") == 1

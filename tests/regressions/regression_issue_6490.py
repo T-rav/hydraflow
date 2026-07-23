@@ -65,7 +65,6 @@ class TestAgentExceptionMarksReportFailed:
     """Issue #6490: agent exception should mark tracked report as 'failed'."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6490 — fix not yet landed", strict=False)
     async def test_tracked_report_status_is_failed_on_agent_exception(
         self, tmp_path: Path
     ) -> None:
@@ -105,7 +104,6 @@ class TestAgentExceptionMarksReportFailed:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6490 — fix not yet landed", strict=False)
     async def test_agent_exception_does_not_increment_retry_attempts(
         self, tmp_path: Path
     ) -> None:

@@ -7,9 +7,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from models import Severity
 from trust_fleet_anomaly_detectors import (
+    LOW_SEVERITY_VALUES,
     TRUST_LOOP_WORKERS,
     detect_cost_spike,
+    detect_hitl_composition,
     detect_issues_per_hour,
     detect_repair_ratio,
     detect_staleness,
@@ -206,3 +209,97 @@ def test_cost_spike_reader_exception_returns_false() -> None:
     )
     assert breached is False
     assert details["status"] == "reader_error"
+
+
+# --- 6. HITL composition (#10310) ---
+
+
+def _p4_item(number: int) -> dict[str, object]:
+    return {"number": number, "severity": "P4", "housekeeping": False}
+
+
+def _real_work_item(number: int, severity: str = "P1") -> dict[str, object]:
+    return {"number": number, "severity": severity, "housekeeping": False}
+
+
+def test_low_severity_values_is_p4_housekeeping() -> None:
+    """The canonical low-severity set keys off P4/Housekeeping (drift guard)."""
+    assert sorted(LOW_SEVERITY_VALUES) == ["P4"]
+    assert Severity.P4_HOUSEKEEPING.value in LOW_SEVERITY_VALUES
+
+
+def test_hitl_composition_breaches_when_p4_dominates() -> None:
+    """HITL full of P4 severity items -> signal fires."""
+    items = [_p4_item(101), _p4_item(102), _p4_item(103)]
+    breached, details = detect_hitl_composition(items, threshold=3)
+    assert breached is True
+    assert details["total"] == 3
+    assert details["low_severity"] == 3
+    assert details["fraction"] == pytest.approx(1.0)
+    assert details["issues"] == [101, 102, 103]
+
+
+def test_hitl_composition_counts_housekeeping_labels() -> None:
+    """Items with a housekeeping label count even when severity is unknown."""
+    items = [
+        {"number": 1, "severity": None, "housekeeping": True},
+        {"number": 2, "severity": None, "housekeeping": True},
+        {"number": 3, "severity": None, "housekeeping": True},
+    ]
+    breached, details = detect_hitl_composition(items, threshold=3)
+    assert breached is True
+    assert details["low_severity"] == 3
+
+
+def test_hitl_composition_real_work_does_not_breach() -> None:
+    """HITL with genuine P1/P2 work -> signal stays silent (no false positive)."""
+    items = [
+        _real_work_item(1, "P1"),
+        _real_work_item(2, "P2"),
+        _real_work_item(3, "P0"),
+        _real_work_item(4, "P3"),
+    ]
+    breached, details = detect_hitl_composition(items, threshold=3)
+    assert breached is False
+    assert details["low_severity"] == 0
+    assert details["total"] == 4
+
+
+def test_hitl_composition_below_threshold_does_not_breach() -> None:
+    """Two P4 items with a threshold of 3 -> no breach."""
+    items = [_p4_item(1), _p4_item(2), _real_work_item(3, "P1")]
+    breached, details = detect_hitl_composition(items, threshold=3)
+    assert breached is False
+    assert details["low_severity"] == 2
+
+
+def test_hitl_composition_at_threshold_breaches() -> None:
+    """`>=` comparison (sibling-plan lock): exactly-threshold fires."""
+    items = [_p4_item(1), _p4_item(2), _real_work_item(3, "P1")]
+    breached, _ = detect_hitl_composition(items, threshold=2)
+    assert breached is True
+
+
+def test_hitl_composition_empty_queue_insufficient_data() -> None:
+    """An empty HITL queue must never escalate."""
+    breached, details = detect_hitl_composition([], threshold=3)
+    assert breached is False
+    assert details["status"] == "insufficient_data"
+    assert details["total"] == 0
+
+
+def test_hitl_composition_mixed_counts_only_low_severity() -> None:
+    """Only low-severity items are counted; the total reflects the whole queue."""
+    items = [
+        _p4_item(1),
+        _p4_item(2),
+        _p4_item(3),
+        _real_work_item(4, "P1"),
+        _real_work_item(5, "P2"),
+    ]
+    breached, details = detect_hitl_composition(items, threshold=3)
+    assert breached is True
+    assert details["low_severity"] == 3
+    assert details["total"] == 5
+    assert details["fraction"] == pytest.approx(0.6)
+    assert details["issues"] == [1, 2, 3]

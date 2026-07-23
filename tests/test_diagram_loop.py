@@ -111,8 +111,60 @@ async def test_regen_pr_uses_config_base_branch_and_worktree_path_specs(
     assert result.pr_url == "https://pr/2"
     assert captured["base"] == "staging"
     assert captured["branch"] == "arch-regen-auto"
-    assert captured["path_specs"] == ["docs/arch/generated", "docs/arch/.meta.json"]
+    # The baseline MUST ride along: a regen PR that lowers the matrix pct
+    # without pruning disturbance/baselines/traceability.yaml makes the
+    # ratchet's `resolved` assertion fail on the next unrelated PR.
+    assert captured["path_specs"] == [
+        "docs/arch/generated",
+        "docs/arch/.meta.json",
+        "disturbance/baselines/traceability.yaml",
+    ]
     assert callable(captured["generate"])
+
+
+@pytest.mark.asyncio
+async def test_regen_generate_callback_syncs_baseline_after_emit(
+    loop_deps, tmp_path, monkeypatch
+):
+    config = MagicMock()
+    config.diagram_loop_enabled = True
+    config.base_branch.return_value = "staging"
+    loop = DiagramLoop(config=config, pr_manager=MagicMock(), deps=loop_deps)
+    loop._set_repo_root(tmp_path)
+
+    captured = {}
+
+    import auto_pr as _auto_pr_mod
+    from auto_pr import AutoPrResult
+
+    async def intercept(**kw):
+        captured.update(kw)
+        return AutoPrResult(status="no-diff", pr_url=None, branch=kw["branch"])
+
+    monkeypatch.setattr(_auto_pr_mod, "generate_and_open_pr_async", intercept)
+    await loop._regen_pr()
+
+    calls = []
+    import arch.runner as _runner_mod
+    import diagram_loop as _diagram_loop_mod
+
+    monkeypatch.setattr(
+        _runner_mod,
+        "emit",
+        lambda **kw: calls.append(("emit", kw["repo_root"])),
+    )
+    monkeypatch.setattr(
+        _diagram_loop_mod,
+        "sync_traceability_baseline",
+        lambda root: calls.append(("sync", root)),
+    )
+
+    worktree = tmp_path / "wt"
+    await captured["generate"](worktree)
+
+    # Sync must see the freshly emitted matrix, so it runs after emit and
+    # against the same worktree the PR is cut from.
+    assert calls == [("emit", worktree), ("sync", worktree)]
 
 
 @pytest.mark.asyncio

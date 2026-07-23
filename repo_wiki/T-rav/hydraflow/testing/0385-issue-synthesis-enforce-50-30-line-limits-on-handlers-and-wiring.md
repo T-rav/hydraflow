@@ -1,0 +1,19 @@
+---
+id: 0385
+topic: testing
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-07-19T01:49:52.731250+00:00
+status: superseded
+corroborations: 1
+supersedes: 0334,0335,0336,0337,0338,0339,0340,0341,0342,0343,0344,0345,0346,0347,0348,0349,0350,0351,0352,0353,0354,0355,0356,0357,0358,0359,0360,0361,0362,0363,0364,0365,0366,0367,0368,0369,0370,0371,0372
+superseded_by: 0412
+---
+
+# Enforce 50/30-line limits on handlers and wiring
+
+Keep handler functions to ≤ 50 lines and registration wiring to ≤ 30 lines. Extract nested closures into instance methods to hold nesting to ≤ 3 levels.
+
+Example: Enforce via AST-based tests with ±3 line tolerance. See also: testing — Allow ±3 line drift in AST-based structure assertions.
+
+**Why:** Functions exceeding these limits are difficult to test in isolation; deeply nested closures cannot be mocked independently.

@@ -36,3 +36,35 @@ class TestLabelDriftWatcherLoopScenario:
         assert "hydraflow-ready" not in issue.labels
         assert len(issue.comments) == 1
         assert "LabelDriftWatcher" in issue.comments[0]
+
+    async def test_escalated_issue_with_green_resolving_pr_is_reconciled(
+        self, tmp_path
+    ):
+        """#10260: an issue stuck with stale hitl-escalation/diagnose-failed
+        labels after a resolving PR already opened and went CI-green gets
+        those labels cleared — the loop runs entirely through MockWorld's
+        FakeGitHub, exercising the real find_label_drift → reconcile path."""
+        world = MockWorld(tmp_path)
+        world.github.add_issue(
+            42,
+            "flaky rc_budget regression",
+            "body",
+            labels=["hydraflow-hitl", "hitl-escalation", "diagnose-failed"],
+        )
+        world.github.add_pr(number=100, issue_number=42, branch="agent/diag-42")
+        world.github._prs[100].checks = [
+            ("Lint", "SUCCESS"),
+            ("Tests", "SUCCESS"),
+        ]
+
+        stats = await world.run_with_loops(["label_drift_watcher"], cycles=1)
+
+        assert stats["label_drift_watcher"] == {"detected": 1, "reconciled": 1}
+        issue = world.github.issue(42)
+        assert "hitl-escalation" not in issue.labels
+        assert "diagnose-failed" not in issue.labels
+        # The pipeline label stays — the issue remains visible in the HITL
+        # queue rather than disappearing outright.
+        assert "hydraflow-hitl" in issue.labels
+        assert len(issue.comments) == 1
+        assert "escalated_with_resolving_pr" in issue.comments[0]

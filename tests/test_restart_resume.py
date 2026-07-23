@@ -57,6 +57,54 @@ class TestWorkerIntervalPersistence:
         assert intervals["review"] == 60
 
 
+class TestWatchdogTimeoutPersistence:
+    def test_watchdog_timeouts_survive_restart(self, tmp_path: Path) -> None:
+        """Custom watchdog-timeout overrides persist across StateTracker recreation.
+
+        Mirrors ``test_worker_intervals_survive_restart`` — this is the whole
+        point of #9503: an operator-set per-loop watchdog bound must survive a
+        redeploy, not just live in memory.
+        """
+        from state import StateTracker
+
+        state_file = tmp_path / "state.json"
+        st1 = StateTracker(state_file)
+        st1.set_watchdog_timeouts({"repo_wiki": 3600, "adr_reviewer": 43200})
+
+        # Simulate restart: create new StateTracker on same file
+        st2 = StateTracker(state_file)
+        timeouts = st2.get_watchdog_timeouts()
+
+        assert timeouts["repo_wiki"] == 3600
+        assert timeouts["adr_reviewer"] == 43200
+
+    def test_watchdog_timeouts_survive_restart_via_bg_worker_manager(
+        self, tmp_path: Path
+    ) -> None:
+        """The full restart path: BGWorkerManager -> state -> StateRestorer."""
+        from bg_worker_manager import BGWorkerManager
+        from config import HydraFlowConfig
+        from events import EventBus
+        from state import StateTracker
+        from state_restorer import StateRestorer
+
+        state_file = tmp_path / "state.json"
+        config = HydraFlowConfig()
+
+        st1 = StateTracker(state_file)
+        mgr1 = BGWorkerManager(config, st1, bg_loop_registry={})
+        mgr1.set_timeout("repo_wiki", 3600)
+
+        # Simulate restart: fresh StateTracker + BGWorkerManager on the same
+        # backing file, then run the boot-time restore path.
+        st2 = StateTracker(state_file)
+        mgr2 = BGWorkerManager(config, st2, bg_loop_registry={})
+        restorer = StateRestorer(st2, EventBus(), mgr2)
+        restorer.restore_all(set(), set(), set(), set())
+
+        assert mgr2.get_timeout("repo_wiki") == 3600
+
+
 # ---------------------------------------------------------------------------
 # Active issue crash recovery
 # ---------------------------------------------------------------------------
@@ -298,3 +346,24 @@ class TestCostBudgetKilledWorkersPersistence:
             "watcher_killed_a",
             "watcher_killed_b",
         }
+
+
+class TestCostThrottledWorkersState:
+    def test_round_trips_priors_including_none(self, tmp_path: Path) -> None:
+        from state import StateTracker
+
+        st = StateTracker(tmp_path / "state.json")
+        st.set_cost_throttled_workers({"repo_wiki": 900, "flake_tracker": None})
+        reloaded = StateTracker(tmp_path / "state.json")
+        assert reloaded.get_cost_throttled_workers() == {
+            "repo_wiki": 900,
+            "flake_tracker": None,
+        }
+
+    def test_clearable(self, tmp_path: Path) -> None:
+        from state import StateTracker
+
+        st = StateTracker(tmp_path / "state.json")
+        st.set_cost_throttled_workers({"repo_wiki": None})
+        st.set_cost_throttled_workers({})
+        assert st.get_cost_throttled_workers() == {}

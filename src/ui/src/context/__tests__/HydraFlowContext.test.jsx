@@ -4,8 +4,6 @@ import { reducer } from '../HydraFlowContext'
 
 const emptyPipeline = {
   triage: [],
-  discover: [],
-  shape: [],
   plan: [],
   implement: [],
   review: [],
@@ -495,21 +493,6 @@ describe('PIPELINE_SNAPSHOT reducer', () => {
       data: { stages: { implement: [{ issue_number: 7, title: 'Renamed', url: 'u', status: 'active' }] } },
     })
     expect(overridden.pipelineIssues.implement[0].title).toBe('Renamed')
-  })
-
-  it('F6: discover and shape stages are included in the merged snapshot', () => {
-    const state = { ...initialState, pipelineIssues: { ...emptyPipeline } }
-    const next = reducer(state, {
-      type: 'pipeline_snapshot',
-      data: { stages: {
-        discover: [{ issue_number: 21, title: 'D', url: 'u', status: 'active' }],
-        shape: [{ issue_number: 22, title: 'S', url: 'u', status: 'active' }],
-      } },
-    })
-    expect(next.pipelineIssues.discover).toHaveLength(1)
-    expect(next.pipelineIssues.discover[0].issue_number).toBe(21)
-    expect(next.pipelineIssues.shape).toHaveLength(1)
-    expect(next.pipelineIssues.shape[0].issue_number).toBe(22)
   })
 
   it('F7: absent stage key is preserved — omitting merged keeps the existing merged card', () => {
@@ -1418,6 +1401,83 @@ describe('EPIC_READY reducer', () => {
   })
 })
 
+describe('epic_update reducer', () => {
+  // The EPICS action stores full EpicDetail dumps from /api/epics; the
+  // epic_update WS event only carries an EpicProgress payload. Merge, don't
+  // wholesale-replace, so detail-only fields survive until the next poll.
+  const detailEpic = () => ({
+    epic_number: 100,
+    title: 'Epic A',
+    status: 'active',
+    completed: 1,
+    percent_complete: 20,
+    // detail-only fields (absent from EpicProgress)
+    merged_children: 3,
+    active_children: 2,
+    queued_children: 4,
+    children: [{ issue_number: 5, title: 'child' }],
+    readiness: { all_implemented: false, all_approved: false },
+  })
+
+  it('merges the progress payload onto the existing epic, preserving detail-only fields', () => {
+    const state = { ...initialState, epics: [detailEpic()] }
+    const progress = {
+      epic_number: 100,
+      title: 'Epic A',
+      status: 'active',
+      completed: 5,
+      percent_complete: 60,
+      child_issues: [5, 6, 7], // progress-only field
+    }
+    const next = reducer(state, { type: 'epic_update', data: { progress } })
+    const epic = next.epics.find(e => e.epic_number === 100)
+    // progress fields win
+    expect(epic.completed).toBe(5)
+    expect(epic.percent_complete).toBe(60)
+    expect(epic.child_issues).toEqual([5, 6, 7])
+    // detail-only fields preserved
+    expect(epic.merged_children).toBe(3)
+    expect(epic.active_children).toBe(2)
+    expect(epic.queued_children).toBe(4)
+    expect(epic.children).toEqual([{ issue_number: 5, title: 'child' }])
+    expect(epic.readiness).toEqual({ all_implemented: false, all_approved: false })
+  })
+
+  it('preserves array order and leaves sibling epics untouched', () => {
+    const state = {
+      ...initialState,
+      epics: [
+        detailEpic(),
+        { epic_number: 200, status: 'active', merged_children: 9, children: [{ issue_number: 1 }] },
+      ],
+    }
+    const next = reducer(state, {
+      type: 'epic_update',
+      data: { progress: { epic_number: 100, status: 'active', completed: 2 } },
+    })
+    // order unchanged (no move-to-end)
+    expect(next.epics.map(e => e.epic_number)).toEqual([100, 200])
+    const sibling = next.epics.find(e => e.epic_number === 200)
+    expect(sibling.merged_children).toBe(9)
+    expect(sibling.children).toEqual([{ issue_number: 1 }])
+  })
+
+  it('appends the progress payload when the epic is not yet in state', () => {
+    const next = reducer(
+      { ...initialState, epics: [] },
+      { type: 'epic_update', data: { progress: { epic_number: 300, status: 'active', completed: 0 } } },
+    )
+    expect(next.epics).toHaveLength(1)
+    expect(next.epics[0].epic_number).toBe(300)
+  })
+
+  it('is a passthrough (records the event) when no progress payload is present', () => {
+    const state = { ...initialState, epics: [{ epic_number: 100, status: 'active' }] }
+    const next = reducer(state, { type: 'epic_update', data: {} })
+    expect(next.epics).toEqual([{ epic_number: 100, status: 'active' }])
+  })
+})
+
 describe('EPIC_RELEASING reducer', () => {
   it('sets epicReleasing and updates epic status', () => {
     const state = {
@@ -1470,6 +1530,91 @@ describe('EPIC_RELEASED reducer', () => {
     const state = { ...initialState, epicReleasing: { epicNumber: 100, progress: 3, total: 5 } }
     const next = reducer(state, { type: 'EPIC_RELEASED', data: {} })
     expect(next.epicReleasing).toEqual({ epicNumber: 100, progress: 3, total: 5 })
+  })
+})
+
+describe('epic reducers de-collide by (repo, epic_number) under repo=__all__', () => {
+  // Two supervised repos can each have an epic #5. In the aggregate view epics
+  // must key on (repo, epic_number) — mirroring issueKey/workerKey — so one
+  // repo's update does not overwrite the other's fields.
+  const aggState = (epics) => ({ ...initialState, selectedRepoSlug: '__all__', epics })
+  const twoRepoEpics = () => [
+    { epic_number: 5, repo: 'org-a', status: 'active', title: 'A5', completed: 1 },
+    { epic_number: 5, repo: 'org-b', status: 'active', title: 'B5', completed: 2 },
+  ]
+
+  it('epic_update only touches the same-repo epic, not another repo sharing the number', () => {
+    const state = aggState(twoRepoEpics())
+    const next = reducer(state, {
+      type: 'epic_update',
+      repo: 'org-a',
+      data: { progress: { epic_number: 5, status: 'active', completed: 9 } },
+    })
+    const a = next.epics.find(e => e.repo === 'org-a' && e.epic_number === 5)
+    const b = next.epics.find(e => e.repo === 'org-b' && e.epic_number === 5)
+    expect(next.epics).toHaveLength(2)
+    expect(a.completed).toBe(9) // updated
+    expect(a.title).toBe('A5') // detail preserved
+    expect(b.completed).toBe(2) // untouched
+    expect(b.title).toBe('B5')
+  })
+
+  it('epic_update appends a new repo epic instead of overwriting a same-number epic in another repo', () => {
+    const state = aggState([
+      { epic_number: 5, repo: 'org-a', status: 'active', title: 'A5', completed: 1 },
+    ])
+    const next = reducer(state, {
+      type: 'epic_update',
+      repo: 'org-b',
+      data: { progress: { epic_number: 5, status: 'active', completed: 7 } },
+    })
+    expect(next.epics).toHaveLength(2)
+    const a = next.epics.find(e => e.repo === 'org-a' && e.epic_number === 5)
+    const b = next.epics.find(e => e.repo === 'org-b' && e.epic_number === 5)
+    expect(a.completed).toBe(1)
+    expect(a.title).toBe('A5')
+    expect(b.completed).toBe(7)
+    expect(b.repo).toBe('org-b')
+  })
+
+  it('EPIC_READY marks only the same-repo epic ready', () => {
+    const state = aggState(twoRepoEpics())
+    const next = reducer(state, {
+      type: 'EPIC_READY',
+      repo: 'org-a',
+      data: { epic_number: 5 },
+    })
+    expect(next.epics.find(e => e.repo === 'org-a').status).toBe('ready')
+    expect(next.epics.find(e => e.repo === 'org-b').status).toBe('active')
+  })
+
+  it('EPIC_RELEASING marks only the same-repo epic releasing', () => {
+    const state = aggState(twoRepoEpics())
+    const next = reducer(state, {
+      type: 'EPIC_RELEASING',
+      repo: 'org-b',
+      data: { epic_number: 5, progress: 1, total: 3 },
+    })
+    expect(next.epics.find(e => e.repo === 'org-a').status).toBe('active')
+    expect(next.epics.find(e => e.repo === 'org-b').status).toBe('releasing')
+  })
+
+  it('EPIC_RELEASED marks only the same-repo epic released', () => {
+    const state = aggState([
+      { epic_number: 5, repo: 'org-a', status: 'releasing', title: 'A5' },
+      { epic_number: 5, repo: 'org-b', status: 'releasing', title: 'B5' },
+    ])
+    const next = reducer(state, {
+      type: 'EPIC_RELEASED',
+      repo: 'org-a',
+      data: { epic_number: 5, version: 'v1.0.0', released_at: '2026-07-22T00:00:00Z' },
+    })
+    const a = next.epics.find(e => e.repo === 'org-a')
+    const b = next.epics.find(e => e.repo === 'org-b')
+    expect(a.status).toBe('released')
+    expect(a.version).toBe('v1.0.0')
+    expect(b.status).toBe('releasing') // untouched
+    expect(b.version).toBeUndefined()
   })
 })
 
@@ -1559,6 +1704,35 @@ describe('UPDATE_BG_WORKER_INTERVAL action', () => {
     expect(result.backgroundWorkers).toHaveLength(1)
     expect(result.backgroundWorkers[0].name).toBe('metrics')
     expect(result.backgroundWorkers[0].interval_seconds).toBe(1800)
+  })
+})
+
+describe('UPDATE_BG_WORKER_WATCHDOG_TIMEOUT action', () => {
+  // Mirrors UPDATE_BG_WORKER_INTERVAL above (#9503).
+  it('updates watchdog_timeout_seconds for existing worker', () => {
+    const state = {
+      ...initialState,
+      backgroundWorkers: [
+        { name: 'repo_wiki', status: 'ok', enabled: true, last_run: null, watchdog_timeout_seconds: 7200, details: {} },
+      ],
+    }
+    const result = reducer(state, {
+      type: 'UPDATE_BG_WORKER_WATCHDOG_TIMEOUT',
+      data: { name: 'repo_wiki', watchdog_timeout_seconds: 14400 },
+    })
+    const worker = result.backgroundWorkers.find(w => w.name === 'repo_wiki')
+    expect(worker.watchdog_timeout_seconds).toBe(14400)
+  })
+
+  it('creates stub entry for unknown worker', () => {
+    const state = { ...initialState, backgroundWorkers: [] }
+    const result = reducer(state, {
+      type: 'UPDATE_BG_WORKER_WATCHDOG_TIMEOUT',
+      data: { name: 'repo_wiki', watchdog_timeout_seconds: 3600 },
+    })
+    expect(result.backgroundWorkers).toHaveLength(1)
+    expect(result.backgroundWorkers[0].name).toBe('repo_wiki')
+    expect(result.backgroundWorkers[0].watchdog_timeout_seconds).toBe(3600)
   })
 })
 

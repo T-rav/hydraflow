@@ -1,12 +1,13 @@
 # ADR-0017: Auto-Decompose Triage Path Excluded from Session Counter
 
 **Status:** Accepted
-**Enforced by:** tests/test_state_machine.py
 **Date:** 2026-03-01
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_state_machine.py
 
 ## Context
 
-In the triage phase (`src/triage_phase.py`), when an issue scores above the
+In the triage phase (`src/triage_phase.py:triage_issues`), when an issue scores above the
 `epic_decompose_complexity_threshold` and `epic_auto_decompose` is enabled,
 `_maybe_decompose()` creates an epic plus child issues on GitHub, closes the
 original issue, and marks it as `"decomposed"` in the state tracker.
@@ -97,7 +98,7 @@ is **intentional and should remain as-is**. The rationale:
 
 - Source memory: #1729
 - Original implementation: PR #1689 (issue #1542)
-- `src/triage_phase.py` — `_maybe_decompose()`, `triage_issues()`
-- `src/state.py` — `StateTracker.increment_session_counter()`,
+- `src/triage_phase.py:_maybe_decompose`, `src/triage_phase.py:triage_issues`
+- `src/state/__init__.py:StateTracker` — `StateTracker.increment_session_counter()`,
   `StateTracker.mark_issue()`
 - ADR-0001 (Five concurrent async loops — triage is loop 1)

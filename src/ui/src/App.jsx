@@ -28,6 +28,10 @@ function _initialTabFromUrl() {
   const params = new URLSearchParams(window.location.search)
   const requested = params.get('tab')
   if (requested === 'wiki') return 'atlas'
+  // #9789: these moved from top-level tabs to sub-tabs; old deep links
+  // land on the parent (the panel reads its own sub param).
+  if (requested === 'loop-fitness') return 'system'
+  if (requested === 'adr-conformance') return 'atlas'
   if (requested && TABS.includes(requested)) return requested
   return 'issues'
 }
@@ -99,9 +103,10 @@ function SystemAlertBanner({ alert, onDismiss, onRefreshCredit, onClearCredit })
 
   if (!alert) return null
   const resumeTime = formatResumeAt(alert.resume_at)
+  const isWarning = alert?.severity === 'warning'
   return (
-    <div style={styles.alertBanner}>
-      <span style={styles.alertIcon}>!</span>
+    <div style={isWarning ? styles.alertBannerWarning : styles.alertBanner}>
+      <span style={isWarning ? styles.alertIconWarning : styles.alertIcon}>!</span>
       <span>{alert.message}{resumeTime && ` Resumes at ${resumeTime}.`}</span>
       {alert.source && <span style={styles.alertSource}>Source: {alert.source}</span>}
       {refreshState === 'still_exhausted' && (
@@ -188,7 +193,7 @@ function AppContent() {
   const {
     connected, orchestratorStatus, workers, prs,
     hitlItems, humanInputRequests, submitHumanInput, refreshHitl,
-    backgroundWorkers, systemAlert, dismissSystemAlert, refreshCreditStatus, clearCreditPause, intents, toggleBgWorker, triggerBgWorker, updateBgWorkerInterval,
+    backgroundWorkers, systemAlert, dismissSystemAlert, refreshCreditStatus, clearCreditPause, intents, toggleBgWorker, triggerBgWorker, updateBgWorkerInterval, updateBgWorkerWatchdogTimeout,
     requestChanges,
     config,
     reporterId,
@@ -278,6 +283,7 @@ function AppContent() {
               onToggleBgWorker={toggleBgWorker}
               onTriggerBgWorker={triggerBgWorker}
               onUpdateInterval={updateBgWorkerInterval}
+              onUpdateWatchdogTimeout={updateBgWorkerWatchdogTimeout}
             />
           )}
         </div>
@@ -378,6 +384,19 @@ const styles = {
     fontSize: 13,
     fontWeight: 600,
   },
+  // Warning (yellow) variant — benign alerts (e.g. a credit false positive
+  // that was suppressed), so it reads as informational, not critical.
+  alertBannerWarning: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '8px 16px',
+    background: theme.yellowSubtle,
+    borderBottom: `2px solid ${theme.yellow}`,
+    color: theme.yellow,
+    fontSize: 13,
+    fontWeight: 600,
+  },
   alertIcon: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -386,6 +405,19 @@ const styles = {
     height: 20,
     borderRadius: '50%',
     background: theme.red,
+    color: theme.white,
+    fontSize: 12,
+    fontWeight: 700,
+    flexShrink: 0,
+  },
+  alertIconWarning: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 20,
+    height: 20,
+    borderRadius: '50%',
+    background: theme.yellow,
     color: theme.white,
     fontSize: 12,
     fontWeight: 700,

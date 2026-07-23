@@ -1,0 +1,22 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# find_open_promotion_pr returns the open rc/* PR targeting main, or None
+# when there is none (real: PRInfo | None). A fresh fake has no promotion
+# PR, so the contract pins the None path — the shape StagingPromotionLoop
+# branches on before cutting a new RC. None serializes as empty stdout
+# (mutation/None shape).
+adapter: github
+interaction: find_open_promotion_pr
+recorded_at: "2026-07-20T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: find_open_promotion_pr
+  args: []
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ""
+  stderr: ""
+normalizers: []
+baseline_only: true

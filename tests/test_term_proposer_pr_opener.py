@@ -17,6 +17,12 @@ from ubiquitous_language import (
 class FakePRPort:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.open_prs: dict[int, list[str]] = {}
+
+    async def find_open_bot_pr(self, *, labels: list[str]) -> int | None:
+        wanted = set(labels)
+        hits = [n for n, ls in self.open_prs.items() if wanted & set(ls)]
+        return max(hits) if hits else None
 
     async def open_bot_pr(
         self,

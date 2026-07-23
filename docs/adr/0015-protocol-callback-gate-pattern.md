@@ -1,8 +1,9 @@
 # ADR-0015: Protocol-Based Callback Injection for Merge-Phase Gates
 
 **Status:** Accepted
-**Enforced by:** tests/test_review_phase_hooks.py
 **Date:** 2026-03-18
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_review_phase_hooks.py
 
 ## Context
 
@@ -140,6 +141,6 @@ exception in spirit: pragmatic co-location where the type has a narrow scope.
 - Issue: #1746
 - `src/models.py` — `CiGateFn`, `VisualGateFn`, `MergeConflictFixFn`, `EscalateFn`, `PublishFn`, `VisualValidationDecision`
 - `src/post_merge_handler.py` — `handle_approved()` callback injection
-- `src/review_phase.py:check_visual_gate`, `src/review_phase.py:_fetch_code_scanning_alerts`
+- `src/review_phase/_phase.py:check_visual_gate`, `src/review_phase/_phase.py:_fetch_code_scanning_alerts`
 - `src/visual_validation.py` — `compute_visual_validation()`
 - `src/escalation_gate.py` — `should_escalate_debug()`

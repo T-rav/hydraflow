@@ -3,8 +3,8 @@
 Three short-lived labels mark intra-stage adversarial review activity. They
 are applied while an adversarial sub-stage is running and cleared when the
 phase completes. Unlike the canonical pipeline labels
-(``hydraflow-discover``, ``hydraflow-shape``, ``hydraflow-plan``,
-``hydraflow-ready``, ``hydraflow-review``, ``hydraflow-hitl``), these
+(``hydraflow-find``, ``hydraflow-plan``, ``hydraflow-ready``,
+``hydraflow-review``, ``hydraflow-hitl``), these
 labels do **not** move an issue between pipeline queues — the
 ``IssueStore`` label map ignores them. They are observable markers for
 operators, dashboards, and downstream consumers (event bus, wiki).

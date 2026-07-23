@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import random
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -18,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
     from circuit_breaker import CircuitBreaker
-    from execution import SubprocessRunner
+    from execution import SimpleResult, SubprocessRunner
 
 logger = logging.getLogger("hydraflow.subprocess")
 
@@ -310,6 +312,14 @@ class CircuitBreakerOpenError(RuntimeError):
     """
 
 
+#: The billing-provider identity of the default (Claude CLI / harness) backend.
+#: One-shot OpenAI-compatible backends carry their own registry name
+#: ("openrouter"/"zai"/"kimi"); everything routed through the harness bills
+#: against Anthropic. Used as ``CreditExhaustedError.provider``'s default so a
+#: signal is scoped to Anthropic unless a backend classifies itself otherwise.
+PROVIDER_ANTHROPIC = "anthropic"
+
+
 class CreditExhaustedError(RuntimeError):
     """Raised when a subprocess fails because API credits are exhausted.
 
@@ -318,11 +328,26 @@ class CreditExhaustedError(RuntimeError):
     resume_at:
         The datetime (UTC) when credits are expected to reset, or ``None``
         if no reset time could be parsed from the error output.
+    provider:
+        The billing-provider identity that hit the limit — ``"anthropic"``
+        (the Claude CLI / harness, the default) or a one-shot OpenAI-compatible
+        backend name (``"openrouter"``/``"zai"``/``"kimi"``). The orchestrator
+        scopes the credit pause to loops routed to this provider so a Claude cap
+        never halts z.ai/kimi background workers, and vice-versa (#9807). Kept
+        defaulting to ``"anthropic"`` so every existing raise site — all of
+        which are harness paths — stays Anthropic-scoped without change.
     """
 
-    def __init__(self, message: str = "", *, resume_at: datetime | None = None) -> None:
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        resume_at: datetime | None = None,
+        provider: str = PROVIDER_ANTHROPIC,
+    ) -> None:
         super().__init__(message)
         self.resume_at = resume_at
+        self.provider = provider
 
 
 _AUTH_PATTERNS = ("401", "not logged in", "authentication required", "auth token")
@@ -424,6 +449,9 @@ _DOCKER_ENV_PASSTHROUGH_KEYS = (
     "CLAUDE_CODE_OAUTH_TOKEN",
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
+    "ZAI_API_KEY",
+    "MOONSHOT_API_KEY",
+    "KIMI_API_KEY",
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
     "GOOGLE_GENERATIVE_AI_API_KEY",
@@ -549,12 +577,8 @@ def _parse_weekly_resume_time(text: str) -> datetime | None:
     return _parse_weekly_month_day(text) or _parse_weekly_weekday(text)
 
 
-async def probe_credit_availability() -> bool:
-    """Make a lightweight Anthropic API call to check if credits are available.
-
-    Returns ``True`` if credits appear available (or if the check cannot be
-    performed), ``False`` if the API responds with a credit-exhaustion error.
-    """
+async def _probe_anthropic() -> bool:
+    """Lightweight Anthropic API call — the ground-truth credit probe."""
     import os
 
     import httpx
@@ -590,6 +614,138 @@ async def probe_credit_availability() -> bool:
         # here — they propagate so they surface in logs instead of silently
         # returning False.
         return True
+
+
+async def probe_openai_compatible_availability(base_url: str, api_key: str) -> bool:
+    """Cheap credit probe for an OpenAI-compatible one-shot backend (z.ai / kimi
+    / openrouter). A ``GET {base_url}/models`` costs no tokens and reflects the
+    same key/billing the real spawn uses.
+
+    Mirrors :func:`_probe_anthropic`'s contract exactly: returns ``True`` when
+    credits appear available OR the probe cannot be performed (no key/base_url,
+    transient network error — fail-open per #6381/#9869 so a flaky probe delays
+    a real pause by at most one detection cycle rather than masking it), and
+    ``False`` only when the backend confirms exhaustion (HTTP 402/429 or a
+    credit-exhaustion body).
+    """
+    import httpx
+
+    if not api_key or not base_url:
+        # Cannot probe (backend not wired) — assume available; scoping falls
+        # back to pausing on the text signal alone.
+        return True
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{base_url.rstrip('/')}/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if resp.status_code == 200:
+                return True
+            if resp.status_code in (402, 429):
+                return False
+            # Any other status: only a credit-exhaustion body counts as exhausted
+            # (a 401/404 is an auth/routing problem, not a spent balance).
+            return not is_credit_exhaustion(resp.text)
+    except (httpx.HTTPError, OSError):
+        return True
+
+
+async def probe_credit_availability(
+    provider: str = PROVIDER_ANTHROPIC,
+    *,
+    base_url: str = "",
+    api_key: str = "",
+) -> bool:
+    """Corroborate a credit-exhaustion signal against the AFFECTED backend.
+
+    ``provider`` selects which backend to probe: the default ``"anthropic"``
+    hits the Anthropic API; a one-shot OpenAI-compatible backend name
+    (``"openrouter"``/``"zai"``/``"kimi"``) probes ``{base_url}/models`` with
+    ``base_url``/``api_key`` (resolved by the caller from the provider registry).
+
+    Returns ``True`` if credits appear available (or the check cannot be
+    performed — fail-open), ``False`` only when the backend confirms exhaustion.
+    Back-compat: called with no args it probes Anthropic exactly as before.
+    """
+    if provider == PROVIDER_ANTHROPIC:
+        return await _probe_anthropic()
+    return await probe_openai_compatible_availability(base_url, api_key)
+
+
+# Ground-truth auth-rejection phrases in ``gh auth status`` output. These
+# indicate the stored credentials are genuinely bad/missing (a PERSISTENT
+# failure) rather than a transient network hiccup. Kept broader than the
+# ``_AUTH_PATTERNS`` used to classify per-call stderr because ``gh auth status``
+# renders its own diagnostic wording ("authentication failed", "bad
+# credentials", "token ... is invalid").
+_AUTH_STATUS_REJECTION_PATTERNS = (
+    "not logged in",
+    "not logged into",
+    "authentication failed",
+    "failed to authenticate",
+    "authentication required",
+    "requires authentication",
+    "bad credentials",
+    "token is invalid",
+    "invalid token",
+    "401",
+    "403",
+)
+
+# `gh auth status` can take several seconds on first invocation when the OS
+# keychain unlocks the token; bound it so a hung probe can't block the caller.
+# Module-level so tests can patch a smaller value.
+_GH_AUTH_PROBE_TIMEOUT_S = 15.0
+
+
+async def probe_auth_availability() -> bool:
+    """Corroborate a GitHub auth-failure signal with a live ``gh auth status``.
+
+    Returns ``True`` when auth appears healthy (or the probe cannot be run),
+    and ``False`` **only** when ``gh auth status`` positively confirms the
+    credentials are rejected/missing (a persistent failure).
+
+    Mirrors :func:`probe_credit_availability`'s fail-open philosophy: a single
+    ``AuthenticationError`` from a gh call can be a transient network/API blip
+    (#9621 — one such blip stalled the whole factory ~2.5h). So every
+    un-probeable or transient condition — gh missing, spawn failure, timeout,
+    or a non-auth network error — is treated as "auth is fine" (``True``), and
+    a factory-wide halt is only triggered on ground-truth auth rejection.
+    """
+    if shutil.which("gh") is None:
+        # Cannot probe — assume auth is fine (fail-open), same as the credit probe.
+        return True
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "gh",
+            "auth",
+            "status",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError:
+        # Could not even spawn gh (transient/environmental) — fail-open.
+        return True
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=_GH_AUTH_PROBE_TIMEOUT_S
+        )
+    except TimeoutError:
+        # Hung probe — transient, not a confirmed rejection. Kill and fail-open.
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        return True
+    if proc.returncode == 0:
+        return True
+    combined = (
+        (stdout or b"").decode(errors="replace")
+        + (stderr or b"").decode(errors="replace")
+    ).lower()
+    # rc != 0 AND the output names an auth rejection → confirmed persistent
+    # failure. Any other non-zero exit (e.g. an unreachable network) is
+    # transient, so fail-open.
+    return not any(p in combined for p in _AUTH_STATUS_REJECTION_PATTERNS)
 
 
 def parse_credit_resume_time(text: str) -> datetime | None:
@@ -764,28 +920,43 @@ def make_docker_env(
 _GH_COMMANDS = frozenset({"gh", "git"})
 
 
-async def run_subprocess(
+async def _run_gated(
     *cmd: str,
     cwd: Path | None = None,
     gh_token: str = "",
     timeout: float = 120.0,
     runner: SubprocessRunner | None = None,
-) -> str:
-    """Run a subprocess and return stripped stdout.
+    extra_env: dict[str, str] | None = None,
+    stdin_input: bytes | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    cancel_poll_interval: float = 5.0,
+    check: bool,
+) -> SimpleResult:
+    """Shared gated core for :func:`run_subprocess`/:func:`run_subprocess_result`.
 
-    Strips the ``CLAUDECODE`` key from the environment to prevent
-    nesting detection.  When *gh_token* is non-empty it is injected
-    as ``GH_TOKEN``.
+    Applies identical hardening regardless of *check*: ``gh``/``git`` commands
+    are gated through the global concurrency semaphore, the rate-limit
+    cooldown, and (``gh`` only) the circuit breaker; every call is bounded by
+    *timeout* via the injected/default :class:`SubprocessRunner`, which also
+    supplies process-group registration and reap (``HostRunner.run_simple``,
+    #9911/#10017/#10019) — free to every caller of this helper.
 
-    For ``gh`` and ``git`` commands, execution is gated through a global
-    semaphore to prevent GitHub API rate limiting from concurrent calls.
+    ``check=True`` (used by :func:`run_subprocess`) raises ``RuntimeError`` /
+    ``AuthenticationError`` on a non-zero exit, matching historical
+    ``run_subprocess`` behavior. ``check=False`` (used by
+    :func:`run_subprocess_result`) never raises for a non-zero exit — the
+    caller branches on ``SimpleResult.returncode`` instead. Both raise
+    :class:`SubprocessTimeoutError` on timeout and :class:`CircuitBreakerOpenError`
+    when the breaker is OPEN — those are infrastructure failures, not business
+    outcomes a caretaker loop should have to special-case per call site.
 
-    Raises :class:`SubprocessTimeoutError` if the command exceeds *timeout* seconds.
-    Raises :class:`RuntimeError` on non-zero exit.
+    Module-private: never imported outside this file.
     """
     from execution import get_default_runner
 
     env = make_clean_env(gh_token)
+    if extra_env:
+        env.update(extra_env)
 
     resolved_runner = runner if runner is not None else get_default_runner()
 
@@ -803,13 +974,16 @@ async def run_subprocess(
         else None
     )
 
-    async def _exec() -> str:
+    async def _exec() -> SimpleResult:
         try:
             result = await resolved_runner.run_simple(
                 list(cmd),
                 cwd=str(cwd) if cwd is not None else None,
                 env=env,
                 timeout=timeout,
+                input=stdin_input,
+                cancel_check=cancel_check,
+                cancel_poll_interval=cancel_poll_interval,
             )
         except TimeoutError as exc:
             if breaker is not None:
@@ -833,24 +1007,30 @@ async def run_subprocess(
                 # Auth failure = bad/again-rejected credentials, not an outage;
                 # opening the breaker wouldn't help (the token is still bad after
                 # the reset window), so it must not count toward it.
-                raise AuthenticationError(msg) from cause
+                if check:
+                    raise AuthenticationError(msg) from cause
+                return result
             if _is_rate_limited(result.stderr):
                 _trigger_rate_limit_cooldown()
                 # A rate limit has its own global cooldown and is not a
                 # GitHub-down signal, so it must NOT count toward the breaker.
-                raise RuntimeError(msg) from cause
+                if check:
+                    raise RuntimeError(msg) from cause
+                return result
             # Count toward the breaker ONLY genuine GitHub/network outages — a
             # 4xx / business-logic non-zero exit (404, "label does not exist",
             # "cannot approve your own pull request", …) is normal control flow
             # and must not accumulate toward an OPEN that halts the factory.
             if breaker is not None and _is_gh_outage_error(result.stderr):
                 breaker.record_failure()
-            raise RuntimeError(msg) from cause
+            if check:
+                raise RuntimeError(msg) from cause
+            return result
         _reset_rate_limit_backoff()
         if breaker is not None:
             breaker.record_success()
         _maybe_sample_shadow(cmd, result.returncode, result.stdout, result.stderr)
-        return result.stdout
+        return result
 
     if use_semaphore:
         if breaker is not None and not breaker.allow_request():
@@ -866,6 +1046,77 @@ async def run_subprocess(
         async with _get_gh_semaphore():
             return await _exec()
     return await _exec()
+
+
+async def run_subprocess(
+    *cmd: str,
+    cwd: Path | None = None,
+    gh_token: str = "",
+    timeout: float = 120.0,
+    runner: SubprocessRunner | None = None,
+) -> str:
+    """Run a subprocess and return stripped stdout.
+
+    Strips the ``CLAUDECODE`` key from the environment to prevent
+    nesting detection.  When *gh_token* is non-empty it is injected
+    as ``GH_TOKEN``.
+
+    For ``gh`` and ``git`` commands, execution is gated through a global
+    semaphore to prevent GitHub API rate limiting from concurrent calls.
+
+    Raises :class:`SubprocessTimeoutError` if the command exceeds *timeout* seconds.
+    Raises :class:`RuntimeError` on non-zero exit.
+    """
+    result = await _run_gated(
+        *cmd, cwd=cwd, gh_token=gh_token, timeout=timeout, runner=runner, check=True
+    )
+    return result.stdout
+
+
+async def run_subprocess_result(
+    *cmd: str,
+    cwd: Path | None = None,
+    gh_token: str = "",
+    timeout: float = 120.0,
+    runner: SubprocessRunner | None = None,
+    extra_env: dict[str, str] | None = None,
+    stdin_input: bytes | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    cancel_poll_interval: float = 5.0,
+) -> SimpleResult:
+    """Run a subprocess and return the full result, never raising on non-zero exit.
+
+    Sibling of :func:`run_subprocess` for callers that branch on
+    ``proc.returncode`` themselves (e.g. accepting ``rc in {0, 1}`` for
+    ``make``/``rg``, or treating any non-zero as "skip this tick"). Applies
+    identical hardening: timeout bound + process-group reap + registry-join
+    (via the injected/default ``SubprocessRunner``), and for ``gh``/``git``
+    the global concurrency semaphore, rate-limit cooldown, and circuit
+    breaker accounting.
+
+    *extra_env* is merged on top of :func:`make_clean_env`'s output (e.g. to
+    forward a harness-specific env var). *stdin_input*, when provided, is
+    written to the child's stdin (mirrors ``HostRunner.run_simple``'s
+    ``input`` param — renamed here to avoid shadowing the ``input`` builtin).
+
+    Raises :class:`SubprocessTimeoutError` if the command exceeds *timeout*
+    seconds, and :class:`CircuitBreakerOpenError` if the ``gh`` circuit
+    breaker is OPEN — both are infrastructure failures, not business
+    outcomes. Does **not** raise for a non-zero exit (including auth or
+    rate-limit failures): the caller inspects ``result.returncode``.
+    """
+    return await _run_gated(
+        *cmd,
+        cwd=cwd,
+        gh_token=gh_token,
+        timeout=timeout,
+        runner=runner,
+        extra_env=extra_env,
+        stdin_input=stdin_input,
+        cancel_check=cancel_check,
+        cancel_poll_interval=cancel_poll_interval,
+        check=False,
+    )
 
 
 _RETRYABLE_PATTERNS = (

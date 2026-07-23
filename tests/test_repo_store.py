@@ -129,3 +129,45 @@ def test_update_overrides_returns_false_for_missing_slug(tmp_path: Path) -> None
     assert store.update_overrides("nonexistent", {"max_workers": 1}) is False
     assert store.update_overrides("", {"max_workers": 1}) is False
     assert store.update_overrides("acme-repo", {}) is False
+
+
+# --- CH-6 data-governance class declaration (#9734) ---
+
+
+def test_data_class_defaults_to_internal(tmp_path: Path) -> None:
+    store = RepoStore(tmp_path)
+    record = store.upsert(
+        RepoRecord(slug="acme-repo", repo="acme/repo", path=str(tmp_path / "repo"))
+    )
+    assert record.data_class == "internal"
+    assert store.get("acme-repo").data_class == "internal"
+
+
+def test_data_class_round_trips_through_persistence(tmp_path: Path) -> None:
+    store = RepoStore(tmp_path)
+    store.upsert(
+        RepoRecord(
+            slug="acme-repo",
+            repo="acme/repo",
+            path=str(tmp_path / "repo"),
+            data_class="regulated-phi",
+        )
+    )
+    reloaded = RepoStore(tmp_path).get("acme-repo")
+    assert reloaded is not None
+    assert reloaded.data_class == "regulated-phi"
+
+
+def test_legacy_record_without_data_class_loads_as_internal(tmp_path: Path) -> None:
+    """Pre-CH-6 repos.json entries carry no data_class key."""
+    import json
+
+    payload = {
+        "repos": [
+            {"slug": "acme-repo", "repo": "acme/repo", "path": str(tmp_path / "repo")}
+        ]
+    }
+    (tmp_path / "repos.json").write_text(json.dumps(payload))
+    record = RepoStore(tmp_path).get("acme-repo")
+    assert record is not None
+    assert record.data_class == "internal"

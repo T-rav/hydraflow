@@ -7,8 +7,9 @@ success result is returned.
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -122,6 +123,8 @@ class _FakePlannerRunner(_ScriptedRunner):
         **_unused: Any,
     ) -> Any:
         _ = (worker_id, research_context)
+        if self._parent.plan_hold_seconds:
+            await asyncio.sleep(self._parent.plan_hold_seconds)
         issue_number = getattr(task, "id", getattr(task, "number", 0))
         if not self._parent._consume_budget(issue_number):
             return PlanResultFactory.create(
@@ -139,6 +142,8 @@ class _FakePlannerRunner(_ScriptedRunner):
         _epic_number: int,
         _child_plans: dict[Any, Any],
         _child_titles: dict[Any, Any],
+        *,
+        issue_labels: Sequence[str] = (),
     ) -> str:
         return ""
 
@@ -385,6 +390,37 @@ class FakeLLM:
         self._advisor = _FakeAdvisorRunner()
         # ADR-0063 phase-level scripted outcomes (W3a/W3b/W4/W5).
         self._phase_scripts = _FakePhaseScripts()
+        # Artificial real-time delay (seconds) _FakePlannerRunner.plan()
+        # awaits before returning. Defaults to 0.0 (no-op) — set via
+        # MockWorldSeed.plan_hold_seconds by sandbox_main.py for scenarios
+        # that need a sustained, real wall-clock "active" window (see
+        # MockWorldSeed.plan_hold_seconds docstring for why).
+        self.plan_hold_seconds: float = 0.0
+        # DecompositionCouncil replies, keyed by issue → FIFO of raw transcript
+        # strings. The council makes two seam calls per attempt (direction then
+        # validation), so a scenario scripts them in that order (and doubles the
+        # list for a retry). Popped in call order by ``next_decomposition_reply``.
+        self.decomposition: dict[int, deque[str]] = {}
+
+    def script_decomposition(self, issue_number: int, replies: list[str]) -> None:
+        """Script the raw transcript strings the DecompositionCouncil's seam
+        returns, in call order: [direction, validation, (retry: direction,
+        validation), ...].
+
+        Accumulates (like every other ``script_*`` method): repeated calls for
+        the same issue append, so the two application paths agree — sandbox_main
+        passes the whole list in one call, while ``MockWorld.apply_seed`` replays
+        ``seed.scripts`` one reply at a time. Both build the same FIFO."""
+        self.decomposition.setdefault(issue_number, deque()).extend(replies)
+
+    def next_decomposition_reply(self, issue_number: int) -> str | None:
+        """Pop the next scripted council transcript for *issue_number*, or
+        ``None`` when the queue is empty (the council treats ``None`` as a
+        garbled/retryable pass)."""
+        queue = self.decomposition.get(issue_number)
+        if not queue:
+            return None
+        return queue.popleft()
 
     def script_triage(self, issue_number: int, results: list[Any]) -> None:
         self.triage_runner.add_script(

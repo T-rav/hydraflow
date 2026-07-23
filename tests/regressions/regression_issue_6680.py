@@ -59,7 +59,6 @@ class TestLoadRecentTypeError:
     a validator receives an unexpected type) and must not be silently
     swallowed by the except Exception handler on line 281."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6680 — fix not yet landed", strict=False)
     def test_type_error_in_model_validate_json_propagates(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
 
@@ -89,7 +88,6 @@ class TestLoadProposalMetadataTypeError:
     """A TypeError during ProposalMetadata.model_validate is a programming
     bug and must propagate from the inner except Exception on line 312."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6680 — fix not yet landed", strict=False)
     def test_type_error_in_model_validate_propagates(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
 

@@ -2,9 +2,9 @@
 source: feedback_squash_stack_cascade.md
 name: feedback_squash_stack_cascade
 description: How to land a stacked-PR chain onto staging when force-push (rebase --onto) is hook-blocked
-status: pending
-issue: null
-promoted_in: null
+status: promoted
+issue: 10177
+promoted_in: '#10177'
 wontfix_reason: null
 created: '2026-05-31'
 ---

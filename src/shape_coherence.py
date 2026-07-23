@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import re
 
+from human_steering import fenced_steering_guidance
+
 
 def build_shape_coherence_prompt(
     *,
@@ -21,6 +23,7 @@ def build_shape_coherence_prompt(
     issue_title: str,
     discover_brief: str = "",
     proposal: str = "",
+    guidance: str = "",
     **_kwargs: object,
 ) -> str:
     """Build a prompt that asks an agent to evaluate a Shape proposal.
@@ -28,9 +31,20 @@ def build_shape_coherence_prompt(
     ``discover_brief`` is the upstream brief the proposal is responding to
     (may be empty if the issue skipped Discover — the rubric is still
     applicable except for criterion 5).
-    ``proposal`` is the Shape proposal text to evaluate.
+    ``proposal`` is the Shape proposal text to evaluate. ``guidance``
+    (ADR-0099 #4) is live operator steering for this issue, folded in
+    fenced via :func:`fenced_steering_guidance`, which returns ``""``
+    when there is no guidance so behavior is unchanged when the feature
+    is off.
     """
-    return f"""You are running the Shape Coherence skill for issue #{issue_number}: {issue_title}.
+    if not proposal.strip():
+        # No Shape proposal exists (#9823): issues that skipped Shape must
+        # not fail a rubric over an absent document. Empty prompt = the
+        # skill loop's "no input data" pass; ShapeRunner always supplies a
+        # real proposal, unchanged.
+        return ""
+
+    prompt = f"""You are running the Shape Coherence skill for issue #{issue_number}: {issue_title}.
 
 You are evaluating a SHAPE PROPOSAL against the five-criterion rubric
 below. You are NOT producing a proposal — you are judging one.
@@ -104,6 +118,7 @@ SUMMARY: <first-failing-keyword> — <short description>
 FINDINGS:
 - <keyword> — <specific evidence>
 """
+    return prompt + fenced_steering_guidance(guidance)
 
 
 _STATUS_RE = re.compile(r"SHAPE_COHERENCE_RESULT:\s*(OK|RETRY)", re.IGNORECASE)

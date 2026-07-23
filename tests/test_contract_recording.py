@@ -328,6 +328,112 @@ def test_record_claude_stream_returns_empty_when_stdout_blank(tmp_path: Path) ->
     assert paths == []
 
 
+def test_record_claude_stream_isolates_from_user_settings(tmp_path: Path) -> None:
+    """The recorder spawn must restrict to project-scope settings.
+
+    Issue #10220: without ``--setting-sources project`` a host-installed
+    plugin's ``SessionStart`` hook (e.g. superpowers) injects its full
+    skill-invocation guidance into every recorded "ping" cassette — a
+    multi-KB payload that changes whenever the plugin's skill content
+    changes and has nothing to do with the stream-json protocol shape
+    this cassette exists to guard.
+    """
+    captured: list[list[str]] = []
+
+    def fake_run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        captured.append(list(argv))
+        return _completed(argv=argv, stdout='{"type": "result", "result": "ok"}\n')
+
+    with patch("contract_recording.subprocess.run", side_effect=fake_run):
+        record_claude_stream(tmp_stream_dir=tmp_path)
+
+    argv = captured[0]
+    assert "--setting-sources" in argv
+    assert argv[argv.index("--setting-sources") + 1] == "project"
+
+
+def test_record_claude_stream_redacts_assistant_text(tmp_path: Path) -> None:
+    """Free-form assistant/result text is replaced with a stable placeholder.
+
+    Issue #10220: live LLM text differs on every call even for the
+    identical "ping" prompt, so byte-for-byte drift comparison could
+    never converge — the claude adapter's attempt counter climbed
+    forever. Redacting the wording at record time keeps the cassette
+    deterministic while preserving the event shape StreamParser's
+    contract actually cares about.
+    """
+    sample_stream = (
+        '{"type": "assistant", "message": {"content": '
+        '[{"type": "text", "text": "Hi there, how can I help today?"}]}}\n'
+        '{"type": "result", "result": "Hi there, how can I help today?"}\n'
+    )
+    with patch(
+        "contract_recording.subprocess.run",
+        side_effect=lambda argv, **_: _completed(argv=argv, stdout=sample_stream),
+    ):
+        paths = record_claude_stream(tmp_stream_dir=tmp_path)
+
+    written = paths[0].read_text(encoding="utf-8")
+    assert "how can I help today" not in written
+    assert "<redacted" in written
+
+
+def test_record_claude_stream_writes_identical_cassette_across_differing_wording(
+    tmp_path: Path,
+) -> None:
+    """Two recordings that differ only in LLM wording produce byte-identical
+    cassettes once redacted — this is what lets the claude adapter reach a
+    genuine clean tick (issue #10220)."""
+    stream_a = (
+        '{"type": "assistant", "message": {"content": '
+        '[{"type": "text", "text": "Sure, ping received!"}]}}\n'
+        '{"type": "result", "result": "Sure, ping received!"}\n'
+    )
+    stream_b = (
+        '{"type": "assistant", "message": {"content": '
+        '[{"type": "text", "text": "Pong — here to help."}]}}\n'
+        '{"type": "result", "result": "Pong — here to help."}\n'
+    )
+
+    with patch(
+        "contract_recording.subprocess.run",
+        side_effect=lambda argv, **_: _completed(argv=argv, stdout=stream_a),
+    ):
+        paths_a = record_claude_stream(tmp_stream_dir=tmp_path / "a")
+    with patch(
+        "contract_recording.subprocess.run",
+        side_effect=lambda argv, **_: _completed(argv=argv, stdout=stream_b),
+    ):
+        paths_b = record_claude_stream(tmp_stream_dir=tmp_path / "b")
+
+    assert paths_a[0].read_text(encoding="utf-8") == paths_b[0].read_text(
+        encoding="utf-8"
+    )
+
+
+def test_record_claude_stream_preserves_empty_text(tmp_path: Path) -> None:
+    """An empty assistant text block is left empty, not redacted.
+
+    Distinguishing "no text produced" from "text produced" is the one bit
+    of shape signal the redaction must not erase.
+    """
+    sample_stream = (
+        '{"type": "assistant", "message": {"content": '
+        '[{"type": "text", "text": ""}]}}\n'
+    )
+    with patch(
+        "contract_recording.subprocess.run",
+        side_effect=lambda argv, **_: _completed(argv=argv, stdout=sample_stream),
+    ):
+        paths = record_claude_stream(tmp_stream_dir=tmp_path)
+
+    import json
+
+    line = paths[0].read_text(encoding="utf-8").splitlines()[0]
+    event = json.loads(line)
+    assert event["message"]["content"][0]["text"] == ""
+
+
 # ---------------------------------------------------------------------------
 # Cross-cutting: logging on failure
 # ---------------------------------------------------------------------------
@@ -436,12 +542,15 @@ def _mutation_fake_run(
     argv: list[str], **_: object
 ) -> subprocess.CompletedProcess[str]:
     """Simulate gh CLI responses for the three mutation recordings."""
-    # gh api .../git/ref/heads/main  → main SHA
+    # gh api .../git/commits/<sha> --jq .tree.sha  (read main's tree)
+    # gh api .../git/commits (POST synthetic commit) --jq .sha
+    # Both resolve to a non-empty SHA so _provision_scratch_branch proceeds.
+    if "api" in argv and any("git/commits" in a for a in argv):
+        return _completed(argv=argv, stdout="b" * 40 + "\n")
+    # gh api .../git/ref(s)/... → main SHA. The DELETE / create-branch / PATCH
+    # outputs are unused by the recorder (it only checks the exit code).
     if "api" in argv and any("git/ref" in a for a in argv):
         return _completed(argv=argv, stdout=_MAIN_SHA)
-    # gh api .../git/refs (branch creation)
-    if "api" in argv and any("git/refs" in a for a in argv):
-        return _completed(argv=argv, stdout="{}\n")
     # gh issue create → issue URL
     if "issue" in argv and "create" in argv:
         return _completed(argv=argv, stdout=_ISSUE_URL)
@@ -526,6 +635,187 @@ def test_record_github_mutation_writes_merge_pr_cassette(tmp_path: Path) -> None
     assert not cassette.baseline_only
 
 
+def test_record_github_mutation_merge_pr_writes_stable_args(tmp_path: Path) -> None:
+    """merge_pr cassette must store the stable logical args (["42"]) — NOT the
+    live sandbox PR number (the fake returns /pull/7). ``input.args`` is compared
+    verbatim by the drift layer, so a live number would phantom-drift every tick.
+    """
+    with patch("contract_recording.subprocess.run", side_effect=_mutation_fake_run):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    cassette = Cassette.model_validate(_load_yaml(tmp_path / "merge_pr.yaml"))
+    assert cassette.input.args == ["42"], (
+        f"merge_pr args must be stable ['42'], not the live PR number: "
+        f"{cassette.input.args}"
+    )
+    assert (
+        cassette.output.stdout == "merged pull request https://github.com/_/_/pull/42\n"
+    )
+    assert cassette.normalizers == ["pr_number"]
+
+
+def test_record_github_mutation_close_issue_writes_stable_args(tmp_path: Path) -> None:
+    """close_issue cassette must store the stable logical args (["42"]) even
+    though the freshly-created sandbox issue URL ends in a different number."""
+    with patch("contract_recording.subprocess.run", side_effect=_mutation_fake_run):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    cassette = Cassette.model_validate(_load_yaml(tmp_path / "close_issue.yaml"))
+    assert cassette.input.args == ["42", "--reason", "not planned"], (
+        f"close_issue args must be the stable ['42', '--reason', 'not planned'] "
+        f"(stable #9535 arg composed with the #10025 reason flags), not the "
+        f"live issue number: {cassette.input.args}"
+    )
+
+
+def test_record_merge_pr_posts_synthetic_commit_before_pr_create(
+    tmp_path: Path,
+) -> None:
+    """The recorder must POST a tree-identical synthetic commit (with a
+    ``parents[]`` field) AND fast-forward the scratch ref (PATCH) BEFORE calling
+    ``gh pr create`` — otherwise GitHub rejects the no-diff branch."""
+    calls: list[list[str]] = []
+
+    def capture(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=capture):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    commit_post = [
+        i
+        for i, c in enumerate(calls)
+        if any(str(a).startswith("parents[]=") for a in c)
+    ]
+    patch_ref = [
+        i
+        for i, c in enumerate(calls)
+        if "--method" in c
+        and "PATCH" in c
+        and any("git/refs/heads/contract-recorder-scratch" in a for a in c)
+    ]
+    pr_create = [i for i, c in enumerate(calls) if "pr" in c and "create" in c]
+
+    assert commit_post, "recorder must POST a synthetic commit (parents[]= field)"
+    assert patch_ref, "recorder must PATCH the scratch ref to the new commit"
+    assert pr_create, "recorder must call gh pr create"
+    assert commit_post[0] < pr_create[0], (
+        "synthetic commit POST must precede gh pr create"
+    )
+    assert patch_ref[0] < pr_create[0], "scratch ref PATCH must precede gh pr create"
+
+
+def test_record_merge_pr_pr_create_targets_scratch_branch_and_main(
+    tmp_path: Path,
+) -> None:
+    """``gh pr create`` must open the PR from the scratch branch against main.
+
+    ``record_github_mutation`` now runs three separate ``gh pr create``
+    provisioning steps (merge_pr, pr_create, create_promotion_pr), each
+    against its own scratch branch — filter to merge_pr's branch
+    (``contract-recorder-scratch``) specifically rather than counting all
+    ``pr create`` calls.
+    """
+    calls: list[list[str]] = []
+
+    def capture(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=capture):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    pr_creates = [
+        c
+        for c in calls
+        if "pr" in c
+        and "create" in c
+        and "--head" in c
+        and c[c.index("--head") + 1] == "contract-recorder-scratch"
+    ]
+    assert len(pr_creates) == 1
+    argv = pr_creates[0]
+    assert (
+        "--head" in argv
+        and argv[argv.index("--head") + 1] == "contract-recorder-scratch"
+    )
+    assert "--base" in argv and argv[argv.index("--base") + 1] == "main"
+
+
+def test_record_merge_pr_best_effort_deletes_stale_scratch_branch(
+    tmp_path: Path,
+) -> None:
+    """A stale scratch branch (from a prior interrupted tick) is best-effort
+    deleted first, and a non-zero DELETE does not abort recording."""
+    calls: list[list[str]] = []
+
+    def capture(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        # Simulate the DELETE failing (ref does not exist) — must be tolerated.
+        if "--method" in argv and "DELETE" in argv:
+            return _completed(argv=argv, returncode=1, stderr="Not Found\n")
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=capture):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    delete_calls = [
+        i
+        for i, c in enumerate(calls)
+        if "--method" in c
+        and "DELETE" in c
+        and any("git/refs/heads/contract-recorder-scratch" in a for a in c)
+    ]
+    assert delete_calls, "recorder must best-effort DELETE the stale scratch ref"
+    assert (tmp_path / "merge_pr.yaml").exists(), (
+        "a failing best-effort DELETE must not abort merge_pr recording"
+    )
+
+
+def test_record_merge_pr_still_merges_live_pr_number(tmp_path: Path) -> None:
+    """The side-effecting ``gh pr merge`` uses the LIVE PR number (7 from the
+    fake URL) even though the cassette records the stable ["42"]."""
+    calls: list[list[str]] = []
+
+    def capture(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=capture):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    merge_calls = [c for c in calls if "pr" in c and "merge" in c]
+    assert len(merge_calls) == 1
+    assert "7" in merge_calls[0], (
+        f"gh pr merge must target the live PR number 7: {merge_calls[0]}"
+    )
+    cassette = Cassette.model_validate(_load_yaml(tmp_path / "merge_pr.yaml"))
+    assert cassette.input.args == ["42"], "cassette must still record the stable arg"
+
+
+def test_record_merge_pr_returns_none_when_synthetic_commit_fails(
+    tmp_path: Path,
+) -> None:
+    """When the synthetic-commit POST exits non-zero, no merge_pr cassette is
+    written and the recorder never raises into the loop (graceful failure)."""
+
+    def failing_commit_post(
+        argv: list[str], **_: object
+    ) -> subprocess.CompletedProcess[str]:
+        # The synthetic-commit POST is the git/commits call carrying parents[].
+        if any(str(a).startswith("parents[]=") for a in argv):
+            return _completed(argv=argv, returncode=1, stderr="422 Unprocessable\n")
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=failing_commit_post):
+        paths = record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    stems = {p.stem for p in paths}
+    assert "merge_pr" not in stems
+    assert not (tmp_path / "merge_pr.yaml").exists()
+
+
 def test_record_github_mutation_returns_empty_when_gh_missing(
     tmp_path: Path,
 ) -> None:
@@ -580,3 +870,313 @@ def test_record_github_mutation_gh_invoked_with_text_capture(tmp_path: Path) -> 
         assert kw.get("capture_output") is True
         assert kw.get("text") is True
         assert kw.get("check", False) is False
+
+
+# ---------------------------------------------------------------------------
+# _record_create_issue: sandbox cleanup
+# ---------------------------------------------------------------------------
+
+
+def test_record_create_issue_closes_sandbox_issue_after_cassette_written(
+    tmp_path: Path,
+) -> None:
+    """_record_create_issue must close the sandbox issue it created after
+    writing the cassette so no durable open issues leak across refresh ticks."""
+    from contract_recording import _record_create_issue
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        if "issue" in argv and "create" in argv:
+            return _completed(argv=argv, stdout=_ISSUE_URL)
+        if "issue" in argv and "close" in argv:
+            return _completed(argv=argv, stdout="")
+        return _completed(argv=argv, stdout="abc1234\n")
+
+    with patch("contract_recording.subprocess.run", side_effect=fake_run):
+        result = _record_create_issue(sandbox_repo=_SANDBOX, tmp_dir=tmp_path)
+
+    assert result is not None, "cassette path must be returned"
+    assert (tmp_path / "create_issue.yaml").exists()
+
+    close_calls = [c for c in calls if "gh" in c and "issue" in c and "close" in c]
+    assert len(close_calls) == 1, (
+        f"expected exactly one 'gh issue close' call to clean up the sandbox issue, "
+        f"got {len(close_calls)}: {close_calls}"
+    )
+    assert "42" in close_calls[0], (
+        f"gh issue close must use issue number 42 parsed from the create URL, "
+        f"got argv: {close_calls[0]}"
+    )
+    assert _SANDBOX in close_calls[0], "gh issue close must target the sandbox repo"
+
+
+# ---------------------------------------------------------------------------
+# _record_create_pr (issue #8699)
+# ---------------------------------------------------------------------------
+
+
+def test_record_github_mutation_writes_pr_create_cassette(tmp_path: Path) -> None:
+    with patch("contract_recording.subprocess.run", side_effect=_mutation_fake_run):
+        paths = record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    stems = {p.stem for p in paths}
+    assert "pr_create" in stems
+    cassette = Cassette.model_validate(_load_yaml(tmp_path / "pr_create.yaml"))
+    assert cassette.adapter == "github"
+    assert cassette.interaction == "pr_create"
+    assert cassette.input.command == "create_pr"
+    assert cassette.output.exit_code == 0
+    assert "pr_number" in cassette.normalizers
+    assert not cassette.baseline_only
+
+
+def test_record_github_mutation_pr_create_writes_stable_args(tmp_path: Path) -> None:
+    """pr_create cassette must store the stable logical args (["42",
+    "contract-branch"]) matching the committed baseline byte-for-byte — NOT
+    the live sandbox PR number/branch. ``input.args`` is compared verbatim by
+    the drift layer, so a live value would phantom-drift every tick (#9535
+    pattern)."""
+    with patch("contract_recording.subprocess.run", side_effect=_mutation_fake_run):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    cassette = Cassette.model_validate(_load_yaml(tmp_path / "pr_create.yaml"))
+    assert cassette.input.args == ["42", "contract-branch"], (
+        f"pr_create args must be stable ['42', 'contract-branch'], not the "
+        f"live values: {cassette.input.args}"
+    )
+    assert cassette.output.stdout == "https://github.com/test-org/test-repo/pull/101\n"
+
+
+def test_record_create_pr_posts_synthetic_commit_before_pr_create(
+    tmp_path: Path,
+) -> None:
+    """The recorder must POST a tree-identical synthetic commit AND
+    fast-forward the scratch ref BEFORE calling ``gh pr create`` — otherwise
+    GitHub rejects the no-diff branch (the #9535 bug merge_pr had)."""
+    calls: list[list[str]] = []
+
+    def capture(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=capture):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    commit_post = [
+        i
+        for i, c in enumerate(calls)
+        if any(str(a).startswith("parents[]=") for a in c)
+    ]
+    patch_ref = [
+        i
+        for i, c in enumerate(calls)
+        if "--method" in c
+        and "PATCH" in c
+        and any("git/refs/heads/contract-recorder-create-pr-scratch" in a for a in c)
+    ]
+    pr_creates = [
+        i
+        for i, c in enumerate(calls)
+        if "pr" in c
+        and "create" in c
+        and "--head" in c
+        and c[c.index("--head") + 1] == "contract-recorder-create-pr-scratch"
+    ]
+
+    assert commit_post, "recorder must POST a synthetic commit (parents[]= field)"
+    assert patch_ref, "recorder must PATCH the create_pr scratch ref"
+    assert pr_creates, "recorder must call gh pr create for the create_pr scratch PR"
+    assert patch_ref[0] < pr_creates[0], (
+        "scratch ref PATCH must precede gh pr create for the create_pr scratch branch"
+    )
+
+
+def test_record_create_pr_closes_scratch_pr_after_cassette_written(
+    tmp_path: Path,
+) -> None:
+    """``_record_create_pr`` must close (with --delete-branch) the scratch PR
+    it opened after writing the cassette, so the sandbox doesn't accumulate
+    open PRs across ContractRefreshLoop ticks."""
+    from contract_recording import _record_create_pr
+
+    calls: list[list[str]] = []
+
+    def capture(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=capture):
+        result = _record_create_pr(sandbox_repo=_SANDBOX, tmp_dir=tmp_path)
+
+    assert result is not None
+    assert (tmp_path / "pr_create.yaml").exists()
+
+    close_calls = [
+        c for c in calls if "pr" in c and "close" in c and "--delete-branch" in c
+    ]
+    assert len(close_calls) == 1, (
+        f"expected exactly one 'gh pr close --delete-branch' cleanup call, "
+        f"got {len(close_calls)}: {close_calls}"
+    )
+    assert "7" in close_calls[0], (
+        f"gh pr close must use the live PR number (7) parsed from the create "
+        f"URL, got argv: {close_calls[0]}"
+    )
+
+
+def test_record_create_pr_returns_none_when_synthetic_commit_fails(
+    tmp_path: Path,
+) -> None:
+    """When the synthetic-commit POST for the create_pr scratch branch exits
+    non-zero, no pr_create cassette is written and the recorder never raises
+    into the loop (graceful failure)."""
+
+    def failing_commit_post(
+        argv: list[str], **_: object
+    ) -> subprocess.CompletedProcess[str]:
+        if any(str(a).startswith("parents[]=") for a in argv):
+            return _completed(argv=argv, returncode=1, stderr="422 Unprocessable\n")
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=failing_commit_post):
+        paths = record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    stems = {p.stem for p in paths}
+    assert "pr_create" not in stems
+    assert not (tmp_path / "pr_create.yaml").exists()
+
+
+# ---------------------------------------------------------------------------
+# _record_create_promotion_pr (issue #8699)
+# ---------------------------------------------------------------------------
+
+
+def test_record_github_mutation_writes_create_promotion_pr_cassette(
+    tmp_path: Path,
+) -> None:
+    with patch("contract_recording.subprocess.run", side_effect=_mutation_fake_run):
+        paths = record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    stems = {p.stem for p in paths}
+    assert "create_promotion_pr" in stems
+    cassette = Cassette.model_validate(
+        _load_yaml(tmp_path / "create_promotion_pr.yaml")
+    )
+    assert cassette.adapter == "github"
+    assert cassette.interaction == "create_promotion_pr"
+    assert cassette.input.command == "create_promotion_pr"
+    assert cassette.output.exit_code == 0
+    assert "pr_number" in cassette.normalizers
+    assert not cassette.baseline_only
+
+
+def test_record_github_mutation_create_promotion_pr_writes_stable_args(
+    tmp_path: Path,
+) -> None:
+    """create_promotion_pr cassette must store the stable rc-branch arg
+    matching the committed #10092 baseline byte-for-byte — NOT the live
+    sandbox scratch branch/PR number."""
+    with patch("contract_recording.subprocess.run", side_effect=_mutation_fake_run):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    cassette = Cassette.model_validate(
+        _load_yaml(tmp_path / "create_promotion_pr.yaml")
+    )
+    assert cassette.input.args == ["rc/2026-05-13-0000"], (
+        f"create_promotion_pr args must be the stable rc-branch value, not "
+        f"the live scratch branch: {cassette.input.args}"
+    )
+    assert cassette.output.stdout == "https://github.com/test/repo/pull/10000\n"
+
+
+def test_record_create_promotion_pr_posts_synthetic_commit_before_pr_create(
+    tmp_path: Path,
+) -> None:
+    """Same no-diff-PR guard as merge_pr/create_pr: the synthetic commit +
+    ref PATCH must precede ``gh pr create`` for the promotion scratch branch."""
+    calls: list[list[str]] = []
+
+    def capture(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=capture):
+        record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    patch_ref = [
+        i
+        for i, c in enumerate(calls)
+        if "--method" in c
+        and "PATCH" in c
+        and any("git/refs/heads/contract-recorder-promotion-scratch" in a for a in c)
+    ]
+    pr_creates = [
+        i
+        for i, c in enumerate(calls)
+        if "pr" in c
+        and "create" in c
+        and "--head" in c
+        and c[c.index("--head") + 1] == "contract-recorder-promotion-scratch"
+    ]
+
+    assert patch_ref, "recorder must PATCH the promotion scratch ref"
+    assert pr_creates, "recorder must call gh pr create for the promotion scratch PR"
+    assert patch_ref[0] < pr_creates[0], (
+        "scratch ref PATCH must precede gh pr create for the promotion branch"
+    )
+
+
+def test_record_create_promotion_pr_closes_scratch_pr_after_cassette_written(
+    tmp_path: Path,
+) -> None:
+    """``_record_create_promotion_pr`` must close (with --delete-branch) the
+    scratch PR it opened after writing the cassette."""
+    from contract_recording import _record_create_promotion_pr
+
+    calls: list[list[str]] = []
+
+    def capture(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=capture):
+        result = _record_create_promotion_pr(sandbox_repo=_SANDBOX, tmp_dir=tmp_path)
+
+    assert result is not None
+    assert (tmp_path / "create_promotion_pr.yaml").exists()
+
+    close_calls = [
+        c for c in calls if "pr" in c and "close" in c and "--delete-branch" in c
+    ]
+    assert len(close_calls) == 1, (
+        f"expected exactly one 'gh pr close --delete-branch' cleanup call, "
+        f"got {len(close_calls)}: {close_calls}"
+    )
+
+
+def test_record_create_promotion_pr_returns_none_when_pr_create_fails(
+    tmp_path: Path,
+) -> None:
+    """A failing ``gh pr create`` for the promotion scratch branch must not
+    write a cassette and must not raise into the loop."""
+
+    def failing_pr_create(
+        argv: list[str], **_: object
+    ) -> subprocess.CompletedProcess[str]:
+        if (
+            "pr" in argv
+            and "create" in argv
+            and "--head" in argv
+            and argv[argv.index("--head") + 1] == "contract-recorder-promotion-scratch"
+        ):
+            return _completed(argv=argv, returncode=1, stderr="422 Unprocessable\n")
+        return _mutation_fake_run(argv)
+
+    with patch("contract_recording.subprocess.run", side_effect=failing_pr_create):
+        paths = record_github_mutation(sandbox_repo=_SANDBOX, tmp_cassette_dir=tmp_path)
+
+    stems = {p.stem for p in paths}
+    assert "create_promotion_pr" not in stems
+    assert not (tmp_path / "create_promotion_pr.yaml").exists()

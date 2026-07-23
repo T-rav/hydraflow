@@ -147,3 +147,90 @@ class TestLiveCorpusReplayScenario:
         assert len(world.github._issues) == 0, (
             "volatile shape difference must not file a hydraflow-find issue"
         )
+
+    async def test_pruned_corpus_only_covered_samples_reach_loop(
+        self, tmp_path: Path
+    ) -> None:
+        """#9633 end-to-end: with the registry-derived coverage predicate
+        wired (production default), no-opinion samples never reach the
+        corpus — the loop sees zero dead weight — while a genuinely
+        shape-drifted covered sample still fires the hydraflow-find +
+        shadow-drift issue (pruning must not suppress real drift)."""
+        from contracts.shape_dispatchers import gh_shape_covers, gh_shape_validator
+
+        world = MockWorld(tmp_path)
+        config = HydraFlowConfig(
+            data_root=tmp_path / "data",
+            repo_root=tmp_path / "repo",
+            repo="hydra/hydraflow",
+        )
+        (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
+        corpus = ShadowCorpus(config.data_root / "contract_shadow")
+        dedup = DedupStore(
+            "live_corpus_replay",
+            config.data_root / "dedup" / "live_corpus_replay.json",
+        )
+        stop = asyncio.Event()
+        deps = LoopDeps(
+            event_bus=EventBus(),
+            stop_event=stop,
+            status_cb=MagicMock(),
+            enabled_cb=lambda _: True,
+            sleep_fn=AsyncMock(),
+        )
+        loop = LiveCorpusReplayLoop(
+            config=config,
+            corpus=corpus,
+            pr_manager=world.github,
+            dedup=dedup,
+            deps=deps,
+        )
+        loop.register("github", "gh", gh_shape_validator, covers=gh_shape_covers)
+        corpus.set_coverage_predicate(loop.covers)
+
+        # No-opinion samples are dropped at record time (never consume
+        # LRU budget, never reach the loop).
+        assert (
+            corpus.record(
+                adapter="git",
+                command="git",
+                args=["ls-remote"],
+                stdout="abc123\trefs/heads/main\n",
+                stderr="",
+                exit_code=0,
+            )
+            is None
+        )
+        assert (
+            corpus.record(
+                adapter="github",
+                command="gh",
+                args=["api", "search/issues", "--jq", ".total_count"],
+                stdout="7\n",
+                stderr="",
+                exit_code=0,
+            )
+            is None
+        )
+        # Covered sample with real shape drift: "QUEUED" is not a valid
+        # PR state literal, so the validator returns a drift verdict.
+        drifted_path = corpus.record(
+            adapter="github",
+            command="gh",
+            args=["pr", "view", "42", "--json", "number,title,state"],
+            stdout=json.dumps({"number": 42, "title": "x", "state": "QUEUED"}) + "\n",
+            stderr="",
+            exit_code=0,
+        )
+        assert drifted_path is not None
+        assert corpus.list() == [drifted_path]
+
+        result = await loop._do_work()
+
+        assert result["skipped_no_dispatcher"] == 0
+        assert result["compared"] == 1
+        assert result["drifted"] == 1
+        assert result["filed_issue"] == 9001
+        labels = world.github.issue(9001).labels
+        assert "hydraflow-find" in labels
+        assert "shadow-drift" in labels

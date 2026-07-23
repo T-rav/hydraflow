@@ -53,12 +53,15 @@ _EVENT_STRING_CASES: list[tuple[EventType, str]] = [
     (EventType.WIKI_SUPERSEDES, "wiki_supersedes"),
     (EventType.TRIBAL_PROMOTION, "tribal_promotion"),
     (EventType.ADR_DRAFT_OPENED, "adr_draft_opened"),
+    (EventType.ADR_CONFORMANCE_UPDATE, "adr_conformance_update"),
+    (EventType.RATCHET_TIGHTENED, "ratchet_tightened"),
     (EventType.ADVERSARIAL_STAGE_STARTED, "adversarial_stage_started"),
     (EventType.ADVERSARIAL_STAGE_CONVERGED, "adversarial_stage_converged"),
     (EventType.ADVERSARIAL_STAGE_EXHAUSTED, "adversarial_stage_exhausted"),
     (EventType.CONCERN_FORWARDED, "concern_forwarded"),
     (EventType.CONCERN_ADDRESSED, "concern_addressed"),
     (EventType.SHIPPED_WITH_KNOWN_GAP, "shipped_with_known_gap"),
+    (EventType.ISSUE_REFINEMENT_UPDATE, "issue_refinement_update"),
 ]
 
 
@@ -98,8 +101,6 @@ class TestEventTypeEnum:
             "PIPELINE_STATS",
             "VISUAL_GATE",
             "BASELINE_UPDATE",
-            "DISCOVER_UPDATE",
-            "SHAPE_UPDATE",
             "CRATE_ACTIVATED",
             "CRATE_COMPLETED",
             "AGENT_ACTIVITY",
@@ -109,12 +110,16 @@ class TestEventTypeEnum:
             "WIKI_SUPERSEDES",
             "TRIBAL_PROMOTION",
             "ADR_DRAFT_OPENED",
+            "ADR_CONFORMANCE_UPDATE",
             "ADVERSARIAL_STAGE_STARTED",
             "ADVERSARIAL_STAGE_CONVERGED",
             "ADVERSARIAL_STAGE_EXHAUSTED",
             "CONCERN_FORWARDED",
             "CONCERN_ADDRESSED",
             "SHIPPED_WITH_KNOWN_GAP",
+            "LOOP_FITNESS_UPDATE",
+            "RATCHET_TIGHTENED",
+            "ISSUE_REFINEMENT_UPDATE",
         }
         actual = {member.name for member in EventType}
         assert expected == actual
@@ -135,6 +140,9 @@ class TestEventTypeEnum:
     def test_enum_comparison_with_string(self) -> None:
         assert EventType.ERROR == "error"
         assert EventType.ERROR == "error"
+
+    def test_adr_conformance_update_is_known_event(self) -> None:
+        assert EventType.ADR_CONFORMANCE_UPDATE.value == "adr_conformance_update"
 
 
 # ---------------------------------------------------------------------------
@@ -878,15 +886,18 @@ class TestRotateSyncUsesAtomicWrite:
         log_path.write_text((event.model_dump_json() + "\n") * 5)
 
         event_log = EventLog(log_path)
+        # Budget fits exactly 3 lines (#9905 size bound): rotation triggers
+        # (file > budget) and the newest 3 survive the byte budget.
+        budget = (len(event.model_dump_json()) + 1) * 3 + 5
         with patch("events.atomic_write") as mock_aw:
-            event_log._rotate_sync(max_size_bytes=10, max_age_days=365)
+            event_log._rotate_sync(max_size_bytes=budget, max_age_days=365)
 
         call_args = mock_aw.call_args[0]
         content = call_args[1]
         # Content should end with newline and contain valid JSON lines
         assert content.endswith("\n")
         lines = [line for line in content.split("\n") if line.strip()]
-        assert len(lines) == 5
+        assert len(lines) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -959,7 +970,11 @@ class TestRotateSyncCorruptContinuance:
         log_path.write_text("\n".join(lines) + "\n")
 
         event_log = EventLog(log_path)
-        event_log._rotate_sync(max_size_bytes=10, max_age_days=365)
+        # Budget fits both valid lines (#9905 size bound) while still being
+        # below the on-disk size (corrupt bytes inflate the file), so
+        # rotation triggers and both valid lines survive.
+        budget = (len(valid_line) + 1) * 2 + 5
+        event_log._rotate_sync(max_size_bytes=budget, max_age_days=365)
 
         # Read rotated file and verify both valid lines were kept
         content = log_path.read_text()

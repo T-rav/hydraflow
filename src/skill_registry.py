@@ -29,7 +29,52 @@ from shape_coherence import (
     build_shape_coherence_prompt,
     parse_shape_coherence_result,
 )
-from test_adequacy import build_test_adequacy_prompt, parse_test_adequacy_result
+from test_adequacy import (
+    build_test_adequacy_prompt,
+    build_test_adequacy_verifier_prompt,
+    finder_asserted_adequate,
+    parse_test_adequacy_result,
+    parse_test_adequacy_verifier_result,
+)
+
+
+@dataclass(frozen=True)
+class VerifierSpec:
+    """An independent second-opinion pass attached to a skill (#9546).
+
+    The verifier runs AFTER the skill's finder loop passes, and ONLY when
+    ``trigger(finder_transcript)`` is true — for test-adequacy that means an
+    explicit ``TEST_ADEQUACY_RESULT: OK`` marker, never the no-marker
+    default-pass. The config keys are resolved with ``getattr(config, key)``
+    at dispatch time so the knobs stay live-editable; a registry test guards
+    each key against typo drift.
+
+    Attributes
+    ----------
+    prompt_builder:
+        ``(issue_number, issue_title, diff, **kwargs) -> str`` — builds the
+        verifier prompt. Must not disclose the finder's verdict.
+    result_parser:
+        ``(transcript) -> (confirmed, summary, gaps)`` — ``confirmed=False``
+        overrides the finder's pass.
+    trigger:
+        ``(finder_transcript) -> bool`` — explicit-OK gate.
+    tool_config_key / model_config_key:
+        ``HydraFlowConfig`` field names for the verifier CLI backend/model.
+        The model must stay independent of the finder's ``review_model``.
+    enabled_config_key:
+        Kill-switch field name (default-on).
+    fail_closed_config_key:
+        Field name for the degraded-run policy (default fail-soft).
+    """
+
+    prompt_builder: Callable[..., str]
+    result_parser: Callable[[str], tuple[bool, str, list[str]]]
+    trigger: Callable[[str], bool]
+    tool_config_key: str
+    model_config_key: str
+    enabled_config_key: str
+    fail_closed_config_key: str
 
 
 @dataclass(frozen=True)
@@ -55,6 +100,9 @@ class AgentSkill:
     result_parser:
         ``(transcript) -> (passed, summary, findings)`` — parses structured
         markers from the agent's response.
+    verifier:
+        Optional :class:`VerifierSpec` for an independent second-opinion pass
+        (#9546). ``None`` for every skill except test-adequacy.
     """
 
     name: str
@@ -63,6 +111,8 @@ class AgentSkill:
     blocking: bool
     prompt_builder: Callable[..., str]
     result_parser: Callable[[str], tuple[bool, str, list[str]]]
+    coverage_check: bool = False
+    verifier: VerifierSpec | None = None
 
 
 # Built-in skills — registered in execution order
@@ -95,9 +145,26 @@ BUILTIN_SKILLS: list[AgentSkill] = [
         name="test-adequacy",
         purpose="Assess whether changed production code has adequate test coverage, edge cases, and regression safety",
         config_key="max_test_adequacy_attempts",
-        blocking=False,
+        # Blocking (#9227): the deterministic coverage-delta check + LLM verdict
+        # already run here pre-review, but as advisory warnings the implementer
+        # never had to act on — so `missing_tests` kept recurring as a review
+        # finding. Gating it (like diff-sanity/scope-check) shifts the catch
+        # left: an uncovered changed line RETRIES the implementer via the
+        # existing prior_failure seam before review ever classifies it. Disable
+        # via max_test_adequacy_attempts=0 if it ever over-gates.
+        blocking=True,
         prompt_builder=build_test_adequacy_prompt,
         result_parser=parse_test_adequacy_result,
+        coverage_check=True,
+        verifier=VerifierSpec(
+            prompt_builder=build_test_adequacy_verifier_prompt,
+            result_parser=parse_test_adequacy_verifier_result,
+            trigger=finder_asserted_adequate,
+            tool_config_key="test_adequacy_verifier_tool",
+            model_config_key="test_adequacy_verifier_model",
+            enabled_config_key="test_adequacy_verifier_enabled",
+            fail_closed_config_key="test_adequacy_verifier_fail_closed",
+        ),
     ),
     AgentSkill(
         name="discover-completeness",

@@ -26,6 +26,11 @@ HYDRAFLOW_LABELS: tuple[tuple[str, str, str], ...] = (
     ("dup_label", "cfd3d7", "Issue already satisfied — no changes needed"),
     ("epic_label", "5319e7", "Epic tracking issue with linked sub-issues"),
     ("epic_child_label", "9b59b6", "Child issue linked to a HydraFlow epic"),
+    (
+        "auto_decomposed_child_label",
+        "9b59b6",
+        "Child created by decompose-to-converge (ADR-0105) — depth guard",
+    ),
     ("verify_label", "c2e0c6", "Post-merge verification pending"),
     ("parked_label", "c5c5c5", "Issue parked — awaiting author clarification"),
     ("diagnose_label", "1d76db", "Issue under diagnostic analysis before HITL"),
@@ -93,6 +98,16 @@ HYDRAFLOW_LITERAL_LABELS: tuple[tuple[str, str, str], ...] = (
     # --- escalation root (bare literal; config field resolves to the
     #     hydraflow-prefixed variant, so this bare name is never created by it) ---
     ("hitl-escalation", "b60205", "Stuck-loop HITL escalation (bare literal label)"),
+    (
+        "sandbox-fail-auto-fix",
+        "d93f0b",
+        "Sandbox suite failed — SandboxFailureFixerLoop dispatches the auto-agent",
+    ),
+    (
+        "sandbox-hitl",
+        "b60205",
+        "Sandbox auto-fix exhausted — needs a human (System tab HITL queue)",
+    ),
     # --- rc-red / RC-duration / revert family (operator-urgent, reddish) ---
     ("rc-red-attribution", "b60205", "Auto-revert culprit attribution for a red RC"),
     ("rc-red-bisect-exhausted", "b60205", "RC bisect exhausted without a culprit"),
@@ -133,7 +148,18 @@ HYDRAFLOW_LITERAL_LABELS: tuple[tuple[str, str, str], ...] = (
     ("issue-cost-spike", "e4e669", "Per-issue cost spike detected"),
     ("arch-knowledge", "e4e669", "Architecture-knowledge coverage gap"),
     ("sanity-loop-stalled", "e4e669", "Sanity loop stalled (dead-man switch)"),
+    (
+        "detector-calibration",
+        "e4e669",
+        "Detector repeatedly escalating one subject (miscalibrated)",
+    ),
+    ("loop-stalled", "e4e669", "Background loop stalled (dead-man switch)"),
     ("wiki-stale", "e4e669", "Wiki freshness dead-man switch fired"),
+    (
+        "factory-stale-code",
+        "e4e669",
+        "Running instance is stale-code behind origin (dead-man switch)",
+    ),
     ("onboarding-blocked", "e4e669", "Onboarding/auto-agent preflight blocked"),
     ("cultural-check", "e4e669", "Principles cultural-check audit label"),
     ("pricing-refresh", "e4e669", "Pricing-refresh loop signal"),
@@ -154,6 +180,16 @@ HYDRAFLOW_LITERAL_LABELS: tuple[tuple[str, str, str], ...] = (
         "human-required",
         "d93f0b",
         "Autonomous attempts exhausted — human action required",
+    ),
+    (
+        "refinement-auto",
+        "ededed",
+        "Issue auto-closed as a duplicate by IssueRefinementLoop (#9957)",
+    ),
+    (
+        "hydraflow-refinement-digest",
+        "c5def5",
+        "Rolling backlog-health digest issue maintained by IssueRefinementLoop",
     ),
 )
 

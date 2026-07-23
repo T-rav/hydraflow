@@ -1,0 +1,23 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# fetch_ci_failure_logs returns aggregated CI failure logs for a PR
+# (`gh run view --log-failed`). The dispatcher seeds a failure-log line
+# via seed_ci_failure_log so the read returns a non-empty payload.
+adapter: github
+interaction: fetch_ci_failure_logs
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: fetch_ci_failure_logs
+  args:
+  - '811'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: 'FAILED tests/test_x.py::test_y
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

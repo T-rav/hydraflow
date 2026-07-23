@@ -4,9 +4,175 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W30
+
+- `b28837f` — feat(ul): entry-evidence — 2 new entry links across 2 terms (#10305) (#10305) *(2026-07-22)*
+- `bb77fb1` — fix(triage): parse code-quoting verdicts + raise turn budget (#10291); infra-park != clarification-park (#10290) (#10300) (#10300) *(2026-07-22)*
+- `b1cde30` — feat(ul): entry-evidence — 5 new entry links across 5 terms (#10295) (#10295) *(2026-07-22)*
+- `bfc5d9d` — docs(memory-feedback): mirror 3 pending feedback entries + refresh coverage_matrix (#10288) (#10288) *(2026-07-22)*
+- `1cc250d` — feat(ul): entry-evidence — 4 new entry links across 3 terms (#10284) (#10284) *(2026-07-22)*
+- `48aa743` — feat(ul): edge-proposer — 49 new edges across 24 terms (#10283) (#10283) *(2026-07-22)*
+- `f66ad04` — fix(adr-conformance): pre-flight skip when pytest runner env is broken (#10243) (#10277) (#10277) *(2026-07-22)*
+- `fec83cb` — Fixes #10260: Fix label/dispatch reconciliation so resolved issues ... (#10268) (#10268) *(2026-07-22)*
+- `1bd34db` — feat(ul): term-proposer batch — 4 drafts (#10266) (#10266) *(2026-07-22)*
+- `e11c542` — feat(ul): entry-evidence — 1 new entry links across 1 terms (#10248) (#10248) *(2026-07-22)*
+- `fc4e755` — feat(ul): entry-evidence — 1 new entry links across 1 terms (#10235) (#10235) *(2026-07-22)*
+- `9516955` — feat(pipeline): hydraflow-in-progress claim label — ready→in-progress→review, durable cross-actor build claim (#10168) (#10172) (#10172) *(2026-07-22)*
+- `21f2343` — docs(build): add pre-push self-check checklist for six recurring CI-red patterns (#10169) (#10171) (#10171) *(2026-07-22)*
+- `6b45686` — feat(merge-heal): pin docs/arch/.meta.json to base in arch-stale heal to stop re-DIRTY churn (#10167) (#10170) (#10170) *(2026-07-22)*
+- `c9b9ab6` — feat(ul): edge-proposer — 1 new edges across 1 terms (#10222) (#10222) *(2026-07-21)*
+- `36ac0f4` — feat(ul): edge-proposer — 1 new edges across 1 terms (#10218) (#10218) *(2026-07-21)*
+- `637fbbb` — feat(ul): entry-evidence — 2 new entry links across 2 terms (#10210) (#10210) *(2026-07-21)*
+- `d071fbd` — refactor(pipeline): collapse Discover+Shape into Plan — full removal (#9773) (#10166) (#10166) *(2026-07-21)*
+- `3f833ff` — fix(codeql): model scrub_secrets() as py/clear-text-storage sanitizer (#9143) (#10164) (#10164) *(2026-07-21)*
+- `dc6060b` — test(fake-coverage): cover final FakeGitHub adapter-surface slice — gap→0 (#9768) (#10165) (#10165) *(2026-07-21)*
+- `37dcabe` — feat(health): loop self-repair actuator — persistent error-heartbeat → auto-repair or file (#10140) (#10155) (#10155) *(2026-07-21)*
+- `94be7b3` — fix(fake-fidelity): FakeGitHub PR-title format matches real PRManager (#10153) (#10160) (#10160) *(2026-07-21)*
+- `31e4cbd` — test(fake-coverage): cover next FakeGitHub adapter-surface slice (#9768) (#10161) (#10161) *(2026-07-21)*
+- `e9115b0` — feat(pr-red): Phase 2 — dispatch auto-agent to fix real (non-infra) settled CI reds on their branch (#10027) (#10157) (#10157) *(2026-07-21)*
+- `90d56c9` — test(trust): cassette FakeGitHub PR-review/label cluster — 11 methods (#9768 slice 3) (#10152) (#10152) *(2026-07-21)*
+- `f76c267` — feat(adr): AdrDriftResolverLoop — triage-before-escalate so drift rollups self-resolve (#9976) (#10146) (#10146) *(2026-07-21)*
+- `0d66c52` — feat(pipeline): ADR-0107 + flag-gated Triage→Plan routing — keystone for collapsing Discover/Shape (#9773) (#10145) (#10145) *(2026-07-21)*
+- `d4d4ecc` — fix(factory): perf/ auto-merge + worktree arch-meta merge driver (#10143) (#10143) *(2026-07-21)*
+- `e556096` — feat(erosion): ErosionMetricsLoop v1 — Pattern-B caretaker files change-spread/concept-scatter drift to triage (#10107) (#10138) (#10138) *(2026-07-21)*
+- `769843e` — feat(sandbox): seed repo-wiki broken-cite fixture + wiki_rot_detector active-trigger scenario (#10133) (#10137) (#10137) *(2026-07-21)*
+- `2c34150` — feat(erosion): v1 concept-scatter sensor — newly-added symbol across K>=3 modules (#10106) (#10136) (#10136) *(2026-07-21)*
+- `76bc56b` — feat(sandbox): seed worker-status event-history + trust_fleet_sanity active-trigger scenario (#10133) (#10135) (#10135) *(2026-07-21)*
+- `9af3aa2` — feat(sandbox): per-issue updated_at seed field + stale_issue_gc fresh-skip active-trigger scenario (#9544) (#10132) (#10132) *(2026-07-21)*
+- `281548c` — feat(sandbox): seed BGWorkerManager registered_workers set + dead-man-switch stall-escalation e2e scenario (#10086) (#10131) (#10131) *(2026-07-21)*
+- `896486d` — feat(sandbox): seed materializer for EpicState + health trend/heartbeat history; s71/s72 active-trigger scenarios (#9643) (#10084) (#10084) *(2026-07-21)*
+- `0c629f3` — feat(erosion): pure change-spread sensor — modules-crossed + files-touched per change, baselined (#10105) (#10116) (#10116) *(2026-07-21)*
+- `97d7436` — feat(pr-red): Phase 1 infra-flake retrier caretaker loop — settled-red detect + bounded rerun (#10027) (#10124) (#10124) *(2026-07-21)*
+- `95a6402` — feat(retrospective): re-arm HITL stale-insight window only on human close via is_bot_close (#8996) (#10110) (#10110) *(2026-07-21)*
+- `6f0e235` — fix(state-gc): sweep route_back_counts + review-orphan counters on issue close; structural issue-keyed-field guard (#10083) (#10114) (#10114) *(2026-07-21)*
+- `77a163a` — test(trust): cassette the staging/RC promotion cluster — 13 FakeGitHub methods (#9768 slice 1) (#10092) (#10092) *(2026-07-21)*
+- `0668416` — feat(config): heavy make-invoking loop subprocess timeouts become operator knobs (#9555) (#10091) (#10091) *(2026-07-21)*
+- `33ff371` — feat(preflight): widen AutoAgentPreflightLoop intake to attempt-cap/quality-gate HITL issues (#9721) (#10080) (#10080) *(2026-07-21)*
+- `2ff96bb` — fix(adr-drift): batch cross-cutting fleet-PR drift into one rollup (#9662) (#10093) (#10093) *(2026-07-21)*
+- `52b6752` — fix(subprocess): cooperative kill-switch in the shared helper — migrate staging_bisect._run_git (#9577) (#10077) (#10077) *(2026-07-21)*
+- `b0c7d5e` — test(guard): spawn-side reap guard — raw-spawn containment + reap-pairing ratchets (#9623) (#10088) (#10088) *(2026-07-21)*
+- `ddfdb66` — build(arch): auto-resolve docs/arch/.meta.json + changelog.md merge conflicts (#10099) (#10099) *(2026-07-20)*
+- `9f99bcf` — fix(escalation): TTL re-drive so stale auto-agent escalations self-heal (#9719) (#10079) (#10079) *(2026-07-20)*
+- `982cec5` — fix(workspace,state): automate HITL reset runbook residuals — main-repo core.worktree heal + attempt-counter close-to-clear (#9723) (#10082) (#10082) *(2026-07-20)*
+- `ee15f26` — feat(test-adequacy): independent second-opinion verifier gated on explicit OK (#9546) (#10076) (#10076) *(2026-07-20)*
+- `fa5e02e` — feat(gh-load): cached CI-run + issue-list reads and first-tick stagger — cut direct-gh load (#9814) (#10075) (#10075) *(2026-07-20)*
+- `aee928c` — feat(sandbox): active-trigger scenarios for six governance loops (s65-s70) (#9543) (#10074) (#10074) *(2026-07-20)*
+- `64fc05d` — feat(watchdog): thread-level event-loop freeze detector (#9552) (#10070) (#10070) *(2026-07-20)*
+- `14f4a2e` — fix(refinement): v1 follow-ups — not-planned closes, priority budget, fail-closed fake, inefficiency re-file (#10025) (#10066) (#10066) *(2026-07-20)*
+- `1306712` — fix(fitness): cadence-derived min_samples — scorecards can finally score (#9841) (#10056) (#10056) *(2026-07-20)*
+- `8509ee0` — feat(orchestration): v2 IssueDriver runtime phase spec + accept ADR-0099 (#10038) (#10055) (#10055) *(2026-07-20)*
+- `d94945e` — fix(ul): one file per term — delete stale forks, hard-fail uniqueness lint, store-level dedupe (#9938) (#10051) (#10051) *(2026-07-20)*
+- `f4c0d38` — fix(stale-issue): branch-GC reconciler + unpushed-work boot check (#10011) (#10052) (#10052) *(2026-07-20)*
+- `9d6184d` — feat(liveness): external factory watchdog + boot-time down-detection (#10044) (#10044) *(2026-07-20)*
+- `9fa2966` — fix(health-monitor): stale-code dead-man-switch — host in HealthMonitorLoop (#9596) (#10035) (#10035) *(2026-07-20)*
+- `6206f38` — fix(stale-issue): detect regression-test rot — false-close + orphaned-RED (#9597) (#10039) (#10039) *(2026-07-20)*
+- `45ef36f` — fix(wiki): worktree-isolate runtime wiki writes — boot store read-only + queue-routed ingest (#9836) (#10033) (#10033) *(2026-07-20)*
+- `67cc3ce` — fix(file-util): bounded file_lock with FIFO gate + FileLockTimeout (#9661) (#10032) (#10032) *(2026-07-20)*
+- `ccebee6` — feat(refinement): IssueRefinementLoop — tiered backlog dedup, priority scoring, operator digest (#9957) (#10024) (#10024) *(2026-07-20)*
+
+## 2026-W29
+
+- `33f8b6f` — feat(refine): prompt self-refinement — honeypot-gated auto-merge prompt-fix PRs + telemetry consumption (#9724) (#10006) (#10006) *(2026-07-19)*
+- `f7c15a9` — fix(audit): split P10.3 enforcement from measurement — per-PR gate + telemetry scan (#9902) (#10008) (#10008) *(2026-07-19)*
+- `79d683c` — feat(gate-health): GateHealthLoop — CI reds as distributions, not events (#9974) (#10003) (#10003) *(2026-07-19)*
+- `5bb06db` — docs(dark-factory): the new-loop checklist is seven checkpoints, not five (#10004) (#10004) *(2026-07-19)*
+- `6312563` — fix(gc): bound events.jsonl growth + prune stranded per-issue state (#9905) (#9999) (#9999) *(2026-07-19)*
+- `3cb90cf` — fix(workspace-gc): route open-issue GitHub reads through PRPort (#9575) (#9988) (#9988) *(2026-07-19)*
+- `c63f057` — fix(ul): slugify context-map Mermaid node ids (stable + unique) (#9980) (#9980) *(2026-07-19)*
+- `d58fd13` — docs(adr): sync README status cells to ADR files + add consistency guard (#9456) (#9967) (#9967) *(2026-07-18)*
+- `8cda10a` — fix(adr): repoint rotted src citations + add citation-existence ratchet (#9963) (#9963) *(2026-07-18)*
+- `25ba8da` — fix(adr-xref): merge cited modules per ADR number + warn on duplicates (#9505, #9465) (#9960) (#9960) *(2026-07-18)*
+- `90be6dc` — docs(adr): resolve 5 ADR-drift rollups (#9950 #9779 #9781 #9775 #9418) (#9953) (#9953) *(2026-07-18)*
+- `0c27386` — fix(ul): single-flight guard — at most one open UL-graph bot PR across the family (#9893, #9890) (#9939) (#9939) *(2026-07-18)*
+- `4d20d74` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9926) (#9926) *(2026-07-18)*
+- `cb09ea0` — feat(ul): edge-proposer — 3 new edges across 3 terms (#9912) (#9912) *(2026-07-18)*
+- `15bbcac` — feat(ul): edge-proposer — 81 new edges across 40 terms (#9896) (#9896) *(2026-07-18)*
+- `90114b5` — feat(ul): entry-evidence — 21 new entry links across 14 terms (#9897) (#9897) *(2026-07-18)*
+- `f07fa2f` — feat(ul): entry-evidence — 20 new entry links across 14 terms (#9886) (#9886) *(2026-07-18)*
+- `c540840` — feat(ul): term-proposer batch — 1 drafts (#9864) (#9864) *(2026-07-18)*
+- `c91e35f` — feat(ul): entry-evidence — 15 new entry links across 12 terms (#9880) (#9880) *(2026-07-18)*
+- `5ed366d` — feat(ul): entry-evidence — 13 new entry links across 10 terms (#9868) (#9868) *(2026-07-18)*
+- `dfa0ca8` — feat(ul): entry-evidence — 13 new entry links across 10 terms (#9790) (#9790) *(2026-07-18)*
+- `120e2eb` — feat: epic-to-epic lineage — nested decompose-to-converge (depth 2) (#9757) (#9761) (#9761) *(2026-07-17)*
+- `d721487` — feat: decompose-to-converge P1 — narrow HITL to genuine dead-ends (ADR-0105) (#9756) (#9756) *(2026-07-15)*
+
+## 2026-W28
+
+- `79acd3a` — feat(llm): make the term-proposer / entry-evidence drafters dial-able (#9752) (#9752) *(2026-07-11)*
+- `c34e61a` — feat(triage): prompt-injection honeypot — validate the request before handling (#9747) (#9747) *(2026-07-11)*
+- `be0b5d5` — feat(prompt-gate): lightweight-seam label enforcement + traceability marker verification (convergence findings 5,9,10) (#9745) (#9745) *(2026-07-09)*
+- `753658f` — feat(staging-promotion): close promotion-evidence gaps from convergence review (#9743) (#9743) *(2026-07-09)*
+- `b732f28` — feat(evidence-pack): per-RC release evidence-pack compiler — the binder (CH-4, #9732) (#9742) (#9742) *(2026-07-09)*
+- `a16597c` — feat(merge-policy): policy-as-code merge gates from the factory-autonomy table (CH-3, #9731) (#9741) (#9741) *(2026-07-09)*
+- `f009569` — feat(prompt-gate): LLM data-governance gates at every spawn seam (CH-6, #9734) (#9739) (#9739) *(2026-07-09)*
+- `1d2d8db` — feat(manifest): per-PR reproducibility manifest + AI system inventory (CH-7, #9735) (#9738) (#9738) *(2026-07-09)*
+- `9f62794` — feat(traceability): requirement-ID threading + traceability matrix ratchet (CH-5, #9733) (#9737) (#9737) *(2026-07-09)*
+- `cee31ec` — feat(approval-records): named-human approval evidence + role separation on the CH-1 chain (CH-2, #9730) (#9740) (#9740) *(2026-07-08)*
+- `9c63956` — feat(audit-chain): tamper-evident audit streams — hash-chained JSONL + retention (CH-1) (#9736) (#9736) *(2026-07-08)*
+- `2009f17` — feat(loops): DetectorCalibrationLoop — the factory watches its own sensors (Fix F) (#9728) (#9728) *(2026-07-08)*
+- `0fd20bf` — feat(scaffold): bring scaffold_loop up to the current ratchets (13 wiring sites) (#9726) (#9726) *(2026-07-08)*
+- `b269794` — feat(cost): soft-throttle band before the hard-cap kill (Fix I) (#9725) (#9725) *(2026-07-08)*
+- `4768add` — feat(auto-tighten): auto-tightening ratchet loop (coverage floor, ADR-0104) (#9713) (#9713) *(2026-07-07)*
+
+## 2026-W27
+
+- `a963f8f` — feat(steering): enable human-steering by default (#9710 enable-readiness, all 6 phases + allowlist) (#9711) (#9711) *(2026-07-05)*
+- `83cf489` — feat(steering): continuous human-on-the-loop steering channel (ADR-0103, control surface #4) (#9709) (#9709) *(2026-07-04)*
+- `ef22341` — Convergence hardening: real lap signatures, ledger lifecycle, caretaker guards (#9693) (#9706) (#9706) *(2026-07-04)*
+- `ed627b8` — docs(adr): backfill Enforcement for all 59 grandfathered ADRs (drain grandfather set to ∅) (#9696) (#9696) *(2026-07-02)*
+- `a482385` — docs(adr): correct ADR-0102 Rule 3 (gate fails OPEN on advisor degradation by design) (#9695) (#9695) *(2026-07-02)*
+- `f170b89` — fix(adr-0101): drop line-number citation to satisfy P1.16 (#9692) (#9692) *(2026-07-02)*
+- `aae9526` — feat(disturbance): Phase B — burn-down loop (ADR-0095) (#9686) (#9686) *(2026-07-02)*
+- `8f35ebb` — Convergence gate GA: remove convergence_gate_enabled (gate is the sole review path) (#9688) (#9688) *(2026-07-01)*
+- `8358094` — feat(disturbance): Phase A — feedforward disturbance dampener (gate + 2 detectors) (#9682) (#9682) *(2026-07-01)*
+- `54a0365` — docs(adr): ADR-0094 — orchestration as a control system + control-role vocabulary (#9679) (#9679) *(2026-07-01)*
+- `9914531` — ADR conformance as a measured contract (ADR-0098) (#9684) (#9684) *(2026-07-01)*
+- `7eb71e4` — Two-level convergence Phase 2d: oscillation caretaker loop (#9683) (#9683) *(2026-07-01)*
+- `7503e7e` — Two-level convergence Phase 2c: migrate attempt counters into the ledger (#9681) (#9681) *(2026-07-01)*
+- `62cd012` — Two-level convergence Phase 2b: boundary verdict recording (Triage/Shape/Plan) (#9677) (#9677) *(2026-06-30)*
+- `e396bad` — Merge origin/staging into Phase1+2a; resolve ADR-0093 collision (convergence ADRs -> 0094/0095), union config + README *(2026-06-30)*
+- `1877391` — feat: loop-fitness scorecard (read-only measurement substrate) (#9672) (#9672) *(2026-06-30)*
+- `a642ac1` — docs(adr-0094): soften escalate-parity wording (reject adds oscillation cause) *(2026-06-30)*
+- `5a5a105` — docs(adr): ADR-0094 approve-path gating + live convergence (Phase 2a) *(2026-06-30)*
+- `4c9e6dc` — docs(adr): ADR-0093 two-level convergence (Gate + ConvergenceLedger) *(2026-06-30)*
+
+## 2026-W26
+
+- `5e72016` — Fixes #9080: Provision isolated GitHub contracts sandbox (sandbox session + teardown) (#9512) (#9512) *(2026-06-22)*
+- `0117ea0` — feat(test-adequacy): add deterministic coverage-delta cross-check (#9567) (#9646) (#9646) *(2026-06-22)*
+- `8e3a40d` — feat(ul): term-proposer batch — 1 drafts (#9655) (#9655) *(2026-06-22)*
+- `efdb1cb` — feat(ul): term-proposer batch — 1 drafts (#9654) (#9654) *(2026-06-22)*
+- `6f1dc99` — feat(ul): entry-evidence — 3 new entry links across 1 terms (#9653) (#9653) *(2026-06-22)*
+- `e4d1ef8` — feat(ul): entry-evidence — 27 new entry links across 12 terms (#9638) (#9638) *(2026-06-22)*
+- `1b9ef5b` — feat(ul): edge-proposer — 5 new edges across 5 terms (#9637) (#9637) *(2026-06-22)*
+- `e81d29d` — feat(ul): entry-evidence — 10 new entry links across 5 terms (#9620) (#9620) *(2026-06-22)*
+
+## 2026-W25
+
+- `ef30b34` — feat(ul): edge-proposer — 5 new edges across 5 terms (#9619) (#9619) *(2026-06-21)*
+- `2865085` — feat(ul): term-proposer batch — 1 drafts (#9612) (#9612) *(2026-06-21)*
+- `376ea77` — feat(ul): entry-evidence — 3 new entry links across 2 terms (#9611) (#9611) *(2026-06-21)*
+- `dada382` — feat(ul): entry-evidence — 14 new entry links across 5 terms (#9573) (#9573) *(2026-06-21)*
+- `4dc2b15` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9571) (#9571) *(2026-06-21)*
+- `74c6d83` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9560) (#9560) *(2026-06-21)*
+- `79f2109` — feat(ul): entry-evidence — 20 new entry links across 11 terms (#9549) (#9549) *(2026-06-21)*
+- `27a4fe5` — feat(ul): entry-evidence — 3 new entry links across 3 terms (#9534) (#9534) *(2026-06-21)*
+- `9f3ae72` — feat(ul): entry-evidence — 7 new entry links across 4 terms (#9533) (#9533) *(2026-06-21)*
+- `5f5fb99` — feat(ul): entry-evidence — 5 new entry links across 4 terms (#9495) (#9495) *(2026-06-21)*
+- `bfc5425` — feat(ul): entry-evidence — 21 new entry links across 11 terms (#9610) (#9610) *(2026-06-21)*
+- `1e288b0` — feat(ul): entry-evidence — 8 new entry links across 5 terms (#9492) (#9492) *(2026-06-21)*
+- `5e24e54` — Accept ADR-0027: duplicate class merge artifact pattern (#9493) (#9493) *(2026-06-21)*
+- `d1d7e11` — Fixes #9507: ADR-0007/0013/0019 carry the same dashboard drift FP +... (#9518) (#9518) *(2026-06-20)*
+- `69fea6a` — feat(factory): generate-in-worktree foundation + DiagramLoop migration (#9539 pt1) (#9614) (#9614) *(2026-06-19)*
+- `e920762` — feat(loops): per-loop work-cycle watchdog (closes #9556) (#9594) (#9594) *(2026-06-19)*
+- `1d8a175` — fix: close regression-test backlog from the 2026-06-13 session (10 issues) (#9592) (#9592) *(2026-06-19)*
+- `9ce3101` — Fixes #9442: wiki_rot_detector _gh_closed_escalations bypasses PRPo... (#9509) (#9509) *(2026-06-15)*
+
 ## 2026-W24
 
-- `0773c6d` — chore: salvage uncommitted changes for issue #9507 *(2026-06-13)*
+- `e79114c` — chore(wiki): untrack RepoWikiLoop runtime caches to stop perpetual tree-dirt (#9537) (#9537) *(2026-06-14)*
+- `5a715ac` — fix(adr-drift): stop recurring false-positive ADR-drift HITL escalations (#9530) (#9530) *(2026-06-13)*
+- `4e65ff6` — Fixes #9499: PricingRefreshLoop bare-tier alias may lag the newest ... (#9517) (#9517) *(2026-06-13)*
 - `f0974e5` — fix(wiki): resolve committed conflict markers in 11 term files (#9482) (#9484) (#9484) *(2026-06-12)*
 - `79662e5` — fix(observability): suppress Sentry noise — bugs-only filter + test init guard (#9481) (#9481) *(2026-06-12)*
 - `cadb008` — Fixes #9354: Shadow-drift: exclude non-deterministic corpus samples... (#9445) (#9445) *(2026-06-12)*
@@ -407,30 +573,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `be1315c` — feat(wiki): LLM semantic-drift layer (E2) (#8410) (#8410) *(2026-04-23)*
 - `8de17bf` — docs(adr): backfill real Enforced-by refs for 14 ADRs (B1) (#8404) (#8404) *(2026-04-23)*
 - `1b79b45` — feat(adr): require Enforced-by linkage on Accepted ADRs (P3) (#8398) (#8398) *(2026-04-23)*
-- `39c6fc9` — feat(principles-audit): ADR-0044 + audit framework + P1 checks (#8386) (#8386) *(2026-04-22)*
-- `57157c8` — feat(audit): prompt audit report + scoring engine (sub-project 1 of 4) (#8376) (#8376) *(2026-04-21)*
-- `046f5fa` — refactor(agent-cli): scan /opt/plugins dynamically instead of hardcoding (#8375) (#8375) *(2026-04-21)*
-- `6b45f82` — feat(skills): boot-time install + prompt alignment + per-phase whitelist (#8374) (#8374) *(2026-04-21)*
-
-## 2026-W16
-
-- `03cb313` — Phase 0: regression tests + CI prep for staging/RC workflow (#7518) (#7518) *(2026-04-18)*
-
-## 2026-W15
-
-- `6e18c3b` — Issue cache: append-only JSONL mirror with typed record API (#6429) (#6429) *(2026-04-08)*
-- `a30d132` — chore: accept ADR-0023 (dead class artifacts in mock-based tests) (#6189) (#6189) *(2026-04-06)*
-- `7e7bd72` — Fixes #6011: Fix ADR 0023 numbering collision — 9 ADRs share same n... (#6147) (#6147) *(2026-04-06)*
-
-## 2026-W14
-
-- `494f736` — docs: ADR-0032 Per-Repo Wiki Knowledge Base (Karpathy pattern) (#6096) (#6096) *(2026-04-05)*
-- `f65f00b` — docs: accept ADR-0023 pair + add diagnostic and HITL plans (#6093) (#6093) *(2026-04-05)*
-- `2977a62` — docs: ADR-0031 Product Track Architecture (Discover/Shape phases) (#6010) (#6010) *(2026-04-05)*
-
-## 2026-W13
-
-- `bbf7336` — docs: Add ADRs for report pipeline, caretaker loops, and routes decomposition (#5904) (#5904) *(2026-03-28)*
 
 
 <!-- arch:generated -->

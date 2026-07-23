@@ -99,9 +99,6 @@ class TestHealthMonitorSuggestionIngestionBlocksHaveReraise:
     ``reraise_on_credit_or_bug``.
     """
 
-    @pytest.mark.xfail(
-        reason="Regression for issue #6855 — fix not yet landed", strict=False
-    )
     def test_suggestion_ingestion_except_blocks_have_reraise_guard(self) -> None:
         filepath = SRC / "health_monitor_loop.py"
         assert filepath.exists(), f"Source file not found: {filepath}"
@@ -125,9 +122,6 @@ class TestKnownSitesHaveReraiseGuard:
         ("filename", "approx_line", "desc"),
         KNOWN_UNGUARDED_SITES,
         ids=[f"{f}:{ln}" for f, ln, _ in KNOWN_UNGUARDED_SITES],
-    )
-    @pytest.mark.xfail(
-        reason="Regression for issue #6855 — fix not yet landed", strict=False
     )
     def test_known_site_has_reraise_guard(
         self, filename: str, approx_line: int, desc: str

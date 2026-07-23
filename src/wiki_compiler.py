@@ -21,8 +21,15 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from dedup_store import DedupStore
 from knowledge_metrics import metrics as _metrics
+from prompt_gate_alerts import (
+    alert_prompt_gate_block,
+    clear_prompt_gate_block,
+    is_prompt_gate_blocked,
+)
 from repo_wiki import WikiEntry
+from wiki_anchor_gate import config_field_vocabulary, has_repo_anchor
 
 _SYNTHESIS_ID_RE = re.compile(r"^(\d+)-")
 
@@ -77,6 +84,7 @@ class ADRDraftDecision(BaseModel):
 
 if TYPE_CHECKING:
     from config import Credentials, HydraFlowConfig
+    from events import EventBus
     from execution import SubprocessRunner
     from repo_wiki import RepoWikiStore
     from tribal_wiki import TribalWikiStore
@@ -146,6 +154,23 @@ Example of the required format:
 - Restating the title in the first sentence.
 - Inline JSON or code fences spanning more than 5 lines (link to the
   source instead).
+
+## Repo-specificity requirement (load-bearing — entries are gated on this)
+
+Every entry MUST be grounded in **{repo}** — reference at least one
+concrete repo anchor: a `src/*.py` module or file path, a registered
+loop/worker/Port/runner/store name (e.g. `RepoWikiLoop`, `WorkspacePort`),
+a config field (e.g. `rc_cadence_hours`), an ADR number (e.g. `ADR-0042`),
+or a fake/double name (e.g. `FakeGitHub`).
+
+**DROP any entry that reads as generic programming best-practice** — a rule
+that would apply verbatim to any Python project and names nothing from this
+repo. Examples to DROP, not emit: "Use `is None` for optional sentinels",
+"Create a specialized method rather than overloading", "Use portable shell
+commands in Alpine containers", "Delete code blocks bottom-to-top." A
+downstream deterministic gate rejects anchor-less entries and logs them, so
+emitting them wastes the slot — fold their durable, repo-specific corollary
+(if any) into an anchored entry instead.
 
 ## Compilation rules (apply only after the structure rules above)
 
@@ -307,6 +332,17 @@ Anti-patterns to avoid:
 - Restating the title in the first sentence.
 - Inline JSON or code fences spanning more than 5 lines (link to the
   source instead).
+
+## Repo-specificity requirement (load-bearing — entries are gated on this)
+
+Every entry MUST be grounded in **{repo}** — reference at least one
+concrete repo anchor: a `src/*.py` module or file path, a registered
+loop/worker/Port/runner/store name (e.g. `RepoWikiLoop`), a config field
+(e.g. `rc_cadence_hours`), an ADR number (e.g. `ADR-0042`), or a fake name
+(e.g. `FakeGitHub`). **Skip any insight that reads as generic programming
+best-practice** — a rule that would apply verbatim to any Python project
+and names nothing from this repo. A downstream deterministic gate rejects
+anchor-less entries, so emitting them wastes the slot.
 
 ## Output format
 
@@ -478,6 +514,8 @@ class WikiCompiler:
         config: HydraFlowConfig,
         runner: SubprocessRunner,
         credentials: Credentials | None = None,
+        event_bus: EventBus | None = None,
+        gate_block_dedup: DedupStore | None = None,
     ) -> None:
         self._config = config
         self._runner = runner
@@ -486,6 +524,13 @@ class WikiCompiler:
 
             credentials = _Creds()
         self._credentials = credentials
+        # Prompt-gate block escalation (#9734 finding 3): without a bus the
+        # ERROR log still fires; the SYSTEM_ALERT is simply skipped.
+        self._bus = event_bus
+        self._gate_block_dedup = gate_block_dedup or DedupStore(
+            "prompt_gate_blocked",
+            config.data_root / "dedup" / "prompt_gate_blocked.json",
+        )
 
     async def compile_topic(
         self,
@@ -534,6 +579,21 @@ class WikiCompiler:
         if not compiled:
             logger.warning(
                 "Wiki compile for %s/%s produced no valid entries — keeping originals",
+                repo,
+                topic,
+            )
+            return len(entries)
+
+        # Repo-specificity gate (#9954): drop anchor-less platitudes so
+        # synthesis never overwrites the topic page with generic best
+        # practice. Empty result → keep the originals untouched.
+        compiled = self._filter_anchored_entries(
+            compiled, repo=repo, topic=topic, context="compile"
+        )
+        if not compiled:
+            logger.info(
+                "Wiki compile for %s/%s: all synthesized entries lacked a "
+                "repo anchor — keeping originals",
                 repo,
                 topic,
             )
@@ -628,6 +688,22 @@ class WikiCompiler:
             logger.warning(
                 "Wiki compile_tracked for %s/%s produced no valid entries — "
                 "keeping originals",
+                repo,
+                topic,
+            )
+            return 0
+
+        # Repo-specificity gate (#9954): drop anchor-less platitudes before
+        # they are written as synthesis entries. Keeping originals when the
+        # gate empties the batch is the fail-safe — never supersede the
+        # inputs with nothing.
+        compiled = self._filter_anchored_entries(
+            compiled, repo=repo, topic=topic, context="compile_tracked"
+        )
+        if not compiled:
+            logger.info(
+                "Wiki compile_tracked for %s/%s: all synthesized entries "
+                "lacked a repo anchor — keeping originals",
                 repo,
                 topic,
             )
@@ -891,18 +967,33 @@ class WikiCompiler:
                 config=self._config,
                 tool=self._config.wiki_compilation_tool,
                 model=self._config.wiki_compilation_model,
+                provider=self._config.wiki_compilation_provider,
                 prompt=prompt,
                 source="wiki_compilation",
                 timeout=self._config.wiki_compilation_timeout,
                 gh_token=self._credentials.gh_token,
             )
             if result.returncode != 0:
+                if is_prompt_gate_blocked(result.stderr):
+                    # A gate block is a persistent policy misconfiguration,
+                    # not a transient failure: every tick re-blocks, so a
+                    # soft warn would be a PERMANENT silent no-op (#9734
+                    # review finding 3). Escalate: ERROR + one SYSTEM_ALERT.
+                    await alert_prompt_gate_block(
+                        dedup=self._gate_block_dedup,
+                        event_bus=self._bus,
+                        source="wiki_compilation",
+                        repo=self._config.repo or "",
+                        detail=result.stderr[:200],
+                    )
+                    return None
                 logger.warning(
                     "Wiki compilation model failed (rc=%d): %s",
                     result.returncode,
                     result.stderr[:200],
                 )
                 return None
+            clear_prompt_gate_block(self._gate_block_dedup, "wiki_compilation")
             return result.stdout if result.stdout else None
         except TimeoutError:
             logger.warning("Wiki compilation model timed out")
@@ -910,6 +1001,45 @@ class WikiCompiler:
         except (OSError, FileNotFoundError, NotImplementedError) as exc:
             logger.warning("Wiki compilation model unavailable: %s", exc)
             return None
+
+    @staticmethod
+    def _filter_anchored_entries(
+        entries: list[WikiEntry],
+        *,
+        repo: str,
+        topic: str,
+        context: str,
+    ) -> list[WikiEntry]:
+        """Drop entries lacking a repo-specific anchor (#9954).
+
+        A synthesized entry earns its place only if its title/content
+        references something specific to this repo — a ``.py`` module, an
+        ADR number, a loop/Port/runner class name, or a known config
+        field. Generic best-practice platitudes ("Use ``is None`` for
+        optional sentinels") dilute the wiki context injected into agent
+        prompts (``max_repo_wiki_chars`` truncates) and are rejected here.
+        Each drop is logged and counted so the gate stays observable and
+        cannot silently regress.
+        """
+        vocab = config_field_vocabulary()
+        kept: list[WikiEntry] = []
+        dropped = 0
+        for entry in entries:
+            text = f"{entry.title}\n{entry.content}"
+            if has_repo_anchor(text, config_fields=vocab):
+                kept.append(entry)
+                continue
+            dropped += 1
+            logger.info(
+                "Wiki %s gate dropped anchor-less entry for %s/%s: %r",
+                context,
+                repo,
+                topic,
+                entry.title,
+            )
+        if dropped:
+            _metrics.increment("wiki_entries_rejected_no_anchor", dropped)
+        return kept
 
     @staticmethod
     def _parse_entries(raw: str) -> list[WikiEntry]:

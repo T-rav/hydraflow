@@ -27,23 +27,33 @@ from ._adversarial import AdversarialStateMixin
 from ._auto_agent import AutoAgentStateMixin
 from ._ci_monitor import CIMonitorStateMixin
 from ._contract_refresh import ContractRefreshStateMixin
+from ._convergence import ConvergenceStateMixin
 from ._corpus_learning import CorpusLearningStateMixin
 from ._dependabot_merge import DependabotMergeStateMixin
+from ._detector_calibration import DetectorCalibrationStateMixin
 from ._diagnostic import DiagnosticStateMixin
+from ._disturbance import DisturbanceStateMixin
+from ._driver import DriverStateMixin
 from ._epic import EpicStateMixin
+from ._erosion_metrics import ErosionMetricsStateMixin
 from ._fake_coverage import FakeCoverageStateMixin
 from ._flake_tracker import FlakeTrackerStateMixin
+from ._gc import StateGCMixin
 from ._hitl import HITLStateMixin
+from ._human_steering import HumanSteeringStateMixin
 from ._issue import IssueStateMixin
+from ._issue_refinement import IssueRefinementStateMixin
 from ._lifetime import LifetimeStatsMixin
 from ._live_corpus_replay import LiveCorpusReplayStateMixin
 from ._log_ingest import LogIngestStateMixin
 from ._memory_backlog import MemoryBacklogStateMixin
 from ._onboarding import OnboardingStateMixin
+from ._pr_red_repair import PrRedRepairStateMixin
 from ._principles_audit import PrinciplesAuditStateMixin
 from ._rc_budget import RCBudgetStateMixin
 from ._report import ReportStateMixin
 from ._review import ReviewStateMixin
+from ._review_orphan import ReviewOrphanStateMixin
 from ._rollup_issues import RollupIssueStateMixin
 from ._route_back import RouteBackStateMixin
 from ._sandbox_failure_fixer import SandboxFailureFixerStateMixin
@@ -73,6 +83,7 @@ class StateTracker(
     WorkspaceStateMixin,
     HITLStateMixin,
     ReviewStateMixin,
+    ReviewOrphanStateMixin,
     RouteBackStateMixin,
     EpicStateMixin,
     LifetimeStatsMixin,
@@ -103,10 +114,19 @@ class StateTracker(
     TrustFleetSanityStateMixin,
     ContractRefreshStateMixin,
     AutoAgentStateMixin,
+    DetectorCalibrationStateMixin,
     SandboxFailureFixerStateMixin,
+    PrRedRepairStateMixin,
     AdrAuditStateMixin,
     AdversarialStateMixin,
+    StateGCMixin,
     TriageRetryStateMixin,
+    DisturbanceStateMixin,
+    ConvergenceStateMixin,
+    HumanSteeringStateMixin,
+    DriverStateMixin,
+    IssueRefinementStateMixin,
+    ErosionMetricsStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 

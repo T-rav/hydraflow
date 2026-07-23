@@ -24,7 +24,14 @@ def _normalize_path(path: str | Path) -> str:
 
 @dataclass
 class RepoRecord:
-    """Single persisted repo entry."""
+    """Single persisted repo entry.
+
+    ``data_class`` is the CH-6 data-governance declaration for the repo
+    (``public-code`` | ``internal`` | ``regulated-<name>``, issue #9734).
+    It is threaded into the per-repo ``HydraFlowConfig.repo_data_class`` at
+    registration/restore so ``prompt_gate`` enforces it at every LLM spawn
+    seam; unknown values fail CLOSED at gate time.
+    """
 
     slug: str
     repo: str
@@ -33,6 +40,7 @@ class RepoRecord:
     auto_registered: bool = False
     created_at: str | None = None
     updated_at: str | None = None
+    data_class: str = "internal"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -43,6 +51,7 @@ class RepoRecord:
             "auto_registered": self.auto_registered,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "data_class": self.data_class,
         }
 
     @classmethod
@@ -62,6 +71,9 @@ class RepoRecord:
             auto_registered=bool(data.get("auto_registered", False)),
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
+            # Legacy pre-CH-6 entries carry no data_class key → the
+            # zero-regression default.
+            data_class=str(data.get("data_class") or "internal"),
         )
         return record
 
@@ -128,15 +140,39 @@ class RepoRegistryStore:
         return record
 
     def remove(self, slug: str) -> bool:
+        """Remove a record by slug — raw OR path-sanitized form (#9887).
+
+        ``/api/repos`` renders ``slug.replace("/", "-")`` (path-safe for the
+        DELETE URL), so the UI can only ever send back the sanitized form —
+        which previously never matched a raw ``owner/name`` record and made
+        idle registrations undeletable (404 on the exact slug the listing
+        emitted).
+        """
         slug = slug.strip()
         if not slug:
             return False
         records = self.load()
-        filtered = [r for r in records if r.slug != slug]
+        filtered = [
+            r for r in records if r.slug != slug and r.slug.replace("/", "-") != slug
+        ]
         if len(filtered) == len(records):
             return False
         self.save(filtered)
         return True
+
+    def resolve_slug(self, slug: str) -> str | None:
+        """Return the RAW record slug for *slug* (raw or sanitized), or None.
+
+        Registry keys use the raw slug; callers holding a sanitized one
+        (every UI DELETE) must resolve before touching the registry (#9887).
+        """
+        slug = slug.strip()
+        if not slug:
+            return None
+        for r in self.load():
+            if r.slug == slug or r.slug.replace("/", "-") == slug:
+                return r.slug
+        return None
 
     def update_overrides(self, slug: str, updates: dict[str, Any]) -> bool:
         slug = slug.strip()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -12,13 +13,47 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import evidence_pack
+import subprocess_util
+from audit_chain import AuditChain
 from base_background_loop import LoopDeps
 from ci_sentinels import ci_timeout
 from config import HydraFlowConfig
-from events import EventBus
+from events import EventBus, EventType
+from evidence_pack import GAP_REPRO_MANIFEST, RECORD_TYPE_EVIDENCE_PACK
 from models import PRInfo
+from repro_manifest import MANIFEST_HEADING, MANIFEST_SCHEMA, extract_manifest_block
 from staging_promotion_loop import StagingPromotionLoop
 from state import StateTracker
+from subprocess_util import CreditExhaustedError
+from tests.helpers import install_repo_merge_policy
+
+#: The real CH-4 compiler, captured at import time (before the autouse fake
+#: below patches the module attribute) for the CH-7→CH-4 round-trip test.
+_REAL_COMPILE_EVIDENCE_PACK = evidence_pack.compile_evidence_pack
+
+
+@pytest.fixture(autouse=True)
+def _fake_evidence_compiler(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Keep the CH-4 compiler off the network for every promoted-path test;
+    TestEvidencePackTrigger installs its own instrumented fake on top."""
+    fake = AsyncMock(return_value=MagicMock(gap_count=0))
+    monkeypatch.setattr(evidence_pack, "compile_evidence_pack", fake)
+    return fake
+
+
+@pytest.fixture(autouse=True)
+def _fake_merged_pr_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the CH-4 reconcile sweep's gh boundary off the network for every
+    test: an empty merged-PR list means the sweep is a no-op. Tests that
+    exercise the sweep (or the policy label fetch) install their own
+    ``run_subprocess`` fake on top."""
+
+    async def _empty_list(*cmd: str, **_kwargs: object) -> str:
+        assert cmd[:3] == ("gh", "pr", "list"), cmd
+        return "[]"
+
+    monkeypatch.setattr(subprocess_util, "run_subprocess", _empty_list)
 
 
 def _make_cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> HydraFlowConfig:
@@ -141,6 +176,104 @@ class TestCadenceGate:
         result = await loop._do_work()
         assert result["status"] == "opened"
         prs.create_rc_branch.assert_called_once()
+
+
+class TestMissedCadenceBootCheck:
+    """#10009: loud boot-time warning when the RC cadence was missed by a
+    wide margin (factory process was likely down), distinct from the
+    ordinary cadence gate which already cuts immediately once the plain
+    cadence has elapsed."""
+
+    @pytest.mark.asyncio
+    async def test_no_marker_no_warning(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        loop, _ = _make_loop(tmp_path, monkeypatch, rc_cadence_hours=4)
+        assert not loop._cadence_path().exists()
+        with caplog.at_level("WARNING", logger="hydraflow.staging_promotion_loop"):
+            await loop._do_work()
+        assert not any(
+            "missed its RC cadence" in r.getMessage() for r in caplog.records
+        )
+        assert loop._boot_cadence_checked is True
+
+    @pytest.mark.asyncio
+    async def test_recent_marker_no_warning(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        loop, _ = _make_loop(tmp_path, monkeypatch, rc_cadence_hours=4)
+        loop._record_last_rc(datetime.now(UTC) - timedelta(hours=1))
+        with caplog.at_level("WARNING", logger="hydraflow.staging_promotion_loop"):
+            await loop._do_work()
+        assert not any(
+            "missed its RC cadence" in r.getMessage() for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_elapsed_but_below_alert_multiplier_no_loud_warning(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """5h behind a 4h cadence already cuts (elapsed >= cadence) but is
+        below the 1.5x=6h alert threshold — no loud "was likely down" log."""
+        loop, prs = _make_loop(tmp_path, monkeypatch, rc_cadence_hours=4)
+        loop._record_last_rc(datetime.now(UTC) - timedelta(hours=5))
+        with caplog.at_level("WARNING", logger="hydraflow.staging_promotion_loop"):
+            result = await loop._do_work()
+        assert result["status"] == "opened"
+        prs.create_rc_branch.assert_called_once()
+        assert not any(
+            "missed its RC cadence" in r.getMessage() for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_beyond_alert_multiplier_logs_loud_warning_and_cuts(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """20h behind a 4h cadence (>1.5x=6h) — loud warning AND immediate cut."""
+        loop, prs = _make_loop(tmp_path, monkeypatch, rc_cadence_hours=4)
+        loop._record_last_rc(datetime.now(UTC) - timedelta(hours=20))
+        with caplog.at_level("WARNING", logger="hydraflow.staging_promotion_loop"):
+            result = await loop._do_work()
+        assert result["status"] == "opened"
+        prs.create_rc_branch.assert_called_once()
+        warnings = [
+            r.getMessage()
+            for r in caplog.records
+            if "missed its RC cadence" in r.getMessage()
+        ]
+        assert len(warnings) == 1
+        assert "cadence=4h" in warnings[0]
+        assert "likely down" in warnings[0]
+
+    @pytest.mark.asyncio
+    async def test_only_warns_once_per_loop_lifetime(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        loop, _ = _make_loop(tmp_path, monkeypatch, rc_cadence_hours=4)
+        loop._record_last_rc(datetime.now(UTC) - timedelta(hours=20))
+        with caplog.at_level("WARNING", logger="hydraflow.staging_promotion_loop"):
+            await loop._do_work()  # first tick: cuts an RC, records a fresh marker
+            await loop._do_work()  # second tick: marker is now fresh, but even
+            # if it weren't, the boot check must not fire twice
+        warnings = [
+            r for r in caplog.records if "missed its RC cadence" in r.getMessage()
+        ]
+        assert len(warnings) == 1
 
 
 class TestRcBranchNaming:
@@ -558,6 +691,128 @@ class TestRepeatedFailureEscalation:
         assert state.get_consecutive_rc_failures() == 0
 
 
+class TestEscalationAutoClose:
+    """#10015: the rc-promotion-stuck escalation must auto-close on the next
+    green promotion — mirroring the rc_ci rolling-issue pattern. Before this,
+    the escalation was filed via bare ``create_issue`` with no resolve path:
+    a green promotion only reset the failure counter, and #9867 closed only
+    because an unrelated PR body happened to say "Closes #9867"."""
+
+    ESCALATION_ISSUE = 8002
+    RC_CI_ISSUE = 7001
+
+    def _streak_loop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[StagingPromotionLoop, MagicMock, StateTracker]:
+        monkeypatch.setenv("HYDRAFLOW_RC_CONSECUTIVE_FAILURE_ESCALATION_THRESHOLD", "2")
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(number=70),
+            ci_result=(False, "ci failed: scenario tests"),
+        )
+
+        async def _create_issue(title: str, body: str, labels: list[str]) -> int:
+            if "rc-promotion-stuck" in labels:
+                return self.ESCALATION_ISSUE
+            return self.RC_CI_ISSUE
+
+        prs.create_issue = AsyncMock(side_effect=_create_issue)
+        prs.update_issue_body = AsyncMock()
+        prs.get_pr_head_sha = AsyncMock(return_value="somesha")
+        state = StateTracker(state_file=tmp_path / "s.json")
+        loop._state = state  # type: ignore[attr-defined]
+        return loop, prs, state
+
+    @pytest.mark.asyncio
+    async def test_escalation_is_tracked_as_rollup_subject(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, state = self._streak_loop(tmp_path, monkeypatch)
+
+        await loop._do_work()  # failure 1 — below threshold
+        assert state.get_rollup_issue("staging_promotion:rc_promotion_stuck") is None
+
+        await loop._do_work()  # failure 2 — escalates, tracked as a rollup
+        tracked = state.get_rollup_issue("staging_promotion:rc_promotion_stuck")
+        assert tracked is not None
+        assert tracked["issue_number"] == self.ESCALATION_ISSUE
+
+    @pytest.mark.asyncio
+    async def test_escalation_title_is_stable_and_count_lives_in_body(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Rollup contract: variable content (streak size, latest PR) goes in
+        the BODY; the title must be stable so re-adoption dedup works."""
+        loop, prs, _state = self._streak_loop(tmp_path, monkeypatch)
+
+        await loop._do_work()
+        await loop._do_work()
+
+        escalations = _escalation_calls(prs)
+        assert len(escalations) == 1
+        title, body, labels = escalations[0].args
+        assert "promotion stuck" in title
+        assert "2" not in title  # streak count must NOT be in the title
+        assert "2 times in a row" in body
+        assert "#70" in body
+        assert "hydraflow-hitl-escalation" in labels
+        assert "rc-promotion-stuck" in labels
+
+    @pytest.mark.asyncio
+    async def test_green_promotion_auto_closes_open_escalation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, state = self._streak_loop(tmp_path, monkeypatch)
+
+        await loop._do_work()
+        await loop._do_work()  # escalation filed + tracked
+
+        prs.wait_for_ci.return_value = (True, "ok")
+        prs.merge_promotion_pr = AsyncMock(return_value=True)
+        result = await loop._do_work()
+
+        assert result["status"] == "promoted"
+        prs.close_issue.assert_any_await(self.ESCALATION_ISSUE)
+        assert state.get_rollup_issue("staging_promotion:rc_promotion_stuck") is None
+        assert state.get_consecutive_rc_failures() == 0
+
+    @pytest.mark.asyncio
+    async def test_green_without_open_escalation_is_a_noop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """resolve() is idempotent — a clean green tick with no tracked
+        escalation must not touch GitHub for the escalation subject."""
+        loop, prs, _state = self._streak_loop(tmp_path, monkeypatch)
+        prs.wait_for_ci.return_value = (True, "ok")
+        prs.merge_promotion_pr = AsyncMock(return_value=True)
+
+        result = await loop._do_work()
+
+        assert result["status"] == "promoted"
+        prs.close_issue.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fresh_streak_after_green_files_new_escalation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, _state = self._streak_loop(tmp_path, monkeypatch)
+
+        await loop._do_work()
+        await loop._do_work()  # streak 1 escalates
+        assert len(_escalation_calls(prs)) == 1
+
+        prs.wait_for_ci.return_value = (True, "ok")
+        prs.merge_promotion_pr = AsyncMock(return_value=True)
+        await loop._do_work()  # green — closes + clears tracking
+
+        prs.wait_for_ci.return_value = (False, "ci failed: scenario tests")
+        await loop._do_work()
+        await loop._do_work()  # streak 2 escalates fresh
+
+        assert len(_escalation_calls(prs)) == 2
+
+
 class TestSentinelFidelity:
     @pytest.mark.asyncio
     async def test_producer_timeout_sentinel_is_pending_not_failure(
@@ -621,3 +876,705 @@ class TestRollingFailureIssue:
         assert r2["status"] == "promoted"
         prs.close_issue.assert_any_await(7001)
         assert state.get_rollup_issue("staging_promotion:rc_ci") is None
+
+
+class TestEvidencePackTrigger:
+    """CH-4 (#9732): the release evidence pack compiles after a successful
+    promotion — compile-only, report-only, fail-open."""
+
+    RC_BRANCH = "rc/2026-07-08-1200"
+
+    def _promoted_loop(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        merge_result: bool = True,
+        ci_result: tuple[bool, str] = (True, "ok"),
+    ) -> tuple[StagingPromotionLoop, MagicMock]:
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(99, branch=self.RC_BRANCH),
+            ci_result=ci_result,
+            merge_result=merge_result,
+        )
+        prs.get_pr_head_sha = AsyncMock(return_value="headsha")
+        return loop, prs
+
+    def _install_compiler(
+        self, monkeypatch: pytest.MonkeyPatch, error: Exception | None = None
+    ) -> list[tuple]:
+        calls: list[tuple] = []
+
+        async def _fake(config, rc_branch, pr_number, *, disabled_workers=None):
+            calls.append((rc_branch, pr_number, disabled_workers))
+            if error is not None:
+                raise error
+            return MagicMock(gap_count=0)
+
+        monkeypatch.setattr(evidence_pack, "compile_evidence_pack", _fake)
+        return calls
+
+    def _alerts(self, queue) -> list:
+        alerts = []
+        while not queue.empty():
+            event = queue.get_nowait()
+            if event.type is EventType.SYSTEM_ALERT:
+                alerts.append(event)
+        return alerts
+
+    @pytest.mark.asyncio
+    async def test_compiles_pack_after_successful_promotion(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = self._install_compiler(monkeypatch)
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch)
+
+        result = await loop._do_work()
+
+        assert result == {"status": "promoted", "pr": 99}
+        assert calls == [(self.RC_BRANCH, 99, None)]  # stateless → gap, not guess
+
+    @pytest.mark.asyncio
+    async def test_passes_disabled_workers_from_state(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = self._install_compiler(monkeypatch)
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch)
+        state = StateTracker(state_file=tmp_path / "s.json")
+        state.set_disabled_workers({"sentry"})
+        loop._state = state  # type: ignore[attr-defined]
+
+        await loop._do_work()
+
+        assert calls == [(self.RC_BRANCH, 99, {"sentry"})]
+
+    @pytest.mark.asyncio
+    async def test_not_compiled_when_merge_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = self._install_compiler(monkeypatch)
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch, merge_result=False)
+
+        result = await loop._do_work()
+
+        assert result == {"status": "merge_failed", "pr": 99}
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_not_compiled_on_ci_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = self._install_compiler(monkeypatch)
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch, ci_result=(False, "boom"))
+
+        result = await loop._do_work()
+
+        assert result["status"] == "ci_failed"
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_disables_compilation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_EVIDENCE_PACK_ENABLED", "false")
+        calls = self._install_compiler(monkeypatch)
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch)
+
+        result = await loop._do_work()
+
+        assert result == {"status": "promoted", "pr": 99}
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_compiler_failure_is_fail_open_and_alerts(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        self._install_compiler(monkeypatch, error=RuntimeError("disk full"))
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch)
+        queue = loop._bus.subscribe()
+
+        with caplog.at_level("WARNING", logger="hydraflow.staging_promotion_loop"):
+            result = await loop._do_work()
+
+        assert result == {"status": "promoted", "pr": 99}  # NEVER blocks promotion
+        assert any("vidence" in r.getMessage() for r in caplog.records)
+        alerts = self._alerts(queue)
+        assert len(alerts) == 1
+        assert alerts[0].data["source"] == "evidence_pack"
+        assert "#99" in alerts[0].data["message"]
+
+    @pytest.mark.asyncio
+    async def test_failure_alert_is_deduped_per_rc(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._install_compiler(monkeypatch, error=RuntimeError("still broken"))
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch)
+        queue = loop._bus.subscribe()
+
+        await loop._do_work()
+        await loop._do_work()  # same RC promoted-tick shape again
+
+        assert len(self._alerts(queue)) == 1
+
+    @pytest.mark.asyncio
+    async def test_credit_exhaustion_propagates_not_swallowed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._install_compiler(monkeypatch, error=CreditExhaustedError("billing cap"))
+        loop, _ = self._promoted_loop(tmp_path, monkeypatch)
+
+        with pytest.raises(CreditExhaustedError):
+            await loop._do_work()
+
+
+class TestMergePolicyGateOnPromotion:
+    """CH-3 (#9731) — the policy gate at the RC promotion seam."""
+
+    @pytest.mark.asyncio
+    async def test_policy_deny_leaves_promotion_pr_open(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def _run(*cmd, **_kwargs):
+            if cmd[:3] == ("gh", "pr", "list"):
+                return "[]"  # CH-4 reconcile sweep: nothing merged
+            assert cmd[:3] == ("gh", "pr", "view")
+            return json.dumps({"labels": []})
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(99),
+            ci_result=(True, "ok"),
+        )
+        install_repo_merge_policy(loop._config)
+        prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+
+        result = await loop._do_work()
+
+        assert result == {"status": "policy_denied", "pr": 99}
+        prs.merge_promotion_pr.assert_not_called()
+        comment = prs.post_comment.await_args.args[1]
+        assert "Blocked by merge policy" in comment
+        assert "policy-override:" in comment
+
+    async def test_policy_deny_emits_system_alert(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A blocked RC promotion must be LOUD (review finding): every
+        cadence tick silently blocking is an operator-invisible outage —
+        the deny publishes a SYSTEM_ALERT like the other policy seams."""
+
+        async def _run(*cmd, **_kwargs):
+            if cmd[:3] == ("gh", "pr", "list"):
+                return "[]"  # CH-4 reconcile sweep: nothing merged
+            assert cmd[:3] == ("gh", "pr", "view")
+            return json.dumps({"labels": []})
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(99),
+            ci_result=(True, "ok"),
+        )
+        install_repo_merge_policy(loop._config)
+        prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        queue = loop._bus.subscribe()
+
+        result = await loop._do_work()
+
+        assert result == {"status": "policy_denied", "pr": 99}
+        alerts = []
+        while not queue.empty():
+            event = queue.get_nowait()
+            if event.type is EventType.SYSTEM_ALERT:
+                alerts.append(event)
+        assert len(alerts) == 1
+        assert alerts[0].data["source"] == "merge_policy"
+        assert "#99" in alerts[0].data["message"]
+
+    @pytest.mark.asyncio
+    async def test_default_policy_allows_rc_promotion(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The packaged policy accepts the ADR-0042 promotion-lane grant."""
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(99),
+            ci_result=(True, "ok"),
+        )
+        result = await loop._do_work()
+        assert result == {"status": "promoted", "pr": 99}
+        prs.merge_promotion_pr.assert_called_once_with(99, auto_rebase=True)
+
+
+def _drain_alerts(queue) -> list:
+    """Drain *queue* and return the SYSTEM_ALERT events it held."""
+    alerts = []
+    while not queue.empty():
+        event = queue.get_nowait()
+        if event.type is EventType.SYSTEM_ALERT:
+            alerts.append(event)
+    return alerts
+
+
+class TestRcBodyReproManifest:
+    """CH-7 gap (convergence review): the RC promotion PR body is the exact
+    document CH-4's evidence-pack compiler reads the reproducibility manifest
+    back from (``_rc_repro_manifest``). ``_cut_new_rc`` built its body inline
+    and never passed it through ``repro_manifest.append_manifest``, so EVERY
+    compiled binder recorded GAP_REPRO_MANIFEST — a guaranteed false gap."""
+
+    @pytest.mark.asyncio
+    async def test_promotion_pr_body_carries_parseable_manifest(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = _make_loop(tmp_path, monkeypatch)
+
+        result = await loop._do_work()
+
+        assert result["status"] == "opened"
+        body = prs.create_promotion_pr.call_args.kwargs["body"]
+        # The original promotion prose must survive the append.
+        assert "Automated release-candidate promotion PR." in body
+        assert "ADR-0042" in body
+        # Parse the manifest back with the same parser CH-4 uses.
+        parsed = extract_manifest_block(body)
+        assert parsed is not None
+        assert parsed["schema"] == MANIFEST_SCHEMA
+        assert set(parsed) >= {"hydraflow_sha", "models", "config_snapshot"}
+
+    @pytest.mark.asyncio
+    async def test_manifest_failure_still_cuts_rc_fail_open(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A manifest error must never block the RC cut (evidence, not
+        load-bearing — same fail-open contract as pr_manager.create_pr)."""
+        monkeypatch.setattr(
+            "repro_manifest.build_manifest",
+            MagicMock(side_effect=RuntimeError("hash boom")),
+        )
+        loop, prs = _make_loop(tmp_path, monkeypatch)
+
+        result = await loop._do_work()
+
+        assert result["status"] == "opened"
+        prs.create_promotion_pr.assert_called_once()
+        body = prs.create_promotion_pr.call_args.kwargs["body"]
+        assert MANIFEST_HEADING not in body
+        assert "Automated release-candidate promotion PR." in body
+
+    @pytest.mark.asyncio
+    async def test_cut_rc_body_round_trips_into_pack_without_manifest_gap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End-to-end CH-7→CH-4: the body ``_cut_new_rc`` writes is the body
+        the REAL compiler parses — the pack must carry a parsed
+        ``repro_manifest`` and NO GAP_REPRO_MANIFEST entry."""
+        monkeypatch.setattr(
+            evidence_pack, "compile_evidence_pack", _REAL_COMPILE_EVIDENCE_PACK
+        )
+        loop, prs = _make_loop(tmp_path, monkeypatch)
+
+        # Tick 1: cut the RC and capture the body the loop actually wrote.
+        cut = await loop._do_work()
+        assert cut["status"] == "opened"
+        rc_branch = cut["rc_branch"]
+        body = prs.create_promotion_pr.call_args.kwargs["body"]
+
+        # Tick 2: that PR is now the open promotion, CI is green, and gh
+        # serves the SAME body back to the compiler.
+        async def _fake_gh(*cmd: str, **_kwargs: object) -> str:
+            if cmd[:3] == ("gh", "pr", "list"):
+                return "[]"  # reconcile sweep: nothing else merged
+            assert cmd[:3] == ("gh", "pr", "view"), cmd
+            if int(cmd[3]) == 42:
+                return json.dumps(
+                    {
+                        "number": 42,
+                        "title": f"Promote {rc_branch} → main",
+                        "url": "https://github.com/o/r/pull/42",
+                        "body": body,
+                        "author": {"login": "hydra-ops-bot"},
+                        "baseRefName": "main",
+                        "headRefName": rc_branch,
+                        "headRefOid": "a" * 40,
+                        "mergeCommit": {"oid": "b" * 40},
+                        "mergedAt": "2026-07-09T00:00:00Z",
+                        "commits": [
+                            {
+                                "oid": "c" * 40,
+                                "messageHeadline": "feat(z): one change (#9001)",
+                            }
+                        ],
+                    }
+                )
+            return json.dumps(
+                {
+                    "number": int(cmd[3]),
+                    "title": f"PR {cmd[3]}",
+                    "body": "Closes #1.",
+                    "author": {"login": "agent-z"},
+                }
+            )
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _fake_gh)
+        prs.find_open_promotion_pr.return_value = _make_pr(42, branch=rc_branch)
+        prs.get_pr_head_sha = AsyncMock(return_value="headsha")
+
+        promoted = await loop._do_work()
+
+        assert promoted["status"] == "promoted"
+        pack_dir = loop._config.evidence_dir / rc_branch.replace("/", "-")
+        manifest = json.loads((pack_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["repro_manifest"] is not None
+        assert manifest["repro_manifest"]["schema"] == MANIFEST_SCHEMA
+        assert GAP_REPRO_MANIFEST not in {g["kind"] for g in manifest["gaps"]}
+
+
+class TestReconcileMissingPacks:
+    """CH-4 hardening (convergence review): ``_compile_evidence_pack`` only
+    ran when THIS loop's own ``merge_promotion_pr`` returned True. An RC
+    merged by any other actor (operator force-merge, Monitor-driven merge, a
+    merge that landed after our call reported failure) got NO pack, no
+    chained record, no gap entry, no alert — a silent missing binder. The
+    reconcile sweep reads gh's merged list against the evidence stream."""
+
+    RC_BRANCH = "rc/2026-07-08-0800"
+
+    def _quiet_loop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[StagingPromotionLoop, MagicMock]:
+        """A loop whose tick does no promotion work (cadence not elapsed)."""
+        loop, prs = _make_loop(tmp_path, monkeypatch)
+        loop._record_last_rc(datetime.now(UTC))
+        return loop, prs
+
+    def _install_gh_list(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        payload: list[dict] | Exception,
+    ) -> list[tuple[str, ...]]:
+        calls: list[tuple[str, ...]] = []
+
+        async def _fake(*cmd: str, **_kwargs: object) -> str:
+            calls.append(cmd)
+            if isinstance(payload, Exception):
+                raise payload
+            assert cmd[:3] == ("gh", "pr", "list"), cmd
+            assert "merged" in cmd  # only merged PRs are ever scanned
+            return json.dumps(payload)
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _fake)
+        return calls
+
+    def _seed_pack_record(
+        self, loop: StagingPromotionLoop, pr_number: int, rc_branch: str
+    ) -> None:
+        AuditChain(loop._config.evidence_packs_path).append(
+            {
+                "record_type": RECORD_TYPE_EVIDENCE_PACK,
+                "pr_number": pr_number,
+                "rc_branch": rc_branch,
+            }
+        )
+
+    @pytest.mark.asyncio
+    async def test_operator_merged_rc_gets_pack_on_next_tick(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        _fake_evidence_compiler: AsyncMock,
+    ) -> None:
+        self._install_gh_list(
+            monkeypatch,
+            [
+                {"number": 555, "headRefName": self.RC_BRANCH},
+                {"number": 554, "headRefName": "feature/not-an-rc"},
+            ],
+        )
+        loop, _ = self._quiet_loop(tmp_path, monkeypatch)
+
+        result = await loop._do_work()
+
+        assert result["status"] == "cadence_not_elapsed"
+        assert result["packs_reconciled"] == 1
+        _fake_evidence_compiler.assert_awaited_once()
+        args = _fake_evidence_compiler.await_args.args
+        assert args[1:] == (self.RC_BRANCH, 555)  # (config, rc_branch, pr)
+
+    @pytest.mark.asyncio
+    async def test_already_packed_rcs_are_skipped_idempotently(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        _fake_evidence_compiler: AsyncMock,
+    ) -> None:
+        """A recorded RC is never re-compiled (no duplicate chain records);
+        only the genuinely missing one is."""
+        self._install_gh_list(
+            monkeypatch,
+            [
+                {"number": 555, "headRefName": self.RC_BRANCH},
+                {"number": 556, "headRefName": "rc/2026-07-08-1200"},
+            ],
+        )
+        loop, _ = self._quiet_loop(tmp_path, monkeypatch)
+        self._seed_pack_record(loop, 555, self.RC_BRANCH)
+
+        result = await loop._do_work()
+
+        assert result["packs_reconciled"] == 1
+        _fake_evidence_compiler.assert_awaited_once()
+        assert _fake_evidence_compiler.await_args.args[1:] == (
+            "rc/2026-07-08-1200",
+            556,
+        )
+
+    @pytest.mark.asyncio
+    async def test_reconcile_is_idempotent_across_ticks(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Once the compiler has chained its record, the next tick's sweep
+        must not compile the same RC again."""
+        compile_calls: list[int] = []
+
+        async def _recording_compiler(config, rc_branch, pr_number, **_kwargs):
+            compile_calls.append(pr_number)
+            AuditChain(config.evidence_packs_path).append(
+                {
+                    "record_type": RECORD_TYPE_EVIDENCE_PACK,
+                    "pr_number": pr_number,
+                    "rc_branch": rc_branch,
+                }
+            )
+            return MagicMock(gap_count=0)
+
+        monkeypatch.setattr(evidence_pack, "compile_evidence_pack", _recording_compiler)
+        self._install_gh_list(
+            monkeypatch, [{"number": 555, "headRefName": self.RC_BRANCH}]
+        )
+        loop, _ = self._quiet_loop(tmp_path, monkeypatch)
+
+        await loop._do_work()
+        await loop._do_work()
+
+        assert compile_calls == [555]
+        stream = loop._config.evidence_packs_path.read_text(encoding="utf-8")
+        assert len(stream.splitlines()) == 1
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_off_means_no_sweep(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        _fake_evidence_compiler: AsyncMock,
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_EVIDENCE_PACK_ENABLED", "false")
+        calls = self._install_gh_list(
+            monkeypatch, [{"number": 555, "headRefName": self.RC_BRANCH}]
+        )
+        loop, _ = self._quiet_loop(tmp_path, monkeypatch)
+
+        result = await loop._do_work()
+
+        assert calls == []  # not even the gh listing runs when switched off
+        assert "packs_reconciled" not in result
+        _fake_evidence_compiler.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_dry_run_means_no_sweep(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        _fake_evidence_compiler: AsyncMock,
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_DRY_RUN", "true")
+        calls = self._install_gh_list(
+            monkeypatch, [{"number": 555, "headRefName": self.RC_BRANCH}]
+        )
+        loop, _ = self._quiet_loop(tmp_path, monkeypatch)
+
+        result = await loop._do_work()
+
+        assert calls == []
+        assert "packs_reconciled" not in result
+        _fake_evidence_compiler.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_sweep_failure_is_fail_open(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        self._install_gh_list(monkeypatch, RuntimeError("gh: 502"))
+        loop, _ = self._quiet_loop(tmp_path, monkeypatch)
+
+        with caplog.at_level("WARNING", logger="hydraflow.staging_promotion_loop"):
+            result = await loop._do_work()
+
+        assert result["status"] == "cadence_not_elapsed"
+        assert "packs_reconciled" not in result
+        assert any("reconcile" in r.getMessage().lower() for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_sweep_failure_never_affects_promotion_work(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The tick's promotion result survives a broken sweep untouched."""
+        self._install_gh_list(monkeypatch, RuntimeError("gh: 502"))
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(99),
+            ci_result=(True, "ok"),
+        )
+
+        result = await loop._do_work()
+
+        assert result == {"status": "promoted", "pr": 99}
+        prs.merge_promotion_pr.assert_called_once_with(99, auto_rebase=True)
+
+    @pytest.mark.asyncio
+    async def test_sweep_credit_exhaustion_propagates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """dark-factory §2.2: the fail-open guard must re-raise billing
+        signals, never burn ticks against an exhausted account."""
+        self._install_gh_list(monkeypatch, CreditExhaustedError("billing cap"))
+        loop, _ = self._quiet_loop(tmp_path, monkeypatch)
+
+        with pytest.raises(CreditExhaustedError):
+            await loop._do_work()
+
+
+class TestPolicyDenyDedup:
+    """CH-3 hardening (convergence review): the deny path posted the
+    "Blocked by merge policy" comment AND a SYSTEM_ALERT unconditionally on
+    EVERY promotion tick. With a corrupt policy.yaml (the designed
+    fail-closed state) the open RC PR accumulated duplicate comments + alert
+    spam every 300s until an operator fixed the policy. One comment + one
+    alert per (PR, deny reason-class); a later allow verdict re-arms."""
+
+    def _denied_loop(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        pr_number: int = 99,
+        policy_text: str | None = None,
+    ) -> tuple[StagingPromotionLoop, MagicMock]:
+        async def _run(*cmd: str, **_kwargs: object) -> str:
+            if cmd[:3] == ("gh", "pr", "list"):
+                return "[]"  # CH-4 reconcile sweep: nothing merged
+            assert cmd[:3] == ("gh", "pr", "view"), cmd
+            return json.dumps({"labels": []})
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(pr_number),
+            ci_result=(True, "ok"),
+        )
+        if policy_text is None:
+            install_repo_merge_policy(loop._config)
+        else:
+            install_repo_merge_policy(loop._config, text=policy_text)
+        prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        return loop, prs
+
+    @pytest.mark.asyncio
+    async def test_repeated_deny_alerts_and_comments_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = self._denied_loop(tmp_path, monkeypatch)
+        queue = loop._bus.subscribe()
+
+        r1 = await loop._do_work()
+        r2 = await loop._do_work()
+
+        assert r1 == r2 == {"status": "policy_denied", "pr": 99}
+        assert len(_drain_alerts(queue)) == 1
+        assert prs.post_comment.await_count == 1
+        assert "Blocked by merge policy" in prs.post_comment.await_args.args[1]
+
+    @pytest.mark.asyncio
+    async def test_corrupt_policy_fail_closed_denies_are_deduped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The designed fail-closed state (unloadable policy.yaml) is exactly
+        the standing-deny shape that was spamming — it must dedup too."""
+        loop, prs = self._denied_loop(
+            tmp_path, monkeypatch, policy_text="{{ not valid yaml !!"
+        )
+        queue = loop._bus.subscribe()
+
+        r1 = await loop._do_work()
+        r2 = await loop._do_work()
+
+        assert r1 == r2 == {"status": "policy_denied", "pr": 99}
+        alerts = _drain_alerts(queue)
+        assert len(alerts) == 1
+        assert "failing closed" in alerts[0].data["message"]
+        assert prs.post_comment.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_deny_then_allow_rearms_so_a_new_deny_realerts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = self._denied_loop(tmp_path, monkeypatch)
+        policy_path = (
+            loop._config.repo_root
+            / "docs"
+            / "standards"
+            / "factory_autonomy"
+            / "policy.yaml"
+        )
+        queue = loop._bus.subscribe()
+
+        await loop._do_work()  # deny → alert 1
+        await loop._do_work()  # deny → deduped
+        # Policy fixed: the packaged default allows. Merge fails, so the
+        # same PR stays the open promotion for the next tick.
+        policy_path.unlink()
+        prs.merge_promotion_pr = AsyncMock(return_value=False)
+        r3 = await loop._do_work()
+        assert r3 == {"status": "merge_failed", "pr": 99}
+        # Policy broken again: a NEW distinct deny event must re-alert.
+        install_repo_merge_policy(loop._config)
+        r4 = await loop._do_work()
+
+        assert r4 == {"status": "policy_denied", "pr": 99}
+        assert len(_drain_alerts(queue)) == 2
+        assert prs.post_comment.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_different_pr_gets_a_fresh_alert(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = self._denied_loop(tmp_path, monkeypatch, pr_number=99)
+        queue = loop._bus.subscribe()
+
+        await loop._do_work()  # deny #99 → alert 1
+        await loop._do_work()  # deny #99 → deduped
+        prs.find_open_promotion_pr.return_value = _make_pr(100)
+        r3 = await loop._do_work()  # deny #100 → fresh alert
+
+        assert r3 == {"status": "policy_denied", "pr": 100}
+        alerts = _drain_alerts(queue)
+        assert len(alerts) == 2
+        assert "#100" in alerts[1].data["message"]
+        assert prs.post_comment.await_count == 2
+        commented_prs = [c.args[0] for c in prs.post_comment.await_args_list]
+        assert commented_prs == [99, 100]

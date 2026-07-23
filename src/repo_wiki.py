@@ -27,11 +27,30 @@ from pydantic import BaseModel, Field, model_validator
 from ulid import ULID
 
 from staleness import evaluate as evaluate_staleness
+from wiki_anchor_gate import has_repo_anchor
 
 if TYPE_CHECKING:
     from dedup_store import DedupStore
 
 logger = logging.getLogger("hydraflow.repo_wiki")
+
+
+class RepoWikiReadOnlyError(RuntimeError):
+    """Raised when a knowledge-content write is attempted on a read-only store.
+
+    The boot-time self-repo store (``service_registry``) is constructed
+    ``read_only=True`` because its ``wiki_root`` / ``tracked_root`` point at
+    the operator's main checkout (``repo_root``). Runtime knowledge writes
+    there dirty the working tree and never ride a PR (the maintenance heal
+    runs in an ephemeral worktree — #9539, #9836). This error makes any such
+    write fail loudly instead of silently corrupting the checkout, so a
+    missed reroute is a caught bug rather than a perpetual-dirt footgun.
+
+    Reads (``query``) and gitignored runtime caches (``mark_ingested``,
+    ``append_log``) remain allowed — only the four content-mutating methods
+    (``ingest``, ``write_entry``, ``mark_superseded``, ``active_lint``) raise.
+    """
+
 
 # ---------------------------------------------------------------------------
 # Data models
@@ -509,6 +528,76 @@ def active_lint_tracked(
     return result
 
 
+def flag_generic_entries_stale(
+    tracked_root: Path,
+    repo_slug: str,
+    *,
+    anchor_vocabulary: frozenset[str] | None = None,
+) -> int:
+    """Mark active tracked entries stale when they lack a repo-specific anchor.
+
+    The prune pass for #9954: the gotcha store had accumulated generic
+    coding truisms ("Use ``is None`` for optional sentinels") that dilute
+    the wiki context injected into agent prompts (``max_repo_wiki_chars``
+    truncates, so platitudes crowd out real gotchas). This pass scores
+    every ``status: active`` per-entry file with the same deterministic
+    heuristic the synthesis-time gate uses
+    (:func:`wiki_anchor_gate.has_repo_anchor`) and flips anchor-less ones
+    to ``status: stale`` with a ``stale_reason``.
+
+    Mark-only — never deletes. The flips land as uncommitted diffs the
+    maintenance PR rolls up (reviewable), and the existing age-based prune
+    in :func:`active_lint_tracked` removes them on a later tick. Stale
+    entries are already filtered out of prompt injection, so injection
+    favors anchored entries immediately.
+
+    Returns the number of entries newly flagged stale. No-op (returns 0)
+    when *anchor_vocabulary* is ``None`` so callers opt in explicitly and
+    existing ``active_lint_tracked`` behavior is untouched.
+    """
+    from file_util import atomic_write  # noqa: PLC0415
+
+    if anchor_vocabulary is None:
+        return 0
+    repo_dir = tracked_root / repo_slug
+    if not repo_dir.is_dir():
+        return 0
+
+    flagged = 0
+    for topic_name in _TRACKED_TOPICS:
+        topic_dir = repo_dir / topic_name
+        if not topic_dir.is_dir():
+            continue
+        for entry_path in sorted(topic_dir.glob("*.md")):
+            try:
+                text = entry_path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            fields, _block, body = _split_tracked_entry(text)
+            if not fields or fields.get("status", "active") != "active":
+                continue
+            # ``body`` carries the ``# Title`` heading plus content — enough
+            # signal for the anchor heuristic.
+            if has_repo_anchor(body, config_fields=anchor_vocabulary):
+                continue
+            updated = _update_tracked_entry_status(
+                text,
+                status="stale",
+                stale_reason="no repo-specific anchor (generic best-practice)",
+            )
+            if updated is None:
+                continue
+            try:
+                atomic_write(entry_path, updated)
+            except OSError:
+                logger.warning(
+                    "flag_generic_entries_stale: failed to rewrite %s", entry_path
+                )
+                continue
+            flagged += 1
+    return flagged
+
+
 class WikiEntry(BaseModel):
     """A single knowledge entry within a topic page."""
 
@@ -563,6 +652,25 @@ class WikiEntry(BaseModel):
             "the ingest-path dedup/corroboration logic in wiki_compiler."
         ),
     )
+    fixed_in_pr: str | None = Field(
+        default=None,
+        description=(
+            "PR reference (e.g. '#8713') asserting this entry's underlying "
+            "fix has shipped. Hand-authored gotcha/manual entries carry "
+            "this alongside code_refs; WikiRotDetectorLoop's shipped-claim "
+            "pass (issue #9598) verifies the claim against them. Previously "
+            "dropped as an unmodeled extra field on parse (issue #9936)."
+        ),
+    )
+    code_refs: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "path.py:symbol (or bare-file) references corroborating "
+            "fixed_in_pr — resolved against checked-out source by the "
+            "shipped-claim verifier. Previously dropped as an unmodeled "
+            "extra field on parse (issue #9936)."
+        ),
+    )
 
     @model_validator(mode="after")
     def _default_valid_from(self) -> WikiEntry:
@@ -612,6 +720,80 @@ def annotate_entries_with_temporal_tags(
             base = f"{base} (+{entry.corroborations})"
         annotated.append((entry, base))
     return annotated
+
+
+def parse_topic_page(topic_path: Path) -> list[WikiEntry]:
+    """Parse a topic markdown file into its ``WikiEntry`` objects.
+
+    Schema-slim layout: each entry is rendered as a `## Title`
+    section followed by prose, an optional `_Source: #N (kind)_`
+    footer, and a `json:entry` code block carrying metadata WITHOUT
+    the `content` field. The reader reconstructs ``WikiEntry.content``
+    from the prose section above the metadata block.
+
+    Legacy entries that still embed ``content`` in the JSON continue
+    to load — the prose section overrides if present, otherwise the
+    JSON-embedded copy is used.
+
+    Parsing strategy: split the file at line-start ``## `` boundaries
+    into entry sections, then within each section locate the LAST
+    ``json:entry`` code block as the metadata block. This is robust
+    against (a) prose containing embedded ```` ```json:entry ```` fences
+    (e.g., wiki entries about the wiki schema itself), and (b) free-form
+    ``## Heading`` sections without a metadata block (silently skipped
+    rather than eating the next entry).
+
+    Module-level (not a ``RepoWikiStore`` method) so callers that only
+    need the authoritative, read-only parse — e.g. ``WikiRotDetectorLoop``
+    (issue #9936) — can share it without a live store instance. Returns
+    ``[]``, never raises, for files that aren't in this shape (no ``## ``
+    sections, or none carrying a ``json:entry`` block) — callers treat
+    an empty result as "not a topic page" and fall back accordingly.
+    """
+    if not topic_path.exists():
+        return []
+
+    text = topic_path.read_text()
+    # Split at line-start "## " — first chunk is the file preamble.
+    sections = re.split(r"(?:^|\n)## ", text)
+    entries: list[WikiEntry] = []
+
+    for section in sections[1:]:
+        title, _, body = section.partition("\n")
+        title = title.strip()
+        if not title:
+            continue
+        meta_matches = list(
+            re.finditer(r"```json:entry\n(.+?)\n```", body, re.DOTALL),
+        )
+        if not meta_matches:
+            continue  # free-form section without metadata — skip silently
+        meta_match = meta_matches[-1]  # always the LAST block
+        try:
+            metadata = json.loads(meta_match.group(1))
+            prose = _strip_prose_chrome(body[: meta_match.start()])
+            if prose:
+                metadata["content"] = prose
+            elif "content" not in metadata:
+                metadata["content"] = ""
+            if not metadata.get("title"):
+                metadata["title"] = title
+            entries.append(WikiEntry.model_validate(metadata))
+        except Exception as exc:  # noqa: BLE001
+            # Surface the offending entry id and the validation reason so
+            # drift is diagnosable from the log alone (the bare path is not).
+            try:
+                entry_id = str(json.loads(meta_match.group(1)).get("id", ""))
+            except Exception:  # noqa: BLE001
+                entry_id = "<invalid-json>"
+            logger.warning(
+                "Skipping malformed entry %s in %s: %s",
+                entry_id or "<no-id>",
+                topic_path,
+                exc,
+            )
+
+    return entries
 
 
 class WikiIndex(BaseModel):
@@ -686,6 +868,8 @@ class RepoWikiStore:
         wiki_root: Path,
         tracked_root: Path | None = None,
         self_slug: str | None = None,
+        *,
+        read_only: bool = False,
     ) -> None:
         """Initialise a repo-wiki store.
 
@@ -698,11 +882,38 @@ class RepoWikiStore:
         the running repo's own wiki. The self-repo's pages live directly
         under ``wiki_root`` (no owner/repo nesting); every other slug
         nests under ``wiki_root/owner/repo``.
+
+        ``read_only`` (keyword-only) blocks the four knowledge-content
+        write methods (``ingest``, ``write_entry``, ``mark_superseded``,
+        ``active_lint``) — they raise :class:`RepoWikiReadOnlyError`. Used
+        for the boot-time store whose roots live under the operator's main
+        checkout: runtime content writes there dirty the tree and never
+        ride a PR (#9539, #9836). Reads and gitignored caches stay allowed.
         """
         self._wiki_root = wiki_root
         self._tracked_root = tracked_root
         self._self_slug = self_slug
+        self._read_only = read_only
         self._dedup_stores: dict[str, object] = {}
+
+    @property
+    def is_read_only(self) -> bool:
+        """True when content-write methods are blocked (see ``read_only``)."""
+        return self._read_only
+
+    def _ensure_writable(self, method: str) -> None:
+        """Raise :class:`RepoWikiReadOnlyError` when the store is read-only.
+
+        Called at the top of every knowledge-content write method so a
+        stray write against the main-checkout store fails loudly instead
+        of silently dirtying ``repo_root``.
+        """
+        if self._read_only:
+            raise RepoWikiReadOnlyError(
+                f"RepoWikiStore.{method} is blocked: this store is read-only "
+                f"(wiki_root={self._wiki_root}). Route content writes through the "
+                "worktree-isolated maintenance PR path (see wiki_maint_queue)."
+            )
 
     # -- public API --------------------------------------------------------
 
@@ -716,6 +927,7 @@ class RepoWikiStore:
         Creates the repo wiki directory if it doesn't exist, updates
         topic pages, refreshes the index, and logs the operation.
         """
+        self._ensure_writable("ingest")
         repo_dir = self._ensure_repo_dir(repo_slug)
         result = IngestResult()
 
@@ -926,6 +1138,7 @@ class RepoWikiStore:
 
         Returns the same ``LintResult`` with counts of actions taken.
         """
+        self._ensure_writable("active_lint")
         repo_dir = self._repo_dir(repo_slug)
         result = LintResult()
 
@@ -1015,6 +1228,7 @@ class RepoWikiStore:
         entry was found and updated; False otherwise. Does not delete or
         move the entry. Callers emit events.
         """
+        self._ensure_writable("mark_superseded")
         repo_dir = self._repo_dir(repo_slug)
         if not repo_dir.exists():
             return False
@@ -1135,7 +1349,9 @@ class RepoWikiStore:
             FileExistsError: If the computed path collides with an
                 existing file (same id + slug + issue).  The exclusive
                 open prevents silent overwrite of prior entries.
+            RepoWikiReadOnlyError: If the store was constructed read-only.
         """
+        self._ensure_writable("write_entry")
         repo_dir = self._repo_dir(repo_slug)
         topic_dir = repo_dir / topic
         topic_dir.mkdir(parents=True, exist_ok=True)
@@ -1423,68 +1639,12 @@ class RepoWikiStore:
     def _load_topic_entries(self, topic_path: Path) -> list[WikiEntry]:
         """Parse a topic markdown file back into entries.
 
-        Schema-slim layout: each entry is rendered as a `## Title`
-        section followed by prose, an optional `_Source: #N (kind)_`
-        footer, and a `json:entry` code block carrying metadata WITHOUT
-        the `content` field. The reader reconstructs ``WikiEntry.content``
-        from the prose section above the metadata block.
-
-        Legacy entries that still embed ``content`` in the JSON continue
-        to load — the prose section overrides if present, otherwise the
-        JSON-embedded copy is used.
-
-        Parsing strategy: split the file at line-start ``## `` boundaries
-        into entry sections, then within each section locate the LAST
-        ``json:entry`` code block as the metadata block. This is robust
-        against (a) prose containing embedded ```` ```json:entry ```` fences
-        (e.g., wiki entries about the wiki schema itself), and (b) free-form
-        ``## Heading`` sections without a metadata block (silently skipped
-        rather than eating the next entry).
+        Thin delegator to the module-level :func:`parse_topic_page` — that
+        function is the single source of truth so other callers (e.g.
+        ``WikiRotDetectorLoop``, issue #9936) can share the identical parse
+        without needing a live ``RepoWikiStore`` instance.
         """
-        if not topic_path.exists():
-            return []
-
-        text = topic_path.read_text()
-        # Split at line-start "## " — first chunk is the file preamble.
-        sections = re.split(r"(?:^|\n)## ", text)
-        entries: list[WikiEntry] = []
-
-        for section in sections[1:]:
-            title, _, body = section.partition("\n")
-            title = title.strip()
-            if not title:
-                continue
-            meta_matches = list(
-                re.finditer(r"```json:entry\n(.+?)\n```", body, re.DOTALL),
-            )
-            if not meta_matches:
-                continue  # free-form section without metadata — skip silently
-            meta_match = meta_matches[-1]  # always the LAST block
-            try:
-                metadata = json.loads(meta_match.group(1))
-                prose = _strip_prose_chrome(body[: meta_match.start()])
-                if prose:
-                    metadata["content"] = prose
-                elif "content" not in metadata:
-                    metadata["content"] = ""
-                if not metadata.get("title"):
-                    metadata["title"] = title
-                entries.append(WikiEntry.model_validate(metadata))
-            except Exception as exc:  # noqa: BLE001
-                # Surface the offending entry id and the validation reason so
-                # drift is diagnosable from the log alone (the bare path is not).
-                try:
-                    entry_id = str(json.loads(meta_match.group(1)).get("id", ""))
-                except Exception:  # noqa: BLE001
-                    entry_id = "<invalid-json>"
-                logger.warning(
-                    "Skipping malformed entry %s in %s: %s",
-                    entry_id or "<no-id>",
-                    topic_path,
-                    exc,
-                )
-
-        return entries
+        return parse_topic_page(topic_path)
 
     def _write_topic_page(
         self,

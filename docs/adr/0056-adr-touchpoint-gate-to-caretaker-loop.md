@@ -2,10 +2,11 @@
 
 - **Status:** Accepted
 - **Date:** 2026-05-06
+- **Enforcement:** enforced
 - **Supersedes:** none (the gate it replaces was a piece of CI tooling, not an ADR-blessed decision)
 - **Superseded by:** none
-- **Related:** [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker-loop pattern), [ADR-0045](0045-trust-architecture-hardening.md) (trust-architecture hardening, which originally floated `Skip-ADR:` as a convention). Code: `src/adr_touchpoint_auditor_loop.py:AdrTouchpointAuditorLoop`, `src/adr_drift.py:compute_drift`, `src/state/_adr_audit.py:AdrAuditStateMixin`.
-- **Enforced by:** `tests/test_adr_touchpoint_auditor_loop.py`, `tests/test_adr_drift.py`, `tests/test_loop_wiring_completeness.py` (auto-discovery confirms the loop is wired in all 5 checkpoints).
+- **Related:** [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker-loop pattern), [ADR-0045](0045-trust-architecture-hardening.md) (trust-architecture hardening, which originally floated `Skip-ADR:` as a convention). Code: `src/adr_touchpoint_auditor_loop.py:AdrTouchpointAuditorLoop`, `src/adr_drift.py:compute_drift`, `src/adr_drift.py:partition_fleet_drift`, `src/adr_drift.py:FleetDriftBatch`, `src/state/_adr_audit.py:AdrAuditStateMixin`. Additional coverage: `tests/test_adr_drift.py`, `tests/test_loop_wiring_completeness.py` (auto-discovery confirms the loop is wired in all 5 checkpoints).
+- **Enforced by:** pytest:tests/test_adr_touchpoint_auditor_loop.py
 
 ## Context
 
@@ -31,6 +32,7 @@ The loop runs on a configurable interval (default: 4 hours). On each tick it:
 4. Dedup key `adr_touchpoint_auditor:ADR-NNNN` (per ADR, no PR component) prevents re-filing the same rollup across re-scans (e.g. cursor rewind during incident response). On subsequent ticks, an open rollup for the same ADR is **updated in place** via `PRPort.update_issue_body` — new drifting PRs are appended, PRs that have gained ADR coverage are dropped.
 5. When any PR diff this tick includes the ADR's own markdown file, the rollup is **closed automatically** — drift is considered resolved by that PR.
 6. After 3 unresolved attempts on the same per-ADR rollup, escalates to `hitl_escalation_label` + `adr_drift_stuck_label` (`hydraflow-adr-drift-stuck`). Closing the escalation issue clears the dedup key, the per-ADR attempt counter, and the rollup state (same reconcile pattern as `FakeCoverageAuditorLoop`).
+7. **Fleet batch** (Amended 2026-07-20 by #9662): when a *single* PR drifts at least `adr_drift_fleet_batch_threshold` distinct ADRs (default 4, range 2–100, env `HYDRAFLOW_ADR_DRIFT_FLEET_BATCH_THRESHOLD`), the loop files **one batched rollup** for that PR listing every affected ADR, instead of N per-ADR rollups. The partition is pure (`src/adr_drift.py:partition_fleet_drift` → `src/adr_drift.py:FleetDriftBatch`); a fleet PR's findings are removed from the per-ADR aggregation so the same drift is never double-filed. Below-threshold PRs keep the per-ADR shape of points 3–6 unchanged. Batch keys use the `FLEET-<pr>` discriminator (state key `FLEET-<pr>`, dedup key `adr_touchpoint_auditor:FLEET-<pr>`) — disjoint from the per-ADR `ADR-NNNN` sub-namespace. **Close semantics differ from per-ADR rollups:** a batched rollup is one-shot — it is *not* auto-closed when a member ADR's file is later updated (point 5 does not apply). A human closes it with a one-line explanation (the close comment is the audit trail, preserving Rule 4's philosophy without reviving `Skip-ADR:`); the loop's manual-close reconcile then clears the `FLEET-<pr>` state, attempt counter, and dedup key so nothing strands.
 
 The loop honors the [ADR-0049](0049-trust-loop-kill-switch-convention.md) in-body kill-switch:
 
@@ -65,6 +67,7 @@ async def _do_work(self) -> dict[str, Any] | None:
 - The gate workflow + script are deleted in PR #8484.
 - The first deploy after this ADR lands seeds `adr_audit_cursor` to "now"; pre-existing merged PRs are *not* retroactively scanned. Operators who want a backfill can manually rewind the cursor in `.hydraflow/.../state.json`.
 - **#8987 rollup migration:** Existing per-tuple dedup keys (`adr_touchpoint_auditor:PR-N:ADR-N`) and per-tuple attempt counters are **silently ignored** by the new code path — they become dead weight in the dedup store but are harmless. The 57 noise issues filed under the old shape were closed on 2026-05-19 and need no further action. A future cleanup pass may prune the dead keys; until then, they cost a few KB of state and are not re-filed.
+- **#9662 fleet-batch amendment (2026-07-20):** cross-cutting caretaker-fleet sweeps (e.g. #9592's bounded-subprocess hardening across 9 owned loops) previously amplified into N near-identical per-ADR rollups from one PR (#9603, #9606). Decision point 7 collapses those into one batched issue per fleet PR at the filing stage. No state migration: existing per-ADR keys and open rollups are untouched; `FLEET-<pr>` keys are a new disjoint sub-namespace. The `Skip-ADR:` marker considered in the issue was rejected — it would contradict Rule 4 and require a superseding ADR.
 
 ## Notes for future ADRs
 

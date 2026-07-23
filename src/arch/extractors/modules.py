@@ -16,11 +16,17 @@ from pathlib import Path
 from arch._models import ModuleEdge, ModuleGraph, ModuleNode
 
 
-def _package_of(path: Path, src_root: Path) -> str:
+def package_of(path: Path, src_root: Path) -> str:
     """Return the dotted package name for `path` relative to `src_root`'s parent.
 
     A file at src/foo/a.py belongs to package src.foo.
     A file at src/foo.py belongs to package src.
+
+    Pure lexical path arithmetic (``relative_to`` / ``with_suffix`` /
+    ``parts``) — never touches the filesystem, so it works for
+    non-existent/synthetic paths too. Public: this is the authoritative
+    file→module mapping reused by the erosion change-spread sensor
+    (``erosion.spread``, #10105) so nothing else hand-rolls it.
     """
     rel = path.relative_to(src_root.parent)
     parts = rel.with_suffix("").parts
@@ -49,14 +55,14 @@ def extract_module_graph(src_dir: Path) -> ModuleGraph:
     # First pass: collect all package names that exist under src/.
     local_packages: set[str] = set()
     for py in src_dir.rglob("*.py"):
-        local_packages.add(_package_of(py, src_dir))
+        local_packages.add(package_of(py, src_dir))
 
     for py in sorted(src_dir.rglob("*.py")):
         try:
             tree = ast.parse(py.read_text())
         except SyntaxError:
             continue
-        from_pkg = _package_of(py, src_dir)
+        from_pkg = package_of(py, src_dir)
         nodes.add(from_pkg)
         for stmt in ast.walk(tree):
             for tgt in _module_targets(stmt):

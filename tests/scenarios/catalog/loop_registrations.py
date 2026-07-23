@@ -15,16 +15,178 @@ from unittest.mock import AsyncMock, MagicMock
 from tests.scenarios.catalog import LoopCatalog, register_loop
 
 
+def _scenario_github_cache(ports: dict[str, Any], config: Any, pr_manager: Any) -> Any:
+    """Shared ``GitHubDataCache`` over the scenario's GitHub port (#9814).
+
+    A REAL cache instance (not a MagicMock) so unseeded scenarios exercise
+    the production read path — loop → cache → FakeGitHub
+    ``list_runs_for_workflow`` — with zero subprocesses. Tests may override
+    by seeding a ``github_cache`` port key.
+    """
+    github_cache = ports.get("github_cache")
+    if github_cache is None:
+        from github_cache_loop import GitHubDataCache  # noqa: PLC0415
+
+        github_cache = GitHubDataCache(config, pr_manager, MagicMock())
+        ports["github_cache"] = github_cache
+    return github_cache
+
+
 def _build_ci_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from ci_monitor_loop import CIMonitorLoop  # noqa: PLC0415
 
     return CIMonitorLoop(config=config, pr_manager=ports["github"], deps=deps)
 
 
+def _build_gate_health(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    from gate_health_loop import GateHealthLoop  # noqa: PLC0415
+
+    return GateHealthLoop(config=config, pr_manager=ports["github"], deps=deps)
+
+
+def _build_pr_red_repair(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build PrRedRepairLoop for scenarios (#10027 Phase 1: infra-flake retrier).
+
+    ``state`` defaults to a MagicMock mirroring the ``_build_security_patch``
+    guard: ``get_rollup_issue``/``get_rollup_issue_keys`` return falsy/empty
+    so ``RollupIssueManager.ensure``/``resolve_all_except`` see a clean
+    slate rather than a truthy unstubbed MagicMock. Attempt-count reads/
+    bumps default to a simple in-memory counter so bounded-rerun scenarios
+    (settle red → rerun → re-settle red → escalate) work without a real
+    ``StateTracker``.
+    """
+    from pr_red_repair_loop import PrRedRepairLoop  # noqa: PLC0415
+
+    state = ports.get("pr_red_repair_state")
+    if state is None:
+        state = MagicMock()
+        state.get_rollup_issue.return_value = None
+        state.get_rollup_issue_keys.return_value = []
+        counts: dict[str, int] = {}
+
+        def _get_attempts(pr_number: int) -> int:
+            return counts.get(str(pr_number), 0)
+
+        def _bump_attempts(pr_number: int) -> int:
+            key = str(pr_number)
+            counts[key] = counts.get(key, 0) + 1
+            return counts[key]
+
+        state.get_pr_red_rerun_attempts.side_effect = _get_attempts
+        state.bump_pr_red_rerun_attempts.side_effect = _bump_attempts
+        ports["pr_red_repair_state"] = state
+    return PrRedRepairLoop(
+        config=config, pr_manager=ports["github"], state=state, deps=deps
+    )
+
+
+def _build_erosion_metrics(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build ErosionMetricsLoop for scenarios (#10107, epic #10104).
+
+    ``state`` defaults to a MagicMock whose last-processed-SHA cursor is a
+    simple in-memory string starting empty (clean slate — the first tick
+    primes the baseline, matching production's fresh-install behavior).
+    ``dedup`` defaults to a clean-slate MagicMock (no prior filed
+    fingerprints), mirroring GateActivatorLoop's builder. Both this
+    loop's git-range analysis (``changed_files_for_range`` /
+    ``added_symbols_for_range``) run against ``config.repo_root`` on disk,
+    not through the ``github`` port, so scenarios exercising the
+    threshold/dedup path need a real git repo fixture there rather than
+    seeded FakeGitHub state — see ``tests/scenarios/test_erosion_metrics_scenario.py``.
+    """
+    from erosion_metrics_loop import ErosionMetricsLoop  # noqa: PLC0415
+
+    state = ports.get("erosion_metrics_state")
+    if state is None:
+        state = MagicMock()
+        cursor: dict[str, str] = {"sha": ""}
+
+        def _get_sha() -> str:
+            return cursor["sha"]
+
+        def _set_sha(sha: str) -> None:
+            cursor["sha"] = sha
+
+        state.get_erosion_last_processed_sha.side_effect = _get_sha
+        state.set_erosion_last_processed_sha.side_effect = _set_sha
+        ports["erosion_metrics_state"] = state
+
+    dedup = ports.get("erosion_metrics_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["erosion_metrics_dedup"] = dedup
+
+    return ErosionMetricsLoop(
+        config=config,
+        pr_manager=ports["github"],
+        state=state,
+        dedup=dedup,
+        deps=deps,
+    )
+
+
+def _build_issue_refinement(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build IssueRefinementLoop for scenarios (#9957).
+
+    ``state`` and ``dedup`` default to MagicMocks that behave like a clean
+    slate (empty index, no judged pairs, no full sweep yet, no digest issue,
+    no open proposals, no prior dedup keys) — mirrors the FlakeTrackerLoop /
+    SkillPromptEvalLoop pattern. ``issue_refinement_llm`` defaults to a
+    duck-typed client whose ``complete`` resolves to ``""`` — the loop's
+    fail-soft degrade path (unparseable verdict -> low-confidence proposal,
+    no crash) so a scenario never needs a real LLM call.
+    """
+    from issue_refinement_loop import IssueRefinementLoop  # noqa: PLC0415
+
+    state = ports.get("issue_refinement_state")
+    if state is None:
+        state = MagicMock()
+        state.get_refinement_index.return_value = {}
+        state.get_judged_pairs.return_value = []
+        state.get_refinement_last_full_sweep.return_value = None
+        state.get_refinement_digest_issue.return_value = 0
+        state.get_refinement_open_proposals.return_value = []
+        ports["issue_refinement_state"] = state
+
+    dedup = ports.get("issue_refinement_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["issue_refinement_dedup"] = dedup
+
+    llm = ports.get("issue_refinement_llm")
+    if llm is None:
+        llm = MagicMock()
+        llm.complete = AsyncMock(return_value="")
+        ports["issue_refinement_llm"] = llm
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return IssueRefinementLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        deps=deps,
+        refinement_llm=llm,
+    )
+
+
 def _build_stale_issue_gc(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from stale_issue_gc_loop import StaleIssueGCLoop  # noqa: PLC0415
 
-    return StaleIssueGCLoop(config=config, pr_manager=ports["github"], deps=deps)
+    state = ports.get("state")
+    if state is None:
+        state = MagicMock()
+        # Real StateTracker returns {} when nothing was pruned — a bare
+        # MagicMock return would read as "pruned something" in loop results
+        # (fake-fidelity rule).
+        state.prune_issue_scoped_state.return_value = {}
+        ports["state"] = state
+    return StaleIssueGCLoop(
+        config=config, pr_manager=ports["github"], state=state, deps=deps
+    )
 
 
 def _build_dependabot_merge(ports: dict[str, Any], config: Any, deps: Any) -> Any:
@@ -56,6 +218,25 @@ def _build_dependabot_merge(ports: dict[str, Any], config: Any, deps: Any) -> An
 
         state.get_dependabot_arch_refresh_attempts.side_effect = _get_arch_attempts
         state.bump_dependabot_arch_refresh_attempts.side_effect = _bump_arch_attempts
+
+        # Same fake-fidelity treatment for the sibling update-branch heal counter
+        # (#9889). The CI-failure and conflict paths compare
+        # ``get_dependabot_update_branch_attempts(pr) < cap`` under DEFAULT config
+        # (cap=1, heal enabled), so a bare MagicMock raises "'<' not supported
+        # between 'MagicMock' and 'int'" — the #10276 staging->main RC-promotion
+        # Browser Scenarios failure. The non-browser reference masks it by pinning
+        # HYDRAFLOW_DEPENDABOT_UPDATE_BRANCH_MAX_ATTEMPTS=0.
+        _ub_attempts: dict[int, int] = {}
+
+        def _get_ub_attempts(pr_number: int) -> int:
+            return _ub_attempts.get(pr_number, 0)
+
+        def _bump_ub_attempts(pr_number: int) -> int:
+            _ub_attempts[pr_number] = _ub_attempts.get(pr_number, 0) + 1
+            return _ub_attempts[pr_number]
+
+        state.get_dependabot_update_branch_attempts.side_effect = _get_ub_attempts
+        state.bump_dependabot_update_branch_attempts.side_effect = _bump_ub_attempts
         ports["dependabot_state"] = state
     return DependabotMergeLoop(
         config=config,
@@ -69,10 +250,18 @@ def _build_dependabot_merge(ports: dict[str, Any], config: Any, deps: Any) -> An
 def _build_merge_state_watcher(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from merge_state_watcher_loop import MergeStateWatcherLoop  # noqa: PLC0415
 
+    # CH-2 (#9730): the approval-record reconciler talks to gh at the raw
+    # subprocess boundary; stub it here so MockWorld ticks stay hermetic.
+    reconciler = ports.get("approval_reconciler")
+    if reconciler is None:
+        reconciler = MagicMock()
+        reconciler.reconcile = AsyncMock(return_value={"merged_seen": 0, "recorded": 0})
+        ports["approval_reconciler"] = reconciler
     return MergeStateWatcherLoop(
         config=config,
         prs=ports["github"],
         deps=deps,
+        approval_reconciler=reconciler,
     )
 
 
@@ -91,10 +280,40 @@ def _build_pr_unsticker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
+class _StubRepoProber:
+    """In-process air-gap for ``HealthMonitorLoop``'s repo-existence probe.
+
+    Production ``DefaultRepoProber.probe`` shells out to ``git ls-remote``
+    (#10140); reporting "reachable" (``True``) without spawning keeps
+    in-process MockWorld health-monitor scenarios off the network the same
+    way ``sandbox_main`` injects ``_FakeRepoProber``.
+    """
+
+    async def probe(self, slug: str) -> bool | None:
+        _ = slug
+        return True
+
+
 def _build_health_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from health_monitor_loop import HealthMonitorLoop  # noqa: PLC0415
 
-    return HealthMonitorLoop(config=config, deps=deps, prs=ports["github"])
+    # ``state`` powers the dead-man-switch heartbeat reads; ``bg_workers``
+    # (seeded via seed_ports) powers the restart-first stall sweep. Both
+    # checks silently no-op when their deps are absent, so plain
+    # health-monitor scenarios are unaffected. ``repo_prober`` is stubbed so
+    # the persistent-error self-repair actuator's ``git ls-remote`` 404-probe
+    # (#10140) never spawns in-process.
+    loop = HealthMonitorLoop(
+        config=config,
+        deps=deps,
+        prs=ports["github"],
+        state=ports.get("state"),
+        repo_prober=_StubRepoProber(),
+    )
+    bg_workers = ports.get("bg_workers")
+    if bg_workers is not None:
+        loop.set_bg_workers(bg_workers)
+    return loop
 
 
 def _build_workspace_gc(ports: dict[str, Any], config: Any, deps: Any) -> Any:
@@ -315,6 +534,13 @@ def _build_stale_issue(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         # a MagicMock — prevents TypeError in timedelta() during parity tests.
         state.get_stale_issue_settings.return_value = StaleIssueSettings()
         state.get_stale_issue_closed.return_value = set()
+        # Regression-rot rollup (#9597) uses RollupIssueManager against this
+        # same state mock — mirrors _build_security_patch's guard so an
+        # unstubbed MagicMock().get_rollup_issue() (truthy) doesn't make
+        # RollupIssueManager.ensure/resolve think a rollup issue already
+        # exists.
+        state.get_rollup_issue.return_value = None
+        state.get_rollup_issue_keys.return_value = []
         ports["stale_issue_state"] = state
     return StaleIssueLoop(config=config, prs=ports["github"], state=state, deps=deps)
 
@@ -343,6 +569,11 @@ def _build_flake_tracker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     * ``flake_fetch_runs`` → ``_fetch_recent_runs``
     * ``flake_download_junit`` → ``_download_junit``
     * ``flake_reconcile_closed`` → ``_reconcile_closed_escalations``
+    * ``flake_fetch_xdist_runs`` → ``_fetch_xdist_audit_runs`` (#10141)
+    * ``flake_download_xdist`` → ``_download_xdist_audit`` (#10141)
+
+    The xdist-audit seams default to an EMPTY audit (no gh, no quarantine)
+    so the detection is a no-op unless a test seeds them.
 
     ``state`` and ``dedup`` default to MagicMocks that behave like a clean
     slate (no prior flake counts, no prior dedup keys). Tests may override
@@ -365,6 +596,7 @@ def _build_flake_tracker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         ports["flake_dedup"] = dedup
 
     pr_manager = ports.get("pr_manager") or ports["github"]
+    github_cache = _scenario_github_cache(ports, config, pr_manager)
 
     loop = FlakeTrackerLoop(
         config=config,
@@ -372,6 +604,7 @@ def _build_flake_tracker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         pr_manager=pr_manager,
         dedup=dedup,
         deps=deps,
+        github_cache=github_cache,
     )
 
     # Rewire external I/O to seeded async callables (if provided).
@@ -385,6 +618,16 @@ def _build_flake_tracker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     reconcile = ports.get("flake_reconcile_closed")
     if reconcile is not None:
         loop._reconcile_closed_escalations = reconcile  # type: ignore[method-assign]
+
+    # xdist-quarantine external gh I/O (#10141) — air-gapped like the flake
+    # seams above. Default fetch to an empty audit so _run_xdist_quarantine_
+    # detection is a no-op (no gh, no _download call) unless a test seeds it.
+    loop._fetch_xdist_audit_runs = ports.get(  # type: ignore[method-assign]
+        "flake_fetch_xdist_runs"
+    ) or AsyncMock(return_value=[])
+    xdist_download = ports.get("flake_download_xdist")
+    if xdist_download is not None:
+        loop._download_xdist_audit = xdist_download  # type: ignore[method-assign]
 
     return loop
 
@@ -482,6 +725,7 @@ def _build_rc_budget(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         ports["rc_budget_dedup"] = dedup
 
     pr_manager = ports.get("pr_manager") or ports["github"]
+    github_cache = _scenario_github_cache(ports, config, pr_manager)
 
     loop = RCBudgetLoop(
         config=config,
@@ -489,6 +733,7 @@ def _build_rc_budget(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         pr_manager=pr_manager,
         dedup=dedup,
         deps=deps,
+        github_cache=github_cache,
     )
 
     # Rewire external I/O to seeded async callables (if provided).
@@ -683,6 +928,163 @@ def _build_adr_touchpoint_auditor(ports: dict[str, Any], config: Any, deps: Any)
     return loop
 
 
+def _build_adr_drift_resolver(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build AdrDriftResolverLoop for scenarios (#9976).
+
+    Sibling of ``_build_adr_touchpoint_auditor`` — reads the auditor's
+    rollup state (seeded directly here, not produced by actually running
+    the auditor) and triages it via a FAKED LLM boundary (no real model
+    calls in scenarios/tests, per #9976). Tests pre-seed:
+
+    * ``adr_drift_resolver_state`` — MagicMock whose ``all_adr_rollups()``
+      returns the open ``{rollup_key: {issue_number, pr_numbers}}`` map to
+      triage; defaults to a clean slate (empty dict — nothing to triage).
+    * ``adr_drift_resolver_dedup`` — MagicMock behaving like a clean-slate
+      dedup set.
+    * ``adr_drift_resolver_index`` — an ``ADRIndex`` (or duck-typed
+      substitute); defaults to one reporting no ADRs (unmatched candidates
+      are skipped, never crash the tick).
+    * ``adr_drift_resolver_triage`` — an ``AdrDriftTriageLLM`` (or
+      duck-typed substitute with an async ``classify`` method) — the FAKED
+      TRIAGE boundary; defaults to a MagicMock always returning a
+      CONSISTENT verdict.
+    """
+    from adr_drift_resolver_loop import AdrDriftResolverLoop  # noqa: PLC0415
+
+    state = ports.get("adr_drift_resolver_state")
+    if state is None:
+        state = MagicMock()
+        state.all_adr_rollups.return_value = {}
+        ports["adr_drift_resolver_state"] = state
+
+    dedup = ports.get("adr_drift_resolver_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["adr_drift_resolver_dedup"] = dedup
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+    adr_index = ports.get("adr_drift_resolver_index") or MagicMock(adrs=lambda: [])
+
+    triage = ports.get("adr_drift_resolver_triage")
+    if triage is None:
+        from adr_drift_triage import (  # noqa: PLC0415
+            DriftClassification,
+            TriageVerdict,
+        )
+
+        triage = MagicMock()
+        triage.classify = AsyncMock(
+            return_value=TriageVerdict(
+                classification=DriftClassification.CONSISTENT,
+                rationale="No contradicting evidence in the scoped diff.",
+            )
+        )
+        ports["adr_drift_resolver_triage"] = triage
+
+    return AdrDriftResolverLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        adr_index=adr_index,
+        triage=triage,
+        deps=deps,
+    )
+
+
+def _build_adr_conformance(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build AdrConformanceLoop for scenarios (ADR-0100).
+
+    Mirrors ``_build_adr_touchpoint_auditor``. Tests pre-seed:
+    * ``adr_conformance_runner`` → a ``ConformanceRunnerPort`` (defaults to
+      ``FakeConformanceRunner``, which maps ``check.raw`` -> preset outcome
+      without shelling out).
+    * ``adr_conformance_index`` → an ``ADRIndex`` (or duck-typed substitute).
+
+    State + dedup default to MagicMocks behaving like a clean slate (no
+    rollup recorded, zero attempts, empty dedup set). Tests override via
+    ``adr_conformance_state`` / ``adr_conformance_dedup``.
+    """
+    from adr_conformance_loop import AdrConformanceLoop  # noqa: PLC0415
+    from mockworld.fakes import FakeConformanceRunner  # noqa: PLC0415
+
+    state = ports.get("adr_conformance_state")
+    if state is None:
+        state = MagicMock()
+        state.get_adr_conformance_rollup.return_value = None
+        state.inc_adr_conformance_attempts.return_value = 1
+        ports["adr_conformance_state"] = state
+
+    dedup = ports.get("adr_conformance_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["adr_conformance_dedup"] = dedup
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+    adr_index = ports.get("adr_conformance_index") or MagicMock(adrs=lambda: [])
+    runner = ports.get("adr_conformance_runner")
+    if runner is None:
+        runner = FakeConformanceRunner()
+        ports["adr_conformance_runner"] = runner
+
+    return AdrConformanceLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        adr_index=adr_index,
+        runner=runner,
+        deps=deps,
+    )
+
+
+def _build_auto_tighten(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build AutoTightenLoop for scenarios.
+
+    Tests pre-seed:
+    * ``auto_tighten_adapters`` -> a list of ``RatchetAdapter``-shaped fakes
+      (defaults to empty, so a tick is a no-op cold start).
+    * ``auto_tighten_ingestor`` / ``auto_tighten_attribution`` /
+      ``auto_tighten_pr_author`` -> collaborator fakes (default to MagicMocks
+      that behave like a clean, no-op tick — no gh shelling in scenarios).
+    * ``auto_tighten_obs`` -> an ``ObservationStore`` (defaults to a real one
+      rooted at ``config.repo_data_root``, matching production wiring).
+
+    State defaults to a MagicMock; tests override via ``auto_tighten_state``.
+    """
+    from auto_tighten.observation_store import ObservationStore  # noqa: PLC0415
+    from auto_tighten_loop import AutoTightenLoop  # noqa: PLC0415
+
+    obs = ports.get("auto_tighten_obs") or ObservationStore(
+        config.repo_data_root / "metrics" / "tighten.jsonl"
+    )
+    adapters = ports.get("auto_tighten_adapters") or []
+    ingestor = ports.get("auto_tighten_ingestor") or MagicMock(ingest=lambda: None)
+    attribution = ports.get("auto_tighten_attribution") or MagicMock(
+        attribute=lambda *a, **k: None
+    )
+    pr_author = ports.get("auto_tighten_pr_author") or MagicMock(
+        open=AsyncMock(return_value=None)
+    )
+    state = ports.get("auto_tighten_state")
+    if state is None:
+        state = MagicMock()
+        ports["auto_tighten_state"] = state
+
+    return AutoTightenLoop(
+        config=config,
+        state=state,
+        deps=deps,
+        adapters=adapters,
+        ingestor=ingestor,
+        attribution=attribution,
+        pr_author=pr_author,
+        observation_store=obs,
+    )
+
+
 def _build_branch_protection_auditor(
     ports: dict[str, Any], config: Any, deps: Any
 ) -> Any:
@@ -867,6 +1269,100 @@ def _build_sandbox_failure_fixer(ports: dict[str, Any], config: Any, deps: Any) 
     )
 
 
+def _build_disturbance_dampener(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build DisturbanceDampenerLoop for scenarios (ADR-0095, Pattern A).
+
+    Scenarios that exercise the burn-down path must seed ``ports['github']``
+    (FakeGitHub satisfies the PRPort contract) and ``ports['auto_agent_runner']``
+    (an AsyncMock-style object whose ``run`` returns a ``PreflightSpawn``-like
+    namespace). Scenarios that only need scaffold-wiring smoke can omit both;
+    the loop falls back to a no-op tick. ``state`` and ``dedup`` default to
+    MagicMocks that behave like a clean slate (no prior attempts, no prior
+    dedup keys), mirroring FlakeTrackerLoop's builder.
+    """
+    from disturbance_dampener_loop import DisturbanceDampenerLoop  # noqa: PLC0415
+
+    state = ports.get("disturbance_dampener_state")
+    if state is None:
+        state = MagicMock()
+        state.get_disturbance_dampener_attempts.return_value = 0
+        state.bump_disturbance_dampener_attempts.return_value = 1
+        ports["disturbance_dampener_state"] = state
+
+    dedup = ports.get("disturbance_dampener_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["disturbance_dampener_dedup"] = dedup
+
+    return DisturbanceDampenerLoop(
+        config=config,
+        state=state,
+        prs=ports.get("github"),
+        dedup=dedup,
+        deps=deps,
+        runner=ports.get("auto_agent_runner"),
+    )
+
+
+def _build_human_steering(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build HumanSteeringLoop for scenarios (ADR-0099 #4).
+
+    ``prs`` defaults to a MagicMock whose ``list_issue_comments`` is an
+    AsyncMock returning ``[]`` (no comments, no directives parsed).
+    ``state`` defaults to a MagicMock whose ``get_human_steering`` returns a
+    clean ``SteeringState()``, mirroring the disturbance-dampener builder's
+    clean-slate default. ``active_issues_cb`` defaults to a no-op returning
+    ``[]`` so scenarios that only need scaffold-wiring smoke tick with zero
+    work; scenarios exercising the sensing path should seed
+    ``ports['human_steering_active_issues_cb']``.
+    """
+    from human_steering_loop import HumanSteeringLoop  # noqa: PLC0415
+    from models import SteeringState  # noqa: PLC0415
+
+    prs = ports.get("github")
+    if prs is None:
+        prs = MagicMock()
+        prs.list_issue_comments = AsyncMock(return_value=[])
+        ports["github"] = prs
+
+    state = ports.get("human_steering_state")
+    if state is None:
+        state = MagicMock()
+        state.get_human_steering.return_value = SteeringState()
+        ports["human_steering_state"] = state
+
+    active_issues_cb = ports.get("human_steering_active_issues_cb")
+    if active_issues_cb is None:
+        active_issues_cb = lambda: []  # noqa: E731
+        ports["human_steering_active_issues_cb"] = active_issues_cb
+
+    return HumanSteeringLoop(
+        config=config,
+        state=state,
+        prs=prs,
+        deps=deps,
+        active_issues_cb=active_issues_cb,
+    )
+
+
+def _build_detector_calibration(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build DetectorCalibrationLoop for scenarios."""
+    from detector_calibration_loop import DetectorCalibrationLoop  # noqa: PLC0415
+
+    state = ports.get("detector_calibration_state") or MagicMock()
+    ports.setdefault("detector_calibration_state", state)
+    pr_manager = ports.get("pr_manager") or ports["github"]
+    github_cache = _scenario_github_cache(ports, config, pr_manager)
+    return DetectorCalibrationLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        deps=deps,
+        github_cache=github_cache,
+    )
+
+
 def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build AutoAgentPreflightLoop for scenarios (spec §1–§11).
 
@@ -878,6 +1374,22 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
 
     State defaults to a MagicMock with the auto_agent_* accessors stubbed; tests
     can override via the ``auto_agent_state`` port to use a real StateTracker.
+
+    ADR-0105 decompose-to-converge: ``AutoAgentPreflightLoop`` only builds its
+    internal ``IssueDecomposer``/``DecompositionCouncil`` (and therefore only
+    calls ``decompose_or_escalate`` instead of going straight to
+    ``human-required``) when ``epic_manager``/``runner`` are passed at
+    construction. Both default to ``None`` here — unseeded scenarios keep
+    today's pre-ADR-0105 behavior unchanged. Tests exercising the decompose
+    path seed ``auto_agent_epic_manager`` (typically a real ``EpicManager``
+    wired against the scenario's real ``StateTracker``, so the epic it
+    registers is visible to ``epic_sweeper``) and
+    ``auto_agent_decompose_runner`` (any placeholder — the council's LLM
+    seam is scripted by monkeypatching ``runner_utils.run_lightweight_agent``
+    directly, mirroring ``tests/test_decomposition_council.py``, so the
+    runner object itself is never actually invoked). Distinct port keys from
+    ``_build_epic_monitor``'s ``epic_manager`` (a differently-shaped mock)
+    avoid a collision if a scenario ever runs both loops in one MockWorld.
     """
     from unittest.mock import MagicMock  # noqa: PLC0415
 
@@ -907,6 +1419,8 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
         audit_store=audit_store,
         deps=deps,
         workspaces=ports.get("workspaces"),
+        epic_manager=ports.get("auto_agent_epic_manager"),
+        runner=ports.get("auto_agent_decompose_runner"),
     )
 
 
@@ -946,14 +1460,16 @@ def _build_corpus_learning(ports: dict[str, Any], config: Any, deps: Any) -> Any
         deps=deps,
     )
 
-    # Optional: replace the auto_pr seam on the loop's module with a
-    # seeded async callable so tests can assert the opened PR without
-    # shelling out to ``git``/``gh``.
+    # Optional: replace the auto_pr seam with a seeded async callable so
+    # tests can assert the opened PR without shelling out to ``git``/``gh``.
+    # The loop now generates the case tree inside the worktree (#9539) and
+    # lazily imports :func:`auto_pr.generate_and_open_pr_async`, so the seam
+    # to patch is on the ``auto_pr`` module itself (mirrors DiagramLoop).
     auto_pr_stub = ports.get("corpus_learning_auto_pr")
     if auto_pr_stub is not None:
-        import corpus_learning_loop as _mod  # noqa: PLC0415
+        import auto_pr as _auto_pr  # noqa: PLC0415
 
-        _mod.open_automated_pr_async = auto_pr_stub  # type: ignore[assignment]
+        _auto_pr.generate_and_open_pr_async = auto_pr_stub  # type: ignore[assignment]
 
     return loop
 
@@ -1087,7 +1603,9 @@ def _build_contract_refresh(ports: dict[str, Any], config: Any, deps: Any) -> An
     * ``contract_refresh_record_git`` → ``record_git``
     * ``contract_refresh_record_docker`` → ``record_docker``
     * ``contract_refresh_record_claude`` → ``record_claude_stream``
-    * ``contract_refresh_auto_pr`` → ``open_automated_pr_async``
+    * ``contract_refresh_auto_pr`` → ``auto_pr.generate_and_open_pr_async``
+      (generate-in-worktree, #9539 — the loop imports it lazily so the
+      seam lives on the ``auto_pr`` module, not ``crl_module``)
 
     ``state`` defaults to a MagicMock wired with int-returning stubs for
     the Task 18 attempt counters (``get_contract_refresh_attempts`` →
@@ -1124,13 +1642,16 @@ def _build_contract_refresh(ports: dict[str, Any], config: Any, deps: Any) -> An
         "contract_refresh_record_claude", default_empty
     )
 
-    # Optional: replace the auto_pr seam on the loop's module with a
-    # seeded async callable so tests can assert the opened PR shape
-    # without shelling out to ``git`` / ``gh``. Mirrors the F1
-    # corpus-learning pattern.
+    # Optional: replace the generate-in-worktree seam (#9539) with a seeded
+    # async callable so tests can assert the opened PR shape without shelling
+    # out to ``git`` / ``gh`` or creating a real worktree. The loop imports
+    # ``generate_and_open_pr_async`` lazily from ``auto_pr`` at call time, so
+    # the seam must be patched on the ``auto_pr`` module (not ``_module``).
     auto_pr_stub = ports.get("contract_refresh_auto_pr")
     if auto_pr_stub is not None:
-        _module.open_automated_pr_async = auto_pr_stub  # type: ignore[assignment]
+        import auto_pr as _auto_pr_module  # noqa: PLC0415
+
+        _auto_pr_module.generate_and_open_pr_async = auto_pr_stub  # type: ignore[assignment]
 
     loop = ContractRefreshLoop(
         config=config,
@@ -1409,12 +1930,71 @@ def _build_triage_retry(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         ports["triage_retry_state"] = state
 
     pr_manager = ports.get("pr_manager") or ports["github"]
+    github_cache = _scenario_github_cache(ports, config, pr_manager)
 
     return TriageRetryLoop(
         config=config,
         state=state,
         pr_manager=pr_manager,
         deps=deps,
+        github_cache=github_cache,
+    )
+
+
+def _build_convergence_oscillation(
+    ports: dict[str, Any], config: Any, deps: Any
+) -> Any:
+    """Build ConvergenceOscillationLoop for scenarios (ADR-0098).
+
+    Caretaker loop that scans ConvergenceLedger entries held in StateTracker
+    and escalates cross-boundary oscillation to HITL once per issue.  Tests
+    seed a FakeGitHub via ``ports['github']``; the optional
+    ``convergence_oscillation_state`` port lets a scenario inject a pre-built
+    StateTracker mock when it needs to assert on ledger scanning or escalation.
+    """
+    from convergence_oscillation_loop import ConvergenceOscillationLoop  # noqa: PLC0415
+
+    state = ports.get("convergence_oscillation_state")
+    if state is None:
+        state = MagicMock()
+        state.iter_convergence_ledgers.return_value = []
+        state.mark_oscillation_escalated.return_value = None
+        ports["convergence_oscillation_state"] = state
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return ConvergenceOscillationLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        deps=deps,
+    )
+
+
+def _build_fitness_scorecard(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build FitnessScorecardLoop for scenarios (ADR-0093).
+
+    Read-only caretaker loop. Scenarios that need to assert on emitted
+    LOOP_FITNESS_UPDATE events can seed ``ports['fitness_issue_fetcher']``
+    with an async callable returning a list of IssueRecord-like objects.
+    The default is a no-op async function returning an empty list, which
+    is sufficient for smoke/wiring tests.
+    """
+    from fitness_scorecard_loop import FitnessScorecardLoop  # noqa: PLC0415
+
+    issue_fetcher = ports.get("fitness_issue_fetcher")
+    if issue_fetcher is None:
+
+        async def _no_issues() -> list:
+            return []
+
+        issue_fetcher = _no_issues
+        ports["fitness_issue_fetcher"] = issue_fetcher
+
+    return FitnessScorecardLoop(
+        config=config,
+        deps=deps,
+        issue_fetcher=issue_fetcher,
     )
 
 
@@ -1424,6 +2004,10 @@ _BUILDERS: dict[str, Any] = {
     "branch_protection_auditor": _build_branch_protection_auditor,
     "gate_activator": _build_gate_activator,
     "stale_issue_gc": _build_stale_issue_gc,
+    "gate_health": _build_gate_health,
+    "pr_red_repair": _build_pr_red_repair,
+    "erosion_metrics": _build_erosion_metrics,
+    "issue_refinement": _build_issue_refinement,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,
     "merge_state_watcher": _build_merge_state_watcher,
@@ -1449,6 +2033,9 @@ _BUILDERS: dict[str, Any] = {
     "skill_prompt_eval": _build_skill_prompt_eval,
     "fake_coverage_auditor": _build_fake_coverage_auditor,
     "adr_touchpoint_auditor": _build_adr_touchpoint_auditor,
+    "adr_drift_resolver": _build_adr_drift_resolver,
+    "adr_conformance": _build_adr_conformance,
+    "auto_tighten": _build_auto_tighten,
     "memory_backlog": _build_memory_backlog,
     "rc_budget": _build_rc_budget,
     "wiki_rot_detector": _build_wiki_rot_detector,
@@ -1469,7 +2056,12 @@ _BUILDERS: dict[str, Any] = {
     "cost_budget_watcher": _build_cost_budget_watcher_loop,
     # auto-agent (spec §1–§11; ADR-0050)
     "auto_agent_preflight": _build_auto_agent_preflight,
+    "detector_calibration": _build_detector_calibration,
     "sandbox_failure_fixer": _build_sandbox_failure_fixer,
+    # disturbance dampener burn-down actuator (ADR-0095, Pattern A)
+    "disturbance_dampener": _build_disturbance_dampener,
+    # human-on-the-loop continuous steering sensor (ADR-0099 #4)
+    "human_steering": _build_human_steering,
     # ubiquitous-language (ADR-0054 + ADR-0057 + ADR-0058 + ADR-0062)
     "edge_proposer": _build_edge_proposer,
     "entry_evidence": _build_entry_evidence,
@@ -1481,6 +2073,10 @@ _BUILDERS: dict[str, Any] = {
     "staging_promotion": _build_staging_promotion,
     # factory-phase drift mitigation (ADR-0063 W2)
     "triage_retry": _build_triage_retry,
+    # convergence oscillation escalation (ADR-0098)
+    "convergence_oscillation": _build_convergence_oscillation,
+    # loop fitness scorecard (ADR-0093)
+    "fitness_scorecard": _build_fitness_scorecard,
 }
 
 

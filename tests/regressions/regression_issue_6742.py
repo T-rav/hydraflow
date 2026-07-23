@@ -52,7 +52,9 @@ class TestImplementPhaseSummarizerTruthy:
     """Issue #6742 — ImplementPhase._summarizer must use ``is not None``."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6742 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6742 — fix not yet landed", strict=False
+    )
     async def test_post_impl_transcript_calls_summarizer_when_falsy(
         self, config
     ) -> None:
@@ -88,7 +90,9 @@ class TestImplementPhaseSummarizerTruthy:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6742 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6742 — fix not yet landed", strict=False
+    )
     async def test_post_impl_transcript_hooks_calls_summarizer_when_falsy(
         self, config
     ) -> None:
@@ -132,7 +136,9 @@ class TestImplementPhaseBeadsManagerTruthy:
     """Issue #6742 — ImplementPhase._beads_manager must use ``is not None``."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6742 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6742 — fix not yet landed", strict=False
+    )
     async def test_beads_manager_checked_via_identity_not_truthiness(
         self, config
     ) -> None:
@@ -179,7 +185,9 @@ class TestPlanPhaseSummarizerTruthy:
     """Issue #6742 — PlanPhase._summarizer must use ``is not None``."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6742 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6742 — fix not yet landed", strict=False
+    )
     async def test_plan_transcript_calls_summarizer_when_falsy(self, config) -> None:
         """A falsy-but-present _summarizer must still be invoked (line 480).
 
@@ -222,7 +230,9 @@ class TestPlanPhaseBeadsManagerTruthy:
     """Issue #6742 — PlanPhase._beads_manager must use ``is not None``."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6742 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6742 — fix not yet landed", strict=False
+    )
     async def test_beads_manager_checked_via_identity_not_truthiness(
         self, config
     ) -> None:
@@ -258,7 +268,9 @@ class TestReviewPhaseSummarizerTruthy:
     """Issue #6742 — ReviewPhase._summarizer must use ``is not None``."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6742 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6742 — fix not yet landed", strict=False
+    )
     async def test_post_review_transcript_calls_summarizer_when_falsy(
         self, config
     ) -> None:
@@ -291,34 +303,4 @@ class TestReviewPhaseSummarizerTruthy:
             "evaluated as False on a falsy mock — "
             "should use `if self._summarizer is not None` (issue #6742, "
             "review_phase.py:274)"
-        )
-
-
-# ===========================================================================
-# ShapePhase — _whatsapp truthiness check (line 526)
-# ===========================================================================
-
-
-class TestShapePhasWhatsAppTruthy:
-    """Issue #6742 — ShapePhase._whatsapp must use ``is not None``."""
-
-    @pytest.mark.xfail(reason="Regression for issue #6742 — fix not yet landed", strict=False)
-    def test_whatsapp_checked_via_identity_not_truthiness(self) -> None:
-        """A falsy-but-present _whatsapp must still pass the guard (line 526).
-
-        Current code: ``if self._whatsapp and hasattr(self._whatsapp, "send_shape_turn"):``
-        """
-        falsy_wa = _falsy_mock()
-        falsy_wa.send_shape_turn = AsyncMock()
-
-        # Mirror the production guard exactly
-        entered_branch = False
-        if falsy_wa and hasattr(falsy_wa, "send_shape_turn"):  # mirrors buggy code
-            entered_branch = True
-
-        assert entered_branch, (
-            "WhatsApp notification was skipped because `if self._whatsapp` "
-            "evaluated as False on a falsy-but-not-None mock — "
-            "should use `if self._whatsapp is not None` (issue #6742, "
-            "shape_phase.py:526)"
         )

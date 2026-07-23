@@ -2,7 +2,7 @@
 
 Per CLAUDE.md (ADR-0042 two-tier branch model): "PRs target staging, not main.
 Only RC promotion PRs use --base main." ``ContractRefreshLoop._open_refresh_pr``
-defaulted to ``main`` (the ``open_automated_pr_async`` parameter default),
+defaulted to ``main`` (the ``generate_and_open_pr_async`` parameter default),
 which meant every contract-refresh PR was opened against a protected branch
 that requires an RC promotion to merge into. The "auto-merge" label and
 ``auto_merge=True`` flag both became no-ops because the merge gate at GitHub
@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import auto_pr
 import contract_refresh_loop as crl_module
 from auto_pr import AutoPrResult
 from base_background_loop import LoopDeps
@@ -33,7 +34,7 @@ from events import EventBus
 
 
 class _CaptureAutoPR:
-    """Captures ``open_automated_pr_async`` kwargs for assertion."""
+    """Captures ``generate_and_open_pr_async`` kwargs for assertion."""
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -76,7 +77,7 @@ async def test_refresh_pr_targets_staging_when_enabled(
     not main — otherwise auto-merge can never fire against the protected
     main branch and the closed-loop chain is broken."""
     capture = _CaptureAutoPR()
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", capture)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", capture)
 
     loop = _loop(tmp_path, staging_enabled=True)
     drifted = tmp_path / "drift.yaml"
@@ -93,7 +94,7 @@ async def test_refresh_pr_targets_staging_when_enabled(
         has_drift=True,
     )
 
-    pr_url = await loop._open_refresh_pr([drifted], fleet)
+    pr_url = await loop._open_refresh_pr(fleet)
 
     assert pr_url == "https://github.com/x/y/pull/1"
     assert len(capture.calls) == 1
@@ -114,7 +115,7 @@ async def test_refresh_pr_targets_main_when_staging_disabled(
     """When staging is disabled, base_branch() returns main_branch — the
     fix must respect that, not hardcode staging."""
     capture = _CaptureAutoPR()
-    monkeypatch.setattr(crl_module, "open_automated_pr_async", capture)
+    monkeypatch.setattr(auto_pr, "generate_and_open_pr_async", capture)
 
     loop = _loop(tmp_path, staging_enabled=False)
     drifted = tmp_path / "drift.yaml"
@@ -131,7 +132,7 @@ async def test_refresh_pr_targets_main_when_staging_disabled(
         has_drift=True,
     )
 
-    await loop._open_refresh_pr([drifted], fleet)
+    await loop._open_refresh_pr(fleet)
 
     assert len(capture.calls) == 1
     assert capture.calls[0].get("base") == loop._config.main_branch

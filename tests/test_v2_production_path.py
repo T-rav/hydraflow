@@ -65,7 +65,8 @@ class _StubRunner:
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         timeout: float = 120.0,
-        input: bytes | None = None,  # noqa: A002
+        input: bytes | None = None,  # noqa: A002,
+        **_kwargs: object,  # #9577 cancel_check/cancel_poll_interval
     ) -> SimpleResult:
         del cmd, cwd, env, timeout, input
         return SimpleResult(stdout=self._stdout, stderr="", returncode=self._returncode)
@@ -84,6 +85,7 @@ def _callbacks() -> WorkerRegistryCallbacks:
         update_status=lambda *_a, **_k: None,
         is_enabled=lambda _name: True,
         get_interval=lambda _name: 900,
+        get_watchdog_timeout=lambda _name: 7200,
     )
 
 
@@ -138,10 +140,21 @@ async def test_run_subprocess_call_lands_in_corpus(
     """The seam works end-to-end: build registry → call run_subprocess
     with the injected runner → corpus has a file with the captured shape."""
     _build_real_registry(_config)
-    runner = _StubRunner(stdout='{"number":1,"state":"OPEN"}\n')
+    # #9633: only shapes the dispatcher has a real OPINION on are recorded
+    # now (a narrow projection like number,state gets only a skip-verdict and
+    # is pruned). Use a covered projection so the end-to-end seam still lands.
+    runner = _StubRunner(
+        stdout='{"number":1,"state":"OPEN","mergeable":"MERGEABLE","isDraft":false}\n'
+    )
 
     stdout = await run_subprocess(
-        "gh", "pr", "view", "1", "--json", "number,state", runner=runner
+        "gh",
+        "pr",
+        "view",
+        "1",
+        "--json",
+        "number,state,mergeable,isDraft",
+        runner=runner,
     )
     assert "OPEN" in stdout  # production-path return semantics preserved
 
@@ -165,7 +178,9 @@ async def test_replay_loop_processes_real_captured_sample(
     LiveCorpusReplayLoop ticks against the real captured sample and
     completes without raising."""
     svc = _build_real_registry(_config)
-    runner = _StubRunner(stdout='{"number":1,"state":"OPEN","mergeable":"MERGEABLE"}\n')
+    runner = _StubRunner(
+        stdout='{"number":1,"state":"OPEN","mergeable":"MERGEABLE","isDraft":false}\n'
+    )
 
     await run_subprocess(
         "gh",
@@ -173,7 +188,7 @@ async def test_replay_loop_processes_real_captured_sample(
         "view",
         "1",
         "--json",
-        "number,state,mergeable",
+        "number,state,mergeable,isDraft",
         runner=runner,
     )
 
@@ -215,7 +230,7 @@ async def test_drifted_call_files_hydraflow_find_via_real_chain(
         "view",
         "99",
         "--json",
-        "number,state,mergeable",
+        "number,state,mergeable,isDraft",
         runner=runner,
     )
 

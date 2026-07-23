@@ -52,6 +52,46 @@ def _make_config(wiki_root: Path) -> MagicMock:
     return config
 
 
+class TestApplyIngestEntryTasks:
+    """`_apply_ingest_entry_tasks` writes queued ingest-entry payloads into
+    the worktree's tracked layout so they ride the maintenance PR (#9836)."""
+
+    def test_writes_entries_into_tracked_layout(self, tmp_path: Path) -> None:
+        from wiki_maint_queue import make_ingest_entry_task
+
+        loop = _make_loop(tmp_path / "wiki")
+        tracked_root = tmp_path / "repo_wiki"
+        entry = WikiEntry(
+            title="Gap insight",
+            content="Watch out for the race.",
+            topic="gotchas",
+            source_type="shipped-with-known-gap",
+            source_issue=505,
+        )
+        tasks = [make_ingest_entry_task("org/repo", entry)]
+
+        applied = loop._apply_ingest_entry_tasks(tracked_root, tasks)
+
+        assert applied == tasks
+        # Lands under the tracked layout (path_specs of the maintenance PR),
+        # nested under owner/repo (no self_slug flattening).
+        files = list((tracked_root / "org" / "repo" / "gotchas").glob("*.md"))
+        assert len(files) == 1
+        assert "Gap insight" in files[0].read_text(encoding="utf-8")
+
+    def test_malformed_payload_is_dropped(self, tmp_path: Path) -> None:
+        from wiki_maint_queue import MaintenanceTask
+
+        loop = _make_loop(tmp_path / "wiki")
+        tracked_root = tmp_path / "repo_wiki"
+        bad = MaintenanceTask(kind="ingest-entry", repo_slug="org/repo", params={})
+
+        applied = loop._apply_ingest_entry_tasks(tracked_root, [bad])
+
+        assert applied == []
+        assert not tracked_root.exists()
+
+
 class TestDefaultInterval:
     def test_returns_config_interval(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path / "wiki")
@@ -59,6 +99,12 @@ class TestDefaultInterval:
 
 
 class TestDoWork:
+    """``_do_work`` is the orchestrator: drain → resolve → poll/merge any open
+    PR → (skip if a PR is open) → heal-and-PR in a worktree. The lint/compile/
+    drift behaviour itself is covered by :class:`TestHeal` below, which calls
+    the now-parameterized heal helpers directly (post-#9539 the heal runs
+    inside the worktree, gated on credentials)."""
+
     @pytest.mark.asyncio
     async def test_no_repos(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path / "wiki")
@@ -67,25 +113,97 @@ class TestDoWork:
         assert result["repos"] == 0
 
     @pytest.mark.asyncio
+    async def test_heals_when_repos_present(self, tmp_path: Path) -> None:
+        from unittest.mock import AsyncMock
+
+        wiki_root = tmp_path / "wiki"
+        store = RepoWikiStore(wiki_root)
+        store.ingest(
+            "org/repo",
+            [WikiEntry(title="Some pattern", content="Details.", source_type="plan")],
+        )
+        loop = RepoWikiLoop(
+            config=_make_config(wiki_root), wiki_store=store, deps=_make_deps()
+        )
+        heal = AsyncMock()
+        loop._heal_and_open_maintenance_pr = heal  # type: ignore[method-assign]
+
+        result = await loop._do_work()
+
+        assert result is not None
+        heal.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_skips_heal_while_maintenance_pr_open(self, tmp_path: Path) -> None:
+        from unittest.mock import AsyncMock
+
+        wiki_root = tmp_path / "wiki"
+        store = RepoWikiStore(wiki_root)
+        store.ingest(
+            "org/repo",
+            [WikiEntry(title="p", content="c", source_type="plan")],
+        )
+        config = _make_config(wiki_root)
+        config.repo_wiki_maintenance_pr_coalesce = True
+        loop = RepoWikiLoop(config=config, wiki_store=store, deps=_make_deps())
+        loop._open_pr_branch = "hydraflow/wiki-maint-prior"
+        loop._open_pr_url = "https://github.com/x/y/pull/42"
+        heal = AsyncMock()
+        loop._heal_and_open_maintenance_pr = heal  # type: ignore[method-assign]
+        # Poll runs but cannot reach gh (no credentials) → PR stays "open".
+        loop._poll_and_merge_open_pr = AsyncMock()  # type: ignore[method-assign]
+
+        result = await loop._do_work()
+
+        assert result is not None
+        # Coalesce: no fresh heal while a maintenance PR is open.
+        heal.assert_not_awaited()
+        assert result["maintenance_pr"] == "https://github.com/x/y/pull/42"
+
+    @pytest.mark.asyncio
+    async def test_polls_open_pr_before_healing(self, tmp_path: Path) -> None:
+        from unittest.mock import AsyncMock
+
+        wiki_root = tmp_path / "wiki"
+        store = RepoWikiStore(wiki_root)
+        store.ingest(
+            "org/repo", [WikiEntry(title="p", content="c", source_type="plan")]
+        )
+        loop = RepoWikiLoop(
+            config=_make_config(wiki_root), wiki_store=store, deps=_make_deps()
+        )
+        order: list[str] = []
+        loop._poll_and_merge_open_pr = AsyncMock(  # type: ignore[method-assign]
+            side_effect=lambda _stats: order.append("poll")
+        )
+        loop._heal_and_open_maintenance_pr = AsyncMock(  # type: ignore[method-assign]
+            side_effect=lambda *_a: order.append("heal")
+        )
+
+        await loop._do_work()
+
+        assert order == ["poll", "heal"]
+
+
+class TestHeal:
+    """The heal helpers, post-#9539 parameterized so they operate on a
+    worktree-scoped store / root rather than ``repo_root``."""
+
+    @pytest.mark.asyncio
     async def test_lints_existing_repos(self, tmp_path: Path) -> None:
         wiki_root = tmp_path / "wiki"
         store = RepoWikiStore(wiki_root)
         store.ingest(
             "org/repo",
-            [
-                WikiEntry(
-                    title="Some pattern",
-                    content="Details here.",
-                    source_type="plan",
-                ),
-            ],
+            [WikiEntry(title="Some pattern", content="Details.", source_type="plan")],
+        )
+        loop = RepoWikiLoop(
+            config=_make_config(wiki_root), wiki_store=store, deps=_make_deps()
         )
 
-        config = _make_config(wiki_root)
-        loop = RepoWikiLoop(config=config, wiki_store=store, deps=_make_deps())
-
-        result = await loop._do_work()
-        assert result is not None
+        result = await loop._lint_and_compile_repos(
+            ["org/repo"], None, set(), store=store
+        )
         assert result["repos"] == 1
         assert result["total_entries"] >= 1
 
@@ -105,9 +223,6 @@ class TestDoWork:
             ],
         )
 
-        config = _make_config(wiki_root)
-
-        # Mock StateTracker with a terminal outcome for issue 42
         from models import IssueOutcome, IssueOutcomeType
 
         state = MagicMock()
@@ -121,10 +236,15 @@ class TestDoWork:
         }
 
         loop = RepoWikiLoop(
-            config=config, wiki_store=store, deps=_make_deps(), state=state
+            config=_make_config(wiki_root),
+            wiki_store=store,
+            deps=_make_deps(),
+            state=state,
         )
-        result = await loop._do_work()
-        assert result is not None
+        closed = loop._get_closed_issues()
+        result = await loop._lint_and_compile_repos(
+            ["org/repo"], None, closed, store=store
+        )
         assert result["entries_marked_stale"] == 1
 
     @pytest.mark.asyncio
@@ -133,7 +253,6 @@ class TestDoWork:
 
         wiki_root = tmp_path / "wiki"
         store = RepoWikiStore(wiki_root)
-        # Seed 5 entries in same topic to hit compilation threshold
         store.ingest(
             "org/repo",
             [
@@ -147,19 +266,18 @@ class TestDoWork:
             ],
         )
 
-        config = _make_config(wiki_root)
-
         compiler = MagicMock()
         compiler.compile_topic = AsyncMock(return_value=3)  # 5 → 3
 
         loop = RepoWikiLoop(
-            config=config,
+            config=_make_config(wiki_root),
             wiki_store=store,
             deps=_make_deps(),
             wiki_compiler=compiler,
         )
-        result = await loop._do_work()
-        assert result is not None
+        result = await loop._lint_and_compile_repos(
+            ["org/repo"], None, set(), store=store
+        )
         assert result["entries_compiled"] == 2  # 5 - 3
         compiler.compile_topic.assert_called_once()
 
@@ -180,25 +298,24 @@ class TestDoWork:
             ],
         )
 
-        config = _make_config(wiki_root)
-
         compiler = MagicMock()
         compiler.compile_topic = AsyncMock()
 
         loop = RepoWikiLoop(
-            config=config,
+            config=_make_config(wiki_root),
             wiki_store=store,
             deps=_make_deps(),
             wiki_compiler=compiler,
         )
-        result = await loop._do_work()
-        assert result is not None
+        result = await loop._lint_and_compile_repos(
+            ["org/repo"], None, set(), store=store
+        )
         assert result["entries_compiled"] == 0
         compiler.compile_topic.assert_not_called()
 
 
 class TestSemanticDriftWiring:
-    """E2: loop wiring for the LLM-backed semantic-drift pass."""
+    """E2: heal wiring for the LLM-backed semantic-drift pass."""
 
     @pytest.mark.asyncio
     async def test_flag_off_skips_llm_call(self, tmp_path: Path) -> None:
@@ -223,10 +340,11 @@ class TestSemanticDriftWiring:
             deps=_make_deps(),
             wiki_compiler=compiler,
         )
-        result = await loop._do_work()
+        findings = await loop._run_semantic_drift_scan(
+            ["org/repo"], None, repo_root=wiki_root
+        )
 
-        assert result is not None
-        assert result.get("semantic_drift_findings", 0) == 0
+        assert findings == 0
         compiler._call_model.assert_not_called()
 
     @pytest.mark.asyncio
@@ -283,10 +401,13 @@ class TestSemanticDriftWiring:
             deps=_make_deps(),
             wiki_compiler=compiler,
         )
-        result = await loop._do_work()
+        # The drift scan reads code citations from ``repo_root`` (here the
+        # test repo) and entries from ``tracked_root``.
+        findings = await loop._run_semantic_drift_scan(
+            ["org/repo"], tracked_root, repo_root=repo_root
+        )
 
-        assert result is not None
-        assert result.get("semantic_drift_findings") == 1
+        assert findings == 1
         compiler._call_model.assert_awaited()
 
 

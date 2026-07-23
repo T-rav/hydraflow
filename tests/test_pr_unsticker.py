@@ -1949,3 +1949,227 @@ class TestNarrowedExceptionHandling:
             await h.unsticker._resolve_ci_timeout(
                 42, issue, tmp_path / "h.wt", "branch", "url"
             )
+
+
+class TestMergePolicyGate:
+    """CH-3 (#9731) — the policy gate at the unsticker's merge seam."""
+
+    def _fake_labels(self, monkeypatch, labels: list[str]) -> None:
+        import json
+
+        import subprocess_util
+
+        async def _run(*cmd, **_kwargs):
+            assert cmd[:3] == ("gh", "pr", "view")
+            return json.dumps({"labels": [{"name": name} for name in labels]})
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+
+    def _merge_ready_harness(self, tmp_path: Path) -> UnstickerHarness:
+        issue = IssueFactory.create(
+            title="Test issue", body="body", labels=["hydraflow-hitl"]
+        )
+        h = _make_unsticker(tmp_path, unstick_auto_merge=True)
+        h.state.set_hitl_cause(42, "Merge conflict")
+        h.state.set_hitl_origin(42, "hydraflow-review")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.prs.push_branch = AsyncMock(return_value=True)
+        h.prs.wait_for_ci = AsyncMock(return_value=(True, "All checks passed"))
+        h.prs.merge_pr = AsyncMock(return_value=True)
+        h.prs.pull_main = AsyncMock(return_value=True)
+        h.prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        h.resolver.resolve_merge_conflicts = AsyncMock(
+            return_value=ConflictResolutionResult(success=True, used_rebuild=False)
+        )
+        wt_dir = h.unsticker._config.workspace_path_for_issue(42)
+        wt_dir.mkdir(parents=True)
+        return h
+
+    @pytest.mark.asyncio
+    async def test_policy_deny_releases_back_to_hitl_without_merging(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from tests.helpers import install_repo_merge_policy
+
+        h = self._merge_ready_harness(tmp_path)
+        install_repo_merge_policy(h.unsticker._config)
+        self._fake_labels(monkeypatch, [])
+
+        stats = await h.unsticker.unstick([_make_hitl_item(42, pr=100)])
+
+        assert stats["merged"] == 0
+        h.prs.merge_pr.assert_not_awaited()
+        comments = [c.args[1] for c in h.prs.post_comment.await_args_list]
+        assert any("Blocked by merge policy" in c for c in comments)
+
+    @pytest.mark.asyncio
+    async def test_standing_config_grant_satisfies_default_policy(
+        self, tmp_path: Path
+    ) -> None:
+        """The packaged policy accepts the unstick_auto_merge operator grant."""
+        h = self._merge_ready_harness(tmp_path)
+
+        stats = await h.unsticker.unstick([_make_hitl_item(42, pr=100)])
+
+        assert stats["merged"] == 1
+        h.prs.merge_pr.assert_awaited_once_with(100, auto_rebase=True)
+
+
+class TestReflectionIssueLabelThreading:
+    """CH-6 finding 1: the reflection spawn threads issue labels to the gate."""
+
+    @staticmethod
+    def _harness(tmp_path: Path, **config_updates):
+        store = MagicMock()
+        store.load_patterns = MagicMock(return_value=[])
+        config = _make_config(tmp_path).model_copy(update=config_updates)
+        h = _make_unsticker(tmp_path, config=config, troubleshooting_store=store)
+        h.agents._runner = SimpleNamespace(run_simple=AsyncMock())
+        return h
+
+    @pytest.mark.asyncio
+    async def test_elevating_label_blocks_reflection_spawn(
+        self, tmp_path: Path
+    ) -> None:
+        """data-class label elevates the gate: no backend allowed → no spawn."""
+        h = self._harness(tmp_path, data_class_allowed_backends={})
+
+        result = await h.unsticker._reflect_on_fix(
+            "transcript body",
+            42,
+            "python",
+            issue_labels=["data-class:regulated-phi"],
+        )
+
+        assert result is None
+        h.agents._runner.run_simple.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_persist_pattern_threads_labels_to_reflection(
+        self, tmp_path: Path
+    ) -> None:
+        h = self._harness(tmp_path, data_class_allowed_backends={})
+
+        await h.unsticker._persist_troubleshooting_pattern(
+            "a transcript with no explicit pattern block",
+            42,
+            "python",
+            issue_labels=["data-class:regulated-phi"],
+        )
+
+        h.agents._runner.run_simple.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_labels_spawns_normally_on_internal_repo(
+        self, tmp_path: Path
+    ) -> None:
+        from execution import SimpleResult
+
+        h = self._harness(tmp_path, data_class_allowed_backends={})
+        h.agents._runner.run_simple = AsyncMock(
+            return_value=SimpleResult(returncode=0, stdout="NO_NEW_PATTERN")
+        )
+
+        result = await h.unsticker._reflect_on_fix("transcript body", 42, "python")
+
+        assert result is None  # NO_NEW_PATTERN, but the spawn happened
+        h.agents._runner.run_simple.assert_awaited_once()
+
+
+class TestReflectionGateBlockEscalation:
+    """CH-6 finding 2 (#9734 review finding 3 adoption): a gate-blocked
+    reflection must escalate loudly instead of soft-debugging forever."""
+
+    @staticmethod
+    def _blocked_harness(tmp_path: Path):
+        store = MagicMock()
+        store.load_patterns = MagicMock(return_value=[])
+        config = _make_config(tmp_path).model_copy(
+            update={
+                "repo_data_class": "regulated-phi",
+                "data_class_allowed_backends": {},
+            }
+        )
+        h = _make_unsticker(tmp_path, config=config, troubleshooting_store=store)
+        h.agents._runner = SimpleNamespace(run_simple=AsyncMock())
+        return h
+
+    @pytest.mark.asyncio
+    async def test_block_logs_error_and_alerts_once_across_two_calls(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from events import EventType
+
+        h = self._blocked_harness(tmp_path)
+
+        with caplog.at_level(logging.ERROR, logger="hydraflow.prompt_gate_alerts"):
+            assert await h.unsticker._reflect_on_fix("t one", 42, "python") is None
+            assert await h.unsticker._reflect_on_fix("t two", 43, "python") is None
+
+        h.agents._runner.run_simple.assert_not_awaited()  # blocked BEFORE spawn
+        errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert len(errors) == 2  # loud on every blocked call
+        alerts = [
+            c.args[0]
+            for c in h.bus.publish.await_args_list
+            if c.args and getattr(c.args[0], "type", None) == EventType.SYSTEM_ALERT
+        ]
+        assert len(alerts) == 1  # SYSTEM_ALERT deduped
+        assert alerts[0].data["kind"] == "prompt_gate_blocked"
+        assert alerts[0].data["source"] == "pr_unsticker"
+
+    @pytest.mark.asyncio
+    async def test_generic_failure_keeps_debug_path_without_alert(
+        self, tmp_path: Path
+    ) -> None:
+        from events import EventType
+        from execution import SimpleResult
+
+        store = MagicMock()
+        store.load_patterns = MagicMock(return_value=[])
+        h = _make_unsticker(tmp_path, troubleshooting_store=store)
+        h.agents._runner = SimpleNamespace(
+            run_simple=AsyncMock(return_value=SimpleResult(returncode=1, stderr="boom"))
+        )
+
+        result = await h.unsticker._reflect_on_fix("t", 42, "python")
+
+        assert result is None
+        alerts = [
+            c.args[0]
+            for c in h.bus.publish.await_args_list
+            if c.args and getattr(c.args[0], "type", None) == EventType.SYSTEM_ALERT
+        ]
+        assert alerts == []
+
+    @pytest.mark.asyncio
+    async def test_dedup_cleared_on_success_then_realerts(self, tmp_path: Path) -> None:
+        from events import EventType
+        from execution import SimpleResult
+
+        h = self._blocked_harness(tmp_path)
+
+        assert await h.unsticker._reflect_on_fix("t", 42, "python") is None
+
+        # Unblock: allow the backend, and let the spawn succeed.
+        h.unsticker._config = h.unsticker._config.model_copy(
+            update={"data_class_allowed_backends": {"regulated-phi": ["claude"]}}
+        )
+        h.agents._runner.run_simple = AsyncMock(
+            return_value=SimpleResult(returncode=0, stdout="NO_NEW_PATTERN")
+        )
+        assert await h.unsticker._reflect_on_fix("t", 42, "python") is None
+
+        # Re-block: a NEW block condition must re-alert.
+        h.unsticker._config = h.unsticker._config.model_copy(
+            update={"data_class_allowed_backends": {}}
+        )
+        assert await h.unsticker._reflect_on_fix("t", 42, "python") is None
+
+        alerts = [
+            c.args[0]
+            for c in h.bus.publish.await_args_list
+            if c.args and getattr(c.args[0], "type", None) == EventType.SYSTEM_ALERT
+        ]
+        assert len(alerts) == 2

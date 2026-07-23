@@ -52,7 +52,7 @@ favour of the single-source-of-truth `post_verify_authority`):
    - Per-role: `HYDRAFLOW_REVIEW_PREFLIGHT_ENABLED`, `HYDRAFLOW_REVIEW_MIDFLIGHT_ENABLED`, `HYDRAFLOW_REVIEW_POSTVERIFY_ENABLED`
    - Per-surface: `HYDRAFLOW_<SURFACE>_ADVISOR_ENABLED`
    Kill-switch state is resolved **once per review at start**; mid-review flips do not take effect (consistent with [ADR-0049](0049-trust-loop-kill-switch-convention.md)'s tick-boundary semantics, adapted to per-review boundaries here).
-3. **Self-modification guard** (T29) — when a diff modifies `src/review_advisor.py` or `src/review_phase.py`, post-verify authority is **forced to `veto`** regardless of surface config. Prevents the advisor from approving changes to itself in `wiki_ingest` (advisory) mode.
+3. **Self-modification guard** (T29) — when a diff modifies `src/review_advisor.py` or `src/review_phase/_phase.py`, post-verify authority is **forced to `veto`** regardless of surface config. Prevents the advisor from approving changes to itself in `wiki_ingest` (advisory) mode.
 4. **Failure-soft contract** — advisor crashes / parse errors degrade per-role:
    - Pre-flight failure → `None` (executor proceeds without plan).
    - Mid-flight failure → executor proceeds with own judgment.
@@ -72,9 +72,6 @@ Nine OTel metrics (all surface-tagged), wired via [ADR-0055](0055-otel-honeycomb
 - `review_advisor_post_verify_degraded_total{surface}`
 - `review_advisor_disagreement_total{surface, role, severity}`
 - `review_advisor_disagreement_validated_total{surface, role}`
-- `review_advisor_veto_retries_total{surface, attempt}`
-- `review_advisor_veto_recovered_total{surface}`
-- `review_advisor_veto_exhausted_total{surface}`
 
 **Headline KPIs:**
 
@@ -94,9 +91,9 @@ Nine OTel metrics (all surface-tagged), wired via [ADR-0055](0055-otel-honeycomb
 
 **Negative:**
 
-- Adds ~3500 lines of code + tests across `src/review_advisor.py`, `src/review_phase.py`, `src/reviewer.py`, `src/mockworld/fakes/fake_llm.py`, and `tests/`.
+- Adds ~3500 lines of code + tests across `src/review_advisor.py`, `src/review_phase/_phase.py`, `src/reviewer.py`, `src/mockworld/fakes/fake_llm.py`, and `tests/`.
 - Each advisor invocation is a Claude Code subagent dispatch — measurable latency and cost. Mitigated by per-surface tiering and conditional pre-flight (composite trigger skips trivial PRs).
-- `src/review_phase.py` grew to ~3700 lines. Phase 5+ should consider extraction (per cumulative review M2, see *When to supersede* below).
+- `src/review_phase/_phase.py` grew to ~3700 lines. Phase 5+ should consider extraction (per cumulative review M2, see *When to supersede* below).
 
 **Risks:**
 
@@ -117,13 +114,13 @@ Nine OTel metrics (all surface-tagged), wired via [ADR-0055](0055-otel-honeycomb
 
 - If a future feature replaces the advisor pattern (e.g. a unified executor with built-in second-opinion reasoning), supersede with rationale.
 - If empirical KPIs after staging soak deviate significantly from the targets in §Telemetry, supersede with the new tuning + fresh KPI bands.
-- If the helper duplication cleanup (Phase 5 cumulative review M1+M2 — extract a `_run_post_verify_for_surface` skeleton from the per-surface wiring in `src/review_phase.py`) materially changes the wiring shape, supersede.
+- If the helper duplication cleanup (Phase 5 cumulative review M1+M2 — extract a `_run_post_verify_for_surface` skeleton from the per-surface wiring in `src/review_phase/_phase.py`) materially changes the wiring shape, supersede.
 - If the runtime gains literal shared-session subagent semantics (Claude Code roadmap), revisit the artifact-based sharing decision and supersede if the literal shape becomes preferable.
 
 ## Source-file citations
 
 - `src/review_advisor.py` — schemas, env helpers, advisor classes, `_SURFACE_DEFAULTS`, telemetry.
-- `src/review_phase.py` — wiring across 5 surfaces, retry loop, runner adapter, self-modification guard.
+- `src/review_phase/_phase.py` — wiring across 5 surfaces, retry loop, runner adapter, self-modification guard.
 - `src/reviewer.py` — executor prompt threading (pre-flight plan injection).
 - `src/mockworld/fakes/fake_llm.py` — `_FakeAdvisorRunner` for scenario testing.
 - `.claude/agents/hydraflow-review-advisor.md` — Opus subagent definition.

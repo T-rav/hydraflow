@@ -33,16 +33,62 @@ async def test_resolved_removes_hitl_escalation() -> None:
         state=state,
         max_attempts=3,
     )
-    # `resolved` removes hitl-escalation + human-required + the sub-label
-    # itself (spec §3 line 119: a successful resolve cleans up the routing
-    # tag too). remove_label is singular, called once per label.
-    assert pr.remove_label.await_count == 3
+    # `resolved` removes hitl-escalation + human-required + diagnose-failed
+    # (#10260: unconditional, so it never sticks around stale) + the
+    # sub-label itself (spec §3 line 119: a successful resolve cleans up the
+    # routing tag too). remove_label is singular, called once per label.
+    assert pr.remove_label.await_count == 4
     pr.remove_label.assert_any_await(42, "hitl-escalation")
     pr.remove_label.assert_any_await(42, "human-required")
+    pr.remove_label.assert_any_await(42, "diagnose-failed")
     pr.remove_label.assert_any_await(42, "flaky-test-stuck")
     pr.post_comment.assert_awaited()
     assert out["status"] == "resolved"
     pr.add_labels.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolved_removes_diagnose_failed_even_when_not_the_picked_sub_label() -> (
+    None
+):
+    """#10260: an issue can carry multiple sub-labels alongside
+    diagnose-failed. Only the alphabetically-first sub-label is dynamically
+    appended to the remove list — diagnose-failed must ALSO be removed
+    unconditionally so it never sticks around stale when it doesn't sort
+    first (mirrors the deny-list's every-sub-label recursion-safety fix)."""
+    pr = AsyncMock()
+    state = MagicMock()
+    state.get_auto_agent_attempts = MagicMock(return_value=1)
+    out = await apply_decision(
+        issue_number=42,
+        sub_label="check-some-id",  # sorts before "diagnose-failed"
+        result=_result("resolved"),
+        pr_port=pr,
+        state=state,
+        max_attempts=3,
+    )
+    pr.remove_label.assert_any_await(42, "diagnose-failed")
+    assert "diagnose-failed" in out["removed"]
+
+
+@pytest.mark.asyncio
+async def test_resolved_removes_diagnose_failed_once_when_it_is_the_sub_label() -> None:
+    """When diagnose-failed IS the (only) sub-label, it must not be removed
+    twice — the dynamic sub-label append and the base label-map entry
+    would otherwise both add it."""
+    pr = AsyncMock()
+    state = MagicMock()
+    state.get_auto_agent_attempts = MagicMock(return_value=1)
+    out = await apply_decision(
+        issue_number=42,
+        sub_label="diagnose-failed",
+        result=_result("resolved"),
+        pr_port=pr,
+        state=state,
+        max_attempts=3,
+    )
+    assert out["removed"].count("diagnose-failed") == 1
+    assert pr.remove_label.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -146,7 +192,7 @@ async def test_pr_failed_pairs_correctly() -> None:
 async def test_resolved_with_default_sentinel_skips_sub_label_remove() -> None:
     """When sub_label is the '_default' sentinel (no domain routing tag was
     present on the issue), `resolved` removes only hitl-escalation +
-    human-required — NOT a literal '_default' label."""
+    human-required + diagnose-failed — NOT a literal '_default' label."""
     pr = AsyncMock()
     state = MagicMock()
     state.get_auto_agent_attempts = MagicMock(return_value=1)
@@ -158,10 +204,11 @@ async def test_resolved_with_default_sentinel_skips_sub_label_remove() -> None:
         state=state,
         max_attempts=3,
     )
-    # Exactly two remove_label calls — no spurious "_default" removal.
-    assert pr.remove_label.await_count == 2
+    # Exactly three remove_label calls — no spurious "_default" removal.
+    assert pr.remove_label.await_count == 3
     pr.remove_label.assert_any_await(42, "hitl-escalation")
     pr.remove_label.assert_any_await(42, "human-required")
+    pr.remove_label.assert_any_await(42, "diagnose-failed")
     assert "_default" not in out["removed"]
 
 

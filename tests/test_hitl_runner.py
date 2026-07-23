@@ -229,6 +229,82 @@ class TestBuildPrompt:
         assert "Each concern is a separate PR" in prompt
 
 
+class TestBuildPromptHumanSteering:
+    """ADR-0099 #4 — live operator guidance folded into the HITL cause-template.
+
+    Unlike the plain-prompt builders (planner, reviewer, etc.), HITL's prompt
+    is assembled from cause-keyed instruction templates
+    (``_CAUSE_INSTRUCTIONS``). Guidance must still reach the model ONLY via
+    ``fenced_steering_guidance`` — never as raw comment text (ADR-0092 fence
+    invariant) — appended to the rendered cause-template output.
+    """
+
+    @pytest.mark.asyncio
+    async def test_folds_fenced_human_steering_guidance(self, hitl_runner) -> None:
+        from human_steering import fenced_steering_guidance
+
+        issue = IssueFactory.create(number=42, title="Fix the widget")
+        guidance = "Prioritize the enterprise SSO angle over consumer features."
+
+        prompt, _ = await hitl_runner._build_prompt_with_stats(
+            issue, "Fix it", "CI failed", guidance
+        )
+
+        assert "## Human Steering Guidance" in prompt
+        assert fenced_steering_guidance(guidance) in prompt
+
+    @pytest.mark.asyncio
+    async def test_empty_guidance_produces_no_steering_section(
+        self, hitl_runner
+    ) -> None:
+        issue = IssueFactory.create(number=42, title="Fix the widget")
+
+        prompt, _ = await hitl_runner._build_prompt_with_stats(
+            issue, "Fix it", "CI failed", ""
+        )
+
+        assert "## Human Steering Guidance" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_default_guidance_param_produces_no_steering_section(
+        self, hitl_runner
+    ) -> None:
+        """Callers that don't pass ``guidance`` at all get unchanged behavior."""
+        issue = IssueFactory.create(number=42, title="Fix the widget")
+
+        prompt, _ = await hitl_runner._build_prompt_with_stats(
+            issue, "Fix it", "CI failed"
+        )
+
+        assert "## Human Steering Guidance" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_run_threads_guidance_kwarg_into_prompt(
+        self, config, event_bus
+    ) -> None:
+        """``HITLRunner.run(..., guidance=...)`` reaches the executed prompt."""
+        runner = HITLRunner(config, event_bus)
+        issue = IssueFactory.create(number=42, title="Fix the widget")
+        guidance = "Watch out for the flaky auth fixture."
+
+        captured: dict[str, object] = {}
+
+        async def fake_execute(cmd, prompt, worktree_path, meta, **kwargs):  # noqa: ANN001, ARG001
+            captured["prompt"] = prompt
+            return "transcript"
+
+        runner._execute = fake_execute  # type: ignore[method-assign]
+        runner._verify_quality = AsyncMock(  # type: ignore[method-assign]
+            return_value=LoopResult(passed=True, summary="OK")
+        )
+
+        await runner.run(
+            issue, "fix the test", "CI failed", Path("/tmp/wt"), guidance=guidance
+        )
+
+        assert "## Human Steering Guidance" in captured["prompt"]
+
+
 # ---------------------------------------------------------------------------
 # Command building
 # ---------------------------------------------------------------------------

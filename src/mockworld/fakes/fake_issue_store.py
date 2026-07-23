@@ -57,8 +57,6 @@ logger = logging.getLogger("hydraflow.mockworld.fake_issue_store")
 # Stage constants — match issue_store.IssueStoreStage values without
 # importing the real module (keeps the Fake source-of-truth contained).
 STAGE_FIND = "find"
-STAGE_DISCOVER = "discover"
-STAGE_SHAPE = "shape"
 STAGE_PLAN = "plan"
 STAGE_READY = "ready"
 STAGE_REVIEW = "review"
@@ -68,8 +66,6 @@ STAGE_DIAGNOSE = "diagnose"
 
 _LABEL_TO_STAGE: dict[str, str] = {
     "hydraflow-find": STAGE_FIND,
-    "hydraflow-discover": STAGE_DISCOVER,
-    "hydraflow-shape": STAGE_SHAPE,
     "hydraflow-plan": STAGE_PLAN,
     "hydraflow-ready": STAGE_READY,
     "hydraflow-review": STAGE_REVIEW,
@@ -117,8 +113,6 @@ class FakeIssueStore:
         # Per-stage throughput counters
         self._processed_count: dict[str, int] = {
             STAGE_FIND: 0,
-            STAGE_DISCOVER: 0,
-            STAGE_SHAPE: 0,
             STAGE_PLAN: 0,
             STAGE_READY: 0,
             STAGE_REVIEW: 0,
@@ -152,8 +146,6 @@ class FakeIssueStore:
         # Higher index in this list = later in pipeline = takes precedence
         priority = [
             STAGE_FIND,
-            STAGE_DISCOVER,
-            STAGE_SHAPE,
             STAGE_PLAN,
             STAGE_READY,
             STAGE_REVIEW,
@@ -253,12 +245,6 @@ class FakeIssueStore:
     def get_triageable(self, max_count: int) -> list[Task]:
         return self._take(STAGE_FIND, max_count)
 
-    def get_discoverable(self, max_count: int) -> list[Task]:
-        return self._take(STAGE_DISCOVER, max_count)
-
-    def get_shapeable(self, max_count: int) -> list[Task]:
-        return self._take(STAGE_SHAPE, max_count)
-
     def get_plannable(self, max_count: int) -> list[Task]:
         return self._take(STAGE_PLAN, max_count)
 
@@ -313,6 +299,23 @@ class FakeIssueStore:
     def get_active_issues(self) -> dict[int, str]:
         return dict(self._active)
 
+    def get_worker_held_issues(self) -> dict[int, str]:
+        """Worker-held issues (``_active`` ∪ ``_in_flight``); mirrors IssueStore.
+
+        Ground truth for worker-derived epic execution state (#10299).
+        """
+        held: dict[int, str] = {num: str(s) for num, s in self._in_flight.items()}
+        held.update({num: str(s) for num, s in self._active.items()})
+        return held
+
+    def get_queued_issues(self) -> dict[int, str]:
+        """Issues awaiting dispatch in a stage queue (not active/in-flight)."""
+        queued: dict[int, str] = {}
+        for stage in (STAGE_FIND, STAGE_PLAN, STAGE_READY, STAGE_REVIEW):
+            for task in self._queued_for_stage(stage):
+                queued.setdefault(task.id, stage)
+        return queued
+
     def clear_active(self) -> None:
         self._active.clear()
         self._in_flight.clear()
@@ -366,8 +369,6 @@ class FakeIssueStore:
         queue_depth: dict[str, int] = {}
         for stage in (
             STAGE_FIND,
-            STAGE_DISCOVER,
-            STAGE_SHAPE,
             STAGE_PLAN,
             STAGE_READY,
             STAGE_REVIEW,
@@ -379,8 +380,6 @@ class FakeIssueStore:
         active_count: dict[str, int] = {}
         for stage in (
             STAGE_FIND,
-            STAGE_DISCOVER,
-            STAGE_SHAPE,
             STAGE_PLAN,
             STAGE_READY,
             STAGE_REVIEW,
@@ -411,8 +410,6 @@ class FakeIssueStore:
 
         for stage in (
             STAGE_FIND,
-            STAGE_DISCOVER,
-            STAGE_SHAPE,
             STAGE_PLAN,
             STAGE_READY,
             STAGE_REVIEW,

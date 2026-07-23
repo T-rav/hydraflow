@@ -13,6 +13,7 @@ import pytest
 
 from base_runner import BaseRunner
 from events import EventType
+from human_steering import fenced_steering_guidance
 from models import PlannerStatus
 from planner import PlannerRunner
 from tests.conftest import TaskFactory
@@ -50,6 +51,10 @@ def _valid_plan(*, word_pad: int = 200) -> str:
     """Return a plan with all required sections that passes validation."""
     padding = " ".join(["word"] * max(0, word_pad - 80))
     return (
+        "## Intent\n\n"
+        "Add the new data model plus its config knob so downstream consumers can rely on validated settings.\n\n"
+        "## Approach\n\n"
+        "Extend models.py with the model and config.py with the field; wire both through the orchestrator with validation at the boundary.\n\n"
         "## Files to Modify\n\n"
         "- src/models.py — add new data model\n"
         "- src/config.py — add configuration field\n\n"
@@ -235,6 +240,40 @@ async def test_build_prompt_includes_principles_checklist(config, event_bus, iss
 
 
 @pytest.mark.asyncio
+async def test_build_prompt_folds_fenced_human_steering_guidance(
+    config, event_bus, issue
+):
+    """ADR-0099 #4 — live operator guidance is folded in FENCED.
+
+    Plan has a single prompt-construction site (``_build_prompt_with_stats``,
+    unlike discover/shape's two builders). Guidance must reach the prompt
+    only via ``fenced_steering_guidance`` — never as raw comment text
+    (ADR-0092 fence invariant).
+    """
+    runner = _make_runner(config, event_bus)
+    task = issue.to_task()
+
+    guidance = "Prioritize the enterprise SSO angle over consumer features."
+    prompt, _ = await runner._build_prompt_with_stats(task, guidance=guidance)
+
+    assert "## Human Steering Guidance" in prompt
+    assert fenced_steering_guidance(guidance) in prompt
+
+
+@pytest.mark.asyncio
+async def test_build_prompt_empty_guidance_produces_no_steering_section(
+    config, event_bus, issue
+):
+    """No guidance posted -> no steering section (unchanged behavior)."""
+    runner = _make_runner(config, event_bus)
+    task = issue.to_task()
+
+    prompt, _ = await runner._build_prompt_with_stats(task, guidance="")
+
+    assert "## Human Steering Guidance" not in prompt
+
+
+@pytest.mark.asyncio
 async def test_step8_includes_killswitch_principle(config, event_bus, issue):
     """Planner step-8 principles must name the ADR-0049 kill-switch so plans
     that introduce new loops/runners carry the disable env + enabled_cb check
@@ -277,9 +316,11 @@ async def test_build_prompt_truncates_long_body(config, event_bus):
 
     assert "…(truncated)" in prompt
     # Well under original 20k body. Upper bound accommodates the ADR titles
-    # index (now ~3.2k chars for ~50 ADRs) and the ADR-0044 principles checklist
+    # index (now ~64 ADRs, up from ~50, since the adr_index parser fix makes
+    # every ADR title/status format visible instead of silently dropping
+    # em-dash-titled or H2-status ADRs) and the ADR-0044 principles checklist
     # (~900 chars) that the plan prompt now injects.
-    assert len(prompt) < 16_000
+    assert len(prompt) < 20_000
 
 
 @pytest.mark.asyncio
@@ -1319,7 +1360,7 @@ def test_terminate_kills_active_processes(config, event_bus):
     mock_proc.pid = 12345
     runner._active_procs.add(mock_proc)
 
-    with patch("runner_utils.os.killpg") as mock_killpg:
+    with patch("process_group.os.killpg") as mock_killpg:
         runner.terminate()
 
     mock_killpg.assert_called_once()
@@ -1331,7 +1372,9 @@ def test_terminate_handles_process_lookup_error(config, event_bus):
     mock_proc.pid = 12345
     runner._active_procs.add(mock_proc)
 
-    with patch("runner_utils.os.killpg", side_effect=ProcessLookupError) as mock_killpg:
+    with patch(
+        "process_group.os.killpg", side_effect=ProcessLookupError
+    ) as mock_killpg:
         runner.terminate()  # Should not raise
     mock_killpg.assert_called_once()
 
@@ -1672,8 +1715,10 @@ async def test_build_prompt_warns_about_rejection(config, event_bus, issue):
 
 
 def test_required_sections_has_seven_entries(config, event_bus):
-    """PlannerRunner.REQUIRED_SECTIONS should have 7 entries (including Task Graph)."""
-    assert len(PlannerRunner.REQUIRED_SECTIONS) == 7
+    """PlannerRunner.REQUIRED_SECTIONS has 9 entries (#9955 adds Intent/Approach)."""
+    assert len(PlannerRunner.REQUIRED_SECTIONS) == 9
+    assert "## Intent" in PlannerRunner.REQUIRED_SECTIONS
+    assert "## Approach" in PlannerRunner.REQUIRED_SECTIONS
     assert "## Files to Modify" in PlannerRunner.REQUIRED_SECTIONS
     assert "## New Files" in PlannerRunner.REQUIRED_SECTIONS
     assert "## File Delta" in PlannerRunner.REQUIRED_SECTIONS
@@ -1824,6 +1869,8 @@ def test_detect_plan_scale_custom_lite_labels(event_bus, tmp_path):
 def _lite_plan() -> str:
     """Return a plan with only lite-required sections."""
     return (
+        "## Intent\n\n"
+        "Fix the crash in app.py so the affected flow completes.\n\n"
         "## Files to Modify\n\n"
         "- src/app.py — fix the crash\n\n"
         "## Implementation Steps\n\n"
@@ -1836,7 +1883,7 @@ def _lite_plan() -> str:
 
 
 def test_validate_lite_plan_accepts_three_sections(config, event_bus):
-    """A lite plan with only 3 sections passes validation."""
+    """A lite plan with only the lite-required sections passes validation."""
     runner = _make_runner(config, event_bus)
     task = TaskFactory.create(id=1, title="Fix crash")
     errors = runner._validate_plan(task, _lite_plan(), scale="lite")

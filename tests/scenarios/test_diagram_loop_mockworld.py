@@ -84,4 +84,10 @@ class TestL24DiagramLoop:
         assert kwargs["pr_title"].startswith(
             "chore(arch): regenerate architecture knowledge"
         )
-        assert kwargs["path_specs"] == ["docs/arch/generated", "docs/arch/.meta.json"]
+        # The synced traceability ratchet baseline rides in regen PRs so a
+        # lowered matrix pct never lands without the matching baseline prune.
+        assert kwargs["path_specs"] == [
+            "docs/arch/generated",
+            "docs/arch/.meta.json",
+            "disturbance/baselines/traceability.yaml",
+        ]

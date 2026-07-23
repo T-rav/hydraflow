@@ -1,12 +1,26 @@
 # GitHub cassette corpus
 
-Every cassette in this directory is a **hand-authored baseline** — they are
-not refreshed by `ContractRefreshLoop` against a live `gh` CLI. Identifiable
-by both:
+This directory contains two kinds of cassettes:
+
+**Machine-recorded** (`baseline_only: false`) — refreshed by
+`ContractRefreshLoop` via `record_github_mutation` in
+`src/contract_recording.py`. Each recording provisions fresh sandbox
+resources (issue, or scratch branch + PR via a tree-identical synthetic
+commit), runs the mutation, writes the cassette, and tears down the sandbox
+state (closing the scratch issue/PR, best-effort deleting the scratch
+branch). Currently covers: `close_issue.yaml`, `create_issue.yaml`,
+`merge_pr.yaml`, `pr_create.yaml` (`create_pr`), `create_promotion_pr.yaml`
+(issue #8699).
+
+**Hand-authored baselines** (`baseline_only: true`) — not refreshed by
+`ContractRefreshLoop`. Identifiable by both:
 
 - `recorder_sha: "00000000"` (historical convention)
 - `baseline_only: true` in the YAML body (Phase 4 of #8786 — the machine-
   checkable retirement marker)
+
+All remaining cassettes (e.g. `add_labels.yaml`, `post_comment.yaml`,
+`merge_promotion_pr.yaml`, etc.) are hand-authored baselines.
 
 ## Retirement plan (Phase 4 of #8786)
 
@@ -28,20 +42,17 @@ when `baseline_only=true` AND a live dispatcher exists for the same shape
 Until then, baselines stay because they're the only contract test for the
 respective FakeGitHub methods.
 
-## Why hand-authored?
+## Why some cassettes are still hand-authored
 
-The call shapes a `gh`-backed `FakeGitHub` must contract-test against are
-predominantly *mutating* — `gh pr create`, `gh pr merge`, `gh issue create`,
-`gh issue close`, `gh label create`, `gh issue edit --add-label`, etc.
-Refreshing those live every week would pollute the shared sandbox repo
-(`T-rav-Hydra-Ops/hydraflow-contracts-sandbox`) with throwaway PRs and
-issues, and the refresh PR would carry irreversible side effects.
-
-The sibling adapters (git/docker/claude) record live because their fakes
-contract-test against read-only ops (`git commit` is "mutating" but lives
-in a tmp dir that's destroyed after recording — no shared state). See
-`src/contract_recording.py::record_git` / `record_docker` /
-`record_claude_stream` for the live-recording pattern.
+Cassettes for `gh label create`, `gh issue edit --add-label`,
+`merge_promotion_pr`, and other operations not yet covered by
+`record_github_mutation` remain hand-authored because extending the recorder
+to cover them safely is tracked separately (#8693). `merge_promotion_pr`'s
+real CLI shape (`gh pr merge --merge --delete-branch`) is already identical
+to `merge_pr`'s (see `_record_merge_pr`) — promoting it to machine-recorded
+is a small follow-up, not a design gap. The sandbox setup/teardown contract
+in `record_github_mutation` is the pattern to follow when adding new
+machine-recorded operations.
 
 ## How baselines stay accurate
 
@@ -88,15 +99,3 @@ Each cassette must have a matching dispatcher entry in
 without a cassette (e.g. the historical `merge_pr` orphan) is dead code
 and a fake-coverage signal.
 
-## Future work
-
-Implementing live read-only github recording (a real replacement for the
-no-op `record_github`) needs:
-
-1. A reliably-provisioned sandbox repo accessible from CI and dev hosts.
-2. Shape-alignment between gh JSON output and fake method return types
-   (e.g., `gh pr list --json …` returns dicts with different fields than
-   `FakeGitHub.list_open_prs`'s `PRListItem` objects).
-3. Per-call normalizers for issue/PR numbers, timestamps, label IDs.
-
-Tracked separately.

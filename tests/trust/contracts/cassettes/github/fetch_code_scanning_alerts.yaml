@@ -1,0 +1,26 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# fetch_code_scanning_alerts returns open code-scanning alerts for a
+# branch as CodeScanningAlert projections (number/severity/path/rule/...).
+# The dispatcher seeds one high-severity alert via add_alerts so the read
+# returns a populated row, not the empty default.
+adapter: github
+interaction: fetch_code_scanning_alerts
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: fetch_code_scanning_alerts
+  args:
+  - feat/scan
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[{"number": 7, "severity": "error", "security_severity": "high", "path":
+    "src/app.py", "start_line": 42, "rule": "py/sql-injection", "message": "Possible
+    SQL injection"}]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

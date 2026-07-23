@@ -15,6 +15,7 @@ from typing import (
     NamedTuple,
     NotRequired,
     Protocol,
+    cast,
 )
 from uuid import uuid4
 
@@ -378,6 +379,14 @@ class TriageResult(BaseModel):
             "False = claim was false (problem doesn't exist)."
         ),
     )
+    quarantined: bool = Field(
+        default=False,
+        description=(
+            "True when the injection honeypot tripped and triage refused to hand "
+            "the request to the real triage agent (enforce mode). ``ready`` is "
+            "always False in that case; the reasons carry the tripped mock tools."
+        ),
+    )
 
     @field_validator("issue_type", mode="before")
     @classmethod
@@ -401,6 +410,15 @@ class EpicDecompResult(BaseModel):
     epic_body: str = ""
     children: list[NewIssueSpec] = Field(default_factory=list)
     reasoning: str = ""
+    confidence: str = Field(
+        default="",
+        description=(
+            "Self-reported confidence ('high'/'medium'/'low') from the "
+            "decomposition council's decision. Empty for callers that don't "
+            "produce a confidence signal (e.g. the legacy single-shot "
+            "intake-triage path)."
+        ),
+    )
 
 
 # --- Product Discovery & Shaping ---
@@ -904,6 +922,16 @@ class LabelDrift(BaseModel):
         - ``pr_at_pre_pr_stage``: PR labelled ``hydraflow-ready`` /
           ``hydraflow-plan`` / ``hydraflow-find`` while it has commits
           (PR-stage labels are review/hitl/fixed only).
+        - ``escalated_with_resolving_pr``: issue carries BOTH
+          ``hitl-escalation`` AND ``diagnose-failed`` (the diagnostic_loop
+          escalation lineage, which always leaves the durable
+          ``hydraflow-hitl`` pipeline label behind) while an open PR already
+          resolves it (a ``Fixes #N`` link) with all CI checks green — the
+          escalation labels are stale relative to the already-resolved PR
+          (#10260). Deliberately scoped to this pairing: other loops file
+          bare ``hitl-escalation`` + their own ``-stuck`` label with no
+          pipeline label backing it, and clearing it there would orphan the
+          issue with no re-escalation path.
     """
 
     issue: int = Field(description="Linked issue number")
@@ -911,9 +939,9 @@ class LabelDrift(BaseModel):
     pr_commits: int = Field(ge=0, description="Number of commits on the PR")
     issue_label: str = Field(description="Current pipeline label on the issue")
     pr_label: str = Field(description="Current pipeline label on the PR")
-    kind: Literal["pr_ahead_of_issue", "pr_at_pre_pr_stage"] = Field(
-        description="Drift category — see ADR-0088"
-    )
+    kind: Literal[
+        "pr_ahead_of_issue", "pr_at_pre_pr_stage", "escalated_with_resolving_pr"
+    ] = Field(description="Drift category — see ADR-0088")
     detected_at: datetime = Field(
         description="UTC timestamp when the drift was observed"
     )
@@ -998,6 +1026,16 @@ class AttemptRecord(BaseModel):
     changes_made: bool
     error_summary: str
     timestamp: IsoTimestamp
+
+
+class SteeringState(BaseModel):
+    """Per-issue human-steering reference (ADR-0099 surface #4)."""
+
+    guidance: str | None = None
+    flow: str = "running"  # running | paused | abort
+    redo_phase: str | None = None
+    redo_count: int = 0
+    last_applied_ts: str | None = None
 
 
 class EscalationContext(BaseModel):
@@ -1648,6 +1686,23 @@ class EpicState(BaseModel):
     closed: bool = False
     released: bool = False
     auto_decomposed: bool = False
+    decomposition_depth: int = 0
+    parent_epic: int | None = Field(
+        default=None,
+        description=(
+            "For a replacement epic created by decompose-to-converge (ADR-0105 / "
+            "#9757): the epic whose child this epic superseded. None for top-level "
+            "epics. Drives nested rollup — the parent only converges once this "
+            "epic closes."
+        ),
+    )
+    superseded_issue: int | None = Field(
+        default=None,
+        description=(
+            "For a replacement epic: the child issue it was carved from (that "
+            "issue is closed but its work lives here). None for top-level epics."
+        ),
+    )
 
     @property
     def total_children(self) -> int:
@@ -1766,6 +1821,218 @@ class RcBudgetDurationEntry(BaseModel):
     conclusion: str
 
 
+VerdictStr = Literal["ADVANCE", "LOOP_BACK", "ESCALATE", "UNVISITED"]
+
+
+class StageRecord(BaseModel):
+    """Per-stage convergence record inside a ConvergenceLedger."""
+
+    last_verdict: VerdictStr = "UNVISITED"
+    attempts: int = 0
+    last_finding_signatures: list[str] = Field(default_factory=list)
+
+
+DriverState = Literal[
+    "TRIAGE",
+    "PLAN",
+    "READY",
+    "REVIEW",
+    "HITL_WAIT",
+    "HITL_APPLY",
+    "DIAGNOSE",
+    "PARKED",
+    "MERGED",
+    "CLOSED",
+    "ESCALATED",
+]
+
+
+class SuspendRecord(BaseModel):
+    """Why and where a suspended IssueDriver should resume.
+
+    ``reason`` is an open string (documented values: ``shape_human_select``,
+    ``hitl_correction``, ``ci_wait``, ``epic_gap_barrier``) so new suspend
+    causes do not require a schema change.
+    """
+
+    reason: str
+    suspended_at: str
+    wake_signal: Literal["comment", "correction", "label"]
+    resume_state: DriverState
+
+
+class PolicyEvent(BaseModel):
+    """One issue-level orchestration decision, recorded for audit/replay."""
+
+    at: str
+    from_state: DriverState
+    to_state: DriverState
+    decision: str
+    reason: str
+    counters: dict[str, int] = Field(default_factory=dict)
+
+
+# Ubiquitous-language boundary-stage names (ADR-0096 boundary verdict
+# recording). These MUST match the ``stage=`` literals passed to
+# ``record_stage_verdict``/``convergence_recording.record_stage_verdict`` at
+# each phase's boundary call-site: src/triage_phase.py (stage="triage"),
+# src/plan_phase.py (stage="plan"). Both
+# ``ConvergenceLedger.detect_cross_boundary_oscillation`` below and
+# ``ConvergenceOscillationLoop``'s escalation-issue-body stage lookup
+# (src/convergence_oscillation_loop.py) read this single constant so a future
+# stage rename can't leave one of the two call-sites silently stale — a
+# literal-string drift there would still parse and run, just silently stop
+# matching either the detector or the issue body.
+CONVERGENCE_BOUNDARY_STAGES: tuple[str, ...] = ("triage", "plan")
+
+
+class ConvergenceLedger(BaseModel):
+    """Single source of truth for one issue's two-level convergence state.
+
+    Replaces the scattered per-issue attempt counters (no dual-write). The
+    ledger is always-on storage; the Gate decision that writes to it is the
+    only flag-gated part (see ADR for the storage/decision split).
+    """
+
+    issue_number: int
+    laps: int = 0
+    blast_radius: Literal["low", "medium", "high"] = "low"
+    stage_state: dict[str, StageRecord] = Field(default_factory=dict)
+    lap_signatures: list[list[str]] = Field(default_factory=list)
+    converged: bool = False
+    oscillation_escalated: bool = False
+
+    # --- IssueDriver orchestration state (HydraFlow v2, additive) ---
+    driver_state: DriverState = "TRIAGE"
+    suspend: SuspendRecord | None = None
+    pending_correction: str | None = None
+    hitl_origin: str | None = None
+    hitl_cause: str | None = None
+    route_backs: dict[str, int] = Field(default_factory=dict)
+    issue_attempts: int = 0
+    policy_log: list[PolicyEvent] = Field(default_factory=list)
+
+    def _stage(self, stage: str) -> StageRecord:
+        rec = self.stage_state.get(stage)
+        if rec is None:
+            rec = StageRecord()
+            self.stage_state[stage] = rec
+        return rec
+
+    def get_attempts(self, stage: str) -> int:
+        rec = self.stage_state.get(stage)
+        return rec.attempts if rec else 0
+
+    def increment_attempts(self, stage: str) -> int:
+        rec = self._stage(stage)
+        rec.attempts += 1
+        return rec.attempts
+
+    def record_gate_result(
+        self, stage: str, decision: str, signatures: list[str]
+    ) -> None:
+        # Records verdict + signatures ONLY. Does NOT touch attempts —
+        # increment_attempts is the sole counter bumper.
+        if decision not in ("ADVANCE", "LOOP_BACK", "ESCALATE", "UNVISITED"):
+            raise ValueError(f"invalid gate verdict: {decision!r}")
+        rec = self._stage(stage)
+        rec.last_verdict = cast(VerdictStr, decision)
+        rec.last_finding_signatures = list(signatures)
+
+    def mark_lap(self) -> None:
+        """Close the current lap: snapshot the union of stage signatures."""
+        sig: list[str] = sorted(
+            {
+                s
+                for rec in self.stage_state.values()
+                for s in rec.last_finding_signatures
+            }
+        )
+        self.lap_signatures.append(sig)
+        self.laps += 1
+
+    def all_gated_advanced(self, gated_stages: list[str]) -> bool:
+        if not gated_stages:
+            return False
+        return all(
+            self.stage_state.get(s, StageRecord()).last_verdict == "ADVANCE"
+            for s in gated_stages
+        )
+
+    def recompute_converged(self, gated_stages: list[str]) -> bool:
+        self.converged = self.all_gated_advanced(gated_stages)
+        return self.converged
+
+    def detect_outer_oscillation(self, window: int = 2) -> bool:
+        if len(self.lap_signatures) < window:
+            return False
+        tail = self.lap_signatures[-window:]
+        first = tail[0]
+        return bool(first) and all(s == first for s in tail)
+
+    def detect_cross_boundary_oscillation(
+        self,
+        *,
+        window: int = 2,
+        min_loopback_stages: int = 2,
+        include_temporal: bool = True,
+    ) -> bool:
+        """Return True if the ledger shows cross-boundary oscillation.
+
+        Two conditions (either is sufficient):
+        (a) Temporal: ``detect_outer_oscillation(window)`` is True — recurring
+            identical findings across review laps.  Evaluated only when
+            *include_temporal* is True.
+        (b) Snapshot: at least ``min_loopback_stages`` DISTINCT stages among
+            ``CONVERGENCE_BOUNDARY_STAGES`` currently have
+            ``last_verdict == "LOOP_BACK"`` — pre-review cross-boundary churn.
+
+        Pass ``include_temporal=False`` to suppress the temporal arm and check
+        only the snapshot arm (used by the caretaker when the review loop still
+        owns the retry budget and temporal deferral applies).
+
+        Pure function of ledger state; no mutation.
+        """
+        if include_temporal and self.detect_outer_oscillation(window):
+            return True
+        loopback_count = sum(
+            1
+            for stage in CONVERGENCE_BOUNDARY_STAGES
+            if self.stage_state.get(stage, StageRecord()).last_verdict == "LOOP_BACK"
+        )
+        return loopback_count >= min_loopback_stages
+
+    def get_route_backs(self, edge: str) -> int:
+        return self.route_backs.get(edge, 0)
+
+    def increment_route_backs(self, edge: str) -> int:
+        self.route_backs[edge] = self.route_backs.get(edge, 0) + 1
+        return self.route_backs[edge]
+
+    def increment_issue_attempts(self) -> int:
+        self.issue_attempts += 1
+        return self.issue_attempts
+
+    def append_policy_event(self, event: PolicyEvent) -> None:
+        self.policy_log.append(event)
+
+
+class AutoAgentRedriveState(BaseModel):
+    """Escalation TTL re-drive marker for one issue (#9719).
+
+    ``exhausted_at`` is the ISO-8601 UTC timestamp of the exhaustion
+    transition that armed the marker; ``None`` means disarmed. Arming is
+    idempotent — re-running the exhaustion branch on a re-confirmation tick
+    must never refresh the timestamp (the #9716 restart-once marker lesson),
+    or the marker never ages and re-drive never fires. ``redrive_count``
+    persists across disarm/re-arm so ``auto_agent_redrive_max_attempts``
+    bounds total re-drives per issue.
+    """
+
+    exhausted_at: str | None = None
+    redrive_count: int = 0
+
+
 class StateData(BaseModel):
     """Typed schema for the JSON-backed crash-recovery state."""
 
@@ -1786,7 +2053,6 @@ class StateData(BaseModel):
         default_factory=dict
     )
     hitl_visual_evidence: dict[str, VisualEvidence] = Field(default_factory=dict)
-    review_attempts: dict[str, int] = Field(default_factory=dict)
     review_feedback: dict[str, str] = Field(default_factory=dict)
     worker_result_meta: dict[str, WorkerResultMeta] = Field(default_factory=dict)
     bg_worker_states: dict[str, BackgroundWorkerState] = Field(default_factory=dict)
@@ -1802,6 +2068,16 @@ class StateData(BaseModel):
     metrics_last_snapshot_hash: str = ""
     metrics_last_synced: str | None = None
     worker_intervals: dict[str, int] = Field(default_factory=dict)
+    watchdog_timeouts: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Per-loop work-cycle watchdog bound overrides (seconds), keyed by "
+            "worker name. Mirrors worker_intervals: an operator-set runtime "
+            "override of the per-cycle watchdog bound (#9455 / #9556) that "
+            "otherwise derives from loop_watchdog_default_seconds / "
+            "loop_watchdog_llm_seconds. Preserved across restart (#9503)."
+        ),
+    )
     disabled_workers: list[str] = Field(default_factory=list)
     default_disabled_workers_seeded: list[str] = Field(default_factory=list)
     cost_budget_killed_workers: list[str] = Field(
@@ -1812,18 +2088,22 @@ class StateData(BaseModel):
             "Preserved across restart."
         ),
     )
-    interrupted_issues: dict[str, str] = Field(default_factory=dict)
-    last_reviewed_shas: dict[str, str] = Field(default_factory=dict)
-    review_blast_radii: dict[str, str] = Field(
+    cost_throttled_workers: dict[str, int | None] = Field(
         default_factory=dict,
         description=(
-            "Per-issue blast-radius tier ('low'|'medium'|'high') computed at "
-            "pre-flight time. Used by the dashboard and ADR-0051 iteration planning."
+            "Workers interval-stretched by CostBudgetWatcherLoop in the "
+            "soft-throttle band (spend >= cap * cost_throttle_ratio). Maps "
+            "worker name to its PRE-throttle interval override (None = the "
+            "operator had none), so recovery restores exactly. Preserved "
+            "across restart."
         ),
     )
+    interrupted_issues: dict[str, str] = Field(default_factory=dict)
+    last_reviewed_shas: dict[str, str] = Field(default_factory=dict)
     pending_reports: list[PendingReport] = Field(default_factory=list)
     tracked_reports: list[TrackedReport] = Field(default_factory=list)
     issue_outcomes: dict[str, IssueOutcome] = Field(default_factory=dict)
+    convergence_ledgers: dict[str, ConvergenceLedger] = Field(default_factory=dict)
     hook_failures: dict[str, list[HookFailureRecord]] = Field(default_factory=dict)
     epic_states: dict[str, EpicState] = Field(default_factory=dict)
     releases: dict[str, Release] = Field(default_factory=dict)
@@ -1841,6 +2121,9 @@ class StateData(BaseModel):
     # the merge+arch-regen+push retry so a real (non-arch) failure eventually
     # falls through to ``failure_strategy``. Cleared when the PR is merged/closed.
     dependabot_arch_refresh_attempts: dict[str, int] = Field(default_factory=dict)
+    # #9889 shepherd: bounded update-branch heals per bot PR (stale merge
+    # ref class — reruns pin the old base; update-branch forces fresh CI).
+    dependabot_update_branch_attempts: dict[str, int] = Field(default_factory=dict)
     shape_conversations: dict[str, ShapeConversation] = Field(default_factory=dict)
     shape_responses: dict[str, str] = Field(default_factory=dict)
     stale_issue_settings: StaleIssueSettings = Field(default_factory=StaleIssueSettings)
@@ -1853,6 +2136,11 @@ class StateData(BaseModel):
     # JSON-compat with the rest of StateData. See route_back.py and
     # state/_route_back.py.
     route_back_counts: dict[str, int] = Field(default_factory=dict)
+    # Review-orphan requeue (#9815): review-labeled issues with no open
+    # agent PR (restart edge case). Strikes count consecutive PR-less
+    # sightings; requeues count bounded ready-relabels before HITL.
+    review_orphan_strikes: dict[str, int] = Field(default_factory=dict)
+    review_orphan_requeues: dict[str, int] = Field(default_factory=dict)
     ci_monitor_settings: CIMonitorSettings = Field(default_factory=CIMonitorSettings)
     ci_monitor_tracked_failures: dict[str, str] = Field(default_factory=dict)
     # Trust fleet — RCBudgetLoop (spec §4.8)
@@ -1865,8 +2153,12 @@ class StateData(BaseModel):
     # Trust fleet — ContractRefreshLoop (spec §4.2 Task 18)
     contract_refresh_attempts: dict[str, int] = Field(default_factory=dict)
     # Auto-Agent — AutoAgentPreflightLoop (spec §3.6)
-    auto_agent_attempts: dict[str, int] = Field(default_factory=dict)
+    # NOTE: auto_agent_attempts migrated to convergence_ledgers["N"].stage_state["auto_agent"].attempts
     auto_agent_daily_spend: dict[str, float] = Field(default_factory=dict)
+    # Escalation TTL re-drive markers (#9719): str(issue) → marker. Armed at
+    # the auto-agent exhaustion transition; cleared on issue close (reconcile)
+    # or when the issue drops out of the human-required set.
+    auto_agent_redrive: dict[str, AutoAgentRedriveState] = Field(default_factory=dict)
     # Trust fleet — TrustFleetSanityLoop (spec §12.1)
     trust_fleet_sanity_attempts: dict[str, int] = Field(default_factory=dict)
     trust_fleet_sanity_last_run: str | None = None
@@ -1875,11 +2167,20 @@ class StateData(BaseModel):
     )
     # Trust fleet — caretaker loops (Plan 5)
     flake_counts: dict[str, int] = Field(default_factory=dict)
+    # NOTE: sandbox_failure_fixer_attempts migrated to convergence_ledgers[str(pr_number)].stage_state["sandbox_fix"].attempts
     # SandboxFailureFixerLoop state
-    sandbox_failure_fixer_attempts: dict[str, int] = Field(default_factory=dict)
+    # DetectorCalibrationLoop state
+    detector_calibration_attempts: dict[str, int] = Field(default_factory=dict)
     flake_attempts: dict[str, int] = Field(default_factory=dict)
     skill_prompt_last_green: dict[str, str] = Field(default_factory=dict)
     skill_prompt_attempts: dict[str, int] = Field(default_factory=dict)
+    # Prompt self-refinement (#9724) — ISO-8601 timestamps of filed refine
+    # proposals, used to enforce a rolling 7-day cap.
+    skill_prompt_refine_proposals: list[str] = Field(default_factory=list)
+    # Telemetry consumption (spec §5) — last week's `PromptTelemetry.
+    # get_source_totals()` snapshot, compared against the current tick's
+    # snapshot to compute per-source cost trend before being overwritten.
+    prompt_efficiency_baseline: dict[str, dict[str, int]] = Field(default_factory=dict)
     fake_coverage_last_known: dict[str, list[str]] = Field(default_factory=dict)
     fake_coverage_attempts: dict[str, int] = Field(default_factory=dict)
     # #8986 — rollup issue tracking: maps "{Fake}:{gap_kind}" → open GH issue
@@ -1894,6 +2195,11 @@ class StateData(BaseModel):
     # rollup issue number + the set of PR numbers currently listed in the body.
     # Used so subsequent ticks update the body in-place rather than re-filing.
     adr_rollup_issues: dict[str, dict] = Field(default_factory=dict)
+    # AdrConformanceLoop (ADR-0100) — remediation attempt counters + rollup
+    # tracking. Mirrors adr_audit_attempts/adr_rollup_issues above under a
+    # distinct namespace so the two auditors' counters never collide.
+    adr_conformance_attempts: dict[str, int] = Field(default_factory=dict)
+    adr_conformance_rollup_issues: dict[str, dict] = Field(default_factory=dict)
     # Generic rollup tracking for RollupIssueManager (#9359 hygiene). Keyed by
     # "{namespace}:{subject}" (e.g. "staging_promotion:rc_ci"); value is
     # {"issue_number": int, "content_hash": str}. Lets any loop keep ONE open
@@ -1908,6 +2214,11 @@ class StateData(BaseModel):
     # on the underlying issue closing (reconciled via gh issue list).
     triage_retry_attempts: dict[str, int] = Field(default_factory=dict)
     triage_retry_last_attempt: dict[str, str] = Field(default_factory=dict)
+    # Issue numbers (as strings) parked by a TRANSIENT INFRA failure rather than
+    # a 'needs author clarification' verdict (#10290). TriageRetryLoop re-flows
+    # these on the short triage_infra_retry_interval floor instead of the 24h
+    # clarification backoff; cleared on re-dispatch and on close-reconcile.
+    triage_infra_parked: list[str] = Field(default_factory=list)
     # LiveCorpusReplayLoop (#8786 Phase 3) — per-drift-signature attempt
     # counters for the 3-attempt escalation chain.
     live_corpus_drift_attempts: dict[str, int] = Field(default_factory=dict)
@@ -1974,6 +2285,9 @@ class StateData(BaseModel):
     # (spec §4.1 v2 step 5). At 3 consecutive failures on the same escape
     # issue the loop files `hitl-escalation` + `corpus-learning-stuck`.
     corpus_learning_validation_attempts: dict[str, int] = Field(default_factory=dict)
+    # DisturbanceDampenerLoop per-burndown-unit attempt counters, keyed by
+    # dedup_key (f"disturbance:{dimension}:{path}") (ADR-0095).
+    disturbance_dampener_attempts: dict[str, int] = Field(default_factory=dict)
     # Earlier-adversarial pipeline (ADR-pending). One AdversarialState per
     # issue, persisted across phases so implement_phase can read carryover
     # concerns surfaced during plan_phase without re-running the stages.
@@ -1981,6 +2295,41 @@ class StateData(BaseModel):
     # Default empty dict — schema-evolution safe: legacy state files load
     # cleanly because Pydantic fills the default.
     adversarial_states: dict[str, AdversarialState] = Field(default_factory=dict)
+    # Continuous human-steering reference, keyed by str(issue_id) (ADR-0099 #4).
+    human_steering: dict[str, SteeringState] = Field(default_factory=dict)
+    # IssueRefinementLoop (spec #9957) — small change-detection projection, NOT
+    # the engine's richer runtime RefinementIssue view (src/issue_refinement.py). Keyed
+    # by issue number (str); value is {"title_hash", "body_hash", "updated_at"}.
+    # The loop rebuilds full RefinementIssue views from live backlog fetches each
+    # tick — this index only tells it which issues changed since last time.
+    refinement_index: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # Judged dup-pair cache keys (issue_refinement.pair_key format), newest-5000
+    # cap enforced by IssueRefinementStateMixin.add_judged_pairs. Prevents
+    # re-spending an LLM call on a pair already judged since either side's
+    # body last changed (the pair_key embeds both bodies' hashes).
+    refinement_judged_pairs: list[str] = Field(default_factory=list)
+    # ISO-8601 timestamp of the last weekly full-sweep tick (changed=all
+    # issues, not just the incremental diff). Empty string = never run.
+    refinement_last_full_sweep: str = Field(default="")
+    # The refinement loop's own rolling digest issue number (#8987 rollup pattern);
+    # 0 = not yet created.
+    refinement_digest_issue: int = Field(default=0)
+    # Open operator questions carried across ticks so the digest renders ALL
+    # still-open proposals, not just the current tick's (spec #9957, ratified
+    # controller decision). Each entry is one of two shapes, tagged by "kind":
+    #   dup:      {"kind": "dup", "a", "b", "canonical", "verdict",
+    #              "confidence", "evidence", "first_seen"}
+    #   priority: {"kind": "priority", "number", "current", "proposed",
+    #              "reason", "first_seen"}
+    # Pruned each tick to the live backlog (and, for priority entries, dropped
+    # once the issue gains a P-label). Deduped by unordered pair (dup) / issue
+    # number (priority) so a re-judged pair supersedes its stale entry.
+    refinement_open_proposals: list[dict[str, Any]] = Field(default_factory=list)
+    # ErosionMetricsLoop (#10107, epic #10104) — base-branch HEAD SHA the loop
+    # last finished analyzing. Empty = never run; primed to current HEAD (no
+    # back-analysis) on the first tick, mirroring log_ingest_cursor's
+    # prime-on-first-tick convention.
+    erosion_last_processed_sha: str = Field(default="")
     last_updated: str | None = None
 
 
@@ -2299,6 +2648,12 @@ class PRListItem(BaseModel):
     title: str = ""
     merged: bool = False
     author: str = ""
+    # GitHub's own bot flag (``author.is_bot``) — true for GitHub Apps like
+    # Dependabot/Renovate. Lets consumers detect bot PRs the same way the UI
+    # does, without linking to specific account logins. Populated by
+    # ``PRManager.list_all_open_prs``; defaults False for label-filtered/legacy
+    # snapshots that don't project it.
+    is_bot: bool = False
 
 
 class HITLItem(BaseModel):
@@ -2331,6 +2686,11 @@ class ControlStatusConfig(BaseModel):
     app_version: str = ""
     latest_version: str = ""
     update_available: bool = False
+    # #9663: in-memory boot SHA + commits-behind for at-a-glance staleness
+    # observability. Both are best-effort git reads: ``None`` when unavailable
+    # (git missing, detached, non-repo) rather than a fabricated value.
+    boot_sha: str | None = None
+    commits_behind: int | None = None
     repo: str = ""
     ready_label: list[str] = Field(default_factory=list)
     find_label: list[str] = Field(default_factory=list)
@@ -2345,9 +2705,19 @@ class ControlStatusConfig(BaseModel):
     max_reviewers: int = 0
     max_hitl_workers: int = 0
     batch_size: int = 0
+    # Work-queue strategy (#10067) — surfaced so the dashboard can show which
+    # algorithm is picking work without opening the settings editor.
+    queue_strategy: str = "weighted_mix"
+    queue_weight_p1: int = 3
+    queue_weight_p2: int = 2
+    queue_weight_unprioritised: int = 1
     model: str = ""
     pr_unstick_batch_size: int = 10
     workspace_base: str = ""
+    test_adequacy_coverage_timeout_secs: int = 300
+    # CH-3 (#9731): the merge-policy gate kill-switch is an operational
+    # lever — runtime-visible and runtime-toggleable, no restart.
+    merge_policy_enabled: bool = True
 
 
 class ControlStatusResponse(BaseModel):
@@ -2510,12 +2880,25 @@ class BackgroundWorkerStatusPayload(TypedDict):
     details: dict[str, object]
 
 
+class LoopFitnessUpdatePayload(TypedDict):
+    """Payload for ``EventType.LOOP_FITNESS_UPDATE``."""
+
+    generated_at: str
+    window_days: int
+    loop_count: int
+    scored_count: int
+
+
 class OrchestratorStatusPayload(TypedDict, total=False):
     """Payload for ``EventType.ORCHESTRATOR_STATUS``."""
 
     status: str
     reset: bool
     credits_paused_until: str
+    # Which backend the active credit pause is scoped to — "anthropic" or a
+    # one-shot backend ("zai"/"kimi"/"openrouter"). Absent for a global/legacy
+    # pause. Lets the UI show which provider is paused (#9807).
+    credits_paused_provider: str
 
 
 class SessionStartPayload(TypedDict):
@@ -2570,6 +2953,10 @@ class SystemAlertPayload(TypedDict, total=False):
 
     message: str
     source: str
+    # UI banner severity: "warning" renders yellow (benign/informational, e.g. a
+    # credit signal ignored as a false positive); anything else (default) renders
+    # red (critical, e.g. a real credit pause).
+    severity: str
     repo: str
     epic_number: int
     exception_type: str
@@ -2578,6 +2965,9 @@ class SystemAlertPayload(TypedDict, total=False):
     hook_name: str
     issue: int
     resume_at: str
+    # The billing provider a credit pause/false-positive alert refers to —
+    # "anthropic" or a one-shot backend ("zai"/"kimi"/"openrouter") (#9807).
+    provider: str
 
 
 class TranscriptSummaryPayload(TypedDict, total=False):
@@ -2790,12 +3180,23 @@ class ShippedWithKnownGapPayload(TypedDict):
 
 
 class GitHubIssueSummary(TypedDict):
-    """Lightweight issue dict returned by ``PRPort.list_issues_by_label``."""
+    """Lightweight issue dict returned by ``PRPort.list_issues_by_label``.
+
+    ``labels`` uses the gh wire shape (``[{"name": ...}, ...]``). Originally
+    populated by the OPEN listing only (#9943); ``list_closed_issues_by_label``
+    now projects it too (#8996), since ``escalation_reconcile.is_bot_close``
+    needs labels on CLOSED rows to tell a programmatic close from a human one.
+    ``closed_at`` is populated by ``list_closed_issues_by_label`` only (#9727
+    — the detector-calibration churn window keys on close time, since
+    ``updated_at`` moves on ANY issue activity).
+    """
 
     number: int
     title: str
     body: str
     updated_at: str
+    labels: NotRequired[list[dict[str, str]]]
+    closed_at: NotRequired[str]
 
 
 class PipelineSnapshotEntry(TypedDict):
@@ -2807,6 +3208,14 @@ class PipelineSnapshotEntry(TypedDict):
     status: str
     epic_number: NotRequired[int]
     is_epic_child: NotRequired[bool]
+    # Work-queue visualisation (#10067). ``priority`` is the P0/P1/P2 band
+    # (``queue_strategy.band_of``; "none" when unlabelled). ``dispatch_rank`` is
+    # the position ``order_queue`` would pick this entry in under the active
+    # strategy — present only on *queued* entries (an active issue is already
+    # being worked). The wire list stays in arrival order; a client renders
+    # dispatch order by sorting on ``dispatch_rank``.
+    priority: NotRequired[str]
+    dispatch_rank: NotRequired[int]
 
 
 class PipelineSnapshotPayload(TypedDict):
@@ -2835,9 +3244,14 @@ class LabelCounts(TypedDict):
 
 
 class WorkerResultMeta(TypedDict, total=False):
-    """Metadata stored by ``StateTracker.set_worker_result_meta``."""
+    """Metadata stored by ``StateTracker.set_worker_result_meta``.
 
-    quality_fix_attempts: int
+    Note: ``quality_fix_attempts`` has been migrated to the convergence ledger
+    (``ConvergenceLedger.stage_state["quality_fix"].attempts``). Use
+    ``StateTracker.set_quality_fix_attempts`` / ``get_convergence_ledger`` to
+    read or write that count.
+    """
+
     pre_quality_review_attempts: int
     duration_seconds: float
     error: str | None
@@ -3056,6 +3470,7 @@ class BackgroundWorkerStatus(BaseModel):
     enabled: bool = True
     last_run: str | None = None
     interval_seconds: int | None = None
+    watchdog_timeout_seconds: int | None = None
     next_run: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)
     repo: str = ""
@@ -3180,8 +3595,6 @@ class PipelineStage(StrEnum):
     """Display pipeline stages for issue lifecycle."""
 
     TRIAGE = "triage"
-    DISCOVER = "discover"
-    SHAPE = "shape"
     PLAN = "plan"
     IMPLEMENT = "implement"
     REVIEW = "review"

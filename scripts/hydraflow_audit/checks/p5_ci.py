@@ -285,11 +285,45 @@ def _detect_github_slug(root: Path) -> str | None:
     return match.group(1)
 
 
+def _resolve_main_history_ref(root: Path) -> str | None:
+    """Return a rev that reaches main's history: local ``main`` or ``origin/main``.
+
+    CI checks out PRs as a detached merge commit with no local ``main``
+    branch; the audit workflow fetches ``refs/remotes/origin/main``
+    explicitly. Git's refname shorthand never resolves bare ``main`` to
+    ``refs/remotes/origin/main`` (only ``refs/remotes/main`` would match),
+    so ``git log main`` fails there. Probe candidates explicitly and fall
+    back to the remote-tracking ref.
+    """
+    for candidate in ("main", "origin/main", "master", "origin/master"):
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--verify", "--quiet", f"{candidate}^{{commit}}"],
+                check=False,
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        if result.returncode == 0:
+            return candidate
+    return None
+
+
 @register("P5.6")
 def _no_direct_pushes_to_main(ctx: CheckContext) -> Finding:
     """Warn when recent main-branch history has commits not reached via merge."""
     if not (ctx.root / ".git").exists():
         return finding("P5.6", Status.NA, "not a git repo — cannot inspect history")
+    main_ref = _resolve_main_history_ref(ctx.root)
+    if main_ref is None:
+        return finding(
+            "P5.6",
+            Status.NA,
+            "no main/master ref (local or origin) — cannot inspect history",
+        )
     try:
         result = subprocess.run(
             [
@@ -297,7 +331,7 @@ def _no_direct_pushes_to_main(ctx: CheckContext) -> Finding:
                 "log",
                 "--no-merges",
                 "--first-parent",
-                "main",
+                main_ref,
                 "-n",
                 "100",
                 "--format=%H %s",
@@ -311,7 +345,7 @@ def _no_direct_pushes_to_main(ctx: CheckContext) -> Finding:
     except (subprocess.TimeoutExpired, OSError):
         return finding("P5.6", Status.NA, "git log timed out — skipping")
     if result.returncode != 0:
-        return finding("P5.6", Status.NA, "git log failed — skipping (no main branch?)")
+        return finding("P5.6", Status.NA, f"git log {main_ref} failed — skipping")
     lines = [line for line in result.stdout.splitlines() if line.strip()]
     # Squash-merge workflows leave non-merge commits on main, but each one
     # still went through a PR — GitHub appends `(#NNN)` to the subject.

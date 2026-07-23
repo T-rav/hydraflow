@@ -1,0 +1,22 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_pr_head_sha returns the PR's head-commit SHA (`gh pr view <n>
+# --json headRefOid`). The fake returns a fixed short stub SHA.
+adapter: github
+interaction: get_pr_head_sha
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_pr_head_sha
+  args:
+  - '601'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: 'abc123
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

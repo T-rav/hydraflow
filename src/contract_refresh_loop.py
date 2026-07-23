@@ -10,14 +10,18 @@ Tick body (Tasks 15 + 16 + 20 wired; Tasks 17/18/19 still pending):
 3. If drift is detected, hash the drift report and look the hash up in a
    per-loop :class:`DedupStore`. Hash hit → short-circuit so identical
    drift on back-to-back ticks does not refile the same PR.
-4. Stage the drifted/new cassettes into the worktree (their committed
-   paths under ``tests/trust/contracts/``) and open a refresh PR via
-   :func:`auto_pr.open_automated_pr_async` — title ``contract-refresh:
-   YYYY-MM-DD (<adapters>)``, body summarising per-adapter slugs, labels
-   ``contract-refresh`` + ``auto-merge``, ``auto_merge=True``,
-   ``raise_on_failure=False``.
+4. Open a refresh PR via :func:`auto_pr.generate_and_open_pr_async`
+   (#9539 generate-in-worktree): the loop hands a ``generate(worktree)``
+   callback that copies the drifted/new cassettes into the ephemeral
+   worktree's committed paths under ``tests/trust/contracts/`` — the
+   factory's ``repo_root`` is never mutated. ``path_specs`` cover the
+   cassette dirs so only those generated paths are staged. Title
+   ``contract-refresh: YYYY-MM-DD (<adapters>)``, body summarising
+   per-adapter slugs, labels ``contract-refresh`` + ``auto-merge``,
+   ``auto_merge=True``, ``raise_on_failure=False``.
 5. Post-refresh replay gate (Task 16): invoke ``make trust-contracts``
-   via :func:`subprocess.run`. Pass → clean exit. Fail → the fresh
+   via :func:`subprocess_util.run_subprocess_result` (#9554/#10028 bounded
+   helper). Pass → clean exit. Fail → the fresh
    cassettes have outrun the fakes; file a ``hydraflow-find`` +
    ``fake-drift`` companion issue via ``PRManager.create_issue`` so the
    factory dispatches a fake-repair implementer. Success of the PR's
@@ -57,7 +61,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import trace_collector
-from auto_pr import open_automated_pr_async
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
 from contract_diff import (
     AdapterDriftReport,
@@ -73,6 +76,7 @@ from contract_recording import (
 from dedup_store import DedupStore
 from models import WorkCycleResult  # noqa: TCH001
 from rollup_issue_manager import RollupIssueManager
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -103,6 +107,18 @@ class AdapterPlan:
     name: str  # "github" | "git" | "docker" | "claude"
     cassette_dir_relpath: str  # under repo_root
 
+
+# Committed claude-stream samples that expand the StreamParser contract
+# corpus (tests/trust/contracts/test_fake_llm_contract.py parametrizes over
+# every *.jsonl in the directory) beyond the single fixed prompt
+# ``record_claude_stream`` actually sends. These are permanent
+# hand-authored fixtures — no recorder tick will ever regenerate them — so
+# diffing must not flag their permanent absence from the recording as
+# "deleted". Without this, the claude adapter's fleet report always has a
+# non-empty ``deleted_cassettes`` bucket, so it never has a clean tick and
+# its ContractRefreshLoop attempt counter (Task 18) climbs forever without
+# ever resetting (issue #10220).
+_CLAUDE_IGNORE_DELETED: frozenset[str] = frozenset({"stream_001_list_primes.jsonl"})
 
 ADAPTER_PLANS: tuple[AdapterPlan, ...] = (
     AdapterPlan(
@@ -175,6 +191,24 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             state=self._state,
             namespace="contract_refresh",
             labels=["hydraflow-find", "fake-drift"],
+        )
+
+    def _escalation_rollup(self) -> RollupIssueManager:
+        """One rolling ``fake-repair-stuck`` escalation per adapter (#10015).
+
+        Subjects are adapter names under a namespace SEPARATE from
+        ``contract_refresh`` (which tracks the ``fake_drift`` rollup), so
+        the per-tick ``resolve_all_except`` sweep can close every recovered
+        adapter's escalation without touching the fake-drift issue.
+        Previously escalations were bare ``create_issue`` calls: a clean
+        tick cleared the attempt counter and dedup but left the
+        hitl-escalation issue open forever (the #9867 dead-letter shape).
+        """
+        return RollupIssueManager(
+            pr=self._prs,
+            state=self._state,
+            namespace="contract_refresh_escalations",
+            labels=["hitl-escalation", "fake-repair-stuck"],
         )
 
     # ------------------------------------------------------------------
@@ -329,25 +363,57 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         blob = json.dumps(payload, sort_keys=True).encode("utf-8")
         return hashlib.sha256(blob).hexdigest()
 
-    def _stage_drifted_cassettes(self, reports: list[AdapterDriftReport]) -> list[Path]:
-        """Copy each drifted/new cassette into its committed path under ``repo_root``.
+    def _stage_drifted_cassettes(
+        self, reports: list[AdapterDriftReport], dest_root: Path
+    ) -> list[Path]:
+        """Copy each drifted/new cassette into its committed path under ``dest_root``.
 
-        ``auto_pr.open_automated_pr_async`` reads the file bytes from the
-        paths we return and stages them into the ephemeral worktree, so
-        we *must* write to paths under ``repo_root``. Returns the list
-        of committed paths that now hold the fresh bytes.
+        ``dest_root`` is the ephemeral worktree handed to the
+        :func:`auto_pr.generate_and_open_pr_async` ``generate`` callback
+        (#9539 generate-in-worktree), *not* the factory's ``repo_root``:
+        the source bytes live in the recorder's tmp dir (outside both),
+        so copying them into the worktree's committed cassette paths
+        produces the PR diff without ever dirtying the host checkout.
+        Returns the list of worktree paths that now hold the fresh bytes.
         """
         written: list[Path] = []
         plans_by_name = {p.name: p for p in ADAPTER_PLANS}
         for report in reports:
             plan = plans_by_name[report.adapter]
-            committed_dir = self._config.repo_root / plan.cassette_dir_relpath
+            committed_dir = dest_root / plan.cassette_dir_relpath
             committed_dir.mkdir(parents=True, exist_ok=True)
             for src in [*report.drifted_cassettes, *report.new_cassettes]:
                 dst = committed_dir / src.name
                 dst.write_bytes(src.read_bytes())
                 written.append(dst)
         return written
+
+    def _cassette_path_specs(self, reports: list[AdapterDriftReport]) -> list[str]:
+        """Repo-relative cassette dirs to ``git add`` after generation.
+
+        One entry per drifted adapter (deduped, order-stable). Mirrors the
+        ``path_specs`` contract of :func:`auto_pr.generate_and_open_pr_async`:
+        only these generated paths are staged, so the host checkout's own
+        untracked files can never leak into the refresh PR.
+        """
+        plans_by_name = {p.name: p for p in ADAPTER_PLANS}
+        specs: list[str] = []
+        for report in reports:
+            relpath = plans_by_name[report.adapter].cassette_dir_relpath
+            if relpath not in specs:
+                specs.append(relpath)
+        return specs
+
+    def _count_staged_cassettes(self, reports: list[AdapterDriftReport]) -> int:
+        """Number of drifted/new cassettes the ``generate`` callback will write.
+
+        Computed from the drift report up front because, under
+        generate-in-worktree, the copy happens inside the PR helper's
+        ephemeral worktree (torn down in ``finally``) — the caller can't
+        count the written paths after the fact, so it derives the
+        ``adapters_refreshed`` stat from the report directly.
+        """
+        return sum(len(r.drifted_cassettes) + len(r.new_cassettes) for r in reports)
 
     def _pr_title_and_body(
         self, fleet: FleetDriftReport, stamp: str
@@ -387,17 +453,35 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         )
         return title, "\n".join(body_lines)
 
-    async def _open_refresh_pr(
-        self, written: list[Path], fleet: FleetDriftReport
-    ) -> str | None:
+    async def _open_refresh_pr(self, fleet: FleetDriftReport) -> str | None:
+        """Open the refresh PR via generate-in-worktree (#9539).
+
+        The ``generate`` callback copies the freshly-recorded cassettes
+        (whose bytes live in the recorder's tmp dir) into the ephemeral
+        worktree's committed cassette paths via
+        :meth:`_stage_drifted_cassettes`. ``repo_root`` is never mutated —
+        the worktree is the only thing written, and it is torn down in the
+        helper's ``finally``. ``path_specs`` cover exactly the drifted
+        adapters' cassette dirs so only the generated bytes are staged.
+        """
+        from auto_pr import generate_and_open_pr_async  # noqa: PLC0415
+
         stamp = datetime.now(UTC).strftime("%Y-%m-%d")
         branch = f"contract-refresh/{stamp}"
         title, body = self._pr_title_and_body(fleet, stamp)
+        reports = fleet.reports
 
-        result = await open_automated_pr_async(
+        async def _generate(worktree: Path) -> None:
+            # Copy the recorder's tmp bytes into the worktree's committed
+            # cassette paths. Sync filesystem work — wrap in a thread so the
+            # event loop keeps ticking while many cassettes are written.
+            await asyncio.to_thread(self._stage_drifted_cassettes, reports, worktree)
+
+        result = await generate_and_open_pr_async(
             repo_root=self._config.repo_root,
             branch=branch,
-            files=written,
+            generate=_generate,
+            path_specs=self._cassette_path_specs(reports),
             pr_title=title,
             pr_body=body,
             commit_message=title,
@@ -431,8 +515,12 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         ``_REPLAY_GATE_TIMEOUT_SECONDS`` (5 min). The earlier
         synchronous implementation called ``subprocess.run`` from the
         async ``_do_work`` path, freezing the event loop for the whole
-        duration. Use ``asyncio.create_subprocess_exec`` so other
-        loops keep ticking while the replay gate runs.
+        duration. Routes through the shared bounded helper
+        (:func:`subprocess_util.run_subprocess_result`, #9554/#10028) so
+        other loops keep ticking while the replay gate runs, and the
+        spawn inherits process-group registration + reap (#9911/#10019)
+        for free — on top of the group-kill-on-timeout already wired
+        here (#9579).
 
         Task 20 wraps the call in
         :func:`trace_collector.emit_loop_subprocess_trace` so the
@@ -441,25 +529,20 @@ class ContractRefreshLoop(BaseBackgroundLoop):
 
         Hard timeout defends the orchestrator: a hung recording
         cassette must not stall the entire async event loop. On
-        ``TimeoutError`` we synthesize a non-zero CompletedProcess so
-        the caller routes the timeout through the fake-drift
-        companion path (returncode=124, the bash timeout convention).
+        ``SubprocessTimeoutError`` we synthesize a non-zero
+        CompletedProcess so the caller routes the timeout through the
+        fake-drift companion path (returncode=124, the bash timeout
+        convention).
         """
         cmd = ["make", "trust-contracts"]
         t0 = time.perf_counter()
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(self._config.repo_root),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(), timeout=_REPLAY_GATE_TIMEOUT_SECONDS
+            gated = await run_subprocess_result(
+                *cmd,
+                cwd=self._config.repo_root,
+                timeout=_REPLAY_GATE_TIMEOUT_SECONDS,
             )
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
+        except SubprocessTimeoutError:
             logger.warning(
                 "Replay gate timed out after %ss; treating as failure",
                 _REPLAY_GATE_TIMEOUT_SECONDS,
@@ -479,13 +562,11 @@ class ContractRefreshLoop(BaseBackgroundLoop):
                 stderr_excerpt=timeout_proc.stderr,
             )
             return timeout_proc
-        stdout_txt = (stdout_b or b"").decode(errors="replace")
-        stderr_txt = (stderr_b or b"").decode(errors="replace")
         result = subprocess.CompletedProcess(
             args=cmd,
-            returncode=proc.returncode if proc.returncode is not None else -1,
-            stdout=stdout_txt,
-            stderr=stderr_txt,
+            returncode=gated.returncode,
+            stdout=gated.stdout,
+            stderr=gated.stderr,
         )
         duration_ms = int((time.perf_counter() - t0) * 1000)
         trace_collector.emit_loop_subprocess_trace(
@@ -493,7 +574,7 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             command=cmd,
             exit_code=result.returncode,
             duration_ms=duration_ms,
-            stderr_excerpt=stderr_txt.strip() or None,
+            stderr_excerpt=gated.stderr.strip() or None,
         )
         return result
 
@@ -570,12 +651,12 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         ``config.max_fake_repair_attempts``. The HITL operator uses the
         adapter name in the label + title to jump straight to the stuck
         fake.
+
+        #10015: tracked per adapter via :meth:`_escalation_rollup` so the
+        adapter's next clean tick auto-closes the issue. The title is
+        STABLE (rollup contract) — the attempt count lives in the body.
         """
-        labels = ["hitl-escalation", "fake-repair-stuck", f"adapter-{adapter}"]
-        title = (
-            f"Contract refresh stuck: {adapter} has drifted "
-            f"{attempts} consecutive ticks"
-        )
+        title = f"Contract refresh stuck: {adapter} fake repair not converging"
         body = (
             f"`ContractRefreshLoop` has detected drift on the **{adapter}** "
             f"adapter for {attempts} consecutive ticks without the drift "
@@ -587,14 +668,15 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             f"repair the fake in `src/mockworld/fakes/` or adjust the "
             f"cassette normalizers.\n\n"
             f"This issue dedups on the adapter name — the next clean tick "
-            f"for `{adapter}` will clear both the attempt counter and the "
-            f"escalation dedup entry, so a future stuck streak can "
-            f"re-escalate."
+            f"for `{adapter}` clears the attempt counter and the escalation "
+            f"dedup entry and auto-closes this issue (#10015), so a future "
+            f"stuck streak escalates fresh."
         )
-        return await self._prs.create_issue(
+        return await self._escalation_rollup().ensure(
+            adapter,
             title=title,
             body=body,
-            labels=labels,
+            extra_labels=[f"adapter-{adapter}"],
         )
 
     async def _maybe_escalate(self, drifted_adapters: set[str]) -> dict[str, int]:
@@ -688,20 +770,23 @@ class ContractRefreshLoop(BaseBackgroundLoop):
 
     async def _stage_and_open_pr(
         self, fleet: FleetDriftReport, dedup_key: str
-    ) -> tuple[list[Path], str | None]:
-        """Stage drifted cassettes, open the refresh PR, and record the dedup key.
+    ) -> tuple[int, str | None]:
+        """Open the refresh PR (generate-in-worktree) and record the dedup key.
 
-        Returns ``(written_paths, pr_url)``.  The dedup key is recorded only
+        Returns ``(staged_count, pr_url)`` — ``staged_count`` is the number
+        of cassettes the worktree ``generate`` callback writes, derived from
+        the drift report up front because the copy now happens inside the
+        helper's ephemeral worktree (#9539). The dedup key is recorded only
         after a successful PR open so a transient failure (branch conflict,
         ``gh`` auth, push rejection) does not silently block the next tick
-        behind a dedup entry while the primary checkout stays dirty with
-        uncommitted cassette writes.
+        behind a dedup entry. ``repo_root`` is never mutated, so there is no
+        dirty-checkout hazard to clean up on failure.
         """
-        written = self._stage_drifted_cassettes(fleet.reports)
-        pr_url = await self._open_refresh_pr(written, fleet)
+        staged_count = self._count_staged_cassettes(fleet.reports)
+        pr_url = await self._open_refresh_pr(fleet)
         if pr_url is not None:
             self._dedup.add(dedup_key)
-        return written, pr_url
+        return staged_count, pr_url
 
     async def _check_replay_and_maybe_file_issue(
         self, fleet: FleetDriftReport, pr_url: str | None
@@ -762,7 +847,11 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         tmp_root.mkdir(parents=True, exist_ok=True)
         recordings = await self._record_all(tmp_root)
 
-        fleet: FleetDriftReport = detect_fleet_drift(recordings, self._config.repo_root)
+        fleet: FleetDriftReport = detect_fleet_drift(
+            recordings,
+            self._config.repo_root,
+            ignore_deleted_names={"claude": _CLAUDE_IGNORE_DELETED},
+        )
 
         # Task 18 — update attempt counters on EVERY tick, before any
         # short-circuits, so dedup-suppressed drift still counts toward
@@ -770,6 +859,21 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         # per-adapter escalation dedup.
         drifted_adapters: set[str] = {r.adapter for r in fleet.reports}
         self._update_attempt_counters(drifted_adapters)
+
+        # #10015 — auto-close open fake-repair-stuck escalations for every
+        # adapter NOT drifting this tick, mirroring the attempt-counter reset
+        # semantics directly above (a no-signal recorder already resets the
+        # counter, so it closes the escalation too; a genuine re-occurrence
+        # re-escalates fresh once the streak rebuilds). No-op when nothing
+        # is tracked.
+        await self._escalation_rollup().resolve_all_except(
+            drifted_adapters,
+            comment=(
+                "This adapter is no longer drifting — the fake is back in "
+                "sync with its committed cassettes; auto-closing (#10015). "
+                "A future stuck streak escalates fresh."
+            ),
+        )
 
         if not fleet.has_drift:
             return await self._on_clean_tick()
@@ -783,7 +887,7 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         if dedup_key in self._dedup.get():
             return self._on_dedup_hit(fleet, escalated)
 
-        written, pr_url = await self._stage_and_open_pr(fleet, dedup_key)
+        staged_count, pr_url = await self._stage_and_open_pr(fleet, dedup_key)
 
         # Task 16 — replay gate runs after the PR is opened. A failed gate
         # files a fake-drift companion issue; a passing gate does not.
@@ -793,7 +897,7 @@ class ContractRefreshLoop(BaseBackgroundLoop):
 
         return {
             "status": "refreshed",
-            "adapters_refreshed": len(written),
+            "adapters_refreshed": staged_count,
             "adapters_drifted": len(fleet.reports),
             "pr_url": pr_url,
             "replay_gate_passed": replay_proc.returncode == 0,

@@ -1,0 +1,22 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# close_pr closes a PR without merging it (`gh pr close <n> --repo ...`,
+# not `gh issue close` -- the latter does not reliably resolve a PR
+# number). Mirrors close_issue.yaml's shape: empty stdout, side-effect
+# pinned via the seeded PR's `.closed` flag rather than the returned bool.
+adapter: github
+interaction: close_pr
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: close_pr
+  args:
+  - '523'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ''
+  stderr: ''
+normalizers: []
+baseline_only: true

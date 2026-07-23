@@ -3,7 +3,7 @@ disabled even when master + surface are enabled.
 
 T15 of the advisor-pattern feature. Validates ``is_advisor_enabled``'s
 AND-across-master/role/surface composition: with master and per-surface
-both enabled but the per-role flag off, ``_run_post_verify_advisor``
+both enabled but the per-role flag off, ``_run_post_verify_for_surface``
 must still short-circuit and never invoke the advisor.
 """
 

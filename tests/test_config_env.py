@@ -11,12 +11,15 @@ import pytest
 # conftest.py already inserts the hydraflow package directory into sys.path
 from config import (
     _ENV_BOOL_OVERRIDES,
+    _ENV_ENUM_OVERRIDES,
     _ENV_FLOAT_OVERRIDES,
     _ENV_INT_OVERRIDES,
     _ENV_LITERAL_OVERRIDES,
+    _ENV_OPT_INT_OVERRIDES,
     _ENV_STR_OVERRIDES,
     HydraFlowConfig,
 )
+from queue_strategy import QueueStrategy
 
 # ---------------------------------------------------------------------------
 # Data-driven env-var override table validation
@@ -472,6 +475,75 @@ class TestEnvVarOverrideTable:
             )
 
 
+def test_auto_tighten_loop_enabled_defaults_true_and_env_can_disable(monkeypatch):
+    from config import HydraFlowConfig
+
+    assert HydraFlowConfig().auto_tighten_loop_enabled is True
+    monkeypatch.setenv("HYDRAFLOW_AUTO_TIGHTEN_LOOP_ENABLED", "false")
+    assert HydraFlowConfig().auto_tighten_loop_enabled is False
+
+
+class TestHumanSteeringAuthorizedUsersEnvOverride:
+    """HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS (comma-separated list, special-case)."""
+
+    def test_default_is_empty_list(self, tmp_path: Path) -> None:
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.human_steering_authorized_users == []
+
+    def test_env_var_override_applies_when_at_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(
+            "HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS", "steer-bot,octocat"
+        )
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.human_steering_authorized_users == ["steer-bot", "octocat"]
+
+    def test_env_var_override_strips_whitespace_and_drops_empties(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(
+            "HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS", " steer-bot , , octocat "
+        )
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.human_steering_authorized_users == ["steer-bot", "octocat"]
+
+    def test_explicit_value_overrides_env_var(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS", "steer-bot")
+        cfg = HydraFlowConfig(
+            human_steering_authorized_users=["custom-user"],
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.human_steering_authorized_users == ["custom-user"]
+
+    def test_env_var_all_whitespace_leaves_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS", "  ,  ")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.human_steering_authorized_users == []
+
+
 class TestOtelConfigFields:
     def test_config_otel_defaults(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -547,3 +619,133 @@ class TestDotenvLoading:
 
             main()
             fake_dotenv.load_dotenv.assert_called_once()
+
+
+class TestEnvOptIntOverrideTable:
+    """Optional-int overrides (CH-1, #9729): audit-stream retention floors."""
+
+    @pytest.mark.parametrize(
+        ("field", "env_key", "default"),
+        _ENV_OPT_INT_OVERRIDES,
+        ids=[entry[0] for entry in _ENV_OPT_INT_OVERRIDES],
+    )
+    def test_env_opt_int_override_applies_when_at_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        field: str,
+        env_key: str,
+        default: int | None,
+    ) -> None:
+        monkeypatch.setenv(env_key, "2555")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert getattr(cfg, field) == 2555
+
+    @pytest.mark.parametrize(
+        ("field", "env_key", "default"),
+        _ENV_OPT_INT_OVERRIDES,
+        ids=[entry[0] for entry in _ENV_OPT_INT_OVERRIDES],
+    )
+    def test_env_opt_int_override_ignored_when_explicit_value_set(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        field: str,
+        env_key: str,
+        default: int | None,
+    ) -> None:
+        monkeypatch.setenv(env_key, "365")
+        cfg = HydraFlowConfig(
+            **{field: 30},  # type: ignore[arg-type]
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert getattr(cfg, field) == 30
+
+    @pytest.mark.parametrize(
+        ("field", "env_key", "default"),
+        _ENV_OPT_INT_OVERRIDES,
+        ids=[entry[0] for entry in _ENV_OPT_INT_OVERRIDES],
+    )
+    @pytest.mark.parametrize("bad_value", ["not-a-number", "", "0", "-7"])
+    def test_env_opt_int_override_invalid_or_out_of_range_ignored(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        field: str,
+        env_key: str,
+        default: int | None,
+        bad_value: str,
+    ) -> None:
+        monkeypatch.setenv(env_key, bad_value)
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert getattr(cfg, field) == default
+
+    def test_opt_int_table_defaults_match_field_defaults(self) -> None:
+        model_fields = HydraFlowConfig.model_fields
+        for field, _env_key, table_default in _ENV_OPT_INT_OVERRIDES:
+            pydantic_default = model_fields[field].default
+            assert pydantic_default == table_default, (
+                f"_ENV_OPT_INT_OVERRIDES entry for '{field}' has "
+                f"default={table_default}, but HydraFlowConfig.{field} "
+                f"default is {pydantic_default}"
+            )
+
+
+class TestEnvVarEnumOverride:
+    """StrEnum-typed env overrides (#10037: queue_strategy)."""
+
+    @pytest.mark.parametrize(
+        ("field", "env_key", "enum_cls"),
+        _ENV_ENUM_OVERRIDES,
+        ids=[entry[0] for entry in _ENV_ENUM_OVERRIDES],
+    )
+    def test_enum_override_applies_when_at_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        field: str,
+        env_key: str,
+        enum_cls: type[QueueStrategy],
+    ) -> None:
+        # Pick a member other than the field default so the override is visible.
+        default = HydraFlowConfig.model_fields[field].default
+        target = next(member for member in enum_cls if member != default)
+        monkeypatch.setenv(env_key, target.value)
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert getattr(cfg, field) == target
+
+    def test_queue_strategy_override_lands_as_the_enum_member(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_QUEUE_STRATEGY", "weighted_mix")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.queue_strategy is QueueStrategy.WEIGHTED_MIX
+
+    def test_invalid_queue_strategy_value_is_ignored_and_default_kept(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_QUEUE_STRATEGY", "round_robin")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.queue_strategy is QueueStrategy.WEIGHTED_MIX

@@ -21,6 +21,7 @@ from pydantic import (
 )
 
 import file_util
+from queue_strategy import BandWeights, QueueStrategy
 
 logger = logging.getLogger("hydraflow.config")
 
@@ -106,7 +107,8 @@ class ManagedRepo(BaseModel):
 # Each tuple: (field_name, env_var_key, default_value)
 _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("dashboard_port", "HYDRAFLOW_DASHBOARD_PORT", 5555),
-    ("min_plan_words", "HYDRAFLOW_MIN_PLAN_WORDS", 200),
+    ("min_plan_words", "HYDRAFLOW_MIN_PLAN_WORDS", 60),
+    ("max_plan_chars", "HYDRAFLOW_MAX_PLAN_CHARS", 5000),
     (
         "max_pre_quality_review_attempts",
         "HYDRAFLOW_MAX_PRE_QUALITY_REVIEW_ATTEMPTS",
@@ -115,6 +117,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_diff_sanity_attempts", "HYDRAFLOW_MAX_DIFF_SANITY_ATTEMPTS", 1),
     ("max_scope_check_attempts", "HYDRAFLOW_MAX_SCOPE_CHECK_ATTEMPTS", 1),
     ("max_test_adequacy_attempts", "HYDRAFLOW_MAX_TEST_ADEQUACY_ATTEMPTS", 1),
+    (
+        "test_adequacy_coverage_timeout_secs",
+        "HYDRAFLOW_TEST_ADEQUACY_COVERAGE_TIMEOUT_SECS",
+        300,
+    ),
     ("max_plan_compliance_attempts", "HYDRAFLOW_MAX_PLAN_COMPLIANCE_ATTEMPTS", 1),
     ("max_discover_attempts", "HYDRAFLOW_MAX_DISCOVER_ATTEMPTS", 3),
     ("max_discover_expansions", "HYDRAFLOW_MAX_DISCOVER_EXPANSIONS", 1),
@@ -131,10 +138,17 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         10,
     ),
     ("max_issue_attempts", "HYDRAFLOW_MAX_ISSUE_ATTEMPTS", 3),
+    ("max_decomposition_depth", "HYDRAFLOW_MAX_DECOMPOSITION_DEPTH", 2),
+    (
+        "max_total_decomposition_children",
+        "HYDRAFLOW_MAX_TOTAL_DECOMPOSITION_CHILDREN",
+        8,
+    ),
     ("memory_sync_interval", "HYDRAFLOW_MEMORY_SYNC_INTERVAL", 3600),
     ("max_merge_conflict_fix_attempts", "HYDRAFLOW_MAX_MERGE_CONFLICT_FIX_ATTEMPTS", 3),
     ("max_ci_timeout_fix_attempts", "HYDRAFLOW_MAX_CI_TIMEOUT_FIX_ATTEMPTS", 2),
     ("data_poll_interval", "HYDRAFLOW_DATA_POLL_INTERVAL", 300),
+    ("loop_startup_stagger_s", "HYDRAFLOW_LOOP_STARTUP_STAGGER_S", 120),
     ("max_sessions_per_repo", "HYDRAFLOW_MAX_SESSIONS_PER_REPO", 10),
     ("max_transcript_summary_chars", "HYDRAFLOW_MAX_TRANSCRIPT_SUMMARY_CHARS", 50_000),
     ("pr_unstick_interval", "HYDRAFLOW_PR_UNSTICK_INTERVAL", 3600),
@@ -183,6 +197,16 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         7200,
     ),
     ("loop_watchdog_llm_seconds", "HYDRAFLOW_LOOP_WATCHDOG_LLM_SECONDS", 14400),
+    (
+        "worker_stall_tight_multiplier",
+        "HYDRAFLOW_WORKER_STALL_TIGHT_MULTIPLIER",
+        2,
+    ),
+    (
+        "boot_gap_alert_threshold_seconds",
+        "HYDRAFLOW_BOOT_GAP_ALERT_THRESHOLD_SECONDS",
+        600,
+    ),
     ("collaborator_cache_ttl", "HYDRAFLOW_COLLABORATOR_CACHE_TTL", 600),
     (
         "issue_cache_enrich_ttl_seconds",
@@ -192,6 +216,33 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("artifact_retention_days", "HYDRAFLOW_ARTIFACT_RETENTION_DAYS", 30),
     ("artifact_max_size_mb", "HYDRAFLOW_ARTIFACT_MAX_SIZE_MB", 500),
     ("runs_gc_interval", "HYDRAFLOW_RUNS_GC_INTERVAL", 3600),
+    ("gate_health_interval", "HYDRAFLOW_GATE_HEALTH_INTERVAL", 604800),
+    ("gate_health_run_window", "HYDRAFLOW_GATE_HEALTH_RUN_WINDOW", 50),
+    ("gate_health_min_attempts", "HYDRAFLOW_GATE_HEALTH_MIN_ATTEMPTS", 3),
+    (
+        "gate_health_hang_tolerance_seconds",
+        "HYDRAFLOW_GATE_HEALTH_HANG_TOLERANCE_SECONDS",
+        90,
+    ),
+    ("pr_red_repair_interval", "HYDRAFLOW_PR_RED_REPAIR_INTERVAL", 300),
+    ("pr_red_rerun_max_attempts", "HYDRAFLOW_PR_RED_RERUN_MAX_ATTEMPTS", 2),
+    (
+        "pr_red_repair_dispatch_max_attempts",
+        "HYDRAFLOW_PR_RED_REPAIR_DISPATCH_MAX_ATTEMPTS",
+        2,
+    ),
+    ("erosion_metrics_interval", "HYDRAFLOW_EROSION_METRICS_INTERVAL", 14400),
+    (
+        "erosion_metrics_max_issues_per_tick",
+        "HYDRAFLOW_EROSION_METRICS_MAX_ISSUES_PER_TICK",
+        3,
+    ),
+    ("adr_drift_resolver_interval", "HYDRAFLOW_ADR_DRIFT_RESOLVER_INTERVAL", 3600),
+    (
+        "adr_drift_resolver_max_triage_per_tick",
+        "HYDRAFLOW_ADR_DRIFT_RESOLVER_MAX_TRIAGE_PER_TICK",
+        5,
+    ),
     ("adr_review_interval", "HYDRAFLOW_ADR_REVIEW_INTERVAL", 86400),
     ("adr_review_approval_threshold", "HYDRAFLOW_ADR_REVIEW_APPROVAL_THRESHOLD", 2),
     ("adr_review_max_rounds", "HYDRAFLOW_ADR_REVIEW_MAX_ROUNDS", 3),
@@ -233,11 +284,24 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ),
     ("health_monitor_interval", "HYDRAFLOW_HEALTH_MONITOR_INTERVAL", 7200),
     ("wiki_freshness_stale_days", "HYDRAFLOW_WIKI_FRESHNESS_STALE_DAYS", 7),
+    ("stale_code_alert_threshold", "HYDRAFLOW_STALE_CODE_ALERT_THRESHOLD", 10),
     ("stale_issue_interval", "HYDRAFLOW_STALE_ISSUE_INTERVAL", 86400),
+    (
+        "stale_issue_regression_rot_stale_days",
+        "HYDRAFLOW_STALE_ISSUE_REGRESSION_ROT_STALE_DAYS",
+        14,
+    ),
+    ("branch_gc_stale_days", "HYDRAFLOW_BRANCH_GC_STALE_DAYS", 3),
+    (
+        "branch_gc_min_delete_age_days",
+        "HYDRAFLOW_BRANCH_GC_MIN_DELETE_AGE_DAYS",
+        14,
+    ),
     ("auditor_finding_max_age_days", "HYDRAFLOW_AUDITOR_FINDING_MAX_AGE_DAYS", 14),
-    ("triage_max_turns", "HYDRAFLOW_TRIAGE_MAX_TURNS", 3),
+    ("triage_max_turns", "HYDRAFLOW_TRIAGE_MAX_TURNS", 12),
     ("triage_retry_interval", "HYDRAFLOW_TRIAGE_RETRY_INTERVAL", 86400),
     ("triage_retry_max_attempts", "HYDRAFLOW_TRIAGE_RETRY_MAX_ATTEMPTS", 3),
+    ("triage_infra_retry_interval", "HYDRAFLOW_TRIAGE_INFRA_RETRY_INTERVAL", 900),
     ("sentry_poll_interval", "SENTRY_POLL_INTERVAL", 600),
     ("sentry_min_events", "SENTRY_MIN_EVENTS", 2),
     ("sentry_max_creation_attempts", "SENTRY_MAX_CREATION_ATTEMPTS", 3),
@@ -247,20 +311,64 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("sentry_signal_cooldown_hours", "SENTRY_SIGNAL_COOLDOWN_HOURS", 24),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
+    (
+        "dependabot_update_branch_max_attempts",
+        "HYDRAFLOW_DEPENDABOT_UPDATE_BRANCH_MAX_ATTEMPTS",
+        1,
+    ),
+    ("review_orphan_strike_threshold", "HYDRAFLOW_REVIEW_ORPHAN_STRIKE_THRESHOLD", 3),
+    ("review_orphan_max_requeues", "HYDRAFLOW_REVIEW_ORPHAN_MAX_REQUEUES", 3),
+    (
+        "credit_fp_suppress_cooldown_seconds",
+        "HYDRAFLOW_CREDIT_FP_SUPPRESS_COOLDOWN_SECONDS",
+        300,
+    ),
+    ("repo_wiki_min_batch_files", "HYDRAFLOW_REPO_WIKI_MIN_BATCH_FILES", 8),
+    ("repo_wiki_max_batch_age_hours", "HYDRAFLOW_REPO_WIKI_MAX_BATCH_AGE_HOURS", 24),
     ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
     ("diagnostic_interval", "HYDRAFLOW_DIAGNOSTIC_INTERVAL", 30),
     ("retrospective_interval", "HYDRAFLOW_RETROSPECTIVE_INTERVAL", 1800),
     ("principles_audit_interval", "HYDRAFLOW_PRINCIPLES_AUDIT_INTERVAL", 604800),
+    ("principles_audit_timeout_seconds", "HYDRAFLOW_PRINCIPLES_AUDIT_TIMEOUT", 1800),
     (
         "sandbox_failure_fixer_interval",
         "HYDRAFLOW_SANDBOX_FAILURE_FIXER_INTERVAL",
         3600,
     ),
+    ("detector_calibration_interval", "HYDRAFLOW_DETECTOR_CALIBRATION_INTERVAL", 3600),
     ("auto_agent_preflight_interval", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_INTERVAL", 120),
     ("auto_agent_max_attempts", "HYDRAFLOW_AUTO_AGENT_MAX_ATTEMPTS", 3),
+    (
+        "auto_agent_redrive_max_attempts",
+        "HYDRAFLOW_AUTO_AGENT_REDRIVE_MAX_ATTEMPTS",
+        1,
+    ),
+    ("auto_agent_redrive_ttl_days", "HYDRAFLOW_AUTO_AGENT_REDRIVE_TTL_DAYS", 5),
+    (
+        "auto_agent_redrive_human_quiet_days",
+        "HYDRAFLOW_AUTO_AGENT_REDRIVE_HUMAN_QUIET_DAYS",
+        2,
+    ),
+    (
+        "auto_pr_preflight_stage_timeout_s",
+        "HYDRAFLOW_AUTO_PR_PREFLIGHT_STAGE_TIMEOUT_S",
+        600,
+    ),
+    ("pr_base_max_age_days", "HYDRAFLOW_PR_BASE_MAX_AGE_DAYS", 3),
     ("flake_tracker_interval", "HYDRAFLOW_FLAKE_TRACKER_INTERVAL", 14400),
     ("flake_threshold", "HYDRAFLOW_FLAKE_THRESHOLD", 3),
+    ("xdist_quarantine_threshold", "HYDRAFLOW_XDIST_QUARANTINE_THRESHOLD", 2),
     ("skill_prompt_eval_interval", "HYDRAFLOW_SKILL_PROMPT_EVAL_INTERVAL", 604800),
+    (
+        "skill_prompt_eval_adversarial_timeout_seconds",
+        "HYDRAFLOW_SKILL_PROMPT_EVAL_TIMEOUT",
+        3600,
+    ),
+    (
+        "skill_prompt_refine_max_weekly",
+        "HYDRAFLOW_SKILL_PROMPT_REFINE_MAX_WEEKLY",
+        2,
+    ),
     (
         "fake_coverage_auditor_interval",
         "HYDRAFLOW_FAKE_COVERAGE_AUDITOR_INTERVAL",
@@ -278,8 +386,19 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_INTERVAL",
         14400,
     ),
+    (
+        "adr_drift_fleet_batch_threshold",
+        "HYDRAFLOW_ADR_DRIFT_FLEET_BATCH_THRESHOLD",
+        4,
+    ),
+    (
+        "adr_conformance_interval",
+        "HYDRAFLOW_ADR_CONFORMANCE_INTERVAL",
+        86400,
+    ),
     ("term_proposer_interval", "HYDRAFLOW_TERM_PROPOSER_INTERVAL", 14400),
     ("term_proposer_max_per_tick", "HYDRAFLOW_TERM_PROPOSER_MAX_PER_TICK", 10),
+    ("term_proposer_timeout", "HYDRAFLOW_TERM_PROPOSER_TIMEOUT", 180),
     (
         "term_proposer_cooldown_seconds",
         "HYDRAFLOW_TERM_PROPOSER_COOLDOWN_SECONDS",
@@ -301,16 +420,63 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_LOOP_ANOMALY_REPAIR_MIN_SAMPLE",
         3,
     ),
+    (
+        "loop_anomaly_tick_error_min_sample",
+        "HYDRAFLOW_LOOP_ANOMALY_TICK_ERROR_MIN_SAMPLE",
+        3,
+    ),
+    (
+        "loop_anomaly_hitl_low_severity_count",
+        "HYDRAFLOW_LOOP_ANOMALY_HITL_LOW_SEVERITY_COUNT",
+        3,
+    ),
     ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 3600),
     ("contract_refresh_interval", "HYDRAFLOW_CONTRACT_REFRESH_INTERVAL", 604800),
     ("max_fake_repair_attempts", "HYDRAFLOW_MAX_FAKE_REPAIR_ATTEMPTS", 3),
+    ("max_convergence_laps", "HYDRAFLOW_MAX_CONVERGENCE_LAPS", 3),
+    (
+        "convergence_oscillation_interval",
+        "HYDRAFLOW_CONVERGENCE_OSCILLATION_INTERVAL",
+        3600,
+    ),
+    (
+        "convergence_oscillation_window",
+        "HYDRAFLOW_CONVERGENCE_OSCILLATION_WINDOW",
+        2,
+    ),
+    (
+        "convergence_oscillation_min_loopback_stages",
+        "HYDRAFLOW_CONVERGENCE_OSCILLATION_MIN_LOOPBACK_STAGES",
+        2,
+    ),
+    ("fitness_scorecard_interval", "HYDRAFLOW_FITNESS_SCORECARD_INTERVAL", 86400),
+    ("fitness_window_days", "HYDRAFLOW_FITNESS_WINDOW_DAYS", 30),
+    ("fitness_min_samples", "HYDRAFLOW_FITNESS_MIN_SAMPLES", 5),
+    ("auto_tighten_stability_ticks", "HYDRAFLOW_AUTO_TIGHTEN_STABILITY_TICKS", 3),
+    ("auto_tighten_interval", "HYDRAFLOW_AUTO_TIGHTEN_INTERVAL", 86400),
+    ("issue_refinement_interval", "HYDRAFLOW_ISSUE_REFINEMENT_INTERVAL", 86400),
+    (
+        "issue_refinement_full_sweep_interval",
+        "HYDRAFLOW_ISSUE_REFINEMENT_FULL_SWEEP_INTERVAL",
+        604800,
+    ),
+    ("issue_refinement_pair_budget", "HYDRAFLOW_ISSUE_REFINEMENT_PAIR_BUDGET", 24),
+    (
+        "issue_refinement_priority_budget",
+        "HYDRAFLOW_ISSUE_REFINEMENT_PRIORITY_BUDGET",
+        50,
+    ),
+    # Work-queue band-draw weights (#10037); see queue_strategy.BandWeights.
+    ("queue_weight_p1", "HYDRAFLOW_QUEUE_WEIGHT_P1", 3),
+    ("queue_weight_p2", "HYDRAFLOW_QUEUE_WEIGHT_P2", 2),
+    ("queue_weight_unprioritised", "HYDRAFLOW_QUEUE_WEIGHT_UNPRIORITISED", 1),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     (
         "security_patch_severity_threshold",
         "HYDRAFLOW_SECURITY_PATCH_SEVERITY_THRESHOLD",
-        "high",
+        "medium",
     ),
     ("dashboard_host", "HYDRAFLOW_DASHBOARD_HOST", "127.0.0.1"),
     ("test_command", "HYDRAFLOW_TEST_COMMAND", "make test"),
@@ -334,10 +500,14 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
         ),
     ),
     ("log_ingest_log_files", "HYDRAFLOW_LOG_INGEST_LOG_FILES", "logs/hydraflow.log"),
+    ("repo_data_class", "HYDRAFLOW_REPO_DATA_CLASS", "internal"),
+    ("regulated_labels", "HYDRAFLOW_REGULATED_LABELS", ""),
     ("dashboard_url", "HYDRAFLOW_DASHBOARD_URL", "http://localhost:5555"),
     ("otel_endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT", "https://api.honeycomb.io"),
     ("otel_service_name", "OTEL_SERVICE_NAME", "hydraflow"),
     ("otel_environment", "HF_ENV", "local"),
+    ("issue_refinement_model", "HYDRAFLOW_ISSUE_REFINEMENT_MODEL", ""),
+    ("skill_prompt_refine_model", "HYDRAFLOW_SKILL_PROMPT_REFINE_MODEL", ""),
 ]
 
 _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
@@ -358,6 +528,23 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
         "HYDRAFLOW_GH_CIRCUIT_BREAKER_RESET_TIMEOUT_S",
         60.0,
     ),
+    (
+        "github_cache_issue_list_ttl_s",
+        "HYDRAFLOW_GITHUB_CACHE_ISSUE_LIST_TTL_S",
+        900.0,
+    ),
+    ("auto_tighten_coverage_margin", "HYDRAFLOW_AUTO_TIGHTEN_COVERAGE_MARGIN", 1.0),
+    (
+        "auto_agent_redrive_backoff_multiplier",
+        "HYDRAFLOW_AUTO_AGENT_REDRIVE_BACKOFF_MULTIPLIER",
+        3.0,
+    ),
+    # Work-queue starvation valve (#10037): hours before weighted_mix promotes.
+    (
+        "queue_starvation_threshold_hours",
+        "HYDRAFLOW_QUEUE_STARVATION_THRESHOLD_HOURS",
+        168.0,
+    ),
 ]
 
 # Optional floats — `None` when env var is missing/empty/invalid.
@@ -370,6 +557,37 @@ _ENV_OPT_FLOAT_OVERRIDES: list[tuple[str, str, float | None]] = [
     ("issue_cost_alert_usd", "HYDRAFLOW_ISSUE_COST_ALERT_USD", None),
 ]
 
+# Optional ints — `None` when env var is missing/empty/invalid. Mirrors
+# _ENV_OPT_FLOAT_OVERRIDES; ge=1 is enforced by the pydantic constraint on
+# the field, with out-of-range env values rejected here (warn + default).
+_ENV_OPT_INT_OVERRIDES: list[tuple[str, str, int | None]] = [
+    (
+        "audit_retention_days_preflight",
+        "HYDRAFLOW_AUDIT_RETENTION_DAYS_PREFLIGHT",
+        None,
+    ),
+    (
+        "audit_retention_days_health_decisions",
+        "HYDRAFLOW_AUDIT_RETENTION_DAYS_HEALTH_DECISIONS",
+        None,
+    ),
+    (
+        "audit_retention_days_inference_telemetry",
+        "HYDRAFLOW_AUDIT_RETENTION_DAYS_INFERENCE_TELEMETRY",
+        None,
+    ),
+    (
+        "audit_retention_days_approval_records",
+        "HYDRAFLOW_AUDIT_RETENTION_DAYS_APPROVAL_RECORDS",
+        None,
+    ),
+    (
+        "audit_retention_days_evidence_packs",
+        "HYDRAFLOW_AUDIT_RETENTION_DAYS_EVIDENCE_PACKS",
+        None,
+    ),
+]
+
 # Float overrides with tight [0, 1] bounds — handled separately from the
 # parametrized table because the generic test adds ``default + 1.0`` which
 # exceeds their upper bound.
@@ -377,10 +595,26 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
     ("visual_warn_threshold", "HYDRAFLOW_VISUAL_WARN_THRESHOLD", 0.05),
     ("visual_fail_threshold", "HYDRAFLOW_VISUAL_FAIL_THRESHOLD", 0.15),
     ("loop_anomaly_tick_error_ratio", "HYDRAFLOW_LOOP_ANOMALY_TICK_ERROR_RATIO", 0.2),
+    ("cost_throttle_ratio", "HYDRAFLOW_COST_THROTTLE_RATIO", 0.8),
 ]
 
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
+    (
+        "test_adequacy_verifier_enabled",
+        "HYDRAFLOW_TEST_ADEQUACY_VERIFIER_ENABLED",
+        True,
+    ),
+    (
+        "test_adequacy_verifier_fail_closed",
+        "HYDRAFLOW_TEST_ADEQUACY_VERIFIER_FAIL_CLOSED",
+        False,
+    ),
+    ("triage_honeypot_enabled", "HYDRAFLOW_TRIAGE_HONEYPOT_ENABLED", True),
+    ("triage_honeypot_enforce", "HYDRAFLOW_TRIAGE_HONEYPOT_ENFORCE", False),
+    ("approval_records_enabled", "HYDRAFLOW_APPROVAL_RECORDS_ENABLED", True),
+    ("evidence_pack_enabled", "HYDRAFLOW_EVIDENCE_PACK_ENABLED", True),
+    ("merge_policy_enabled", "HYDRAFLOW_MERGE_POLICY_ENABLED", True),
     ("sensor_enrichment_enabled", "HYDRAFLOW_SENSOR_ENRICHMENT_ENABLED", True),
     ("gh_circuit_breaker_enabled", "HYDRAFLOW_GH_CIRCUIT_BREAKER_ENABLED", True),
     ("issue_cache_enabled", "HYDRAFLOW_ISSUE_CACHE_ENABLED", True),
@@ -408,6 +642,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_ENABLE_FRESH_BRANCH_REBUILD",
         True,
     ),
+    (
+        "branch_gc_delete_enabled",
+        "HYDRAFLOW_BRANCH_GC_DELETE_ENABLED",
+        False,
+    ),
     ("collaborator_check_enabled", "HYDRAFLOW_COLLABORATOR_CHECK_ENABLED", True),
     ("memory_auto_approve", "HYDRAFLOW_MEMORY_AUTO_APPROVE", False),
     ("visual_gate_enabled", "HYDRAFLOW_VISUAL_GATE_ENABLED", False),
@@ -426,7 +665,24 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_SANDBOX_FAILURE_FIXER_ENABLED",
         False,
     ),
+    ("detector_calibration_enabled", "HYDRAFLOW_DETECTOR_CALIBRATION_ENABLED", True),
     ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
+    ("auto_agent_redrive_enabled", "HYDRAFLOW_AUTO_AGENT_REDRIVE_ENABLED", True),
+    (
+        "auto_agent_hitl_intake_enabled",
+        "HYDRAFLOW_AUTO_AGENT_HITL_INTAKE_ENABLED",
+        True,
+    ),
+    (
+        "auto_pr_preflight_gate_enabled",
+        "HYDRAFLOW_AUTO_PR_PREFLIGHT_GATE_ENABLED",
+        True,
+    ),
+    (
+        "pr_base_freshness_guard_enabled",
+        "HYDRAFLOW_PR_BASE_FRESHNESS_GUARD_ENABLED",
+        True,
+    ),
     (
         "implement_two_stage_review_enabled",
         "HYDRAFLOW_IMPLEMENT_TWO_STAGE_REVIEW_ENABLED",
@@ -434,6 +690,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("staging_enabled", "HYDRAFLOW_STAGING_ENABLED", False),
     ("otel_enabled", "HYDRAFLOW_OTEL_ENABLED", False),
+    (
+        "shadow_corpus_coverage_pruning_enabled",
+        "HYDRAFLOW_SHADOW_CORPUS_COVERAGE_PRUNING_ENABLED",
+        True,
+    ),
     ("term_proposer_enabled", "HYDRAFLOW_TERM_PROPOSER_ENABLED", True),
     ("term_pruner_enabled", "HYDRAFLOW_TERM_PRUNER_ENABLED", True),
     ("edge_proposer_enabled", "HYDRAFLOW_EDGE_PROPOSER_ENABLED", True),
@@ -442,11 +703,21 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_REVIEW_USE_QUALITY_GATE",
         True,
     ),
+    (
+        "human_steering_enabled",
+        "HYDRAFLOW_HUMAN_STEERING_ENABLED",
+        True,
+    ),
     # Static config gates — 34 loops (dark-factory §2.1 #3 defense-in-depth)
     ("adr_reviewer_loop_enabled", "HYDRAFLOW_ADR_REVIEWER_LOOP_ENABLED", True),
     (
         "adr_touchpoint_auditor_loop_enabled",
         "HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_LOOP_ENABLED",
+        True,
+    ),
+    (
+        "adr_conformance_loop_enabled",
+        "HYDRAFLOW_ADR_CONFORMANCE_LOOP_ENABLED",
         True,
     ),
     ("ci_monitor_loop_enabled", "HYDRAFLOW_CI_MONITOR_LOOP_ENABLED", True),
@@ -475,8 +746,14 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("flake_tracker_loop_enabled", "HYDRAFLOW_FLAKE_TRACKER_LOOP_ENABLED", True),
+    ("xdist_quarantine_enabled", "HYDRAFLOW_XDIST_QUARANTINE_ENABLED", True),
     ("github_cache_loop_enabled", "HYDRAFLOW_GITHUB_CACHE_LOOP_ENABLED", True),
     ("health_monitor_loop_enabled", "HYDRAFLOW_HEALTH_MONITOR_LOOP_ENABLED", True),
+    (
+        "self_repair_actuator_enabled",
+        "HYDRAFLOW_SELF_REPAIR_ACTUATOR_ENABLED",
+        True,
+    ),
     (
         "label_drift_watcher_loop_enabled",
         "HYDRAFLOW_LABEL_DRIFT_WATCHER_LOOP_ENABLED",
@@ -495,6 +772,12 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("report_issue_loop_enabled", "HYDRAFLOW_REPORT_ISSUE_LOOP_ENABLED", True),
     ("retrospective_loop_enabled", "HYDRAFLOW_RETROSPECTIVE_LOOP_ENABLED", True),
     ("runs_gc_loop_enabled", "HYDRAFLOW_RUNS_GC_LOOP_ENABLED", True),
+    (
+        "event_log_periodic_rotate_enabled",
+        "HYDRAFLOW_EVENT_LOG_PERIODIC_ROTATE_ENABLED",
+        True,
+    ),
+    ("state_prune_enabled", "HYDRAFLOW_STATE_PRUNE_ENABLED", True),
     ("security_patch_loop_enabled", "HYDRAFLOW_SECURITY_PATCH_LOOP_ENABLED", True),
     ("sentry_loop_enabled", "HYDRAFLOW_SENTRY_LOOP_ENABLED", True),
     ("log_ingest_loop_enabled", "HYDRAFLOW_LOG_INGEST_LOOP_ENABLED", True),
@@ -510,9 +793,46 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_SKILL_PROMPT_EVAL_LOOP_ENABLED",
         True,
     ),
+    (
+        "skill_prompt_refine_enabled",
+        "HYDRAFLOW_SKILL_PROMPT_REFINE_ENABLED",
+        True,
+    ),
     ("stale_issue_gc_loop_enabled", "HYDRAFLOW_STALE_ISSUE_GC_LOOP_ENABLED", True),
+    ("gate_health_loop_enabled", "HYDRAFLOW_GATE_HEALTH_LOOP_ENABLED", True),
+    ("pr_red_repair_loop_enabled", "HYDRAFLOW_PR_RED_REPAIR_LOOP_ENABLED", True),
+    (
+        "pr_red_repair_dispatch_enabled",
+        "HYDRAFLOW_PR_RED_REPAIR_DISPATCH_ENABLED",
+        True,
+    ),
+    (
+        "erosion_metrics_loop_enabled",
+        "HYDRAFLOW_EROSION_METRICS_LOOP_ENABLED",
+        True,
+    ),
+    (
+        "adr_drift_resolver_loop_enabled",
+        "HYDRAFLOW_ADR_DRIFT_RESOLVER_LOOP_ENABLED",
+        True,
+    ),
+    (
+        "human_branch_shepherd_enabled",
+        "HYDRAFLOW_HUMAN_BRANCH_SHEPHERD_ENABLED",
+        True,
+    ),
+    (
+        "dependabot_conflict_heal_enabled",
+        "HYDRAFLOW_DEPENDABOT_CONFLICT_HEAL_ENABLED",
+        True,
+    ),
     ("stale_issue_loop_enabled", "HYDRAFLOW_STALE_ISSUE_LOOP_ENABLED", True),
     ("triage_retry_loop_enabled", "HYDRAFLOW_TRIAGE_RETRY_LOOP_ENABLED", True),
+    (
+        "convergence_oscillation_loop_enabled",
+        "HYDRAFLOW_CONVERGENCE_OSCILLATION_LOOP_ENABLED",
+        True,
+    ),
     (
         "trust_fleet_sanity_loop_enabled",
         "HYDRAFLOW_TRUST_FLEET_SANITY_LOOP_ENABLED",
@@ -524,6 +844,8 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("workspace_gc_loop_enabled", "HYDRAFLOW_WORKSPACE_GC_LOOP_ENABLED", True),
+    ("auto_tighten_loop_enabled", "HYDRAFLOW_AUTO_TIGHTEN_LOOP_ENABLED", True),
+    ("issue_refinement_enabled", "HYDRAFLOW_ISSUE_REFINEMENT_ENABLED", True),
 ]
 
 # Literal-typed env-var overrides.
@@ -534,6 +856,12 @@ _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
     ("docker_network_mode", "HYDRAFLOW_DOCKER_NETWORK_MODE"),
     ("epic_merge_strategy", "HYDRAFLOW_EPIC_MERGE_STRATEGY"),
     ("release_version_source", "HYDRAFLOW_RELEASE_VERSION_SOURCE"),
+]
+
+# StrEnum-typed fields, kept separate from _ENV_LITERAL_OVERRIDES because
+# get_args() is empty for an Enum subclass — the choices are the enum members.
+_ENV_ENUM_OVERRIDES: list[tuple[str, str, type[QueueStrategy]]] = [
+    ("queue_strategy", "HYDRAFLOW_QUEUE_STRATEGY", QueueStrategy),
 ]
 
 # Deprecated env var aliases (HYDRA_ → HYDRAFLOW_).
@@ -594,6 +922,11 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
     ("HYDRAFLOW_BACKGROUND", "background_tool", "background_model"),
     ("HYDRAFLOW_IMPLEMENT", "implementation_tool", "model"),
     ("HYDRAFLOW_REVIEW", "review_tool", "review_model"),
+    (
+        "HYDRAFLOW_TEST_ADEQUACY_VERIFIER",
+        "test_adequacy_verifier_tool",
+        "test_adequacy_verifier_model",
+    ),
     ("HYDRAFLOW_PLANNER", "planner_tool", "planner_model"),
     ("HYDRAFLOW_TRIAGE", "triage_tool", "triage_model"),
     ("HYDRAFLOW_AC", "ac_tool", "ac_model"),
@@ -606,6 +939,12 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
     ("HYDRAFLOW_SENTRY", "sentry_tool", "sentry_model"),
     ("HYDRAFLOW_ADR_REVIEW", "adr_review_tool", "adr_review_model"),
     ("HYDRAFLOW_REPORT_ISSUE", "report_issue_tool", "report_issue_model"),
+    ("HYDRAFLOW_TERM_PROPOSER", "term_proposer_tool", "term_proposer_model"),
+    (
+        "HYDRAFLOW_ADR_DRIFT_RESOLVER",
+        "adr_drift_resolver_tool",
+        "adr_drift_resolver_model",
+    ),
 ]
 
 
@@ -638,6 +977,57 @@ class HydraFlowConfig(BaseModel):
     max_hitl_workers: int = Field(
         default=1, ge=1, le=5, description="Concurrent HITL correction agents"
     )
+
+    # Work-queue discipline (#10037) — how IssueStore orders each stage queue.
+    # ``IssueRefinementLoop`` (#9957) produces the P0/P1/P2 labels these read.
+    # Default is 'weighted_mix': priority-driven selection is the intended
+    # out-of-the-box behaviour, so a fresh instance picks by priority rather
+    # than oldest-first. #10045 shipped 'fifo' to make the merge behaviour-
+    # neutral; this makes the deliberate cutover. 'fifo' remains the escape
+    # hatch — a live System-tab dial away, no restart (issue_store re-reads it
+    # on every dequeue) — restoring the pre-#10037 ordering without a deploy.
+    queue_strategy: QueueStrategy = Field(
+        default=QueueStrategy.WEIGHTED_MIX,
+        description=(
+            "Stage-queue ordering: 'weighted_mix' (default — P0 preempts, then "
+            "a weighted ratio draw with an age-based starvation guard), "
+            "'priority' (strict P0>P1>P2, starves lower bands), or 'fifo' "
+            "(oldest first, the pre-#10037 behaviour and escape hatch)"
+        ),
+    )
+    # Weights are the relative share each band draws under 'weighted_mix'.
+    # The floor of 1 is deliberate: it makes "a band cannot starve" an
+    # unconditional guarantee rather than a property of the default values.
+    queue_weight_p1: int = Field(
+        default=3, ge=1, le=10, description="P1 draw share under weighted_mix"
+    )
+    queue_weight_p2: int = Field(
+        default=2, ge=1, le=10, description="P2 draw share under weighted_mix"
+    )
+    queue_weight_unprioritised: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        description="Unlabelled draw share under weighted_mix",
+    )
+    # Age at which a lower-band item is promoted ahead of the weighted draw so
+    # it cannot languish forever (weighted_mix only). Generous by default: the
+    # ratio draw is the normal path and this is the rarely-hit safety valve.
+    queue_starvation_threshold_hours: float = Field(
+        default=168.0,
+        ge=1.0,
+        le=8760.0,
+        description="Hours before a lower-band item is force-promoted (weighted_mix)",
+    )
+
+    def band_weights(self) -> BandWeights:
+        """Weighted-mix draw ratio in the form the ordering engine expects."""
+        return BandWeights(
+            p1=self.queue_weight_p1,
+            p2=self.queue_weight_p2,
+            unprioritised=self.queue_weight_unprioritised,
+        )
+
     # Plugin skill registry — see docs/superpowers/specs/2026-04-18-dynamic-plugin-skill-registry-design.md
     required_plugins: list[str] = Field(
         default_factory=lambda: [
@@ -747,6 +1137,37 @@ class HydraFlowConfig(BaseModel):
     )
     review_model: str = Field(default="sonnet", description="Model for review agents")
 
+    # Independent test-adequacy verifier (#9546): a second-opinion pass with a
+    # model that MUST stay independent of review_model — a shared model would
+    # defeat the second opinion (the finder grading its own homework).
+    test_adequacy_verifier_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+        default="claude",
+        description="CLI backend for the independent test-adequacy verifier pass",
+    )
+    test_adequacy_verifier_model: str = Field(
+        default="opus",
+        description=(
+            "Model for the independent test-adequacy verifier. Keep distinct "
+            "from review_model — a shared model defeats the second opinion"
+        ),
+    )
+    test_adequacy_verifier_enabled: bool = Field(
+        default=True,
+        description=(
+            "Run the independent verifier pass when the test-adequacy finder "
+            "emits an explicit OK (kill-switch; no-marker default-passes never "
+            "trigger the verifier)"
+        ),
+    )
+    test_adequacy_verifier_fail_closed: bool = Field(
+        default=False,
+        description=(
+            "Treat a degraded verifier run (empty transcript / infra failure) "
+            "as an OVERRIDE instead of keeping the finder's OK (fail-soft is "
+            "the default)"
+        ),
+    )
+
     # CI check configuration
     ci_check_timeout: int = Field(
         default=600, ge=30, le=3600, description="Seconds to wait for CI checks"
@@ -789,6 +1210,12 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         le=3,
         description="Max test adequacy check passes (0 = disabled)",
+    )
+    test_adequacy_coverage_timeout_secs: int = Field(
+        default=300,
+        ge=60,
+        le=1800,
+        description="Timeout in seconds for the coverage-delta make coverage run",
     )
     max_plan_compliance_attempts: int = Field(
         default=1,
@@ -855,6 +1282,27 @@ class HydraFlowConfig(BaseModel):
         le=10,
         description="Max total implementation attempts per issue before HITL escalation",
     )
+    max_decomposition_depth: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description=(
+            "Max recursive decomposition depth for decompose-to-converge (0 = "
+            "disabled). Default 2: a parent decomposes into children, and a "
+            "stalled child may re-decompose once more. Nested convergence is "
+            "correct because EpicState carries parent_epic/superseded_issue "
+            "lineage — the sweeper gate + EpicManager propagation ensure a root "
+            "epic only closes after all transitive grandchild work finishes "
+            "(#9757). le=5 bounds the chain; max_total_decomposition_children "
+            "bounds fan-out."
+        ),
+    )
+    max_total_decomposition_children: int = Field(
+        default=8,
+        ge=1,
+        le=50,
+        description="Max total child issues fanned out across a decomposition tree",
+    )
     gh_max_retries: int = Field(
         default=3,
         ge=0,
@@ -892,6 +1340,31 @@ class HydraFlowConfig(BaseModel):
             "(HALF_OPEN); it auto-recovers so it can't halt the factory forever"
         ),
     )
+    github_cache_issue_list_ttl_s: float = Field(
+        default=900.0,
+        ge=0.0,
+        le=86400.0,
+        description=(
+            "Freshness bound (seconds) for the shared issue-list-by-label "
+            "snapshots in GitHubDataCache (#9814). A read younger than this "
+            "is served with no gh call; 0 disables caching (every read "
+            "refreshes, still coalesced + degrade-safe). On refresh failure "
+            "a stale snapshot is served while younger than 3x this bound."
+        ),
+    )
+    loop_startup_stagger_s: int = Field(
+        default=120,
+        ge=0,
+        le=3600,
+        description=(
+            "Spread window (seconds) for deterministic background-loop "
+            "first-tick staggering (#9814). Each loop delays its first cycle "
+            "by hash(worker_name) % this value so a restart doesn't fire "
+            "every loop's GitHub reads at once. 0 disables. Loops with "
+            "run_on_startup=True (e.g. github_cache) are exempt so the "
+            "shared cache still populates immediately at boot."
+        ),
+    )
 
     # Task source
     task_source_type: Literal["github"] = Field(
@@ -903,6 +1376,22 @@ class HydraFlowConfig(BaseModel):
     review_label: list[str] = Field(
         default=["hydraflow-review"],
         description="Labels for issues/PRs under review (OR logic)",
+    )
+    in_progress_label: list[str] = Field(
+        default=["hydraflow-in-progress"],
+        description=(
+            "Durable cross-actor build-claim marker (#10168). Added to a "
+            "``hydraflow-ready`` issue the moment a build STARTS on it and "
+            "cleared when the PR opens (``ready → review`` swap removes it, "
+            "since it is in ``all_pipeline_labels``) or on abandon/failure. "
+            "Unlike ``review_label`` it is NOT a pipeline stage — it is an "
+            "orthogonal claim marker that coexists with ``hydraflow-ready`` "
+            "during the build so a second factory instance / parallel "
+            "operator session / out-of-band Agent dispatch reading GitHub "
+            "labels can see the issue is already being built and skip it. "
+            "The in-process ``IssueStore._eagerly_transitioned`` fast-path "
+            "stays; this is the durable belt-and-suspenders (ADR-0002)."
+        ),
     )
     hitl_label: list[str] = Field(
         default=["hydraflow-hitl"],
@@ -989,6 +1478,16 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-epic-child"],
         description="Labels for child issues linked to epics (OR logic)",
     )
+    auto_decomposed_child_label: list[str] = Field(
+        default=["auto-decomposed-child"],
+        description=(
+            "Label stamped on every child issue created by decompose-to-converge "
+            "(ADR-0105), on top of epic_child_label/find_label. Triage's intake "
+            "complexity path (_maybe_decompose) skips re-decomposing an issue "
+            "carrying this label so the depth counter can't be bypassed by "
+            "re-entering through the intake vector uncounted."
+        ),
+    )
     epic_group_planning: bool = Field(
         default=True,
         description="Group epic children for cohort planning with gap review",
@@ -1040,6 +1539,57 @@ class HydraFlowConfig(BaseModel):
         le=604800,
         description="Stale issue check interval (seconds)",
     )
+    stale_issue_regression_rot_stale_days: int = Field(
+        default=14,
+        ge=1,
+        le=365,
+        description=(
+            "Regression-rot threshold (days, #9597). StaleIssueLoop's "
+            "regression-rot check flags a still-OPEN issue whose "
+            "`tests/regressions/` pin has been `xfail` RED for longer than "
+            "this many days as 'orphaned-RED' (a written-but-unimplemented "
+            "contract). A closed issue with a still-RED pin ('false-close "
+            "rot') is always flagged regardless of age. "
+            "Env: HYDRAFLOW_STALE_ISSUE_REGRESSION_ROT_STALE_DAYS."
+        ),
+    )
+    branch_gc_stale_days: int = Field(
+        default=3,
+        ge=1,
+        le=90,
+        description=(
+            "Stale agent-branch GC threshold (days, #10011). StaleIssueLoop's "
+            "branch-GC reconciler flags an `agent/issue-*` or `fix/*` remote "
+            "branch carrying a `Fixes #N`-style commit as needing a truth "
+            "comment once it has sat unmerged (no open PR, referenced issue "
+            "still OPEN) for this many days. Posting the comment is deduped "
+            "per branch regardless of this threshold. "
+            "Env: HYDRAFLOW_BRANCH_GC_STALE_DAYS."
+        ),
+    )
+    branch_gc_min_delete_age_days: int = Field(
+        default=14,
+        ge=1,
+        le=365,
+        description=(
+            "Never delete a stale agent/fix branch younger than this many "
+            "days (#10011), even when `branch_gc_delete_enabled=True` — a "
+            "generous floor independent of `branch_gc_stale_days` since "
+            "branch deletion is destructive. "
+            "Env: HYDRAFLOW_BRANCH_GC_MIN_DELETE_AGE_DAYS."
+        ),
+    )
+    branch_gc_delete_enabled: bool = Field(
+        default=False,
+        description=(
+            "Allow StaleIssueLoop's branch-GC reconciler to actually delete "
+            "stale unmerged `agent/issue-*` / `fix/*` branches past "
+            "`branch_gc_min_delete_age_days` (#10011). Defaults to False — "
+            "report/comment-only — because branch deletion is destructive; "
+            "the operator opts in via the System tab. "
+            "Env: HYDRAFLOW_BRANCH_GC_DELETE_ENABLED."
+        ),
+    )
     triage_retry_interval: int = Field(
         default=86400,
         ge=3600,
@@ -1057,6 +1607,21 @@ class HydraFlowConfig(BaseModel):
             "Maximum number of autonomous retries before TriageRetryLoop escalates "
             "the parked issue to HITL via the triage_retry_exhausted_label "
             "sub-label (ADR-0063 W2)."
+        ),
+    )
+    triage_infra_retry_interval: int = Field(
+        default=900,
+        ge=60,
+        le=86400,
+        description=(
+            "Short re-flow floor (seconds, default 15m) for issues parked by a "
+            "TRANSIENT INFRA failure (rate-limit truncation, subprocess exit 1, "
+            "unparseable verdict) rather than a 'needs author clarification' "
+            "verdict (#10290). Infra-parks are the infra's fault, not the "
+            "issue's — they must re-flow as soon as infra recovers, not sit under "
+            "the 24h clarification backoff (triage_retry_interval). TriageRetryLoop "
+            "ticks at this cadence and applies this floor only to infra-parked "
+            "issues; clarification-parks keep the 24h floor."
         ),
     )
     stale_issue_threshold_days: int = Field(
@@ -1119,6 +1684,194 @@ class HydraFlowConfig(BaseModel):
         le=86400,
         description="Runs GC loop interval in seconds (default 1 hour)",
     )
+    gate_health_interval: int = Field(
+        default=604800,
+        ge=3600,
+        le=2592000,
+        description="GateHealthLoop cycle interval in seconds (default weekly)",
+    )
+    gate_health_run_window: int = Field(
+        default=50,
+        ge=10,
+        le=200,
+        description="Workflow runs analyzed per GateHealthLoop cycle",
+    )
+    gate_health_min_attempts: int = Field(
+        default=3,
+        ge=2,
+        le=50,
+        description=(
+            "Minimum failures before GateHealthLoop flags a check: "
+            "born-broken needs N, blame-correlation N-1"
+        ),
+    )
+    gate_health_hang_tolerance_seconds: int = Field(
+        default=90,
+        ge=10,
+        le=600,
+        description=(
+            "GateHealthLoop suspected-hang classifier (#10010): a CANCELLED "
+            "job whose duration lands within this many seconds of its "
+            "workflow's configured timeout-minutes is a candidate hang, "
+            "not a generic cancellation"
+        ),
+    )
+    pr_red_repair_interval: int = Field(
+        default=300,
+        ge=60,
+        le=86400,
+        description=(
+            "PrRedRepairLoop cycle interval in seconds (#10027 Phase 1: "
+            "infra-flake retrier; default 5 minutes)"
+        ),
+    )
+    pr_red_rerun_max_attempts: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description=(
+            "Max bounded `gh run rerun --failed` attempts per PR before "
+            "PrRedRepairLoop escalates via a rollup issue (#10027)"
+        ),
+    )
+    pr_red_repair_dispatch_max_attempts: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description=(
+            "Max bounded auto-agent dispatch attempts per PR before "
+            "PrRedRepairLoop gives up on a real (non-infra-flake) settled "
+            "red and labels the PR `hydraflow-hitl` for a human (#10027 "
+            "Phase 2). Tracked separately from `pr_red_rerun_max_attempts` "
+            "— a rerun is a cheap gh API call, a dispatch is a full "
+            "auto-agent worktree attempt."
+        ),
+    )
+    erosion_metrics_interval: int = Field(
+        default=14400,
+        ge=900,
+        le=604800,
+        description=(
+            "ErosionMetricsLoop cycle interval in seconds (#10107, epic "
+            "#10104: change-spread/concept-scatter drift → triage; v1 "
+            "provisional cadence, default 4h)"
+        ),
+    )
+    erosion_metrics_max_issues_per_tick: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Max hydraflow-find issues ErosionMetricsLoop files in one tick "
+            "(#10107). Overflow candidates beyond the cap for that tick's "
+            "commit range are not carried over — a rate limit on filing "
+            "volume, not a durable backlog."
+        ),
+    )
+    adr_drift_resolver_interval: int = Field(
+        default=3600,
+        ge=900,
+        le=86400,
+        description=(
+            "AdrDriftResolverLoop cycle interval in seconds (#9976: "
+            "triage-before-escalate for adr_touchpoint_auditor's ADR-drift "
+            "rollups; default 1h)"
+        ),
+    )
+    adr_drift_resolver_max_triage_per_tick: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description=(
+            "Max open ADR-drift rollups AdrDriftResolverLoop triages "
+            "(spends an LLM call on) in one tick (#9976). Overflow "
+            "candidates are simply retried next tick — no carryover "
+            "bookkeeping needed since the candidate set is re-derived from "
+            "state each tick."
+        ),
+    )
+
+    # Hash-chained audit stream retention (CH-1, #9729). None = keep forever.
+    # A set value is a retention FLOOR: RunsGCLoop may prune records strictly
+    # older than the floor and can never delete inside it. Regulated
+    # deployments should set explicit values (e.g. 2555 days ~ 7y for
+    # change-control evidence).
+    audit_retention_days_preflight: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Days to retain preflight audit records (auto_agent/audit.jsonl). "
+            "None = keep forever."
+        ),
+    )
+    audit_retention_days_health_decisions: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Days to retain health-monitor decision records "
+            "(memory/decisions.jsonl). None = keep forever."
+        ),
+    )
+    audit_retention_days_inference_telemetry: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Days to retain inference telemetry records "
+            "(metrics/prompt/inferences.jsonl). None = keep forever."
+        ),
+    )
+    audit_retention_days_approval_records: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Days to retain merge approval records (CH-2, #9730; "
+            "audit/approval_records.jsonl). None = keep forever — the "
+            "recommended setting for change-control evidence."
+        ),
+    )
+    audit_retention_days_evidence_packs: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Days to retain evidence-pack summary records (CH-4, #9732; "
+            "audit/evidence_packs.jsonl). None = keep forever — the "
+            "recommended setting for release evidence."
+        ),
+    )
+
+    # CH-2 (#9730): kill-switch for the approval-record reconciler capability
+    # hosted by MergeStateWatcherLoop. Not a loop gate — the loop keeps
+    # unsticking conflicts when this is off; only evidence capture stops.
+    approval_records_enabled: bool = Field(
+        default=True,
+        description=(
+            "Capture structured merge-approval records (CH-2) on the "
+            "MergeStateWatcherLoop tick."
+        ),
+    )
+
+    # CH-4 (#9732): kill-switch for the release evidence-pack compiler
+    # invoked by StagingPromotionLoop after a successful RC promotion.
+    # Compile-only, report-only — never gates the promotion itself.
+    evidence_pack_enabled: bool = Field(
+        default=True,
+        description=(
+            "Compile a release evidence pack (CH-4) after each successful RC promotion."
+        ),
+    )
+
+    # CH-3 (#9731): kill-switch for the policy-as-code merge gate consulted
+    # at the factory's own autonomous merge seams (merge_policy.py). When on,
+    # a missing/unparseable policy.yaml fails CLOSED (merges deny+escalate);
+    # this switch and the policy-override:<reason-slug> break-glass label
+    # are the escape hatches.
+    merge_policy_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enforce docs/standards/factory_autonomy/policy.yaml before "
+            "autonomous merges (CH-3)."
+        ),
+    )
 
     epic_stale_days: int = Field(
         default=7,
@@ -1146,19 +1899,25 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-find"],
         description="Labels for new issues to discover and triage into planning (OR logic)",
     )
-    discover_label: list[str] = Field(
-        default=["hydraflow-discover"],
-        description="Labels for issues needing product discovery research (OR logic)",
-    )
-    shape_label: list[str] = Field(
-        default=["hydraflow-shape"],
-        description="Labels for issues needing product direction shaping (OR logic)",
+    regulated_labels: str = Field(
+        default="",
+        description=(
+            "Comma-separated label names forming the regulated change class "
+            "(CH-5 traceability). Issues carrying any of these labels must "
+            "declare a requirement ID (`req:<id>` label or `Req-ID:` body "
+            "line). Empty (the default) means no change class is regulated."
+        ),
     )
     clarity_threshold: int = Field(
         default=7,
         ge=1,
         le=10,
-        description="Clarity score threshold: issues scoring below this route to discovery",
+        description=(
+            "Clarity score threshold (ADR-0107). Issues scoring below this are "
+            "flagged to the planner's on-demand discover/shape decision gate "
+            "(plan_phase.py:_should_discover_helper) as a discovery hint, rather "
+            "than routed to a standalone Discover phase at triage time."
+        ),
     )
     max_shape_turns: int = Field(
         default=10,
@@ -1202,14 +1961,100 @@ class HydraFlowConfig(BaseModel):
         default="sonnet",
         description="Model for triage evaluation (fast/cheap)",
     )
+    openrouter_base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        description=(
+            "OpenAI-compatible base URL for the 'openrouter' one-shot LLM "
+            "provider. The API key is read from the OPENROUTER_API_KEY env var "
+            "(a secret — never stored on config or shown in the UI)."
+        ),
+    )
+    zai_base_url: str = Field(
+        default="https://api.z.ai/api/paas/v4",
+        description=(
+            "OpenAI-compatible base URL for the 'zai' one-shot LLM provider "
+            "(z.ai / GLM). The API key is read from the ZAI_API_KEY env var "
+            "(a secret — never stored on config or shown in the UI)."
+        ),
+    )
+    kimi_base_url: str = Field(
+        default="https://api.moonshot.ai/v1",
+        description=(
+            "OpenAI-compatible base URL for the 'kimi' one-shot LLM provider "
+            "(Moonshot / Kimi). The API key is read from the MOONSHOT_API_KEY "
+            "env var (a secret — never stored on config or shown in the UI)."
+        ),
+    )
+    # Per-role backend dials for the one-shot (no-tools) loops. "claude" keeps
+    # the CLI harness; "openrouter", "zai", and "kimi" call a cheap direct model
+    # over an OpenAI-compatible endpoint. Pair each with the role's *_model (e.g.
+    # a DeepSeek id for openrouter, "glm-5.2" for zai, "kimi-k3" for kimi).
+    wiki_compilation_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
+        default="claude", description="Backend for wiki topic compilation."
+    )
+    adr_review_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
+        default="claude", description="Backend for the ADR reviewer."
+    )
+    transcript_summary_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
+        default="claude", description="Backend for transcript summarization."
+    )
+    triage_honeypot_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
+        default="claude", description="Backend for the triage injection honeypot."
+    )
+    pr_unstick_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
+        default="claude", description="Backend for the PR-unsticker cause analysis."
+    )
+    term_proposer_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
+        default="claude",
+        description="Backend for the term-proposer / entry-evidence drafters.",
+    )
     triage_max_turns: int = Field(
-        default=3,
+        default=12,
         ge=1,
         le=20,
         description=(
-            "Max LLM turns for triage evaluation. Increase from 1 to allow "
-            "Read/Grep tool calls to verify currency and falsifiable claims."
+            "Max LLM turns for triage evaluation. Must cover #9127's "
+            "verify-against-code exploration (Read/Grep to check currency and "
+            "falsifiable claims) PLUS emitting the verdict. 3 was too low — the "
+            "agent exhausted the budget mid-verification and terminated with "
+            "error_max_turns (exit 1, no verdict), so every code-citing issue "
+            "parked (#10291)."
         ),
+    )
+    triage_honeypot_enabled: bool = Field(
+        default=True,
+        description=(
+            "Run the prompt-injection honeypot over each issue before the real "
+            "triage agent handles it. A cheap agent is shown the untrusted body "
+            "with a MOCK tool-belt (nothing executes); any mock-tool call means "
+            "the body tried to hijack the agent — i.e. an injection attempt. "
+            "See src/triage_honeypot.py."
+        ),
+    )
+    triage_honeypot_enforce: bool = Field(
+        default=False,
+        description=(
+            "When False (default), the honeypot runs in SHADOW mode: a trip "
+            "emits a SYSTEM_ALERT + telemetry but the issue still proceeds to "
+            "triage — so efficacy (false-positive vs catch rate) can be evaluated "
+            "from telemetry before it gates real work. When True, a trip "
+            "QUARANTINES the issue (ready=False) and the real triage agent is "
+            "never handed the request. Flip to True once shadow telemetry looks "
+            "good."
+        ),
+    )
+    triage_honeypot_model: str = Field(
+        default="haiku",
+        description=(
+            "Model for the triage injection honeypot. A cheap classifier — the "
+            "signal is behavioural (did it call a mock tool), not deep reasoning."
+        ),
+    )
+    triage_honeypot_timeout: float = Field(
+        default=60.0,
+        ge=5.0,
+        le=600.0,
+        description="Timeout (seconds) for the triage honeypot pre-check.",
     )
     auditor_finding_max_age_days: int = Field(
         default=14,
@@ -1220,10 +2065,23 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     min_plan_words: int = Field(
-        default=200,
-        ge=50,
+        default=60,
+        ge=20,
         le=2000,
-        description="Minimum word count for a valid plan",
+        description=(
+            "Minimum word count for a valid plan — a floor that rejects only "
+            "empty/skeletal plans; concise-but-complete briefs pass (#9955)"
+        ),
+    )
+    max_plan_chars: int = Field(
+        default=5000,
+        ge=1000,
+        le=45000,
+        description=(
+            "Hard character budget for a plan (#9955). Kept BELOW "
+            "max_impl_plan_chars so the implement boundary never truncates — "
+            "truncation is information loss the plan phase paid latency for."
+        ),
     )
     max_new_files_warning: int = Field(
         default=5,
@@ -1263,6 +2121,18 @@ class HydraFlowConfig(BaseModel):
             "Soft daily cost budget (USD). When the last-24h machinery "
             "cost exceeds this, ReportIssueLoop files a hydraflow-find "
             "issue with label cost-budget-exceeded. None disables the check."
+        ),
+    )
+    cost_throttle_ratio: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Fraction of daily_cost_budget_usd at which CostBudgetWatcherLoop "
+            "starts soft-throttling caretaker loops (interval-stretch) before "
+            "the hard-cap kill. 0 disables throttling; no effect when "
+            "daily_cost_budget_usd is None. "
+            "Env: HYDRAFLOW_COST_THROTTLE_RATIO."
         ),
     )
     issue_cost_alert_usd: float | None = Field(
@@ -1526,7 +2396,7 @@ class HydraFlowConfig(BaseModel):
     )
     security_patch_severity_threshold: Literal["critical", "high", "medium", "low"] = (
         Field(
-            default="high",
+            default="medium",
             description="Minimum severity to file issues for",
         )
     )
@@ -1592,7 +2462,6 @@ class HydraFlowConfig(BaseModel):
             "to False to give operators a separate opt-in switch."
         ),
     )
-
     # Shadow corpus (#8786) — opt-in live sampling of production
     # subprocess calls. When enabled, every gh/git/docker/claude call
     # feeds a bounded, normalized, PII-scrubbed YAML corpus that
@@ -1606,6 +2475,15 @@ class HydraFlowConfig(BaseModel):
             "Per-adapter LRU cap on shadow corpus size. Most-recently-"
             "recorded call shapes survive eviction; older shapes are "
             "deleted from disk."
+        ),
+    )
+    shadow_corpus_coverage_pruning_enabled: bool = Field(
+        default=True,
+        description=(
+            "Drop shadow-corpus samples at record time when no registered "
+            "dispatcher branch can form an opinion on them (#9633), so "
+            "no-opinion VOLATILE calls never consume per-adapter LRU "
+            "budget. Disable to record every adapter call."
         ),
     )
     live_corpus_replay_interval: int = Field(
@@ -1636,6 +2514,80 @@ class HydraFlowConfig(BaseModel):
         ge=300,
         le=604800,
         description="Seconds between repo wiki lint cycles",
+    )
+    dependabot_update_branch_max_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description=(
+            "Bounded update-branch heals per CI-failed bot PR (#9889): a "
+            "behind-base PR gets a fresh merge ref + full CI re-run before "
+            "the failure strategy applies. 0 disables."
+        ),
+    )
+    human_branch_shepherd_enabled: bool = Field(
+        default=True,
+        description=(
+            "Class 5 (#9889): DependabotMergeLoop shepherds human-prefix "
+            "branches (fix/, feat/, docs/, test/, chore/, refactor/) to merge "
+            "once CI is green — same path as factory branches. Per-PR opt-out: "
+            "the no-auto-merge label."
+        ),
+    )
+    dependabot_conflict_heal_enabled: bool = Field(
+        default=True,
+        description=(
+            "Item 2 (#9889): DependabotMergeLoop heals CI-green PRs whose "
+            "merge fails on a genuine content conflict (mergeable=False). "
+            "Factory-maintenance PRs are closed-superseded (their loop "
+            "regenerates a fresh one, single-flight #9939); other bot PRs get "
+            "one bounded update-branch before the failure strategy; human "
+            "shepherd-prefix PRs get one dedup-bounded conflict comment and "
+            "are otherwise left to their author. False restores the legacy "
+            "log-and-give-up path."
+        ),
+    )
+    review_orphan_strike_threshold: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Consecutive PR-less sightings of a review-labeled issue before "
+            "it is treated as an orphan and requeued to ready (#9815). "
+            "Below the threshold the review loop keeps waiting for PR "
+            "propagation as before."
+        ),
+    )
+    review_orphan_max_requeues: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description=(
+            "Bounded orphan requeues per issue before escalating to HITL "
+            "instead (#9815). 0 disables orphan requeue entirely (legacy "
+            "wait-forever behavior)."
+        ),
+    )
+    repo_wiki_min_batch_files: int = Field(
+        default=8,
+        ge=1,
+        le=100,
+        description=(
+            "Defer the wiki maintenance PR until at least this many files "
+            "changed — batches the near-hourly single-entry PR treadmill "
+            "(each merge re-stales sibling PRs via the arch cascade). "
+            "1 restores open-on-any-change."
+        ),
+    )
+    repo_wiki_max_batch_age_hours: int = Field(
+        default=24,
+        ge=1,
+        le=168,
+        description=(
+            "Force a wiki maintenance PR open regardless of batch size once "
+            "the newest merged maintenance PR is older than this — small "
+            "dribbles still land within a bounded window."
+        ),
     )
     max_repo_wiki_chars: int = Field(
         default=15_000,
@@ -1900,6 +2852,29 @@ class HydraFlowConfig(BaseModel):
         default="sonnet",
         description="Model for sentry_loop ingestion worker (issue triage + filing from Sentry events) — sonnet is sufficient; the task is stack-trace parsing + issue filing, not deep reasoning. Opus was 4-5× the cost for no measurable quality win.",
     )
+    adr_drift_resolver_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+        default="claude",
+        description="CLI backend for AdrDriftResolverLoop's TRIAGE call (#9976).",
+    )
+    adr_drift_resolver_model: str = Field(
+        default="sonnet",
+        description=(
+            "Model for AdrDriftResolverLoop's TRIAGE call (#9976) — "
+            "classifying one ADR-drift rollup's cited diff against the "
+            "ADR's Decision/Context text. Sonnet is sufficient; the task is "
+            "structured classification, not deep reasoning."
+        ),
+    )
+    adr_drift_resolver_timeout: int = Field(
+        default=180,
+        ge=30,
+        le=1800,
+        description="Per-call timeout (seconds) for AdrDriftResolverLoop's TRIAGE call (#9976).",
+    )
+    adr_drift_resolver_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
+        default="claude",
+        description="Backend for AdrDriftResolverLoop's TRIAGE call (#9976).",
+    )
     report_issue_interval: int = Field(
         default=30,
         ge=10,
@@ -2012,6 +2987,84 @@ class HydraFlowConfig(BaseModel):
             "Env: HYDRAFLOW_LOOP_WATCHDOG_LLM_SECONDS."
         ),
     )
+    worker_stall_tight_loops: list[str] = Field(
+        default_factory=lambda: ["staging_bisect"],
+        description=(
+            "HealthMonitorLoop generic stall sweep (#10241): loops that opt "
+            "into worker_stall_tight_multiplier instead of the blanket "
+            "3×interval+cycle_timeout remediation threshold. A short-poll / "
+            "long-cycle loop like staging_bisect (600s poll, 7200s watchdog) "
+            "has a blanket threshold (9000s) that sits ~30 min past "
+            "TrustFleetSanityLoop's own staleness alert (max(2×interval, "
+            "cycle_timeout)=7200s), leaving an alert→remediation gap in which "
+            "an anomaly issue exists but nothing remediates (#10234). Names "
+            "here fire the auto-restart closer to that alert window while "
+            "keeping the no-false-restart floor (see "
+            "worker_stall_tight_multiplier)."
+        ),
+    )
+    worker_stall_tight_multiplier: int = Field(
+        default=2,
+        ge=1,
+        le=100,
+        description=(
+            "HealthMonitorLoop stall sweep (#10241): interval multiplier for "
+            "loops in worker_stall_tight_loops (default 2 vs the blanket 3). "
+            "The sweep RESTARTS a loop, so its threshold "
+            "(multiplier×interval + cycle_timeout) must stay strictly above "
+            "the worst-case legitimate heartbeat age — one pre-cycle poll "
+            "interval plus a full cycle_timeout (the watchdog bound a healthy "
+            "cycle cannot exceed). ge=1 preserves that no-false-restart floor "
+            "(multiplier×interval + cycle_timeout > interval + cycle_timeout) "
+            "while firing remediation ~1 interval closer to the trust-fleet "
+            "staleness alert. Env: HYDRAFLOW_WORKER_STALL_TIGHT_MULTIPLIER."
+        ),
+    )
+    # -- thread-level event-loop freeze detector (#9552) ----------------------
+    # The asyncio cycle watchdog above cannot see a SYNCHRONOUS block inside a
+    # cycle (CPU spin, blocking file I/O, non-async subprocess.run): such a
+    # block freezes the whole event loop, including every asyncio-scheduled
+    # watcher. EventLoopWatchdog (src/event_loop_watchdog.py) is the
+    # out-of-loop complement: a daemon thread wall-clocks a 1s asyncio beacon.
+    # Knobs are System-tab editable via settings_registry — deliberately NOT
+    # in the env-override tables (knobs→System; secrets stay .env).
+    event_loop_watchdog_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable the thread-level event-loop freeze detector (#9552). A "
+            "daemon watchdog thread checks a 1s asyncio liveness beacon; when "
+            "the beacon goes stale past event_loop_watchdog_stall_seconds it "
+            "dumps all thread stacks (faulthandler — names the blocking call "
+            "site) and leaves a stall marker the health monitor escalates as "
+            "a hydraflow-find issue. Detection + dump + notify only; process "
+            "restart is the separate opt-in hard-restart knob. Captured at "
+            "orchestrator startup (restart to apply)."
+        ),
+    )
+    event_loop_watchdog_stall_seconds: int = Field(
+        default=120,
+        ge=30,
+        le=3600,
+        description=(
+            "Beacon staleness (seconds) before the event loop is declared "
+            "frozen (default 120 ≈ 120 missed 1s beacons — generous, so a "
+            "briefly-blocking legitimate call never trips it; a true "
+            "synchronous wedge is multi-minute). Re-read by the watchdog "
+            "thread on every poll, so changes apply live."
+        ),
+    )
+    event_loop_watchdog_hard_restart: bool = Field(
+        default=False,
+        description=(
+            "OPT-IN hard recovery for a frozen event loop: after the stack "
+            "dump and stall marker, exit the process with code 75 "
+            "(EX_TEMPFAIL) so systemd/docker/launchd restarts it. Default "
+            "OFF — notify-default, restart-opt-in, mirroring branch-GC and "
+            "the external liveness watchdog (#10009). Enable only where a "
+            "supervisor with Restart=always is in place; without one this "
+            "turns a frozen process into a dead one. Re-read at trip time."
+        ),
+    )
     staging_bisect_flake_reruns: int = Field(
         default=2,
         ge=1,
@@ -2117,6 +3170,20 @@ class HydraFlowConfig(BaseModel):
             "to the next tick."
         ),
     )
+    wiki_anchor_prune_enabled: bool = Field(
+        default=False,
+        description=(
+            "When True (#9954), RepoWikiLoop runs a deterministic prune pass "
+            "that marks active tracked wiki entries stale when they lack a "
+            "repo-specific anchor (a src/*.py path, ADR number, loop/Port "
+            "class name, or config field) — i.e. generic best-practice "
+            "platitudes. Mark-only (never deletes); the flips ride the "
+            "normal batched maintenance PR. Off by default: enabling it does "
+            "the one-time cleanup of the accumulated platitude backlog. The "
+            "synthesis-time gate that blocks NEW anchor-less entries is "
+            "always on and independent of this flag."
+        ),
+    )
 
     # Paths (auto-detected)
     repo_root: Path = Field(default=Path("."), description="Repository root directory")
@@ -2152,6 +3219,34 @@ class HydraFlowConfig(BaseModel):
         le=90,
         description="Days of event history to retain during rotation",
     )
+    event_log_periodic_rotate_enabled: bool = Field(
+        default=True,
+        description=(
+            "Rotate events.jsonl every RunsGCLoop cycle, not just at boot "
+            "(#9905). The size bound inside rotation guarantees the "
+            "post-rotation file fits event_log_max_size_mb."
+        ),
+    )
+    boot_gap_alert_threshold_seconds: int = Field(
+        default=600,
+        ge=60,
+        le=86400,
+        description=(
+            "At boot, if the gap between the last persisted events.jsonl "
+            "entry and process start exceeds this many seconds, publish one "
+            "SYSTEM_ALERT ('factory was down ~Xh') so the dashboard shows the "
+            "outage after the fact (#10009). Default 10 minutes — long enough "
+            "to not fire on a normal quick restart/deploy."
+        ),
+    )
+    state_prune_enabled: bool = Field(
+        default=True,
+        description=(
+            "Prune per-issue state.json entries (adversarial states, "
+            "convergence ledgers, attempt counters) for issues that are no "
+            "longer open, during StaleIssueGCLoop cycles (#9905)."
+        ),
+    )
 
     # Health monitor
     health_monitor_interval: int = Field(
@@ -2168,6 +3263,19 @@ class HydraFlowConfig(BaseModel):
             "Wiki-freshness threshold (days). HealthMonitorLoop files a "
             "`wiki-stale` issue when docs/wiki/log.jsonl has not moved in "
             "this many days, surfacing silent RepoWikiLoop stalls."
+        ),
+    )
+    stale_code_alert_threshold: int = Field(
+        default=10,
+        ge=1,
+        le=1000,
+        description=(
+            "Commits-behind threshold (#9596). HealthMonitorLoop files a "
+            "`factory-stale-code` issue when the running instance's boot "
+            "SHA is at least this many commits behind origin/<base_branch> "
+            "(git_revision.get_commits_behind, #9663), surfacing a process "
+            "that is still running old bytecode after a `git pull` without "
+            "a restart."
         ),
     )
 
@@ -2343,6 +3451,33 @@ class HydraFlowConfig(BaseModel):
         description="Poll interval in seconds for retrospective analysis loop",
     )
 
+    # Trust fleet — LoopFitnessScorecard (spec §5)
+    fitness_scorecard_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description="Seconds between loop-fitness scorecard cycles",
+    )
+    fitness_window_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="Rolling window (days) over which loop fitness is computed",
+    )
+    fitness_min_samples: int = Field(
+        default=5,
+        ge=1,
+        le=10000,
+        description=(
+            "Min samples before a SCORED loop reports OK confidence. "
+            "Right-sized to observed proposer throughput (6-14 filed per "
+            "30-day window; #9841 — the old default of 20 was unreachable "
+            "and every scorecard row stayed insufficient_data forever). "
+            "Loops additionally cap this at their cadence-achievable sample "
+            "count via loop_fitness.cadence_min_samples."
+        ),
+    )
+
     # Trust fleet — FlakeTrackerLoop (spec §4.5)
     flake_tracker_interval: int = Field(
         default=14400,
@@ -2355,6 +3490,15 @@ class HydraFlowConfig(BaseModel):
         ge=2,
         le=20,
         description="Flake count in last 20 runs that triggers an issue (>=)",
+    )
+    xdist_quarantine_threshold: int = Field(
+        default=2,
+        ge=1,
+        le=20,
+        description=(
+            "xdist-audit runs a test must be flagged fail-parallel/pass-serial "
+            "in before FlakeTrackerLoop files a quarantine issue (>=)"
+        ),
     )
 
     # Trust fleet — SkillPromptEvalLoop (spec §4.6)
@@ -2374,6 +3518,75 @@ class HydraFlowConfig(BaseModel):
             "MAX_CASES (pre-spend) and applied as a Python-side sample "
             "(post-output) to bound operator-visible escalation flooding "
             "if the harness misses the env var."
+        ),
+    )
+    skill_prompt_eval_live_case_budget: int = Field(
+        default=12,
+        ge=0,
+        le=500,
+        description=(
+            "Max catcher-skill corpus cases a LIVE weekly backstop run "
+            "evaluates via the per-skill live path (each builds its own "
+            "skill's prompt and makes one real agent-CLI call; round-robin "
+            "across skills). Forwarded to the corpus runner via HYDRAFLOW_"
+            "TRUST_ADVERSARIAL_LIVE_BUDGET; inert unless HYDRAFLOW_TRUST_"
+            "ADVERSARIAL_LIVE=1. 0 disables the per-skill live path. Keep "
+            "aligned with corpus_runner.DEFAULT_LIVE_BUDGET (#10014)."
+        ),
+    )
+    skill_prompt_eval_adversarial_timeout_seconds: int = Field(
+        default=3600,
+        ge=60,
+        le=21600,
+        description=(
+            "Hard cap (seconds) on the `make trust-adversarial` subprocess "
+            "read in SkillPromptEvalLoop (default 1h; also bounds the "
+            "per-skill live refine-validation runner). Healthy runtime "
+            "scales with corpus/repo size, so this is an operator knob, not "
+            "a constant (#9555): too low silently degrades the weekly "
+            "backstop to a permanent no-op (false timeout every tick); too "
+            "high weakens wedged-child protection."
+        ),
+    )
+
+    # Trust fleet — prompt self-refinement (#9724)
+    skill_prompt_refine_enabled: bool = Field(
+        default=True,
+        description="Deploy-time kill-switch for skill-prompt self-refinement proposals.",
+    )
+    skill_prompt_refine_max_weekly: int = Field(
+        default=2,
+        ge=0,
+        le=50,
+        description="Max refine proposals filed per rolling 7-day window.",
+    )
+    skill_prompt_refine_model: str = Field(
+        default="",
+        description=(
+            "Model override for skill-prompt refinement generation. "
+            "Empty string = use the background_model default."
+        ),
+    )
+    skill_prompt_refine_live_validation_budget: int = Field(
+        default=4,
+        ge=0,
+        le=50,
+        description=(
+            "Max cases (the regressed case + a sample of that skill's own "
+            "held-out honeypots) a refine-candidate live re-validation run "
+            "forces through the real agent CLI instead of the "
+            "expected_transcript.txt fixture — proving the candidate patch "
+            "actually changed prompt->transcript behavior for the better, "
+            "not just against the OLD prompt's canned transcript. Forwarded "
+            "to the corpus runner via the `--force-live-cases` CLI flag; "
+            "inert unless the operator has also set HYDRAFLOW_TRUST_"
+            "ADVERSARIAL_LIVE=1 on the loop's environment (the same "
+            "operator opt-in the weekly live backstop uses). 0 disables the "
+            "sample — every validation case replays its fixture, matching "
+            "pre-#10063 behavior. Distinct from "
+            "skill_prompt_eval_live_case_budget (the weekly full-corpus "
+            "backstop's budget): refine validation runs once per candidate "
+            "attempt over a handful of cases, not the whole corpus (#10063)."
         ),
     )
 
@@ -2399,6 +3612,24 @@ class HydraFlowConfig(BaseModel):
     adr_drift_stuck_label: list[str] = Field(
         default=["hydraflow-adr-drift-stuck"],
         description="Labels for stuck ADR drift escalations (paired with hitl_escalation_label)",
+    )
+    adr_drift_fleet_batch_threshold: int = Field(
+        default=4,
+        ge=2,
+        le=100,
+        description=(
+            "Distinct-ADR count at which a single PR's drift findings collapse "
+            "into ONE batched fleet rollup issue instead of N per-ADR rollups "
+            "(#9662 cross-cutting caretaker-fleet sweeps)"
+        ),
+    )
+
+    # Trust fleet — AdrConformanceLoop (ADR-0100)
+    adr_conformance_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description="Seconds between AdrConformanceLoop ticks (default 24h)",
     )
 
     # Trust fleet — MemoryBacklogLoop (ADR-0089)
@@ -2469,6 +3700,11 @@ class HydraFlowConfig(BaseModel):
         description="Seconds between AdrTouchpointAuditorLoop ticks (default 4h)",
     )
 
+    # Caretaker — AutoTightenLoop (auto-tightening ratchet)
+    auto_tighten_stability_ticks: int = Field(default=3, ge=1)
+    auto_tighten_coverage_margin: float = Field(default=1.0, ge=0.0)
+    auto_tighten_interval: int = Field(default=86400, ge=60)
+
     # Trust fleet — TermProposerLoop (ADR-0054)
     term_proposer_enabled: bool = Field(
         default=True,
@@ -2491,6 +3727,20 @@ class HydraFlowConfig(BaseModel):
         ge=3600,
         le=604800,
         description="Cooldown before retrying a candidate that previously failed validation or LLM draft.",
+    )
+    term_proposer_model: str = Field(
+        default="sonnet",
+        description="Model for the term-proposer / entry-evidence drafters.",
+    )
+    term_proposer_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+        default="claude",
+        description="CLI backend for the term-proposer drafters (claude path only).",
+    )
+    term_proposer_timeout: int = Field(
+        default=180,
+        ge=30,
+        le=1800,
+        description="Per-call timeout (seconds) for the term-proposer drafters.",
     )
 
     # Trust fleet — TermPrunerLoop (ADR-0057)
@@ -2579,6 +3829,42 @@ class HydraFlowConfig(BaseModel):
             "production `sonnet`."
         ),
     )
+    disturbance_dampener_enabled: bool = Field(
+        default=False,
+        description="Enable the DisturbanceDampenerLoop burn-down loop (ADR-0095). Dark by default.",
+    )
+    disturbance_dampener_interval_seconds: int = Field(
+        default=3600,
+        description="DisturbanceDampenerLoop tick interval in seconds.",
+    )
+    disturbance_dampener_max_prs_per_tick: int = Field(
+        default=1,
+        description="Max burn-down PRs DisturbanceDampenerLoop opens per tick. Bounds blast radius.",
+    )
+
+    # Human-on-the-loop continuous steering (ADR-0099 surface #4)
+    human_steering_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable the HumanSteeringLoop sensor for continuous human-on-the-loop "
+            "steering (ADR-0099 #4). Default-on: safe because an empty "
+            "human_steering_authorized_users allowlist honors nobody, so the "
+            "sensor is inert until an operator login is explicitly allow-listed. "
+            "Set HYDRAFLOW_HUMAN_STEERING_ENABLED=false to disable at deploy time."
+        ),
+    )
+    human_steering_interval_seconds: int = Field(
+        default=60,
+        description="HumanSteeringLoop tick interval in seconds.",
+    )
+    human_steering_max_redos: int = Field(
+        default=3,
+        description="Max redo directives HumanSteeringLoop honors per issue before capping to prevent infinite redo.",
+    )
+    human_steering_authorized_users: list[str] = Field(
+        default_factory=list,
+        description="GitHub logins authorized to issue human-steering directives. Empty list honors nobody (safe default-on).",
+    )
 
     # Trust fleet — ContractRefreshLoop (spec §4.2)
     contract_refresh_interval: int = Field(
@@ -2594,6 +3880,51 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Max per-adapter consecutive drift ticks before ContractRefreshLoop "
             "escalates a fake-drift issue to hitl-escalation (spec §4.2 Task 18)."
+        ),
+    )
+    max_convergence_laps: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Maximum outer-convergence laps allowed before a ConvergenceLedger "
+            "escalates an issue (ADR-0094)."
+        ),
+    )
+    convergence_oscillation_interval: int = Field(
+        default=3600,
+        ge=300,
+        le=86400,
+        description=(
+            "Seconds between ConvergenceOscillationLoop ticks (default 1h). "
+            "Must be between 5 minutes and 24 hours."
+        ),
+    )
+    convergence_oscillation_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable the ConvergenceOscillationLoop caretaker that scans "
+            "ConvergenceLedgers for cross-boundary oscillation and escalates "
+            "stuck issues to HITL."
+        ),
+    )
+    convergence_oscillation_window: int = Field(
+        default=2,
+        ge=2,
+        le=10,
+        description=(
+            "Number of recent lap signatures to compare when detecting temporal "
+            "outer oscillation (detect_outer_oscillation window parameter)."
+        ),
+    )
+    convergence_oscillation_min_loopback_stages: int = Field(
+        default=2,
+        ge=1,
+        le=3,
+        description=(
+            "Minimum number of distinct boundary stages (triage/shape/plan) "
+            "that must have last_verdict==LOOP_BACK to trigger snapshot "
+            "oscillation escalation."
         ),
     )
     contracts_sandbox_repo: str = Field(
@@ -2662,6 +3993,17 @@ class HydraFlowConfig(BaseModel):
             "breach threshold (spec §12.1)."
         ),
     )
+    loop_anomaly_tick_error_min_sample: int = Field(
+        default=3,
+        ge=1,
+        le=1000,
+        description=(
+            "TrustFleetSanityLoop: minimum 24h `ticks_total` count before the "
+            "tick_error_ratio detector escalates. Below this floor the signal "
+            "is too small to escalate and the detector returns "
+            "`insufficient_data` (false-positive guard, issue #9811)."
+        ),
+    )
     loop_anomaly_staleness_multiplier: float = Field(
         default=2.0,
         ge=1.0,
@@ -2680,6 +4022,20 @@ class HydraFlowConfig(BaseModel):
             "30-day median (spec §12.1; reads §4.11 cost endpoint, tolerates absence)."
         ),
     )
+    loop_anomaly_hitl_low_severity_count: int = Field(
+        default=3,
+        ge=1,
+        le=1000,
+        description=(
+            "TrustFleetSanityLoop: files ONE fleet alert when the open HITL "
+            "queue holds at least this many low-severity items — issues whose "
+            "diagnosed severity is P4/Housekeeping OR that carry a housekeeping "
+            "label (e.g. hydraflow-memory-backlog). A backstop for the pipeline "
+            "over-escalating auto-filed housekeeping into human-judgment forks "
+            "(#10310). Conservatively defaulted to 3 so a single mis-scoped "
+            "item never pages a human."
+        ),
+    )
 
     # Managed repos + principles audit (spec §4.4)
     managed_repos: list[ManagedRepo] = Field(
@@ -2692,6 +4048,47 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Seconds between PrinciplesAuditLoop ticks. "
             "Default 604800 = 7 days (spec §4.4)."
+        ),
+    )
+    principles_audit_timeout_seconds: int = Field(
+        default=1800,
+        ge=60,
+        le=21600,
+        description=(
+            "Hard cap (seconds) on the `make audit-json` subprocess read in "
+            "PrinciplesAuditLoop (default 30m). Healthy runtime scales with "
+            "repo size, so this is an operator knob, not a constant (#9555): "
+            "too low silently degrades the audit to a permanent no-op (false "
+            "timeout every tick); too high weakens wedged-child protection."
+        ),
+    )
+
+    # Data-governance prompt gate (CH-6, issue #9734)
+    repo_data_class: str = Field(
+        default="internal",
+        description=(
+            "Data-governance class for THIS repo's content: 'public-code' | "
+            "'internal' | 'regulated-<name>'. Regulated classes get prompt "
+            "redaction + a backend allowlist at every LLM spawn seam "
+            "(prompt_gate.gate_prompt); unknown values fail CLOSED. Populated "
+            "from the runtime repo registry (repos.json) for registered repos."
+        ),
+    )
+    data_class_allowed_backends: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-data-class allowed LLM CLI backends, e.g. "
+            "{'regulated-phi': ['claude']}. Consulted by prompt_gate for "
+            "regulated classes only; a regulated class with no entry allows "
+            "NOTHING (fail closed). Unregulated classes are never checked."
+        ),
+    )
+    data_class_redaction_patterns: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Extra named regex redaction patterns merged over "
+            "prompt_gate.BUILTIN_REDACTION_PATTERNS for regulated-class "
+            "prompts. Names appear in gate audit records; content never does."
         ),
     )
 
@@ -2711,9 +4108,71 @@ class HydraFlowConfig(BaseModel):
         le=86400,
         description="Seconds between SandboxFailureFixerLoop cycles (default 1h).",
     )
+    detector_calibration_enabled: bool = Field(
+        default=True,
+        description="UI kill-switch for DetectorCalibrationLoop (ADR-0049).",
+    )
+    detector_calibration_interval: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+        description="Seconds between DetectorCalibrationLoop cycles (default 1h).",
+    )
     auto_agent_preflight_enabled: bool = Field(
         default=True,
         description="UI kill-switch for AutoAgentPreflightLoop (ADR-0049).",
+    )
+    auto_agent_hitl_intake_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for the #9721 widened intake: AutoAgentPreflightLoop "
+            "also intercepts idle pipeline-origin hydraflow-hitl issues "
+            "(attempt-cap exhaustion, quality-gate/zero-diff bails) in "
+            "addition to hitl-escalation. Distinct from "
+            "auto_agent_preflight_enabled, which gates the whole loop."
+        ),
+    )
+    auto_pr_preflight_gate_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for the auto-PR pre-flight quality-lite gate "
+            "(#10013): ratchet+regressions pytest, arch --check, and ruff on "
+            "staged files run inside the bot-PR worktree before gh pr create; "
+            "a red stage blocks the PR instead of burning a CI cycle."
+        ),
+    )
+    auto_pr_preflight_stage_timeout_s: int = Field(
+        default=600,
+        ge=30,
+        le=3600,
+        description=(
+            "Per-stage timeout in seconds for the auto-PR pre-flight gate "
+            "(#10013). A stage that exceeds it counts as red."
+        ),
+    )
+    pr_base_freshness_guard_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for the implementer/pr_manager base-freshness guard "
+            "(#10101, the #9964 class): before ``gh pr create`` on a "
+            "long-lived implementer worktree, refuses (or auto "
+            "fetch+merges) a branch whose merge-base with the base branch "
+            "is older than ``pr_base_max_age_days``. Distinct from the "
+            "auto_pr pre-flight gate (#10013), which covers the "
+            "short-lived bot-PR worktree seam and always forks fresh."
+        ),
+    )
+    pr_base_max_age_days: int = Field(
+        default=3,
+        ge=1,
+        le=90,
+        description=(
+            "Max age in days of an implementer branch's merge-base with the "
+            "base branch before the base-freshness guard (#10101) treats it "
+            "as stale. Older than this triggers an in-worktree "
+            "fetch+merge-update attempt before falling back to refusing the "
+            "PR open."
+        ),
     )
     implement_two_stage_review_enabled: bool = Field(
         default=True,
@@ -2768,6 +4227,53 @@ class HydraFlowConfig(BaseModel):
         default=None,
         description="Per-day total spend budget in USD. None = unlimited.",
     )
+    auto_agent_redrive_enabled: bool = Field(
+        default=True,
+        description=(
+            "Escalation TTL re-drive (#9719): re-feed auto-agent-exhausted "
+            "escalations that carried human-required past the TTL back to "
+            "preflight (labels removed, attempt counter cleared; the durable "
+            "audit log — the diverse-retry source — is never cleared)."
+        ),
+    )
+    auto_agent_redrive_max_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description=(
+            "Max re-drives per issue before it stays human-required "
+            "permanently (0 disables re-drive behaviorally)."
+        ),
+    )
+    auto_agent_redrive_ttl_days: int = Field(
+        default=5,
+        ge=1,
+        le=90,
+        description=(
+            "Days an exhausted escalation carries human-required before its "
+            "first re-drive."
+        ),
+    )
+    auto_agent_redrive_backoff_multiplier: float = Field(
+        default=3.0,
+        ge=1.0,
+        le=10.0,
+        description=(
+            "TTL multiplier per re-drive: the TTL for re-drive k is "
+            "ttl_days * multiplier**k (default schedule 5d → 15d → stop at "
+            "the max-attempts cap)."
+        ),
+    )
+    auto_agent_redrive_human_quiet_days: int = Field(
+        default=2,
+        ge=0,
+        le=90,
+        description=(
+            "Min days without a comment from an authorized human "
+            "(human_steering_authorized_users) before an escalation may be "
+            "re-driven. Empty allowlist → label-only claim detection."
+        ),
+    )
 
     # Credit pause
     credit_pause_buffer_minutes: int = Field(
@@ -2775,6 +4281,43 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         le=30,
         description="Extra minutes to wait after reported credit reset time",
+    )
+    credit_fp_suppress_cooldown_seconds: int = Field(
+        default=300,
+        ge=10,
+        le=3600,
+        description=(
+            "Cooldown after suppressing a false-positive credit signal from a "
+            "source: within it, repeat signals from that source are log-only "
+            "(no probe, no banner) and the raising loop restarts with a delay "
+            "instead of a tight spin (#9888)."
+        ),
+    )
+    credit_pause_require_probe: bool = Field(
+        default=True,
+        description=(
+            "Before committing a GLOBAL credit pause, corroborate the "
+            "text-detected credit signal with a live Anthropic API probe. "
+            "is_credit_exhaustion matches credit-error PROSE, so a "
+            "diagnostic/reviewer run quoting a prior cap in its analysis would "
+            "otherwise trigger a multi-hour false global pause (#9807). The "
+            "probe is ground truth (False only when the API itself confirms "
+            "exhaustion). Kill-switch: set False to revert to pause-on-text."
+        ),
+    )
+    auth_failure_require_probe: bool = Field(
+        default=True,
+        description=(
+            "Before halting ALL loops on a GitHub AuthenticationError, "
+            "corroborate the signal with a live `gh auth status` probe. A "
+            "single gh call's stderr can match an auth pattern during a "
+            "transient network/API blip, which used to stop the whole factory "
+            "for hours (#9621). The probe is ground truth (False only when gh "
+            "confirms the credentials are rejected); on a probe-refuted "
+            "(transient) signal the crashed loop is restarted instead of "
+            "stopping the factory. Kill-switch: set False to revert to "
+            "halt-on-signal."
+        ),
     )
 
     # Process timeouts
@@ -2889,6 +4432,23 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for AdrTouchpointAuditorLoop.",
     )
+    adr_conformance_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for AdrConformanceLoop (ADR-0100). "
+            "Enabled by default (like sibling caretaker loops) after a dry-run "
+            "against the full ADR corpus confirmed zero false-positive issue "
+            "filing; set False to disable."
+        ),
+    )
+    auto_tighten_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for AutoTightenLoop (auto-tightening ratchet). Enabled by "
+            "default (ADR-0104) once actuation was e2e-verified; set the env var to "
+            "false to disable."
+        ),
+    )
     ci_monitor_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for CIMonitorLoop.",
@@ -2919,7 +4479,13 @@ class HydraFlowConfig(BaseModel):
     )
     diagnostic_loop_enabled: bool = Field(
         default=True,
-        description="Deploy-time kill-switch for DiagnosticLoop.",
+        description=(
+            "Deploy-time kill-switch for DiagnosticLoop. Was defaulted OFF "
+            "(#9895) during the credit-flood incident; re-enabled after ALL "
+            "three named blockers landed: #9888 (false-positive cooldown), "
+            "#10001 (CREDIT_PROSE_SCAN opt-out + HITL comment dedup), and "
+            "#9879/#10018 (gate off-thread + bounded diagnosis prompt)."
+        ),
     )
     diagram_loop_enabled: bool = Field(
         default=True,
@@ -2941,6 +4507,13 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for FlakeTrackerLoop.",
     )
+    xdist_quarantine_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for FlakeTrackerLoop's xdist-quarantine detection "
+            "(reads the xdist-audit report; independent of flake tracking)."
+        ),
+    )
     github_cache_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for GitHubCacheLoop.",
@@ -2948,6 +4521,18 @@ class HydraFlowConfig(BaseModel):
     health_monitor_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for HealthMonitorLoop.",
+    )
+    self_repair_actuator_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for HealthMonitorLoop's persistent-error "
+            "self-repair actuator (#10140): when a registry loop reports an "
+            "`error` heartbeat for N consecutive cycles, auto-repair a known "
+            "pattern (e.g. PrinciplesAuditLoop's managed_repos 404-repo prune) "
+            "or file one deduped hydraflow-find issue naming the loop. "
+            "Independent of `health_monitor_loop_enabled` so operators can "
+            "disable auto-repair/auto-file without disabling the whole loop."
+        ),
     )
     label_drift_watcher_loop_enabled: bool = Field(
         default=True,
@@ -3009,6 +4594,48 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for StaleIssueGCLoop.",
     )
+    gate_health_loop_enabled: bool = Field(
+        default=True,
+        description="Deploy-time kill-switch for GateHealthLoop (#9974).",
+    )
+    pr_red_repair_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for PrRedRepairLoop (#10027 Phase 1: "
+            "infra-flake retrier)."
+        ),
+    )
+    pr_red_repair_dispatch_enabled: bool = Field(
+        default=True,
+        description=(
+            "Dark-launch gate for PrRedRepairLoop's Phase 2 real-red "
+            "auto-agent dispatch (#10027), ANDed with "
+            "`pr_red_repair_loop_enabled` and the live `enabled_cb` "
+            "kill-switch per ADR-0049 — not a replacement for either. "
+            "When False, a real (non-infra-flake) settled red is left "
+            "untouched (Phase 1 behavior only); the infra-flake rerun path "
+            "is unaffected."
+        ),
+    )
+    erosion_metrics_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for ErosionMetricsLoop (#10107, epic "
+            "#10104: v1 change-spread/concept-scatter drift caretaker). "
+            "Defaults ON but conservative — the sensors' own baseline/"
+            "threshold defaults keep it quiet until an operator snapshots "
+            "a real repo-specific baseline."
+        ),
+    )
+    adr_drift_resolver_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for AdrDriftResolverLoop (#9976: "
+            "triage-before-escalate so ADR-drift rollups self-resolve). "
+            "Defense-in-depth alongside the ADR-0049 UI kill-switch — the "
+            "in-body enabled_cb gate is checked first."
+        ),
+    )
     stale_issue_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for StaleIssueLoop.",
@@ -3033,9 +4660,59 @@ class HydraFlowConfig(BaseModel):
         description="Deploy-time kill-switch for WorkspaceGCLoop.",
     )
 
+    # IssueRefinementLoop (spec #9957) — backlog-wide dedup, priority scoring,
+    # operator digest.
+    issue_refinement_enabled: bool = Field(
+        default=True,
+        description="Deploy-time kill-switch for IssueRefinementLoop (ADR-0049).",
+    )
+    issue_refinement_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description="Seconds between IssueRefinementLoop incremental ticks (default 24h).",
+    )
+    issue_refinement_full_sweep_interval: int = Field(
+        default=604800,
+        ge=86400,
+        le=2_592_000,
+        description=(
+            "Seconds between IssueRefinementLoop full-sweep ticks, where every "
+            "open issue is treated as changed rather than just the "
+            "incremental diff since the persisted index (default 7d)."
+        ),
+    )
+    issue_refinement_pair_budget: int = Field(
+        default=24,
+        ge=0,
+        le=200,
+        description=(
+            "Max duplicate-candidate pairs judged by an LLM call per "
+            "IssueRefinementLoop tick."
+        ),
+    )
+    issue_refinement_priority_budget: int = Field(
+        default=50,
+        ge=0,
+        le=500,
+        description=(
+            "Max issues priority-scored by an LLM call per "
+            "IssueRefinementLoop tick — bounds full-sweep spend, where every "
+            "unguarded open issue is otherwise a scoring target (#10025)."
+        ),
+    )
+    issue_refinement_model: str = Field(
+        default="",
+        description=(
+            "Model override for IssueRefinementLoop judgment calls. Empty "
+            "string = use the background_model default."
+        ),
+    )
+
     @field_validator(
         "ready_label",
         "review_label",
+        "in_progress_label",
         "hitl_label",
         "hitl_active_label",
         "hitl_autofix_label",
@@ -3043,9 +4720,8 @@ class HydraFlowConfig(BaseModel):
         "dup_label",
         "epic_label",
         "epic_child_label",
+        "auto_decomposed_child_label",
         "find_label",
-        "discover_label",
-        "shape_label",
         "planner_label",
         "verify_label",
         "parked_label",
@@ -3091,8 +4767,6 @@ class HydraFlowConfig(BaseModel):
         result: list[str] = []
         for labels in (
             self.find_label,
-            self.discover_label,
-            self.shape_label,
             self.planner_label,
             self.ready_label,
             self.review_label,
@@ -3108,6 +4782,13 @@ class HydraFlowConfig(BaseModel):
         # correction — so a corrected issue re-enters the pipeline clean instead
         # of carrying a stale blocker forever (ADR-0084, pillar C / anti-cycle).
         result.append("human-required")
+        # ``in_progress_label`` is likewise orthogonal — a build-claim marker
+        # (#10168) that coexists with ``hydraflow-ready`` during a build, not a
+        # stage. Listing it here makes every ``swap_pipeline_labels`` call clear
+        # it: the ``ready → review`` swap at PR-open drops the claim, and any
+        # escalation/route-back swap (hitl/diagnose/parked/ready) clears it too,
+        # so an issue can never get stuck claimed (ADR-0002).
+        result.extend(self.in_progress_label)
         return result
 
     @property
@@ -3201,6 +4882,61 @@ class HydraFlowConfig(BaseModel):
         """Repo-scoped per-PR telemetry aggregates (ADR-0021 D2)."""
         return self.repo_data_root / "metrics" / "prompt" / "pr_stats.json"
 
+    @property
+    def prompt_gate_audit_path(self) -> Path:
+        """Repo-scoped data-governance gate audit trail (CH-6, issue #9734).
+
+        JSONL records of gate decisions for regulated data classes: class,
+        action, pattern-hit NAMES and counts — never prompt content.
+        """
+        return self.repo_data_root / "metrics" / "prompt_gate" / "gate_audit.jsonl"
+
+    @property
+    def approval_records_path(self) -> Path:
+        """Repo-scoped hash-chained merge-approval evidence stream (CH-2, #9730).
+
+        PR numbers are repo-scoped, so the stream lives under
+        ``repo_data_root`` — one chain per managed repo.
+        """
+        return self.repo_data_root / "audit" / "approval_records.jsonl"
+
+    @property
+    def evidence_packs_path(self) -> Path:
+        """Repo-scoped hash-chained evidence-pack summary stream (CH-4, #9732).
+
+        One ``record_type="evidence_pack"`` record per compiled RC pack;
+        the pack directories themselves live under :attr:`evidence_dir`.
+        """
+        return self.repo_data_root / "audit" / "evidence_packs.jsonl"
+
+    @property
+    def evidence_dir(self) -> Path:
+        """Root of the per-RC release evidence packs (CH-4, #9732)."""
+        return self.repo_data_root / "evidence"
+
+    @property
+    def merge_policy_path(self) -> Path:
+        """Resolve the factory-autonomy merge policy file (CH-3, #9731).
+
+        A managed repo's own ``docs/standards/factory_autonomy/policy.yaml``
+        when present; otherwise the packaged policy shipped with this
+        HydraFlow checkout (the standard applies to every HydraFlow-format
+        project). ``merge_policy.enforce_merge_policy`` fails CLOSED when
+        the resolved file is missing or invalid.
+        """
+        repo_local = (
+            self.repo_root / "docs" / "standards" / "factory_autonomy" / "policy.yaml"
+        )
+        if repo_local.exists():
+            return repo_local
+        return (
+            Path(__file__).resolve().parent.parent
+            / "docs"
+            / "standards"
+            / "factory_autonomy"
+            / "policy.yaml"
+        )
+
     def base_branch(self) -> str:
         """Return the branch agent PRs should target.
 
@@ -3214,6 +4950,16 @@ class HydraFlowConfig(BaseModel):
     def branch_for_issue(self, issue_number: int) -> str:
         """Return the canonical branch name for a given issue number."""
         return f"agent/issue-{issue_number}"
+
+    def regulated_label_set(self) -> frozenset[str]:
+        """Parse ``regulated_labels`` CSV into a label set (CH-5).
+
+        Blank entries are dropped; an empty result means no change class
+        is regulated, so requirement IDs stay optional everywhere.
+        """
+        return frozenset(
+            label.strip() for label in self.regulated_labels.split(",") if label.strip()
+        )
 
     def workspace_path_for_issue(self, issue_number: int) -> Path:
         """Return the repo-scoped workspace directory path for a given issue number."""
@@ -3398,6 +5144,11 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
     stage_pairs: list[tuple[str, str, str]] = [
         ("implementation", config.implementation_tool, config.model),
         ("review", config.review_tool, config.review_model),
+        (
+            "test_adequacy_verifier",
+            config.test_adequacy_verifier_tool,
+            config.test_adequacy_verifier_model,
+        ),
         ("planner", config.planner_tool, config.planner_model),
         ("triage", config.triage_tool, config.triage_model),
         ("ac", config.ac_tool, config.ac_model),
@@ -3416,6 +5167,12 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
         ("report_issue", config.report_issue_tool, config.report_issue_model),
         ("sentry", config.sentry_tool, config.sentry_model),
         ("adr_review", config.adr_review_tool, config.adr_review_model),
+        ("term_proposer", config.term_proposer_tool, config.term_proposer_model),
+        (
+            "adr_drift_resolver",
+            config.adr_drift_resolver_tool,
+            config.adr_drift_resolver_model,
+        ),
     ]
 
     for stage, tool, model in stage_pairs:
@@ -3752,6 +5509,34 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
             continue
         object.__setattr__(config, field, parsed)
 
+    # Optional int overrides — applied only when the field is still at its
+    # default (explicit constructor values win, matching the int/str tables).
+    # Empty string or unset leaves the default; parse failures and values
+    # below the ge=1 field constraint log a warning and are ignored.
+    for field, env_key, default in _ENV_OPT_INT_OVERRIDES:
+        if getattr(config, field) != default:
+            continue
+        env_val = _get_env(env_key)
+        if env_val is None or env_val == "":
+            continue
+        try:
+            parsed_int = int(env_val)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid %s=%r — treating as unset",
+                env_key,
+                env_val,
+            )
+            continue
+        if parsed_int < 1:
+            logger.warning(
+                "%s=%s is below minimum 1; ignoring env override",
+                env_key,
+                parsed_int,
+            )
+            continue
+        object.__setattr__(config, field, parsed_int)
+
     # Ratio float overrides ([0, 1] bounds) — parse failures are silently ignored
     # but out-of-bounds values emit a warning so operators know their config was rejected.
     for field, env_key, default in _ENV_FLOAT_RATIO_OVERRIDES:
@@ -3842,8 +5627,15 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
             )
             raise ValueError(msg)
         object.__setattr__(config, tool_field, tool)
+        # Register as explicitly-set: object.__setattr__ bypasses Pydantic's
+        # fields-set tracking, so without this the group cascade in
+        # _apply_profile_overrides treats the field as untouched and — when
+        # the env value equals the field default — silently overwrites the
+        # operator's per-role choice (#9717).
+        config.__pydantic_fields_set__.add(tool_field)
         if model:  # empty model only for "inherit"
             object.__setattr__(config, model_field, model)
+            config.__pydantic_fields_set__.add(model_field)
 
     # Data-driven env var overrides (Literal-typed fields)
     for field, env_key in _ENV_LITERAL_OVERRIDES:
@@ -3860,6 +5652,23 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                         env_key,
                         env_val,
                         allowed,
+                    )
+
+    # Data-driven env var overrides (StrEnum-typed fields)
+    for field, env_key, enum_cls in _ENV_ENUM_OVERRIDES:
+        field_info = HydraFlowConfig.model_fields[field]
+        if getattr(config, field) == field_info.default:
+            env_val = _get_env(env_key)
+            if env_val is not None:
+                try:
+                    object.__setattr__(config, field, enum_cls(env_val))
+                    config.__pydantic_fields_set__.add(field)
+                except ValueError:
+                    logger.warning(
+                        "Invalid %s=%r; expected one of %s",
+                        env_key,
+                        env_val,
+                        [member.value for member in enum_cls],
                     )
 
     # Backward-compat bridge: promote legacy HYDRAFLOW_DOCKER_ENABLED /
@@ -3892,6 +5701,13 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
         parsed = [lbl.strip() for lbl in env_lite_labels.split(",") if lbl.strip()]
         if parsed:
             object.__setattr__(config, "lite_plan_labels", parsed)
+
+    # Human-steering authorized users (comma-separated list, special-case)
+    env_steering_users = os.environ.get("HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS")
+    if env_steering_users is not None and config.human_steering_authorized_users == []:
+        parsed = [u.strip() for u in env_steering_users.split(",") if u.strip()]
+        if parsed:
+            object.__setattr__(config, "human_steering_authorized_users", parsed)
 
     # Docker resource limit overrides (validated fields handled manually
     # because str/int overrides need format/bounds validation that

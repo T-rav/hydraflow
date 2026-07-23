@@ -42,7 +42,7 @@ function StageRow({ stageKey, stageData, isLast }) {
       : stageData.status === 'failed'
         ? { ...stageNodeBase, background: theme.red, borderColor: theme.red }
         : stageData.status === 'hitl'
-          ? { ...stageNodeBase, background: theme.yellow, borderColor: theme.yellow }
+          ? { ...stageNodeBase, background: theme.red, borderColor: theme.red }
           : stageData.status === 'queued'
             ? { ...stageNodeBase, background: meta.subtleColor, borderColor: meta.color }
             : { ...stageNodeBase, background: meta.color, borderColor: meta.color }
@@ -144,6 +144,15 @@ export function StreamCard({ issue, intent, defaultExpanded, onRequestChanges, t
             </a>
           ) : (
             <span style={styles.issueNum}>#{issue.issueNumber}</span>
+          )}
+          {priorityBadgeStyleMap[issue.priority] && (
+            <span
+              style={priorityBadgeStyleMap[issue.priority]}
+              data-testid={`priority-badge-${issue.issueNumber}`}
+              title={`priority ${issue.priority}`}
+            >
+              {issue.priority}
+            </span>
           )}
           <span style={styles.title}>{intent?.text || issue.title}</span>
           {issue.repo && (
@@ -343,6 +352,14 @@ export const badgeStyleMap = {
   failed: { ...badgeBase, background: theme.redSubtle, color: theme.red },
   hitl: { ...badgeBase, background: theme.redSubtle, color: theme.red },
   pending: { ...badgeBase, background: theme.mutedSubtle, color: theme.textMuted },
+}
+
+// Priority-band chips (#10067). P0 = "factory is broken now" (red, preempts);
+// P1 = degraded (accent); P2 = hardening (muted). 'none' renders nothing.
+export const priorityBadgeStyleMap = {
+  P0: { ...badgeBase, background: theme.redSubtle, color: theme.red },
+  P1: { ...badgeBase, background: theme.accentSubtle, color: theme.accent },
+  P2: { ...badgeBase, background: theme.mutedSubtle, color: theme.textMuted },
 }
 
 // Pre-computed per-stage queued badge styles (avoids object spread in StageRow render)

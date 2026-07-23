@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 9442
 source_phase: review
 created_at: 2026-06-13T07:10:55.323956+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0044
 ---
 
 # Update _emit_trace command strings when migrating from subprocess to Port calls

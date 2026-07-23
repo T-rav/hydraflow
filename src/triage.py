@@ -19,6 +19,7 @@ from models import (
     EpicDecompResult,
     IssueType,
     NewIssueSpec,
+    SystemAlertPayload,
     Task,
     TranscriptLinePayload,
     TriageResult,
@@ -31,6 +32,7 @@ from plugin_skill_registry import (
     skills_for_phase,
 )
 from prompt_builder import PromptBuilder
+from triage_honeypot import screen_issue
 
 logger = logging.getLogger("hydraflow.triage")
 
@@ -141,6 +143,12 @@ class TriageRunner(BaseRunner):
             )
             return result
 
+        # --- Injection honeypot: validate the request before handling it ---
+        if self._config.triage_honeypot_enabled:
+            quarantine = await self._run_injection_honeypot(issue, worker_id)
+            if quarantine is not None:
+                return quarantine
+
         # --- LLM evaluation ---
         await self._emit_transcript(
             issue.id,
@@ -186,6 +194,105 @@ class TriageRunner(BaseRunner):
             result.reasons or "none",
         )
         return result
+
+    async def _run_injection_honeypot(
+        self, issue: Task, worker_id: int
+    ) -> TriageResult | None:
+        """Screen the untrusted request through the mock-tool honeypot.
+
+        Returns a quarantine :class:`TriageResult` when ``triage_honeypot_enforce``
+        is on and the honeypot trips; otherwise ``None`` (proceed to normal
+        triage). Shadow mode (the default) still alerts + records telemetry on a
+        trip but never blocks — so efficacy can be evaluated before it gates
+        real work. Infra failures fail **open** (return ``None``).
+        """
+        gh_token = getattr(getattr(self, "_credentials", None), "gh_token", "") or ""
+        try:
+            verdict = await screen_issue(
+                runner=self._runner,
+                config=self._config,
+                title=issue.title or "",
+                body=issue.body or "",
+                issue_labels=list(issue.tags or []),
+                gh_token=gh_token,
+                source="triage_honeypot",
+            )
+        except Exception as exc:  # noqa: BLE001 — classify, else fail open
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "Triage honeypot raised for #%d: %s; failing open", issue.id, exc
+            )
+            return None
+
+        if verdict.error:
+            logger.warning(
+                "Triage honeypot could not run for #%d (%s); failing open",
+                issue.id,
+                verdict.error,
+            )
+            return None
+
+        if not verdict.injection_detected:
+            return None
+
+        # Tripped — alert + telemetry in BOTH modes.
+        tools = ", ".join(verdict.tripped_tools) or "unknown"
+        enforce = self._config.triage_honeypot_enforce
+        await self._emit_injection_alert(issue, verdict.tripped_tools, enforce)
+        await self._emit_transcript(
+            issue.id,
+            f"⚠️ Injection honeypot tripped (mock tools: {tools}) — "
+            + (
+                "QUARANTINED; not handed to the triage agent."
+                if enforce
+                else "SHADOW mode: proceeding to triage, logged for evaluation."
+            ),
+        )
+        logger.warning(
+            "SECURITY: triage injection honeypot tripped on issue #%d "
+            "(mode=%s, mock tools: %s)",
+            issue.id,
+            "enforce" if enforce else "shadow",
+            tools,
+        )
+
+        if not enforce:
+            return None  # shadow: observe only, don't block
+
+        await self._emit_status(issue.id, worker_id, TriageStatus.DONE)
+        return TriageResult(
+            issue_number=issue.id,
+            ready=False,
+            quarantined=True,
+            reasons=[
+                "Quarantined by the injection honeypot: the request drove a "
+                f"mock-tool call ({tools}), indicating a prompt-injection attempt. "
+                "Not handed to the triage agent."
+            ],
+        )
+
+    async def _emit_injection_alert(
+        self, issue: Task, tripped_tools: list[str], enforce: bool
+    ) -> None:
+        """Publish a ``SYSTEM_ALERT`` for a honeypot trip (both modes)."""
+        mode = "enforce" if enforce else "shadow"
+        tools = ", ".join(tripped_tools) or "unknown"
+        try:
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    data=SystemAlertPayload(
+                        message=(
+                            f"Triage injection honeypot tripped on issue "
+                            f"#{issue.id} (mode={mode}, mock tools: {tools})"
+                        ),
+                        source="triage_honeypot",
+                    ),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — alerting must not crash triage
+            reraise_on_credit_or_bug(exc)
+            logger.debug("Failed to publish injection SYSTEM_ALERT for #%d", issue.id)
 
     def _build_command(self, _worktree_path: Path | None = None) -> list[str]:
         """Construct the CLI invocation for triage evaluation.
@@ -314,6 +421,7 @@ or for a claim that is demonstrably false / already implemented (the described p
             self._config.repo_root,
             {"issue": issue.id, "source": "triage"},
             telemetry_stats=prompt_stats,
+            issue_labels=issue.tags,
         )
         self._save_transcript("triage-issue", issue.id, transcript)
 
@@ -335,14 +443,16 @@ or for a claim that is demonstrably false / already implemented (the described p
                 )
             return result
 
-        # Fallback: could not parse LLM response.  Rather than escalating
-        # to HITL (which is for genuinely bad issues, not infra failures),
-        # default to passing the issue through.  The triage prompt says
-        # "default to passing issues through" — a parse failure is an
-        # infrastructure problem, not an issue quality problem.
+        # Fallback (#9798): could not parse the LLM response. A parse failure
+        # is an INFRASTRUCTURE problem, and the established contract for
+        # infra failures (see the empty-response check above and the
+        # ``except RuntimeError: raise`` in ``evaluate``) is to propagate so
+        # the issue STAYS IN THE TRIAGE QUEUE for retry. The old behavior —
+        # defaulting to ready=True — rubber-stamped ~131 issues straight past
+        # the gate, making triage a no-op exactly when the parser broke.
         logger.warning(
-            "Issue #%d triage — could not parse LLM response, defaulting to "
-            "ready=True. Transcript snippet: %.200s",
+            "Issue #%d triage — could not parse LLM response; keeping the "
+            "issue queued for retry. Transcript snippet: %.200s",
             issue.id,
             transcript.strip(),
         )
@@ -353,16 +463,9 @@ or for a claim that is demonstrably false / already implemented (the described p
                 level="warning",
                 issue_id=issue.id,
             )
-        return TriageResult(
-            issue_number=issue.id,
-            ready=True,
-            reasons=["Triage parse failed — defaulting to ready"],
-            enrichment=(
-                "## Triage Note\n\n"
-                "Triage evaluation could not parse the LLM response. "
-                "This issue was passed through to planning by default. "
-                "The planner should validate sufficient context."
-            ),
+        raise RuntimeError(
+            "triage verdict unparseable — LLM response contained no "
+            "recognizable JSON verdict (issue stays queued for retry)"
         )
 
     @staticmethod
@@ -447,9 +550,61 @@ or for a claim that is demonstrably false / already implemented (the described p
         2. Extract JSON from markdown code fences
         3. Regex to find a JSON object with ``"ready"`` key
         """
-        # Pre-process: strip Claude Code system/init lines
-        transcript = TriageRunner._strip_system_lines(transcript)
+        # Strategy 0 (#9798): the transcript may be RAW stream-json — one
+        # frame per line, with the verdict escaped INSIDE a ``result`` frame
+        # (``{"type":"result","result":"{\"ready\":...}"}``) or an assistant
+        # content block. None of the text strategies below can see escaped
+        # JSON (the regex looks for an unescaped "ready" key), which is how
+        # ~131 real verdicts fell through to the old rubber-stamp fallback.
+        # Extract the embedded text first and give the strategies real input.
+        stream_text = TriageRunner._extract_stream_json_text(transcript)
+        if stream_text:
+            extracted = TriageRunner._parse_json_strategies(stream_text, issue_number)
+            if extracted is not None:
+                return extracted
 
+        # Pre-process: strip Claude Code system/init lines, then run the
+        # text-level strategies on what remains.
+        transcript = TriageRunner._strip_system_lines(transcript)
+        return TriageRunner._parse_json_strategies(transcript, issue_number)
+
+    @staticmethod
+    def _extract_stream_json_text(transcript: str) -> str | None:
+        """Pull human/verdict text out of a stream-json transcript.
+
+        Collects ``result`` payloads and assistant message text blocks from
+        per-line JSON frames. Returns None when no frame parses (plain-text
+        transcripts fall through to the direct strategies unchanged).
+        """
+        chunks: list[str] = []
+        saw_frame = False
+        for raw_line in transcript.splitlines():
+            candidate = raw_line.strip()
+            if not candidate.startswith("{"):
+                continue
+            try:
+                frame = json.loads(candidate)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if not isinstance(frame, dict):
+                continue
+            saw_frame = True
+            if isinstance(frame.get("result"), str):
+                chunks.append(frame["result"])
+            message = frame.get("message")
+            if isinstance(message, dict):
+                for block in message.get("content") or []:
+                    if isinstance(block, dict) and isinstance(block.get("text"), str):
+                        chunks.append(block["text"])
+        if not saw_frame or not chunks:
+            return None
+        return "\n".join(chunks)
+
+    @staticmethod
+    def _parse_json_strategies(
+        transcript: str, issue_number: int
+    ) -> TriageResult | None:
+        """The original three text-level parse strategies."""
         # Strategy 1: direct parse
         try:
             data = json.loads(transcript.strip())
@@ -458,21 +613,33 @@ or for a claim that is demonstrably false / already implemented (the described p
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
-        # Strategy 2: extract from markdown code fences
+        # Strategy 2 (#10291): brace-matched raw_decode. The regex strategies
+        # below are defeated the moment the verdict QUOTES source code — which
+        # #9127's verify-against-code enrichment does routinely: nested ```
+        # code fences and ``{}`` (e.g. an f-string ``f"[main {sha[:7]}]"``). The
+        # non-greedy fence regex truncates at the first inner ```; the
+        # ``[^{}]`` object regex truncates at the first inner ``{``. A real JSON
+        # parser handles nested braces/strings correctly, so scan each ``{`` and
+        # let ``raw_decode`` consume a full object, taking the first with a
+        # ``"ready"`` key. This is what stopped every code-citing bug from
+        # triaging (the whole backlog parked).
+        decoder = json.JSONDecoder()
+        for idx, ch in enumerate(transcript):
+            if ch != "{":
+                continue
+            try:
+                data, _ = decoder.raw_decode(transcript, idx)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if isinstance(data, dict) and "ready" in data:
+                return TriageRunner._result_from_dict(data, issue_number)
+
+        # Strategy 3: extract from markdown code fences (kept as a fallback for
+        # transcripts where no brace-delimited object decodes cleanly).
         fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", transcript, re.DOTALL)
         if fence_match:
             try:
                 data = json.loads(fence_match.group(1).strip())
-                if isinstance(data, dict) and "ready" in data:
-                    return TriageRunner._result_from_dict(data, issue_number)
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
-
-        # Strategy 3: regex to find JSON object with "ready" key
-        json_match = re.search(r"\{[^{}]*\"ready\"\s*:[^{}]*\}", transcript)
-        if json_match:
-            try:
-                data = json.loads(json_match.group(0))
                 if isinstance(data, dict) and "ready" in data:
                     return TriageRunner._result_from_dict(data, issue_number)
             except (json.JSONDecodeError, TypeError, ValueError):
@@ -522,6 +689,7 @@ or for a claim that is demonstrably false / already implemented (the described p
                 prompt,
                 self._config.repo_root,
                 {"issue": task.id, "source": "decomposition"},
+                issue_labels=task.tags,
             )
         except Exception as exc:
             reraise_on_credit_or_bug(exc)

@@ -149,6 +149,17 @@ def _canonical_yaml(path: Path) -> bytes:
 # Fields that vary per invocation and carry no semantic contract — dropped
 # before comparing two claude stream samples. Byte-wise compare was too
 # brittle once a protocol version touches any of these (Task 17).
+#
+# Issue #10220: with only the original six identifier fields stripped, a
+# real `claude -p` recording carried a load of host/version/billing/timing
+# metadata (hook ids, cwd, Claude Code version, token costs, rate-limit
+# state, tool/plugin/skill listings, ...) that varies release-to-release
+# or request-to-request but has no bearing on the stream-json event shape
+# StreamParser actually consumes (see stream_parser.py) — so the claude
+# adapter's drift never cleared and its ContractRefreshLoop attempt
+# counter climbed forever. These are additive: dropping them only removes
+# noise, it can't hide a genuine protocol change (renamed/removed keys
+# still show up as a canonical-dict difference).
 _CLAUDE_VOLATILE_FIELDS: frozenset[str] = frozenset(
     {
         "session_id",
@@ -157,6 +168,36 @@ _CLAUDE_VOLATILE_FIELDS: frozenset[str] = frozenset(
         "parent_tool_use_id",
         "uuid",
         "created_at",
+        "hook_id",
+        "request_id",
+        "cwd",
+        "resetsAt",
+        "rate_limit_info",
+        "claude_code_version",
+        "model",
+        "duration_ms",
+        "duration_api_ms",
+        "ttft_ms",
+        "ttft_stream_ms",
+        "time_to_request_ms",
+        "total_cost_usd",
+        "usage",
+        "cache_creation",
+        "modelUsage",
+        "permission_denials",
+        "tools",
+        "mcp_servers",
+        "slash_commands",
+        "agents",
+        "skills",
+        "plugins",
+        "memory_paths",
+        "capabilities",
+        "apiKeySource",
+        "output_style",
+        "fast_mode_state",
+        "analytics_disabled",
+        "product_feedback_disabled",
     }
 )
 
@@ -235,13 +276,21 @@ def detect_adapter_drift(
     adapter: str,
     recorded_cassettes: list[Path],
     committed_cassettes: list[Path],
+    *,
+    ignore_deleted_names: frozenset[str] = frozenset(),
 ) -> AdapterDriftReport | None:
     """Diff *recorded_cassettes* against *committed_cassettes* by filename.
 
     Two cassettes match when they share a basename (e.g. ``pr_create.yaml``).
     Match → canonicalize both sides and byte-compare; a mismatch lands in
     ``drifted_cassettes``. A recorded-only slug lands in ``new_cassettes``;
-    a committed-only slug in ``deleted_cassettes``.
+    a committed-only slug in ``deleted_cassettes`` — unless its name is in
+    *ignore_deleted_names*, in which case it's a permanent hand-authored
+    fixture the recorder is known to never regenerate (e.g. the claude
+    adapter's extra StreamParser corpus samples beyond the one prompt
+    ``record_claude_stream`` actually sends — issue #10220: treating that
+    permanent absence as "deleted" every tick meant the claude adapter
+    could never reach a clean tick).
 
     Returns ``None`` when all three buckets are empty (the fast-path the
     loop hits on every clean tick).
@@ -266,7 +315,7 @@ def detect_adapter_drift(
             drifted.append(rec_path)
 
     for name, com_path in committed_by_name.items():
-        if name not in recorded_by_name:
+        if name not in recorded_by_name and name not in ignore_deleted_names:
             deleted.append(com_path)
 
     if not drifted and not new and not deleted:
@@ -294,7 +343,10 @@ def _committed_cassettes_for(adapter: str, repo_root: Path) -> list[Path]:
 
 
 def detect_fleet_drift(
-    recordings: dict[str, list[Path]], repo_root: Path
+    recordings: dict[str, list[Path]],
+    repo_root: Path,
+    *,
+    ignore_deleted_names: dict[str, frozenset[str]] | None = None,
 ) -> FleetDriftReport:
     """Run :func:`detect_adapter_drift` for each adapter in *recordings*.
 
@@ -303,6 +355,10 @@ def detect_fleet_drift(
     when a tool is missing or the sandbox is offline. Treating the
     absence as "everything deleted" would fire a catastrophic refresh PR
     every time the docker daemon hiccups; explicit opt-in prevents that.
+
+    *ignore_deleted_names* maps adapter name to committed-cassette
+    filenames that are never flagged ``deleted`` for that adapter — see
+    :func:`detect_adapter_drift`.
 
     Unknown adapter names raise ``ValueError`` so a typo in the caller is
     loud at dispatch time.
@@ -318,7 +374,10 @@ def detect_fleet_drift(
             # See docstring — empty list is a no-signal, not a sweep.
             continue
         committed = _committed_cassettes_for(adapter, repo_root)
-        report = detect_adapter_drift(adapter, recorded, committed)
+        ignore = (ignore_deleted_names or {}).get(adapter, frozenset())
+        report = detect_adapter_drift(
+            adapter, recorded, committed, ignore_deleted_names=ignore
+        )
         if report is not None:
             reports.append(report)
 

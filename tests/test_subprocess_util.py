@@ -21,6 +21,7 @@ from subprocess_util import (
     make_clean_env,
     make_docker_env,
     parse_credit_resume_time,
+    probe_auth_availability,
     run_subprocess,
     run_subprocess_with_retry,
 )
@@ -691,6 +692,7 @@ class TestMakeDockerEnv:
             {
                 "OPENAI_API_KEY": "sk-openai",
                 "OPENROUTER_API_KEY": "sk-openrouter",
+                "ZAI_API_KEY": "sk-zai",
                 "PI_CODING_AGENT_DIR": "/Users/dev/.pi/agent",
                 "CODEX_HOME": "/Users/dev/.codex",
             },
@@ -699,6 +701,7 @@ class TestMakeDockerEnv:
             env = make_docker_env()
         assert env["OPENAI_API_KEY"] == "sk-openai"
         assert env["OPENROUTER_API_KEY"] == "sk-openrouter"
+        assert env["ZAI_API_KEY"] == "sk-zai"
         assert env["PI_CODING_AGENT_DIR"] == "/Users/dev/.pi/agent"
         assert env["CODEX_HOME"] == "/Users/dev/.codex"
 
@@ -1176,8 +1179,219 @@ class TestGhCircuitBreaker:
 
 
 # ---------------------------------------------------------------------------
-# Credit exhaustion detection — Anthropic API spend-cap rejections
+# run_subprocess_result — non-raising, returncode-exposing sibling (#9554)
 # ---------------------------------------------------------------------------
+
+
+class TestRunSubprocessResult:
+    @pytest.fixture(autouse=True)
+    def _reset_state(self) -> None:
+        import subprocess_util
+
+        subprocess_util._gh_semaphore = None
+        subprocess_util._rate_limit_until = None
+        subprocess_util._gh_circuit_breaker = None
+        subprocess_util._gh_circuit_breaker_enabled = False
+
+    @staticmethod
+    def _runner(stderr: str = "", returncode: int = 0, stdout: str = "done"):
+        async def _run(cmd: list[str], **_kwargs: object) -> SimpleResult:
+            return SimpleResult(stdout=stdout, stderr=stderr, returncode=returncode)
+
+        runner = MagicMock()
+        runner.run_simple = _run
+        return runner
+
+    @pytest.mark.asyncio
+    async def test_success_returns_simple_result(self) -> None:
+        from subprocess_util import run_subprocess_result
+
+        result = await run_subprocess_result(
+            "echo", "hi", runner=self._runner(stdout="hello world")
+        )
+
+        assert result.returncode == 0
+        assert result.stdout == "hello world"
+
+    @pytest.mark.asyncio
+    async def test_nonzero_exit_is_returned_not_raised(self) -> None:
+        """The defining difference from run_subprocess: no RuntimeError."""
+        from subprocess_util import run_subprocess_result
+
+        result = await run_subprocess_result(
+            "false", runner=self._runner(returncode=1, stderr="boom")
+        )
+
+        assert result.returncode == 1
+        assert result.stderr == "boom"
+
+    @pytest.mark.asyncio
+    async def test_auth_failure_is_returned_not_raised(self) -> None:
+        """Unlike run_subprocess, an auth-pattern stderr does not raise either —
+        callers of the result variant branch on returncode uniformly."""
+        from subprocess_util import run_subprocess_result
+
+        result = await run_subprocess_result(
+            "gh",
+            "api",
+            runner=self._runner(returncode=1, stderr="Authentication required"),
+        )
+
+        assert result.returncode == 1
+
+    @pytest.mark.asyncio
+    async def test_timeout_raises_subprocess_timeout_error(self) -> None:
+        from subprocess_util import SubprocessTimeoutError, run_subprocess_result
+
+        async def _timeout(cmd: list[str], **_kwargs: object) -> SimpleResult:
+            raise TimeoutError
+
+        runner = MagicMock()
+        runner.run_simple = _timeout
+
+        with pytest.raises(SubprocessTimeoutError):
+            await run_subprocess_result("gh", "api", timeout=0.01, runner=runner)
+
+    @pytest.mark.asyncio
+    async def test_breaker_open_raises_circuit_breaker_open_error(self) -> None:
+        from subprocess_util import (
+            CircuitBreakerOpenError,
+            configure_gh_circuit_breaker,
+            run_subprocess_result,
+        )
+
+        configure_gh_concurrency(5)
+        configure_gh_circuit_breaker(enabled=True, max_failures=1, reset_timeout=60.0)
+        fail = self._runner(stderr="fatal: unable to access (HTTP 500)", returncode=1)
+        result = await run_subprocess_result("gh", "api", "x", runner=fail)
+        assert result.returncode == 1
+
+        with pytest.raises(CircuitBreakerOpenError):
+            await run_subprocess_result("gh", "api", "x", runner=fail)
+
+    @pytest.mark.asyncio
+    async def test_gh_outage_error_records_breaker_failure(self) -> None:
+        import subprocess_util
+        from subprocess_util import configure_gh_circuit_breaker, run_subprocess_result
+
+        configure_gh_concurrency(5)
+        configure_gh_circuit_breaker(enabled=True, max_failures=5, reset_timeout=60.0)
+        result = await run_subprocess_result(
+            "gh",
+            "api",
+            "x",
+            runner=self._runner(stderr="HTTP 503 Service Unavailable", returncode=1),
+        )
+
+        assert result.returncode == 1
+        assert subprocess_util._gh_circuit_breaker._failure_count == 1
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_triggers_cooldown_without_raising(self) -> None:
+        import subprocess_util
+        from subprocess_util import run_subprocess_result
+
+        configure_gh_concurrency(5)
+        result = await run_subprocess_result(
+            "gh",
+            "api",
+            "x",
+            runner=self._runner(
+                stderr="API rate limit exceeded (HTTP 403)", returncode=1
+            ),
+        )
+
+        assert result.returncode == 1
+        assert subprocess_util._rate_limit_until is not None
+
+    @pytest.mark.asyncio
+    async def test_success_resets_backoff_and_records_breaker_success(self) -> None:
+        import subprocess_util
+        from subprocess_util import configure_gh_circuit_breaker, run_subprocess_result
+
+        configure_gh_concurrency(5)
+        configure_gh_circuit_breaker(enabled=True, max_failures=5, reset_timeout=60.0)
+        subprocess_util._rate_limit_current_cooldown = 240
+
+        result = await run_subprocess_result("gh", "api", "x", runner=self._runner())
+
+        assert result.returncode == 0
+        assert subprocess_util._rate_limit_current_cooldown == 60
+        assert subprocess_util._gh_circuit_breaker.state == "closed"
+
+    @pytest.mark.asyncio
+    async def test_extra_env_merged_over_clean_env(self) -> None:
+        from subprocess_util import run_subprocess_result
+
+        captured: dict[str, object] = {}
+
+        async def _run(cmd: list[str], **kwargs: object) -> SimpleResult:
+            captured.update(kwargs)
+            return SimpleResult(stdout="", stderr="", returncode=0)
+
+        runner = MagicMock()
+        runner.run_simple = _run
+
+        with patch.dict("os.environ", {"CLAUDECODE": "1"}, clear=False):
+            await run_subprocess_result(
+                "make", "audit-json", extra_env={"FOO": "bar"}, runner=runner
+            )
+
+        env = captured["env"]
+        assert env["FOO"] == "bar"
+        assert "CLAUDECODE" not in env
+
+    @pytest.mark.asyncio
+    async def test_input_passed_through_to_runner(self) -> None:
+        from subprocess_util import run_subprocess_result
+
+        captured: dict[str, object] = {}
+
+        async def _run(cmd: list[str], **kwargs: object) -> SimpleResult:
+            captured.update(kwargs)
+            return SimpleResult(stdout="", stderr="", returncode=0)
+
+        runner = MagicMock()
+        runner.run_simple = _run
+
+        await run_subprocess_result(
+            "git", "apply", "-", stdin_input=b"patch text", runner=runner
+        )
+
+        assert captured["input"] == b"patch text"
+
+    @pytest.mark.asyncio
+    async def test_cwd_passed_through(self) -> None:
+        from subprocess_util import run_subprocess_result
+
+        captured: dict[str, object] = {}
+
+        async def _run(cmd: list[str], **kwargs: object) -> SimpleResult:
+            captured.update(kwargs)
+            return SimpleResult(stdout="", stderr="", returncode=0)
+
+        runner = MagicMock()
+        runner.run_simple = _run
+
+        await run_subprocess_result("ls", cwd=Path("/some/dir"), runner=runner)
+
+        assert captured["cwd"] == "/some/dir"
+
+    @pytest.mark.asyncio
+    async def test_non_gh_command_bypasses_semaphore_and_breaker(self) -> None:
+        """`make`/`rg` calls skip the gh/git gating entirely (no breaker check)."""
+        from subprocess_util import (
+            configure_gh_circuit_breaker,
+            run_subprocess_result,
+        )
+
+        configure_gh_circuit_breaker(enabled=True, max_failures=1, reset_timeout=60.0)
+        # Even with a breaker OPEN (were it gh), a non-gh/git command must not
+        # be gated at all — this must not raise CircuitBreakerOpenError.
+        result = await run_subprocess_result(
+            "make", "audit-json", runner=self._runner(returncode=2, stderr="fail")
+        )
+        assert result.returncode == 2
 
 
 class TestIsCreditExhaustion:
@@ -1455,3 +1669,59 @@ class TestParseCreditResumeTime:
         caller falls back to its default pause, so parse returns None.
         """
         assert parse_credit_resume_time("You've hit your weekly limit") is None
+
+
+# --- probe_auth_availability (#9621) ---
+
+
+class TestProbeAuthAvailability:
+    """Live ``gh auth status`` corroboration probe for the auth-failure path.
+
+    Fail-open mirror of ``probe_credit_availability``: returns ``False`` ONLY on
+    a ground-truth, persistent auth rejection; every un-probeable/transient
+    condition returns ``True`` so a momentary blip never halts the factory.
+    """
+
+    @pytest.mark.asyncio
+    async def test_returns_true_when_gh_missing(self) -> None:
+        with patch("subprocess_util.shutil.which", return_value=None):
+            assert await probe_auth_availability() is True
+
+    @pytest.mark.asyncio
+    async def test_returns_true_when_authenticated(self) -> None:
+        proc = _make_proc(returncode=0, stdout=b"Logged in to github.com")
+        with (
+            patch("subprocess_util.shutil.which", return_value="/usr/bin/gh"),
+            patch("asyncio.create_subprocess_exec", return_value=proc),
+        ):
+            assert await probe_auth_availability() is True
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_confirmed_auth_rejection(self) -> None:
+        proc = _make_proc(returncode=1, stderr=b"X github.com: authentication failed")
+        with (
+            patch("subprocess_util.shutil.which", return_value="/usr/bin/gh"),
+            patch("asyncio.create_subprocess_exec", return_value=proc),
+        ):
+            assert await probe_auth_availability() is False
+
+    @pytest.mark.asyncio
+    async def test_returns_true_on_transient_network_failure(self) -> None:
+        # rc != 0 but the output is a network error, not an auth rejection.
+        proc = _make_proc(
+            returncode=1,
+            stderr=b"dial tcp: lookup api.github.com: no such host",
+        )
+        with (
+            patch("subprocess_util.shutil.which", return_value="/usr/bin/gh"),
+            patch("asyncio.create_subprocess_exec", return_value=proc),
+        ):
+            assert await probe_auth_availability() is True
+
+    @pytest.mark.asyncio
+    async def test_returns_true_on_oserror_spawning_gh(self) -> None:
+        with (
+            patch("subprocess_util.shutil.which", return_value="/usr/bin/gh"),
+            patch("asyncio.create_subprocess_exec", side_effect=OSError("boom")),
+        ):
+            assert await probe_auth_availability() is True

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from human_steering import fenced_steering_guidance
 from shape_coherence import (
     build_shape_coherence_prompt,
     parse_shape_coherence_result,
@@ -57,6 +58,37 @@ class TestBuildShapeCoherencePrompt:
             plan_text="ignored",
         )
         assert prompt  # didn't raise
+
+    def test_folds_fenced_human_steering_guidance(self):
+        """ADR-0099 #4 — live operator guidance is folded in FENCED.
+
+        This is the second of shape's two prompt-construction sites (the
+        first being ``ShapeRunner._build_turn_prompt``), invoked from
+        ``ShapeRunner._evaluate_proposal``. Guidance must reach the
+        prompt only via ``fenced_steering_guidance`` — never as raw
+        comment text (ADR-0092 fence invariant).
+        """
+        guidance = "Prioritize the enterprise SSO angle over consumer features."
+        prompt = build_shape_coherence_prompt(
+            issue_number=1,
+            issue_title="T",
+            discover_brief="b",
+            proposal="p",
+            guidance=guidance,
+        )
+        assert "## Human Steering Guidance" in prompt
+        assert fenced_steering_guidance(guidance) in prompt
+
+    def test_empty_guidance_produces_no_steering_section(self):
+        """No guidance posted -> no steering section (unchanged behavior)."""
+        prompt = build_shape_coherence_prompt(
+            issue_number=1,
+            issue_title="T",
+            discover_brief="b",
+            proposal="p",
+            guidance="",
+        )
+        assert "## Human Steering Guidance" not in prompt
 
 
 class TestParseShapeCoherenceResult:

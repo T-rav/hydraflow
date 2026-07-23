@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from mockworld.fakes.fake_github import FakeGitHub, RateLimitError
+from mockworld.seed import MockWorldSeed
 from tests.conftest import TaskFactory
 
 pytestmark = pytest.mark.scenario
@@ -73,8 +74,6 @@ class TestFakeGitHubMutations:
         ("stage", "expected_label"),
         [
             ("find", "hydraflow-find"),
-            ("discover", "hydraflow-discover"),
-            ("shape", "hydraflow-shape"),
             ("plan", "hydraflow-plan"),
             ("ready", "hydraflow-ready"),
             ("review", "hydraflow-review"),
@@ -123,6 +122,41 @@ class TestFakeGitHubMutations:
         gh.add_issue(1, "t", "b")
         await gh.post_comment(1, "a comment")
         assert "a comment" in gh.issue(1).comments
+
+    async def test_list_issue_comments_returns_distinct_login_and_created_at(self):
+        """Structured per-comment records (Task 5): list_issue_comments must
+        surface each comment's own author + timestamp, not a hardcoded
+        constant shared by every comment on the issue."""
+        # Seed two structured comments via the seed loader so the test
+        # exercises the same path a scenario would use.
+        seed = MockWorldSeed(
+            issues=[{"number": 1, "title": "t", "body": "b", "labels": []}],
+            comments={
+                1: [
+                    {
+                        "login": "alice",
+                        "body": "/pause",
+                        "created_at": "2026-07-01T00:00:00Z",
+                    },
+                    {
+                        "login": "bob",
+                        "body": "/resume",
+                        "created_at": "2026-07-01T00:05:00Z",
+                    },
+                ]
+            },
+        )
+        gh = FakeGitHub.from_seed(seed)
+
+        comments = await gh.list_issue_comments(1)
+
+        assert len(comments) == 2
+        assert comments[0]["user"]["login"] == "alice"
+        assert comments[0]["body"] == "/pause"
+        assert comments[0]["created_at"] == "2026-07-01T00:00:00Z"
+        assert comments[1]["user"]["login"] == "bob"
+        assert comments[1]["body"] == "/resume"
+        assert comments[1]["created_at"] == "2026-07-01T00:05:00Z"
 
 
 class TestFakeGitHubRateLimit:

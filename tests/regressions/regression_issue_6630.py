@@ -58,7 +58,6 @@ class TestIssue6630AuthenticationErrorNotSuppressed:
     swallowed by the broad ``except Exception`` at ci_monitor_loop.py:67."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6630 — fix not yet landed", strict=False)
     async def test_authentication_error_propagates_from_do_work(
         self, tmp_path: Path
     ) -> None:

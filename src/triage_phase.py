@@ -12,7 +12,9 @@ from adr_utils import (
     is_adr_issue_title,
 )
 from config import HydraFlowConfig
+from convergence_recording import record_stage_verdict
 from events import EventBus, EventType, HydraFlowEvent
+from issue_decomposer import IssueDecomposer
 from models import Task, TriageResult
 from phase_utils import (
     _sentry_transaction,
@@ -35,6 +37,19 @@ logger = logging.getLogger("hydraflow.triage_phase")
 
 _SENTRY_MARKER = "<!-- [sentry:"
 _AUDITOR_MARKER = "<!-- [hydraflow-auditor:"
+
+# Verdict map for ConvergenceLedger boundary recording (ADR-0096 / convergence gate).
+# "ADVANCE" = issue moves forward in the pipeline.
+# "LOOP_BACK" = issue is requeued or parked and must re-enter triage.
+# Outcomes not in this map (e.g. "unknown") are not recorded.
+_TRIAGE_VERDICT_MAP: dict[str, str] = {
+    "plan": "ADVANCE",
+    "sentry_noise_closed": "ADVANCE",
+    "already_addressed": "ADVANCE",
+    "epic_decomposed": "ADVANCE",
+    "bug_not_present": "ADVANCE",
+    "parked": "LOOP_BACK",
+}
 
 
 def _is_sentry_issue(issue: Task) -> bool:
@@ -91,6 +106,25 @@ class TriagePhase:
         self._issue_cache = issue_cache
         self._bug_reproducer = bug_reproducer
 
+    def _record_triage_verdict(self, issue_id: int, routing_outcome: str) -> None:
+        """Record the ConvergenceLedger boundary verdict for a routing outcome.
+
+        Looks up ``routing_outcome`` in ``_TRIAGE_VERDICT_MAP`` and records the
+        verdict via :func:`record_stage_verdict` when a mapping exists.
+        Outcomes with no mapping (e.g. ``"unknown"``) are silently skipped —
+        matching the previous inline behavior at both call-sites.
+        """
+        verdict = _TRIAGE_VERDICT_MAP.get(routing_outcome)
+        if verdict is None:
+            return
+        record_stage_verdict(
+            self._state,
+            issue_number=issue_id,
+            stage="triage",
+            decision=verdict,
+            signatures=[],
+        )
+
     def _enrich_parent_epic(self, issue: Task) -> None:
         """Set the parent_epic field if this issue belongs to a tracked epic."""
         if self._epic_manager is None:
@@ -143,6 +177,11 @@ class TriagePhase:
             worker_fn=_triage_one,
             max_concurrent=self._config.max_triagers,
             stop_event=self._stop_event,
+            # Opt in to mid-run refill (issue #10312, extending #10296): wake
+            # at least every poll_interval to dispatch items enqueued while a
+            # long triage holds a slot, instead of only refilling when a
+            # triage completes.
+            poll_interval=self._config.poll_interval,
         )
         return sum(results)
 
@@ -285,35 +324,44 @@ class TriagePhase:
         try:
             result = await self._triage.evaluate(issue)
         except RuntimeError as exc:
-            # Infrastructure errors (empty LLM response, subprocess crash)
-            # should NOT escalate to HITL.  Leave the issue in the find queue
-            # so it gets retried on the next triage cycle.
+            # Infrastructure errors (empty/unparseable LLM response, subprocess
+            # crash/timeout) must NOT hot-retry. Leaving the issue find-labeled
+            # means the next triage tick re-picks it immediately, so a
+            # persistently-failing issue loops forever — a triage retry storm
+            # that burns the usage budget (a batch of ADR-conformance
+            # false-positives did exactly this). Park it instead: TriageRetryLoop
+            # re-dispatches parked issues with backoff and a
+            # ``triage_retry_max_attempts`` cap, escalating to HITL once the
+            # retry budget is spent — bounded, not infinite.
             logger.warning(
-                "Issue #%d triage skipped (infra error, will retry): %s",
+                "Issue #%d triage infra error — parking for bounded retry: %s",
                 issue.id,
                 exc,
             )
+            # Park (find -> parked); TriageRetryLoop then re-dispatches with
+            # backoff + the attempt cap. As with the other park sites in this
+            # phase, a swap failure propagates — swap_pipeline_labels adds the
+            # parked label before removing find, so a failure leaves the issue
+            # find-labeled (safe fallback), not label-less.
+            await self._prs.swap_pipeline_labels(issue.id, self._config.parked_label[0])
+            # #10290: this is an INFRA park (the infra failed, not "the issue
+            # needs author clarification"). Mark it so TriageRetryLoop re-flows
+            # it on the short triage_infra_retry_interval floor the moment infra
+            # recovers, instead of the 24h clarification backoff.
+            self._state.mark_triage_infra_parked(issue.id)
             return 0
 
         if self._config.dry_run:
             return 1
 
         routing_outcome: str = "unknown"
-        if result.needs_discovery or (
-            result.ready and result.clarity_score < self._config.clarity_threshold
-        ):
-            # Vague or broad issue — route to product discovery track
-            self._store.enqueue_transition(issue, "discover")
-            await self._transitioner.transition(issue.id, "discover")
-            self._state.increment_session_counter("triaged")
-            routing_outcome = "discover"
-            logger.info(
-                "Issue #%d triaged → %s (needs product discovery, clarity=%d)",
-                issue.id,
-                self._config.discover_label[0],
-                result.clarity_score,
-            )
-        elif result.ready:
+        # ADR-0107: Triage routes ready issues straight to Plan — there is no
+        # standalone Discover/Shape fork. The clarity_score / needs_discovery
+        # signals survive on the TriageResult and are recorded on the issue's
+        # classification record below as HINTS for the planner's on-demand
+        # discover/shape decision gate (plan_phase.py:_should_discover_helper),
+        # not as a triage-time routing verdict.
+        if result.ready:
             if not await self._maybe_decompose(issue, result):
                 if result.enrichment:
                     await self._transitioner.post_comment(issue.id, result.enrichment)
@@ -384,6 +432,11 @@ class TriagePhase:
                 parked_label=self._config.parked_label[0],
                 reasons=result.reasons,
             )
+            # #10290: a genuine "needs author clarification" park — NOT infra.
+            # Clear any stale infra marker so this issue keeps the 24h
+            # clarification floor (a prior infra-park shouldn't make a real
+            # clarification need re-flow every 15m).
+            self._state.clear_triage_infra_parked(issue.id)
             await self._bus.publish(
                 HydraFlowEvent(
                     type=EventType.SYSTEM_REROUTE,
@@ -404,9 +457,14 @@ class TriagePhase:
         # Mirror classification into the local JSONL cache with the
         # final routing outcome captured. Writing AFTER the routing
         # decision prevents the READY-stage precondition gate from
-        # accepting a classification whose issue was parked or sent
-        # to discover — the gate checks routing_outcome == "plan".
+        # accepting a classification whose issue was parked — the gate
+        # checks routing_outcome == "plan".
         # Best-effort: cache failures never raise into the domain layer.
+        #
+        # clarity_score / needs_discovery (ADR-0107) ride along so the
+        # planner's on-demand discover/shape decision gate can read them
+        # back as HINTS via ``IssueCache.latest_classification`` — see
+        # plan_phase.py:_should_discover_helper.
         if self._issue_cache is not None:
             self._issue_cache.record_classification(
                 issue.id,
@@ -415,6 +473,8 @@ class TriagePhase:
                 complexity_rank=self._complexity_rank(result.complexity_score),
                 routing_outcome=routing_outcome,
                 reasoning="; ".join(result.reasons) if result.reasons else "",
+                clarity_score=result.clarity_score,
+                needs_discovery=result.needs_discovery,
             )
 
         # Reproduce bug-classified issues that were routed to plan
@@ -466,6 +526,7 @@ class TriagePhase:
                         issue.id,
                         evidence,
                     )
+                    self._record_triage_verdict(issue.id, routing_outcome)
                     return 1
                 if str(repro.outcome) == "unable":
                     logger.warning(
@@ -485,13 +546,15 @@ class TriagePhase:
         # Deferred plan-stage label swap. Now that the classification
         # record + reproduction record (if applicable) are written, the
         # implement loop's READY gate has data to check when the issue
-        # eventually transitions through plan → ready. The discover/
-        # parked/sentry paths swapped their labels inline above because
-        # they have no race window with downstream consumers.
+        # eventually transitions through plan → ready. The parked/sentry
+        # paths swapped their labels inline above because they have no
+        # race window with downstream consumers.
         if routing_outcome == "plan":
             self._store.enqueue_transition(issue, "plan")
             await self._transitioner.transition(issue.id, "plan")
             self._state.increment_session_counter("triaged")
+
+        self._record_triage_verdict(issue.id, routing_outcome)
 
         return 1
 
@@ -510,6 +573,27 @@ class TriagePhase:
         ):
             return False
 
+        # Intake-vector guard (ADR-0105 §4): an issue stamped
+        # auto-decomposed-child was itself created by a prior decomposition
+        # (depth-cap-bound via create_epic_from_result). If intake's own
+        # complexity-gated path were allowed to decompose it again, the
+        # split would bypass the depth counter entirely — an uncounted
+        # re-split. Chosen fix (simpler-correct option per the task brief):
+        # skip intake decomposition outright for a stamped auto-child rather
+        # than plumbing its ancestor depth through this path. Further
+        # splitting of an auto-child, if ever needed, only happens through
+        # the stall-path call to create_epic_from_result(depth=...), which
+        # the depth-cap already bounds.
+        auto_child_label = self._config.auto_decomposed_child_label[0]
+        if auto_child_label in issue.tags:
+            logger.info(
+                "Issue #%d carries %r — skipping intake auto-decomposition "
+                "to avoid an uncounted re-split of an already-decomposed child",
+                issue.id,
+                auto_child_label,
+            )
+            return False
+
         logger.info(
             "Issue #%d scored %d complexity — attempting auto-decomposition",
             issue.id,
@@ -526,61 +610,13 @@ class TriagePhase:
             )
             return False
 
-        epic_label = self._config.epic_label[0]
-        epic_child_label = self._config.epic_child_label[0]
-        find_label = self._config.find_label[0]
-
-        # Create the epic issue
-        epic_number = await self._prs.create_issue(
-            decomp.epic_title,
-            decomp.epic_body,
-            [epic_label],
+        decomposer = IssueDecomposer(
+            self._prs, self._epic_manager, self._state, self._config
         )
-        if epic_number <= 0:
-            logger.warning(
-                "Failed to create epic issue for decomposition of #%d",
-                issue.id,
-            )
-            return False
-
-        # Create child issues
-        child_numbers: list[int] = []
-        for child_spec in decomp.children:
-            child_body = child_spec.body + f"\n\nParent Epic #{epic_number}"
-            child_num = await self._prs.create_issue(
-                child_spec.title,
-                child_body,
-                [epic_child_label, find_label],
-            )
-            if child_num > 0:
-                child_numbers.append(child_num)
-                self._state.record_issue_created()
-
-        # Register with EpicManager
-        await self._epic_manager.register_epic(
-            epic_number,
-            decomp.epic_title,
-            child_numbers,
-            auto_decomposed=True,
+        epic_number = await decomposer.create_epic_from_result(
+            source_task=issue,
+            result=decomp,
+            depth=0,
+            stall_context=None,
         )
-
-        # Close the original issue with a link to the epic
-        await self._prs.post_comment(
-            issue.id,
-            f"## Auto-Decomposed into Epic\n\n"
-            f"This issue was automatically decomposed into epic #{epic_number} "
-            f"with {len(child_numbers)} child issue(s).\n\n"
-            f"**Reason:** {decomp.reasoning}\n\n"
-            f"---\n*Generated by HydraFlow Triage*",
-        )
-        await self._prs.close_issue(issue.id)
-        self._state.mark_issue(issue.id, "decomposed")
-
-        logger.info(
-            "Issue #%d decomposed into epic #%d with %d children: %s",
-            issue.id,
-            epic_number,
-            len(child_numbers),
-            child_numbers,
-        )
-        return True
+        return epic_number is not None

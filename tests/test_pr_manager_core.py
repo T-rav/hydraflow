@@ -878,6 +878,98 @@ async def test_create_pr_includes_required_flags(config, event_bus, issue):
 
 
 @pytest.mark.asyncio
+async def test_create_pr_body_includes_reproducibility_manifest(
+    config, event_bus, issue
+):
+    """CH-7 (#9735): the implement-path PR body carries the evidence block."""
+    from repro_manifest import MANIFEST_HEADING, MANIFEST_SCHEMA
+
+    manager = make_pr_manager(config, event_bus)
+    pr_url = "https://github.com/test-org/test-repo/pull/55"
+    run_mock = AsyncMock(return_value=pr_url)
+
+    with patch.object(manager, "_run_with_body_file", run_mock):
+        await manager.create_pr(issue, "agent/issue-42")
+
+    body = run_mock.call_args.kwargs["body"]
+    assert body.startswith("## Summary")
+    assert MANIFEST_HEADING in body
+    payload = body.split("```json\n", 1)[1].rsplit("\n```", 1)[0]
+    manifest = json.loads(payload)
+    assert manifest["schema"] == MANIFEST_SCHEMA
+    assert manifest["models"]["implementation"]["model"] == config.model
+
+
+@pytest.mark.asyncio
+async def test_create_pr_manifest_failure_does_not_block_pr(config, event_bus, issue):
+    """append_manifest is fail-open: PR creation proceeds with a plain body."""
+    manager = make_pr_manager(config, event_bus)
+    pr_url = "https://github.com/test-org/test-repo/pull/56"
+    run_mock = AsyncMock(return_value=pr_url)
+
+    with (
+        patch("repro_manifest.build_manifest", side_effect=RuntimeError("boom")),
+        patch.object(manager, "_run_with_body_file", run_mock),
+    ):
+        pr_info = await manager.create_pr(issue, "agent/issue-42")
+
+    assert pr_info.number == 56
+    body = run_mock.call_args.kwargs["body"]
+    assert "Reproducibility Manifest" not in body
+
+
+async def test_create_pr_body_carries_req_id_trailer(config, event_bus):
+    """An issue-declared requirement ID lands as a trailer in the PR body
+    (CH-5): re-derived from the issue itself so it survives every label
+    state-machine round trip. (Kept out of this docstring by name: the matrix
+    generator reads docstring requirement references as test evidence.)"""
+    from tests.conftest import IssueFactory
+
+    manager = make_pr_manager(config, event_bus)
+    tagged = IssueFactory.create(labels=["ready", "req:REQ-042"])
+    run_body_file = AsyncMock(
+        return_value="https://github.com/test-org/test-repo/pull/55"
+    )
+
+    with patch.object(manager, "_run_with_body_file", run_body_file):
+        await manager.create_pr(tagged, "agent/issue-42")
+
+    body = run_body_file.call_args.kwargs["body"]
+    assert body.rstrip().endswith("Req-ID: REQ-042")
+
+
+@pytest.mark.asyncio
+async def test_create_pr_body_carries_body_field_req_id(config, event_bus):
+    from tests.conftest import IssueFactory
+
+    manager = make_pr_manager(config, event_bus)
+    tagged = IssueFactory.create(body="Broken.\n\nReq-ID: SYS-9")
+    run_body_file = AsyncMock(
+        return_value="https://github.com/test-org/test-repo/pull/55"
+    )
+
+    with patch.object(manager, "_run_with_body_file", run_body_file):
+        await manager.create_pr(tagged, "agent/issue-42")
+
+    body = run_body_file.call_args.kwargs["body"]
+    assert body.rstrip().endswith("Req-ID: SYS-9")
+
+
+@pytest.mark.asyncio
+async def test_create_pr_body_has_no_trailer_without_req_id(config, event_bus, issue):
+    manager = make_pr_manager(config, event_bus)
+    run_body_file = AsyncMock(
+        return_value="https://github.com/test-org/test-repo/pull/55"
+    )
+
+    with patch.object(manager, "_run_with_body_file", run_body_file):
+        await manager.create_pr(issue, "agent/issue-42")
+
+    body = run_body_file.call_args.kwargs["body"]
+    assert "Req-ID" not in body
+
+
+@pytest.mark.asyncio
 async def test_create_pr_parses_pr_number_from_url(config, event_bus, issue):
     manager = make_pr_manager(config, event_bus)
     pr_url = "https://github.com/test-org/test-repo/pull/123"
@@ -1724,6 +1816,7 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         "custom-dup",
         "custom-epic",
         "custom-epic-child",
+        "auto-decomposed-child",  # #9855: decomposer child label now startup-ensured
         "custom-verify",
         "hydraflow-parked",
         "hydraflow-diagnose",
@@ -1733,6 +1826,11 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         "hydraflow-test-helper",
         "hydraflow-fake-coverage-stuck",
         "rc-promotion-stuck",
+        "factory-stale-code",  # #9596 stale-code dead-man-switch
+        "sandbox-fail-auto-fix",  # #9914 durable startup check
+        "sandbox-hitl",
+        "refinement-auto",  # #9957 IssueRefinementLoop auto-close marker
+        "hydraflow-refinement-digest",
         "hydraflow-adr-drift",
         "hydraflow-adr-drift-stuck",
         "hydraflow-log-ingest",
@@ -1778,6 +1876,8 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         "issue-cost-spike",
         "arch-knowledge",
         "sanity-loop-stalled",
+        "detector-calibration",
+        "loop-stalled",
         "wiki-stale",
         "onboarding-blocked",
         "cultural-check",
@@ -2310,6 +2410,32 @@ class TestCloseIssue:
         assert "42" in args
         assert "--repo" in args
         assert config.repo in args
+
+    @pytest.mark.asyncio
+    async def test_close_issue_without_reason_omits_flag(self, config, event_bus):
+        manager = make_pr_manager(config, event_bus)
+        mock_create = SubprocessMockBuilder().with_stdout("").build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            await manager.close_issue(42)
+
+        args = mock_create.call_args[0]
+        assert "--reason" not in args
+
+    @pytest.mark.asyncio
+    async def test_close_issue_reason_passes_gh_reason_flag(self, config, event_bus):
+        """#10025: reason threads to `gh issue close --reason "not planned"` so
+        automated dedup closes record stateReason=NOT_PLANNED, not COMPLETED."""
+        manager = make_pr_manager(config, event_bus)
+        mock_create = SubprocessMockBuilder().with_stdout("").build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            await manager.close_issue(42, reason="not planned")
+
+        args = mock_create.call_args[0]
+        assert "--reason" in args
+        assert "not planned" in args
+        assert args.index("--reason") + 1 == args.index("not planned")
 
     @pytest.mark.asyncio
     async def test_close_issue_dry_run_skips_command(self, dry_config, event_bus):

@@ -261,8 +261,6 @@ describe('Header component', () => {
 
     const expectedCounts = {
       triage: 7,
-      discover: 0,
-      shape: 0,
       plan: 5,
       implement: 4,
       review: 3,
@@ -287,15 +285,14 @@ describe('Header component', () => {
       })
 
       const arrows = screen.getAllByText('\u2192')
-      // Linear arrows = 3 main (plan, implement, review) + 1 product-internal.
-      // Terminal stages (hitl, merged: role/configKey null) fork off review
-      // with diagonal fork arrows instead of chaining linearly, so they no
-      // longer contribute a linear arrow to the main track (#9224).
+      // Linear \u2192 arrows = one before each post-triage stage (plan, implement,
+      // review). triage is the junction (no leading arrow), and terminal stages
+      // (hitl, merged: role/configKey null) fork off review with diagonal fork
+      // arrows instead of chaining linearly, so they no longer contribute a
+      // linear arrow to the main track (#9224).
       const terminalStages = PIPELINE_STAGES.filter(s => !s.role && !s.configKey)
-      const mainTrackArrows =
-        PIPELINE_STAGES.filter(s => s.track !== 'product').length - 1 - terminalStages.length
-      const productTrackArrows = Math.max(0, PIPELINE_STAGES.filter(s => s.track === 'product').length - 1)
-      expect(arrows.length).toBe(mainTrackArrows + productTrackArrows)
+      const mainTrackArrows = PIPELINE_STAGES.length - 1 - terminalStages.length
+      expect(arrows.length).toBe(mainTrackArrows)
     })
 
     it('shows abbreviated stage labels in each session pill', () => {
@@ -312,6 +309,25 @@ describe('Header component', () => {
         const pill = screen.getByTestId(`session-stage-${stage.key}`)
         expect(pill.style.borderColor).toBe(stage.color)
       })
+    })
+
+    it('renders the shared terminal fork with hitl and merged as parallel arms', () => {
+      // hitl/merged fork off REVIEW (never both) via the shared TerminalFork —
+      // the same topology StreamView's flow-terminal-fork renders (#9564).
+      render(<Header {...defaultProps} />)
+      const fork = screen.getByTestId('review-terminal-fork')
+      expect(fork).toBeInTheDocument()
+      expect(fork).toContainElement(screen.getByTestId('session-stage-hitl'))
+      expect(fork).toContainElement(screen.getByTestId('session-stage-merged'))
+    })
+
+    it('left-aligns the terminal fork arms so the branch arrows form a column', () => {
+      // pipelineFork previously centered each [arrow][label] row (alignItems:
+      // 'center'), which left-shifts the wider "Needs Human" row further than
+      // the narrower "Merged" row, misaligning the ↗/↘ glyphs (#10226).
+      render(<Header {...defaultProps} />)
+      const fork = screen.getByTestId('review-terminal-fork')
+      expect(fork.style.alignItems).toBe('flex-start')
     })
   })
 

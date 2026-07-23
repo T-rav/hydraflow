@@ -1,8 +1,9 @@
 # ADR-0012: Epic Merge Coordination Architecture
 
 **Status:** Accepted
-**Enforced by:** tests/test_epic_merge_coordination.py
 **Date:** 2026-03-01
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_epic_merge_coordination.py
 
 ## Context
 
@@ -183,5 +184,5 @@ an epic body directive parsed during registration.
 - `src/post_merge_handler.py` (`handle_approved`, `_should_defer_merge` — merge interception)
 - `src/epic.py` (`EpicManager.on_child_approved`, `_handle_bundled_ready`, `_handle_ordered_ready`, `_get_merge_order`)
 - `src/models.py` (`EpicState` — model to extend)
-- `src/review_phase.py:_handle_approved_merge` — review-to-merge flow
+- `src/review_phase/_phase.py:_handle_approved_merge` — review-to-merge flow
 - `src/epic_monitor_loop.py` (stale epic detection — relevant for held bundles)

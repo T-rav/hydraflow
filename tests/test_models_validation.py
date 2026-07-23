@@ -366,8 +366,6 @@ class TestPipelineStageEnum:
         "member, expected",
         [
             (PipelineStage.TRIAGE, "triage"),
-            (PipelineStage.DISCOVER, "discover"),
-            (PipelineStage.SHAPE, "shape"),
             (PipelineStage.PLAN, "plan"),
             (PipelineStage.IMPLEMENT, "implement"),
             (PipelineStage.REVIEW, "review"),
@@ -379,7 +377,8 @@ class TestPipelineStageEnum:
         assert member == expected
 
     def test_member_count(self) -> None:
-        assert len(PipelineStage) == 7
+        # ADR-0107: DISCOVER / SHAPE removed — Triage → Plan directly.
+        assert len(PipelineStage) == 5
 
 
 class TestStageStatusEnum:

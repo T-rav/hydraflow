@@ -5,177 +5,362 @@
 ```mermaid
 graph LR
   subgraph builder
-    AgentRunner["AgentRunner<br/><i>runner</i>"]
-    ReportIssueLoop["ReportIssueLoop<br/><i>loop</i>"]
-    Task["Task<br/><i>entity</i>"]
+    agentrunner["AgentRunner<br/><i>runner</i>"]
+    reportissueloop["ReportIssueLoop<br/><i>loop</i>"]
+    task["Task<br/><i>entity</i>"]
   end
   subgraph caretaker
-    ADRCouncilReviewer["ADRCouncilReviewer<br/><i>service</i>"]
-    ADRReviewerLoop["ADRReviewerLoop<br/><i>loop</i>"]
-    AdrTouchpointAuditorLoop["AdrTouchpointAuditorLoop<br/><i>loop</i>"]
-    CIMonitorLoop["CIMonitorLoop<br/><i>loop</i>"]
-    ContractRefreshLoop["ContractRefreshLoop<br/><i>loop</i>"]
-    CorpusLearningLoop["CorpusLearningLoop<br/><i>loop</i>"]
-    DependabotMergeLoop["DependabotMergeLoop<br/><i>loop</i>"]
-    DiagnosticLoop["DiagnosticLoop<br/><i>loop</i>"]
-    DiagramLoop["DiagramLoop<br/><i>loop</i>"]
-    EdgeProposerLoop["EdgeProposerLoop<br/><i>loop</i>"]
-    EntryEvidenceLoop["EntryEvidenceLoop<br/><i>loop</i>"]
-    FakeCoverageAuditorLoop["FakeCoverageAuditorLoop<br/><i>loop</i>"]
-    FlakeTrackerLoop["FlakeTrackerLoop<br/><i>loop</i>"]
-    GitHubCacheLoop["GitHubCacheLoop<br/><i>loop</i>"]
-    GitHubCacheLoop["GitHubCacheLoop<br/><i>loop</i>"]
-    LiveCorpusReplayLoop["LiveCorpusReplayLoop<br/><i>loop</i>"]
-    MergeStateWatcherLoop["MergeStateWatcherLoop<br/><i>loop</i>"]
-    PricingRefreshLoop["PricingRefreshLoop<br/><i>loop</i>"]
-    PRUnstickerLoop["PRUnstickerLoop<br/><i>loop</i>"]
-    RCBudgetLoop["RCBudgetLoop<br/><i>loop</i>"]
-    SentryLoop["SentryLoop<br/><i>loop</i>"]
-    SkillPromptEvalLoop["SkillPromptEvalLoop<br/><i>loop</i>"]
-    StaleIssueGCLoop["StaleIssueGCLoop<br/><i>loop</i>"]
-    TermPrunerLoop["TermPrunerLoop<br/><i>loop</i>"]
-    WikiRotDetectorLoop["WikiRotDetectorLoop<br/><i>loop</i>"]
-    WorkspaceGCLoop["WorkspaceGCLoop<br/><i>loop</i>"]
+    adrcouncilreviewer["ADRCouncilReviewer<br/><i>service</i>"]
+    adrprevalidator["ADRPreValidator<br/><i>service</i>"]
+    adrreviewerloop["ADRReviewerLoop<br/><i>loop</i>"]
+    adrtouchpointauditorloop["AdrTouchpointAuditorLoop<br/><i>loop</i>"]
+    cimonitorloop["CIMonitorLoop<br/><i>loop</i>"]
+    contractrefreshloop["ContractRefreshLoop<br/><i>loop</i>"]
+    corpuslearningloop["CorpusLearningLoop<br/><i>loop</i>"]
+    dependabotmergeloop["DependabotMergeLoop<br/><i>loop</i>"]
+    diagnosticloop["DiagnosticLoop<br/><i>loop</i>"]
+    diagramloop["DiagramLoop<br/><i>loop</i>"]
+    edgeproposerloop["EdgeProposerLoop<br/><i>loop</i>"]
+    entryevidenceloop["EntryEvidenceLoop<br/><i>loop</i>"]
+    escalationreconciler["EscalationReconciler<br/><i>service</i>"]
+    fakecoverageauditorloop["FakeCoverageAuditorLoop<br/><i>loop</i>"]
+    fitnesscontext["FitnessContext<br/><i>value_object</i>"]
+    fitnessscorecardloop["FitnessScorecardLoop<br/><i>loop</i>"]
+    flaketrackerloop["FlakeTrackerLoop<br/><i>loop</i>"]
+    githubcacheloop["GitHubCacheLoop<br/><i>loop</i>"]
+    livecorpusreplayloop["LiveCorpusReplayLoop<br/><i>loop</i>"]
+    loopfitness["LoopFitness<br/><i>value_object</i>"]
+    mergestatewatcherloop["MergeStateWatcherLoop<br/><i>loop</i>"]
+    pricingrefreshloop["PricingRefreshLoop<br/><i>loop</i>"]
+    prunstickerloop["PRUnstickerLoop<br/><i>loop</i>"]
+    rcbudgetloop["RCBudgetLoop<br/><i>loop</i>"]
+    sentryloop["SentryLoop<br/><i>loop</i>"]
+    skillpromptevalloop["SkillPromptEvalLoop<br/><i>loop</i>"]
+    staleissuegcloop["StaleIssueGCLoop<br/><i>loop</i>"]
+    termprunerloop["TermPrunerLoop<br/><i>loop</i>"]
+    wikirotdetectorloop["WikiRotDetectorLoop<br/><i>loop</i>"]
+    workspacegcloop["WorkspaceGCLoop<br/><i>loop</i>"]
   end
   subgraph shared-kernel
-    AgentPort["AgentPort<br/><i>port</i>"]
-    BaseBackgroundLoop["BaseBackgroundLoop<br/><i>loop</i>"]
-    BotPRPort["BotPRPort<br/><i>port</i>"]
-    EventBus["EventBus<br/><i>service</i>"]
-    HydraFlowConfig["HydraFlowConfig<br/><i>aggregate</i>"]
-    IssueFetcherPort["IssueFetcherPort<br/><i>port</i>"]
-    IssueStorePort["IssueStorePort<br/><i>port</i>"]
-    ObservabilityPort["ObservabilityPort<br/><i>port</i>"]
-    PRPort["PRPort<br/><i>port</i>"]
-    RepoWikiStore["RepoWikiStore<br/><i>service</i>"]
-    ReviewInsightStorePort["ReviewInsightStorePort<br/><i>port</i>"]
-    RouteBackCounterPort["RouteBackCounterPort<br/><i>port</i>"]
-    StateTracker["StateTracker<br/><i>service</i>"]
-    WorkspacePort["WorkspacePort<br/><i>port</i>"]
+    actuator["Actuator<br/><i>control_role</i>"]
+    adrindex["ADRIndex<br/><i>service</i>"]
+    agentport["AgentPort<br/><i>port</i>"]
+    basebackgroundloop["BaseBackgroundLoop<br/><i>loop</i>"]
+    botprport["BotPRPort<br/><i>port</i>"]
+    controller["Controller<br/><i>control_role</i>"]
+    credentials["Credentials<br/><i>value_object</i>"]
+    dedupstore["DedupStore<br/><i>service</i>"]
+    dimensionbaseline["DimensionBaseline<br/><i>control_role</i>"]
+    disturbancedampenerloop["DisturbanceDampenerLoop<br/><i>loop</i>"]
+    error["Error<br/><i>control_role</i>"]
+    eventbus["EventBus<br/><i>service</i>"]
+    governor["Governor<br/><i>control_role</i>"]
+    humansteeringloop["HumanSteeringLoop<br/><i>control_role</i>"]
+    hydraflowconfig["HydraFlowConfig<br/><i>aggregate</i>"]
+    issuefetcherport["IssueFetcherPort<br/><i>port</i>"]
+    issuestoreport["IssueStorePort<br/><i>port</i>"]
+    observabilityport["ObservabilityPort<br/><i>port</i>"]
+    plant["Plant<br/><i>control_role</i>"]
+    prmanager["PRManager<br/><i>adapter</i>"]
+    prport["PRPort<br/><i>port</i>"]
+    repowikistore["RepoWikiStore<br/><i>service</i>"]
+    reviewinsightstoreport["ReviewInsightStorePort<br/><i>port</i>"]
+    routebackcounterport["RouteBackCounterPort<br/><i>port</i>"]
+    sensor["Sensor<br/><i>control_role</i>"]
+    set_point["Set-point<br/><i>control_role</i>"]
+    statetracker["StateTracker<br/><i>service</i>"]
+    steeringchannel["SteeringChannel<br/><i>control_role</i>"]
+    steeringstate["SteeringState<br/><i>control_role</i>"]
+    subprocessrunner["SubprocessRunner<br/><i>port</i>"]
+    tribalwikistore["TribalWikiStore<br/><i>service</i>"]
+    violationdetector["ViolationDetector<br/><i>control_role</i>"]
+    workspaceport["WorkspacePort<br/><i>port</i>"]
   end
-  ADRCouncilReviewer -->|depends_on| EventBus
-  ADRCouncilReviewer -->|depends_on| HydraFlowConfig
-  ADRReviewerLoop -->|depends_on| HydraFlowConfig
-  ADRReviewerLoop -->|depends_on| BaseBackgroundLoop
-  ADRReviewerLoop -->|implements| BaseBackgroundLoop
-  ADRReviewerLoop -->|depends_on| ADRCouncilReviewer
-  AdrTouchpointAuditorLoop -->|depends_on| BaseBackgroundLoop
-  AdrTouchpointAuditorLoop -->|depends_on| HydraFlowConfig
-  AdrTouchpointAuditorLoop -->|depends_on| StateTracker
-  AdrTouchpointAuditorLoop -->|implements| BaseBackgroundLoop
-  AgentPort -->|depends_on| Task
-  AgentRunner -->|depends_on| PRPort
-  AgentRunner -->|depends_on| WorkspacePort
-  AgentRunner -->|depends_on| IssueStorePort
-  AgentRunner -->|depends_on| HydraFlowConfig
-  AgentRunner -->|depends_on| RepoWikiStore
-  AgentRunner -->|depends_on| Task
-  AgentRunner -->|depends_on| EventBus
-  BaseBackgroundLoop -->|depends_on| EventBus
-  BaseBackgroundLoop -->|depends_on| HydraFlowConfig
-  BotPRPort -->|depends_on| HydraFlowConfig
-  BotPRPort -->|depends_on| BaseBackgroundLoop
-  CIMonitorLoop -->|depends_on| HydraFlowConfig
-  CIMonitorLoop -->|depends_on| BaseBackgroundLoop
-  CIMonitorLoop -->|depends_on| PRPort
-  CIMonitorLoop -->|implements| BaseBackgroundLoop
-  ContractRefreshLoop -->|depends_on| BaseBackgroundLoop
-  ContractRefreshLoop -->|depends_on| HydraFlowConfig
-  ContractRefreshLoop -->|depends_on| StateTracker
-  ContractRefreshLoop -->|implements| BaseBackgroundLoop
-  CorpusLearningLoop -->|depends_on| BaseBackgroundLoop
-  CorpusLearningLoop -->|depends_on| HydraFlowConfig
-  CorpusLearningLoop -->|depends_on| StateTracker
-  CorpusLearningLoop -->|implements| BaseBackgroundLoop
-  DependabotMergeLoop -->|depends_on| HydraFlowConfig
-  DependabotMergeLoop -->|depends_on| BaseBackgroundLoop
-  DependabotMergeLoop -->|depends_on| StateTracker
-  DependabotMergeLoop -->|depends_on| PRPort
-  DependabotMergeLoop -->|implements| BaseBackgroundLoop
-  DiagnosticLoop -->|depends_on| BaseBackgroundLoop
-  DiagnosticLoop -->|depends_on| PRPort
-  DiagnosticLoop -->|depends_on| HydraFlowConfig
-  DiagnosticLoop -->|depends_on| StateTracker
-  DiagnosticLoop -->|implements| BaseBackgroundLoop
-  DiagramLoop -->|depends_on| BaseBackgroundLoop
-  DiagramLoop -->|depends_on| HydraFlowConfig
-  DiagramLoop -->|implements| BaseBackgroundLoop
-  EdgeProposerLoop -->|depends_on| BaseBackgroundLoop
-  EdgeProposerLoop -->|depends_on| BotPRPort
-  EdgeProposerLoop -->|depends_on| HydraFlowConfig
-  EdgeProposerLoop -->|implements| BaseBackgroundLoop
-  EntryEvidenceLoop -->|depends_on| BaseBackgroundLoop
-  EntryEvidenceLoop -->|depends_on| BotPRPort
-  EntryEvidenceLoop -->|depends_on| RepoWikiStore
-  EntryEvidenceLoop -->|depends_on| HydraFlowConfig
-  EntryEvidenceLoop -->|implements| BaseBackgroundLoop
-  FakeCoverageAuditorLoop -->|depends_on| BaseBackgroundLoop
-  FakeCoverageAuditorLoop -->|depends_on| HydraFlowConfig
-  FakeCoverageAuditorLoop -->|depends_on| StateTracker
-  FakeCoverageAuditorLoop -->|implements| BaseBackgroundLoop
-  FlakeTrackerLoop -->|depends_on| HydraFlowConfig
-  FlakeTrackerLoop -->|depends_on| BaseBackgroundLoop
-  FlakeTrackerLoop -->|depends_on| StateTracker
-  FlakeTrackerLoop -->|implements| BaseBackgroundLoop
-  GitHubCacheLoop -->|depends_on| BaseBackgroundLoop
-  GitHubCacheLoop -->|depends_on| HydraFlowConfig
-  GitHubCacheLoop -->|implements| BaseBackgroundLoop
-  IssueFetcherPort -->|depends_on| IssueStorePort
-  IssueFetcherPort -->|depends_on| Task
-  IssueStorePort -->|depends_on| Task
-  LiveCorpusReplayLoop -->|depends_on| HydraFlowConfig
-  LiveCorpusReplayLoop -->|depends_on| BaseBackgroundLoop
-  LiveCorpusReplayLoop -->|depends_on| StateTracker
-  LiveCorpusReplayLoop -->|implements| BaseBackgroundLoop
-  MergeStateWatcherLoop -->|depends_on| HydraFlowConfig
-  MergeStateWatcherLoop -->|depends_on| BaseBackgroundLoop
-  MergeStateWatcherLoop -->|depends_on| PRPort
-  MergeStateWatcherLoop -->|implements| BaseBackgroundLoop
-  ObservabilityPort -->|depends_on| Task
-  PricingRefreshLoop -->|depends_on| BaseBackgroundLoop
-  PricingRefreshLoop -->|depends_on| HydraFlowConfig
-  PricingRefreshLoop -->|implements| BaseBackgroundLoop
-  PRPort -->|depends_on| Task
-  PRUnstickerLoop -->|depends_on| HydraFlowConfig
-  PRUnstickerLoop -->|depends_on| BaseBackgroundLoop
-  PRUnstickerLoop -->|depends_on| PRPort
-  PRUnstickerLoop -->|implements| BaseBackgroundLoop
-  RCBudgetLoop -->|depends_on| BaseBackgroundLoop
-  RCBudgetLoop -->|depends_on| HydraFlowConfig
-  RCBudgetLoop -->|depends_on| StateTracker
-  RCBudgetLoop -->|implements| BaseBackgroundLoop
-  ReportIssueLoop -->|depends_on| BaseBackgroundLoop
-  ReportIssueLoop -->|depends_on| HydraFlowConfig
-  ReportIssueLoop -->|depends_on| StateTracker
-  ReportIssueLoop -->|implements| BaseBackgroundLoop
-  ReviewInsightStorePort -->|depends_on| Task
-  RouteBackCounterPort -->|depends_on| PRPort
-  SentryLoop -->|depends_on| BaseBackgroundLoop
-  SentryLoop -->|depends_on| HydraFlowConfig
-  SentryLoop -->|depends_on| StateTracker
-  SentryLoop -->|implements| BaseBackgroundLoop
-  SkillPromptEvalLoop -->|depends_on| BaseBackgroundLoop
-  SkillPromptEvalLoop -->|depends_on| HydraFlowConfig
-  SkillPromptEvalLoop -->|depends_on| StateTracker
-  SkillPromptEvalLoop -->|implements| BaseBackgroundLoop
-  StaleIssueGCLoop -->|depends_on| HydraFlowConfig
-  StaleIssueGCLoop -->|depends_on| BaseBackgroundLoop
-  StaleIssueGCLoop -->|depends_on| PRPort
-  StaleIssueGCLoop -->|implements| BaseBackgroundLoop
-  TermPrunerLoop -->|depends_on| HydraFlowConfig
-  TermPrunerLoop -->|depends_on| BaseBackgroundLoop
-  TermPrunerLoop -->|depends_on| BotPRPort
-  TermPrunerLoop -->|implements| BaseBackgroundLoop
-  WikiRotDetectorLoop -->|depends_on| BaseBackgroundLoop
-  WikiRotDetectorLoop -->|depends_on| RepoWikiStore
-  WikiRotDetectorLoop -->|depends_on| HydraFlowConfig
-  WikiRotDetectorLoop -->|depends_on| StateTracker
-  WikiRotDetectorLoop -->|implements| BaseBackgroundLoop
-  WorkspaceGCLoop -->|depends_on| HydraFlowConfig
-  WorkspaceGCLoop -->|depends_on| BaseBackgroundLoop
-  WorkspaceGCLoop -->|depends_on| StateTracker
-  WorkspaceGCLoop -->|depends_on| WorkspacePort
-  WorkspaceGCLoop -->|depends_on| PRPort
-  WorkspaceGCLoop -->|implements| BaseBackgroundLoop
-  WorkspacePort -->|depends_on| Task
+  actuator -->|depends_on| credentials
+  actuator -->|depends_on| adrindex
+  actuator -->|depends_on| eventbus
+  actuator -->|depends_on| repowikistore
+  actuator -->|depends_on| hydraflowconfig
+  actuator -->|depends_on| tribalwikistore
+  actuator -->|depends_on| subprocessrunner
+  adrcouncilreviewer -->|depends_on| eventbus
+  adrcouncilreviewer -->|depends_on| hydraflowconfig
+  adrcouncilreviewer -->|depends_on| credentials
+  adrcouncilreviewer -->|depends_on| adrprevalidator
+  adrcouncilreviewer -->|depends_on| subprocessrunner
+  adrcouncilreviewer -->|depends_on| prmanager
+  adrcouncilreviewer -->|depends_on| dedupstore
+  adrreviewerloop -->|depends_on| hydraflowconfig
+  adrreviewerloop -->|depends_on| basebackgroundloop
+  adrreviewerloop -->|implements| basebackgroundloop
+  adrreviewerloop -->|depends_on| adrcouncilreviewer
+  adrreviewerloop -->|depends_on| governor
+  adrtouchpointauditorloop -->|depends_on| basebackgroundloop
+  adrtouchpointauditorloop -->|depends_on| hydraflowconfig
+  adrtouchpointauditorloop -->|depends_on| statetracker
+  adrtouchpointauditorloop -->|implements| basebackgroundloop
+  adrtouchpointauditorloop -->|depends_on| adrindex
+  adrtouchpointauditorloop -->|depends_on| governor
+  adrtouchpointauditorloop -->|depends_on| escalationreconciler
+  adrtouchpointauditorloop -->|depends_on| prmanager
+  adrtouchpointauditorloop -->|depends_on| dedupstore
+  agentport -->|depends_on| task
+  agentrunner -->|depends_on| prport
+  agentrunner -->|depends_on| workspaceport
+  agentrunner -->|depends_on| issuestoreport
+  agentrunner -->|depends_on| hydraflowconfig
+  agentrunner -->|depends_on| repowikistore
+  agentrunner -->|depends_on| task
+  agentrunner -->|depends_on| eventbus
+  agentrunner -->|depends_on| credentials
+  agentrunner -->|depends_on| actuator
+  agentrunner -->|implements| actuator
+  agentrunner -->|depends_on| tribalwikistore
+  agentrunner -->|depends_on| subprocessrunner
+  basebackgroundloop -->|depends_on| eventbus
+  basebackgroundloop -->|depends_on| hydraflowconfig
+  basebackgroundloop -->|depends_on| fitnesscontext
+  basebackgroundloop -->|depends_on| loopfitness
+  botprport -->|depends_on| hydraflowconfig
+  botprport -->|depends_on| basebackgroundloop
+  botprport -->|depends_on| governor
+  botprport -->|depends_on| fitnesscontext
+  botprport -->|depends_on| loopfitness
+  botprport -->|depends_on| dedupstore
+  cimonitorloop -->|depends_on| hydraflowconfig
+  cimonitorloop -->|depends_on| basebackgroundloop
+  cimonitorloop -->|depends_on| prport
+  cimonitorloop -->|implements| basebackgroundloop
+  cimonitorloop -->|depends_on| governor
+  contractrefreshloop -->|depends_on| basebackgroundloop
+  contractrefreshloop -->|depends_on| hydraflowconfig
+  contractrefreshloop -->|depends_on| statetracker
+  contractrefreshloop -->|implements| basebackgroundloop
+  contractrefreshloop -->|depends_on| governor
+  contractrefreshloop -->|depends_on| prmanager
+  contractrefreshloop -->|depends_on| dedupstore
+  controller -->|depends_on| eventbus
+  controller -->|depends_on| hydraflowconfig
+  controller -->|depends_on| task
+  corpuslearningloop -->|depends_on| basebackgroundloop
+  corpuslearningloop -->|depends_on| hydraflowconfig
+  corpuslearningloop -->|depends_on| statetracker
+  corpuslearningloop -->|implements| basebackgroundloop
+  corpuslearningloop -->|depends_on| governor
+  corpuslearningloop -->|depends_on| prmanager
+  corpuslearningloop -->|depends_on| dedupstore
+  dedupstore -->|depends_on| adrcouncilreviewer
+  dedupstore -->|depends_on| adrtouchpointauditorloop
+  dedupstore -->|depends_on| contractrefreshloop
+  dedupstore -->|depends_on| corpuslearningloop
+  dedupstore -->|depends_on| dependabotmergeloop
+  dedupstore -->|depends_on| diagnosticloop
+  dedupstore -->|depends_on| entryevidenceloop
+  dedupstore -->|depends_on| fakecoverageauditorloop
+  dedupstore -->|depends_on| flaketrackerloop
+  dedupstore -->|depends_on| livecorpusreplayloop
+  dedupstore -->|depends_on| mergestatewatcherloop
+  dedupstore -->|depends_on| rcbudgetloop
+  dedupstore -->|depends_on| repowikistore
+  dedupstore -->|depends_on| reportissueloop
+  dedupstore -->|depends_on| sentryloop
+  dedupstore -->|depends_on| skillpromptevalloop
+  dedupstore -->|depends_on| botprport
+  dedupstore -->|depends_on| wikirotdetectorloop
+  dependabotmergeloop -->|depends_on| hydraflowconfig
+  dependabotmergeloop -->|depends_on| basebackgroundloop
+  dependabotmergeloop -->|depends_on| statetracker
+  dependabotmergeloop -->|depends_on| prport
+  dependabotmergeloop -->|implements| basebackgroundloop
+  dependabotmergeloop -->|depends_on| governor
+  dependabotmergeloop -->|depends_on| dedupstore
+  diagnosticloop -->|depends_on| basebackgroundloop
+  diagnosticloop -->|depends_on| prport
+  diagnosticloop -->|depends_on| hydraflowconfig
+  diagnosticloop -->|depends_on| statetracker
+  diagnosticloop -->|implements| basebackgroundloop
+  diagnosticloop -->|depends_on| governor
+  diagnosticloop -->|depends_on| dedupstore
+  diagramloop -->|depends_on| basebackgroundloop
+  diagramloop -->|depends_on| hydraflowconfig
+  diagramloop -->|implements| basebackgroundloop
+  diagramloop -->|depends_on| governor
+  dimensionbaseline -->|depends_on| violationdetector
+  disturbancedampenerloop -->|depends_on| governor
+  disturbancedampenerloop -->|depends_on| basebackgroundloop
+  disturbancedampenerloop -->|depends_on| dimensionbaseline
+  disturbancedampenerloop -->|depends_on| fitnesscontext
+  disturbancedampenerloop -->|depends_on| loopfitness
+  disturbancedampenerloop -->|implements| basebackgroundloop
+  edgeproposerloop -->|depends_on| basebackgroundloop
+  edgeproposerloop -->|depends_on| botprport
+  edgeproposerloop -->|depends_on| hydraflowconfig
+  edgeproposerloop -->|implements| basebackgroundloop
+  edgeproposerloop -->|depends_on| governor
+  edgeproposerloop -->|depends_on| fitnesscontext
+  edgeproposerloop -->|depends_on| loopfitness
+  entryevidenceloop -->|depends_on| basebackgroundloop
+  entryevidenceloop -->|depends_on| botprport
+  entryevidenceloop -->|depends_on| repowikistore
+  entryevidenceloop -->|depends_on| hydraflowconfig
+  entryevidenceloop -->|implements| basebackgroundloop
+  entryevidenceloop -->|depends_on| governor
+  entryevidenceloop -->|depends_on| dedupstore
+  error -->|depends_on| hydraflowconfig
+  error -->|depends_on| observabilityport
+  error -->|depends_on| dedupstore
+  escalationreconciler -->|depends_on| adrtouchpointauditorloop
+  escalationreconciler -->|depends_on| fakecoverageauditorloop
+  escalationreconciler -->|depends_on| flaketrackerloop
+  escalationreconciler -->|depends_on| rcbudgetloop
+  escalationreconciler -->|depends_on| skillpromptevalloop
+  escalationreconciler -->|depends_on| wikirotdetectorloop
+  escalationreconciler -->|depends_on| prport
+  escalationreconciler -->|depends_on| dedupstore
+  fakecoverageauditorloop -->|depends_on| basebackgroundloop
+  fakecoverageauditorloop -->|depends_on| hydraflowconfig
+  fakecoverageauditorloop -->|depends_on| statetracker
+  fakecoverageauditorloop -->|implements| basebackgroundloop
+  fakecoverageauditorloop -->|depends_on| governor
+  fakecoverageauditorloop -->|depends_on| escalationreconciler
+  fakecoverageauditorloop -->|depends_on| prmanager
+  fakecoverageauditorloop -->|depends_on| dedupstore
+  fitnessscorecardloop -->|depends_on| hydraflowconfig
+  fitnessscorecardloop -->|depends_on| governor
+  fitnessscorecardloop -->|depends_on| basebackgroundloop
+  fitnessscorecardloop -->|depends_on| fitnesscontext
+  fitnessscorecardloop -->|depends_on| loopfitness
+  fitnessscorecardloop -->|implements| basebackgroundloop
+  flaketrackerloop -->|depends_on| hydraflowconfig
+  flaketrackerloop -->|depends_on| basebackgroundloop
+  flaketrackerloop -->|depends_on| statetracker
+  flaketrackerloop -->|implements| basebackgroundloop
+  flaketrackerloop -->|depends_on| governor
+  flaketrackerloop -->|depends_on| escalationreconciler
+  flaketrackerloop -->|depends_on| prmanager
+  flaketrackerloop -->|depends_on| dedupstore
+  githubcacheloop -->|depends_on| basebackgroundloop
+  githubcacheloop -->|depends_on| hydraflowconfig
+  githubcacheloop -->|implements| basebackgroundloop
+  githubcacheloop -->|depends_on| governor
+  githubcacheloop -->|depends_on| prmanager
+  governor -->|depends_on| eventbus
+  governor -->|depends_on| hydraflowconfig
+  governor -->|depends_on| fitnesscontext
+  governor -->|depends_on| loopfitness
+  humansteeringloop -->|depends_on| fitnesscontext
+  humansteeringloop -->|depends_on| governor
+  humansteeringloop -->|depends_on| basebackgroundloop
+  humansteeringloop -->|depends_on| loopfitness
+  humansteeringloop -->|depends_on| steeringstate
+  humansteeringloop -->|implements| basebackgroundloop
+  issuefetcherport -->|depends_on| issuestoreport
+  issuefetcherport -->|depends_on| task
+  issuestoreport -->|depends_on| task
+  livecorpusreplayloop -->|depends_on| hydraflowconfig
+  livecorpusreplayloop -->|depends_on| basebackgroundloop
+  livecorpusreplayloop -->|depends_on| statetracker
+  livecorpusreplayloop -->|implements| basebackgroundloop
+  livecorpusreplayloop -->|depends_on| governor
+  livecorpusreplayloop -->|depends_on| prmanager
+  livecorpusreplayloop -->|depends_on| dedupstore
+  mergestatewatcherloop -->|depends_on| hydraflowconfig
+  mergestatewatcherloop -->|depends_on| basebackgroundloop
+  mergestatewatcherloop -->|depends_on| prport
+  mergestatewatcherloop -->|implements| basebackgroundloop
+  mergestatewatcherloop -->|depends_on| governor
+  mergestatewatcherloop -->|depends_on| dedupstore
+  observabilityport -->|depends_on| task
+  pricingrefreshloop -->|depends_on| basebackgroundloop
+  pricingrefreshloop -->|depends_on| hydraflowconfig
+  pricingrefreshloop -->|implements| basebackgroundloop
+  pricingrefreshloop -->|depends_on| governor
+  prmanager -->|depends_on| credentials
+  prmanager -->|depends_on| dedupstore
+  prmanager -->|depends_on| eventbus
+  prmanager -->|depends_on| hydraflowconfig
+  prport -->|depends_on| task
+  prunstickerloop -->|depends_on| hydraflowconfig
+  prunstickerloop -->|depends_on| basebackgroundloop
+  prunstickerloop -->|depends_on| prport
+  prunstickerloop -->|implements| basebackgroundloop
+  prunstickerloop -->|depends_on| governor
+  rcbudgetloop -->|depends_on| basebackgroundloop
+  rcbudgetloop -->|depends_on| hydraflowconfig
+  rcbudgetloop -->|depends_on| statetracker
+  rcbudgetloop -->|implements| basebackgroundloop
+  rcbudgetloop -->|depends_on| governor
+  rcbudgetloop -->|depends_on| escalationreconciler
+  rcbudgetloop -->|depends_on| prmanager
+  rcbudgetloop -->|depends_on| dedupstore
+  reportissueloop -->|depends_on| basebackgroundloop
+  reportissueloop -->|depends_on| hydraflowconfig
+  reportissueloop -->|depends_on| statetracker
+  reportissueloop -->|implements| basebackgroundloop
+  reportissueloop -->|depends_on| credentials
+  reportissueloop -->|depends_on| governor
+  reportissueloop -->|depends_on| subprocessrunner
+  reportissueloop -->|depends_on| prmanager
+  reportissueloop -->|depends_on| dedupstore
+  repowikistore -->|depends_on| dedupstore
+  reviewinsightstoreport -->|depends_on| task
+  routebackcounterport -->|depends_on| prport
+  sentryloop -->|depends_on| basebackgroundloop
+  sentryloop -->|depends_on| hydraflowconfig
+  sentryloop -->|depends_on| statetracker
+  sentryloop -->|implements| basebackgroundloop
+  sentryloop -->|depends_on| credentials
+  sentryloop -->|depends_on| controller
+  sentryloop -->|depends_on| governor
+  sentryloop -->|depends_on| subprocessrunner
+  sentryloop -->|depends_on| prmanager
+  sentryloop -->|depends_on| dedupstore
+  set_point -->|depends_on| eventbus
+  set_point -->|depends_on| hydraflowconfig
+  set_point -->|depends_on| task
+  skillpromptevalloop -->|depends_on| basebackgroundloop
+  skillpromptevalloop -->|depends_on| hydraflowconfig
+  skillpromptevalloop -->|depends_on| statetracker
+  skillpromptevalloop -->|implements| basebackgroundloop
+  skillpromptevalloop -->|depends_on| governor
+  skillpromptevalloop -->|depends_on| escalationreconciler
+  skillpromptevalloop -->|depends_on| prmanager
+  skillpromptevalloop -->|depends_on| dedupstore
+  staleissuegcloop -->|depends_on| hydraflowconfig
+  staleissuegcloop -->|depends_on| basebackgroundloop
+  staleissuegcloop -->|depends_on| prport
+  staleissuegcloop -->|implements| basebackgroundloop
+  staleissuegcloop -->|depends_on| governor
+  staleissuegcloop -->|depends_on| statetracker
+  statetracker -->|depends_on| plant
+  steeringchannel -->|depends_on| fitnesscontext
+  steeringchannel -->|depends_on| governor
+  steeringchannel -->|depends_on| basebackgroundloop
+  steeringchannel -->|depends_on| loopfitness
+  steeringchannel -->|depends_on| steeringstate
+  steeringchannel -->|implements| basebackgroundloop
+  termprunerloop -->|depends_on| hydraflowconfig
+  termprunerloop -->|depends_on| basebackgroundloop
+  termprunerloop -->|depends_on| botprport
+  termprunerloop -->|implements| basebackgroundloop
+  termprunerloop -->|depends_on| governor
+  tribalwikistore -->|depends_on| repowikistore
+  wikirotdetectorloop -->|depends_on| basebackgroundloop
+  wikirotdetectorloop -->|depends_on| repowikistore
+  wikirotdetectorloop -->|depends_on| hydraflowconfig
+  wikirotdetectorloop -->|depends_on| statetracker
+  wikirotdetectorloop -->|implements| basebackgroundloop
+  wikirotdetectorloop -->|depends_on| governor
+  wikirotdetectorloop -->|depends_on| escalationreconciler
+  wikirotdetectorloop -->|depends_on| prmanager
+  wikirotdetectorloop -->|depends_on| dedupstore
+  workspacegcloop -->|depends_on| hydraflowconfig
+  workspacegcloop -->|depends_on| basebackgroundloop
+  workspacegcloop -->|depends_on| statetracker
+  workspacegcloop -->|depends_on| workspaceport
+  workspacegcloop -->|depends_on| prport
+  workspacegcloop -->|implements| basebackgroundloop
+  workspacegcloop -->|depends_on| credentials
+  workspacegcloop -->|depends_on| governor
+  workspaceport -->|depends_on| task
 ```

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from dedup_store import DedupStore
+from loop_fitness import FitnessContext, LoopFitness
 from subprocess_util import AuthenticationError, CreditExhaustedError
 from ubiquitous_language import (
     Candidate,
@@ -58,6 +59,8 @@ class BotPRPort(Protocol):
         files: dict[str, str],
     ) -> int: ...
 
+    async def find_open_bot_pr(self, *, labels: list[str]) -> int | None: ...
+
 
 TERM_PROPOSER_PR_LABEL = "hydraflow-ul-proposed"
 """Label applied to bot-PRs opened by ``TermProposerLoop``.
@@ -65,6 +68,54 @@ TERM_PROPOSER_PR_LABEL = "hydraflow-ul-proposed"
 Public constant — imported by ``review_phase`` to skip routing such PRs through
 the agent pipeline (the LLM call inside this loop IS the work). See ADR-0054.
 """
+
+UL_BOT_PR_LABELS: tuple[str, ...] = (
+    "hydraflow-ul-proposed",
+    "hydraflow-ul-edges",
+    "hydraflow-ul-evidence",
+    "hydraflow-ul-deprecated",
+)
+"""Single-flight family: labels of every UL-graph bot-PR loop (#9893/#9890).
+
+The four UL generator loops all rewrite ``docs/wiki/terms``, so any two open
+UL PRs conflict with each other — the 2026-07-18 pile was seven duplicate
+edge-proposer PRs going DIRTY+HITL while the loop kept regenerating. Before
+opening, each loop calls :func:`skip_if_family_pr_open`; at most one UL-graph
+PR is in flight across the whole family. Literal strings to avoid import
+cycles (the sibling modules import from THIS module); the family/constant
+parity is pinned by ``tests/test_ul_single_flight.py``.
+"""
+
+
+async def skip_if_family_pr_open(
+    port: BotPRPort, *, worker_name: str
+) -> dict[str, object] | None:
+    """Return a ``skipped_open_pr`` status dict when a UL family PR is open.
+
+    Called by each UL loop AFTER it has computed proposals and immediately
+    BEFORE opening a PR — never on no-op ticks, so idle loops issue zero
+    queries. Returns ``None`` when the family is clear and the caller may
+    open. A port query failure returns ``None`` too (fail-open: identical to
+    the pre-guard behavior — a duplicate PR is recoverable, a starved loop
+    on a persistent query error is not).
+    """
+    try:
+        existing = await port.find_open_bot_pr(labels=list(UL_BOT_PR_LABELS))
+    except (RuntimeError, OSError, ValueError) as exc:
+        logger.warning(
+            "%s: single-flight query failed (%s) — proceeding unguarded",
+            worker_name,
+            exc,
+        )
+        return None
+    if existing is None:
+        return None
+    logger.info(
+        "%s: UL family PR #%d already open — single-flight skip (#9893)",
+        worker_name,
+        existing,
+    )
+    return {"status": "skipped_open_pr", "open_pr": existing, "opened_pr": False}
 
 
 async def open_proposer_pr(
@@ -159,6 +210,23 @@ class TermProposerLoop(BaseBackgroundLoop):
     def _get_default_interval(self) -> int:
         return self._config.term_proposer_interval
 
+    def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
+        from loop_fitness import (  # noqa: PLC0415
+            cadence_min_samples,
+            proposal_acceptance_fitness,
+        )
+
+        return proposal_acceptance_fitness(
+            ctx,
+            worker_name=self._worker_name,
+            label=TERM_PROPOSER_PR_LABEL,
+            min_samples=cadence_min_samples(
+                ctx,
+                interval_seconds=self._get_default_interval(),
+                configured_min=self._config.fitness_min_samples,
+            ),
+        )
+
     async def _do_work(self) -> dict[str, Any] | None:
         # Canonical operator UI kill-switch (ADR-0049).
         if not self._enabled_cb(self._worker_name):
@@ -229,6 +297,17 @@ class TermProposerLoop(BaseBackgroundLoop):
 
         opened_pr = False
         if validated:
+            skipped = await skip_if_family_pr_open(
+                self._pr_port, worker_name=_WORKER_NAME
+            )
+            if skipped is not None:
+                return {
+                    **skipped,
+                    "candidates": len(candidates),
+                    "drafted": drafted,
+                    "validated": len(validated),
+                    "dropped_drafts": dropped_drafts,
+                }
             run_id = secrets.token_hex(4)
             pr_number = await open_proposer_pr(
                 terms=validated,

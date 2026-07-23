@@ -116,6 +116,7 @@ def _get_all_override_fields() -> list[tuple[str, str]]:
         "_ENV_STR_OVERRIDES",
         "_ENV_FLOAT_OVERRIDES",
         "_ENV_FLOAT_RATIO_OVERRIDES",
+        "_ENV_OPT_INT_OVERRIDES",
     ]:
         pairs.extend(_parse_override_table(text, table))
     return pairs
@@ -140,6 +141,10 @@ class TestIntervalFieldsHaveBounds:
             "stale_issue_gc_interval": "stale_issue_gc",
             "ci_monitor_interval": "ci_monitor",
             "security_patch_interval": "security_patch",
+            # Secondary cadence knob on IssueRefinementLoop (#9957) — shares
+            # the loop's single dashboard-editable bounds entry rather than
+            # getting its own (there's one worker, not two).
+            "issue_refinement_full_sweep_interval": "issue_refinement",
         }
 
         missing = set()

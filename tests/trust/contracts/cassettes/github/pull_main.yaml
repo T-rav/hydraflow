@@ -1,0 +1,20 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# pull_main pulls latest main into the local repo. FIDELITY GAP: the
+# fake returns None (the real PRPort returns bool); with no git remote in
+# the sandbox it is a no-op, so the contract records the empty stdout.
+adapter: github
+interaction: pull_main
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: pull_main
+  args: []
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ''
+  stderr: ''
+normalizers: []
+baseline_only: true

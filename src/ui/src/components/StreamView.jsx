@@ -1,8 +1,10 @@
-import React, { useMemo, useCallback, useState } from 'react'
+import React, { useMemo, useCallback } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow, workerKey } from '../context/HydraFlowContext'
 import { StreamCard } from './StreamCard'
-import { PIPELINE_STAGES, PRODUCT_TRACK_KEYS, PULSE_ANIMATION } from '../constants'
+import { PIPELINE_STAGES, PULSE_ANIMATION } from '../constants'
+import { splitPipelineTracks } from '../utils/pipelineTracks'
+import { TerminalFork } from './PipelineFork'
 import { STAGE_KEYS } from '../hooks/useTimeline'
 import {
   sectionHeaderStyles,
@@ -25,13 +27,12 @@ const NO_ROLE_DOT_COLORS = {
   hitl: theme.red,
 }
 
-// Terminal end-states = pipeline stages with no processing role and no config
-// knob (hitl, merged). After REVIEW an issue forks to a human OR gets merged —
-// never both — so these render as parallel arms of a fork, not a linear chain.
-// Derived from PIPELINE_STAGES so adding/removing a terminal needs no edit here.
-const TERMINAL_STAGE_KEYS = new Set(
-  PIPELINE_STAGES.filter(s => !s.role && !s.configKey).map(s => s.key)
-)
+// Human-readable labels for the work-queue strategy badge (#10067).
+const QUEUE_STRATEGY_LABELS = {
+  weighted_mix: 'weighted',
+  priority: 'priority',
+  fifo: 'fifo',
+}
 
 function PendingIntentCard({ intent }) {
   return (
@@ -45,7 +46,7 @@ function PendingIntentCard({ intent }) {
   )
 }
 
-function PipelineFlow({ stageGroups }) {
+function PipelineFlow({ stageGroups, queueStrategy }) {
   const { mergedCount, failedCount } = useMemo(() => {
     const merged = stageGroups.find(g => g.stage.key === 'merged')?.issues.length || 0
     const failed = stageGroups.reduce(
@@ -54,12 +55,17 @@ function PipelineFlow({ stageGroups }) {
     return { mergedCount: merged, failedCount: failed }
   }, [stageGroups])
 
+  // #9863: a big backlog (67 queued in PLAN) rendered 67 dots in one
+  // non-wrapping row and blew out the strip. Cap the dots and show the
+  // remainder as a +N badge — the count survives, the layout does too.
+  const FLOW_DOT_CAP = 10
+
   const renderFlowStage = (group) => (
     <div style={styles.flowStage} key={group.stage.key}>
       <span style={flowLabelStyles[group.stage.key]}>{group.stage.label}</span>
       {group.issues.length > 0 && (
         <div style={styles.flowDots}>
-          {group.issues.map(issue => {
+          {group.issues.slice(0, FLOW_DOT_CAP).map(issue => {
             const isEpic = issue.isEpicChild || issue.epicNumber > 0
             const dotStyles = isEpic ? epicFlowDotStyleMap : regularFlowDotStyleMap
             const dotStyle =
@@ -79,61 +85,51 @@ function PipelineFlow({ stageGroups }) {
               </span>
             )
           })}
+          {group.issues.length > FLOW_DOT_CAP && (
+            <span
+              style={styles.flowDotOverflow}
+              title={`${group.issues.length - FLOW_DOT_CAP} more in ${group.stage.label}`}
+              data-testid={`flow-overflow-${group.stage.key}`}
+            >
+              +{group.issues.length - FLOW_DOT_CAP}
+            </span>
+          )}
         </div>
       )}
     </div>
   )
 
-  const mainGroups = stageGroups.filter(g => !PRODUCT_TRACK_KEYS.has(g.stage.key))
-  const productGroups = stageGroups.filter(g => PRODUCT_TRACK_KEYS.has(g.stage.key))
-  const triageGroup = mainGroups.find(g => g.stage.key === 'triage')
-  // Post-triage main-track stages, minus the terminal end-states (hitl, merged):
-  // those fork off REVIEW rather than chaining linearly after it.
-  const postTriageGroups = mainGroups.filter(
-    g => g.stage.key !== 'triage' && !TERMINAL_STAGE_KEYS.has(g.stage.key)
-  )
-  const terminalGroups = mainGroups.filter(g => TERMINAL_STAGE_KEYS.has(g.stage.key))
+  const { triage: triageGroup, postTriage: postTriageGroups, terminal: terminalGroups } =
+    splitPipelineTracks(stageGroups, g => g.stage.key)
+  const groupKey = g => g.stage.key
 
   return (
     <div style={styles.flowContainer} data-testid="pipeline-flow">
       <span style={styles.flowTitle}>Pipeline Flow</span>
+      {queueStrategy && (
+        <span
+          style={styles.queueStrategyBadge}
+          data-testid="queue-strategy-badge"
+          title={`work-queue strategy: ${queueStrategy} — the algorithm choosing which issue the factory works next`}
+        >
+          ⚡ {QUEUE_STRATEGY_LABELS[queueStrategy] || queueStrategy}
+        </span>
+      )}
       <div style={styles.flowConnector} />
       {triageGroup && renderFlowStage(triageGroup)}
-      {productGroups.length > 0 && (
-        <>
-          <div style={styles.flowFork}>
-            <div style={styles.flowForkTop}>
-              {productGroups.map((group, idx) => (
-                <React.Fragment key={group.stage.key}>
-                  {idx === 0 && <span style={styles.flowForkArrow}>↗</span>}
-                  {idx > 0 && <div style={styles.flowConnectorShort} />}
-                  {renderFlowStage(group)}
-                </React.Fragment>
-              ))}
-              <span style={styles.flowForkArrow}>↘</span>
-            </div>
-            <div style={styles.flowForkBottom}>
-              <span style={styles.flowForkDirect}>direct →</span>
-            </div>
-          </div>
-        </>
-      )}
-      {postTriageGroups.map((group, idx) => (
+      {postTriageGroups.map((group) => (
         <React.Fragment key={group.stage.key}>
           <div style={styles.flowConnector} />
           {renderFlowStage(group)}
         </React.Fragment>
       ))}
-      {terminalGroups.length > 0 && (
-        <div style={styles.flowFork} data-testid="flow-terminal-fork">
-          {terminalGroups.map((group, idx) => (
-            <div style={styles.flowForkTop} key={group.stage.key}>
-              <span style={styles.flowForkArrow}>{idx === 0 ? '↗' : '↘'}</span>
-              {renderFlowStage(group)}
-            </div>
-          ))}
-        </div>
-      )}
+      <TerminalFork
+        items={terminalGroups}
+        keyOf={groupKey}
+        renderItem={renderFlowStage}
+        styles={forkStyles}
+        testId="flow-terminal-fork"
+      />
       {(mergedCount > 0 || failedCount > 0) && (
         <span style={styles.flowSummary} data-testid="flow-summary">
           {mergedCount > 0 && <span style={flowSummaryMergedStyle}>{mergedCount} merged</span>}
@@ -164,8 +160,17 @@ function EpicContainer({ epicNumber, issues, children }) {
 }
 
 function StageSection({ stage, issues, workerCount, workerCap, queuedCount, intentMap, onRequestChanges, open, onToggle, enabled, dotColor, workers, prs }) {
-  const failedCount = issues.filter(i => i.overallStatus === 'failed').length
-  const hitlCount = issues.filter(i => i.overallStatus === 'hitl').length
+  const safeIssues = issues || []
+  const failedCount = safeIssues.filter(i => i.overallStatus === 'failed').length
+  const hitlCount = safeIssues.filter(i => i.overallStatus === 'hitl').length
+  // #9793: the header count and the expanded list previously came from two
+  // sources (orchestrator live counters vs the label-derived /api/pipeline
+  // snapshot) — "1 queued" could render zero queued rows. The count shown is
+  // now derived from the SAME rows the expansion renders; when the
+  // orchestrator is ahead of the snapshot the delta is shown honestly as
+  // "syncing" instead of a phantom row count.
+  const listQueuedCount = safeIssues.filter(i => i.overallStatus === 'queued').length
+  const syncingCount = Math.max(0, (queuedCount || 0) - listQueuedCount)
   const hasRole = !!stage.role
 
   return (
@@ -186,7 +191,10 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
         <span style={sectionCountStyles[stage.key]}>
           {hasRole ? (
             <>
-              <span>{queuedCount} queued</span>
+              <span data-testid={`stage-queued-${stage.key}`}>
+                {listQueuedCount} queued
+                {syncingCount > 0 && ` (+${syncingCount} syncing)`}
+              </span>
               {failedCount > 0 && <span style={styles.failedBadge}> · {failedCount} failed</span>}
               {hitlCount > 0 && <span style={styles.hitlBadge}> · {hitlCount} hitl</span>}
               <span>
@@ -196,7 +204,7 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
               </span>
             </>
           ) : (
-            <span>{issues.length} {NO_ROLE_COUNT_LABELS[stage.key] ?? 'merged'}</span>
+            <span>{safeIssues.length} {NO_ROLE_COUNT_LABELS[stage.key] ?? 'merged'}</span>
           )}
         </span>
         <span
@@ -208,7 +216,7 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
         // Group epic children by epicNumber, keep standalone separate
         const epicGroups = {}
         const standalone = []
-        for (const issue of issues) {
+        for (const issue of safeIssues) {
           if (issue.isEpicChild && issue.epicNumber > 0) {
             if (!epicGroups[issue.epicNumber]) epicGroups[issue.epicNumber] = []
             epicGroups[issue.epicNumber].push(issue)
@@ -302,6 +310,12 @@ export function toStreamIssue(pipeIssue, stageKey, prs) {
     epicNumber: pipeIssue.epic_number || 0,
     isEpicChild: pipeIssue.is_epic_child || false,
     repo: pipeIssue.repo || '',
+    // Work-queue visualisation (#10067): the P0/P1/P2 band and the position the
+    // active strategy would dispatch this issue in. dispatch_rank is present
+    // only on queued entries; default to a large sentinel so active/unranked
+    // items sort after ranked ones.
+    priority: pipeIssue.priority || 'none',
+    dispatchRank: pipeIssue.dispatch_rank ?? Number.MAX_SAFE_INTEGER,
   }
 }
 
@@ -336,140 +350,8 @@ export function findWorkerTranscript(workers, prs, stageKey, issueNumber, repo =
   return workers[key]?.transcript || []
 }
 
-function EpicChildRow({ child }) {
-  const dotColor = child.is_completed ? theme.green : child.is_failed ? theme.red : theme.textMuted
-  return (
-    <div style={epicPanelStyles.childRow}>
-      <span style={{ ...epicPanelStyles.childDot, background: dotColor }} />
-      <a
-        href={child.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        style={epicPanelStyles.childLink}
-      >
-        #{child.issue_number}
-      </a>
-      <span style={epicPanelStyles.childTitle}>{child.title || `Issue #${child.issue_number}`}</span>
-      {child.is_completed && <span style={epicPanelStyles.childBadgeDone}>done</span>}
-      {child.is_failed && <span style={epicPanelStyles.childBadgeFailed}>failed</span>}
-    </div>
-  )
-}
-
-function EpicRow({ epic, config }) {
-  const [expanded, setExpanded] = useState(false)
-  const [children, setChildren] = useState(null)
-  const [loading, setLoading] = useState(false)
-
-  const pct = epic.percent_complete || 0
-  const statusStyle = epicStatusStyles[epic.status] || epicStatusStyles.active
-  const repo = config?.repo || ''
-  const epicUrl = repo ? `https://github.com/${repo}/issues/${epic.epic_number}` : ''
-
-  const handleToggle = useCallback(async () => {
-    if (!expanded && children === null) {
-      setLoading(true)
-      try {
-        const res = await fetch(`/api/epics/${epic.epic_number}`)
-        if (res.ok) {
-          const detail = await res.json()
-          setChildren(detail.children || [])
-        }
-      } catch { /* ignore */ }
-      setLoading(false)
-    }
-    setExpanded(prev => !prev)
-  }, [expanded, children, epic.epic_number])
-
-  return (
-    <div style={epicPanelStyles.row}>
-      <div
-        style={epicPanelStyles.rowTop}
-        onClick={handleToggle}
-        role="button"
-        tabIndex={0}
-      >
-        <span style={epicPanelStyles.chevron}>{expanded ? '\u25BE' : '\u25B8'}</span>
-        {epicUrl ? (
-          <a
-            href={epicUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={epicPanelStyles.epicLink}
-            onClick={e => e.stopPropagation()}
-          >
-            #{epic.epic_number}
-          </a>
-        ) : (
-          <span style={epicPanelStyles.epicLabel}>#{epic.epic_number}</span>
-        )}
-        <span style={epicPanelStyles.epicTitle}>{epic.title}</span>
-        {epic.auto_decomposed && <span style={epicPanelStyles.autoBadge}>auto</span>}
-        <span style={statusStyle}>{epic.status}</span>
-      </div>
-      <div style={epicPanelStyles.barTrack}>
-        {epic.completed > 0 && (
-          <div style={{ ...epicPanelStyles.barGreen, width: `${(epic.completed / epic.total_children) * 100}%` }} />
-        )}
-        {epic.failed > 0 && (
-          <div style={{ ...epicPanelStyles.barRed, width: `${(epic.failed / epic.total_children) * 100}%` }} />
-        )}
-      </div>
-      <span style={epicPanelStyles.progress}>
-        {epic.completed}/{epic.total_children} done
-        {epic.failed > 0 && ` \u00B7 ${epic.failed} failed`}
-        {` \u00B7 ${Math.round(pct)}%`}
-        {epic.child_issues?.length > 0 && ` \u00B7 ${epic.child_issues.length} issues`}
-      </span>
-      {expanded && (
-        <div style={epicPanelStyles.childList}>
-          {loading && <span style={epicPanelStyles.childLoading}>Loading...</span>}
-          {children && children.length > 0 && children.map(child => (
-            <EpicChildRow key={child.issue_number} child={child} />
-          ))}
-          {children && children.length === 0 && !loading && (
-            <span style={epicPanelStyles.childLoading}>No child issues found</span>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function EpicOverviewPanel({ epics, config }) {
-  if (!epics || epics.length === 0) return null
-
-  const active = epics.filter(e => e.status !== 'completed')
-  const completed = epics.filter(e => e.status === 'completed')
-
-  return (
-    <div style={epicPanelStyles.wrapper}>
-      <div style={epicPanelStyles.header}>
-        <span style={epicPanelStyles.title}>Epics</span>
-        <span style={epicPanelStyles.count}>{epics.length}</span>
-        {active.length > 0 && active.length !== epics.length && (
-          <span style={epicPanelStyles.activeCount}>{active.length} active</span>
-        )}
-      </div>
-      {active.map(epic => (
-        <EpicRow key={epic.epic_number} epic={epic} config={config} />
-      ))}
-      {completed.length > 0 && (
-        <>
-          <div style={epicPanelStyles.completedDivider}>
-            <span style={epicPanelStyles.completedLabel}>Completed ({completed.length})</span>
-          </div>
-          {completed.map(epic => (
-            <EpicRow key={epic.epic_number} epic={epic} config={config} />
-          ))}
-        </>
-      )}
-    </div>
-  )
-}
-
 export function StreamView({ intents, expandedStages, onToggleStage, onRequestChanges }) {
-  const { pipelineIssues, prs, stageStatus, workers, epics, config } = useHydraFlow()
+  const { pipelineIssues, prs, stageStatus, workers, config } = useHydraFlow()
 
   // Match intents to issues by issueNumber
   const intentMap = useMemo(() => {
@@ -493,11 +375,15 @@ export function StreamView({ intents, expandedStages, onToggleStage, onRequestCh
     return PIPELINE_STAGES.map(stage => {
       const stageIssues = (pipelineIssues[stage.key] || [])
         .map(pi => toStreamIssue(pi, stage.key, prs))
-      // Sort active-first
+      // Active-first, then queued issues in DISPATCH order (#10067): the
+      // backend stamps each queued entry with dispatch_rank — the position the
+      // active queue strategy would pick it — so the top queued card is the one
+      // the factory works next, instead of arrival order.
       stageIssues.sort((a, b) => {
         const aActive = a.overallStatus === 'active' ? 1 : 0
         const bActive = b.overallStatus === 'active' ? 1 : 0
-        return bActive - aActive
+        if (aActive !== bActive) return bActive - aActive
+        return a.dispatchRank - b.dispatchRank
       })
       return { stage, issues: stageIssues }
     })
@@ -516,9 +402,7 @@ export function StreamView({ intents, expandedStages, onToggleStage, onRequestCh
         <PendingIntentCard key={`pending-${i}`} intent={intent} />
       ))}
 
-      <PipelineFlow stageGroups={stageGroups} />
-
-      <EpicOverviewPanel epics={epics} config={config} />
+      <PipelineFlow stageGroups={stageGroups} queueStrategy={config?.queue_strategy} />
 
       {stageGroups.map(({ stage, issues: stageIssues }) => {
         const status = stageStatus[stage.key] || {}
@@ -690,14 +574,15 @@ const styles = {
     gap: 4,
     alignItems: 'center',
   },
+  flowDotOverflow: {
+    fontSize: 9,
+    fontWeight: 700,
+    color: theme.textMuted,
+    marginLeft: 2,
+    whiteSpace: 'nowrap',
+  },
   flowConnector: {
     width: 16,
-    height: 1,
-    background: theme.border,
-    flexShrink: 0,
-  },
-  flowConnectorShort: {
-    width: 8,
     height: 1,
     background: theme.border,
     flexShrink: 0,
@@ -705,7 +590,7 @@ const styles = {
   flowFork: {
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 1,
     margin: '0 4px',
   },
@@ -714,19 +599,10 @@ const styles = {
     alignItems: 'center',
     gap: 4,
   },
-  flowForkBottom: {
-    display: 'flex',
-    alignItems: 'center',
-  },
   flowForkArrow: {
     color: theme.cyan,
     fontSize: 10,
     fontWeight: 600,
-  },
-  flowForkDirect: {
-    fontSize: 9,
-    color: theme.textInactive,
-    fontStyle: 'italic',
   },
   flowTitle: {
     fontSize: 9,
@@ -734,6 +610,16 @@ const styles = {
     color: theme.textMuted,
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+  },
+  queueStrategyBadge: {
+    fontSize: 9,
+    fontWeight: 600,
+    color: theme.accent,
+    background: theme.accentSubtle,
+    padding: '1px 6px',
+    borderRadius: 8,
     flexShrink: 0,
     whiteSpace: 'nowrap',
   },
@@ -805,6 +691,15 @@ const styles = {
   },
 }
 
+// Canonical fork-slot → PipelineFlow-style map fed to the shared TerminalFork so
+// the large flow diagram shares the Header pipeline row's fork topology while
+// keeping its own larger styling (#9564).
+const forkStyles = {
+  fork: styles.flowFork,
+  forkTop: styles.flowForkTop,
+  forkArrow: styles.flowForkArrow,
+}
+
 const epicContainerStyles = {
   wrapper: {
     borderLeft: `3px solid ${theme.purple}`,
@@ -840,193 +735,6 @@ const epicContainerStyles = {
     padding: 4,
   },
 }
-
-const epicPanelStyles = {
-  wrapper: {
-    background: theme.surfaceInset,
-    borderRadius: 8,
-    padding: '8px 12px',
-    marginBottom: 8,
-    borderLeft: `3px solid ${theme.purple}`,
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  title: {
-    fontSize: 12,
-    fontWeight: 700,
-    color: theme.textBright,
-  },
-  count: {
-    fontSize: 10,
-    fontWeight: 600,
-    color: theme.purple,
-    background: theme.purpleSubtle,
-    borderRadius: 8,
-    padding: '1px 6px',
-  },
-  activeCount: {
-    fontSize: 10,
-    color: theme.textMuted,
-  },
-  row: {
-    marginBottom: 8,
-  },
-  rowTop: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
-    cursor: 'pointer',
-  },
-  chevron: {
-    fontSize: 10,
-    color: theme.textMuted,
-    flexShrink: 0,
-    width: 10,
-  },
-  epicLabel: {
-    fontSize: 11,
-    fontWeight: 600,
-    color: theme.purple,
-    flexShrink: 0,
-  },
-  epicLink: {
-    fontSize: 11,
-    fontWeight: 600,
-    color: theme.purple,
-    flexShrink: 0,
-    textDecoration: 'none',
-    cursor: 'pointer',
-  },
-  epicTitle: {
-    fontSize: 11,
-    color: theme.text,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    flex: 1,
-  },
-  autoBadge: {
-    fontSize: 9,
-    fontWeight: 600,
-    color: theme.accent,
-    background: theme.accentSubtle,
-    borderRadius: 4,
-    padding: '1px 4px',
-    flexShrink: 0,
-  },
-  barTrack: {
-    display: 'flex',
-    height: 4,
-    background: theme.border,
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginBottom: 2,
-    marginLeft: 18,
-  },
-  barGreen: {
-    height: '100%',
-    background: theme.green,
-    transition: 'width 0.3s ease',
-  },
-  barRed: {
-    height: '100%',
-    background: theme.red,
-    transition: 'width 0.3s ease',
-  },
-  progress: {
-    fontSize: 10,
-    color: theme.textMuted,
-    marginLeft: 18,
-  },
-  childList: {
-    marginLeft: 18,
-    marginTop: 4,
-    paddingLeft: 8,
-    borderLeft: `1px solid ${theme.border}`,
-  },
-  childRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '2px 0',
-  },
-  childDot: {
-    width: 6,
-    height: 6,
-    borderRadius: '50%',
-    flexShrink: 0,
-  },
-  childLink: {
-    fontSize: 10,
-    fontWeight: 600,
-    color: theme.accent,
-    textDecoration: 'none',
-    flexShrink: 0,
-  },
-  childTitle: {
-    fontSize: 10,
-    color: theme.text,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    flex: 1,
-  },
-  childBadgeDone: {
-    fontSize: 9,
-    fontWeight: 600,
-    color: theme.green,
-    background: theme.greenSubtle,
-    borderRadius: 4,
-    padding: '0 4px',
-    flexShrink: 0,
-  },
-  childBadgeFailed: {
-    fontSize: 9,
-    fontWeight: 600,
-    color: theme.red,
-    background: theme.redSubtle,
-    borderRadius: 4,
-    padding: '0 4px',
-    flexShrink: 0,
-  },
-  childLoading: {
-    fontSize: 10,
-    color: theme.textMuted,
-    fontStyle: 'italic',
-  },
-  completedDivider: {
-    borderTop: `1px solid ${theme.border}`,
-    marginTop: 4,
-    paddingTop: 4,
-    marginBottom: 4,
-  },
-  completedLabel: {
-    fontSize: 10,
-    color: theme.textMuted,
-    fontWeight: 600,
-  },
-}
-
-const epicStatusBase = {
-  fontSize: 9,
-  fontWeight: 600,
-  padding: '1px 6px',
-  borderRadius: 4,
-  flexShrink: 0,
-}
-
-const epicStatusStyles = {
-  active: { ...epicStatusBase, color: theme.green, background: theme.greenSubtle },
-  completed: { ...epicStatusBase, color: theme.textMuted, background: theme.mutedSubtle },
-  stale: { ...epicStatusBase, color: theme.yellow, background: theme.yellowSubtle },
-  blocked: { ...epicStatusBase, color: theme.red, background: theme.redSubtle },
-}
-
 
 // Pre-computed section opacity variants (avoids object spread in StageSection render)
 const sectionEnabledStyle = { ...styles.section, opacity: 1, transition: 'opacity 0.2s' }

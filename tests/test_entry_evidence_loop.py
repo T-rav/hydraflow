@@ -118,6 +118,7 @@ def llm_match_only_eventbus():
 def pr_port_capturing():
     mock = AsyncMock()
     mock.open_bot_pr = AsyncMock(return_value=42)
+    mock.find_open_bot_pr = AsyncMock(return_value=None)  # single-flight clear (#9893)
     return mock
 
 

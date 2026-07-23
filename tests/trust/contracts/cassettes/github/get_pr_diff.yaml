@@ -1,0 +1,22 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_pr_diff returns the raw unified diff for a PR (`gh pr diff <n>`).
+# With no seeded/default diff the fake yields a minimal stub hunk.
+adapter: github
+interaction: get_pr_diff
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_pr_diff
+  args:
+  - '601'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: 'diff --git a/x b/x
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

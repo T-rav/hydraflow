@@ -158,11 +158,13 @@ class TestPRPortMethods:
         "list_conflicting_prs",
         "post_pr_comment",
         "list_issues_by_label",
+        "list_open_issues",
         "list_closed_issues_by_label",
         "list_prs_by_label",
         "find_label_drift",
         "get_issue_state",
         "get_issue_updated_at",
+        "get_issue_labels",
         "update_issue_body",
         "get_latest_ci_status",
         "get_dependabot_alerts",
@@ -172,6 +174,9 @@ class TestPRPortMethods:
         "transition",
         "close_task",
         "create_task",
+        # Label/dispatch reconciliation (#10260)
+        "get_pr_checks",
+        "find_open_resolving_pr",
     ]
 
     @pytest.mark.parametrize("method", _REQUIRED_METHODS)
@@ -291,11 +296,13 @@ class TestPRPortSignatures:
         "list_conflicting_prs",
         "post_pr_comment",
         "list_issues_by_label",
+        "list_open_issues",
         "list_closed_issues_by_label",
         "list_prs_by_label",
         "find_label_drift",
         "get_issue_state",
         "get_issue_updated_at",
+        "get_issue_labels",
         "update_issue_body",
         "get_latest_ci_status",
         "get_dependabot_alerts",
@@ -305,6 +312,9 @@ class TestPRPortSignatures:
         "transition",
         "close_task",
         "create_task",
+        # Label/dispatch reconciliation (#10260)
+        "get_pr_checks",
+        "find_open_resolving_pr",
     ]
 
     @pytest.mark.parametrize("method", _SIGNED_METHODS)
@@ -580,3 +590,76 @@ class TestObservabilityPortSignatures:
         from ports import ObservabilityPort
 
         _assert_param_names_match(ObservabilityPort, FakeSentry, method)
+
+
+class TestConformanceRunnerPortConformance:
+    """SubprocessConformanceRunner must satisfy the ConformanceRunnerPort protocol."""
+
+    def test_subprocess_conformance_runner_satisfies_port(self) -> None:
+        """SubprocessConformanceRunner is a structural subtype of ConformanceRunnerPort."""
+        from adr_conformance_runner import SubprocessConformanceRunner
+        from ports import ConformanceRunnerPort
+
+        assert isinstance(
+            SubprocessConformanceRunner.__new__(SubprocessConformanceRunner),
+            ConformanceRunnerPort,
+        ), (
+            "SubprocessConformanceRunner no longer satisfies the "
+            "ConformanceRunnerPort protocol. Check that all methods declared "
+            "in ConformanceRunnerPort exist on SubprocessConformanceRunner."
+        )
+
+    def test_fake_conformance_runner_satisfies_port(self) -> None:
+        """FakeConformanceRunner is a structural subtype of ConformanceRunnerPort."""
+        from mockworld.fakes.fake_conformance_runner import FakeConformanceRunner
+        from ports import ConformanceRunnerPort
+
+        assert isinstance(FakeConformanceRunner(), ConformanceRunnerPort), (
+            "FakeConformanceRunner no longer satisfies the ConformanceRunnerPort "
+            "protocol. Check that all methods declared in ConformanceRunnerPort "
+            "exist on FakeConformanceRunner."
+        )
+
+
+class TestConformanceRunnerPortMethods:
+    """All methods declared in ConformanceRunnerPort exist on SubprocessConformanceRunner."""
+
+    _REQUIRED_METHODS = [
+        "run",
+    ]
+
+    @pytest.mark.parametrize("method", _REQUIRED_METHODS)
+    def test_method_exists_on_subprocess_conformance_runner(self, method: str) -> None:
+        from adr_conformance_runner import SubprocessConformanceRunner
+
+        assert hasattr(SubprocessConformanceRunner, method), (
+            f"SubprocessConformanceRunner is missing '{method}' which is "
+            "declared in ConformanceRunnerPort"
+        )
+
+
+class TestConformanceRunnerPortSignatures:
+    """ConformanceRunnerPort method signatures must match SubprocessConformanceRunner's
+    implementations (and the FakeConformanceRunner test double).
+    """
+
+    _SIGNED_METHODS = [
+        "run",
+    ]
+
+    @pytest.mark.parametrize("method", _SIGNED_METHODS)
+    def test_signature_matches_subprocess_conformance_runner(self, method: str) -> None:
+        from adr_conformance_runner import SubprocessConformanceRunner
+        from ports import ConformanceRunnerPort
+
+        result = _assert_param_names_match(
+            ConformanceRunnerPort, SubprocessConformanceRunner, method
+        )
+        assert result is None
+
+    @pytest.mark.parametrize("method", _SIGNED_METHODS)
+    def test_signature_matches_fake_conformance_runner(self, method: str) -> None:
+        from mockworld.fakes.fake_conformance_runner import FakeConformanceRunner
+        from ports import ConformanceRunnerPort
+
+        _assert_param_names_match(ConformanceRunnerPort, FakeConformanceRunner, method)

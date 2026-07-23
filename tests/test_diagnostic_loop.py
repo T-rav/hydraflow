@@ -56,6 +56,9 @@ def _make_loop(
     Returns (loop, runner_mock, prs_mock, state_mock, workspaces_mock).
     """
     deps = make_bg_loop_deps(tmp_path, enabled=enabled)
+    # DiagnosticLoop now defaults OFF (#9895); these tests exercise its _do_work
+    # logic, so enable the deploy-time kill-switch for the test config.
+    object.__setattr__(deps.config, "diagnostic_loop_enabled", True)
 
     runner = MagicMock()
     runner.diagnose = AsyncMock(return_value=_make_diagnosis())
@@ -65,6 +68,10 @@ def _make_loop(
     prs.list_issues_by_label = AsyncMock(return_value=[])
     prs.post_comment = AsyncMock()
     prs.swap_pipeline_labels = AsyncMock()
+    prs.add_labels = AsyncMock()
+    # #10262: escalation consults find_open_pr_for_branch before re-arming the
+    # hitl labels. Default to "no open resolving PR" so escalation proceeds.
+    prs.find_open_pr_for_branch = AsyncMock(return_value=None)
 
     state = MagicMock()
     state.get_escalation_context = MagicMock(return_value=_make_context())
@@ -740,3 +747,45 @@ class TestDiagnosticEscalationRoutesToAutoAgent:
         prs.add_labels.assert_awaited_once_with(
             42, ["hitl-escalation", "diagnose-failed"]
         )
+
+
+class TestIssueLabelsThreading:
+    """CH-6 (#10000): labels from the issue listing reach diagnose AND fix."""
+
+    @pytest.mark.asyncio
+    async def test_do_work_threads_wire_shape_labels_to_runner(
+        self, tmp_path: Path
+    ) -> None:
+        """gh wire-shape labels ([{"name": ...}]) flow to both runner stages."""
+        loop, runner, prs, _, _ = _make_loop(tmp_path)
+        prs.list_issues_by_label.return_value = [
+            {
+                "number": 42,
+                "title": "Bug",
+                "body": "It's broken",
+                "labels": [
+                    {"name": "data-class:regulated-phi"},
+                    {"name": "hydraflow-diagnose"},
+                ],
+            }
+        ]
+
+        await loop._do_work()
+
+        expected = ("data-class:regulated-phi", "hydraflow-diagnose")
+        assert runner.diagnose.call_args.kwargs["issue_labels"] == expected
+        assert runner.fix.call_args.kwargs["issue_labels"] == expected
+
+    @pytest.mark.asyncio
+    async def test_do_work_tolerates_missing_labels_key(self, tmp_path: Path) -> None:
+        """Issues without a labels key still process (empty elevation)."""
+        loop, runner, prs, _, _ = _make_loop(tmp_path)
+        prs.list_issues_by_label.return_value = [
+            {"number": 42, "title": "Bug", "body": "It's broken"}
+        ]
+
+        result = await loop._do_work()
+
+        assert result is not None
+        assert result["processed"] == 1
+        assert runner.diagnose.call_args.kwargs["issue_labels"] == ()

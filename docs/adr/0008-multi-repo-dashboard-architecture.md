@@ -1,8 +1,9 @@
 # ADR-0008: Multi-Repo Dashboard Architecture
 
 **Status:** Accepted
-**Enforced by:** tests/test_dashboard_routes_repo.py
 **Date:** 2026-02-28
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_dashboard_routes_repo.py
 
 ## Context
 
@@ -75,8 +76,8 @@ Adopt a **supervisor-proxied aggregation model** for the multi-repo dashboard:
 
 - Source memory: #1619
 - Implementation: #1469
-- `src/hf_cli/supervisor_service.py` (`_start_repo`, `RUNNERS`)
-- `src/dashboard.py`, `src/dashboard_routes.py`
+- `src/repo_runtime.py:RepoRuntimeRegistry` — repo start/stop lifecycle (the old `hf_cli/supervisor_service.py` TCP supervisor with `_start_repo` / `RUNNERS` was removed)
+- `src/dashboard.py`, `src/dashboard_routes/_routes.py:create_router`
 - `src/ui/src/context/HydraFlowContext.jsx`
 - ADR-0006 (RepoRuntime Isolation Architecture)
 - ADR-0007 (Dashboard API Architecture for Multi-Repo Scoping)

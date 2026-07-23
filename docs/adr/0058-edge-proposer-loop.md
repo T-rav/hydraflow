@@ -12,6 +12,12 @@ Accepted
 
 `tests/test_edge_proposer_loop.py`, `tests/architecture/test_edge_proposer_wiring.py`
 
+**Enforcement:** enforced
+
+**Enforced by:**
+pytest:tests/test_edge_proposer_loop.py
+pytest:tests/architecture/test_edge_proposer_wiring.py
+
 ## Context
 
 [ADR-0053](0053-ubiquitous-language-as-living-artifact.md) established the

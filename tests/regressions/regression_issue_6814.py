@@ -119,7 +119,6 @@ class TestMetricsManagerExceptBlocksHaveReraise:
     must call ``reraise_on_credit_or_bug``.
     """
 
-    @pytest.mark.xfail(reason="Regression for issue #6814 — fix not yet landed", strict=False)
     def test_all_except_exception_blocks_have_reraise_guard(self) -> None:
         filepath = SRC / "metrics_manager.py"
         assert filepath.exists(), f"Source file not found: {filepath}"
@@ -142,7 +141,6 @@ class TestKnownSitesHaveReraiseGuard:
         KNOWN_UNGUARDED_SITES,
         ids=[f"{f}:{ln}" for f, ln, _ in KNOWN_UNGUARDED_SITES],
     )
-    @pytest.mark.xfail(reason="Regression for issue #6814 — fix not yet landed", strict=False)
     def test_known_site_has_reraise_guard(
         self, filename: str, approx_line: int, desc: str
     ) -> None:
@@ -273,7 +271,6 @@ class TestBuildSnapshotAuthErrorPropagates:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6814 — fix not yet landed", strict=False)
     async def test_authentication_error_propagates(self, tmp_path: Path) -> None:
         """AuthenticationError from get_label_counts must not be silently caught."""
         mgr, prs = _make_metrics_manager(tmp_path)
@@ -283,7 +280,6 @@ class TestBuildSnapshotAuthErrorPropagates:
             await mgr._build_snapshot()
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6814 — fix not yet landed", strict=False)
     async def test_credit_exhausted_error_propagates(self, tmp_path: Path) -> None:
         """CreditExhaustedError from get_label_counts must not be silently caught."""
         mgr, prs = _make_metrics_manager(tmp_path)

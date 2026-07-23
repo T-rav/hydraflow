@@ -1,19 +1,12 @@
 import React, { useCallback, useState } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
-import { PIPELINE_STAGES, PRODUCT_TRACK_KEYS, SENSITIVE_SELECTORS } from '../constants'
+import { PIPELINE_STAGES, SENSITIVE_SELECTORS } from '../constants'
+import { splitPipelineTracks } from '../utils/pipelineTracks'
+import { TerminalFork } from './PipelineFork'
 import { BugReportPanel } from './BugReportPanel'
 import { ReportIssueModal } from './ReportIssueModal'
 import html2canvasLib from 'html2canvas'
-
-// Terminal end-states = main-track stages with no processing role and no config
-// knob (hitl, merged). After REVIEW an issue forks to a human OR gets merged —
-// never both — so these render as parallel arms of a fork, not a linear chain
-// (#9224). Derived from PIPELINE_STAGES so adding/removing a terminal needs no
-// edit here; mirrors StreamView's PipelineFlow.
-const TERMINAL_STAGE_KEYS = new Set(
-  PIPELINE_STAGES.filter(s => !s.role && !s.configKey).map(s => s.key)
-)
 
 function isCrossOriginImage(el) {
   if (!el || el.tagName !== 'IMG') return false
@@ -252,8 +245,7 @@ export function Header({ connected, orchestratorStatus }) {
         <div style={styles.sessionBox} data-testid="session-box" aria-label="Session pipeline statistics">
           <div style={styles.pipelineRow} data-testid="session-pipeline">
             {(() => {
-              const mainTrack = sessionStages.filter(s => !PRODUCT_TRACK_KEYS.has(s.key))
-              const productTrack = sessionStages.filter(s => PRODUCT_TRACK_KEYS.has(s.key))
+              const { triage, postTriage, terminal } = splitPipelineTracks(sessionStages)
               const renderPill = (stage) => (
                 <div
                   key={stage.key}
@@ -267,56 +259,21 @@ export function Header({ connected, orchestratorStatus }) {
                 </div>
               )
               const arrow = <span style={styles.pipelineArrow}>→</span>
-              const triageStage = mainTrack.find(s => s.key === 'triage')
-              // Post-triage main-track stages minus the terminal end-states
-              // (hitl, merged): those fork off REVIEW rather than chaining
-              // linearly after it (#9224).
-              const postTriage = mainTrack.filter(
-                s => s.key !== 'triage' && !TERMINAL_STAGE_KEYS.has(s.key)
-              )
-              const terminalStages = mainTrack.filter(s => TERMINAL_STAGE_KEYS.has(s.key))
               return (
                 <>
-                  {triageStage && renderPill(triageStage)}
-                  {productTrack.length > 0 && (
-                    <>
-                      <span style={styles.pipelineFork}>
-                        <span style={styles.forkTop}>
-                          {productTrack.map((s, i) => (
-                            <React.Fragment key={s.key}>
-                              {i === 0 && <span style={styles.forkArrow}>↗</span>}
-                              {i > 0 && arrow}
-                              {renderPill(s)}
-                            </React.Fragment>
-                          ))}
-                          <span style={styles.forkArrow}>↘</span>
-                        </span>
-                        <span style={styles.forkBottom}>
-                          <span style={styles.forkDirect}>direct →</span>
-                        </span>
-                      </span>
-                    </>
-                  )}
+                  {triage && renderPill(triage)}
                   {postTriage.map((stage) => (
                     <React.Fragment key={stage.key}>
                       {arrow}
                       {renderPill(stage)}
                     </React.Fragment>
                   ))}
-                  {terminalStages.length > 0 && (
-                    <span style={styles.pipelineFork} data-testid="review-terminal-fork">
-                      <span style={styles.forkTop}>
-                        <span style={styles.forkArrow}>↗</span>
-                        {renderPill(terminalStages[0])}
-                      </span>
-                      {terminalStages.slice(1).map((stage) => (
-                        <span style={styles.forkBottom} key={stage.key}>
-                          <span style={styles.forkArrow}>↘</span>
-                          {renderPill(stage)}
-                        </span>
-                      ))}
-                    </span>
-                  )}
+                  <TerminalFork
+                    items={terminal}
+                    renderItem={renderPill}
+                    styles={forkStyles}
+                    testId="review-terminal-fork"
+                  />
                 </>
               )
             })()}
@@ -462,7 +419,7 @@ const styles = {
   pipelineFork: {
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 2,
     margin: '0 4px',
   },
@@ -471,20 +428,10 @@ const styles = {
     alignItems: 'center',
     gap: 4,
   },
-  forkBottom: {
-    display: 'flex',
-    alignItems: 'center',
-  },
   forkArrow: {
     color: theme.cyan,
     fontSize: 10,
     fontWeight: 600,
-  },
-  forkDirect: {
-    fontSize: 9,
-    color: theme.textInactive,
-    fontStyle: 'italic',
-    letterSpacing: '0.3px',
   },
   controls: { display: 'flex', alignItems: 'center', gap: 10, marginLeft: 10, flexShrink: 0 },
   controlStartBtn: {
@@ -529,6 +476,15 @@ const styles = {
     cursor: 'pointer',
     transition: 'opacity 0.15s',
   },
+}
+
+// Canonical fork-slot → Header-style map fed to the shared TerminalFork so the
+// compact pipeline row shares StreamView's fork topology while keeping its own
+// compact styling (#9564).
+const forkStyles = {
+  fork: styles.pipelineFork,
+  forkTop: styles.forkTop,
+  forkArrow: styles.forkArrow,
 }
 
 // Pre-computed pipeline stage style maps (avoids object spread in render loops)

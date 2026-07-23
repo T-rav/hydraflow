@@ -17,14 +17,20 @@ HydraFlow's existing cadence-style loops; no new event infra.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
+import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from dedup_store import DedupStore
+from execution import SubprocessCancelledError, get_default_runner
+from subprocess_util import (
+    SubprocessTimeoutError,
+    run_subprocess,
+    run_subprocess_result,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -95,9 +101,74 @@ class StagingBisectLoop(BaseBackgroundLoop):
         # Pending watchdog state — set after an auto-revert is filed.
         # None when no watchdog active.
         self._pending_watchdog: dict[str, Any] | None = None
+        # Lightweight stall-state diagnostics (#10240). Surfaced read-only via
+        # ``stall_state()`` into the Trust Fleet drill-down so an operator (or
+        # the next autonomous agent) can see WHAT the loop was doing when
+        # ``TrustFleetSanityLoop`` fires a staleness anomaly — a legitimately
+        # long bisect / watchdog vs a genuine hang. Pure diagnostics: never
+        # gate scheduling or remediation on these fields.
+        # Wall-clock start of the in-flight bisect pipeline; ``None`` when not
+        # bisecting.
+        self._bisect_started_ts: float | None = None
+        # Last subprocess argv issued (space-joined), for the drill-down.
+        self._last_subprocess_cmd: str | None = None
 
     def _get_default_interval(self) -> int:
         return self._config.staging_bisect_interval
+
+    def _record_subprocess_cmd(self, cmd: list[str]) -> None:
+        """Record the last subprocess argv for stall-state diagnostics (#10240)."""
+        self._last_subprocess_cmd = " ".join(cmd)
+
+    def stall_state(self) -> dict[str, Any]:
+        """Read-only snapshot of the loop's current phase (#10240).
+
+        Surfaced into ``/api/trust/fleet`` so the Trust Fleet drill-down can
+        report WHAT ``staging_bisect`` was doing when it went stale. Phase is
+        one of:
+
+        - ``idle``                — no red to process; between ticks.
+        - ``bisecting``           — running the bisect → attribute → revert
+          pipeline over the RC-red range (may legitimately run for the
+          configured runtime cap).
+        - ``watchdog_pending_rc`` — an auto-revert was filed; watching the
+          next RC outcome for up to 8h (spec §4.3 step 8).
+
+        Also carries the ISO-8601 phase start, elapsed seconds in that phase,
+        the last subprocess command issued, and — when a watchdog is pending —
+        its deadline and remaining seconds. Never mutates loop state.
+        """
+        now = time.time()
+        if self._bisect_started_ts is not None:
+            phase = "bisecting"
+            since: float | None = self._bisect_started_ts
+        elif self._pending_watchdog is not None:
+            phase = "watchdog_pending_rc"
+            started = self._pending_watchdog.get("started_ts")
+            since = started if isinstance(started, (int, float)) else None
+        else:
+            phase = "idle"
+            since = None
+
+        snapshot: dict[str, Any] = {
+            "phase": phase,
+            "phase_since": (
+                datetime.fromtimestamp(since, tz=UTC).isoformat()
+                if since is not None
+                else None
+            ),
+            "elapsed_s": max(0, int(now - since)) if since is not None else 0,
+            "last_command": self._last_subprocess_cmd,
+        }
+        wd = self._pending_watchdog
+        if wd is not None:
+            deadline = wd.get("deadline_ts")
+            if isinstance(deadline, (int, float)):
+                snapshot["watchdog_deadline"] = datetime.fromtimestamp(
+                    deadline, tz=UTC
+                ).isoformat()
+                snapshot["watchdog_remaining_s"] = max(0, int(deadline - now))
+        return snapshot
 
     async def _do_work(self) -> dict[str, Any] | None:  # noqa: PLR0911
         # Kill-switch via the System-tab toggle — operators need a live
@@ -173,39 +244,31 @@ class StagingBisectLoop(BaseBackgroundLoop):
         logger.info("Running bisect-probe against %s", rc_sha)
         timeout_s = self._config.staging_bisect_runtime_cap_seconds
         cmd = ["make", "bisect-probe"]
+        self._record_subprocess_cmd(cmd)
         t0 = time.perf_counter()
-        exit_code: int | None = None
-        stderr_excerpt: str | None = None
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                cwd=str(self._config.repo_root),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            result = await run_subprocess_result(
+                *cmd, cwd=self._config.repo_root, timeout=timeout_s
             )
-            try:
-                stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout_s
-                )
-            except TimeoutError:
-                proc.kill()
-                await proc.wait()
-                exit_code = 124  # bash convention
-                stderr_excerpt = f"timeout after {timeout_s}s"
-                self._emit_trace(t0, cmd, exit_code, stderr_excerpt)
-                return False, f"bisect-probe timed out after {timeout_s}s"
+        except SubprocessTimeoutError:
+            # The shared helper (run_simple) already group-kills the whole
+            # make → pytest probe subtree on timeout (#9579/#9554/#10028) —
+            # this method just surfaces the failure instead of crashing the
+            # loop. (#9794/#9816/#9883)
+            exit_code = 124  # bash convention
+            stderr_excerpt = f"timeout after {timeout_s}s"
+            self._emit_trace(t0, cmd, exit_code, stderr_excerpt)
+            return False, f"bisect-probe timed out after {timeout_s}s"
         except OSError as exc:
             self._emit_trace(t0, cmd, -1, f"exec failed: {exc}")
             return False, f"bisect-probe exec failed: {exc}"
-        combined = (stdout_b or b"").decode(errors="replace") + (
-            stderr_b or b""
-        ).decode(errors="replace")
-        exit_code = proc.returncode if proc.returncode is not None else -1
+        combined = result.stdout + result.stderr
+        exit_code = result.returncode
         self._emit_trace(
             t0,
             cmd,
             exit_code,
-            (stderr_b or b"").decode(errors="replace").strip()[:200] or None,
+            result.stderr.strip()[:200] or None,
         )
         return exit_code == 0, combined
 
@@ -233,10 +296,23 @@ class StagingBisectLoop(BaseBackgroundLoop):
             stderr_excerpt=stderr_excerpt,
         )
 
-    async def _run_full_bisect_pipeline(  # noqa: PLR0911
+    async def _run_full_bisect_pipeline(
         self, red_sha: str, probe_output: str
     ) -> dict[str, Any]:
         """End-to-end pipeline: bisect → attribute → guardrail → revert → retry."""
+        # Mark the loop as actively bisecting for the stall-state drill-down
+        # (#10240). Cleared in the ``finally`` regardless of which branch
+        # returns; if a watchdog is scheduled, the read-time phase then
+        # derives from ``_pending_watchdog`` instead.
+        self._bisect_started_ts = time.time()
+        try:
+            return await self._run_full_bisect_pipeline_inner(red_sha, probe_output)
+        finally:
+            self._bisect_started_ts = None
+
+    async def _run_full_bisect_pipeline_inner(  # noqa: PLR0911
+        self, red_sha: str, probe_output: str
+    ) -> dict[str, Any]:
         import time  # noqa: PLC0415
 
         green_sha = self._state.get_last_green_rc_sha()
@@ -369,6 +445,10 @@ class StagingBisectLoop(BaseBackgroundLoop):
             "red_sha_at_revert": red_sha,
             "rc_cycle_at_revert": self._state.get_rc_cycle_id(),
             "deadline_ts": time.time() + watchdog_wall_seconds,
+            # Stall-state diagnostics (#10240): anchor the watchdog phase's
+            # elapsed-time so the Trust Fleet drill-down can report how long
+            # the loop has been watching this RC.
+            "started_ts": time.time(),
         }
 
         return {
@@ -476,39 +556,34 @@ class StagingBisectLoop(BaseBackgroundLoop):
         caller's own enabled-check at ``_do_work`` entry catches the
         next tick.
         """
-        import asyncio  # noqa: PLC0415
-
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        comm_task = asyncio.create_task(proc.communicate())
-        deadline = asyncio.get_event_loop().time() + timeout
-        while True:
-            remaining = deadline - asyncio.get_event_loop().time()
-            if remaining <= 0:
-                proc.kill()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await comm_task
-                raise TimeoutError(f"git command exceeded {timeout}s")
-            poll = min(_CANCELLATION_POLL_SECONDS, remaining)
-            done, _pending = await asyncio.wait({comm_task}, timeout=poll)
-            if comm_task in done:
-                stdout, stderr = comm_task.result()
-                break
-            # Subprocess still running. Cooperative cancellation check.
-            if not self._enabled_cb(self._worker_name):
-                logger.info(
-                    "staging_bisect: kill-switch tripped mid-run — "
-                    "terminating git subprocess"
-                )
-                proc.kill()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await comm_task
-                raise BisectCancelledError("kill-switch tripped during git bisect run")
-        return proc.returncode or 0, stdout.decode(), stderr.decode()
+        self._record_subprocess_cmd(cmd)
+        # #9577: the shared helper now owns the group-leader spawn, the
+        # bounded reap, the registry-join, AND the cooperative kill-switch
+        # poll — so the bespoke poll loop (and its duplicated #9579 group-kill)
+        # is gone. Kept OFF the gated run_subprocess path: a 45-min local
+        # `git bisect` must not hold the fleet-wide gh/git semaphore.
+        try:
+            result = await get_default_runner().run_simple(
+                cmd,
+                cwd=str(cwd),
+                timeout=timeout,
+                cancel_check=lambda: not self._enabled_cb(self._worker_name),
+                cancel_poll_interval=_CANCELLATION_POLL_SECONDS,
+            )
+        except TimeoutError as exc:
+            # Preserve the descriptive message the bespoke loop raised — the
+            # bare wait_for TimeoutError from run_simple carries none, and
+            # _run_bisect's callers surface it. (#9577 migration parity)
+            raise TimeoutError(f"git command exceeded {timeout}s") from exc
+        except SubprocessCancelledError as exc:
+            logger.info(
+                "staging_bisect: kill-switch tripped mid-run — "
+                "git subprocess group terminated"
+            )
+            raise BisectCancelledError(
+                "kill-switch tripped during git bisect run"
+            ) from exc
+        return result.returncode, result.stdout, result.stderr
 
     async def _run_bisect(self, green_sha: str, red_sha: str) -> str:
         """Run bisect; return the first-bad SHA.
@@ -569,29 +644,22 @@ class StagingBisectLoop(BaseBackgroundLoop):
             await self._cleanup_worktree(worktree_dir)
 
     async def _run_gh(self, cmd: list[str]) -> str:
-        """Run a ``gh`` command and return stdout. Overridable in tests."""
-        import asyncio  # noqa: PLC0415
+        """Run a ``gh`` command and return stdout. Overridable in tests.
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=self._config.repo_root,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        Routes through the shared bounded helper (#9554/#10028) —
+        ``run_subprocess`` raises on non-zero exit (same stdout-or-raise
+        contract as before) and inherits the gh circuit-breaker/rate-limit
+        gating plus process-group registration for free.
+        """
+        self._record_subprocess_cmd(cmd)
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=_GH_TIMEOUT_SECONDS
+            return await run_subprocess(
+                *cmd, cwd=self._config.repo_root, timeout=_GH_TIMEOUT_SECONDS
             )
-        except TimeoutError as exc:
-            proc.kill()
-            with contextlib.suppress(ProcessLookupError):
-                await proc.wait()
+        except SubprocessTimeoutError as exc:
             raise RuntimeError(
                 f"gh timed out after {_GH_TIMEOUT_SECONDS}s: {' '.join(cmd)}"
             ) from exc
-        if proc.returncode != 0:
-            raise RuntimeError(f"gh failed: {stderr.decode()[:500]}")
-        return stdout.decode()
 
     async def _attribute_culprit(self, sha: str) -> tuple[int, str]:
         """Resolve *sha* to ``(pr_number, pr_title)``.

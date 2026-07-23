@@ -41,7 +41,6 @@ class TestMalformedOutcomesLineLogging:
     so no log is emitted — this test is RED.
     """
 
-    @pytest.mark.xfail(reason="Regression for issue #6511 — fix not yet landed", strict=False)
     def test_malformed_outcomes_line_emits_log(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -85,7 +84,6 @@ class TestCorruptItemScoresLogging:
     Currently ``except Exception: pass`` (line 205-206) — RED.
     """
 
-    @pytest.mark.xfail(reason="Regression for issue #6511 — fix not yet landed", strict=False)
     def test_corrupt_scores_file_emits_log(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -188,7 +186,6 @@ class TestMalformedFailuresLineLogging:
     Currently ``except Exception: pass`` (line 226-227) — RED.
     """
 
-    @pytest.mark.xfail(reason="Regression for issue #6511 — fix not yet landed", strict=False)
     def test_malformed_failures_line_emits_log(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -276,7 +273,6 @@ class TestBareExceptPassBlocksHaveLogging:
                 i += 1
         return violations
 
-    @pytest.mark.xfail(reason="Regression for issue #6511 — fix not yet landed", strict=False)
     def test_health_monitor_no_bare_except_pass(self) -> None:
         """health_monitor_loop.py must not have bare except-pass blocks."""
         import inspect
@@ -291,7 +287,6 @@ class TestBareExceptPassBlocksHaveLogging:
             f"without logging: {violations}"
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6511 — fix not yet landed", strict=False)
     def test_orchestrator_no_bare_except_pass(self) -> None:
         """orchestrator.py must not have bare except-pass blocks."""
         import inspect

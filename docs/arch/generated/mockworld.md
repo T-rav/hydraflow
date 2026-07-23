@@ -14,8 +14,8 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 | **FakeClock** | `ClockPort` | `tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/fakes/test_fake_clock.py`<br>`tests/scenarios/fakes/test_supporting_fakes.py`<br>`tests/scenarios/test_fidelity.py` |
 | **FakeDocker** | `DockerPort` | `tests/scenarios/fakes/test_fake_docker.py`<br>`tests/scenarios/fakes/test_fake_subprocess_runner.py` |
 | **FakeFS** | `FSPort` | `tests/scenarios/fakes/test_fake_fs.py` |
-| **FakeGit** | `GitPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_git.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py` |
-| **FakeGitHub** | `GitHubPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py` |
+| **FakeGit** | `GitPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_git.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_auto_agent_redrive_scenario.py`<br>`tests/scenarios/test_caretaker_loops_part2.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py` |
+| **FakeGitHub** | `GitHubPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_auto_agent_redrive_scenario.py`<br>`tests/scenarios/test_caretaker_loops_part2.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py` |
 | **FakeHTTP** | `HTTPPort` | `tests/scenarios/fakes/test_fake_http.py` |
 | **FakeHoneycomb** | `HoneycombPort` | — |
 | **FakeIssueFetcher** | `IssueFetcherPort` | — |
@@ -25,7 +25,7 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 | **FakeRouteBackCounter** | `RouteBackCounterPort` | — |
 | **FakeSentry** | `SentryPort` | `tests/scenarios/fakes/test_supporting_fakes.py` |
 | **FakeSubprocessRunner** | `SubprocessRunnerPort` | `tests/scenarios/fakes/test_fake_subprocess_runner.py` |
-| **FakeWikiCompiler** | `WikiCompilerPort` | `tests/scenarios/test_wiki_evolution_scenarios.py` |
+| **FakeWikiCompiler** | `WikiCompilerPort` | — |
 | **FakeWorkspace** | `WorkspacePort` | `tests/scenarios/fakes/test_supporting_fakes.py` |
 
 ## Wiring
@@ -71,7 +71,6 @@ graph LR
     FakeSubprocessRunner -.-> SubprocessRunnerPort
     tests_scenarios_fakes_test_fake_subprocess_runner_py([tests/scenarios/fakes/test_fake_subprocess_runner.py]) --> FakeSubprocessRunner
     FakeWikiCompiler -.-> WikiCompilerPort
-    tests_scenarios_test_wiki_evolution_scenarios_py([tests/scenarios/test_wiki_evolution_scenarios.py]) --> FakeWikiCompiler
     FakeWorkspace -.-> WorkspacePort
     tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeWorkspace
 ```

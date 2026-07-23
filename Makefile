@@ -13,6 +13,43 @@ UV := VIRTUAL_ENV=$(VENV) UV_CACHE_DIR=$(PROJECT_ROOT)/.uv-cache uv run --active
 # Stamp file to track when deps were last synced
 DEPS_STAMP := $(VENV)/.deps-synced
 
+# Parallel test execution (pytest-xdist). `--dist loadscope` keeps a module's
+# tests on one worker (safe for module-level fixtures). tests/scenarios/ now
+# runs in the parallel bulk: its one cross-worker leak (a sibling test wiped the
+# process-global loop-registration catalog and left it empty) is contained by
+# the `_restore_loop_catalog_registry` autouse fixture in
+# tests/scenarios/conftest.py, and OTel provider state is already reset per test
+# by `_reset_otel_tracer_provider` in tests/conftest.py (#10111). Override
+# PYTEST_PARALLEL= to disable.
+# `--reruns` rescues TRANSIENT cross-worker flakes a newly-parallelized suite
+# surfaces (subprocess PID/timing races, e.g. the process-group reap tests) —
+# deterministic failures still fail on every retry and stay red, so real breaks
+# are not masked. PERSISTENT isolation leaks (a global mock left set) are NOT
+# rescued by reruns and are quarantined via PYTEST_SERIAL_PATHS instead.
+PYTEST_PARALLEL ?= -n auto --dist loadscope --reruns 2 --reruns-delay 1
+
+# Paths excluded from the parallel run and executed SERIALLY (xdist-unsafe:
+# process-global state that collides across workers).
+# tests/test_review_phase_metrics.py: a leaked global review_advisor client mock
+# degrades the advisor under cross-worker ordering (passes single-threaded) —
+# tracked follow-up (#10119). Add a path here when a non-scenario test proves
+# xdist-unsafe; the real fix is per-test isolation, not growing this list.
+# Subprocess-group reap tests race under parallel workers (a child's process
+# group / reap timing collides cross-worker; they have a dedicated serial CI
+# lane). Only THESE regressions stay serial — the rest of tests/regressions/ is
+# xdist-safe (verified) and runs in the parallel bulk. Keep in sync with ci.yml.
+REAP_TESTS := tests/regressions/test_reap_processlookuperror.py \
+  tests/regressions/test_issue_9553.py \
+  tests/regressions/test_issue_9579.py \
+  tests/regressions/test_issue_9911_stop_path_reap.py \
+  tests/regressions/test_issue_9641_unified_group_kill.py \
+  tests/regressions/test_hostrunner_reap_grandchildren.py
+# Paths run SERIALLY (excluded from the parallel run). review_phase_metrics:
+# leaked review_advisor mock (#10119). REAP_TESTS: subprocess-group reap races.
+# Everything else — including tests/scenarios (#10111) — parallelizes.
+PYTEST_SERIAL_PATHS ?= tests/test_review_phase_metrics.py $(REAP_TESTS)
+PYTEST_SERIAL_IGNORE := $(addprefix --ignore=,$(PYTEST_SERIAL_PATHS))
+
 # Runtime overrides (used by `make hot`)
 WORKERS ?= 3
 MODEL ?= opus
@@ -36,7 +73,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev factory dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial
+.PHONY: help run dev factory env dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -61,8 +98,9 @@ help:
 	@echo "  make lint-fix       Auto-repair formatting/lint issues"
 	@echo "  make typecheck      Run Pyright type checks"
 	@echo "  make security       Run Bandit security scan"
+	@echo "  make test-ui        Run UI vitest suite (skips with warning if node/node_modules missing)"
 	@echo "  make quality-lite   Lint + typecheck + security (parallel)"
-	@echo "  make quality        quality-lite + test (parallel)"
+	@echo "  make quality        quality-lite + test + UI vitest (parallel)"
 	@echo "  make ensure-labels  Create HydraFlow labels in GitHub repo (API with offline fallback)"
 	@echo "  make prep           Sync agent assets then run full prep (API with offline fallback)"
 	@echo "  make scaffold       Generate baseline tests and CI configuration (API with offline fallback)"
@@ -75,7 +113,8 @@ help:
 	@echo "  make integration    Run multi-repo integration tests"
 	@echo "  make soak           Run soak/load tests"
 	@echo "  make hot            Send config update to running instance"
-	@echo "  make deps           Sync dependencies via uv"
+	@echo "  make deps           Sync dependencies via uv (stamp-gated on pyproject)"
+	@echo "  make env            Heal/verify the environment (force uv sync --all-extras + sanity check)"
 	@echo "  make docker-build   Build Hydra agent Docker image"
 	@echo "  make docker-test    Build + smoke-test the agent image"
 	@echo "  make arch-regen-stage  Regenerate arch artifacts and git-add them (pre-commit fix)"
@@ -153,6 +192,20 @@ $(DEPS_STAMP): pyproject.toml
 
 deps: $(DEPS_STAMP)
 
+# Canonical env-sanity command (#10243). Unlike `deps` (stamp-gated on
+# pyproject.toml mtime), `env` ALWAYS re-syncs the full extra set and then
+# verifies pytest is importable — the one signal that distinguishes a complete
+# venv from a half-synced one (the test extra silently dropped by a partial
+# `uv sync`). Run it yourself whenever the environment feels off; the factory
+# launcher (scripts/run-factory-isolated.sh) also calls it on every boot so the
+# factory self-heals its dependencies. Idempotent + near-instant when in sync.
+env:
+	@echo "$(BLUE)Healing environment (uv sync --all-extras)...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && uv sync --all-extras
+	@touch $(DEPS_STAMP)
+	@cd $(HYDRAFLOW_DIR) && $(UV) python -c "import pytest, sys; print('[env OK] python', sys.version.split()[0], '- pytest', pytest.__version__)" \
+	  || { echo "$(RED)[env FAIL] pytest not importable after sync - environment is broken$(RESET)"; exit 1; }
+
 TEST_COVERAGE := $(word 2,$(MAKECMDGOALS))
 TEST_COVERAGE_IS_NUM := $(shell printf '%s' "$(TEST_COVERAGE)" | grep -Eq '^[0-9]+$$' && echo 1 || echo 0)
 TEST_COVERAGE_DEFAULT ?= 70
@@ -177,8 +230,9 @@ coverage: deps
 cover: coverage
 
 test: deps
-	@echo "$(BLUE)Running HydraFlow unit tests...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ -x -q
+	@echo "$(BLUE)Running HydraFlow unit tests (parallel; scenarios serial)...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(PYTEST_PARALLEL) -q
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) -q
 	@echo "$(GREEN)All tests passed$(RESET)"
 
 smoke: deps
@@ -237,7 +291,7 @@ scenario-browser: deps
 	@echo "$(BLUE)Running browser scenario tests...$(RESET)"
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh ci && $(HYDRAFLOW_DIR)scripts/ui-npm.sh run build
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m playwright install --with-deps chromium
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/browser/ -m scenario_browser --reruns=1 -v
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/browser/ -m scenario_browser --reruns=1 --timeout=90 -v
 	@echo "$(GREEN)Browser scenario tests passed$(RESET)"
 
 trust-adversarial: deps
@@ -270,6 +324,39 @@ test-cov: deps
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ -v --cov=src --cov-fail-under=70 --cov-report=term-missing --cov-report=html:htmlcov -p no:xdist
 	@echo "$(GREEN)All tests passed with coverage$(RESET)"
 
+# CI-speedup Tier 3: run ONLY the tests impacted by this branch's diff vs the
+# base branch, plus the always-on architecture guards + smoke floor, instead of
+# the whole ~15,700-test suite. The selection is computed by the pure, unit-
+# tested scripts/impacted_tests.py (see its header for the exact mapping rules
+# and the conservative full-suite fallback). If ANY changed file is high-fanout
+# (config/models/orchestrator/ports/service_registry, src/arch/**, conftest,
+# pyproject, workflows, Makefile, hooks) the selector emits the __ALL__ sentinel
+# and we run the entire suite — never risk skipping a relevant test.
+#
+# LOCAL ONLY for now. CI wiring is a deliberate follow-up: a workflow step would
+# run `python scripts/impacted_tests.py --base origin/$$GITHUB_BASE_REF` and feed
+# the result to pytest exactly like this target does. That PR is intentionally
+# separate to avoid conflicting with an in-flight CI-workflow change.
+#
+# Override the compared ref with e.g. `make test-impacted BASE_REF=origin/main`.
+# BASE_REF corresponds to config.base_branch() (origin/staging by default).
+BASE_REF ?= origin/staging
+test-impacted: deps
+	@cd $(HYDRAFLOW_DIR) && set -e; \
+	base="$(BASE_REF)"; \
+	sel="$$(PYTHONPATH=src $(UV) python scripts/impacted_tests.py --base "$$base")"; \
+	if [ "$$sel" = "__ALL__" ]; then \
+		echo "$(YELLOW)test-impacted: FULL SUITE required (high-fanout/infra change vs $$base) — running everything$(RESET)"; \
+		PYTHONPATH=src $(UV) pytest tests/ -n auto --dist loadscope; \
+	elif [ -z "$$sel" ]; then \
+		echo "$(YELLOW)test-impacted: no impacted tests for diff vs $$base — nothing to run$(RESET)"; \
+	else \
+		count="$$(printf '%s\n' "$$sel" | grep -c .)"; \
+		echo "$(BLUE)test-impacted: running $$count impacted test file(s) vs $$base (guards + smoke + mapped)$(RESET)"; \
+		PYTHONPATH=src $(UV) pytest $$sel -n auto --dist loadscope; \
+	fi
+	@echo "$(GREEN)test-impacted complete$(RESET)"
+
 lint: deps
 	@echo "$(BLUE)Linting HydraFlow (auto-fix)...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && $(UV) ruff check . --fix && $(UV) ruff format .
@@ -288,6 +375,13 @@ test-sludge-check: deps
 # FILES is space-separated; defaults to all tracked files (--tracked).
 conflict-check:
 	@cd $(HYDRAFLOW_DIR) && python3 scripts/check_conflict_markers.py $(if $(FILES),$(FILES),--tracked)
+
+# Reject git-tracked runtime caches / untracked loop artifacts (#9599). stdlib-only.
+# FILES is space-separated; defaults to a --tracked scan. The mode-b (untracked
+# loop artifact) scan is run second so a local dev checkout catches both.
+cache-check:
+	@cd $(HYDRAFLOW_DIR) && python3 scripts/check_runtime_cache_tracked.py $(if $(FILES),$(FILES),--tracked)
+	@cd $(HYDRAFLOW_DIR) && python3 scripts/check_runtime_cache_tracked.py --untracked
 
 lint-fix: lint
 	@echo "$(GREEN)Auto-repair complete$(RESET)"
@@ -347,22 +441,51 @@ init:
 		$(ARGS)
 
 
+# UI vitest stage (#9875): CI's "Dashboard Build" job runs the src/ui vitest
+# suite, but `make quality` historically did not — a stale UI test could pass
+# every local gate and only go red at the PR check (the UNSTABLE merge behind
+# #9617). Parity fix: quality runs the same suite through the same entry point
+# CI uses (`npm test` -> src/ui/scripts/run-vitest.cjs; NOT raw `npx vitest`,
+# which skips the wrapper's jsdom patch + encoding shim). Node is an optional
+# local tool, so machines without node or an installed src/ui/node_modules
+# degrade LOUDLY-but-green: the stage prints a SKIPPED warning instead of
+# failing quality — CI's Dashboard Build job still gates the merge either way.
+# Single definition shared by `make test-ui` and the quality parallel block.
+# Kept inline (no $(MAKE) recursion) so `make -n quality` stays a pure dry-run:
+# recipe lines containing $(MAKE) execute even under -n.
+UI_TEST_CMD = if command -v node >/dev/null 2>&1 && [ -d $(HYDRAFLOW_DIR)src/ui/node_modules ]; then \
+		(cd $(HYDRAFLOW_DIR)src/ui && node ./scripts/run-vitest.cjs run) && echo "[ui-tests OK]"; \
+	else \
+		echo "$(YELLOW)[ui-tests SKIPPED] node or src/ui/node_modules missing — UI vitest suite NOT run locally; CI Dashboard Build still runs it. Fix: install Node 20.19+/22.12+ then run npm ci in src/ui$(RESET)"; \
+	fi
+
+test-ui:
+	@$(UI_TEST_CMD)
+
 # Lint runs first, serially — ensures a failing lint aborts quality before
 # spending time on tests, and guarantees the same verdict as `make lint-check`.
-# pyright, bandit, and pytest are parallelised after lint passes.
+# pyright, bandit, pytest, and the UI vitest suite are parallelised after lint
+# passes.
 quality: deps lint-ul
 	@echo "$(BLUE)Running quality checks in parallel...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && $(UV) ruff check . && $(UV) ruff format . --check && echo "[lint OK]"
 	@cd $(HYDRAFLOW_DIR) && ( \
 		$(UV) pyright && echo "[typecheck OK]" & \
 		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
-		PYTHONPATH=src $(UV) pytest tests/ && echo "[tests OK]" & \
+		PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(PYTEST_PARALLEL) && echo "[tests OK]" & \
+		PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) && echo "[serial-tests OK]" & \
+		PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -q && echo "[scenario-loops OK]" & \
+		( $(UI_TEST_CMD) ) & \
 		wait_result=0; \
 		for job in $$(jobs -p); do wait $$job || wait_result=1; done; \
 		exit $$wait_result; \
 	)
 	@echo "$(GREEN)HydraFlow quality pipeline passed$(RESET)"
 
+# The UI vitest stage (#9875) is deliberately NOT part of quality-lite: this is
+# the pre-push gate and must stay fast (lint + typecheck + security only, no
+# test suites of any kind). UI drift is still caught by `make quality` locally
+# and by CI's Dashboard Build job on every PR.
 quality-lite: deps
 	@echo "$(BLUE)Running lightweight quality checks...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && ( \
@@ -542,6 +665,13 @@ ensure-hooks:
 	@git config core.hooksPath .githooks
 	@echo "$(GREEN)core.hooksPath set to .githooks$(RESET) (current: $$(git config core.hooksPath))"
 	@echo "  Canary: if pre-commit/pre-push hooks aren't firing, run 'make ensure-hooks'."
+	@# arch-meta merge driver (see .gitattributes): auto-resolve docs/arch/.meta.json
+	@# conflicts to the incoming (staging) copy so staging advances never force a
+	@# manual re-resolve of the regen stamp. changelog.md uses the built-in
+	@# merge=union and needs no driver registration.
+	@git config merge.arch-meta.name 'keep incoming arch .meta.json (regenerated on mainline)'
+	@git config merge.arch-meta.driver 'cp -- %B %A'
+	@echo "$(GREEN)arch-meta merge driver registered$(RESET) (auto-resolves docs/arch/.meta.json)."
 
 ensure-labels: deps
 	@echo "$(BLUE)Creating HydraFlow lifecycle labels...$(RESET)"
@@ -607,6 +737,7 @@ audit-prompts: ## Render all prompt fixtures, score against the rubric, regenera
 .PHONY: arch-regen arch-check arch-serve arch-validate arch-regen-stage rebase-onto
 
 ## arch-regen — regenerate docs/arch/generated/ from source
+## (--emit also prunes disturbance/baselines/traceability.yaml to the fresh matrix pct)
 arch-regen:
 	@echo "$(BLUE)Regenerating architecture knowledge artifacts...$(RESET)"
 	@$(UV) python -m arch.runner --emit --repo-root $(HYDRAFLOW_DIR)
@@ -616,7 +747,7 @@ arch-regen:
 arch-regen-stage:
 	@echo "$(BLUE)Regenerating and staging architecture artifacts...$(RESET)"
 	@$(UV) python -m arch.runner --emit --repo-root $(HYDRAFLOW_DIR)
-	@git -C $(HYDRAFLOW_DIR) add docs/arch/generated docs/arch/.meta.json
+	@git -C $(HYDRAFLOW_DIR) add docs/arch/generated docs/arch/.meta.json disturbance/baselines/traceability.yaml
 	@echo "$(GREEN)docs/arch/ refreshed and staged$(RESET)"
 
 ## rebase-onto — rebase current branch onto origin/<base> past PARENT_TIP

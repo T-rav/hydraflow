@@ -78,6 +78,17 @@ class WorkerStateMixin:
         self._data.worker_intervals = intervals
         self.save()
 
+    # --- watchdog timeout overrides (#9503, mirrors worker interval overrides) ---
+
+    def get_watchdog_timeouts(self) -> dict[str, int]:
+        """Return persisted per-loop watchdog-timeout overrides."""
+        return dict(self._data.watchdog_timeouts)
+
+    def set_watchdog_timeouts(self, timeouts: dict[str, int]) -> None:
+        """Persist per-loop watchdog-timeout overrides."""
+        self._data.watchdog_timeouts = timeouts
+        self.save()
+
     # --- disabled workers ---
 
     def get_disabled_workers(self) -> set[str]:
@@ -105,6 +116,15 @@ class WorkerStateMixin:
     def set_cost_budget_killed_workers(self, names: set[str]) -> None:
         """Persist the set of workers the cost-budget watcher has killed."""
         self._data.cost_budget_killed_workers = sorted(names)
+        self.save()
+
+    def get_cost_throttled_workers(self) -> dict[str, int | None]:
+        """Workers interval-stretched by the cost watcher → pre-throttle override."""
+        return dict(self._data.cost_throttled_workers)
+
+    def set_cost_throttled_workers(self, priors: dict[str, int | None]) -> None:
+        """Persist the throttle map (empty dict = nothing throttled)."""
+        self._data.cost_throttled_workers = dict(priors)
         self.save()
 
     # --- background worker states ---

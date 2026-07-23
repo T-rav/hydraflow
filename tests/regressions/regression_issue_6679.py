@@ -124,9 +124,6 @@ class TestTypeErrorPropagates:
     be silently swallowed and converted to 'merge allowed'."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6679 — fix not yet landed", strict=False
-    )
     async def test_type_error_in_spec_match_is_reraised(self, tmp_path: Path) -> None:
         """If extract_spec_match raises TypeError (e.g. it receives None
         instead of a string), _run_pre_merge_spec_check must let it

@@ -193,6 +193,11 @@ class WorkspaceManager:
         main = self._config.base_branch()
         gh = self._credentials.gh_token
 
+        # Fix J (#9723): heal main-checkout core.worktree corruption BEFORE
+        # any other git command — a corrupt entry makes the fetch below fail
+        # with "fatal: Invalid path '/workspace'".
+        await self._heal_repo_root_config()
+
         # Fetch latest main for worktree creation
         await self._fetch_origin_with_retry(repo, main)
 
@@ -232,26 +237,94 @@ class WorkspaceManager:
         await self._fetch_origin_with_retry(self._repo_root, self._config.base_branch())
 
     async def _heal_worktree_config(self, wt_path: Path, gh_token: str) -> None:
-        """Clear a stale ``core.worktree`` from a worktree's git config.
+        """Clear a stale ``core.worktree`` from a worktree's git config (WS-8).
 
         A docker container that runs git inside the worktree can write
         ``core.worktree=/workspace`` into ``<wt>/.git/config``. On the host that
         path doesn't exist, and git then refuses to run *any* command in the
-        worktree — including ``git config --unset core.worktree`` itself —
-        failing with "fatal: Invalid path '/workspace'". So we can't heal from
-        inside the worktree.
-
-        Instead, edit the config file directly via ``git config --file <path>
-        --unset`` run from OUTSIDE the worktree (``cwd=wt_path.parent``), where
-        git won't auto-discover and validate the broken worktree. Workspaces
+        worktree — failing with "fatal: Invalid path '/workspace'". Workspaces
         here are full local clones (see ``_create_unlocked``), so the config is
-        always ``<wt>/.git/config``. No-op when ``core.worktree`` is absent (git
-        exits non-zero, which we ignore) or the config file is missing.
+        always ``<wt>/.git/config``. Delegates to the guarded
+        :meth:`_heal_stale_core_worktree` predicate.
         """
-        config_path = wt_path / ".git" / "config"
-        if not config_path.exists():
-            return
-        # A non-zero exit just means core.worktree was not set — nothing to heal.
+        await self._heal_stale_core_worktree(
+            wt_path / ".git" / "config", wt_path, gh_token
+        )
+
+    async def _heal_repo_root_config(self) -> bool:
+        """Heal a stale ``core.worktree`` in the MAIN checkout's config (#9723).
+
+        The docker factory can corrupt the primary checkout the same way it
+        corrupts worktrees (WS-8): a container writes
+        ``core.worktree=/workspace`` into ``<repo>/.git/config`` and every
+        host-side git command then fails with "fatal: Invalid path
+        '/workspace'" — the manual HITL reset runbook step this automates.
+        Runs first in :meth:`sanitize_repo` (orchestrator startup, shutdown,
+        and deferred pipeline start). No-op when ``<repo>/.git/config`` is
+        missing — e.g. the primary checkout is itself a linked worktree whose
+        config lives elsewhere.
+
+        Returns ``True`` when a stale entry was unset.
+        """
+        return await self._heal_stale_core_worktree(
+            self._repo_root / ".git" / "config",
+            self._repo_root,
+            self._credentials.gh_token,
+        )
+
+    async def _heal_stale_core_worktree(
+        self, config_path: Path, root: Path, gh_token: str
+    ) -> bool:
+        """Unset ``core.worktree`` in *config_path* when it points outside *root*.
+
+        Fail-safe predicate (#9723): only a value that resolves OUTSIDE
+        *root* — the container-corruption signature, e.g. ``/workspace`` on a
+        host where that path is not this checkout — is ever unset. A value
+        that resolves to *root* (or inside it) is a legitimately-configured
+        worktree checkout and is never touched; git resolves relative values
+        against the ``.git`` directory, so ``..`` is legitimate too. When the
+        value cannot be read, nothing is unset.
+
+        All git calls use ``--file`` and run from OUTSIDE the checkout
+        (``cwd=root.parent``): from inside, git auto-discovers the repo and
+        re-validates the bogus ``core.worktree`` before it ever processes
+        ``--file``, re-triggering the same fatal error.
+
+        Returns ``True`` when a stale entry was unset.
+        """
+        if not config_path.is_file():
+            return False
+        try:
+            value = (
+                await run_subprocess(
+                    "git",
+                    "config",
+                    "--file",
+                    str(config_path),
+                    "--get",
+                    "core.worktree",
+                    cwd=root.parent,
+                    gh_token=gh_token,
+                )
+            ).strip()
+        except RuntimeError:
+            # Exit 1 = key absent — nothing to heal. Any other read failure:
+            # fail safe by leaving the config untouched.
+            return False
+        if not value:
+            return False
+        raw = Path(value)
+        # git resolves a relative core.worktree against the .git directory.
+        resolved = (raw if raw.is_absolute() else config_path.parent / raw).resolve()
+        root_resolved = root.resolve()
+        if resolved == root_resolved or resolved.is_relative_to(root_resolved):
+            logger.debug(
+                "core.worktree=%s in %s resolves inside %s — legitimate, keeping",
+                value,
+                config_path,
+                root,
+            )
+            return False
         with contextlib.suppress(RuntimeError):
             await run_subprocess(
                 "git",
@@ -260,12 +333,17 @@ class WorkspaceManager:
                 str(config_path),
                 "--unset",
                 "core.worktree",
-                # Run from outside the worktree: from inside, git auto-discovers
-                # the repo and re-validates the bogus core.worktree before it
-                # ever processes --file, re-triggering the same fatal error.
-                cwd=wt_path.parent,
+                cwd=root.parent,
                 gh_token=gh_token,
             )
+            logger.warning(
+                "Healed stale core.worktree=%s in %s (points outside %s)",
+                value,
+                config_path,
+                root,
+            )
+            return True
+        return False
 
     async def _salvage_uncommitted(self, issue_number: int) -> None:
         """Commit and push any uncommitted changes in the worktree before destroying it.
@@ -903,6 +981,10 @@ class WorkspaceManager:
         In host mode, sets ``core.hooksPath`` to the shared ``.githooks`` dir.
         In docker mode, copies individual hook files into the worktree's git
         hooks directory so the worktree is self-contained.
+
+        Either way, registers the ``arch-meta`` merge driver so the worktree
+        gets the same conflict-free ``docs/arch/.meta.json`` handling that
+        ``make ensure-hooks`` gives a developer checkout.
         """
         if self._config.execution_mode == "docker":
             await self._install_hooks_docker(wt_path)
@@ -918,6 +1000,44 @@ class WorkspaceManager:
                 )
             except RuntimeError as exc:
                 logger.warning("git hooks setup failed: %s", exc)
+        await self._register_arch_meta_merge_driver(wt_path)
+
+    async def _register_arch_meta_merge_driver(self, wt_path: Path) -> None:
+        """Register the ``arch-meta`` git merge driver in the worktree.
+
+        ``.gitattributes`` maps ``docs/arch/.meta.json`` to ``merge=arch-meta``
+        so a staging advance auto-resolves the regenerated stamp instead of
+        conflicting on it (#10099). That mapping is INERT unless the driver is
+        registered in git config — and ``make ensure-hooks`` (which registers
+        it for a developer checkout) never runs during factory worktree setup.
+        Without this, every agent worktree still hits the ``.meta.json``
+        conflict on each rebase onto staging, forcing the arch-heal loop to
+        regen it. Values mirror ``make ensure-hooks`` exactly; the sibling
+        ``changelog.md merge=union`` needs no driver (``union`` is built in).
+
+        Best-effort: on failure the branch simply falls back to the old
+        conflict-then-heal path, so we warn and continue rather than fail
+        worktree setup.
+        """
+        for key, value in (
+            (
+                "merge.arch-meta.name",
+                "keep incoming arch .meta.json (regenerated on mainline)",
+            ),
+            ("merge.arch-meta.driver", "cp -- %B %A"),
+        ):
+            try:
+                await run_subprocess(
+                    "git",
+                    "config",
+                    key,
+                    value,
+                    cwd=wt_path,
+                    gh_token=self._credentials.gh_token,
+                )
+            except RuntimeError as exc:
+                logger.warning("arch-meta merge driver setup failed (%s): %s", key, exc)
+                return
 
     async def _install_hooks_docker(self, wt_path: Path) -> None:
         """Copy hook files from .githooks/ into the worktree's git hooks dir."""

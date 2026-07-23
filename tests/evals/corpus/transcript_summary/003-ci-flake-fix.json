@@ -1,0 +1,6 @@
+{
+  "name": "ci-flake-fix",
+  "transcript": "CI red on PR #611. The failing job is Tests; test_circuit_breaker_timeout failed with an assertion on elapsed time.\nInvestigated: the test patches the global time.monotonic, which is fragile under coverage + xdist — it intermittently reads a stale value.\nRewrote the test to backdate _last_failure_time directly instead of patching the clock.\nRe-ran the Tests job 3 times: green each time.\nPushed the fix to the PR branch.",
+  "must_include": ["611", "flaky", "circuit_breaker", "monotonic", "green"],
+  "notes": "Summary must name the PR, the flaky test, the root cause (patching monotonic), the fix approach, and that CI went green."
+}

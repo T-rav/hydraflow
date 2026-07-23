@@ -233,6 +233,8 @@ class IssueCache:
         complexity_rank: str,
         routing_outcome: str,
         reasoning: str = "",
+        clarity_score: int = 10,
+        needs_discovery: bool = False,
     ) -> None:
         """Record a triage classification (#6422 amendment).
 
@@ -240,13 +242,24 @@ class IssueCache:
         instead of regex-scraping triage comments.
 
         ``routing_outcome`` captures where the triager actually routed
-        the issue: ``"plan"``, ``"discover"``, ``"parked"``,
+        the issue: ``"plan"``, ``"parked"``,
         ``"sentry_noise_closed"``, ``"duplicate_closed"``, etc. The
         READY-stage precondition gate reads this field and only
         accepts classifications with ``routing_outcome == "plan"`` —
         a classified-then-parked issue must NOT satisfy the plan-stage
         gate. Callers that don't know the routing outcome yet should
         pass ``"unknown"``.
+
+        ``clarity_score`` / ``needs_discovery`` (ADR-0107) mirror
+        ``TriageResult``'s fields. Triage no longer treats them as a
+        routing verdict — instead the planner's decision gate
+        (``plan_phase.py:_should_discover_helper``) reads them back via
+        :meth:`latest_classification` as HINTS for whether an on-demand
+        discover/shape helper is warranted before planning. Defaults
+        (``10``, ``False``) describe a well-specified
+        issue so callers that don't pass them (or issues with no
+        classification record at all) read as "no helper needed" — the
+        gate's conservative default.
         """
         self.record(
             CacheRecord(
@@ -258,6 +271,8 @@ class IssueCache:
                     "complexity_rank": complexity_rank,
                     "routing_outcome": routing_outcome,
                     "reasoning": reasoning,
+                    "clarity_score": clarity_score,
+                    "needs_discovery": needs_discovery,
                 },
             )
         )

@@ -1,8 +1,11 @@
 # ADR-0002: GitHub Labels as the Pipeline State Machine
 
 **Status:** Accepted
-**Enforced by:** tests/test_state_machine.py
 **Date:** 2026-02-26
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_state_machine.py
+**Amended by:** ADR-0107 (Collapse Discover + Shape into Plan) — removes the
+`hydraflow-discover` / `hydraflow-shape` labels from the state machine.
 
 ## Context
 
@@ -39,6 +42,50 @@ a crash between remove and add leaves conflicting labels).
 
 State is polled, not pushed: each loop queries GitHub for issues with its label.
 
+### Build-claim marker: `ready → in-progress → review` (#10168)
+
+The single-stage-label invariant covers *pipeline stages*. Alongside the stage
+labels there are a small number of **orthogonal markers** that coexist with a
+stage label without being one — `human-required` (blocked, ADR-0084) and, added
+by #10168, `hydraflow-in-progress`.
+
+`hydraflow-in-progress` is a **durable, cross-actor build claim**. The stage
+machine holds an issue at `hydraflow-ready` for the *entire* build, only
+flipping to `hydraflow-review` once a PR opens. During that window the sole
+double-pick protection was `IssueStore._eagerly_transitioned` — in-memory, and
+therefore single-process. Any *other* observer of GitHub labels (a second
+factory instance, a parallel operator session, or an out-of-band Agent
+dispatch) saw an unclaimed `hydraflow-ready` issue and could pick it too — the
+cross-actor collision class first seen in #10141.
+
+The marker closes that gap:
+
+```
+hydraflow-ready ──(build starts)──► hydraflow-ready + hydraflow-in-progress
+                                          │
+                        (PR opens: ready→review swap clears the marker)
+                                          ▼
+                                   hydraflow-review
+```
+
+- **Applied** when a build *starts* on a ready issue (`ImplementPhase._worker`
+  → `PRPort.add_labels`). It is added, not swapped — the issue keeps
+  `hydraflow-ready` so it is still visibly a ready-stage issue; the marker just
+  says "already being built."
+- **Cleared** when the PR opens: the `ready → review` `swap_pipeline_labels`
+  removes it because `in_progress_label` is in `all_pipeline_labels` (exactly
+  like `human-required`). It is also cleared on abandon/failure
+  (`ImplementPhase._worker`'s `finally`) and by any escalation/route-back swap,
+  so an issue can never get stuck claimed.
+- **Honoured** by the work-picker: `IssueStore._is_eligible` treats any issue
+  carrying `hydraflow-in-progress` as not-eligible-for-re-pick — the durable
+  belt-and-suspenders to the in-process `_eagerly_transitioned` fast-path.
+
+Because it is a marker and not a stage, it is absent from the stage-routing map
+(`IssueStore._build_label_map`) and is excluded from the pipeline-stage pick in
+`find_label_drift` (ADR-0088), so a `ready + in-progress` issue still reads as
+`hydraflow-ready`.
+
 ## Consequences
 
 **Positive:**
@@ -56,12 +103,29 @@ State is polled, not pushed: each loop queries GitHub for issues with its label.
   Label changes are not instant.
 - No history: the label state machine has no built-in audit log of how an issue
   moved through stages (git history / transcript logs compensate for this).
-- The dual-label invariant (exactly one pipeline label) must be maintained by all
-  code paths; bypassing `swap_pipeline_labels` can break it.
+- The dual-label invariant (exactly one pipeline *stage* label) must be maintained
+  by all code paths; bypassing `swap_pipeline_labels` can break it. Orthogonal
+  markers (`human-required`, `hydraflow-in-progress`) deliberately coexist with a
+  stage label and are exempt from this invariant — they are cleared by every
+  `swap_pipeline_labels` call because they are members of `all_pipeline_labels`.
+- The build-claim marker is durable but best-effort: a GitHub hiccup while
+  stamping or clearing it must never block a build (dark-factory contract), so
+  the in-memory `IssueStore` guards remain the primary within-process defense and
+  the label is the cross-actor backstop, not the sole mechanism.
 
 ## Related
 
 - `src/pr_manager.py:swap_pipeline_labels` — atomic swap implementation
-- `src/config.py:all_pipeline_labels` — the full label set
+- `src/config.py:all_pipeline_labels` — the full label set (stage labels +
+  orthogonal markers `human-required`, `in_progress_label`)
+- `src/config.py:in_progress_label` — the `hydraflow-in-progress` build-claim
+  marker (#10168)
+- `src/implement_phase.py:_claim_issue` / `_release_claim` — stamp/clear the
+  claim at build start / build exit (#10168)
+- `src/issue_store.py:_is_eligible` — skips issues carrying the claim marker (#10168)
 - `tests/test_state_machine.py` — property-based invariant tests
+- `tests/regressions/test_issue_10168_inprogress_claim_label.py` — build-claim
+  marker regression (#10168)
 - ADR-0001 (Five Concurrent Async Loops) for why polling loops were chosen over a push-based model
+- ADR-0107 (Collapse Discover + Shape into Plan) — amends this state machine by
+  removing the `hydraflow-discover` / `hydraflow-shape` labels

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=83.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
@@ -11,7 +11,7 @@ exclude = ["ui*", "templates*", "tests*"]
 
 [project]
 name = "hydraflow"
-version = "0.9.4"
+version = "0.9.7"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "pydantic>=2.0.0",
@@ -46,8 +46,10 @@ test = [
     "pytest-xdist>=3.5.0",
     "pytest-playwright>=0.5.0",
     "pytest-rerunfailures>=16.0",
+    "pytest-timeout>=2.3.1",
     "httpx>=0.27.0",
     "hypothesis>=6.100.0",
+    "markdown>=3.0",
 ]
 dev = [
     "ruff==0.15.0",
@@ -164,6 +166,10 @@ skips = ["B101"]
 # === Pytest ===
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# regression_*.py: 72 legacy tests/regressions/regression_issue_NNNN.py files
+# never matched the default test_*.py glob and silently provided ZERO
+# coverage since creation (#9801/#9872). Collected explicitly here.
+python_files = ["test_*.py", "regression_*.py"]
 asyncio_mode = "auto"
 addopts = [
     "-q",
@@ -199,5 +205,5 @@ source = ["src"]
 omit = ["tests/*", "*/__init__.py", "venv/*", ".venv/*", "templates/*"]
 
 [tool.coverage.report]
-fail_under = 70
+fail_under = 89.5
 show_missing = true

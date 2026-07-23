@@ -1,0 +1,19 @@
+---
+id: 0055
+topic: gotchas
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-07-18T06:16:33.335070+00:00
+status: superseded
+corroborations: 1
+supersedes: 0012,0012,0013,0013,0014,0015,0016,0017,0018,0019,0020,0021,0022,0023,0024,0025,0026,0027,0028,0029,0030,0031,0032,0033,0034,0035,0036,0037,0038,0039,0040,0041,0042,0043
+superseded_by: 0078
+---
+
+# Use `log_exception_with_bug_classification()` for bugs vs transient
+
+Use `log_exception_with_bug_classification()` or `is_likely_bug()` to distinguish bug exceptions (TypeError, AttributeError, KeyError) from transient errors (OSError, network errors).
+
+Example: in `finally` blocks use `log_exception_with_bug_classification(exc)` rather than `reraise`, to preserve finally semantics while still classifying.
+
+**Why:** Logging all exceptions as bugs floods Sentry with transient noise; wrong classification makes signal-to-noise ratio useless.

@@ -7,8 +7,9 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from audit_chain import AuditChain
 from config import HydraFlowConfig
-from file_util import append_jsonl, atomic_write, file_lock
+from file_util import atomic_write, file_lock
 from model_pricing import ModelPricingTable, load_pricing
 
 logger = logging.getLogger("hydraflow.prompt_telemetry")
@@ -55,6 +56,8 @@ class PromptTelemetry:
         self._dir = self._inferences_file.parent
         self._lock_file = self._dir / ".lock"
         self._pricing = pricing or load_pricing()
+        # Hash-chained append path for inferences.jsonl (CH-1, #9729).
+        self._chain = AuditChain(self._inferences_file)
 
     def record(
         self,
@@ -244,9 +247,13 @@ class PromptTelemetry:
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
             with file_lock(self._lock_file):
-                append_jsonl(self._inferences_file, json.dumps(record, sort_keys=True))
+                self._chain.append(record)
                 self._update_pr_stats(record)
-        except OSError:
+        except (OSError, ValueError):
+            # ValueError covers AuditChain serialization failures (incl.
+            # json.JSONDecodeError from scrub paths). record() runs unguarded
+            # in BaseRunner._execute's ``finally`` — telemetry must never
+            # convert a successful agent run into a hard failure.
             logger.warning(
                 "Could not write prompt telemetry to %s",
                 self._inferences_file,
@@ -406,6 +413,16 @@ class PromptTelemetry:
                 _as_float(target.get("estimated_cost_usd", 0.0)) + float(record_cost),
                 6,
             )
+            # Int mirror of the float accumulator above (micro-USD, i.e.
+            # USD * 1e6). `get_source_totals()` (and its lifetime/session/PR/
+            # issue siblings) filter aggregate payloads to `isinstance(v, int)`
+            # before returning them, silently dropping the float
+            # `estimated_cost_usd` key — this int accumulator is what lets
+            # per-source cost survive that filter for `prompt_efficiency`'s
+            # scorecard math (spec §5).
+            target["estimated_cost_microusd"] = _as_int(
+                target.get("estimated_cost_microusd", 0)
+            ) + round(float(record_cost) * 1_000_000)
         target["last_updated"] = str(record.get("timestamp", ""))
 
     def get_pr_totals(self, pr_number: int) -> dict[str, int] | None:
@@ -501,6 +518,7 @@ def _new_counter() -> dict[str, object]:
         "actual_usage_calls": 0,
         "usage_unavailable_calls": 0,
         "pruned_chars_total": 0,
+        "estimated_cost_microusd": 0,
         "last_updated": "",
     }
 

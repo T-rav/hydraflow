@@ -45,6 +45,15 @@ class TestSkillPromptEval:
         }
         fake_state.get_skill_prompt_attempts.return_value = 0
         fake_state.inc_skill_prompt_attempts.return_value = 1
+        # This scenario pre-dates the self-refinement pipeline (#9724). The
+        # PASS->FAIL regression below now also drives `_try_refine`, which
+        # compares `refine_proposals_last_7d()` against the weekly cap — an
+        # unconfigured MagicMock return value can't compare with `>=` an int.
+        # Pin it past any plausible cap so `_try_refine` short-circuits to
+        # "capped" without engaging refine internals this scenario doesn't
+        # otherwise seed (this file only asserts on the drift-issue backstop
+        # role, not refinement).
+        fake_state.refine_proposals_last_7d.return_value = 999
 
         corpus_result: list[dict] = [
             {
