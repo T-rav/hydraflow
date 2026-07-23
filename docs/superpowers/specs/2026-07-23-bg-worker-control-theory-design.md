@@ -35,6 +35,31 @@ A goal-seeking control framework so workers stop freaking out on faulty/noisy si
 
 ---
 
+## Scope: which loops adopt this
+
+The framework is a **toolkit adopted by signal-reactive loops, not a rewrite of all workers.** Of the ~61 background loops, it applies **only** where a worker acts on a noisy/continuous signal or takes an expensive/irreversible action on a threshold. It does not touch the majority.
+
+**Directly altered (initial PRs):**
+
+| Site | Change | § |
+|---|---|---|
+| `staging_promotion_loop` | RC close-on-first-failure → bounded `RetryController` | §5 |
+| `trust_fleet_anomaly_detectors` (5 detectors, consumed by `trust_fleet_sanity_loop`) | `value >= threshold` → composed conditioner chains | §3 |
+| `orchestrator` `max_workers` | concurrency governor actuator | §2 |
+| credit handler (shared, subprocess-spawning runners) | ad-hoc probe → `Corroborator` | §3 |
+
+**Follow-on adopters (staged onto the landed toolkit, one small PR each — see rollout 4b):**
+
+| Loop | Defect today | Toolkit fit |
+|---|---|---|
+| `flake_tracker_loop` | quarantine decisions flap on flake rate (the s75/s81 quarantine churn) | Hysteresis + Persistence |
+| `health_monitor_loop` / `factory_health` | "is the factory wedged/stale" sensing on raw thresholds | CUSUM + Corroborator |
+| `triage_retry_loop` | infra-park backoff via bespoke streak logic | `RetryController` + CircuitBreaker |
+
+**Deliberately out of scope** — no signal to condition and re-running is cheap/safe, so the framework would be over-engineering: idempotent caretakers (DiagramLoop, RepoWikiLoop, arch-regen), event/label-driven routers, and pure producers (grooming, issue refinement).
+
+---
+
 ## §1 — Core frame: *condition, then control*
 
 Every worker decision routes through one pipeline:
@@ -95,6 +120,10 @@ Example compositions:
 - issues-per-hour anomaly → `EWMA → AdaptiveThreshold → Hysteresis → CUSUM-confirm`.
 - bare boolean sensor → `Persistence(k) → Corroborator`.
 - repeated-failure signal → existing `circuit_breaker.py` as the open/half-open/closed conditioner.
+- flake quarantine decision (`flake_tracker_loop`) → `EWMA(flake_rate) → Hysteresis → Persistence(k)` — a test must be *decisively* flaky before quarantine and *decisively* stable before release, killing the s75/s81 flap.
+- factory-wedge / staleness sensing (`health_monitor_loop` / `factory_health`) → `CUSUM → Corroborator` — escalate only on a sustained regime shift, confirmed by a live probe.
+
+The initial migration targets the trust-fleet detectors + credit handler; `flake_tracker_loop`, `health_monitor_loop`/`factory_health`, and `triage_retry_loop` adopt the same units as staged follow-ons (see Scope and rollout 4b).
 
 ---
 
@@ -172,7 +201,8 @@ New ADR (next in sequence): *"Control-theory signal conditioning and goal-seekin
 1. **Substrate** — `store.py` + `conditioners.py` + `controllers.py` (pure, fully unit + simulation tested) with no integration. Zero behavior change.
 2. **RC-merge resilience** — wrap `StagingPromotionLoop` fix cycle in `RetryController` (§5). Self-contained, high-value, low blast radius; kill-switch `HYDRAFLOW_RC_FIX_RETRY_DISABLED`.
 3. **Concurrency governor** — `governor.py` + orchestrator `max_workers` actuator (§2) behind `HYDRAFLOW_CONCURRENCY_GOVERNOR_DISABLED`, default-conservative.
-4. **Detector conditioning** — migrate trust-fleet detectors + credit handler to composed conditioner chains (§3) behind `..._ADAPTIVE_THRESHOLDS_DISABLED`.
+4. **Detector conditioning (trust fleet + credit)** — migrate the 5 trust-fleet detectors + credit handler to composed conditioner chains (§3) behind `..._ADAPTIVE_THRESHOLDS_DISABLED`.
+   - **4b. Follow-on adopters** — one small PR each onto the landed toolkit, same kill-switch discipline: `flake_tracker_loop` (quarantine hysteresis + persistence), `health_monitor_loop`/`factory_health` (wedge/staleness CUSUM + corroboration), `triage_retry_loop` (`RetryController` + circuit-breaker). Not required for §1–§4 to ship; sequenced after the toolkit and detector migration prove out.
 5. **Observability** — `/api/control/governors` + dashboard "Controllers" panel (§6); ADR + wiki + UL terms.
 
 Each stage is independently shippable and gated; nothing changes live behavior until its kill-switch defaults flip on.
@@ -182,3 +212,4 @@ Each stage is independently shippable and gated; nothing changes live behavior u
 - Exact control period and default `α` / band / `β` — start conservative, tune from the Controllers panel once telemetry exists.
 - `N` (max concurrency) source — reuse `config.max_workers` as the upper bound the governor multiplies within.
 - Whether stage 4 migrates all trust-fleet detectors at once or one detector per PR (leaning one-per-PR for reviewability).
+- Whether the 4b follow-on adopters each get their own kill-switch or share `..._ADAPTIVE_THRESHOLDS_DISABLED` (leaning per-loop switches for independent rollback).
