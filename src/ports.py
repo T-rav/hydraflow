@@ -332,6 +332,18 @@ class PRPort(Protocol):
         """
         ...
 
+    async def reopen_issue(self, issue_number: int) -> bool:
+        """Reopen a closed GitHub issue *issue_number*.
+
+        Wraps ``gh issue reopen``. Returns True when the reopen reached
+        GitHub, False when the underlying call failed (fail-soft: no raise,
+        same contract as :meth:`close_issue`). Used by the close-verification
+        controller (#10358) to undo a false auto-close and by
+        ``IssueRefinementLoop`` to reuse a rolling digest instead of minting a
+        fresh one. Matches ``pr_manager.PRManager.reopen_issue`` exactly.
+        """
+        ...
+
     async def close_pr(self, pr_number: int) -> bool:
         """Close GitHub pull request *pr_number* without merging.
 
@@ -400,6 +412,18 @@ class PRPort(Protocol):
         Each commit section begins with a ``## <sha> <title>`` header followed by
         the unified diff for that commit.  Returns an empty string when the PR has
         no commits or when the underlying call fails.
+        """
+        ...
+
+    async def get_pr_commit_messages(self, pr_number: int) -> str:
+        """Return every commit message on *pr_number*, joined by blank lines.
+
+        Headline + body for each commit — the in-process analogue of P10.7's
+        ``git log %B`` scan of merged history. The close-verification
+        controller (#10358) reads it for the ``Skip-Regression:`` opt-out
+        trailer and any ``Closes/Fixes/Resolves #N`` references. Returns an
+        empty string when the PR has no commits or the underlying call fails.
+        Matches ``pr_manager.PRManager.get_pr_commit_messages`` exactly.
         """
         ...
 

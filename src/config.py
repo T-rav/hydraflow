@@ -615,6 +615,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("approval_records_enabled", "HYDRAFLOW_APPROVAL_RECORDS_ENABLED", True),
     ("evidence_pack_enabled", "HYDRAFLOW_EVIDENCE_PACK_ENABLED", True),
     ("merge_policy_enabled", "HYDRAFLOW_MERGE_POLICY_ENABLED", True),
+    (
+        "close_verification_enabled",
+        "HYDRAFLOW_CLOSE_VERIFICATION_ENABLED",
+        False,
+    ),
     ("sensor_enrichment_enabled", "HYDRAFLOW_SENSOR_ENRICHMENT_ENABLED", True),
     ("gh_circuit_breaker_enabled", "HYDRAFLOW_GH_CIRCUIT_BREAKER_ENABLED", True),
     ("issue_cache_enabled", "HYDRAFLOW_ISSUE_CACHE_ENABLED", True),
@@ -1881,6 +1886,23 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Enforce docs/standards/factory_autonomy/policy.yaml before "
             "autonomous merges (CH-3)."
+        ),
+    )
+
+    # G3 close-verification controller (#10358): the actuator half of the
+    # close-verification loop. P10.7 (#10356) DETECTS a false auto-close (an
+    # issue closed by a PR carrying neither a non-test source change nor a
+    # tests/regressions/ delta — the #10223 signature, with the same
+    # Skip-Regression: opt-out). When ON, a post-merge observer REOPENS the
+    # closed issue and re-triages it (re-applies find_label) so a delta-less
+    # "done" is actually driven to a fix. Default-OFF and fully inert until
+    # enabled — same rollout discipline as the G1 auto-recut actuator.
+    close_verification_enabled: bool = Field(
+        default=False,
+        description=(
+            "Reopen + re-triage an issue a merged PR closed without a fix "
+            "delta (the #10223 false-close signature). Default-off actuator "
+            "for the P10.7 detector (#10358)."
         ),
     )
 
