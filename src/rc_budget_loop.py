@@ -51,6 +51,14 @@ _RECENT_N = 5
 _MIN_HISTORY = 5
 _WORKFLOW = "rc-promotion-scenario.yml"
 
+# Job-name markers for the heavy suite jobs gated behind the workflow's
+# ``gate`` job (``if: needs.gate.outputs.should_run == 'true'``). When the gate
+# resolves ``should_run=false`` (a schedule tick with no open ``rc/*`` PR, or a
+# non-RC PR), every one of these jobs is ``skipped`` and the run finishes in a
+# few seconds — a "gate-only" run that must be excluded from the baseline
+# population so it doesn't deflate the median/spike thresholds (#10254).
+_SUITE_JOB_MARKERS = ("Scenario Tests", "Browser Scenarios")
+
 # Hard cap on each ``gh`` read/download. A wedged child must not hang the loop
 # cycle forever and freeze its heartbeat — the #9410 silent-stall failure
 # class (#9454 / #9508).
@@ -75,6 +83,11 @@ async def _communicate_bounded(
             proc.kill()
             await proc.wait()
         raise
+
+
+def _is_suite_job(name: str) -> bool:
+    """True if *name* is one of the heavy suite jobs gated on ``should_run``."""
+    return any(marker in name for marker in _SUITE_JOB_MARKERS)
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -108,6 +121,11 @@ class RCBudgetLoop(BaseBackgroundLoop):
         self._state = state
         self._pr = pr_manager
         self._dedup = dedup
+        # gate-only classification cache, keyed by run databaseId. Completed
+        # runs are immutable, so a run is classified via ``gh`` at most once
+        # across the loop's lifetime — amortising the job-level fetch instead
+        # of re-fan-out on every 4h tick (#10254 / respecting #9814).
+        self._gate_only_cache: dict[int, bool] = {}
 
     def _get_default_interval(self) -> int:
         return self._config.rc_budget_interval
@@ -198,7 +216,7 @@ class RCBudgetLoop(BaseBackgroundLoop):
             "--status",
             "completed",
             "--json",
-            "databaseId,url,conclusion,createdAt,updatedAt,startedAt",
+            "databaseId,url,conclusion,createdAt,updatedAt,startedAt,event,headBranch",
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -239,14 +257,78 @@ class RCBudgetLoop(BaseBackgroundLoop):
                 }
             )
         out.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
-        return out[:_HISTORY_CAP]
+        out = out[:_HISTORY_CAP]
+        for run in out:
+            run["gate_only"] = await self._classify_gate_only(run)
+        return out
+
+    async def _classify_gate_only(self, run: dict[str, Any]) -> bool:
+        """Return True when *run* is a gate-only (``should_run=false``) tick.
+
+        Cheap list-level fields settle ``pull_request`` runs outright; the
+        ambiguous ``schedule`` / ``workflow_dispatch`` runs (which may be a
+        real full run against an open ``rc/*`` PR *or* an empty gate-only tick)
+        are resolved once via a job-level fetch and cached (#10254).
+        """
+        run_id = int(run.get("databaseId", 0) or 0)
+        if run_id in self._gate_only_cache:
+            return self._gate_only_cache[run_id]
+        verdict = self._classify_from_list_fields(run)
+        if verdict is None:
+            jobs = await self._fetch_run_jobs_raw(str(run_id)) if run_id else []
+            verdict = self._jobs_indicate_gate_only(jobs)
+        if run_id:
+            self._gate_only_cache[run_id] = verdict
+        return verdict
+
+    @staticmethod
+    def _classify_from_list_fields(run: dict[str, Any]) -> bool | None:
+        """Classify from ``gh run list`` fields alone, else None (ambiguous).
+
+        The workflow's ``pull_request`` trigger targets ``main`` and the gate
+        resolves ``should_run=true`` iff the PR head is an ``rc/*`` branch
+        (ADR-0042). So a ``pull_request`` run is decidable from ``headBranch``
+        with no job fetch. ``schedule`` / ``workflow_dispatch`` runs depend on
+        whether an ``rc/*`` PR was open at the time — undecidable from the list.
+        """
+        if str(run.get("event", "")) == "pull_request":
+            return not str(run.get("headBranch", "")).startswith("rc/")
+        return None
+
+    @staticmethod
+    def _jobs_indicate_gate_only(jobs: list[dict[str, Any]]) -> bool:
+        """True iff every present suite job was ``skipped`` (gate-only run).
+
+        A gate-only run runs only the ``gate`` job; ``Scenario Tests`` /
+        ``Browser Scenarios`` are ``skipped``. A full run executes them
+        (``success`` / ``failure`` / ``cancelled``). An unrecognised shape
+        (no suite jobs found) fails open — treated as a full run — so a
+        transient/odd payload never drops a real run from the baseline.
+        """
+        suite = [j for j in jobs if _is_suite_job(str(j.get("name", "")))]
+        if not suite:
+            return False
+        return all(str(j.get("conclusion", "")).lower() == "skipped" for j in suite)
 
     def _compute_baselines(
         self, runs: list[dict[str, Any]]
     ) -> tuple[dict[str, Any], dict[str, int]]:
-        """Return ``(current, {rolling_median, recent_max})`` excluding current."""
+        """Return ``(current, {rolling_median, recent_max})`` excluding current.
+
+        The baseline population (rolling median + recent-5 spike window) is
+        built from real full runs only: gate-only (``should_run=false``) runs
+        are excluded so their near-zero durations don't deflate the thresholds
+        and make a normal full run read as an extreme spike (#10254). The
+        ``current`` run is still the newest run regardless of gate-only status,
+        so its own duration reporting is unaffected.
+        """
         current = max(runs, key=lambda r: r.get("createdAt", ""))
-        others = [r for r in runs if r.get("databaseId") != current.get("databaseId")]
+        others = [
+            r
+            for r in runs
+            if r.get("databaseId") != current.get("databaseId")
+            and not r.get("gate_only", False)
+        ]
         others.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
         durations = [int(r["duration_s"]) for r in others]
         recent = durations[:_RECENT_N]
@@ -272,9 +354,13 @@ class RCBudgetLoop(BaseBackgroundLoop):
             hits.append(("spike", r))
         return hits
 
-    async def _fetch_job_breakdown(self, run: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return up to 10 slowest jobs for *run* via ``gh run view --json jobs``."""
-        run_id = str(run.get("databaseId", ""))
+    async def _fetch_run_jobs_raw(self, run_id: str) -> list[dict[str, Any]]:
+        """Return the raw ``jobs`` array for *run_id* via ``gh run view``.
+
+        Empty list on any failure (missing id, timeout, non-zero exit, bad
+        JSON) — callers fail open. Shared by gate-only classification and the
+        per-job regression breakdown.
+        """
         if not run_id:
             return []
         cmd = [
@@ -302,8 +388,16 @@ class RCBudgetLoop(BaseBackgroundLoop):
             payload = json.loads(stdout.decode() or "{}")
         except json.JSONDecodeError:
             return []
+        jobs = payload.get("jobs") or []
+        return jobs if isinstance(jobs, list) else []
+
+    async def _fetch_job_breakdown(self, run: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return up to 10 slowest jobs for *run* via ``gh run view --json jobs``."""
+        run_id = str(run.get("databaseId", ""))
+        if not run_id:
+            return []
         out: list[dict[str, Any]] = []
-        for job in payload.get("jobs") or []:
+        for job in await self._fetch_run_jobs_raw(run_id):
             s = _parse_iso(job.get("startedAt"))
             c = _parse_iso(job.get("completedAt"))
             if not s or not c:

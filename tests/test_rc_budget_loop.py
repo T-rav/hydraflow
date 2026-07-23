@@ -122,6 +122,119 @@ def test_compute_baselines_median_and_recent_max(loop_env) -> None:
     assert baselines["rolling_median"] == 310
 
 
+def test_compute_baselines_excludes_gate_only_runs(loop_env) -> None:
+    """Gate-only (should_run=false) runs must not pollute median/spike baseline.
+
+    Regression for #10254: schedule-triggered ticks with no open ``rc/*`` PR
+    skip every suite job, so the run finishes in a few seconds. Those near-zero
+    ``gate_only`` runs used to drag the rolling median + recent-5 spike window
+    down (the #10216 "2729s vs 7s median" artifact). They must be excluded from
+    the baseline population while the current run + full runs are preserved.
+    """
+    loop = _loop(loop_env)
+    # Five near-zero gate-only runs, MORE RECENT than the real full runs so
+    # that — without the fix — they would dominate the recent-5 spike window.
+    gate_only = [
+        {
+            "databaseId": 90 - k,
+            "duration_s": dur,
+            "createdAt": f"2026-04-{29 - k:02d}T00:00:00Z",
+            "conclusion": "success",
+            "gate_only": True,
+        }
+        for k, dur in enumerate([7, 6, 8, 5, 9])
+    ]
+    full = [
+        {
+            "databaseId": 50 - k,
+            "duration_s": dur,
+            "createdAt": f"2026-04-{24 - k:02d}T00:00:00Z",
+            "conclusion": "success",
+            "gate_only": False,
+        }
+        for k, dur in enumerate([800, 810, 790, 820, 805])
+    ]
+    current = {
+        "databaseId": 100,
+        "duration_s": 1600,
+        "createdAt": "2026-04-30T00:00:00Z",
+        "conclusion": "success",
+        "gate_only": False,
+    }
+    runs = [current, *gate_only, *full]
+
+    resolved, baselines = loop._compute_baselines(runs)
+
+    assert resolved["databaseId"] == 100  # current unchanged (newest)
+    # Baseline built from the 5 full runs ONLY: [790, 800, 805, 810, 820].
+    assert baselines["rolling_median"] == 805
+    assert baselines["recent_max"] == 820  # not 9 (the gate-only max)
+
+
+def test_jobs_indicate_gate_only_from_skipped_suite_jobs(loop_env) -> None:
+    """Scenario/Browser jobs skipped == gate-only; any that ran == full run."""
+    loop = _loop(loop_env)
+    gate_only_jobs = [
+        {"name": "Resolve RC PR", "conclusion": "success"},
+        {"name": "Scenario Tests", "conclusion": "skipped"},
+        {"name": "Browser Scenarios", "conclusion": "skipped"},
+        {
+            "name": "Trust Gate (adversarial corpus, fixture mode)",
+            "conclusion": "skipped",
+        },
+    ]
+    # Real #10216 shape: schedule-triggered FULL run — scenario ran, browser cancelled.
+    full_jobs = [
+        {"name": "Resolve RC PR", "conclusion": "success"},
+        {"name": "Scenario Tests", "conclusion": "success"},
+        {"name": "Browser Scenarios", "conclusion": "cancelled"},
+    ]
+    assert loop._jobs_indicate_gate_only(gate_only_jobs) is True
+    assert loop._jobs_indicate_gate_only(full_jobs) is False
+    # Unknown/empty shape → treat as full (never drop real data).
+    assert loop._jobs_indicate_gate_only([]) is False
+
+
+def test_classify_from_list_fields_pull_request(loop_env) -> None:
+    """rc/* PR runs are always full; non-rc PR runs are always gate-only."""
+    loop = _loop(loop_env)
+    assert (
+        loop._classify_from_list_fields(
+            {"event": "pull_request", "headBranch": "rc/2026-07-22-1824"}
+        )
+        is False
+    )
+    assert (
+        loop._classify_from_list_fields(
+            {"event": "pull_request", "headBranch": "feature/x"}
+        )
+        is True
+    )
+    # schedule / workflow_dispatch → ambiguous, needs job inspection.
+    assert (
+        loop._classify_from_list_fields({"event": "schedule", "headBranch": "staging"})
+        is None
+    )
+
+
+async def test_classify_gate_only_uses_jobs_and_caches(loop_env) -> None:
+    """Ambiguous schedule runs are classified via jobs and cached per run id."""
+    loop = _loop(loop_env)
+    fetch = AsyncMock(
+        return_value=[
+            {"name": "Resolve RC PR", "conclusion": "success"},
+            {"name": "Scenario Tests", "conclusion": "skipped"},
+            {"name": "Browser Scenarios", "conclusion": "skipped"},
+        ]
+    )
+    loop._fetch_run_jobs_raw = fetch
+    run = {"databaseId": 555, "event": "schedule", "headBranch": "staging"}
+
+    assert await loop._classify_gate_only(run) is True
+    assert await loop._classify_gate_only(run) is True  # served from cache
+    fetch.assert_awaited_once()  # only one job fetch despite two classifications
+
+
 def _history() -> list[dict]:
     """6 prior runs at 300s."""
     return [
