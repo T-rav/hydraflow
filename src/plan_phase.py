@@ -1610,6 +1610,10 @@ class PlanPhase:
             worker_fn=_plan_worker,
             max_concurrent=self._config.max_planners,
             stop_event=self._stop_event,
+            # Opt in to mid-run refill (issue #10296): wake at least every
+            # poll_interval to dispatch items enqueued while a long plan holds
+            # a slot, instead of only refilling when a plan completes.
+            poll_interval=self._config.poll_interval,
         )
 
         return epic_results + standalone_results
