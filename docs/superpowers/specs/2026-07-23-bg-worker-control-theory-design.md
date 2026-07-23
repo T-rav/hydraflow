@@ -187,12 +187,19 @@ src/signal_control/
 
 New ADR (next in sequence): *"Control-theory signal conditioning and goal-seeking for background workers."* States the frame (§1), the mandate (new detectors/controllers compose from this toolkit, not raw thresholds), the fail-safe contract (§6), and kill-switches. Wiki entries + ubiquitous-language terms (`governor`, `setpoint`, `conditioner`, `corroborator`) follow.
 
-### Test strategy — full pyramid + controller simulation
+### Test strategy — full pyramid + property-based controller simulation
 
 - **Unit** — each conditioner/controller against known sequences: hysteresis doesn't flap on a sawtooth around threshold; CUSUM fires on a step, not on noise; AIMD backs off on breach and ramps on sustained headroom; RetryController exhausts exactly 2 attempts then falls through; store prunes by age+count and reloads from JSONL.
-- **Controller simulation (the addition)** — drive each controller with synthetic signal traces (truncation spike; flaky-then-green CI; cold-boot empty window; sustained regime shift) and assert closed-loop behavior: converges to setpoint, no oscillation, respects bounds, fails safe. Validates stability **before** it touches the live fleet.
+- **Property-based controller simulation (the addition)** — the controllers/conditioners are pure, so their stability properties are **searched, not hand-traced**, with `hypothesis` (new dev-dependency): generate arbitrary signal sequences (spikes, sawtooths, step shifts, empty windows) and assert the invariants hold for *all* of them, not just the traces we thought to write:
+  - ALWAYS `cap ∈ [1, N]` and ≤ 1 move per control period (bounds + move-rate/anti-windup).
+  - Hysteresis/persistence: no single-tick spike ever trips escalation ("don't freak out").
+  - AIMD: sustained breach ⇒ decrease; sustained headroom ⇒ increase; no oscillation in the dead-band.
+  - `RetryController`: ≤ 2 attempts and always terminates on any fault interleaving.
+  - Fail-safe: empty/corrupt history ⇒ conservative default action.
+  `hypothesis` finding a counterexample yields a minimal reproducing sequence — stability is validated **before** anything touches the live fleet.
 - **MockWorld scenario** — oversubscription drives truncations up → assert governor throttles `max_workers` then recovers; RC scenario with flaky-then-green CI → assert RC self-heals within cadence instead of closing.
 - **Sandbox e2e** — governor + "Controllers" panel wired end-to-end (load-bearing + dashboard-touching → earns the top layer per the testing standard).
+- **System-level fault injection (out of scope here; separate spike + ADR)** — `hypothesis` searches *inputs* to pure units but cannot exercise concurrency/timing/fault schedules across the integrated factory. A deterministic-simulation platform (e.g. Antithesis, riding the existing `docker-compose.sandbox.yml` air-gap) is the right tool for the closed-loop system properties — governor recovery under whole-fleet load, `RetryController` under injected CI/GitHub faults, and label-state-machine race invariants (no double-build, no double-merge). Tracked as its own spike because it is a cross-cutting *testing-infrastructure* decision (cost, CI wiring, whole-system) broader than this control layer.
 
 ---
 
