@@ -30,15 +30,6 @@ DESCRIPTION = (
     "issue), not just a heartbeat."
 )
 
-# Quarantined: the sweep never escalates in the sandbox (no worker_stall alert
-# within 90s), reproduced deterministically in CI and locally, while the seed
-# and the escalation LOGIC (test_health_monitor_worker_stall.py, 15/15) are both
-# correct — a subtle runtime precondition gap in _check_worker_staleness. This
-# scenario was the required RC-gate blocker jamming ALL staging->main promotions
-# (main stuck ~3 days / ~197 commits). Skipped loudly until the sweep precondition
-# is fixed; un-quarantine then. See the issue for the exact next diagnostic.
-QUARANTINED = "#10315"
-
 _STALLED_WORKER = "workspace_gc"
 
 

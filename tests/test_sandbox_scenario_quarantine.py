@@ -49,10 +49,12 @@ def test_quarantine_does_not_hide_more_than_the_known_set() -> None:
     all_mods = load_all_scenarios(include_quarantined=True)
     collective = load_all_scenarios()
     hidden = {m.NAME for m in all_mods} - {m.NAME for m in collective}
-    # s75_worker_stall_escalation was auto-quarantined by the FlakeTracker
-    # (tracking #10315) but the pin was never acknowledged — a pre-existing
-    # staging-red this un-sticks. Remove from the set when #10315's fix lands.
-    known_quarantined = {"s75_worker_stall_escalation"}
+    # s75_worker_stall_escalation was quarantined under #10315 (the stall sweep
+    # never escalated in the sandbox because the orchestrator's __init__
+    # clobbered the seeded BGWorkerManager). #10315's fix re-wires the seeded
+    # manager after orchestrator construction, so s75 is back in collective
+    # runs. No scenario is quarantined at present.
+    known_quarantined: set[str] = set()
     assert hidden == known_quarantined, (
         f"unexpected quarantine set {hidden ^ known_quarantined} — adding a "
         f"quarantine requires updating this pin (and a tracking issue), "
