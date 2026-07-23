@@ -70,7 +70,10 @@ GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
     # entries — staging_bisect is not exercised by any sandbox scenario), so
     # the baseline entry is RENAMED to the new token, not grown.
     "src/staging_bisect_loop.py::StagingBisectLoop._run_git::get_default_runner": 1,
-    "src/staging_promotion_loop.py::StagingPromotionLoop._list_merged_promotion_prs::run_subprocess": 1,
+    # staging_promotion_loop's raw-gh reads (_list_merged_promotion_prs +
+    # _staging_ci_is_green, #10353) are now covered by the module's
+    # ``config_disable`` seam in SANDBOX_SEAMS — its baseline entry is pruned
+    # per the shrink-only rule (the module is seam-declared, not grandfathered).
     "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._find_open_escalation::run_subprocess_result": 1,
     "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._reconcile_closed_escalations::run_subprocess_result": 1,
     "src/workspace_gc_loop.py::WorkspaceGCLoop._collect_orphaned_branches::run_subprocess": 2,

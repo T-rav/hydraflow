@@ -119,6 +119,15 @@ SANDBOX_SEAMS: dict[str, str] = {
     # loop no sandbox scenario exercises, so the whole loop is config-disabled
     # below rather than seeding those reads.
     "flake_tracker_loop": "config_disable",
+    # StagingPromotionLoop's two raw-gh reads bypass FakeGitHub and hang the
+    # air-gapped network (#10353): ``_list_merged_promotion_prs`` (`gh pr list`,
+    # reached by the evidence reconcile AND the G1 observed-main-advance sweep)
+    # and ``_staging_ci_is_green`` (`gh run list`, reached only by the G1
+    # auto-recut path). All three feature flags that reach them are pinned OFF
+    # in ``_apply_sandbox_config_overrides`` (evidence_pack_enabled,
+    # rc_observed_advance_close_enabled, rc_auto_recut_enabled), so no spawn is
+    # reachable — the sandbox still exercises the cut→monitor→merge path (s82).
+    "staging_promotion_loop": "config_disable",
 }
 
 
@@ -172,14 +181,23 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # loop, so disable it wholesale (retires the grandfathered _download_junit
     # spawn and air-gaps the new xdist-audit read).
     object.__setattr__(config, "flake_tracker_loop_enabled", False)
-    # StagingPromotionLoop's CH-4 evidence machinery (#10309): once a scenario
-    # seeds ``staging_enabled`` the loop's every tick runs the reconcile sweep
-    # (``_list_merged_promotion_prs`` — a raw ``gh pr list`` subprocess, the
-    # grandfathered spawn in test_sandbox_seam_completeness) and each promoted
-    # RC triggers the pack compiler. Both reach the network; both have their
-    # own unit tests. The sandbox exercises the cut→monitor→merge promotion
-    # path itself (s82).
+    # StagingPromotionLoop's raw-gh reads (#10309/#10353): once a scenario seeds
+    # ``staging_enabled`` the loop's every tick can reach two ``gh`` subprocesses
+    # that bypass FakeGitHub — ``_list_merged_promotion_prs`` (`gh pr list`) and
+    # ``_staging_ci_is_green`` (`gh run list`). Three flags gate every path to
+    # them; pin all three OFF so the ``staging_promotion_loop`` config_disable
+    # seam is TRUE (no reachable spawn), while the sandbox still exercises the
+    # cut→monitor→merge promotion path itself (s82):
+    #   - evidence_pack_enabled: the CH-4 reconcile sweep + pack compiler.
+    #   - rc_observed_advance_close_enabled (G1): the observed-main-advance
+    #     tracker-close sweep — the OTHER caller of _list_merged_promotion_prs,
+    #     not gated by evidence_pack_enabled.
+    #   - rc_auto_recut_enabled (G1): the only caller of _staging_ci_is_green
+    #     (already default-OFF; pinned here so the seam is not merely aspirational).
+    # All three have their own unit tests.
     object.__setattr__(config, "evidence_pack_enabled", False)
+    object.__setattr__(config, "rc_observed_advance_close_enabled", False)
+    object.__setattr__(config, "rc_auto_recut_enabled", False)
 
 
 def apply_seed_config_overrides(config: HydraFlowConfig, seed: MockWorldSeed) -> None:

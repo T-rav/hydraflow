@@ -2256,6 +2256,13 @@ class StateData(BaseModel):
     # ``rc_consecutive_failure_escalation_threshold`` files one HITL escalation
     # so a multi-day pipeline stall can't pass unnoticed (#9359 hardening).
     consecutive_rc_failures: int = 0
+    # G1 (#10353): high-water mark of the newest merged rc/* promotion PR the
+    # loop has observed advancing ``main``. Lets StagingPromotionLoop close the
+    # RC-stuck trackers on ANY observed main advance (a manual/operator promotion
+    # merge included), not only on the loop's own merge call. Bootstrapped on the
+    # first observation so a fresh deploy against pre-existing merged RCs never
+    # false-closes an open tracker.
+    last_observed_promotion_pr: int = 0
     auto_reverts_in_cycle: int = 0
     auto_reverts_successful: int = 0
     flake_reruns_total: int = 0
