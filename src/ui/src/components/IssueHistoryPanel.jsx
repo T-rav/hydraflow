@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useRef, useCallback } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
+import { EpicOutcomeCards } from './EpicOutcomeCards'
 
 const RANGE_PRESETS = [
   { key: '24h', label: '24h', hours: 24 },
@@ -234,7 +235,7 @@ function sortItems(items, sortColumn, sortDirection) {
 }
 
 export function OutcomesPanel() {
-  const { issueHistory } = useHydraFlow()
+  const { issueHistory, epics } = useHydraFlow()
   const [preset, setPreset] = useState('all')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
@@ -638,6 +639,7 @@ export function OutcomesPanel() {
 
   return (
     <div style={styles.container}>
+      <EpicOutcomeCards epics={epics} />
       <div style={styles.controls}>
         <div style={styles.controlGroup}>
           <span style={styles.controlLabel}>Range</span>
