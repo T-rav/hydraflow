@@ -4,17 +4,21 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from dedup_store import DedupStore
+from escalation_reconcile import is_bot_close
+from exception_classify import reraise_on_credit_or_bug
 from models import IsoTimestamp, ReviewVerdict
+from text_match import keyword_matches
 
 if TYPE_CHECKING:
-    from ports import ObservabilityPort, ReviewInsightStorePort  # noqa: TCH004
+    from datetime import datetime
+
+    from ports import ObservabilityPort, PRPort, ReviewInsightStorePort  # noqa: TCH004
 
 logger = logging.getLogger("hydraflow.review_insights")
 
@@ -29,25 +33,135 @@ logger = logging.getLogger("hydraflow.review_insights")
 # telemetry was mis-categorized as a reviewer verdict (#9426).  It is now
 # replaced by explicit type-annotation phrases.  "name" was similarly dropped
 # (matched "filename"/"username") in favor of the actionable "rename".
+#
+# #9918: even with ``\b`` whole-word matching, bare single words (test, tests,
+# coverage, security, injection, secret, naming, convention, empty, null, none,
+# exception, complexity, refactor, duplication, lint, format, style, ...) still
+# matched neutral/praise text ("all tests pass", "by convention", "no security
+# issues", "dependency injection"), inflating the per-category counts consumed
+# by analyze_patterns / get_escalation_data / get_common_feedback_section /
+# verify_proposals with false positives. Each bare word is now qualified into a
+# negative-polarity *deficiency phrase* or dropped; only inherently
+# deficiency-signalling single words survive (untested, untyped, insecure,
+# vulnerability, unformatted). The structural ratchet in
+# ``tests/test_review_insights.py`` (#9918, mirroring #9566) fails CI if a broad
+# bare single-word keyword is reintroduced. Historical reviews.jsonl counts are
+# NOT retroactively migrated — only forward classification changes.
 CATEGORY_KEYWORDS: dict[str, list[str]] = {
-    "missing_tests": ["test", "tests", "coverage", "untested", "no tests"],
+    "missing_tests": [
+        "missing test",
+        "missing tests",
+        "no tests",
+        "no test coverage",
+        "untested",
+        "insufficient coverage",
+        "insufficient test coverage",
+        "lacks tests",
+        "lacking tests",
+        "needs tests",
+        "needs more tests",
+        "without tests",
+    ],
     "type_annotations": [
         "type hint",
         "type hints",
         "type annotation",
         "type annotations",
-        "annotation",
-        "annotations",
-        "typing",
         "type hinting",
         "return type",
+        "missing annotation",
+        "missing annotations",
+        "missing type",
+        "untyped",
+        "no type hint",
     ],
-    "security": ["security", "injection", "secret", "vulnerability"],
-    "naming": ["naming", "rename", "convention"],
-    "edge_cases": ["edge case", "boundary", "empty", "null", "none"],
-    "error_handling": ["error handling", "exception", "try/except"],
-    "code_quality": ["complexity", "refactor", "SRP", "duplication"],
-    "lint_format": ["lint", "format", "ruff", "style"],
+    "security": [
+        "security vulnerability",
+        "security vulnerabilities",
+        "security risk",
+        "security flaw",
+        "security hole",
+        "insecure",
+        "sql injection",
+        "command injection",
+        "injection attack",
+        "injection vulnerability",
+        "hardcoded secret",
+        "hardcoded secrets",
+        "leaked secret",
+        "exposed secret",
+        "vulnerability",
+    ],
+    "naming": [
+        "naming convention",
+        "poor naming",
+        "unclear naming",
+        "bad naming",
+        "confusing name",
+        "misleading name",
+        "unclear name",
+        "should rename",
+        "consider renaming",
+        "needs renaming",
+    ],
+    "edge_cases": [
+        "edge case",
+        "edge cases",
+        "boundary condition",
+        "boundary case",
+        "off-by-one",
+        "empty input",
+        "empty case",
+        "null check",
+        "null value",
+        "null pointer",
+        "missing null",
+        "unhandled none",
+    ],
+    "error_handling": [
+        "error handling",
+        "unhandled exception",
+        "uncaught exception",
+        "swallowed exception",
+        "swallows exception",
+        "bare except",
+        "try/except",
+        "silent failure",
+        "silently swallow",
+    ],
+    "code_quality": [
+        "high complexity",
+        "too complex",
+        "overly complex",
+        "cyclomatic complexity",
+        "needs refactor",
+        "needs refactoring",
+        "should refactor",
+        "consider refactor",
+        "code duplication",
+        "duplicated code",
+        "duplicate logic",
+        "srp violation",
+        "single responsibility",
+    ],
+    "lint_format": [
+        "lint error",
+        "lint errors",
+        "lint warning",
+        "lint issue",
+        "lint issues",
+        "linting error",
+        "ruff error",
+        "ruff warning",
+        "ruff failure",
+        "formatting error",
+        "formatting issue",
+        "not formatted",
+        "unformatted",
+        "style violation",
+        "style issue",
+        "inconsistent style",
+    ],
 }
 
 # Summaries beginning with one of these markers are infra/telemetry noise
@@ -226,19 +340,6 @@ def is_infra_failure_summary(summary: str) -> bool:
     return lowered.startswith(_INFRA_FAILURE_PREFIXES)
 
 
-def _keyword_matches(keyword: str, lowered_summary: str) -> bool:
-    """Whole-word / phrase match of *keyword* against *lowered_summary*.
-
-    Uses ``\\b`` boundaries around the keyword's leading/trailing word
-    characters so the 3-char "test" matches "test"/"tests" but not "latest",
-    and so dropped-but-historically-broad terms can never match inside a
-    larger identifier (e.g. "type" inside ``TypeError``). Non-word characters
-    inside a keyword (``try/except``) are matched literally.
-    """
-    pattern = r"\b" + re.escape(keyword) + r"\b"
-    return re.search(pattern, lowered_summary) is not None
-
-
 def extract_categories(summary: str) -> list[str]:
     """Extract feedback categories from a review summary using keyword matching.
 
@@ -256,7 +357,7 @@ def extract_categories(summary: str) -> list[str]:
     return [
         cat
         for cat, keywords in CATEGORY_KEYWORDS.items()
-        if any(_keyword_matches(kw.lower(), lower) for kw in keywords)
+        if any(keyword_matches(kw.lower(), lower) for kw in keywords)
     ]
 
 
@@ -314,7 +415,7 @@ class ReviewInsightStore:
         for line in tail:
             try:
                 records.append(ReviewRecord.model_validate_json(line))
-            except Exception:  # noqa: BLE001
+            except ValidationError:
                 logger.warning("Skipping malformed review record: %s", line[:80])
         return records
 
@@ -345,7 +446,7 @@ class ReviewInsightStore:
             for cat, entry in raw.items():
                 try:
                     result[cat] = ProposalMetadata.model_validate(entry)
-                except Exception:  # noqa: BLE001
+                except ValidationError:
                     logger.warning("Skipping malformed proposal metadata for %s", cat)
             return result
         except (json.JSONDecodeError, OSError):
@@ -710,3 +811,71 @@ def build_persistent_finding_body(category: str, desc: str, stale_days: int) -> 
         f"---\n*Auto-filed by HydraFlow review-insight verification — routed "
         f"to the factory (previously a HITL escalation, #9227).*"
     )
+
+
+async def reconcile_closed_insight_escalations(
+    *,
+    prs: PRPort,
+    insight_escalated_at: dict[str, datetime],
+    find_label: str,
+) -> list[str]:
+    """Clear the in-memory stale-insight window-tracker for HUMAN-closed escalations.
+
+    A *human/external* close of a :data:`PERSISTENT_FINDING_PREFIX` escalation
+    is the intentional re-arm signal — the factory merged a fix, or a human
+    dismissed it — so the next stale tick should be free to file fresh. A
+    *bot/programmatic* close (one stamped with
+    ``escalation_reconcile.BOT_CLOSE_MARKER_LABEL`` before closing) must NOT
+    re-arm: a still-stale category would otherwise refile a duplicate on the
+    very next tick (#8996 — mirrors
+    ``EscalationReconciler.reconcile_closed``, #9437).
+
+    Shared by ``RetrospectiveLoop._reconcile_closed_insight_escalations`` and
+    the ``ReviewPhase`` fallback in ``review_phase/_phase.py`` — same
+    can't-drift-apart rationale as :data:`PERSISTENT_FINDING_PREFIX` above:
+    one writer of the reconcile contract, not two copies that can diverge.
+
+    *insight_escalated_at* is mutated in place (categories re-armed are
+    deleted from it). Returns the list of re-armed categories, for logging.
+    """
+    if not insight_escalated_at or not find_label:
+        return []
+
+    try:
+        closed = await prs.list_closed_issues_by_label(find_label)
+    except Exception as exc:  # noqa: BLE001
+        reraise_on_credit_or_bug(exc)
+        # Best-effort — a transient GitHub fault shouldn't block the tick
+        # that's trying to file (or skip) a stale-insight escalation.
+        logger.debug(
+            "review_insights: could not list closed find issues for re-arm",
+            exc_info=True,
+        )
+        return []
+
+    prefix = PERSISTENT_FINDING_PREFIX
+    # Build desc -> category reverse lookup once.
+    desc_to_category = {
+        CATEGORY_DESCRIPTIONS.get(cat, cat): cat for cat in list(insight_escalated_at)
+    }
+
+    cleared: list[str] = []
+    for entry in closed:
+        if not isinstance(entry, dict):
+            continue
+        title = entry.get("title", "")
+        if not title.startswith(prefix):
+            continue
+        desc = title[len(prefix) :]
+        category = desc_to_category.get(desc) or desc
+        if category not in insight_escalated_at:
+            continue
+        if is_bot_close(entry):
+            # Programmatic close — retain the window-tracker entry so a
+            # still-detected category does not immediately refile a
+            # duplicate on the next stale tick (#8996).
+            continue
+        del insight_escalated_at[category]
+        cleared.append(category)
+
+    return cleared

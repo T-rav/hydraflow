@@ -9,9 +9,11 @@ import pytest
 from adr_drift import (
     AdrRollupEntry,
     DriftFinding,
+    FleetDriftBatch,
     _adr_file_in_diff,
     compute_drift,
     compute_drift_by_adr,
+    partition_fleet_drift,
 )
 from adr_index import ADR, ADRIndex
 
@@ -369,3 +371,144 @@ def test_adr_rollup_entry_is_immutable(adr_index: ADRIndex) -> None:
     )
     with pytest.raises(AttributeError):  # frozen dataclass
         entry.adr = adr  # type: ignore[misc]
+
+
+# --- #9662: partition_fleet_drift / FleetDriftBatch ---
+
+
+@pytest.fixture
+def fleet_index(tmp_path: Path) -> ADRIndex:
+    """Six single-module owned ADRs (numbers 101–106) + files they cite."""
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    for i in range(1, 7):
+        _write_adr(
+            adr_dir,
+            number=100 + i,
+            title=f"loop{i}",
+            status="Accepted",
+            related_files=[f"src/loop{i}.py"],
+        )
+    return ADRIndex(adr_dir)
+
+
+def test_fleet_pr_batches_into_one_entry(fleet_index: ADRIndex) -> None:
+    """One PR drifting 5 ADRs (>= threshold 4) → exactly one FleetDriftBatch;
+    NONE of its findings appear in the per-ADR list (no double-filing)."""
+    per_adr, batches = partition_fleet_drift(
+        fleet_index,
+        [(9592, [f"src/loop{i}.py" for i in range(1, 6)])],
+        fleet_threshold=4,
+    )
+    assert per_adr == []
+    assert len(batches) == 1
+    batch = batches[0]
+    assert batch.pr_number == 9592
+    assert batch.adr_numbers == (101, 102, 103, 104, 105)
+    for entry in batch.entries:
+        assert entry.pr_numbers == (9592,)
+        assert len(entry.contributors) == 1
+
+
+def test_below_threshold_pr_stays_per_adr(fleet_index: ADRIndex) -> None:
+    """A PR drifting 3 ADRs (< threshold 4) keeps the per-ADR shape."""
+    per_adr, batches = partition_fleet_drift(
+        fleet_index,
+        [(100, ["src/loop1.py", "src/loop2.py", "src/loop3.py"])],
+        fleet_threshold=4,
+    )
+    assert batches == []
+    assert [e.adr.number for e in per_adr] == [101, 102, 103]
+
+
+def test_partition_matches_compute_drift_by_adr_below_threshold(
+    adr_index: ADRIndex,
+) -> None:
+    """Behavior-identity guard on the ``_aggregate_by_adr`` extraction:
+    with no PR at threshold, the per-ADR list is exactly what
+    ``compute_drift_by_adr`` produces (byte-for-byte)."""
+    pr_diffs = [
+        (10, ["src/alpha.py"]),
+        (11, ["src/alpha.py", "src/beta.py", "tests/x.py"]),
+        (12, ["src/alpha.py", "docs/adr/0001-alpha.md"]),
+    ]
+    per_adr, batches = partition_fleet_drift(adr_index, pr_diffs, fleet_threshold=4)
+    assert batches == []
+    assert per_adr == compute_drift_by_adr(adr_index, pr_diffs)
+
+
+def test_mixed_fleet_and_normal_prs_partition_independently(
+    fleet_index: ADRIndex,
+) -> None:
+    """A fleet PR and a normal PR drifting an overlapping ADR: the fleet PR's
+    finding goes ONLY to the batch; the normal PR's finding for the same ADR
+    stays per-ADR with only its own contributor."""
+    per_adr, batches = partition_fleet_drift(
+        fleet_index,
+        [
+            (200, [f"src/loop{i}.py" for i in range(1, 5)]),  # fleet: 4 ADRs
+            (201, ["src/loop1.py"]),  # normal: 1 ADR, overlaps the fleet PR
+        ],
+        fleet_threshold=4,
+    )
+    assert len(batches) == 1
+    assert batches[0].pr_number == 200
+    assert batches[0].adr_numbers == (101, 102, 103, 104)
+    assert [e.adr.number for e in per_adr] == [101]
+    assert per_adr[0].pr_numbers == (201,)  # fleet PR 200 NOT double-filed
+
+
+def test_adr_file_in_diff_does_not_count_toward_threshold(
+    fleet_index: ADRIndex,
+) -> None:
+    """Self-coverage carries over: an ADR whose own file is in the PR's diff
+    contributes no finding — dropping the PR below the fleet threshold."""
+    per_adr, batches = partition_fleet_drift(
+        fleet_index,
+        [
+            (
+                300,
+                [
+                    "src/loop1.py",
+                    "src/loop2.py",
+                    "src/loop3.py",
+                    "src/loop4.py",
+                    "docs/adr/0104-loop4.md",  # ADR-0104 covered by its own file
+                ],
+            )
+        ],
+        fleet_threshold=4,
+    )
+    assert batches == []  # 3 findings < threshold 4
+    assert [e.adr.number for e in per_adr] == [101, 102, 103]
+
+
+def test_batches_sorted_by_pr_number(fleet_index: ADRIndex) -> None:
+    fleet_files = [f"src/loop{i}.py" for i in range(1, 5)]
+    _, batches = partition_fleet_drift(
+        fleet_index,
+        [(402, fleet_files), (401, fleet_files)],
+        fleet_threshold=4,
+    )
+    assert [b.pr_number for b in batches] == [401, 402]
+
+
+def test_partition_empty_input(fleet_index: ADRIndex) -> None:
+    assert partition_fleet_drift(fleet_index, [], fleet_threshold=4) == ([], [])
+
+
+def test_partition_rejects_threshold_below_two(fleet_index: ADRIndex) -> None:
+    with pytest.raises(ValueError, match="fleet_threshold"):
+        partition_fleet_drift(fleet_index, [], fleet_threshold=1)
+
+
+def test_fleet_drift_batch_is_immutable(fleet_index: ADRIndex) -> None:
+    _, batches = partition_fleet_drift(
+        fleet_index,
+        [(500, [f"src/loop{i}.py" for i in range(1, 5)])],
+        fleet_threshold=4,
+    )
+    batch = batches[0]
+    with pytest.raises(AttributeError):  # frozen dataclass
+        batch.pr_number = 1  # type: ignore[misc]
+    assert isinstance(batch, FleetDriftBatch)

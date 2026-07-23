@@ -413,6 +413,16 @@ class PromptTelemetry:
                 _as_float(target.get("estimated_cost_usd", 0.0)) + float(record_cost),
                 6,
             )
+            # Int mirror of the float accumulator above (micro-USD, i.e.
+            # USD * 1e6). `get_source_totals()` (and its lifetime/session/PR/
+            # issue siblings) filter aggregate payloads to `isinstance(v, int)`
+            # before returning them, silently dropping the float
+            # `estimated_cost_usd` key — this int accumulator is what lets
+            # per-source cost survive that filter for `prompt_efficiency`'s
+            # scorecard math (spec §5).
+            target["estimated_cost_microusd"] = _as_int(
+                target.get("estimated_cost_microusd", 0)
+            ) + round(float(record_cost) * 1_000_000)
         target["last_updated"] = str(record.get("timestamp", ""))
 
     def get_pr_totals(self, pr_number: int) -> dict[str, int] | None:
@@ -508,6 +518,7 @@ def _new_counter() -> dict[str, object]:
         "actual_usage_calls": 0,
         "usage_unavailable_calls": 0,
         "pruned_chars_total": 0,
+        "estimated_cost_microusd": 0,
         "last_updated": "",
     }
 

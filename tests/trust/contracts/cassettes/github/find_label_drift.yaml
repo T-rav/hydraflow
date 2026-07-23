@@ -1,0 +1,28 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# find_label_drift (ADR-0088) walks open, non-merged PRs paired with
+# their linked issue and classifies pipeline-label drift. The
+# dispatcher seeds an issue at hydraflow-ready with a PR (default
+# commits=1) labelled hydraflow-review — the pr_ahead_of_issue case —
+# and asserts the single-element JSON list. detected_at is a live
+# datetime.now(UTC) stamp, so it is normalized via timestamps.ISO8601
+# rather than pinned to a literal value.
+adapter: github
+interaction: find_label_drift
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: find_label_drift
+  args: []
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[{"issue": 501, "pr": 601, "pr_commits": 1, "issue_label": "hydraflow-ready",
+    "pr_label": "hydraflow-review", "kind": "pr_ahead_of_issue", "detected_at": "2026-01-01T00:00:00.000000Z"}]
+
+    '
+  stderr: ''
+normalizers:
+- timestamps.ISO8601
+baseline_only: true

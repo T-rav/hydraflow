@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/adr_index.py:ADRIndex"
 aliases: ["adr cache", "adr catalog", "architecture decision index"]
 related: []
-evidence: []
+evidence: ["01KQP0V9KK99G77287P414NFQT"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-06-20T14:18:05.961056+00:00"
-updated_at: "2026-06-20T14:18:05.961059+00:00"
+updated_at: "2026-07-22T15:07:58.083138+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-06-20T14:18:05.960978+00:00"
 proposal_signals: ["S2"]

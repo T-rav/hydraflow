@@ -678,17 +678,23 @@ def _seed_arch_bot_branch(
     bot_branch: str,
     base: str = "staging",
     also_conflict_nongenerated: bool = False,
+    seed_meta: bool = False,
 ) -> None:
     """Set up a base branch and a bot branch that conflict on a generated file.
 
     Both branches edit ``docs/arch/generated/x.md`` differently so merging
     *base* into *bot_branch* produces an arch-generated conflict. With
     *also_conflict_nongenerated*, both also edit a non-generated file → a real
-    content conflict that must NOT auto-heal.
+    content conflict that must NOT auto-heal. With *seed_meta*, both branches
+    also write a *different* ``docs/arch/.meta.json`` (the volatile per-commit
+    stamp) so the merge conflicts on it too — the #10167 pin scenario.
     """
     gen = local_repo / "docs" / "arch" / "generated"
     gen.mkdir(parents=True, exist_ok=True)
+    meta = local_repo / "docs" / "arch" / ".meta.json"
     (gen / "x.md").write_text("base v0\n")
+    if seed_meta:
+        meta.write_text('{"stamp": "seed"}\n')
     if also_conflict_nongenerated:
         (local_repo / "code.txt").write_text("shared v0\n")
     subprocess.run(["git", "-C", str(local_repo), "add", "-A"], check=True)
@@ -700,6 +706,8 @@ def _seed_arch_bot_branch(
     # base branch advances the generated file.
     subprocess.run(["git", "-C", str(local_repo), "checkout", "-b", base], check=True)
     (gen / "x.md").write_text("BASE ADVANCED\n")
+    if seed_meta:
+        meta.write_text('{"stamp": "BASE"}\n')
     if also_conflict_nongenerated:
         (local_repo / "code.txt").write_text("base changed code\n")
     subprocess.run(["git", "-C", str(local_repo), "add", "-A"], check=True)
@@ -716,6 +724,8 @@ def _seed_arch_bot_branch(
         check=True,
     )
     (gen / "x.md").write_text("BOT STALE\n")
+    if seed_meta:
+        meta.write_text('{"stamp": "BOT"}\n')
     if also_conflict_nongenerated:
         (local_repo / "code.txt").write_text("bot changed code\n")
     subprocess.run(["git", "-C", str(local_repo), "add", "-A"], check=True)
@@ -837,6 +847,95 @@ async def test_refresh_real_conflict_aborts_no_push(
         check=True,
     ).stdout.strip()
     assert before == after
+
+
+def _arch_regen_meta_stub(local_repo: Path) -> Callable[..., Awaitable[str]]:
+    """Like ``_arch_regen_intercepting_stub`` but the fake ``arch.runner --emit``
+    ALSO writes a branch-specific ``docs/arch/.meta.json`` — reproducing the
+    #10167 defeat where regen re-arms the ``.meta.json`` conflict. The pin must
+    overwrite this branch-specific stamp with the base branch's copy."""
+
+    async def fake_run(
+        *cmd: str,
+        cwd: _Path | None = None,
+        gh_token: str = "",
+        timeout: float = 120.0,
+        runner: object = None,
+    ) -> str:
+        del gh_token, timeout, runner
+        if "arch.runner" in cmd:
+            assert cwd is not None
+            gen = _Path(cwd) / "docs" / "arch" / "generated" / "x.md"
+            gen.parent.mkdir(parents=True, exist_ok=True)
+            gen.write_text("REGENERATED FROM SOURCE\n")
+            # Branch-specific regen of the volatile stamp — this is exactly
+            # what re-arms the server-side conflict absent the #10167 pin.
+            meta = _Path(cwd) / "docs" / "arch" / ".meta.json"
+            meta.write_text('{"stamp": "BRANCH_SPECIFIC_REGEN"}\n')
+            return ""
+        try:
+            return _sp.run(
+                list(cmd),
+                cwd=str(cwd) if cwd is not None else None,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        except _sp.CalledProcessError as exc:
+            raise RuntimeError(exc.stderr or str(exc)) from exc
+
+    return fake_run
+
+
+@pytest.mark.asyncio
+async def test_refresh_pins_meta_json_to_base_not_branch_specific_regen(
+    local_repo: Path, bare_remote: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#10167: after an arch-stale heal, the committed ``docs/arch/.meta.json``
+    equals the BASE branch's copy — never the branch-specific regen — while the
+    generated artifacts ARE the fresh regen. This is what stops the healed PR
+    from re-DIRTYing on the next staging advance (GitHub can't run the local
+    ``merge=arch-meta`` driver, so a diverged ``.meta.json`` re-marks it DIRTY).
+    """
+    from auto_pr import refresh_branch_with_arch_regen
+
+    _seed_arch_bot_branch(
+        local_repo, bot_branch="ul-edge-meta", base="staging", seed_meta=True
+    )
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _arch_regen_meta_stub(local_repo),
+    )
+
+    result = await refresh_branch_with_arch_regen(
+        repo_root=local_repo,
+        branch="ul-edge-meta",
+        base="staging",
+        commit_author_name="t",
+        commit_author_email="t@t",
+    )
+
+    assert result.status == "refreshed", result.error
+
+    def _show(ref: str, path: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(bare_remote), "show", f"{ref}:{path}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+
+    committed_meta = _show("ul-edge-meta", "docs/arch/.meta.json")
+    base_meta = _show("staging", "docs/arch/.meta.json")
+    # The heal commit's .meta.json is pinned to the base branch's copy...
+    assert committed_meta == base_meta
+    assert '"BASE"' in committed_meta
+    # ...NOT the branch-specific regen stamp the arch runner produced.
+    assert "BRANCH_SPECIFIC_REGEN" not in committed_meta
+    # ...while the real generated artifacts ARE the fresh regen.
+    assert "REGENERATED FROM SOURCE" in _show(
+        "ul-edge-meta", "docs/arch/generated/x.md"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -141,6 +141,10 @@ class TestIntervalFieldsHaveBounds:
             "stale_issue_gc_interval": "stale_issue_gc",
             "ci_monitor_interval": "ci_monitor",
             "security_patch_interval": "security_patch",
+            # Secondary cadence knob on IssueRefinementLoop (#9957) — shares
+            # the loop's single dashboard-editable bounds entry rather than
+            # getting its own (there's one worker, not two).
+            "issue_refinement_full_sweep_interval": "issue_refinement",
         }
 
         missing = set()

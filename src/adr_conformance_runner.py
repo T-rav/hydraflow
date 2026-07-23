@@ -7,6 +7,7 @@ ratchet rejects mutating ones), so execution here does not mutate the repo.
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -33,6 +34,31 @@ class SubprocessConformanceRunner:
     resolve to ``CheckOutcome.MANUAL`` without shelling out.
     """
 
+    def available(self) -> bool:
+        """Return True iff pytest can launch under ``sys.executable``.
+
+        Probes the SAME interpreter the checks use (#10212 pinned it to
+        ``sys.executable``) via ``-m pytest --version``. When it returns False
+        — a half-synced venv where the test extra was dropped (``uv sync``
+        without ``--all-extras``) — every pytest-kind check would fail
+        identically with "No module named pytest", which ``run`` maps to FAIL.
+        ``AdrConformanceLoop`` calls this once per tick and skips (filing
+        nothing) rather than storming one false-positive drift issue per ADR
+        (#10211/#10243). This does not change ``run``'s exit-code mapping: a
+        genuine test failure still returns FAIL.
+        """
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "pytest", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=60.0,
+                check=False,
+            )
+        except (subprocess.SubprocessError, OSError):
+            return False
+        return proc.returncode == 0
+
     def run(
         self, check: Check, *, repo_root: Path, timeout_s: float = 300.0
     ) -> CheckResult:
@@ -53,7 +79,16 @@ class SubprocessConformanceRunner:
             # and not scenario_browser``). Without it, a cited scenario_loops/
             # scenario_browser test collects zero tests (exit 5) and is misread
             # as a failure; with it the cited test actually executes.
-            cmd = ["python", "-m", "pytest", check.target, "-q", "-m", ""]
+            #
+            # ``sys.executable``, not a bare "python": the loop's PATH may not
+            # carry a venv `python` shim with pytest installed (background
+            # loop processes don't inherit an interactive shell's PATH). A
+            # bare "python" resolving to a pytest-less interpreter fails every
+            # pytest-kind check with "No module named pytest", which the exit
+            # code mapping below misreads as a genuine FAIL — a mass
+            # false-positive drift storm across every enforced ADR at once
+            # (#10211). Mirrors the same fix in skill_prompt_eval_loop.py.
+            cmd = [sys.executable, "-m", "pytest", check.target, "-q", "-m", ""]
         else:  # make
             cmd = ["make", check.target]
         t0 = time.perf_counter()

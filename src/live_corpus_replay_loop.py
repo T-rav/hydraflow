@@ -58,6 +58,12 @@ Dispatcher = Callable[["ShadowSample"], Awaitable[dict[str, Any] | None]]
 # (the dispatcher itself can branch on ``sample.args``).
 DispatcherKey = tuple[str, str]
 
+# Per-key args-coverage predicate (#9633): answers "would this key's
+# dispatcher form an opinion on these args?". Registered alongside the
+# dispatcher so record-time pruning (ShadowCorpus.covers_cb) derives from
+# the same selection logic the dispatcher itself uses.
+ArgsCoverage = Callable[[list[str]], bool]
+
 
 class LiveCorpusReplayLoop(BaseBackgroundLoop):
     """Periodically diff shadow corpus samples vs fake-adapter outputs."""
@@ -84,17 +90,53 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
         self._dedup = dedup
         self._state = state
         self._dispatchers: dict[DispatcherKey, Dispatcher] = dict(dispatchers or {})
+        self._coverage: dict[DispatcherKey, ArgsCoverage] = {}
 
     def _get_default_interval(self) -> int:
         return self._config.live_corpus_replay_interval
 
-    def register(self, adapter: str, command: str, fn: Dispatcher) -> None:
+    def register(
+        self,
+        adapter: str,
+        command: str,
+        fn: Dispatcher,
+        *,
+        covers: ArgsCoverage | None = None,
+    ) -> None:
         """Register a dispatcher for ``(adapter, command)``.
 
         The dispatcher receives the full ShadowSample so it can branch on
         ``args`` (e.g. ``gh pr view`` covers many ``--json`` field sets).
+
+        ``covers`` optionally declares which args the dispatcher can form
+        an opinion on, feeding record-time pruning via :meth:`covers`
+        (#9633). One dispatcher and one coverage predicate per key: when
+        chaining a second validator under an existing key, OR-compose its
+        coverage into the single predicate (see #9803), else pruning drops
+        the samples the new validator needs. Omitting ``covers`` keeps
+        every sample for the key (conservative default).
         """
         self._dispatchers[(adapter, command)] = fn
+        if covers is not None:
+            self._coverage[(adapter, command)] = covers
+        else:
+            self._coverage.pop((adapter, command), None)
+
+    def covers(self, adapter: str, command: str, args: list[str]) -> bool:
+        """True when a registered dispatcher could form an opinion on this call.
+
+        Wired as ``ShadowCorpus``'s coverage predicate by the composition
+        root (#9633): no dispatcher key → ``False`` (pure dead weight);
+        key present with a coverage predicate → its args verdict; key
+        present without one → ``True`` (conservative keep).
+        """
+        key = (adapter, command)
+        if key not in self._dispatchers:
+            return False
+        predicate = self._coverage.get(key)
+        if predicate is None:
+            return True
+        return predicate(args)
 
     def registered_shapes(self) -> set[DispatcherKey]:
         """Return the set of ``(adapter, command)`` pairs covered by this loop.

@@ -402,6 +402,44 @@ class TestParseVerdict:
         result = TriageRunner._parse_verdict(transcript, 1)
         assert result is None
 
+    def test_verdict_enrichment_quotes_code_with_nested_fence_and_braces(self) -> None:
+        """Regression: the #9127 "verify against code" triage writes enrichment
+        that quotes source — nested ``` code fences AND ``{}`` (e.g. an f-string
+        ``f"[main {sha[:7]}] {args[0]}"``). The old fence/regex strategies both
+        truncate at the FIRST inner fence/brace → the valid verdict is rejected
+        as "unparseable" and the issue is parked. This is a genuine, complete
+        ``{"ready": true}`` verdict and MUST parse. (Observed live: the entire
+        backlog parked because every bug that cited code hit this.)"""
+        verdict = (
+            '{"ready": true, "reasons": [], "issue_type": "bug", '
+            '"clarity_score": 9, "needs_discovery": false, '
+            '"enrichment": "Confirmed the template '
+            '`f\\"[main {sha[:7]}] {args[0]}\\\\n\\"` still emits:\\n'
+            '```\\n[main abc1234] initial\\n```\\ndone.", '
+            '"already_addressed": false, "claim_verified": true}'
+        )
+        transcript = f"```json\n{verdict}\n```"
+        result = TriageRunner._parse_verdict(transcript, 1)
+        assert result is not None, "valid verdict that quotes code must parse"
+        assert result.ready is True
+
+    def test_verdict_as_raw_stream_json_with_code_quoting_enrichment(self) -> None:
+        """Same as above but delivered as RAW stream-json (a ``result`` frame
+        with the fenced verdict escaped inside) — the real transport."""
+        inner = (
+            '```json\\n{\\"ready\\": true, \\"reasons\\": [], '
+            '\\"enrichment\\": \\"template `f\\\\\\"[main {x[:7]}]\\\\\\"` and '
+            '```\\\\n[main abc] init\\\\n``` here\\", '
+            '\\"already_addressed\\": false}\\n```'
+        )
+        transcript = (
+            '{"type":"system","subtype":"init","tools":["Bash"]}\n'
+            f'{{"type":"result","subtype":"success","result":"{inner}"}}'
+        )
+        result = TriageRunner._parse_verdict(transcript, 1)
+        assert result is not None
+        assert result.ready is True
+
     def test_reasons_as_string_coerced_to_list(self) -> None:
         """LLM returns reasons as a plain string instead of an array — coerced to list."""
         transcript = '{"ready": false, "reasons": "Missing specificity"}'

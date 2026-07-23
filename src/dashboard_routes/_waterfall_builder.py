@@ -146,6 +146,7 @@ def _action_llm(rec: dict[str, Any], pricing: ModelPricingTable) -> dict[str, An
     model = str(rec.get("model", ""))
     if "cost_usd" in rec:
         cost_usd = float(rec.get("cost_usd", 0.0) or 0.0)
+        cost_unknown = bool(rec.get("cost_unknown", False))
     else:
         cost = pricing.estimate_cost(
             model,
@@ -155,6 +156,7 @@ def _action_llm(rec: dict[str, Any], pricing: ModelPricingTable) -> dict[str, An
             cache_read_tokens=cache_read,
         )
         cost_usd = round(cost, 6) if cost is not None else 0.0
+        cost_unknown = cost is None
     return {
         "kind": "llm",
         "model": model,
@@ -165,6 +167,8 @@ def _action_llm(rec: dict[str, Any], pricing: ModelPricingTable) -> dict[str, An
         "cache_write_tokens": cache_write,
         "duration_ms": int(float(rec.get("duration_seconds", 0.0)) * 1000),
         "cost_usd": cost_usd,
+        # #9821: unpriced-model spend must be marked, never shown as $0.
+        "cost_unknown": cost_unknown,
     }
 
 
@@ -228,6 +232,7 @@ def _empty_phase_rollup(phase: str) -> dict[str, Any]:
         "cache_write_tokens": 0,
         "cost_usd": 0.0,
         "wall_clock_seconds": 0,
+        "unpriced_calls": 0,
         "actions": [],
     }
 
@@ -307,6 +312,7 @@ def build_waterfall(
     missing: list[str] = []
     total_in = total_out = total_cache_r = total_cache_w = 0
     total_cost = 0.0
+    total_unpriced = 0
 
     for phase in PHASE_ORDER:
         actions = per_phase_actions.get(phase, [])
@@ -322,6 +328,8 @@ def build_waterfall(
             rollup["cache_read_tokens"] += int(a.get("cache_read_tokens", 0) or 0)
             rollup["cache_write_tokens"] += int(a.get("cache_write_tokens", 0) or 0)
             rollup["cost_usd"] += float(a.get("cost_usd", 0.0) or 0.0)
+            if a.get("cost_unknown"):
+                rollup["unpriced_calls"] += 1
         win = phase_windows.get(phase)
         if win is not None:
             rollup["wall_clock_seconds"] = max(
@@ -335,6 +343,7 @@ def build_waterfall(
         total_cache_r += rollup["cache_read_tokens"]
         total_cache_w += rollup["cache_write_tokens"]
         total_cost += rollup["cost_usd"]
+        total_unpriced += rollup["unpriced_calls"]
 
     wall = 0
     if first_seen and merged_at:
@@ -350,6 +359,7 @@ def build_waterfall(
             "cache_read_tokens": total_cache_r,
             "cache_write_tokens": total_cache_w,
             "cost_usd": round(total_cost, 6),
+            "unpriced_calls": total_unpriced,
             "wall_clock_seconds": wall,
             "first_seen": first_seen.isoformat() if first_seen else None,
             "merged_at": merged_at.isoformat() if merged_at else None,

@@ -2,9 +2,9 @@
 source: feedback_waitfor_flake_fix.md
 name: feedback_waitfor_flake_fix
 description: Fix the recurring vitest "assert right after act(async render)" timing-race flake with waitFor, not CI re-runs
-status: pending
-issue: null
-promoted_in: null
+status: promoted
+issue: 10181
+promoted_in: '#10181'
 wontfix_reason: null
 created: '2026-05-31'
 ---

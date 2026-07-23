@@ -213,6 +213,7 @@ def _flake_tracker_loop(tmp_path: Path):
         pr_manager=MagicMock(),
         dedup=MagicMock(),
         deps=d.loop_deps,
+        github_cache=MagicMock(),
     )
 
 
@@ -288,6 +289,7 @@ def _rc_budget_loop(tmp_path: Path):
         pr_manager=MagicMock(),
         dedup=MagicMock(),
         deps=d.loop_deps,
+        github_cache=MagicMock(),
     )
 
 
@@ -359,11 +361,33 @@ def _skill_prompt_eval_loop(tmp_path: Path):
     )
 
 
+def _gate_health_loop(tmp_path: Path):
+    from gate_health_loop import GateHealthLoop
+
+    d = _deps(tmp_path, "gate_health_loop_enabled")
+    return GateHealthLoop(config=d.config, pr_manager=MagicMock(), deps=d.loop_deps)
+
+
+def _issue_refinement_loop(tmp_path: Path):
+    from issue_refinement_loop import IssueRefinementLoop
+
+    d = _deps(tmp_path, "issue_refinement_enabled")
+    return IssueRefinementLoop(
+        config=d.config,
+        state=MagicMock(),
+        pr_manager=MagicMock(),
+        dedup=MagicMock(),
+        deps=d.loop_deps,
+    )
+
+
 def _stale_issue_gc_loop(tmp_path: Path):
     from stale_issue_gc_loop import StaleIssueGCLoop
 
     d = _deps(tmp_path, "stale_issue_gc_loop_enabled")
-    return StaleIssueGCLoop(config=d.config, pr_manager=MagicMock(), deps=d.loop_deps)
+    return StaleIssueGCLoop(
+        config=d.config, pr_manager=MagicMock(), state=MagicMock(), deps=d.loop_deps
+    )
 
 
 def _stale_issue_loop(tmp_path: Path):
@@ -449,6 +473,8 @@ _LOOP_FACTORIES = [
     ("RepoWikiLoop", _repo_wiki_loop),
     ("ReportIssueLoop", _report_issue_loop),
     ("RetrospectiveLoop", _retrospective_loop),
+    ("GateHealthLoop", _gate_health_loop),
+    ("IssueRefinementLoop", _issue_refinement_loop),
     ("RunsGCLoop", _runs_gc_loop),
     ("SecurityPatchLoop", _security_patch_loop),
     ("SentryLoop", _sentry_loop),

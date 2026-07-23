@@ -51,7 +51,32 @@ class TriageRetryStateMixin:
         last.pop(key, None)
         self._data.triage_retry_attempts = attempts
         self._data.triage_retry_last_attempt = last
+        # An infra-park marker is per-park transient state; drop it too so a
+        # closed/reconciled issue doesn't carry a stale marker into a later park.
+        self.clear_triage_infra_parked(issue_number)
         self.save()
+
+    # --- Infra-park distinction (#10290) ---
+    # An issue parked by a transient infra failure (not a clarification need)
+    # is marked here so TriageRetryLoop re-flows it on the short
+    # ``triage_infra_retry_interval`` floor instead of the 24h backoff.
+
+    def mark_triage_infra_parked(self, issue_number: int) -> None:
+        key = str(issue_number)
+        if key not in self._data.triage_infra_parked:
+            self._data.triage_infra_parked = [*self._data.triage_infra_parked, key]
+            self.save()
+
+    def is_triage_infra_parked(self, issue_number: int) -> bool:
+        return str(issue_number) in self._data.triage_infra_parked
+
+    def clear_triage_infra_parked(self, issue_number: int) -> None:
+        key = str(issue_number)
+        if key in self._data.triage_infra_parked:
+            self._data.triage_infra_parked = [
+                k for k in self._data.triage_infra_parked if k != key
+            ]
+            self.save()
 
     def get_triage_retry_last_attempt(self, issue_number: int) -> str:
         key = str(issue_number)

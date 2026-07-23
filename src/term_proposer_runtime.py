@@ -192,7 +192,10 @@ class OpenAutoPRBotPRPort:
         files: dict[str, str],
     ) -> int:
         """Generate files in a worktree and open a PR. Returns the PR number."""
-        from auto_pr import generate_and_open_pr_async  # noqa: PLC0415
+        from auto_pr import (  # noqa: PLC0415
+            PREFLIGHT_DOCS_ONLY,
+            generate_and_open_pr_async,
+        )
 
         path_specs = list(files.keys())
         wrote_term_file = any(
@@ -222,6 +225,9 @@ class OpenAutoPRBotPRPort:
             path_specs=path_specs,
             pr_title=title,
             pr_body=body,
+            # UL term PRs stage Markdown + regenerated glossary views —
+            # docs-only preflight set (#10013).
+            preflight=PREFLIGHT_DOCS_ONLY,
             base=self._base,
             auto_merge=False,
             gh_token=self._gh_token,

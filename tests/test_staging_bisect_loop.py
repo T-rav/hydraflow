@@ -1394,3 +1394,134 @@ class TestG10RetryLineageWiring:
         # past cap.
         all_labels = [c.args[2] for c in prs.create_issue.await_args_list]
         assert all("hitl-escalation" not in lbls for lbls in all_labels)
+
+
+# ---------------------------------------------------------------------------
+# _run_bisect_probe / _run_gh — #9554/#10028: route through the shared
+# bounded helper instead of a raw create_subprocess_exec. (_run_git is
+# deliberately EXCLUDED from this migration — its mid-run enabled_cb polling
+# for cooperative kill-switch cancellation cannot be expressed through the
+# shared helper.)
+# ---------------------------------------------------------------------------
+
+
+async def test_run_bisect_probe_success_returns_true(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from execution import SimpleResult
+
+    loop, _prs, _state = _make_loop(tmp_path, monkeypatch)
+
+    async def fake_result(*cmd: str, **_kwargs: object) -> SimpleResult:
+        assert cmd == ("make", "bisect-probe")
+        return SimpleResult(stdout="all green", stderr="", returncode=0)
+
+    monkeypatch.setattr("staging_bisect_loop.run_subprocess_result", fake_result)
+
+    passed, output = await loop._run_bisect_probe("red123")  # type: ignore[attr-defined]
+
+    assert passed is True
+    assert "all green" in output
+
+
+async def test_run_bisect_probe_nonzero_returns_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from execution import SimpleResult
+
+    loop, _prs, _state = _make_loop(tmp_path, monkeypatch)
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(stdout="", stderr="test_foo failed", returncode=1)
+
+    monkeypatch.setattr("staging_bisect_loop.run_subprocess_result", fake_result)
+
+    passed, output = await loop._run_bisect_probe("red123")  # type: ignore[attr-defined]
+
+    assert passed is False
+    assert "test_foo failed" in output
+
+
+async def test_run_bisect_probe_timeout_returns_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The shared helper group-kills the whole make -> pytest subtree on
+    timeout (#9579); this method just surfaces the failure."""
+    from subprocess_util import SubprocessTimeoutError
+
+    loop, _prs, _state = _make_loop(tmp_path, monkeypatch)
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> object:
+        raise SubprocessTimeoutError("timed out")
+
+    monkeypatch.setattr("staging_bisect_loop.run_subprocess_result", fake_result)
+
+    passed, output = await loop._run_bisect_probe("red123")  # type: ignore[attr-defined]
+
+    assert passed is False
+    assert "timed out" in output
+
+
+async def test_run_bisect_probe_exec_failure_returns_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """make not found (FileNotFoundError, an OSError) -> probe failure."""
+    loop, _prs, _state = _make_loop(tmp_path, monkeypatch)
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> object:
+        raise FileNotFoundError("make: not found")
+
+    monkeypatch.setattr("staging_bisect_loop.run_subprocess_result", fake_result)
+
+    passed, output = await loop._run_bisect_probe("red123")  # type: ignore[attr-defined]
+
+    assert passed is False
+    assert "exec failed" in output
+
+
+async def test_run_gh_success_returns_stdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loop, _prs, _state = _make_loop(tmp_path, monkeypatch)
+
+    async def fake_run_subprocess(*cmd: str, **_kwargs: object) -> str:
+        assert cmd[0] == "gh"
+        return "https://github.com/x/y/pull/42"
+
+    monkeypatch.setattr("staging_bisect_loop.run_subprocess", fake_run_subprocess)
+
+    out = await loop._run_gh(["gh", "pr", "create"])  # type: ignore[attr-defined]
+
+    assert out == "https://github.com/x/y/pull/42"
+
+
+async def test_run_gh_nonzero_raises_runtime_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-zero gh exit (never raised by run_subprocess_result — but
+    run_subprocess IS raising) surfaces as RuntimeError."""
+    loop, _prs, _state = _make_loop(tmp_path, monkeypatch)
+
+    async def fake_run_subprocess(*_cmd: str, **_kwargs: object) -> str:
+        raise RuntimeError("Command ('gh', 'pr', 'create') failed (rc=1): boom")
+
+    monkeypatch.setattr("staging_bisect_loop.run_subprocess", fake_run_subprocess)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await loop._run_gh(["gh", "pr", "create"])  # type: ignore[attr-defined]
+
+
+async def test_run_gh_timeout_raises_runtime_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from subprocess_util import SubprocessTimeoutError
+
+    loop, _prs, _state = _make_loop(tmp_path, monkeypatch)
+
+    async def fake_run_subprocess(*_cmd: str, **_kwargs: object) -> str:
+        raise SubprocessTimeoutError("timed out")
+
+    monkeypatch.setattr("staging_bisect_loop.run_subprocess", fake_run_subprocess)
+
+    with pytest.raises(RuntimeError, match="gh timed out"):
+        await loop._run_gh(["gh", "pr", "create"])  # type: ignore[attr-defined]

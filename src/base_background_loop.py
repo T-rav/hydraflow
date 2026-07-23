@@ -11,6 +11,7 @@ import abc
 import asyncio
 import contextlib
 import logging
+import zlib
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -183,19 +184,29 @@ class BaseBackgroundLoop(abc.ABC):
             return self._interval_cb(self._worker_name)
         return self._get_default_interval()
 
+    def _default_cycle_timeout_seconds(self) -> int:
+        """Return the config-driven default watchdog bound, ignoring any override.
+
+        Mirrors :meth:`_get_default_interval`: the override-free baseline
+        :meth:`_cycle_timeout_seconds` falls back to when no ``timeout_cb`` is
+        wired, and the one :class:`~bg_worker_manager.BGWorkerManager` calls
+        (via ``loop._default_cycle_timeout_seconds()``) to resolve a loop's
+        "no operator override" bound without recursing back through
+        ``timeout_cb`` (#9503).
+        """
+        if self.LONG_LLM_CYCLE:
+            return self._config.loop_watchdog_llm_seconds
+        return self._config.loop_watchdog_default_seconds
+
     def _cycle_timeout_seconds(self) -> int:
         """Resolve this loop's per-cycle watchdog bound in seconds (#9556).
 
         Prefers the injected ``timeout_cb`` (operator-tunable, per-loop); else
-        derives from config: :attr:`LONG_LLM_CYCLE` loops get the longer
-        ``loop_watchdog_llm_seconds`` bound, all others the tight
-        ``loop_watchdog_default_seconds`` one.
+        falls back to :meth:`_default_cycle_timeout_seconds`.
         """
         if self._timeout_cb is not None:
             return self._timeout_cb(self._worker_name)
-        if self.LONG_LLM_CYCLE:
-            return self._config.loop_watchdog_llm_seconds
-        return self._config.loop_watchdog_default_seconds
+        return self._default_cycle_timeout_seconds()
 
     def _build_details(self, stats: dict[str, Any] | None) -> dict[str, Any]:
         """Coerce arbitrary worker stats into a details dict."""
@@ -369,9 +380,55 @@ class BaseBackgroundLoop(abc.ABC):
             # best-effort — don't break the loop, but leave a breadcrumb
             logger.debug("%s: timestamp write failed", self._worker_name, exc_info=True)
 
+    def _startup_stagger_seconds(self) -> float:
+        """Deterministic first-tick offset within the configured spread (#9814).
+
+        A restart used to fire every loop's first cycle — and therefore
+        every loop's GitHub reads — at the same instant. Each loop now
+        delays its first cycle by ``crc32(worker_name) % spread`` seconds:
+        deterministic across restarts (no random jitter to reason about),
+        roughly uniform across loops. The offset is capped at the loop's
+        own resolved interval (the same :meth:`_get_interval` the run loop
+        sleeps on): a loop that ticks every N seconds gains nothing from
+        delaying its first tick beyond N — spreading within one interval
+        de-synchronizes the herd just as well — and fast-interval
+        environments (the sandbox runs ~6s loops against the production
+        120s spread) keep their end-to-end latency instead of serializing
+        the pipeline. ``run_on_startup=True`` loops are exempt —
+        ``github_cache`` must populate the shared cache immediately at
+        boot so the staggered readers land on a warm cache. A
+        :meth:`trigger` or stop request cuts the stagger short.
+        """
+        if self._run_on_startup:
+            return 0.0
+        spread = getattr(self._config, "loop_startup_stagger_s", 0)
+        # int-guard: test doubles pass MagicMock configs — never let a mock
+        # attribute masquerade as a spread.
+        if not isinstance(spread, int) or isinstance(spread, bool) or spread <= 0:
+            return 0.0
+        stagger = float(zlib.crc32(self._worker_name.encode()) % spread)
+        interval = self._get_interval()
+        # Same int-guard posture: interval_cb test doubles may hand back
+        # mocks — only a genuine positive interval caps the offset.
+        if (
+            isinstance(interval, int)
+            and not isinstance(interval, bool)
+            and interval > 0
+        ):
+            stagger = min(stagger, float(interval))
+        return stagger
+
     async def run(self) -> None:
         """Run the background worker loop until the stop event is set."""
         self._run_started_at = datetime.now(UTC)
+        stagger = self._startup_stagger_seconds()
+        if stagger > 0:
+            logger.debug(
+                "%s: staggering first tick by %.0fs", self._worker_name, stagger
+            )
+            await self._sleep_or_trigger(stagger)
+            if self._stop_event.is_set():
+                return
         # Run immediately if configured, or if cycles were missed during downtime
         if self._run_on_startup or self._should_run_catchup():
             try:

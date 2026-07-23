@@ -27,6 +27,7 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from exception_classify import reraise_on_credit_or_bug
 from loop_fitness import Confidence, FitnessContext, FitnessKind, LoopFitness
+from models import CONVERGENCE_BOUNDARY_STAGES
 
 if TYPE_CHECKING:
     from ports import PRPort
@@ -100,8 +101,13 @@ class ConvergenceOscillationLoop(BaseBackgroundLoop):
             # stage record. Skip ledgers that lack any such stage — this guards
             # against non-issue ledgers (e.g. sandbox_fix rows from
             # state/_sandbox_failure_fixer.py) even if the number-namespace
-            # invariant were ever to break.
-            if not (set(ledger.stage_state) & {"triage", "shape", "plan", "review"}):
+            # invariant were ever to break. Built from CONVERGENCE_BOUNDARY_STAGES
+            # (the same ubiquitous-language stage names the detector below and
+            # the escalation-issue-body lookup use) plus "review" (not itself a
+            # cross-boundary stage, but its own stage record also marks a real
+            # issue ledger).
+            relevant_stages = set(CONVERGENCE_BOUNDARY_STAGES) | {"review"}
+            if not (set(ledger.stage_state) & relevant_stages):
                 continue
 
             scanned += 1
@@ -126,11 +132,14 @@ class ConvergenceOscillationLoop(BaseBackgroundLoop):
 
             if fires:
                 # Identify which boundary stages are currently LOOP_BACK so the
-                # body gives operators a quick read on where the churn is.
-                boundary_stages = {"triage", "shape", "plan"}
+                # body gives operators a quick read on where the churn is. Reads
+                # the SAME CONVERGENCE_BOUNDARY_STAGES constant that
+                # detect_cross_boundary_oscillation() uses above — a future
+                # stage rename updates both call-sites at once instead of
+                # silently leaving this issue-body text stale (#9685).
                 loopback_stages = [
                     stage
-                    for stage in sorted(boundary_stages)
+                    for stage in sorted(CONVERGENCE_BOUNDARY_STAGES)
                     if ledger.stage_state.get(stage) is not None
                     and ledger.stage_state[stage].last_verdict == "LOOP_BACK"
                 ]

@@ -127,6 +127,189 @@ async def test_skips_human_required_already_set(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_suppresses_issue_with_open_green_resolving_pr(tmp_path: Path) -> None:
+    """#10260: an eligible issue whose linked PR is already open with all CI
+    checks green must not re-enter a new auto-agent attempt."""
+    loop, _ = _make_loop(tmp_path)
+    loop._prs.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 1,
+                "body": "x",
+                "labels": [
+                    {"name": "hitl-escalation"},
+                    {"name": "diagnose-failed"},
+                ],
+            },
+        ]
+    )
+    loop._prs.find_open_resolving_pr = AsyncMock(return_value=100)
+    loop._prs.get_pr_checks = AsyncMock(
+        return_value=[{"name": "Tests", "state": "SUCCESS"}]
+    )
+
+    result = await loop._do_work()
+
+    assert result == {"status": "ok", "issues_processed": 0, "suppressed": 1}
+    loop._prs.add_labels.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_does_not_suppress_when_ci_failing(tmp_path: Path) -> None:
+    loop, state = _make_loop(tmp_path)
+    state.get_auto_agent_attempts = MagicMock(return_value=3)
+    loop._prs.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 1,
+                "body": "x",
+                "labels": [
+                    {"name": "hitl-escalation"},
+                    {"name": "diagnose-failed"},
+                ],
+            },
+        ]
+    )
+    loop._prs.find_open_resolving_pr = AsyncMock(return_value=100)
+    loop._prs.get_pr_checks = AsyncMock(
+        return_value=[{"name": "Tests", "state": "FAILURE"}]
+    )
+
+    result = await loop._do_work()
+
+    assert result["issues_processed"] == 1
+    assert result["suppressed"] == 0
+    assert result["result_status"] == "skipped_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_does_not_suppress_when_checks_empty(tmp_path: Path) -> None:
+    """No CI checks registered yet must NOT read as green."""
+    loop, state = _make_loop(tmp_path)
+    state.get_auto_agent_attempts = MagicMock(return_value=3)
+    loop._prs.list_issues_by_label = AsyncMock(
+        return_value=[
+            {"number": 1, "body": "x", "labels": [{"name": "hitl-escalation"}]},
+        ]
+    )
+    loop._prs.find_open_resolving_pr = AsyncMock(return_value=100)
+    loop._prs.get_pr_checks = AsyncMock(return_value=[])
+
+    result = await loop._do_work()
+
+    assert result["issues_processed"] == 1
+    assert result["suppressed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_does_not_suppress_when_no_resolving_pr(tmp_path: Path) -> None:
+    loop, state = _make_loop(tmp_path)
+    state.get_auto_agent_attempts = MagicMock(return_value=3)
+    loop._prs.list_issues_by_label = AsyncMock(
+        return_value=[
+            {"number": 1, "body": "x", "labels": [{"name": "hitl-escalation"}]},
+        ]
+    )
+    loop._prs.find_open_resolving_pr = AsyncMock(return_value=None)
+
+    result = await loop._do_work()
+
+    assert result["issues_processed"] == 1
+    assert result["suppressed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_resolving_pr_lookup_failure_does_not_suppress(tmp_path: Path) -> None:
+    """A failed resolving-PR lookup must fail SAFE — never suppress a real
+    dispatch on uncertain data."""
+    loop, state = _make_loop(tmp_path)
+    state.get_auto_agent_attempts = MagicMock(return_value=3)
+    loop._prs.list_issues_by_label = AsyncMock(
+        return_value=[
+            {"number": 1, "body": "x", "labels": [{"name": "hitl-escalation"}]},
+        ]
+    )
+    loop._prs.find_open_resolving_pr = AsyncMock(side_effect=RuntimeError("gh down"))
+
+    result = await loop._do_work()
+
+    assert result["issues_processed"] == 1
+    assert result["suppressed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_ci_checks_lookup_failure_does_not_suppress(tmp_path: Path) -> None:
+    loop, state = _make_loop(tmp_path)
+    state.get_auto_agent_attempts = MagicMock(return_value=3)
+    loop._prs.list_issues_by_label = AsyncMock(
+        return_value=[
+            {"number": 1, "body": "x", "labels": [{"name": "hitl-escalation"}]},
+        ]
+    )
+    loop._prs.find_open_resolving_pr = AsyncMock(return_value=100)
+    loop._prs.get_pr_checks = AsyncMock(side_effect=RuntimeError("gh down"))
+
+    result = await loop._do_work()
+
+    assert result["issues_processed"] == 1
+    assert result["suppressed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_suppressed_count_across_multiple_eligible_issues(
+    tmp_path: Path,
+) -> None:
+    loop, _ = _make_loop(tmp_path)
+    loop._prs.list_issues_by_label = AsyncMock(
+        return_value=[
+            {"number": 1, "body": "x", "labels": [{"name": "hitl-escalation"}]},
+            {"number": 2, "body": "x", "labels": [{"name": "hitl-escalation"}]},
+        ]
+    )
+    loop._prs.find_open_resolving_pr = AsyncMock(return_value=100)
+    loop._prs.get_pr_checks = AsyncMock(
+        return_value=[{"name": "Tests", "state": "SUCCESS"}]
+    )
+
+    result = await loop._do_work()
+
+    assert result == {"status": "ok", "issues_processed": 0, "suppressed": 2}
+
+
+@pytest.mark.asyncio
+async def test_skips_suppressed_issue_and_dispatches_next_eligible(
+    tmp_path: Path,
+) -> None:
+    """The first eligible issue is already resolved by a green PR; the
+    second isn't — the guard must skip #1 and dispatch #2, not give up."""
+    loop, state = _make_loop(tmp_path)
+    state.get_auto_agent_attempts = MagicMock(return_value=3)
+    loop._prs.list_issues_by_label = AsyncMock(
+        return_value=[
+            {"number": 1, "body": "x", "labels": [{"name": "hitl-escalation"}]},
+            {"number": 2, "body": "x", "labels": [{"name": "hitl-escalation"}]},
+        ]
+    )
+
+    async def _find_open_resolving_pr(issue_number: int) -> int | None:
+        return 100 if issue_number == 1 else None
+
+    loop._prs.find_open_resolving_pr = AsyncMock(side_effect=_find_open_resolving_pr)
+    loop._prs.get_pr_checks = AsyncMock(
+        return_value=[{"name": "Tests", "state": "SUCCESS"}]
+    )
+
+    result = await loop._do_work()
+
+    assert result["issues_processed"] == 1
+    assert result["suppressed"] == 1
+    assert result["result_status"] == "skipped_exhausted"
+    loop._prs.add_labels.assert_awaited_with(
+        2, ["human-required", "auto-agent-exhausted"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_deny_list_bypasses_agent(tmp_path: Path) -> None:
     loop, state = _make_loop(tmp_path)
     state.get_auto_agent_attempts = MagicMock(return_value=0)

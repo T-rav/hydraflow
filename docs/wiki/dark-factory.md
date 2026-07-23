@@ -47,6 +47,15 @@ Every new loop must:
    `src/dashboard_routes/_common.py::_INTERVAL_BOUNDS`,
    `tests/scenarios/catalog/loop_registrations.py` builder + entry.
    Verify with `tests/test_loop_wiring_completeness.py` (regex auto-discovery).
+   Two more gates fire only in FULL `make quality` (learned building
+   GateHealthLoop #9974 — each cost a 15-minute bake to discover):
+   an explicit `loop_fitness` override (`tests/test_loop_fitness_completeness.py`
+   — SCORED via helper or HOUSEKEEPING per ADR-0093; never add to
+   `_GRANDFATHERED`; mirror `adr_conformance_loop.py`), and a
+   `services.<name>_loop = FakeBackgroundLoop()` stub in
+   `tests/orchestrator_integration_utils.py::build_scripted_services`
+   (the orchestrator's `bg_loop_registry` dereferences every registered
+   loop, so four integration tests AttributeError without it).
 
 2. **ADR-0049 in-body kill-switch gate** at the top of `_do_work`:
    ```python
@@ -267,6 +276,31 @@ value (None → cleared to the loop default). Detecting either would need
 an event log keyed on (name, source, timestamp) for every control-plane
 write. Accepted trade-off: the windows are short (band crossings move at
 rolling-24h speed) and recovery restores the pre-window operator intent.
+
+### 4.8 Pre-push self-check — six recurring avoidable CI reds
+
+Six patterns pass `make quality-lite` locally but go red on the first CI
+round, each costing a heal round-trip. All are already CI-guarded — the win
+is pre-empting them at build time. The implementer prompt now carries these
+as a "Pre-push self-check" section (`src/agent.py:_SELF_CHECK_CHECKLIST`);
+the same list, with the issue references that surfaced each, lives in
+[`gotchas.md`](gotchas.md) ("Pre-push self-check — six recurring avoidable CI reds").
+
+1. **`fix(` commit → `tests/regressions/` delta (P10.6).** No regressions
+   test on a `fix(` subject WARNs → red. Add one, or a `Skip-Regression:`
+   trailer for a pure refactor.
+2. **New `run_subprocess*`/`stream_claude_process` call site → sandbox seam.**
+   Declare it in `mockworld.sandbox_main.SANDBOX_SEAMS` or route through an
+   injected-fake seam, or the seam-completeness ratchet goes red.
+3. **ADR `Enforced by:` with multiple checks → bullet lines.** `**Enforced by:**`
+   then `- pytest:a` / `- pytest:b`; never inline `pytest:a, pytest:b`.
+4. **Code extraction relocates a `# noqa` → disturbance ratchet red.** Narrow
+   the `except` to concrete types or hoist the import to module top so no
+   suppression is needed; never bump the baseline.
+5. **Moving a cited file → update its ADR `Enforced by:` citation** in the
+   same commit, or ADR-conformance goes red.
+6. **Relocating a symbol → repoint tests that `patch()` it.** Grep for
+   `patch("oldmodule.symbol")` before the move, or the test errors at collection.
 
 ## §5 — Verifying the contract is honored
 

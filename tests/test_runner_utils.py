@@ -442,6 +442,7 @@ class TestStreamClaudeProcessLifecycle:
 
         mock_proc = AsyncMock()
         mock_proc.returncode = 0
+        mock_proc.pid = 4242
         mock_proc.stdin = MagicMock()
         mock_proc.stdin.drain = AsyncMock()
         mock_proc.stdout = CancellingIter()
@@ -455,13 +456,15 @@ class TestStreamClaudeProcessLifecycle:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
+            patch("process_group.os.killpg") as mock_killpg,
             pytest.raises(asyncio.CancelledError),
         ):
             await stream_claude_process(
                 **_default_kwargs(event_bus, active_procs=active_procs)
             )
 
-        mock_proc.kill.assert_called_once()
+        # #9911: group kill, not the child-only proc.kill().
+        mock_killpg.assert_called_once_with(4242, signal.SIGKILL)
         assert mock_proc not in active_procs
 
     @pytest.mark.asyncio
@@ -484,6 +487,7 @@ class TestStreamClaudeProcessLifecycle:
 
         mock_proc = AsyncMock()
         mock_proc.returncode = None
+        mock_proc.pid = 4242
         mock_proc.stdin = MagicMock()
         mock_proc.stdin.drain = AsyncMock()
         mock_proc.stdout = HangingIter()
@@ -496,6 +500,7 @@ class TestStreamClaudeProcessLifecycle:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
+            patch("process_group.os.killpg") as mock_killpg,
             pytest.raises(RuntimeError, match="timed out"),
         ):
             await stream_claude_process(
@@ -515,7 +520,8 @@ class TestStreamClaudeProcessLifecycle:
         pending = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
         assert not pending, f"stderr_task was not cleaned up: {pending}"
 
-        mock_proc.kill.assert_called()
+        # #9911: the timeout path group-kills via killpg, not proc.kill().
+        mock_killpg.assert_called_with(4242, signal.SIGKILL)
         mock_proc.wait.assert_awaited()
 
     @pytest.mark.asyncio
@@ -532,6 +538,13 @@ class TestStreamClaudeProcessLifecycle:
 
         mock_proc = AsyncMock()
         mock_proc.returncode = None
+        # #9911: a concrete int pid is load-bearing. Without it, AsyncMock's
+        # auto-attribute .pid coerces (via __index__) to 1, so the timeout
+        # reap's _kill_proc_group() calls the REAL os.killpg(1, SIGKILL) —
+        # signalling init's process group. On Linux CI (where pytest shares
+        # that group) this wedged the whole run; on macOS it was benign, so
+        # the test passed there and the hang only surfaced in CI.
+        mock_proc.pid = 4242
         mock_proc.stdin = MagicMock()
         mock_proc.stdin.drain = AsyncMock()
         mock_proc.stdout = HangingIter()
@@ -544,6 +557,7 @@ class TestStreamClaudeProcessLifecycle:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
+            patch("process_group.os.killpg"),
             pytest.raises(RuntimeError, match="timed out") as exc_info,
         ):
             await stream_claude_process(
@@ -572,6 +586,7 @@ class TestStreamClaudeProcessLifecycle:
 
         mock_proc = AsyncMock()
         mock_proc.returncode = 0
+        mock_proc.pid = 4242
         mock_proc.stdin = MagicMock()
         mock_proc.stdin.drain = AsyncMock()
         mock_proc.stdout = CancellingIter()
@@ -584,6 +599,7 @@ class TestStreamClaudeProcessLifecycle:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
+            patch("process_group.os.killpg") as mock_killpg,
             pytest.raises(asyncio.CancelledError),
         ):
             await stream_claude_process(**_default_kwargs(event_bus))
@@ -603,7 +619,8 @@ class TestStreamClaudeProcessLifecycle:
             f"stderr_task was not cleaned up on CancelledError: {pending}"
         )
 
-        mock_proc.kill.assert_called_once()
+        # #9911: the cancel path group-kills via killpg, not proc.kill().
+        mock_killpg.assert_called_once_with(4242, signal.SIGKILL)
 
     @pytest.mark.asyncio
     async def test_timeout_suppresses_process_lookup_error_on_kill(
@@ -626,6 +643,7 @@ class TestStreamClaudeProcessLifecycle:
 
         mock_proc = AsyncMock()
         mock_proc.returncode = None
+        mock_proc.pid = 4242
         mock_proc.stdin = MagicMock()
         mock_proc.stdin.drain = AsyncMock()
         mock_proc.stdout = HangingIter()
@@ -639,6 +657,11 @@ class TestStreamClaudeProcessLifecycle:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
+            # #9911: the group is already gone — killpg raises, and the
+            # timeout handler must still raise RuntimeError, not leak it.
+            patch(
+                "runner_utils.os.killpg", side_effect=ProcessLookupError
+            ) as mock_killpg,
             pytest.raises(RuntimeError, match="timed out"),
         ):
             await stream_claude_process(
@@ -646,7 +669,7 @@ class TestStreamClaudeProcessLifecycle:
                 config=StreamConfig(timeout=0.01),
             )
 
-        mock_proc.kill.assert_called_once()
+        mock_killpg.assert_called_once_with(4242, signal.SIGKILL)
         assert mock_proc not in active_procs
 
     @pytest.mark.asyncio
@@ -670,6 +693,7 @@ class TestStreamClaudeProcessLifecycle:
 
         mock_proc = AsyncMock()
         mock_proc.returncode = 0
+        mock_proc.pid = 4242
         mock_proc.stdin = MagicMock()
         mock_proc.stdin.drain = AsyncMock()
         mock_proc.stdout = CancellingIter()
@@ -683,13 +707,16 @@ class TestStreamClaudeProcessLifecycle:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
+            patch(
+                "runner_utils.os.killpg", side_effect=ProcessLookupError
+            ) as mock_killpg,
             pytest.raises(asyncio.CancelledError),
         ):
             await stream_claude_process(
                 **_default_kwargs(event_bus, active_procs=active_procs)
             )
 
-        mock_proc.kill.assert_called_once()
+        mock_killpg.assert_called_once_with(4242, signal.SIGKILL)
         assert mock_proc not in active_procs
 
     @pytest.mark.asyncio
@@ -730,7 +757,7 @@ class TestTerminateProcesses:
         proc2.pid = 222
         active: set[asyncio.subprocess.Process] = {proc1, proc2}
 
-        with patch("runner_utils.os.killpg") as mock_killpg:
+        with patch("process_group.os.killpg") as mock_killpg:
             terminate_processes(active)
 
         assert mock_killpg.call_count == 2
@@ -759,7 +786,7 @@ class TestTerminateProcesses:
         proc.pid = 12345
         active: set[asyncio.subprocess.Process] = {proc}
 
-        with patch("runner_utils.os.killpg") as mock_killpg:
+        with patch("process_group.os.killpg") as mock_killpg:
             terminate_processes(active)
 
         mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
@@ -770,7 +797,7 @@ class TestTerminateProcesses:
         proc.pid = 12345
         active: set[asyncio.subprocess.Process] = {proc}
 
-        with patch("runner_utils.os.killpg", side_effect=OSError("no such group")):
+        with patch("process_group.os.killpg", side_effect=OSError("no such group")):
             terminate_processes(active)
 
         # OSError suppressed, no crash
@@ -838,6 +865,7 @@ class TestStreamClaudeProcessTimeout:
 
         mock_proc = AsyncMock()
         mock_proc.returncode = None
+        mock_proc.pid = 4242
         mock_proc.stdin = MagicMock()
         mock_proc.stdin.drain = AsyncMock()
         mock_proc.stdout = HangingIter()
@@ -851,6 +879,7 @@ class TestStreamClaudeProcessTimeout:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
+            patch("process_group.os.killpg") as mock_killpg,
             pytest.raises(RuntimeError, match="timed out after 0.01s"),
         ):
             await stream_claude_process(
@@ -858,7 +887,8 @@ class TestStreamClaudeProcessTimeout:
                 config=StreamConfig(timeout=0.01),
             )
 
-        mock_proc.kill.assert_called_once()
+        # #9911: group kill, not the child-only proc.kill().
+        mock_killpg.assert_called_once_with(4242, signal.SIGKILL)
 
     @pytest.mark.asyncio
     async def test_timeout_cleans_up_active_procs(self, event_bus) -> None:
@@ -876,6 +906,10 @@ class TestStreamClaudeProcessTimeout:
 
         mock_proc = AsyncMock()
         mock_proc.returncode = None
+        # #9911: concrete int pid + patched killpg, else the timeout reap's
+        # _kill_proc_group() calls the REAL os.killpg on AsyncMock().pid
+        # (which coerces to 1 = init's group) and wedges Linux CI.
+        mock_proc.pid = 4242
         mock_proc.stdin = MagicMock()
         mock_proc.stdin.drain = AsyncMock()
         mock_proc.stdout = HangingIter()
@@ -889,6 +923,7 @@ class TestStreamClaudeProcessTimeout:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
+            patch("process_group.os.killpg"),
             pytest.raises(RuntimeError),
         ):
             await stream_claude_process(

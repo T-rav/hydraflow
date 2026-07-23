@@ -1,3 +1,8 @@
+# Promoted to auto-refreshable (issue #8699) — see
+# contract_recording._record_create_pr. Filename/interaction stay "pr_create"
+# (predates the command/interaction-match naming convention) so
+# contract_diff.detect_adapter_drift's filename-keyed match lands the
+# recorder's output on this same fixture instead of an orphaned duplicate.
 adapter: github
 interaction: pr_create
 recorded_at: "2026-04-22T14:07:03Z"
@@ -16,4 +21,4 @@ output:
   stderr: ""
 normalizers:
   - pr_number
-baseline_only: true
+baseline_only: false

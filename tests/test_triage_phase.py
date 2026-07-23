@@ -288,13 +288,17 @@ class TestTriagePhase:
         assert "Duplicate" in comment
 
     @pytest.mark.asyncio
-    async def test_triage_infra_error_does_not_escalate_to_hitl(
+    async def test_triage_infra_error_parks_for_bounded_retry(
         self,
         config: HydraFlowConfig,
     ) -> None:
-        """RuntimeError (empty LLM response) should NOT send the issue to HITL.
+        """RuntimeError (empty/unparseable LLM response) must PARK the issue.
 
-        The issue should stay in the find queue for retry on the next cycle.
+        Regression: previously the issue was left find-labeled and re-picked on
+        the very next tick, so a persistently-failing issue looped forever — a
+        triage retry storm that burned the usage budget. Parking routes it to
+        TriageRetryLoop (backoff + triage_retry_max_attempts cap → HITL) instead
+        of an unbounded immediate retry. Parking is not HITL escalation.
         """
         phase, _state, triage, prs, store, _stop = make_triage_phase(config)
         issue = TaskFactory.create(id=99, title="Well-formed issue", body="A" * 200)
@@ -306,56 +310,9 @@ class TestTriagePhase:
 
         await phase.triage_issues()
 
-        # Issue should NOT be escalated to HITL
-        prs.swap_pipeline_labels.assert_not_called()
-        prs.post_comment.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_triage_routes_vague_issue_to_discover(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """Vague issues with needs_discovery=True route to discover."""
-        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
-        issue = TaskFactory.create(
-            id=10, title="Build a better Calendly", body="A" * 100
-        )
-
-        triage.evaluate = AsyncMock(
-            return_value=TriageResultFactory.create(
-                issue_number=10,
-                ready=True,
-                needs_discovery=True,
-                clarity_score=3,
-            )
-        )
-        store.get_triageable = supply_once([issue])
-
-        await phase.triage_issues()
-
-        prs.transition.assert_called_once_with(10, "discover")
-
-    @pytest.mark.asyncio
-    async def test_triage_routes_low_clarity_to_discover(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """Issues with low clarity_score route to discover even if ready=True."""
-        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
-        issue = TaskFactory.create(
-            id=11, title="Improve onboarding experience", body="A" * 100
-        )
-
-        triage.evaluate = AsyncMock(
-            return_value=TriageResultFactory.create(
-                issue_number=11,
-                ready=True,
-                clarity_score=4,  # Below default threshold of 7
-            )
-        )
-        store.get_triageable = supply_once([issue])
-
-        await phase.triage_issues()
-
-        prs.transition.assert_called_once_with(11, "discover")
+        # Parked (swapped out of the find queue) so the next tick cannot
+        # immediately re-pick and hot-retry it.
+        prs.swap_pipeline_labels.assert_called_once_with(99, config.parked_label[0])
 
     @pytest.mark.asyncio
     async def test_triage_clear_issue_still_routes_to_plan(
@@ -379,6 +336,93 @@ class TestTriagePhase:
         await phase.triage_issues()
 
         prs.transition.assert_called_once_with(12, "plan")
+
+    @pytest.mark.asyncio
+    async def test_low_clarity_ready_issue_routes_to_plan(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ADR-0107: a low-clarity ready issue routes straight to plan — there
+        is no standalone discover fork; the planner's decision gate owns the
+        discover/shape decision."""
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(
+            id=13, title="Improve onboarding experience", body="A" * 100
+        )
+
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=13,
+                ready=True,
+                clarity_score=4,  # Below default threshold — pre-ADR-0107 discover
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        await phase.triage_issues()
+
+        prs.transition.assert_called_once_with(13, "plan")
+
+    @pytest.mark.asyncio
+    async def test_needs_discovery_issue_routes_to_plan(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ADR-0107: needs_discovery no longer routes to a standalone discover
+        phase — the planner gate owns that decision."""
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(
+            id=14, title="Build a better Calendly", body="A" * 100
+        )
+
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=14,
+                ready=True,
+                needs_discovery=True,
+                clarity_score=3,
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        await phase.triage_issues()
+
+        prs.transition.assert_called_once_with(14, "plan")
+
+    @pytest.mark.asyncio
+    async def test_classification_record_carries_clarity_hints(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ADR-0107: clarity_score / needs_discovery ride along on the
+        classification record so the planner's decision gate can read them
+        back as hints later
+        (plan_phase.py:_should_discover_helper / _triage_hints)."""
+        from unittest.mock import MagicMock
+
+        from issue_cache import IssueCache
+
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
+        mock_cache = MagicMock(spec=IssueCache)
+        mock_cache.record_classification = MagicMock()
+        phase._issue_cache = mock_cache
+
+        issue = TaskFactory.create(
+            id=15, title="Build a better Calendly", body="A" * 100
+        )
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=15,
+                ready=True,
+                needs_discovery=True,
+                clarity_score=3,
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        await phase.triage_issues()
+
+        mock_cache.record_classification.assert_called_once()
+        kwargs = mock_cache.record_classification.call_args.kwargs
+        assert kwargs["clarity_score"] == 3
+        assert kwargs["needs_discovery"] is True
 
 
 class TestTriagePhaseBatchScaling:
@@ -712,3 +756,95 @@ class TestTriageConvergenceLedger:
         ledger = state.get_convergence_ledger(102)
         assert ledger is not None, "Ledger must be created"
         assert ledger.stage_state["triage"].last_verdict == "LOOP_BACK"
+
+    @pytest.mark.asyncio
+    async def test_bug_not_present_records_advance_verdict(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """bug_not_present early-return site -> ledger triage verdict == 'ADVANCE'.
+
+        Regression guard (issue #9678): the ``bug_not_present`` recording is a
+        SEPARATE call-site from the fall-through one — it lives inside the
+        bug-reproducer block and ``return``s before the fall-through site is
+        reached. The other ledger tests exercise only the fall-through site, so a
+        future edit could silently regress this early-return recording while they
+        stay green. This test pins it.
+        """
+        from models import ReproductionOutcome, ReproductionResult
+
+        phase, state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(
+            id=103,
+            title="Crash in validate_config",
+            body="A" * 100,
+        )
+        # Ready + bug + default clarity (10 >= threshold) routes to 'plan',
+        # which is the only path that reaches the bug-reproducer block.
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=103, ready=True, issue_type="bug"
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        from unittest.mock import MagicMock
+
+        from bug_reproducer import BugReproducer
+        from issue_cache import IssueCache
+
+        # The bug-reproducer block guard requires BOTH _bug_reproducer and
+        # _issue_cache to be non-None (see src/triage_phase.py) — omitting
+        # either would route past the early-return site and pass for the wrong
+        # reason.
+        mock_reproducer = MagicMock(spec=BugReproducer)
+        mock_reproducer.reproduce = AsyncMock(
+            return_value=ReproductionResult(
+                issue_number=103,
+                outcome=ReproductionOutcome.NOT_PRESENT,
+                confidence=0.0,
+                investigation="validate_config does not exist in src/",
+            )
+        )
+        phase._bug_reproducer = mock_reproducer
+
+        mock_cache = MagicMock(spec=IssueCache)
+        mock_cache.record_classification = MagicMock()
+        mock_cache.record_reproduction_stored = MagicMock()
+        phase._issue_cache = mock_cache
+
+        await phase.triage_issues()
+
+        ledger = state.get_convergence_ledger(103)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["triage"].last_verdict == "ADVANCE"
+
+    @pytest.mark.asyncio
+    async def test_sentry_noise_closed_records_advance_verdict(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Sentry-noise auto-close -> ledger triage verdict == 'ADVANCE'.
+
+        Symmetry coverage for the 'sentry_noise_closed' fall-through outcome: a
+        not-ready Sentry-originated issue is auto-closed and recorded as ADVANCE.
+        """
+        phase, state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(
+            id=105,
+            title="TypeError in worker",
+            body="<!-- [sentry:issue-abc] -->\nAutomated Sentry report.",
+        )
+
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=105,
+                ready=False,
+                reasons=["Transient infrastructure error, not a code bug"],
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        await phase.triage_issues()
+
+        ledger = state.get_convergence_ledger(105)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["triage"].last_verdict == "ADVANCE"

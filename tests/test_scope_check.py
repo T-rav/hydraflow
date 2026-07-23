@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from scope_check import build_scope_check_prompt, parse_scope_check_result
+from scope_check import (
+    build_scope_check_prompt,
+    changed_files_in_diff,
+    parse_scope_check_result,
+)
 
 
 class TestBuildScopeCheckPrompt:
@@ -63,6 +67,75 @@ class TestBuildScopeCheckPrompt:
         prompt = build_scope_check_prompt(issue_number=1, issue_title="T", diff="+")
         assert "SCOPE_CHECK_RESULT: OK" in prompt
         assert "No plan available" in prompt
+
+
+class TestChangedFilesInDiff:
+    """Extracting changed file paths from a unified diff."""
+
+    def test_empty_diff_has_no_files(self):
+        assert changed_files_in_diff("") == set()
+
+    def test_extracts_from_git_and_header_lines(self):
+        diff = (
+            "diff --git a/src/foo.py b/src/foo.py\n"
+            "--- a/src/foo.py\n"
+            "+++ b/src/foo.py\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+        assert changed_files_in_diff(diff) == {"src/foo.py"}
+
+    def test_ignores_dev_null_sentinel(self):
+        diff = "diff --git a/src/new.py b/src/new.py\n--- /dev/null\n+++ b/src/new.py\n"
+        assert "dev/null" not in changed_files_in_diff(diff)
+        assert "src/new.py" in changed_files_in_diff(diff)
+
+
+class TestLandingOnlyScopeCheck:
+    """Zero-diff/no-op success path for landing-only tasks (issue #10271)."""
+
+    def test_landing_only_empty_diff_auto_passes(self):
+        plan = "## Task Type\nlanding-only\n\n## File Delta\n"
+        prompt = build_scope_check_prompt(
+            issue_number=10258, issue_title="Land PR", diff="", plan_text=plan
+        )
+        assert "SCOPE_CHECK_RESULT: OK" in prompt
+        assert "SCOPE_CHECK_RESULT: OK|RETRY" not in prompt
+        assert "no changes to planned files" in prompt
+
+    def test_landing_only_unrelated_residue_auto_passes(self):
+        plan = "## Task Type\nlanding-only\n\n## File Delta\nMODIFIED: src/target.py\n"
+        diff = (
+            "diff --git a/src/residue.py b/src/residue.py\n"
+            "--- a/src/residue.py\n"
+            "+++ b/src/residue.py\n"
+        )
+        prompt = build_scope_check_prompt(
+            issue_number=10258, issue_title="Land PR", diff=diff, plan_text=plan
+        )
+        assert "SCOPE_CHECK_RESULT: OK" in prompt
+        assert "SCOPE_CHECK_RESULT: OK|RETRY" not in prompt
+
+    def test_landing_only_touching_planned_file_classifies(self):
+        plan = "## Task Type\nlanding-only\n\n## File Delta\nMODIFIED: src/target.py\n"
+        diff = (
+            "diff --git a/src/target.py b/src/target.py\n"
+            "--- a/src/target.py\n"
+            "+++ b/src/target.py\n"
+        )
+        prompt = build_scope_check_prompt(
+            issue_number=10258, issue_title="Land PR", diff=diff, plan_text=plan
+        )
+        assert "SCOPE_CHECK_RESULT: OK|RETRY" in prompt
+
+    def test_code_change_plan_empty_diff_not_auto_passed(self):
+        plan = "## File Delta\nMODIFIED: src/foo.py\n"
+        prompt = build_scope_check_prompt(
+            issue_number=1, issue_title="Feature", diff="", plan_text=plan
+        )
+        assert "SCOPE_CHECK_RESULT: OK|RETRY" in prompt
+        assert "no changes to planned files" not in prompt
 
 
 class TestParseScopeCheckResult:

@@ -1,0 +1,4 @@
+DISCOVER_COMPLETENESS_RESULT: RETRY
+SUMMARY: shallow-section:known-unknowns — section is present but contains only "None."
+FINDINGS:
+- shallow-section:known-unknowns — the Known unknowns section holds five characters of filler, under the 50-character minimum and with zero bullets

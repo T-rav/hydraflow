@@ -270,3 +270,42 @@ async def test_resolved_diagnose_failed_routes_back_to_review(tmp_path: Path) ->
 
     assert result["result_status"] == "resolved"
     pr.swap_pipeline_labels.assert_awaited_once_with(1, loop._config.review_label[0])
+
+
+@pytest.mark.asyncio
+async def test_suppresses_dispatch_when_resolving_pr_is_already_green(
+    tmp_path: Path,
+) -> None:
+    """#10260: an escalated issue already resolved by an open, CI-green PR
+    must not spawn a new auto-agent attempt — the dispatch guard is
+    synchronous, so it is immune to the lag before LabelDriftWatcherLoop's
+    next reconciliation tick clears the stale labels."""
+    loop, _state, pr, _audit = _make_loop(tmp_path)
+    pr.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 1,
+                "body": "x",
+                "labels": [
+                    {"name": "hitl-escalation"},
+                    {"name": "diagnose-failed"},
+                ],
+            },
+        ]
+    )
+    pr.find_open_resolving_pr = AsyncMock(return_value=100)
+    pr.get_pr_checks = AsyncMock(return_value=[{"name": "Tests", "state": "SUCCESS"}])
+    spawn_called = False
+
+    async def _never_spawn(*a, **kw):
+        nonlocal spawn_called
+        spawn_called = True
+        raise AssertionError("agent must not be spawned once a PR resolves the issue")
+
+    loop._build_spawn_fn = lambda issue: _never_spawn
+
+    result = await loop._do_work()
+
+    assert result == {"status": "ok", "issues_processed": 0, "suppressed": 1}
+    assert spawn_called is False
+    pr.add_labels.assert_not_awaited()

@@ -1,0 +1,4 @@
+SCOPE_CHECK_RESULT: RETRY
+SUMMARY: change touches a file outside plan scope
+UNPLANNED_FILES:
+- src/unrelated.py — not listed in plan.md (only src/app.py was planned)

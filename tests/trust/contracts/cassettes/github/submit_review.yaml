@@ -1,0 +1,29 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# submit_review submits a formal PR review (`gh pr review <n> --repo
+# ... --approve/--request-changes/--comment` with the body via a temp
+# file). The verdict flag mirrors close_issue.yaml's `--reason`
+# convention for encoding a keyword arg as a CLI-shaped cassette arg;
+# the dispatcher maps it back to the ReviewVerdict enum member the
+# real PRManager.submit_review takes. The fake is a no-op stub that
+# always succeeds; stdout pins the boolean-return convention.
+adapter: github
+interaction: submit_review
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: submit_review
+  args:
+  - '528'
+  - --approve
+  - Looks good, approving.
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: 'True
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

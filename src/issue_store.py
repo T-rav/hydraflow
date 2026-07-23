@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import re
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -15,6 +16,7 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from models import PipelineIssueStatus, PipelineSnapshotEntry, QueueStats, Task
+from queue_strategy import band_of, order_queue
 from subprocess_util import AuthenticationError
 from task_source import TaskFetcher
 
@@ -38,8 +40,6 @@ class IssueStoreStage(StrEnum):
     """Internal routing stage names for the issue store queues."""
 
     FIND = "find"
-    DISCOVER = "discover"
-    SHAPE = "shape"
     PLAN = "plan"
     READY = "ready"
     REVIEW = "review"
@@ -49,8 +49,6 @@ class IssueStoreStage(StrEnum):
 
 # Backward-compatible module-level aliases
 STAGE_FIND = IssueStoreStage.FIND
-STAGE_DISCOVER = IssueStoreStage.DISCOVER
-STAGE_SHAPE = IssueStoreStage.SHAPE
 STAGE_PLAN = IssueStoreStage.PLAN
 STAGE_READY = IssueStoreStage.READY
 STAGE_REVIEW = IssueStoreStage.REVIEW
@@ -64,8 +62,6 @@ STAGE_MERGED = IssueStoreStage.MERGED
 # pushes and REST polls are byte-identical (modulo seq).
 STAGE_NAME_MAP: dict[str, str] = {
     IssueStoreStage.FIND: "triage",
-    IssueStoreStage.DISCOVER: "discover",
-    IssueStoreStage.SHAPE: "shape",
     IssueStoreStage.PLAN: "plan",
     IssueStoreStage.READY: "implement",
     IssueStoreStage.REVIEW: "review",
@@ -78,8 +74,6 @@ STAGE_NAME_MAP: dict[str, str] = {
 # most advanced stage (highest priority).
 _STAGE_PRIORITY = {
     IssueStoreStage.FIND: 0,
-    IssueStoreStage.DISCOVER: 1,
-    IssueStoreStage.SHAPE: 2,
     IssueStoreStage.PLAN: 3,
     IssueStoreStage.READY: 4,
     IssueStoreStage.REVIEW: 5,
@@ -124,11 +118,14 @@ class IssueStore:
         self._snapshot_flush_task: asyncio.Task[None] | None = None
         self._snapshot_debounce_s = 0.1
 
+        # RNG for the weighted_mix band draw (#10037). Instance-owned and
+        # seedable so store-level tests get a deterministic draw; production
+        # leaves it unseeded. The take path never touches the global random.
+        self._queue_rng: random.Random = random.Random()
+
         # Per-stage queues (FIFO)
         self._queues: dict[IssueStoreStage, deque[Task]] = {
             STAGE_FIND: deque(),
-            STAGE_DISCOVER: deque(),
-            STAGE_SHAPE: deque(),
             STAGE_PLAN: deque(),
             STAGE_READY: deque(),
             STAGE_REVIEW: deque(),
@@ -136,8 +133,6 @@ class IssueStore:
         # Companion sets for O(1) membership checks (task ids in each queue)
         self._queue_members: dict[IssueStoreStage, set[int]] = {
             STAGE_FIND: set(),
-            STAGE_DISCOVER: set(),
-            STAGE_SHAPE: set(),
             STAGE_PLAN: set(),
             STAGE_READY: set(),
             STAGE_REVIEW: set(),
@@ -169,8 +164,6 @@ class IssueStore:
         # Session throughput counters
         self._processed_count: dict[str, int] = {
             STAGE_FIND: 0,
-            STAGE_DISCOVER: 0,
-            STAGE_SHAPE: 0,
             STAGE_PLAN: 0,
             STAGE_READY: 0,
             STAGE_REVIEW: 0,
@@ -362,10 +355,6 @@ class IssueStore:
         m: dict[str, IssueStoreStage] = {}
         for lbl in self._config.find_label:
             m[lbl] = STAGE_FIND
-        for lbl in self._config.discover_label:
-            m[lbl] = STAGE_DISCOVER
-        for lbl in self._config.shape_label:
-            m[lbl] = STAGE_SHAPE
         for lbl in self._config.planner_label:
             m[lbl] = STAGE_PLAN
         for lbl in self._config.ready_label:
@@ -412,8 +401,6 @@ class IssueStore:
         """
         stage_alias: dict[str, IssueStoreStage] = {
             "find": STAGE_FIND,
-            "discover": STAGE_DISCOVER,
-            "shape": STAGE_SHAPE,
             "plan": STAGE_PLAN,
             "ready": STAGE_READY,
             "review": STAGE_REVIEW,
@@ -444,6 +431,33 @@ class IssueStore:
         self._eagerly_transitioned[task.id] = stage
         self._publish_queue_update_nowait()
 
+    def apply_label_transition(self, issue_number: int, new_label: str) -> bool:
+        """Mirror a GitHub pipeline-label swap in-memory immediately (#9842).
+
+        Event-driven bridge for the dashboard board: ``service_registry``
+        injects this as ``PRManager``'s pipeline-label listener, so every
+        ``swap_pipeline_labels`` moves the card within the snapshot debounce
+        (~0.1s) instead of waiting for the ``data_poll_interval`` (300s)
+        refresh to re-read labels. The poll remains the reconciling backstop,
+        and :meth:`enqueue_transition`'s eager protection stops a stale poll
+        (labels up to one cache cycle old) from dragging the card backward.
+
+        Returns ``True`` when the transition was applied. Returns ``False``
+        — leaving reconciliation to the poll — when *new_label* is not a
+        pipeline-stage label (e.g. a dup/parked swap-out; the issue is
+        usually still ``_active`` then, and ``mark_complete`` closes the
+        card) or when the issue was never routed by this store (no cached
+        Task to place in a queue, e.g. right after a restart).
+        """
+        stage = self._build_label_map().get(new_label)
+        if stage is None:
+            return False
+        task = self._issue_cache.get(issue_number)
+        if task is None:
+            return False
+        self.enqueue_transition(task, stage.value)
+        return True
+
     # ------------------------------------------------------------------
     # Queue accessors (non-blocking, return available issues)
     # ------------------------------------------------------------------
@@ -451,14 +465,6 @@ class IssueStore:
     def get_triageable(self, max_count: int) -> list[Task]:
         """Return up to *max_count* issues from the find queue."""
         return self._take_from_queue(STAGE_FIND, max_count)
-
-    def get_discoverable(self, max_count: int) -> list[Task]:
-        """Return up to *max_count* issues from the discover queue."""
-        return self._take_from_queue(STAGE_DISCOVER, max_count)
-
-    def get_shapeable(self, max_count: int) -> list[Task]:
-        """Return up to *max_count* issues from the shape queue."""
-        return self._take_from_queue(STAGE_SHAPE, max_count)
 
     def get_plannable(self, max_count: int) -> list[Task]:
         """Return up to *max_count* issues from the plan queue."""
@@ -505,8 +511,47 @@ class IssueStore:
         """Return the set of HITL issue numbers."""
         return set(self._hitl_numbers)
 
+    def _is_eligible(self, task: Task, stage: IssueStoreStage) -> bool:
+        """Whether *task* may be dispatched from *stage* on this tick."""
+        if task.id in self._active:
+            return False
+        # ``human-required`` issues have been escalated out of the pipeline;
+        # core phases must not re-pull them, or they re-fail and re-escalate
+        # forever. The label is cleared on a successful HITL correction (it is
+        # in ``all_pipeline_labels``), after which the issue re-enters the
+        # queue clean (ADR-0084, pillar C).
+        if "human-required" in task.tags:
+            return False
+        # Durable cross-actor build claim (#10168): an issue carrying the
+        # in-progress claim marker is already being built — possibly by another
+        # factory instance, a parallel operator session, or an out-of-band
+        # Agent dispatch that stamped the label on GitHub. A fresh process
+        # re-reading GitHub has empty in-memory ``_active``/``_in_flight`` for
+        # that issue, so the in-process ``_eagerly_transitioned`` fast-path
+        # can't see the claim; the durable label can. Skip re-pick — belt-and-
+        # suspenders with the in-process guard (ADR-0002).
+        in_progress = {lbl.lower() for lbl in self._config.in_progress_label}
+        if in_progress & {t.lower() for t in task.tags}:
+            return False
+        return not (
+            stage != STAGE_FIND
+            and self._crate_manager is not None
+            and self._crate_manager.active_crate_number is not None
+            and not self._crate_manager.is_in_active_crate(task)
+        )
+
     def _take_from_queue(self, stage: IssueStoreStage, max_count: int) -> list[Task]:
-        """Pop up to *max_count* tasks from *stage* queue, skipping active.
+        """Take up to *max_count* eligible tasks from the *stage* queue.
+
+        Which tasks are considered first is decided by the configured queue
+        strategy (#10037), not by arrival order — the pre-#10037 behaviour is
+        still available exactly as ``fifo``. The strategy and its weights are
+        re-read here on every call so the dashboard knob applies on the next
+        phase tick rather than at restart.
+
+        The deque itself stays in arrival order; ordering is a read-time
+        selection concern only, so queue snapshots and stats are unaffected.
+        Ineligible tasks simply keep their place for the next tick.
 
         Safety note: This method is synchronous with no ``await`` points, so
         the GIL guarantees it cannot be interleaved with ``_route_issues``
@@ -515,41 +560,37 @@ class IssueStore:
         call completes atomically, and this synchronous method runs to
         completion within a single event-loop tick.
         """
-        result: list[Task] = []
-        skipped: list[Task] = []
         q = self._queues[stage]
+        ordered = order_queue(
+            list(q),
+            self._config.queue_strategy,
+            self._config.band_weights(),
+            rng=self._queue_rng,
+            now=datetime.now(UTC),
+            starvation_threshold_hours=self._config.queue_starvation_threshold_hours,
+        )
 
-        while q and len(result) < max_count:
-            task = q.popleft()
-            self._queue_members[stage].discard(task.id)
-            if (
-                task.id in self._active
-                # ``human-required`` issues have been escalated out of the
-                # pipeline; core phases must not re-pull them, or they re-fail
-                # and re-escalate forever. The label is cleared on a successful
-                # HITL correction (it is in ``all_pipeline_labels``), after which
-                # the issue re-enters the queue clean (ADR-0084, pillar C).
-                or "human-required" in task.tags
-                or (
-                    stage != STAGE_FIND
-                    and self._crate_manager is not None
-                    and self._crate_manager.active_crate_number is not None
-                    and not self._crate_manager.is_in_active_crate(task)
-                )
-            ):
-                skipped.append(task)
-            else:
+        result: list[Task] = []
+        for task in ordered:
+            if len(result) >= max_count:
+                break
+            if self._is_eligible(task, stage):
                 result.append(task)
 
-        # Put skipped tasks back at the front
-        for task in reversed(skipped):
-            q.appendleft(task)
-            self._queue_members[stage].add(task.id)
+        if not result:
+            return []
 
-        if result:
-            for t in result:
-                self._in_flight[t.id] = stage
-            self._publish_queue_update_nowait()
+        taken = {t.id for t in result}
+        remaining = [t for t in q if t.id not in taken]
+        q.clear()
+        q.extend(remaining)
+        members = self._queue_members[stage]
+        members.clear()
+        members.update(t.id for t in remaining)
+
+        for t in result:
+            self._in_flight[t.id] = stage
+        self._publish_queue_update_nowait()
         return result
 
     # ------------------------------------------------------------------
@@ -728,6 +769,25 @@ class IssueStore:
                 entry.update(epic_meta)  # type: ignore[typeddict-item]
         return entry
 
+    def _dispatch_ranks(self, tasks: list[Task]) -> dict[int, int]:
+        """Map issue id -> the position ``order_queue`` would pick it (#10067).
+
+        Used only to annotate the snapshot, so it must NOT touch the live
+        dispatch RNG (``self._queue_rng``) — advancing it here would perturb the
+        real ``_take_from_queue`` draw. A fresh, fixed-seed RNG keeps the
+        preview stable within a frame; the head of the list (P0 + starved) is
+        deterministic regardless of seed.
+        """
+        ordered = order_queue(
+            tasks,
+            self._config.queue_strategy,
+            self._config.band_weights(),
+            rng=random.Random(0),
+            now=datetime.now(UTC),
+            starvation_threshold_hours=self._config.queue_starvation_threshold_hours,
+        )
+        return {task.id: rank for rank, task in enumerate(ordered)}
+
     def _snapshot_queued(self) -> dict[str, list[PipelineSnapshotEntry]]:
         """Return queued tasks grouped by stage."""
         snapshot: dict[str, list[PipelineSnapshotEntry]] = {}
@@ -735,6 +795,7 @@ class IssueStore:
             stage_seen: set[int] = set()
             entries: list[PipelineSnapshotEntry] = []
             duplicate_count = 0
+            ranks = self._dispatch_ranks(list(q))
             for task in q:
                 if task.id in stage_seen:
                     duplicate_count += 1
@@ -745,6 +806,8 @@ class IssueStore:
                     title=task.title,
                     url=task.source_url,
                     status="queued",
+                    priority=band_of(task),
+                    dispatch_rank=ranks[task.id],
                 )
                 epic_meta = self._epic_metadata(task)
                 if epic_meta:
@@ -824,8 +887,6 @@ class IssueStore:
         active_count: dict[str, int] = {}
         for stage in [
             STAGE_FIND,
-            STAGE_DISCOVER,
-            STAGE_SHAPE,
             STAGE_PLAN,
             STAGE_READY,
             STAGE_REVIEW,

@@ -17,14 +17,18 @@ HydraFlow's existing cadence-style loops; no new event infra.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from dedup_store import DedupStore
+from execution import SubprocessCancelledError, get_default_runner
+from subprocess_util import (
+    SubprocessTimeoutError,
+    run_subprocess,
+    run_subprocess_result,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -243,38 +247,29 @@ class StagingBisectLoop(BaseBackgroundLoop):
         cmd = ["make", "bisect-probe"]
         self._record_subprocess_cmd(cmd)
         t0 = time.perf_counter()
-        exit_code: int | None = None
-        stderr_excerpt: str | None = None
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                cwd=str(self._config.repo_root),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            result = await run_subprocess_result(
+                *cmd, cwd=self._config.repo_root, timeout=timeout_s
             )
-            try:
-                stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout_s
-                )
-            except TimeoutError:
-                proc.kill()
-                await proc.wait()
-                exit_code = 124  # bash convention
-                stderr_excerpt = f"timeout after {timeout_s}s"
-                self._emit_trace(t0, cmd, exit_code, stderr_excerpt)
-                return False, f"bisect-probe timed out after {timeout_s}s"
+        except SubprocessTimeoutError:
+            # The shared helper (run_simple) already group-kills the whole
+            # make → pytest probe subtree on timeout (#9579/#9554/#10028) —
+            # this method just surfaces the failure instead of crashing the
+            # loop. (#9794/#9816/#9883)
+            exit_code = 124  # bash convention
+            stderr_excerpt = f"timeout after {timeout_s}s"
+            self._emit_trace(t0, cmd, exit_code, stderr_excerpt)
+            return False, f"bisect-probe timed out after {timeout_s}s"
         except OSError as exc:
             self._emit_trace(t0, cmd, -1, f"exec failed: {exc}")
             return False, f"bisect-probe exec failed: {exc}"
-        combined = (stdout_b or b"").decode(errors="replace") + (
-            stderr_b or b""
-        ).decode(errors="replace")
-        exit_code = proc.returncode if proc.returncode is not None else -1
+        combined = result.stdout + result.stderr
+        exit_code = result.returncode
         self._emit_trace(
             t0,
             cmd,
             exit_code,
-            (stderr_b or b"").decode(errors="replace").strip()[:200] or None,
+            result.stderr.strip()[:200] or None,
         )
         return exit_code == 0, combined
 
@@ -564,40 +559,34 @@ class StagingBisectLoop(BaseBackgroundLoop):
         caller's own enabled-check at ``_do_work`` entry catches the
         next tick.
         """
-        import asyncio  # noqa: PLC0415
-
         self._record_subprocess_cmd(cmd)
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        comm_task = asyncio.create_task(proc.communicate())
-        deadline = asyncio.get_event_loop().time() + timeout
-        while True:
-            remaining = deadline - asyncio.get_event_loop().time()
-            if remaining <= 0:
-                proc.kill()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await comm_task
-                raise TimeoutError(f"git command exceeded {timeout}s")
-            poll = min(_CANCELLATION_POLL_SECONDS, remaining)
-            done, _pending = await asyncio.wait({comm_task}, timeout=poll)
-            if comm_task in done:
-                stdout, stderr = comm_task.result()
-                break
-            # Subprocess still running. Cooperative cancellation check.
-            if not self._enabled_cb(self._worker_name):
-                logger.info(
-                    "staging_bisect: kill-switch tripped mid-run — "
-                    "terminating git subprocess"
-                )
-                proc.kill()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await comm_task
-                raise BisectCancelledError("kill-switch tripped during git bisect run")
-        return proc.returncode or 0, stdout.decode(), stderr.decode()
+        # #9577: the shared helper now owns the group-leader spawn, the
+        # bounded reap, the registry-join, AND the cooperative kill-switch
+        # poll — so the bespoke poll loop (and its duplicated #9579 group-kill)
+        # is gone. Kept OFF the gated run_subprocess path: a 45-min local
+        # `git bisect` must not hold the fleet-wide gh/git semaphore.
+        try:
+            result = await get_default_runner().run_simple(
+                cmd,
+                cwd=str(cwd),
+                timeout=timeout,
+                cancel_check=lambda: not self._enabled_cb(self._worker_name),
+                cancel_poll_interval=_CANCELLATION_POLL_SECONDS,
+            )
+        except TimeoutError as exc:
+            # Preserve the descriptive message the bespoke loop raised — the
+            # bare wait_for TimeoutError from run_simple carries none, and
+            # _run_bisect's callers surface it. (#9577 migration parity)
+            raise TimeoutError(f"git command exceeded {timeout}s") from exc
+        except SubprocessCancelledError as exc:
+            logger.info(
+                "staging_bisect: kill-switch tripped mid-run — "
+                "git subprocess group terminated"
+            )
+            raise BisectCancelledError(
+                "kill-switch tripped during git bisect run"
+            ) from exc
+        return result.returncode, result.stdout, result.stderr
 
     async def _run_bisect(self, green_sha: str, red_sha: str) -> str:
         """Run bisect; return the first-bad SHA.
@@ -658,30 +647,22 @@ class StagingBisectLoop(BaseBackgroundLoop):
             await self._cleanup_worktree(worktree_dir)
 
     async def _run_gh(self, cmd: list[str]) -> str:
-        """Run a ``gh`` command and return stdout. Overridable in tests."""
-        import asyncio  # noqa: PLC0415
+        """Run a ``gh`` command and return stdout. Overridable in tests.
 
+        Routes through the shared bounded helper (#9554/#10028) —
+        ``run_subprocess`` raises on non-zero exit (same stdout-or-raise
+        contract as before) and inherits the gh circuit-breaker/rate-limit
+        gating plus process-group registration for free.
+        """
         self._record_subprocess_cmd(cmd)
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=self._config.repo_root,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=_GH_TIMEOUT_SECONDS
+            return await run_subprocess(
+                *cmd, cwd=self._config.repo_root, timeout=_GH_TIMEOUT_SECONDS
             )
-        except TimeoutError as exc:
-            proc.kill()
-            with contextlib.suppress(ProcessLookupError):
-                await proc.wait()
+        except SubprocessTimeoutError as exc:
             raise RuntimeError(
                 f"gh timed out after {_GH_TIMEOUT_SECONDS}s: {' '.join(cmd)}"
             ) from exc
-        if proc.returncode != 0:
-            raise RuntimeError(f"gh failed: {stderr.decode()[:500]}")
-        return stdout.decode()
 
     async def _attribute_culprit(self, sha: str) -> tuple[int, str]:
         """Resolve *sha* to ``(pr_number, pr_title)``.

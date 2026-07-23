@@ -11,6 +11,7 @@ import pytest
 # conftest.py already inserts the hydraflow package directory into sys.path
 from config import (
     _ENV_BOOL_OVERRIDES,
+    _ENV_ENUM_OVERRIDES,
     _ENV_FLOAT_OVERRIDES,
     _ENV_INT_OVERRIDES,
     _ENV_LITERAL_OVERRIDES,
@@ -18,6 +19,7 @@ from config import (
     _ENV_STR_OVERRIDES,
     HydraFlowConfig,
 )
+from queue_strategy import QueueStrategy
 
 # ---------------------------------------------------------------------------
 # Data-driven env-var override table validation
@@ -697,3 +699,53 @@ class TestEnvOptIntOverrideTable:
                 f"default={table_default}, but HydraFlowConfig.{field} "
                 f"default is {pydantic_default}"
             )
+
+
+class TestEnvVarEnumOverride:
+    """StrEnum-typed env overrides (#10037: queue_strategy)."""
+
+    @pytest.mark.parametrize(
+        ("field", "env_key", "enum_cls"),
+        _ENV_ENUM_OVERRIDES,
+        ids=[entry[0] for entry in _ENV_ENUM_OVERRIDES],
+    )
+    def test_enum_override_applies_when_at_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        field: str,
+        env_key: str,
+        enum_cls: type[QueueStrategy],
+    ) -> None:
+        # Pick a member other than the field default so the override is visible.
+        default = HydraFlowConfig.model_fields[field].default
+        target = next(member for member in enum_cls if member != default)
+        monkeypatch.setenv(env_key, target.value)
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert getattr(cfg, field) == target
+
+    def test_queue_strategy_override_lands_as_the_enum_member(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_QUEUE_STRATEGY", "weighted_mix")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.queue_strategy is QueueStrategy.WEIGHTED_MIX
+
+    def test_invalid_queue_strategy_value_is_ignored_and_default_kept(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_QUEUE_STRATEGY", "round_robin")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.queue_strategy is QueueStrategy.WEIGHTED_MIX

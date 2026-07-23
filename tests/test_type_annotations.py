@@ -78,30 +78,6 @@ class TestModelsReleaseField:
         assert typing.get_args(dict_args[0]) == (str, object)
 
 
-class TestExpertCouncilReturnTypes:
-    """to_dict methods must return dict[str, object]."""
-
-    def test_expert_vote_to_dict_return_is_parameterized(self) -> None:
-        from expert_council import CouncilVote
-
-        hints = typing.get_type_hints(CouncilVote.to_dict)
-        ret = hints["return"]
-        assert typing.get_origin(ret) is dict, (
-            f"Expected dict origin, got {typing.get_origin(ret)}"
-        )
-        assert typing.get_args(ret) == (str, object), (
-            f"Expected (str, object), got {typing.get_args(ret)}"
-        )
-
-    def test_council_result_to_dict_return_is_parameterized(self) -> None:
-        from expert_council import CouncilResult
-
-        hints = typing.get_type_hints(CouncilResult.to_dict)
-        ret = hints["return"]
-        assert typing.get_origin(ret) is dict
-        assert typing.get_args(ret) == (str, object)
-
-
 class TestSpecMatchReturnType:
     """extract_spec_match must return dict[str, object]."""
 

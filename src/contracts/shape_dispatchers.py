@@ -156,6 +156,62 @@ _SHAPE_REQUIRED_FIELDS: dict[str, frozenset[str]] = {
 }
 
 
+def _select_shape(args: list[str]) -> type[BaseModel] | None:
+    """Pure args → Pydantic-shape selection shared by validation and coverage.
+
+    Returns ``None`` when this dispatcher can never form an opinion on the
+    call: ``--jq`` transforms (output is an arbitrary scalar/array), unknown
+    subcommands, calls without a usable ``--json`` field set, and narrow
+    projections that omit the selected shape's required fields.
+
+    Single source of truth for #9633's record-time coverage pruning:
+    ``gh_shape_covers`` and ``gh_shape_validator`` both dispatch through
+    this helper, so coverage and dispatcher opinion cannot drift apart.
+    """
+    # --jq transforms output to an arbitrary shape (scalar, array, etc.);
+    # shape validation against a fixed Pydantic model is meaningless.
+    if "--jq" in args:
+        return None
+    subcommand = _gh_subcommand(args)
+    if subcommand is None:
+        return None
+
+    shape_cls: type[BaseModel] | None = None
+    if subcommand in ("pr-view", "pr-list"):
+        shape_cls = _pick_shape_for_pr(args)
+    elif subcommand == "issue-view":
+        shape_cls = _pick_shape_for_issue(args)
+    elif subcommand == "issue-list":
+        shape_cls = _pick_shape_for_issue_list(args)
+    elif subcommand == "pr-checks":
+        shape_cls = _pick_shape_for_checks(args)
+    if shape_cls is None:
+        return None
+
+    # Only validate when the requested fields cover the shape's required
+    # fields.  Narrow queries (e.g. ``--json commits``, ``--json headRefOid``)
+    # don't request the required fields, so attempting to validate them
+    # produces false-positive drift for every valid call of that shape.
+    requested = _extract_json_fields(args)
+    required = _SHAPE_REQUIRED_FIELDS.get(shape_cls.__name__, frozenset())
+    if requested is not None and not required.issubset(requested):
+        return None
+    return shape_cls
+
+
+def gh_shape_covers(args: list[str]) -> bool:
+    """True when this dispatcher would form an opinion on ``args``.
+
+    Registered alongside ``gh_shape_validator`` (``register(...,
+    covers=gh_shape_covers)``) so ``ShadowCorpus`` can drop no-opinion
+    samples at record time instead of letting them consume per-adapter
+    LRU budget (#9633). Derived from the same ``_select_shape`` the
+    validator uses — extending the dispatcher automatically extends
+    coverage, and the corpus self-refreshes on the next matching call.
+    """
+    return _select_shape(args) is not None
+
+
 async def gh_shape_validator(sample: ShadowSample) -> dict[str, object] | None:  # noqa: PLR0911
     """Dispatcher: validate ``sample.stdout`` against the matching shape.
 
@@ -173,34 +229,10 @@ async def gh_shape_validator(sample: ShadowSample) -> dict[str, object] | None: 
         return None
     if not sample.stdout.strip():
         return None
-    # --jq transforms output to an arbitrary shape (scalar, array, etc.);
-    # shape validation against a fixed Pydantic model is meaningless.
-    if "--jq" in sample.args:
-        return None
-    subcommand = _gh_subcommand(sample.args)
-    if subcommand is None:
-        return None
-
-    shape_cls: type[BaseModel] | None = None
-    if subcommand in ("pr-view", "pr-list"):
-        shape_cls = _pick_shape_for_pr(sample.args)
-    elif subcommand == "issue-view":
-        shape_cls = _pick_shape_for_issue(sample.args)
-    elif subcommand == "issue-list":
-        shape_cls = _pick_shape_for_issue_list(sample.args)
-    elif subcommand == "pr-checks":
-        shape_cls = _pick_shape_for_checks(sample.args)
+    shape_cls = _select_shape(sample.args)
     if shape_cls is None:
         return None
-
-    # Only validate when the requested fields cover the shape's required
-    # fields.  Narrow queries (e.g. ``--json commits``, ``--json headRefOid``)
-    # don't request the required fields, so attempting to validate them
-    # produces false-positive drift for every valid call of that shape.
-    requested = _extract_json_fields(sample.args)
-    required = _SHAPE_REQUIRED_FIELDS.get(shape_cls.__name__, frozenset())
-    if requested is not None and not required.issubset(requested):
-        return None
+    subcommand = _gh_subcommand(sample.args)
 
     try:
         parsed_payload = json.loads(sample.stdout)

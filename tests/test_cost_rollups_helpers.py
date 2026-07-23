@@ -173,6 +173,69 @@ def test_iter_priced_inferences_unknown_model_yields_zero_cost(config) -> None:
     )
     assert len(rows) == 1
     assert rows[0]["cost_usd"] == 0.0
+    # #9821: an unpriced model must be marked, not silently folded into $0.
+    assert rows[0]["cost_unknown"] is True
+
+
+def test_iter_priced_inferences_priced_row_is_not_cost_unknown(config) -> None:
+    _write_inference(
+        config,
+        timestamp="2026-04-22T10:00:00+00:00",
+        source="implementer",
+        tool="claude",
+        model="claude-sonnet-4-6",
+        issue_number=3,
+        input_tokens=10,
+        output_tokens=5,
+        cache_creation_input_tokens=0,
+        cache_read_input_tokens=0,
+        duration_seconds=1,
+        status="success",
+    )
+    pricing = MagicMock()
+    pricing.estimate_cost.return_value = 0.01
+    rows = list(
+        iter_priced_inferences(
+            config,
+            since=datetime(2026, 4, 22, 0, 0, tzinfo=UTC),
+            until=datetime(2026, 4, 23, 0, 0, tzinfo=UTC),
+            pricing=pricing,
+        )
+    )
+    assert rows[0]["cost_unknown"] is False
+
+
+def test_iter_priced_inferences_stored_estimate_fallback_is_not_cost_unknown(
+    config,
+) -> None:
+    """A zero-token row that re-prices via its stored char-based estimate has a
+    real (recorded) cost — it must NOT surface as unknown even when the model
+    is missing from the pricing table."""
+    _write_inference(
+        config,
+        timestamp="2026-04-22T10:00:00+00:00",
+        source="implementer",
+        tool="claude",
+        model="made-up-xyz",
+        issue_number=3,
+        input_tokens=0,
+        output_tokens=0,
+        estimated_cost_usd=0.25,
+        duration_seconds=1,
+        status="success",
+    )
+    pricing = MagicMock()
+    pricing.estimate_cost.return_value = None
+    rows = list(
+        iter_priced_inferences(
+            config,
+            since=datetime(2026, 4, 22, 0, 0, tzinfo=UTC),
+            until=datetime(2026, 4, 23, 0, 0, tzinfo=UTC),
+            pricing=pricing,
+        )
+    )
+    assert rows[0]["cost_usd"] == pytest.approx(0.25)
+    assert rows[0]["cost_unknown"] is False
 
 
 def test_iter_priced_inferences_phase_folded(config) -> None:

@@ -30,6 +30,11 @@ import pytest
 
 import subprocess_util
 from audit_chain import AuditChain
+from base_background_loop import LoopDeps
+from config import HydraFlowConfig
+from events import EventBus
+from stale_issue_loop import StaleIssueLoop
+from state import StateTracker
 from tests.scenarios.fakes.mock_world import MockWorld
 from tests.scenarios.helpers.loop_port_seeding import seed_ports as _seed_ports
 
@@ -338,6 +343,211 @@ class TestL20RunsGCLoop:
         # Verify recorder was called with config values
         recorder.purge_expired.assert_called_once()
         recorder.purge_oversized.assert_called_once()
+
+    async def test_event_log_rotation_compacts_oversized_log(self, tmp_path):
+        """#9905: a GC cycle rotates an oversized events.jsonl to the byte budget.
+
+        Catalog-built loop + real EventBus/EventLog over a seeded flood
+        (recent events, so only the size bound can shrink it). Post-cycle
+        the on-disk file fits event_log_max_size_mb and the newest events
+        survive.
+        """
+        import json as _json
+
+        from base_background_loop import LoopDeps
+        from events import EventBus, EventLog, EventType, HydraFlowEvent
+        from tests.helpers import make_bg_loop_deps
+        from tests.scenarios.catalog import LoopCatalog
+
+        log_path = tmp_path / "events.jsonl"
+        now = datetime.now(UTC).isoformat()
+        with open(log_path, "w") as f:
+            for i in range(5000):
+                event = HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    timestamp=now,
+                    data={"seq": i, "pad": "x" * 200},
+                )
+                f.write(event.model_dump_json() + "\n")
+        max_bytes = 1 * 1024 * 1024
+        assert log_path.stat().st_size > max_bytes, "seeded flood must exceed 1MB"
+
+        bg = make_bg_loop_deps(tmp_path)
+        object.__setattr__(bg.config, "event_log_max_size_mb", 1)
+        deps = LoopDeps(
+            event_bus=EventBus(event_log=EventLog(log_path)),
+            stop_event=bg.stop_event,
+            status_cb=bg.status_cb,
+            enabled_cb=bg.enabled_cb,
+            sleep_fn=bg.sleep_fn,
+        )
+        loop = LoopCatalog.instantiate("runs_gc", ports={}, config=bg.config, deps=deps)
+
+        result = await loop._do_work()
+
+        assert result["event_log_rotation"]["dropped_size"] > 0
+        assert log_path.stat().st_size <= max_bytes
+        lines = log_path.read_text().splitlines()
+        assert lines, "rotation must keep the newest window, not empty the log"
+        assert _json.loads(lines[-1])["data"]["seq"] == 4999
+
+
+# ---------------------------------------------------------------------------
+# L20b: gate_health — CI reds as distributions (#9974)
+# ---------------------------------------------------------------------------
+
+
+class TestL20bGateHealthLoop:
+    """L20b: GateHealthLoop finds born-broken gates, uncorrelated blame,
+    missing artifacts, and stale quarantines from seeded run history."""
+
+    def _issues_titled(self, world, fragment):
+        return [i for i in world.github._issues.values() if fragment in i.title]
+
+    async def test_born_broken_scenario_files_evidence_issue(self, tmp_path):
+        world = MockWorld(tmp_path)
+        for i in (1, 2, 3):
+            world.github.add_workflow_run(
+                i,
+                workflow="CI",
+                conclusion="failure",
+                created_at=f"2026-07-0{i}T00:00:00Z",
+                jobs=[
+                    {
+                        "name": "Sandbox (rc/* promotion PR full suite)",
+                        "conclusion": "failure",
+                    },
+                    {"name": "Tests", "conclusion": "success"},
+                ],
+                artifact_count=1,
+            )
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        assert stats["gate_health"]["filed"] == 1
+        filed = self._issues_titled(world, "0% pass rate")
+        assert len(filed) == 1
+        assert "failures in window | 3" in filed[0].body
+        # Healthy sibling check must NOT be flagged.
+        assert not self._issues_titled(world, "Tests has a 0%")
+
+    async def test_docs_only_blame_names_the_instrument(self, tmp_path):
+        world = MockWorld(tmp_path)
+        for i, pr in ((1, 101), (2, 102)):
+            world.github.set_pr_diff_names(pr, ["docs/wiki/x.md", "README.md"])
+            world.github.add_workflow_run(
+                i,
+                workflow="CI",
+                conclusion="failure",
+                created_at=f"2026-07-0{i}T00:00:00Z",
+                pr_number=pr,
+                jobs=[
+                    {"name": "Tests", "conclusion": "failure"},
+                    {"name": "Tests", "conclusion": "success"},
+                ],
+            )
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        assert stats["gate_health"]["filed"] == 1
+        filed = self._issues_titled(world, "docs-only PRs")
+        assert len(filed) == 1
+        assert "#9902" in filed[0].body or "instrument" in filed[0].body
+
+    async def test_failed_sandbox_run_with_zero_artifacts(self, tmp_path):
+        world = MockWorld(tmp_path)
+        world.github.add_workflow_run(
+            7,
+            workflow="Sandbox Nightly",
+            conclusion="failure",
+            jobs=[{"name": "Sandbox (nightly regression)", "conclusion": "failure"}],
+            artifact_count=0,
+        )
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        filed = self._issues_titled(world, "zero artifacts")
+        assert len(filed) == 1
+        assert stats["gate_health"]["filed"] >= 1
+
+    async def test_stale_quarantine_consent_package(self, tmp_path):
+        world = MockWorld(tmp_path)
+        world.github.add_issue(9925, "s55 race", "tracking", labels=[])
+        world.github.issue(9925).state = "closed"
+        world.github.add_workflow_run(
+            1,
+            workflow="CI",
+            conclusion="success",
+            jobs=[{"name": "Tests", "conclusion": "success"}],
+        )
+
+        # The loop reads markers under config.repo_root — the MockWorld
+        # harness config roots at tmp_path/repo.
+        bg_repo = tmp_path / "repo" / "tests" / "sandbox_scenarios" / "scenarios"
+        bg_repo.mkdir(parents=True, exist_ok=True)
+        (bg_repo / "s55_nested_decompose.py").write_text('QUARANTINED = "#9925"\n')
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        filed = self._issues_titled(world, "quarantine")
+        assert len(filed) == 1
+        assert "Consent package" in filed[0].body
+        assert "NOT execute" in filed[0].body
+        assert stats["gate_health"]["filed"] >= 1
+
+    async def test_read_only_green_history_files_nothing(self, tmp_path):
+        world = MockWorld(tmp_path)
+        for i in (1, 2, 3):
+            world.github.add_workflow_run(
+                i,
+                workflow="CI",
+                conclusion="success",
+                created_at=f"2026-07-0{i}T00:00:00Z",
+                jobs=[{"name": "Tests", "conclusion": "success"}],
+            )
+        before = len(world.github._issues)
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        assert stats["gate_health"]["findings"] == 0
+        assert len(world.github._issues) == before
+
+    async def test_suspected_hang_scenario_files_playbook_issue(self, tmp_path):
+        """#10010: cancelled-at-timeout job -> suspected-hang, not a retry."""
+        world = MockWorld(tmp_path)
+        workflows_dir = tmp_path / "repo" / ".github" / "workflows"
+        workflows_dir.mkdir(parents=True, exist_ok=True)
+        (workflows_dir / "ci.yml").write_text(
+            "jobs:\n  test:\n    name: Tests\n    timeout-minutes: 30\n"
+        )
+        world.github.add_workflow_run(
+            555,
+            workflow="CI",
+            conclusion="cancelled",
+            created_at="2026-07-19T00:00:00Z",
+            pr_number=42,
+            jobs=[
+                {
+                    "name": "Tests",
+                    "conclusion": "cancelled",
+                    "started_at": "2026-07-19T00:00:00Z",
+                    "completed_at": "2026-07-19T00:30:05Z",
+                    "steps": [
+                        {"name": "Install dependencies", "conclusion": "success"},
+                        {"name": "Run tests with coverage", "conclusion": None},
+                    ],
+                }
+            ],
+        )
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        assert stats["gate_health"]["filed"] == 1
+        filed = self._issues_titled(world, "suspected CI hang")
+        assert len(filed) == 1
+        assert "#9983" in filed[0].body
+        assert "#10002" in filed[0].body
+        assert "Linux container" in filed[0].body
 
 
 # ---------------------------------------------------------------------------
@@ -770,6 +980,229 @@ class TestL23StaleIssueLoop:
 
         assert result is not None
         assert result["closed"] == 0
+
+
+# ---------------------------------------------------------------------------
+# L23b: stale_issue's regression-rot check (#9597) — hosted, not a new loop.
+# Uses direct instantiation (Pattern B) for the same reason as L23: StaleIssueLoop
+# calls prs._run_gh()/prs._repo directly, which FakeGitHub does not implement.
+# ---------------------------------------------------------------------------
+
+
+class TestL23bRegressionRot:
+    """StaleIssueLoop's regression-rot detector: false-close rot end to end."""
+
+    def _make_loop(self, tmp_path):
+        config = HydraFlowConfig(
+            data_root=tmp_path / "data",
+            repo_root=tmp_path / "repo",
+            repo="owner/repo",
+        )
+        regressions_dir = tmp_path / "repo" / "tests" / "regressions"
+        regressions_dir.mkdir(parents=True, exist_ok=True)
+        (regressions_dir / "test_issue_9911.py").write_text(
+            "import pytest\n\n"
+            "@pytest.mark."
+            "xfail(reason='Regression for issue #9911 — fix not "
+            "yet landed', strict=False)\n"
+            "def test_thing():\n"
+            "    assert False\n",
+            encoding="utf-8",
+        )
+
+        from mockworld.fakes.fake_github import FakeGitHub
+
+        fake = FakeGitHub()
+        # The referenced issue is CLOSED while its regression pin stays RED —
+        # the false-close rot shape.
+        fake.add_issue(9911, "stop path orphans", "closed but pin still red")
+        fake._issues[9911].state = "closed"
+
+        deps = LoopDeps(
+            event_bus=EventBus(),
+            stop_event=asyncio.Event(),
+            status_cb=MagicMock(),
+            enabled_cb=lambda _name: True,
+        )
+        state = StateTracker(state_file=tmp_path / "data" / "state.json")
+        return StaleIssueLoop(config=config, prs=fake, state=state, deps=deps), fake
+
+    async def test_closed_issue_with_red_pin_files_one_rollup_issue(self, tmp_path):
+        """A closed issue (#9911) with a still-RED regression pin is surfaced
+        as ONE deduped rollup issue — not a per-finding issue."""
+        loop, fake = self._make_loop(tmp_path)
+
+        result = await loop._do_work()
+
+        assert result["regression_rot_false_close"] == 1
+        rollups = [
+            issue
+            for issue in fake._issues.values()
+            if issue.number != 9911 and "#9911" in issue.body
+        ]
+        assert len(rollups) == 1
+        assert rollups[0].state == "open"
+
+
+# ---------------------------------------------------------------------------
+# L23c: stale_issue's branch-GC reconciler (#10011) — hosted, not a new loop.
+# Uses Pattern B (MagicMock prs) for the same reason as L23/L23b: the
+# reconciler calls prs._run_gh()/prs._repo directly for the gh api
+# matching-refs/commits reads (composed rather than adding a new PRPort
+# method), which FakeGitHub's generic _run_gh dispatcher doesn't special-case.
+# ---------------------------------------------------------------------------
+
+_BRANCH_GC_REPO = "test-org/test-repo"
+_BRANCH_GC_BRANCH = "agent/issue-9553"
+
+
+class TestL23cBranchGC:
+    """StaleIssueLoop's branch-GC reconciler: false 'fix applied' claims end to end.
+
+    Uses Pattern B (direct instantiation) for the same reason as L23/L23b:
+    the reconciler calls ``prs._run_gh()``/``prs._repo`` directly for the
+    ``gh api`` matching-refs/commits reads, which FakeGitHub's generic
+    ``_run_gh`` dispatcher doesn't special-case.
+    """
+
+    def _make_prs_mock(
+        self,
+        *,
+        commit_age_days: int = 30,
+        has_open_pr: bool = False,
+        issue_state: str = "OPEN",
+        branch: str = _BRANCH_GC_BRANCH,
+    ) -> MagicMock:
+        commit_iso = (
+            (datetime.now(UTC) - timedelta(days=commit_age_days))
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+        async def _run_gh(*cmd: str, cwd=None) -> str:
+            joined = " ".join(cmd)
+            if "issue" in cmd and "list" in cmd:
+                return json.dumps([])  # no unrelated open issues to scan
+            if "matching-refs/heads/agent/issue-" in joined:
+                return json.dumps([f"refs/heads/{branch}"])
+            if "matching-refs/heads/fix/" in joined:
+                return json.dumps([])
+            if "/commits" in joined and branch in joined:
+                return json.dumps(
+                    [{"date": commit_iso, "message": "auto-agent commit"}]
+                )
+            return json.dumps([])
+
+        prs = MagicMock()
+        prs._repo = _BRANCH_GC_REPO
+        prs._run_gh = AsyncMock(side_effect=_run_gh)
+        prs.post_comment = AsyncMock(return_value=None)
+        prs.delete_branch = AsyncMock(return_value=True)
+        if has_open_pr:
+            from models import PRInfo  # noqa: PLC0415
+
+            pr_info = PRInfo(number=42, issue_number=9553, branch=branch)
+            prs.find_open_pr_for_branch = AsyncMock(return_value=pr_info)
+        else:
+            prs.find_open_pr_for_branch = AsyncMock(return_value=None)
+        prs.get_issue_state = AsyncMock(return_value=issue_state)
+        return prs
+
+    def _make_loop(self, tmp_path, prs, *, delete_enabled: bool = False):
+        config = HydraFlowConfig(
+            data_root=tmp_path / "data",
+            repo_root=tmp_path / "repo",
+            repo=_BRANCH_GC_REPO,
+            branch_gc_delete_enabled=delete_enabled,
+        )
+        deps = LoopDeps(
+            event_bus=EventBus(),
+            stop_event=asyncio.Event(),
+            status_cb=MagicMock(),
+            enabled_cb=lambda _name: True,
+        )
+        state = StateTracker(state_file=tmp_path / "data" / "state.json")
+        return StaleIssueLoop(config=config, prs=prs, state=state, deps=deps)
+
+    async def test_stale_unmerged_branch_gets_one_truth_comment(self, tmp_path):
+        """An old agent/issue-* branch with no open PR on a still-OPEN issue
+        gets exactly one truth comment posted."""
+        prs = self._make_prs_mock()
+        loop = self._make_loop(tmp_path, prs)
+
+        result = await loop._do_work()
+
+        assert result["branch_gc_commented"] == 1
+        assert result["branch_gc_deleted"] == 0
+        prs.post_comment.assert_awaited_once()
+        args, _ = prs.post_comment.call_args
+        assert args[0] == 9553
+        assert "agent/issue-9553" in args[1]
+        assert "unverified" in args[1].lower()
+
+    async def test_second_tick_is_deduped_no_new_comment(self, tmp_path):
+        """A branch already commented on doesn't get a second truth comment,
+        but IS re-evaluated for the delete-or-escalate phase."""
+        prs = self._make_prs_mock()
+        loop = self._make_loop(tmp_path, prs)
+
+        await loop._do_work()
+        prs.post_comment.reset_mock()
+        result = await loop._do_work()
+
+        assert result["branch_gc_commented"] == 0
+        prs.post_comment.assert_not_awaited()
+        # delete_enabled defaults False -> report-only escalation, not deletion.
+        assert result["branch_gc_escalated"] == 1
+        assert result["branch_gc_deleted"] == 0
+        prs.delete_branch.assert_not_awaited()
+
+    async def test_delete_enabled_and_already_commented_deletes_branch(self, tmp_path):
+        """Once delete_enabled + past the min-delete-age floor + already
+        commented (a prior tick's dedup), the branch is actually deleted."""
+        prs = self._make_prs_mock(commit_age_days=30)
+        loop = self._make_loop(tmp_path, prs, delete_enabled=True)
+        # Simulate the truth comment having been posted on a prior tick —
+        # the spec never comments and deletes in the same cycle.
+        loop._branch_gc_dedup.add(_BRANCH_GC_BRANCH)
+
+        result = await loop._do_work()
+
+        assert result["branch_gc_commented"] == 0
+        assert result["branch_gc_deleted"] == 1
+        prs.delete_branch.assert_awaited_once_with(_BRANCH_GC_BRANCH)
+        assert _BRANCH_GC_BRANCH not in loop._branch_gc_dedup.get()
+
+    async def test_open_pr_skips_entirely(self, tmp_path):
+        """A branch with an open PR is still in flight — no comment, no dedup."""
+        prs = self._make_prs_mock(has_open_pr=True)
+        loop = self._make_loop(tmp_path, prs)
+
+        result = await loop._do_work()
+
+        assert result["branch_gc_commented"] == 0
+        prs.post_comment.assert_not_awaited()
+        assert loop._branch_gc_dedup.get() == set()
+
+    async def test_young_branch_skips(self, tmp_path):
+        """A branch younger than branch_gc_stale_days is not yet flagged."""
+        prs = self._make_prs_mock(commit_age_days=0)
+        loop = self._make_loop(tmp_path, prs)
+
+        result = await loop._do_work()
+
+        assert result["branch_gc_commented"] == 0
+        prs.post_comment.assert_not_awaited()
+
+    async def test_resolved_issue_skips(self, tmp_path):
+        """A branch referencing an already-resolved issue is not a false claim."""
+        prs = self._make_prs_mock(issue_state="COMPLETED")
+        loop = self._make_loop(tmp_path, prs)
+
+        result = await loop._do_work()
+
+        assert result["branch_gc_commented"] == 0
+        prs.post_comment.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

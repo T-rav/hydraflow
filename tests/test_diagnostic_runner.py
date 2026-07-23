@@ -489,3 +489,86 @@ class TestDiagnosticRunner:
         )
         assert result.fixable is False
         assert result.root_cause == "No output"
+
+
+class TestIssueLabelsThreading:
+    """CH-6 (#10000): diagnose/fix thread issue_labels to gate_prompt.
+
+    The gate call lives inside ``BaseRunner._execute``; patching
+    ``base_runner.gate_prompt`` intercepts it regardless of how _execute
+    wraps the call internally. Without the threading, a
+    ``data-class:regulated-*`` label on the escalated issue would not
+    elevate the gate for the diagnose/fix spawns.
+    """
+
+    _LABELS = ("data-class:regulated-phi", "bug")
+
+    def _real_runner(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from diagnostic_runner import DiagnosticRunner
+        from tests.helpers import ConfigFactory
+
+        bus = MagicMock()
+        bus.current_session_id = "sess-test"
+        return DiagnosticRunner(ConfigFactory.create(repo_root=tmp_path), bus)
+
+    @pytest.mark.asyncio
+    async def test_diagnose_labels_reach_gate_prompt(self, tmp_path) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        runner = self._real_runner(tmp_path)
+        ctx = EscalationContext(cause="CI failed", origin_phase="review")
+        gated = MagicMock()
+        gated.prompt = "gated prompt"
+
+        with (
+            patch("base_runner.gate_prompt", return_value=gated) as gate,
+            patch(
+                "base_runner.stream_claude_process",
+                new_callable=AsyncMock,
+                return_value="out",
+            ),
+        ):
+            await runner.diagnose(42, "Bug", "Fix it", ctx, issue_labels=self._LABELS)
+
+        assert gate.call_args is not None
+        assert tuple(gate.call_args.kwargs["issue_labels"]) == self._LABELS
+
+    @pytest.mark.asyncio
+    async def test_fix_labels_reach_gate_prompt(self, tmp_path) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        runner = self._real_runner(tmp_path)
+        diagnosis = DiagnosisResult(
+            root_cause="Missing import",
+            severity=Severity.P2_FUNCTIONAL,
+            fixable=True,
+            fix_plan="Add the import",
+            human_guidance="Trivial",
+        )
+        gated = MagicMock()
+        gated.prompt = "gated prompt"
+        verify = MagicMock()
+        verify.passed = True
+        runner._verify_quality = AsyncMock(return_value=verify)
+
+        with (
+            patch("base_runner.gate_prompt", return_value=gated) as gate,
+            patch(
+                "base_runner.stream_claude_process",
+                new_callable=AsyncMock,
+                return_value="out",
+            ),
+        ):
+            await runner.fix(
+                42,
+                "Bug",
+                "Fix it",
+                diagnosis,
+                str(tmp_path),
+                issue_labels=self._LABELS,
+            )
+
+        assert gate.call_args is not None
+        assert tuple(gate.call_args.kwargs["issue_labels"]) == self._LABELS

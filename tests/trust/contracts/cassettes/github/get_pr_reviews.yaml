@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_pr_reviews lists PR reviews with author/state/timestamp (`gh api
+# repos/{repo}/pulls/{n}/reviews`). No GitHub reviews exist in the
+# air-gapped sandbox, so the fake always returns an empty list -- same
+# vacuous-but-intentional shape as get_pr_checks.
+adapter: github
+interaction: get_pr_reviews
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_pr_reviews
+  args:
+  - '531'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

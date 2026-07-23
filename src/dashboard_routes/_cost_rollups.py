@@ -86,6 +86,7 @@ def _empty_model_bucket() -> dict[str, float | int]:
     return {
         "cost_usd": 0.0,
         "calls": 0,
+        "unpriced_calls": 0,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -105,6 +106,9 @@ def iter_priced_inferences(
     Yields dicts with the raw row fields plus:
     * ``ts``: parsed ``datetime`` of ``timestamp``.
     * ``cost_usd``: ``float``; ``0.0`` when the pricing table has no entry.
+    * ``cost_unknown``: ``True`` when the model is unpriced AND no stored
+      estimate rescued the row (#9821) — consumers must render "unknown",
+      never ``$0.00``.
     * ``phase``: canonical phase (via ``_phase_for_source``).
     """
     path = config.cost_inferences_path
@@ -137,6 +141,9 @@ def iter_priced_inferences(
                     cache_read_tokens=int(rec.get("cache_read_input_tokens", 0) or 0),
                 )
                 priced = round(cost, 6) if cost is not None else 0.0
+                # #9821: an unpriced model must be MARKED, not silently folded
+                # into $0 — dashboards read $0 as "cheap", hiding real spend.
+                cost_unknown = cost is None
                 # Rows whose actual token usage was unavailable at record time
                 # (token_source=estimated) re-price to 0 from tokens. This is
                 # dominated by heavy pipeline runners (planner/researcher/
@@ -151,8 +158,11 @@ def iter_priced_inferences(
                         and stored > 0
                     ):
                         priced = round(float(stored), 6)
+                        # The stored char-based estimate IS a recorded cost.
+                        cost_unknown = False
                 rec["ts"] = ts
                 rec["cost_usd"] = priced
+                rec["cost_unknown"] = cost_unknown
                 rec["phase"] = _phase_for_source(str(rec.get("source", "")))
                 yield rec
     except OSError:
@@ -244,18 +254,29 @@ def build_rolling_24h(
     phase_cost: dict[str, float] = defaultdict(float)
     phase_tokens_in: dict[str, int] = defaultdict(int)
     phase_tokens_out: dict[str, int] = defaultdict(int)
+    phase_unpriced: dict[str, int] = defaultdict(int)
     total_cost = 0.0
     total_in = 0
     total_out = 0
+    unpriced_calls = 0
+    unpriced_in = 0
+    unpriced_out = 0
 
     for rec in iter_priced_inferences(config, since=since, until=now, pricing=pricing):
         phase = rec["phase"]
+        rec_in = int(rec.get("input_tokens", 0) or 0)
+        rec_out = int(rec.get("output_tokens", 0) or 0)
         phase_cost[phase] += rec["cost_usd"]
-        phase_tokens_in[phase] += int(rec.get("input_tokens", 0) or 0)
-        phase_tokens_out[phase] += int(rec.get("output_tokens", 0) or 0)
+        phase_tokens_in[phase] += rec_in
+        phase_tokens_out[phase] += rec_out
         total_cost += rec["cost_usd"]
-        total_in += int(rec.get("input_tokens", 0) or 0)
-        total_out += int(rec.get("output_tokens", 0) or 0)
+        total_in += rec_in
+        total_out += rec_out
+        if rec.get("cost_unknown"):
+            phase_unpriced[phase] += 1
+            unpriced_calls += 1
+            unpriced_in += rec_in
+            unpriced_out += rec_out
 
     by_phase = [
         {
@@ -263,6 +284,7 @@ def build_rolling_24h(
             "cost_usd": round(phase_cost[phase], 6),
             "tokens_in": phase_tokens_in[phase],
             "tokens_out": phase_tokens_out[phase],
+            "unpriced_calls": phase_unpriced[phase],
         }
         for phase in sorted(phase_cost.keys())
     ]
@@ -286,6 +308,9 @@ def build_rolling_24h(
             "cost_usd": round(total_cost, 6),
             "tokens_in": total_in,
             "tokens_out": total_out,
+            "unpriced_calls": unpriced_calls,
+            "unpriced_tokens_in": unpriced_in,
+            "unpriced_tokens_out": unpriced_out,
         },
         "by_phase": by_phase,
         "by_loop": by_loop,
@@ -652,6 +677,8 @@ def build_cost_by_model(
         bucket = by_model[model_key]
         bucket["cost_usd"] += rec["cost_usd"]
         bucket["calls"] += 1
+        if rec.get("cost_unknown"):
+            bucket["unpriced_calls"] += 1
         bucket["input_tokens"] += int(rec.get("input_tokens", 0) or 0)
         bucket["output_tokens"] += int(rec.get("output_tokens", 0) or 0)
         bucket["cache_read_tokens"] += int(rec.get("cache_read_input_tokens", 0) or 0)
@@ -664,6 +691,8 @@ def build_cost_by_model(
             "model": model,
             "cost_usd": round(float(b["cost_usd"]), 6),
             "calls": int(b["calls"]),
+            "unpriced_calls": int(b["unpriced_calls"]),
+            "cost_unknown": int(b["unpriced_calls"]) > 0,
             "input_tokens": int(b["input_tokens"]),
             "output_tokens": int(b["output_tokens"]),
             "cache_read_tokens": int(b["cache_read_tokens"]),

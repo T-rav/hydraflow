@@ -100,7 +100,10 @@ class DiagramLoop(BaseBackgroundLoop):
         """
         from datetime import UTC, datetime  # noqa: PLC0415
 
-        from auto_pr import generate_and_open_pr_async  # noqa: PLC0415
+        from auto_pr import (  # noqa: PLC0415
+            PREFLIGHT_DOCS_ONLY,
+            generate_and_open_pr_async,
+        )
 
         today = datetime.now(UTC).strftime("%Y-%m-%d")
 
@@ -123,6 +126,11 @@ class DiagramLoop(BaseBackgroundLoop):
             repo_root=self._repo_root,
             branch=_REGEN_BRANCH,
             generate=_generate,
+            # Arch-regen PRs stage freshly emitted artifacts — re-running
+            # `arch.runner --check` right after `emit` is tautological and a
+            # pytest run is irrelevant to generated docs, so opt down to the
+            # docs-only preflight set (#10013).
+            preflight=PREFLIGHT_DOCS_ONLY,
             path_specs=[
                 "docs/arch/generated",
                 "docs/arch/.meta.json",

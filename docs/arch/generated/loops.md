@@ -8,6 +8,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 |---|---|---|---|---|---|
 | **ADRReviewerLoop** | `src.adr_reviewer_loop` | 86400 | — | — | — |
 | **AdrConformanceLoop** | `src.adr_conformance_loop` | 86400 | — | ADR_CONFORMANCE_UPDATE | ADR-0100 |
+| **AdrDriftResolverLoop** | `src.adr_drift_resolver_loop` | 3600 | — | — | ADR-0056 |
 | **AdrTouchpointAuditorLoop** | `src.adr_touchpoint_auditor_loop` | 14400 | — | — | ADR-0056 |
 | **AutoAgentPreflightLoop** | `src.auto_agent_preflight_loop` | 120 | — | — | — |
 | **AutoTightenLoop** | `src.auto_tighten_loop` | 86400 | — | RATCHET_TIGHTENED | — |
@@ -26,19 +27,23 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **EntryEvidenceLoop** | `src.entry_evidence_loop` | 86400 | — | — | ADR-0062 |
 | **EpicMonitorLoop** | `src.epic_monitor_loop` | 1800 | — | — | — |
 | **EpicSweeperLoop** | `src.epic_sweeper_loop` | 3600 | — | — | — |
+| **ErosionMetricsLoop** | `src.erosion_metrics_loop` | 14400 | — | — | — |
 | **FakeCoverageAuditorLoop** | `src.fake_coverage_auditor_loop` | 604800 | — | — | — |
 | **FitnessScorecardLoop** | `src.fitness_scorecard_loop` | 86400 | — | BACKGROUND_WORKER_STATUS, LOOP_FITNESS_UPDATE | ADR-0029, ADR-0046 |
 | **FlakeTrackerLoop** | `src.flake_tracker_loop` | 14400 | — | — | — |
 | **GateActivatorLoop** | `src.gate_activator_loop` | 604800 | — | — | ADR-0029, ADR-0049, ADR-0082 |
+| **GateHealthLoop** | `src.gate_health_loop` | 604800 | — | — | — |
 | **GitHubCacheLoop** | `src.github_cache_loop` | 300 | — | — | — |
-| **HealthMonitorLoop** | `src.health_monitor_loop` | 7200 | — | — | — |
+| **HealthMonitorLoop** | `src.health_monitor_loop` | 7200 | — | SYSTEM_ALERT | — |
 | **HumanSteeringLoop** | `src.human_steering_loop` | — | — | — | ADR-0099 |
+| **IssueRefinementLoop** | `src.issue_refinement_loop` | 86400 | — | ISSUE_REFINEMENT_UPDATE | — |
 | **LabelDriftWatcherLoop** | `src.label_drift_watcher_loop` | 600 | — | — | — |
 | **LiveCorpusReplayLoop** | `src.live_corpus_replay_loop` | 900 | — | — | — |
 | **LogIngestLoop** | `src.log_ingest_loop` | 14400 | — | — | — |
 | **MemoryBacklogLoop** | `src.memory_backlog_loop` | 86400 | — | — | — |
 | **MergeStateWatcherLoop** | `src.merge_state_watcher_loop` | 600 | — | SYSTEM_ALERT | — |
 | **PRUnstickerLoop** | `src.pr_unsticker_loop` | 3600 | — | — | — |
+| **PrRedRepairLoop** | `src.pr_red_repair_loop` | 300 | — | — | — |
 | **PricingRefreshLoop** | `src.pricing_refresh_loop` | 86400 | `HYDRAFLOW_DISABLE_PRICING_REFRESH` | — | — |
 | **PrinciplesAuditLoop** | `src.principles_audit_loop` | 604800 | — | — | ADR-0044 |
 | **RCBudgetLoop** | `src.rc_budget_loop` | 14400 | — | — | — |
@@ -56,7 +61,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **StaleIssueLoop** | `src.stale_issue_loop` | 86400 | — | — | — |
 | **TermProposerLoop** | `src.term_proposer_loop` | 14400 | — | — | ADR-0054 |
 | **TermPrunerLoop** | `src.term_pruner_loop` | 86400 | — | — | — |
-| **TriageRetryLoop** | `src.triage_retry_loop` | 86400 | — | — | ADR-0063 |
+| **TriageRetryLoop** | `src.triage_retry_loop` | 900 | — | — | ADR-0063 |
 | **TrustFleetSanityLoop** | `src.trust_fleet_sanity_loop` | 600 | — | BACKGROUND_WORKER_STATUS | — |
 | **WikiRotDetectorLoop** | `src.wiki_rot_detector_loop` | 604800 | — | — | — |
 | **WorkspaceGCLoop** | `src.workspace_gc_loop` | 1800 | — | — | — |

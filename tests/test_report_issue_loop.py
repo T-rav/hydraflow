@@ -114,6 +114,12 @@ class TestReportIssueLoopDoWork:
         prompt = mock_stream.call_args.kwargs.get("prompt", "")
         assert ".png" in prompt
         assert "![Screenshot](" in prompt
+        # Regression: the agent must NOT be told to vision-Read the screenshot.
+        # That overhead (a large image on top of the /hf.issue skill's research)
+        # exhausted max_turns and the agent exited 1 *after* creating the issue,
+        # so extraction returned 0 and the report was falsely escalated to HITL.
+        # The embedded URL above already makes the screenshot visible.
+        assert "read it with the Read tool" not in prompt
 
     @pytest.mark.asyncio
     async def test_empty_screenshot_skips_upload(self, tmp_path: Path) -> None:
@@ -645,8 +651,12 @@ class TestHfIssueSkillPrompt:
         assert "rename the processes subtab toggles please" in prompt
 
     @pytest.mark.asyncio
-    async def test_screenshot_path_in_prompt(self, tmp_path: Path) -> None:
-        """When a screenshot is available, the prompt tells the agent where to find it."""
+    async def test_screenshot_url_in_prompt(self, tmp_path: Path) -> None:
+        """When a screenshot is available, the prompt embeds the uploaded URL
+        for inline display — and does NOT tell the agent to vision-Read the
+        image. The read overhead (large image + /hf.issue research) exhausted
+        max_turns and the agent exited 1 after creating the issue, falsely
+        escalating reports to HITL."""
         loop, _stop, state, _pr = _make_loop(tmp_path)
         b64 = base64.b64encode(b"\x89PNG\r\n").decode()
         report = PendingReport(
@@ -663,7 +673,8 @@ class TestHfIssueSkillPrompt:
 
         prompt = mock_stream.call_args.kwargs.get("prompt", "")
         assert ".png" in prompt
-        assert "Read tool" in prompt
+        assert "![Screenshot](" in prompt
+        assert "Read tool" not in prompt
 
     @pytest.mark.asyncio
     async def test_screenshot_temp_file_cleaned_up(self, tmp_path: Path) -> None:
@@ -695,7 +706,12 @@ class TestHfIssueSkillPrompt:
 
     @pytest.mark.asyncio
     async def test_max_turns_increased_for_research(self, tmp_path: Path) -> None:
-        """max_turns is >= 10 to allow the agent to research the codebase."""
+        """max_turns must give the /hf.issue skill room to finish.
+
+        At 10 the agent hit the cap and exited 1 *before* printing the created
+        issue URL, so extraction returned 0 and the report was falsely escalated
+        to HITL. Raised to 25.
+        """
         loop, _stop, state, _pr = _make_loop(tmp_path)
         report = PendingReport(description="something broken")
         state.enqueue_report(report)
@@ -715,7 +731,7 @@ class TestHfIssueSkillPrompt:
         call_kwargs = mock_build.call_args
         assert (
             call_kwargs.kwargs.get("max_turns", call_kwargs[1].get("max_turns", 0))
-            >= 10
+            >= 25
         )
 
     @pytest.mark.asyncio

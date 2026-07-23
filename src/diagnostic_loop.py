@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from dedup_store import DedupStore
 from events import EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from models import AttemptRecord, Severity
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from diagnostic_runner import DiagnosisResult, DiagnosticRunner
@@ -86,6 +89,14 @@ class DiagnosticLoop(BaseBackgroundLoop):
         self._prs = prs
         self._state = state
         self._workspaces = workspaces
+        # #9895 (absorbed #9845): during the 2026-06 exhaustion the loop
+        # posted ~33 identical no-op diagnosis comments on one issue. Keyed
+        # by issue + content hash, at most one key per issue (replaced when
+        # the diagnosis text changes), so re-runs re-post only NEW content.
+        self._hitl_comment_dedup = DedupStore(
+            "diagnostic_hitl_comments",
+            config.data_root / "dedup" / "diagnostic_hitl_comments.json",
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.diagnostic_interval
@@ -118,7 +129,18 @@ class DiagnosticLoop(BaseBackgroundLoop):
                 continue
             issue_title = raw_issue.get("title", "")
             issue_body = raw_issue.get("body", "") or ""
-            outcome = await self._process_issue(issue_number, issue_title, issue_body)
+            # CH-6 (#10000): thread the issue's labels down to the runner so
+            # a data-class:<class> label elevates the prompt gate for the
+            # diagnose/fix spawns. Labels ride the gh wire shape
+            # ([{"name": ...}]) on the OPEN listing (#9943).
+            issue_labels = tuple(
+                label["name"]
+                for label in raw_issue.get("labels") or []
+                if isinstance(label, dict) and label.get("name")
+            )
+            outcome = await self._process_issue(
+                issue_number, issue_title, issue_body, issue_labels
+            )
             processed += 1
             if outcome == "fixed":
                 fixed += 1
@@ -139,6 +161,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
         issue_number: int,
         issue_title: str,
         issue_body: str,
+        issue_labels: Sequence[str] = (),
     ) -> str:
         """Run the full diagnostic pipeline for a single issue.
 
@@ -162,7 +185,9 @@ class DiagnosticLoop(BaseBackgroundLoop):
             context = context.model_copy(update={"previous_attempts": attempts})
 
         # --- Stage 1: Diagnose ---
-        diagnosis = await self._diagnose(issue_number, issue_title, issue_body, context)
+        diagnosis = await self._diagnose(
+            issue_number, issue_title, issue_body, context, issue_labels
+        )
         diagnosis_comment = _format_diagnosis_comment(diagnosis)
 
         # --- Gates: not-fixable / attempts exhausted both escalate ---
@@ -180,6 +205,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
             diagnosis,
             attempts,
             diagnosis_comment,
+            issue_labels,
         )
 
     async def _escalate_missing_context(self, issue_number: int) -> None:
@@ -207,6 +233,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
         issue_title: str,
         issue_body: str,
         context: EscalationContext,
+        issue_labels: Sequence[str] = (),
     ) -> DiagnosisResult:
         """Stage 1: run the diagnose agent and persist the severity."""
         logger.info(
@@ -214,7 +241,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
         )
         await self._publish_update(issue_number, "diagnosing")
         diagnosis = await self._runner.diagnose(
-            issue_number, issue_title, issue_body, context
+            issue_number, issue_title, issue_body, context, issue_labels=issue_labels
         )
         self._state.set_diagnosis_severity(issue_number, diagnosis.severity)
         return diagnosis
@@ -259,6 +286,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
         diagnosis: DiagnosisResult,
         attempts: list[AttemptRecord],
         diagnosis_comment: str,
+        issue_labels: Sequence[str] = (),
     ) -> str:
         """Stage 2: provision a workspace, run the fix, and finalize the outcome.
 
@@ -277,7 +305,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
             return "escalated"
 
         success, transcript = await self._run_fix(
-            issue_number, issue_title, issue_body, diagnosis, wt_path
+            issue_number, issue_title, issue_body, diagnosis, wt_path, issue_labels
         )
         self._record_attempt(issue_number, attempts, success, transcript)
         return await self._finalize_fix_outcome(
@@ -313,6 +341,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
         issue_body: str,
         diagnosis: DiagnosisResult,
         wt_path: Path,
+        issue_labels: Sequence[str] = (),
     ) -> tuple[bool, str]:
         """Run the fix agent and clean up the workspace on failure.
 
@@ -321,7 +350,12 @@ class DiagnosticLoop(BaseBackgroundLoop):
         """
         try:
             success, transcript = await self._runner.fix(
-                issue_number, issue_title, issue_body, diagnosis, str(wt_path)
+                issue_number,
+                issue_title,
+                issue_body,
+                diagnosis,
+                str(wt_path),
+                issue_labels=issue_labels,
             )
         except Exception as exc:
             # Infra-level failures (auth, credit, OS permission/IO) propagate
@@ -443,14 +477,31 @@ class DiagnosticLoop(BaseBackgroundLoop):
         involved. The Auto-Agent routes a *resolved* diagnose-failed issue back
         to review.
         """
-        try:
-            await self._prs.post_comment(issue_number, comment)
-        except Exception:
-            logger.warning(
-                "Diagnostic: failed to post comment for issue #%d",
+        digest = hashlib.sha256(comment.encode("utf-8")).hexdigest()[:16]
+        dedup_key = f"{issue_number}:{digest}"
+        seen = self._hitl_comment_dedup.get()
+        if dedup_key in seen:
+            logger.info(
+                "Diagnostic: identical diagnosis comment already posted on "
+                "issue #%d — skipping re-post (labels still applied)",
                 issue_number,
-                exc_info=True,
             )
+        else:
+            try:
+                await self._prs.post_comment(issue_number, comment)
+            except Exception:
+                logger.warning(
+                    "Diagnostic: failed to post comment for issue #%d",
+                    issue_number,
+                    exc_info=True,
+                )
+            else:
+                # Replace any previous hash for this issue: bounded at one
+                # key per issue, and a CHANGED diagnosis re-posts.
+                prefix = f"{issue_number}:"
+                self._hitl_comment_dedup.set_all(
+                    {k for k in seen if not k.startswith(prefix)} | {dedup_key}
+                )
         try:
             await self._prs.swap_pipeline_labels(
                 issue_number, self._config.hitl_label[0]
@@ -466,17 +517,63 @@ class DiagnosticLoop(BaseBackgroundLoop):
         # a pipeline-stage label, so it survives the swap above — the issue then
         # carries both ``hydraflow-hitl`` (HITL queue) and the Auto-Agent
         # routing labels.
-        try:
-            await self._prs.add_labels(
-                issue_number, ["hitl-escalation", "diagnose-failed"]
+        #
+        # #10262: guard the re-arm. If a *prior* attempt's resolving PR is
+        # already open, reconciliation (the Auto-Agent routes a resolved
+        # ``diagnose-failed`` issue back to review) has just cleared these
+        # labels. Re-adding them here — including on the comment-dedup hit path
+        # above ("labels still applied") — flaps the labels and renews
+        # auto-agent dispatch pressure. Defer to the reconciler's verdict and
+        # skip the re-arm when an open resolving PR exists. Conservative: any
+        # lookup failure falls through to today's escalate behaviour.
+        if await self._has_open_resolving_pr(issue_number):
+            logger.info(
+                "Diagnostic: open resolving PR exists for issue #%d — skipping "
+                "hitl-escalation/diagnose-failed re-arm (deferring to the "
+                "reconciler)",
+                issue_number,
             )
-        except Exception:
+        else:
+            try:
+                await self._prs.add_labels(
+                    issue_number, ["hitl-escalation", "diagnose-failed"]
+                )
+            except Exception:
+                logger.warning(
+                    "Diagnostic: failed to add Auto-Agent routing labels for #%d",
+                    issue_number,
+                    exc_info=True,
+                )
+        await self._publish_update(issue_number, "escalated")
+
+    async def _has_open_resolving_pr(self, issue_number: int) -> bool:
+        """Return whether an open PR already resolves *issue_number*.
+
+        Uses the same branch-convention signal the reconciler consults —
+        ``find_open_pr_for_branch`` on the canonical ``agent/issue-{N}``
+        branch. A prior diagnostic/auto-agent attempt that pushed a fix opens
+        such a PR; the Auto-Agent then routes the resolved issue back to review
+        and clears the escalation labels. On any lookup error this returns
+        ``False`` (fail-open to the escalate behaviour) after re-raising
+        credit/bug signals per the dark-factory contract.
+        """
+        try:
+            pr = await self._prs.find_open_pr_for_branch(
+                self._config.branch_for_issue(issue_number),
+                issue_number=issue_number,
+            )
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
             logger.warning(
-                "Diagnostic: failed to add Auto-Agent routing labels for #%d",
+                "Diagnostic: open-PR lookup failed for issue #%d — proceeding "
+                "with escalation",
                 issue_number,
                 exc_info=True,
             )
-        await self._publish_update(issue_number, "escalated")
+            return False
+        # FakeGitHub returns ``PRInfo(number=0)`` as an absence sentinel; the
+        # real PRManager returns ``None``. Both mean "no open resolving PR".
+        return pr is not None and pr.number > 0
 
     async def _publish_update(self, issue_number: int, status: str) -> None:
         """Publish a DIAGNOSTIC_UPDATE event for dashboard visibility."""

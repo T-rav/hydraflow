@@ -76,6 +76,17 @@ Run through this checklist before your final commit:
 - [ ] **Error messages are clear** — exceptions include context (what failed, what was expected)
 - [ ] **Existing tests still pass** — your changes don't break unrelated tests
 - [ ] **Commit message matches changes** — "Fixes #N: <summary>" accurately describes what changed
+
+### Pre-push self-check — avoid these recurring CI reds
+
+These six patterns pass locally but go red in CI. Check each trigger and apply the one-line fix BEFORE your final commit — CI guards them but does not pre-empt them:
+
+- [ ] **`fix(` commit → `tests/regressions/` delta (P10.6)** — if your commit subject starts with `fix(`, add a test under `tests/regressions/`. For a pure refactor with no behavior change, add a `Skip-Regression:` trailer to the commit. No delta and no trailer → P10.6 WARNs → CI red.
+- [ ] **New subprocess call site → sandbox seam** — if you add a NEW `run_subprocess*` / `stream_claude_process` call site in a `src/*_loop.py` or a runner, declare it in `mockworld.sandbox_main.SANDBOX_SEAMS` (or route it through an injected-fake seam). Otherwise the seam-completeness ratchet goes red.
+- [ ] **ADR `Enforced by:` with multiple checks → bullet lines** — multiple checks MUST be bullet lines (`**Enforced by:**` then `- pytest:a` / `- pytest:b` on their own lines), never inline `pytest:a, pytest:b`. A single inline check is fine; the resolver only parses bullets for multiples.
+- [ ] **Extracting code → do NOT relocate a `# noqa`** — moving code to a new file moves its suppression to a new file-signature, which the disturbance ratchet reads as a NEW violation (it only ever shrinks). Instead narrow the `except` to concrete types, or hoist the import to module top, so no suppression is needed. Never bump the baseline.
+- [ ] **Moving a cited file → update its ADR `Enforced by:` citation** — if you relocate a file named in an ADR `Enforced by:` citation (grep the ADRs for the old path), update that citation in the same commit, or ADR-conformance goes red.
+- [ ] **Relocating a symbol → fix its patchers** — before moving a module-level symbol out of its module, grep tests/scenarios for `patch("oldmodule.symbol")` and repoint them, or the patched test errors at collection.
 """
 
     @staticmethod
@@ -170,8 +181,14 @@ Run through this checklist before your final commit:
         bead_mapping: dict[str, str] | None = None,
         human_guidance: str = "",
         attempt_number: int = 0,
+        known_traps: str = "",
     ) -> WorkerResult:
         """Run the implementation agent for *task*.
+
+        ``known_traps`` (#9858) is a pre-rendered "Known CI Traps" section
+        from harness-insights — recurring repo failure classes injected so
+        the agent stops re-hitting documented walls (ratchet, arch-regen,
+        …). Empty string leaves the prompt unchanged.
 
         ``attempt_number`` is the 1-based issue attempt this run represents
         (0 = unknown); on cycling retries it feeds the diverse-retry
@@ -209,6 +226,8 @@ Run through this checklist before your final commit:
                 human_guidance=human_guidance,
                 attempt_number=attempt_number,
             )
+            if known_traps:
+                prompt += "\n\n" + known_traps
             transcript = await self._execute(
                 cmd,
                 prompt,
@@ -1172,6 +1191,11 @@ SUMMARY: <one-line summary>
         cmd = self._build_pre_quality_review_command()
         summary = ""
         skill_started = time.monotonic()
+        # The finder transcript feeds the verifier's explicit-OK trigger below.
+        # Initialised for the type checker; the attempt loop always runs at
+        # least once (max_attempts <= 0 returns early above), and an empty
+        # transcript can never carry the explicit OK marker.
+        transcript = ""
 
         # Each iteration's _execute call allocates its own subprocess_idx
         # from BaseRunner's monotonic counter, so retries and back-to-back
@@ -1183,6 +1207,10 @@ SUMMARY: <one-line summary>
                 worktree_path,
                 {"issue": issue.id, "source": "implementer"},
                 issue_labels=issue.tags,
+                # #9998: tag telemetry with the skill name (not the coarse
+                # phase source) so prompt-efficiency ordering keys match the
+                # adversarial corpus's expected_catcher names.
+                telemetry_source=skill.name,
             )
             passed, summary, findings = skill.result_parser(transcript)
             if passed:
@@ -1222,6 +1250,21 @@ SUMMARY: <one-line summary>
                     attempts=result.attempts,
                 )
 
+        # Independent verifier (#9546): a second-opinion pass with its own
+        # model, gated on the finder's EXPLICIT OK marker — never on the
+        # no-marker default-pass (empty fake/garbled transcripts must not grow
+        # an extra dispatch). Runs after the deterministic coverage check so a
+        # coverage override skips the extra LLM spend.
+        if (
+            result.passed
+            and skill.verifier is not None
+            and getattr(self._config, skill.verifier.enabled_config_key, False)
+            and skill.verifier.trigger(transcript)
+        ):
+            result = await self._run_skill_verifier(
+                skill, issue, worktree_path, prompt_diff, result
+            )
+
         # Append the skill result to run-N/skill_results.json alongside
         # the parent run. This is the source of truth for skill-effectiveness
         # scoring in trace_rollup.
@@ -1236,6 +1279,95 @@ SUMMARY: <one-line summary>
                 blocking=skill.blocking,
             )
 
+        return result
+
+    async def _run_skill_verifier(
+        self,
+        skill: AgentSkill,
+        issue: Task,
+        worktree_path: Path,
+        prompt_diff: str,
+        finder_result: LoopResult,
+    ) -> LoopResult:
+        """Run the independent second-opinion pass for a skill (#9546).
+
+        Dispatches the verifier prompt with the verifier's own tool/model
+        (independent of ``review_model`` — a shared model would defeat the
+        second opinion) and never discloses the finder's verdict. CONCUR
+        keeps the finder's pass; OVERRIDE flips it to a fail with the
+        verifier's own gap list. Fail-soft by default: a degraded run (empty
+        transcript) keeps the finder's OK unless the fail-closed knob is set.
+        """
+        spec = skill.verifier
+        if spec is None:  # pragma: no cover — caller-gated
+            return finder_result
+
+        verifier_started = time.monotonic()
+        verifier_cmd = build_agent_command(
+            tool=getattr(self._config, spec.tool_config_key),
+            model=getattr(self._config, spec.model_config_key),
+            isolate_user_settings=True,
+        )
+        verifier_prompt = spec.prompt_builder(
+            issue_number=issue.id, issue_title=issue.title, diff=prompt_diff
+        )
+        verifier_transcript = await self._execute(
+            verifier_cmd,
+            verifier_prompt,
+            worktree_path,
+            {"issue": issue.id, "source": "implementer"},
+            issue_labels=issue.tags,
+            telemetry_source=f"{skill.name}-verifier",
+        )
+
+        result = finder_result
+        if not verifier_transcript.strip():
+            # Subprocess soft-failure — nothing to judge. Fail-soft keeps the
+            # finder's OK; the opt-in fail-closed knob flips it to a retry.
+            outcome = "degraded"
+            if getattr(self._config, spec.fail_closed_config_key, False):
+                result = LoopResult(
+                    passed=False,
+                    summary=(
+                        f"{skill.name} verifier produced no output "
+                        "(fail-closed policy treats this as an override)"
+                    ),
+                    attempts=finder_result.attempts,
+                )
+        else:
+            confirmed, v_summary, v_gaps = spec.result_parser(verifier_transcript)
+            if confirmed:
+                outcome = "concur"
+            else:
+                outcome = "override"
+                logger.warning(
+                    "%s verifier overrode OK for #%d: %s",
+                    skill.name,
+                    issue.id,
+                    "; ".join(v_gaps[:5]) or v_summary,
+                )
+                result = LoopResult(
+                    passed=False,
+                    summary=(
+                        f"Independent verifier overrode OK: {v_summary}"
+                        if v_summary
+                        else "Independent verifier found gaps"
+                    ),
+                    attempts=finder_result.attempts,
+                )
+
+        ctx = self._tracing_ctx
+        if ctx is not None:
+            self._append_skill_result(
+                ctx,
+                skill_name=f"{skill.name}-verifier",
+                passed=result.passed,
+                attempts=1,
+                duration_seconds=time.monotonic() - verifier_started,
+                blocking=skill.blocking,
+                role="verifier",
+                outcome=outcome,
+            )
         return result
 
     async def _run_coverage_delta_check(
@@ -1307,8 +1439,15 @@ SUMMARY: <one-line summary>
         attempts: int,
         duration_seconds: float,
         blocking: bool,
+        role: str = "finder",
+        outcome: str | None = None,
     ) -> None:
         """Append a skill result to <run-N>/skill_results.json.
+
+        *role* tags the entry for telemetry (#9546): ``"finder"`` for the
+        skill's own pass/fail loop, ``"verifier"`` for the independent
+        second-opinion pass. *outcome* is verifier-only detail
+        (``concur`` / ``override`` / ``degraded``).
 
         Never raises — tracing must not crash the agent run.
         """
@@ -1339,6 +1478,8 @@ SUMMARY: <one-line summary>
                     "attempts": attempts,
                     "duration_seconds": round(duration_seconds, 3),
                     "blocking": blocking,
+                    "role": role,
+                    "outcome": outcome,
                 }
             )
             atomic_write(results_path, _json.dumps(existing, indent=2))

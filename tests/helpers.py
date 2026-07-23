@@ -111,6 +111,14 @@ def make_streaming_proc(
     """Build a mock for asyncio.create_subprocess_exec with streaming stdout."""
     mock_proc = MagicMock()
     mock_proc.returncode = returncode
+    # #9911: keep .pid None so any early-kill/timeout reap goes through the
+    # ``proc.pid is None`` branch of runner_utils._kill_proc_group() and calls
+    # the harmless mock ``proc.kill()`` — NOT the real ``os.killpg``. A bare
+    # MagicMock().pid coerces (via __index__) to 1, which would fire
+    # ``os.killpg(1, SIGKILL)`` at init's process group; on Linux CI that
+    # wedged the whole run while passing silently on macOS. Mirrors
+    # docker_runner._FakeProcess, which also defaults pid=None.
+    mock_proc.pid = None
     # stdin.write and stdin.close are sync on StreamWriter; drain is async
     mock_proc.stdin = MagicMock()
     mock_proc.stdin.drain = AsyncMock()
@@ -251,7 +259,7 @@ class ConfigFactory:
         triage_model: str = "haiku",
         triage_max_turns: int = 3,
         auditor_finding_max_age_days: int = 14,
-        min_plan_words: int = 200,
+        min_plan_words: int = 60,
         max_new_files_warning: int = 5,
         lite_plan_labels: list[str] | None = None,
         repo: str = "test-org/test-repo",
@@ -426,11 +434,22 @@ class ConfigFactory:
         implement_two_stage_review_enabled: bool = True,
         fitness_scorecard_interval: int = 86400,
         fitness_window_days: int = 30,
-        fitness_min_samples: int = 20,
+        fitness_min_samples: int = 5,
         # Off by default in tests: the injection honeypot spawns a lightweight
         # agent before triage's LLM eval, which most triage tests neither mock
         # nor want. Its own tests opt in. Production default is True.
         triage_honeypot_enabled: bool = False,
+        # 0 in tests (#9814): the startup stagger would consume one
+        # instant_sleep_factory call before the first cycle and shift every
+        # loop test's cycle count. Production default is 120. Stagger tests
+        # opt in explicitly.
+        loop_startup_stagger_s: int = 0,
+        # 0 in tests (#9814): a >0 TTL would serve stale snapshots across
+        # ticks inside a single test, hiding the port-mock mutations tests
+        # make between _do_work calls. 0 = every read refreshes through the
+        # port (still coalesced + degrade-safe). Production default is 900.
+        # Cache-behavior tests opt in explicitly.
+        github_cache_issue_list_ttl_s: float = 0.0,
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -444,6 +463,8 @@ class ConfigFactory:
             return HydraFlowConfig(
                 config_file=config_file,
                 triage_honeypot_enabled=triage_honeypot_enabled,
+                loop_startup_stagger_s=loop_startup_stagger_s,
+                github_cache_issue_list_ttl_s=github_cache_issue_list_ttl_s,
                 ready_label=ready_label if ready_label is not None else ["test-label"],
                 batch_size=batch_size,
                 max_workers=max_workers,

@@ -5,13 +5,13 @@ kind: "loop"
 bounded_context: "caretaker"
 code_anchor: "src/wiki_rot_detector_loop.py:WikiRotDetectorLoop"
 aliases: ["wiki rot detector loop", "wiki rot detector", "cite freshness loop"]
-related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K6"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488H"}]
-evidence: ["01KQP0V9KK99G77287P414NFRC"]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K6"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488H"}, {"kind": "depends_on", "target": "01KY4QJX17AGZK48K8ZSR9VWJX"}, {"kind": "depends_on", "target": "01KY4QGA4VF2GJDCW3ZVKNBPMY"}, {"kind": "depends_on", "target": "01KY4QF8BE4Y5782543MPQNDQ0"}]
+evidence: ["01KQP0V9KK99G77287P414NFRC", "01KQP0V9KK99G77287P414NFRN"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T00:00:00.000000+00:00"
-updated_at: "2026-07-18T19:31:17.682213+00:00"
+updated_at: "2026-07-22T16:41:56.908667+00:00"
 ---
 
 ## Definition

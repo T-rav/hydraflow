@@ -160,6 +160,36 @@ class TestL3StaleIssueGCClosesInactive:
         assert len(world.github.issue(99).comments) >= 1
         assert "auto-closed" in world.github.issue(99).comments[-1].lower()
 
+    async def test_state_prune_drops_entries_for_closed_issues(self, tmp_path):
+        """#9905: per-issue state stranded by off-path terminations is pruned.
+
+        GitHub truth (open issues) is the keep-set; entries for issues no
+        longer open are dropped in the same GC cycle, entries for live
+        issues survive.
+        """
+        from models import ConvergenceLedger
+        from pending_concerns import AdversarialState
+
+        world = MockWorld(tmp_path)
+        world.github.add_issue(300, "Live", "still open", labels=[])
+
+        state = world._harness.state
+        state._data.adversarial_states["999"] = AdversarialState(phase="plan")
+        state._data.convergence_ledgers["999"] = ConvergenceLedger(issue_number=999)
+        state._data.issue_attempts["999"] = 3
+        state._data.issue_attempts["300"] = 1
+
+        stats = await world.run_with_loops(["stale_issue_gc"], cycles=1)
+
+        assert stats["stale_issue_gc"] is not None
+        assert stats["stale_issue_gc"]["state_pruned"] == {
+            "adversarial_states": 1,
+            "convergence_ledgers": 1,
+            "issue_attempts": 1,
+        }
+        assert "999" not in state._data.adversarial_states
+        assert state._data.issue_attempts == {"300": 1}
+
 
 # ---------------------------------------------------------------------------
 # L4: PR Unsticker attempts to resolve HITL items
@@ -289,7 +319,12 @@ class TestL7DependabotMergeAutoMerges:
 class TestL8DependabotMergeSkipsOnFailure:
     """L8: Bot PRs with failing CI are skipped (strategy=skip)."""
 
-    async def test_bot_pr_skipped_on_ci_failure(self, tmp_path):
+    async def test_bot_pr_skipped_on_ci_failure(self, tmp_path, monkeypatch):
+        # Pin the #9889 update-branch heal OFF: this scenario asserts the
+        # strategy=skip contract, not the heal-first path (covered by
+        # tests/regressions/test_issue_9889_update_branch_heal.py).
+        # Env pin because run_with_loops builds a FRESH bg config.
+        monkeypatch.setenv("HYDRAFLOW_DEPENDABOT_UPDATE_BRANCH_MAX_ATTEMPTS", "0")
         world = MockWorld(tmp_path)
 
         from mockworld.fakes.fake_github import FakePR
@@ -390,6 +425,77 @@ class TestL7bAutoAgentPrMerges:
 
 
 # ---------------------------------------------------------------------------
+# L7d: human-prefix branches get the shepherd-to-merge path (#9889 class 5)
+# ---------------------------------------------------------------------------
+
+
+class TestL7dHumanBranchShepherd:
+    """L7d: a CI-green human fix/ PR merges via the shepherd lane; the
+    no-auto-merge label leaves it to its author (operator-approved #9889)."""
+
+    async def test_green_human_fix_pr_merges(self, tmp_path):
+        world = MockWorld(tmp_path)
+
+        from unittest.mock import AsyncMock, patch
+
+        from mockworld.fakes.fake_github import FakePR
+        from models import PRListItem
+
+        human_pr = PRListItem(
+            pr=800,
+            title="fix(ui): cap dots",
+            author="T-rav",
+            branch="fix/pipeline-dots-cap",
+        )
+        world.github._prs[800] = FakePR(
+            number=800, issue_number=0, branch="fix/pipeline-dots-cap"
+        )
+
+        await world.run_with_loops(["dependabot_merge"], cycles=1)
+        world._dependabot_cache.get_open_prs.return_value = [human_pr]
+        world._dependabot_cache.get_all_open_prs.return_value = [human_pr]
+
+        # The opt-out label read is a raw gh subprocess (#9754 seam) — fake
+        # it at the loop boundary; the FakeGitHub port handles the rest.
+        with patch("dependabot_merge_loop.fetch_pr_labels", AsyncMock(return_value=[])):
+            stats = await world.run_with_loops(["dependabot_merge"], cycles=1)
+
+        assert stats["dependabot_merge"]["merged"] == 1
+        assert world.github.pr(800).merged is True
+
+    async def test_no_auto_merge_label_respected(self, tmp_path):
+        world = MockWorld(tmp_path)
+
+        from unittest.mock import AsyncMock, patch
+
+        from mockworld.fakes.fake_github import FakePR
+        from models import PRListItem
+
+        human_pr = PRListItem(
+            pr=801,
+            title="feat(x): risky",
+            author="T-rav",
+            branch="feat/risky-change",
+        )
+        world.github._prs[801] = FakePR(
+            number=801, issue_number=0, branch="feat/risky-change"
+        )
+
+        await world.run_with_loops(["dependabot_merge"], cycles=1)
+        world._dependabot_cache.get_open_prs.return_value = [human_pr]
+        world._dependabot_cache.get_all_open_prs.return_value = [human_pr]
+
+        with patch(
+            "dependabot_merge_loop.fetch_pr_labels",
+            AsyncMock(return_value=["no-auto-merge"]),
+        ):
+            stats = await world.run_with_loops(["dependabot_merge"], cycles=1)
+
+        assert stats["dependabot_merge"]["skipped"] == 1
+        assert world.github.pr(801).merged is False
+
+
+# ---------------------------------------------------------------------------
 # L7c: Dependabot Merge self-heals a bot PR stuck on stale arch artifacts
 # ---------------------------------------------------------------------------
 
@@ -437,8 +543,12 @@ class TestL7cDependabotArchSelfHeal:
         # No further refresh needed.
         assert world.github.arch_refresh_call_count(9422) == 1
 
-    async def test_real_failure_not_arch_falls_through_to_skip(self, tmp_path):
+    async def test_real_failure_not_arch_falls_through_to_skip(
+        self, tmp_path, monkeypatch
+    ):
         """A non-arch CI failure must NOT trigger the arch self-heal."""
+        # Pin the #9889 update-branch heal OFF (see L8 note above).
+        monkeypatch.setenv("HYDRAFLOW_DEPENDABOT_UPDATE_BRANCH_MAX_ATTEMPTS", "0")
         world = MockWorld(tmp_path)
 
         from mockworld.fakes.fake_github import FakePR

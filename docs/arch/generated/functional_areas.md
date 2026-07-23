@@ -16,8 +16,10 @@ flowchart LR
         caretaking_EpicMonitorLoop([EpicMonitorLoop])
         caretaking_EpicSweeperLoop([EpicSweeperLoop])
         caretaking_FitnessScorecardLoop([FitnessScorecardLoop])
+        caretaking_GateHealthLoop([GateHealthLoop])
         caretaking_GitHubCacheLoop([GitHubCacheLoop])
         caretaking_HealthMonitorLoop([HealthMonitorLoop])
+        caretaking_IssueRefinementLoop([IssueRefinementLoop])
         caretaking_LabelDriftWatcherLoop([LabelDriftWatcherLoop])
         caretaking_LogIngestLoop([LogIngestLoop])
         caretaking_MemoryBacklogLoop([MemoryBacklogLoop])
@@ -43,13 +45,16 @@ flowchart LR
         quality_gates_BranchProtectionAuditorLoop([BranchProtectionAuditorLoop])
         quality_gates_CIMonitorLoop([CIMonitorLoop])
         quality_gates_GateActivatorLoop([GateActivatorLoop])
+        quality_gates_PrRedRepairLoop([PrRedRepairLoop])
     end
     subgraph trust_fleet["Trust Fleet"]
         trust_fleet_AdrConformanceLoop([AdrConformanceLoop])
+        trust_fleet_AdrDriftResolverLoop([AdrDriftResolverLoop])
         trust_fleet_AdrTouchpointAuditorLoop([AdrTouchpointAuditorLoop])
         trust_fleet_AutoTightenLoop([AutoTightenLoop])
         trust_fleet_ContractRefreshLoop([ContractRefreshLoop])
         trust_fleet_CorpusLearningLoop([CorpusLearningLoop])
+        trust_fleet_ErosionMetricsLoop([ErosionMetricsLoop])
         trust_fleet_FakeCoverageAuditorLoop([FakeCoverageAuditorLoop])
         trust_fleet_FlakeTrackerLoop([FlakeTrackerLoop])
         trust_fleet_LiveCorpusReplayLoop([LiveCorpusReplayLoop])
@@ -110,8 +115,10 @@ Autonomous background loops that maintain the system without human input — wik
 - `EpicMonitorLoop` — `src.epic_monitor_loop`
 - `EpicSweeperLoop` — `src.epic_sweeper_loop`
 - `FitnessScorecardLoop` — `src.fitness_scorecard_loop`
+- `GateHealthLoop` — `src.gate_health_loop`
 - `GitHubCacheLoop` — `src.github_cache_loop`
 - `HealthMonitorLoop` — `src.health_monitor_loop`
+- `IssueRefinementLoop` — `src.issue_refinement_loop`
 - `LabelDriftWatcherLoop` — `src.label_drift_watcher_loop`
 - `LogIngestLoop` — `src.log_ingest_loop`
 - `MemoryBacklogLoop` — `src.memory_backlog_loop`
@@ -145,6 +152,7 @@ Runtime CI/test monitoring loops that catch regressions and watch external check
 - `BranchProtectionAuditorLoop` — `src.branch_protection_auditor_loop`
 - `CIMonitorLoop` — `src.ci_monitor_loop`
 - `GateActivatorLoop` — `src.gate_activator_loop`
+- `PrRedRepairLoop` — `src.pr_red_repair_loop`
 
 **Related ADRs:** `ADR-0023`, `ADR-0035`, `ADR-0044`, `ADR-0082`
 
@@ -156,10 +164,12 @@ The trust-architecture hardening fleet (ADR-0045) — RC promotion gate, staging
 **Loops**
 
 - `AdrConformanceLoop` — `src.adr_conformance_loop`
+- `AdrDriftResolverLoop` — `src.adr_drift_resolver_loop`
 - `AdrTouchpointAuditorLoop` — `src.adr_touchpoint_auditor_loop`
 - `AutoTightenLoop` — `src.auto_tighten_loop`
 - `ContractRefreshLoop` — `src.contract_refresh_loop`
 - `CorpusLearningLoop` — `src.corpus_learning_loop`
+- `ErosionMetricsLoop` — `src.erosion_metrics_loop`
 - `FakeCoverageAuditorLoop` — `src.fake_coverage_auditor_loop`
 - `FlakeTrackerLoop` — `src.flake_tracker_loop`
 - `LiveCorpusReplayLoop` — `src.live_corpus_replay_loop`
@@ -172,7 +182,7 @@ The trust-architecture hardening fleet (ADR-0045) — RC promotion gate, staging
 
 - `ConformanceRunnerPort` — `src.ports`
 
-**Related ADRs:** `ADR-0042`, `ADR-0045`, `ADR-0048`, `ADR-0056`, `ADR-0100`
+**Related ADRs:** `ADR-0042`, `ADR-0045`, `ADR-0048`, `ADR-0056`, `ADR-0100`, `ADR-0101`
 
 
 ## Hexagonal Boundaries
@@ -276,14 +286,17 @@ The Auto-Agent HITL pre-flight loop intercepts every `hitl-escalation` issue bef
 
 ## Goal-Driven Development
 
-The Discover → Shape → Implement track for vague work that the orchestrator can't take directly. Implemented as call-sites in shape_phase.py and discover_phase.py rather than dedicated loops.
+Discovery research and direction shaping for vague or broad work. ADR-0107 retired the standalone Discover/Shape pipeline phases: these engines (DiscoverRunner / ShapeRunner and their expander / completeness / coherence helpers) are now invoked on demand by the planner behind its decision gate (plan_phase.py:_should_discover_helper / _should_shape_helper) rather than as dedicated loops or labels.
 
 **Module globs**
 
-- `src/discover_phase.py`
-- `src/shape_phase.py`
+- `src/discover_runner.py`
+- `src/discover_expander.py`
+- `src/discover_completeness.py`
+- `src/shape_runner.py`
+- `src/shape_coherence.py`
 
-**Related ADRs:** `ADR-0031`
+**Related ADRs:** `ADR-0031`, `ADR-0107`
 
 
 ## Orchestration

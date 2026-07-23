@@ -199,6 +199,117 @@ class TestAdrTouchpointAuditor:
 
         assert await world.github.list_issues_by_label("hydraflow-adr-drift") == []
 
+    async def test_fleet_pr_files_one_batched_rollup(self, tmp_path) -> None:
+        """#9662 — one fleet PR drifting 5 ADRs (>= default threshold 4) files
+        exactly ONE batched `hydraflow-adr-drift` issue listing every ADR."""
+        from adr_index import ADRIndex  # noqa: PLC0415
+
+        world = MockWorld(tmp_path)
+
+        repo = tmp_path / "repo"
+        adr_dir = repo / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        for i in range(1, 6):
+            _write_adr(
+                adr_dir, number=100 + i, title=f"loop{i}", related=[f"src/loop{i}.py"]
+            )
+        adr_index = ADRIndex(adr_dir)
+
+        async def list_merged_prs(_cursor):
+            return [
+                {
+                    "number": 9592,
+                    "mergedAt": "2026-07-11T10:00:00Z",
+                    "title": "fix: bounded subprocess reads across the fleet",
+                    "files": [{"path": f"src/loop{i}.py"} for i in range(1, 6)],
+                }
+            ]
+
+        from unittest.mock import MagicMock  # noqa: PLC0415
+
+        state = MagicMock()
+        state.get_adr_audit_cursor.return_value = "2026-05-01T00:00:00Z"
+        state.get_adr_audit_attempts.return_value = 0
+        state.inc_adr_audit_attempts.return_value = 1
+        state.get_adr_rollup.return_value = None
+
+        _seed_ports(
+            world,
+            adr_touchpoint_state=state,
+            adr_touchpoint_index=adr_index,
+            adr_touchpoint_list_merged_prs=list_merged_prs,
+            adr_touchpoint_reconcile_closed=AsyncMock(return_value=None),
+        )
+
+        await world.run_with_loops(["adr_touchpoint_auditor"], cycles=1)
+
+        issues = await world.github.list_issues_by_label("hydraflow-adr-drift")
+        assert len(issues) == 1
+        issue = world.github.issue(issues[0]["number"])
+        assert "#9592" in issue.title
+        assert "5 ADRs" in issue.title
+        for i in range(1, 6):
+            assert f"ADR-{100 + i:04d}" in issue.body
+        assert "hydraflow-find" in issue.labels
+        assert "hydraflow-adr-drift" in issue.labels
+
+    async def test_fleet_batch_scoped_per_pr(self, tmp_path) -> None:
+        """#9662 — batching is per-PR: a fleet PR batches while a separate
+        below-threshold PR in the same tick still gets its per-ADR rollup."""
+        from adr_index import ADRIndex  # noqa: PLC0415
+
+        world = MockWorld(tmp_path)
+
+        repo = tmp_path / "repo"
+        adr_dir = repo / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        for i in range(1, 6):
+            _write_adr(
+                adr_dir, number=100 + i, title=f"loop{i}", related=[f"src/loop{i}.py"]
+            )
+        _write_adr(adr_dir, number=24, title="alpha", related=["src/agent.py"])
+        adr_index = ADRIndex(adr_dir)
+
+        async def list_merged_prs(_cursor):
+            return [
+                {
+                    "number": 9592,
+                    "mergedAt": "2026-07-11T10:00:00Z",
+                    "files": [{"path": f"src/loop{i}.py"} for i in range(1, 6)],
+                },
+                {
+                    "number": 9600,
+                    "mergedAt": "2026-07-11T11:00:00Z",
+                    "files": [{"path": "src/agent.py"}],
+                },
+            ]
+
+        from unittest.mock import MagicMock  # noqa: PLC0415
+
+        state = MagicMock()
+        state.get_adr_audit_cursor.return_value = "2026-05-01T00:00:00Z"
+        state.get_adr_audit_attempts.return_value = 0
+        state.inc_adr_audit_attempts.return_value = 1
+        state.get_adr_rollup.return_value = None
+
+        _seed_ports(
+            world,
+            adr_touchpoint_state=state,
+            adr_touchpoint_index=adr_index,
+            adr_touchpoint_list_merged_prs=list_merged_prs,
+            adr_touchpoint_reconcile_closed=AsyncMock(return_value=None),
+        )
+
+        await world.run_with_loops(["adr_touchpoint_auditor"], cycles=1)
+
+        issues = await world.github.list_issues_by_label("hydraflow-adr-drift")
+        assert len(issues) == 2
+        titles = {world.github.issue(i["number"]).title for i in issues}
+        batched = next(t for t in titles if "#9592" in t)
+        per_adr = next(t for t in titles if "ADR-0024" in t)
+        assert "5 ADRs" in batched
+        assert "1 PR" in per_adr
+
     async def test_third_strike_files_hitl_escalation(self, tmp_path) -> None:
         """Third consecutive drift tick against an open rollup triggers HITL escalation.
 

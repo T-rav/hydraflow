@@ -165,7 +165,31 @@ class TestClassificationRecord:
             "complexity_rank": "high",
             "routing_outcome": "plan",
             "reasoning": "touches 3 modules",
+            # ADR-0107: clarity_score/needs_discovery default to the
+            # well-specified reading when the caller doesn't pass them.
+            "clarity_score": 10,
+            "needs_discovery": False,
         }
+
+    def test_record_classification_carries_adr_0107_hints(self, tmp_path: Path) -> None:
+        """ADR-0107: clarity_score/needs_discovery ride along on the
+        classification record so the planner's decision gate
+        (plan_phase.py:_should_discover_helper) can read them back as
+        HINTS via latest_classification."""
+        cache = _cache(tmp_path)
+        cache.record_classification(
+            42,
+            issue_type="feature",
+            complexity_score=4,
+            complexity_rank="medium",
+            routing_outcome="plan",
+            clarity_score=3,
+            needs_discovery=True,
+        )
+        latest = cache.latest_classification(42)
+        assert latest is not None
+        assert latest.payload["clarity_score"] == 3
+        assert latest.payload["needs_discovery"] is True
 
     def test_latest_classification_returns_most_recent(self, tmp_path: Path) -> None:
         cache = _cache(tmp_path)

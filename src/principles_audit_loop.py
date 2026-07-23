@@ -8,22 +8,22 @@ subsystems take effect.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
 import logging
 import re
 import time
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import trace_collector
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from config import HydraFlowConfig, ManagedRepo
     from pr_manager import PRManager
     from state import StateTracker
@@ -32,28 +32,16 @@ logger = logging.getLogger("hydraflow.principles_audit_loop")
 
 # Hard caps on subprocess reads. A wedged child must not hang the loop cycle
 # forever and freeze its heartbeat — the #9410 silent-stall failure class
-# (#9454 / #9508). ``make audit-json`` runs a full audit so it gets a longer
-# bound than a plain ``git`` call.
-_AUDIT_TIMEOUT_SECONDS = 1800
+# (#9454 / #9508). Bounded (and, via ``run_subprocess_result``, process-group
+# hardened — #9554/#10028) rather than a raw ``create_subprocess_exec``.
+#
+# The heavy ``make audit-json`` bound is the operator-tunable
+# ``config.principles_audit_timeout_seconds`` knob (#9555, default 1800),
+# re-read from the live config at every invocation — NOT a module constant,
+# because a full audit's healthy runtime scales with repo size
+# (heavy-make-tunable vs fixed-tier convention). The incidental ``git``
+# fetch/clone below is repo-size-independent and stays a fixed tier constant.
 _GIT_TIMEOUT_SECONDS = 120
-
-
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process, timeout: float
-) -> tuple[bytes, bytes]:
-    """``proc.communicate()`` bounded by *timeout* seconds.
-
-    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
-    the caller ends its cycle (and is restarted by the supervisor) rather than
-    hanging indefinitely.
-    """
-    try:
-        return await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except TimeoutError:
-        proc.kill()
-        with contextlib.suppress(ProcessLookupError):
-            await proc.wait()
-        raise
 
 
 _HYDRAFLOW_SELF = "hydraflow-self"
@@ -203,60 +191,65 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
                 continue
             if self._state.get_onboarding_status(mr.slug) != "blocked":
                 continue
-            snapshot = await self._audit_managed_repo(mr)
-            report = await self._fetch_last_report(mr)
-            fails = self._p1_p5_fails(report.get("findings", []))
-            if not fails:
-                self._state.set_onboarding_status(mr.slug, "ready")
-                self._state.set_last_green_audit(mr.slug, snapshot)
-                flipped += 1
+            # Per-target isolation (#9855/#9805) — see _reconcile_onboarding.
+            try:
+                snapshot = await self._audit_managed_repo(mr)
+                report = await self._fetch_last_report(mr)
+                fails = self._p1_p5_fails(report.get("findings", []))
+                if not fails:
+                    self._state.set_onboarding_status(mr.slug, "ready")
+                    self._state.set_last_green_audit(mr.slug, snapshot)
+                    flipped += 1
+            except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning(
+                    "principles_audit retry-blocked failed for %s: %s",
+                    mr.slug,
+                    exc,
+                )
         return flipped
 
     async def _run_audit(self, slug: str, repo_root: Path) -> dict[str, Any]:
         """Invoke ``make audit-json`` → parsed JSON report (spec §4.4)."""
         cmd = ["make", "audit-json", f"DIR={repo_root}"]
+        # Operator-tunable knob (#9555) — read fresh each invocation so a
+        # System-tab PATCH applies on the next audit without a restart.
+        timeout_s = self._config.principles_audit_timeout_seconds
         t0 = time.perf_counter()
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=self._config.repo_root,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            stdout, stderr = await _communicate_bounded(
-                proc, timeout=_AUDIT_TIMEOUT_SECONDS
+            result = await run_subprocess_result(
+                *cmd, cwd=self._config.repo_root, timeout=timeout_s
             )
-        except TimeoutError as exc:
+        except SubprocessTimeoutError as exc:
             duration_ms = int((time.perf_counter() - t0) * 1000)
             trace_collector.emit_loop_subprocess_trace(
                 loop="principles_audit",
                 command=cmd,
                 exit_code=124,  # bash convention for timeouts
                 duration_ms=duration_ms,
-                stderr_excerpt=f"timeout after {_AUDIT_TIMEOUT_SECONDS}s",
+                stderr_excerpt=f"timeout after {timeout_s}s",
             )
             raise RuntimeError(
-                f"make audit-json timed out after {_AUDIT_TIMEOUT_SECONDS}s for {slug}"
+                f"make audit-json timed out after {timeout_s}s for {slug}"
             ) from exc
         duration_ms = int((time.perf_counter() - t0) * 1000)
-        exit_code = proc.returncode or 0
-        stderr_text = stderr.decode(errors="replace")
+        exit_code = result.returncode
         trace_collector.emit_loop_subprocess_trace(
             loop="principles_audit",
             command=cmd,
             exit_code=exit_code,
             duration_ms=duration_ms,
-            stderr_excerpt=stderr_text if stderr_text else None,
+            stderr_excerpt=result.stderr if result.stderr else None,
         )
         if exit_code not in (0, 1):  # audit uses 1 for "failures present"
             logger.warning(
                 "make audit-json exit=%d for %s: %s",
                 exit_code,
                 slug,
-                stderr_text[:400],
+                result.stderr[:400],
             )
         try:
-            return json.loads(stdout.decode())
+            return json.loads(result.stdout)
         except json.JSONDecodeError as exc:
             raise RuntimeError(
                 f"audit-json emitted non-JSON for {slug}: {exc}"
@@ -278,15 +271,11 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         """Run a git subcommand; returns ``(exit_code, combined_output)``."""
         cmd = ["git", *args]
         t0 = time.perf_counter()
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
         try:
-            out, _ = await _communicate_bounded(proc, timeout=_GIT_TIMEOUT_SECONDS)
-        except TimeoutError as exc:
+            result = await run_subprocess_result(
+                *cmd, cwd=cwd, timeout=_GIT_TIMEOUT_SECONDS
+            )
+        except SubprocessTimeoutError as exc:
             duration_ms = int((time.perf_counter() - t0) * 1000)
             trace_collector.emit_loop_subprocess_trace(
                 loop="principles_audit",
@@ -299,8 +288,12 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
                 f"git timed out after {_GIT_TIMEOUT_SECONDS}s: {' '.join(cmd)}"
             ) from exc
         duration_ms = int((time.perf_counter() - t0) * 1000)
-        exit_code = proc.returncode or 0
-        combined = out.decode(errors="replace")
+        exit_code = result.returncode
+        # The shared helper returns separate stdout/stderr (no stderr=STDOUT
+        # redirect); reconstruct the combined text this method's contract
+        # promises. Only used for error messages/trace excerpts, so exact
+        # interleaving with the original redirect doesn't matter.
+        combined = "\n".join(p for p in (result.stdout, result.stderr) if p)
         trace_collector.emit_loop_subprocess_trace(
             loop="principles_audit",
             command=cmd,
@@ -585,12 +578,23 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         for mr in self._config.managed_repos:
             if not mr.enabled:
                 continue
-            status = self._state.get_onboarding_status(mr.slug)
-            if status is None:
-                self._state.set_onboarding_status(mr.slug, "pending")
-                await self._run_onboarding_audit(mr)
-                count += 1
-            elif status == "pending":
-                await self._run_onboarding_audit(mr)
-                count += 1
+            # Per-target isolation (#9855/#9805): one unreachable managed
+            # repo must not kill the whole tick — that pegged
+            # tick_error_ratio at 1.0 and fed the anomaly->epic runaway.
+            try:
+                status = self._state.get_onboarding_status(mr.slug)
+                if status is None:
+                    self._state.set_onboarding_status(mr.slug, "pending")
+                    await self._run_onboarding_audit(mr)
+                    count += 1
+                elif status == "pending":
+                    await self._run_onboarding_audit(mr)
+                    count += 1
+            except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning(
+                    "principles_audit onboarding failed for %s: %s",
+                    mr.slug,
+                    exc,
+                )
         return count

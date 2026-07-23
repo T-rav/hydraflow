@@ -1,0 +1,16 @@
+name: "HydraFlow CodeQL config"
+
+# Exclude adversarial/holdout test FIXTURES from analysis.
+#
+# tests/trust/adversarial/cases/**/{before,after}/src/*.py are synthetic
+# "apps" that DELIBERATELY plant security issues (hardcoded secrets, debug
+# residue that logs a password, etc.) so the diff-sanity / holdout detectors
+# can be tested finding them. They are test DATA, never real runnable code.
+# Scanning them produces guaranteed false positives — e.g. alert #106
+# `py/clear-text-logging-sensitive-data` on
+# holdout-diff-sanity-attack-debug-residue/after/src/app.py — which only
+# surfaced on the staging->main RC-promotion CodeQL run (CodeQL never ran on
+# staging PRs; see codeql.yml triggers). Excluding the fixture tree keeps the
+# scan focused on real code.
+paths-ignore:
+  - "tests/trust/adversarial/cases/**"

@@ -1,0 +1,23 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# push_synthetic_commit appends a tree-identical commit on rc/* so
+# `pull_request: synchronize` workflows fire (#8705) and returns the new
+# HEAD SHA. The fake returns a deterministic "synthetic-sha-<branch>"
+# token, so no normalizer is needed.
+adapter: github
+interaction: push_synthetic_commit
+recorded_at: "2026-07-20T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: push_synthetic_commit
+  args:
+    - "rc/2026-05-13-0000"
+    - "chore: fire pull_request workflows"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "synthetic-sha-rc/2026-05-13-0000\n"
+  stderr: ""
+normalizers: []
+baseline_only: true

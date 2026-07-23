@@ -211,13 +211,20 @@ class TermProposerLoop(BaseBackgroundLoop):
         return self._config.term_proposer_interval
 
     def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
-        from loop_fitness import proposal_acceptance_fitness  # noqa: PLC0415
+        from loop_fitness import (  # noqa: PLC0415
+            cadence_min_samples,
+            proposal_acceptance_fitness,
+        )
 
         return proposal_acceptance_fitness(
             ctx,
             worker_name=self._worker_name,
             label=TERM_PROPOSER_PR_LABEL,
-            min_samples=self._config.fitness_min_samples,
+            min_samples=cadence_min_samples(
+                ctx,
+                interval_seconds=self._get_default_interval(),
+                configured_min=self._config.fitness_min_samples,
+            ),
         )
 
     async def _do_work(self) -> dict[str, Any] | None:

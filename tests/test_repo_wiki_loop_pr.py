@@ -623,7 +623,9 @@ class TestTrackedCompileStatsReporting:
                 "source_phase: plan\n"
                 f"created_at: {datetime.now(UTC).isoformat()}\n"
                 "status: active\n"
-                "---\n\n# Entry\n",
+                # Anchored body so the #9954 prune pass leaves it active and
+                # the 5-entry compile threshold is still met.
+                "---\n\n# Entry\n\nUse `src/repo_wiki.py`.\n",
                 encoding="utf-8",
             )
 
@@ -768,3 +770,85 @@ class TestHealLeavesRepoRootClean:
         pushed = _git(remote, "show", f"{branch}:{entry_rel}")
         assert "status: stale" in pushed
         assert "stale_reason: source issue #42 closed" in pushed
+
+
+class TestAnchorPruneFlagGating:
+    """The #9954 prune pass runs only when ``wiki_anchor_prune_enabled`` is
+    True. Default-off keeps the aggressive one-time backlog cleanup a
+    deliberate operator action; the synthesis-time gate is independent.
+    """
+
+    def _seed_anchorless(self, git_repo: Path) -> Path:
+        from datetime import UTC, datetime
+
+        tracked_root = git_repo / "repo_wiki"
+        topic_dir = tracked_root / "acme" / "widget" / "gotchas"
+        topic_dir.mkdir(parents=True)
+        for i in range(2):
+            (topic_dir / f"000{i}-issue-{i}-x.md").write_text(
+                "---\n"
+                f"id: 000{i}\n"
+                "topic: gotchas\n"
+                f"source_issue: {i}\n"
+                "source_phase: plan\n"
+                f"created_at: {datetime.now(UTC).isoformat()}\n"
+                "status: active\n"
+                # No repo anchor — a generic platitude.
+                "---\n\n# Use is None for optional sentinels\n\nAvoid `==`.\n",
+                encoding="utf-8",
+            )
+        return tracked_root
+
+    def _store(self, git_repo: Path):
+        from unittest.mock import MagicMock
+
+        from repo_wiki import RepoWikiStore
+
+        store = MagicMock(spec=RepoWikiStore)
+        store.active_lint.return_value = MagicMock(
+            stale_entries=0,
+            orphan_entries=0,
+            total_entries=0,
+            entries_marked_stale=0,
+            orphans_pruned=0,
+            empty_topics=[],
+        )
+        return store
+
+    @pytest.mark.asyncio
+    async def test_prune_runs_when_flag_enabled(self, git_repo: Path) -> None:
+        tracked_root = self._seed_anchorless(git_repo)
+        config = _make_config(git_repo).model_copy(
+            update={"wiki_anchor_prune_enabled": True}
+        )
+        loop = _stub_loop(config)
+        loop._wiki_compiler = None  # skip Phase 2/8 compilation
+
+        result = await loop._lint_and_compile_repos(
+            ["acme/widget"], tracked_root, set(), store=self._store(git_repo)
+        )
+
+        assert result["anchor_flagged"] == 2
+        topic_dir = tracked_root / "acme" / "widget" / "gotchas"
+        for i in range(2):
+            text = (topic_dir / f"000{i}-issue-{i}-x.md").read_text()
+            assert "status: stale" in text
+            assert "no repo-specific anchor" in text
+
+    @pytest.mark.asyncio
+    async def test_prune_skipped_when_flag_disabled(self, git_repo: Path) -> None:
+        tracked_root = self._seed_anchorless(git_repo)
+        # _make_config defaults wiki_anchor_prune_enabled to False.
+        loop = _stub_loop(_make_config(git_repo))
+        loop._wiki_compiler = None
+
+        result = await loop._lint_and_compile_repos(
+            ["acme/widget"], tracked_root, set(), store=self._store(git_repo)
+        )
+
+        assert result["anchor_flagged"] == 0
+        topic_dir = tracked_root / "acme" / "widget" / "gotchas"
+        for i in range(2):
+            assert (
+                "status: active" in (topic_dir / f"000{i}-issue-{i}-x.md").read_text()
+            )

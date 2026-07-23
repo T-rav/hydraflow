@@ -51,19 +51,12 @@ export const WS_RECONNECT_MAX_MS = 30_000
  */
 export const PIPELINE_STAGES = [
   { key: 'triage',    label: 'Triage',    color: theme.yellow,      subtleColor: theme.yellowSubtle,  role: 'triage',      configKey: 'max_triagers', track: 'junction' },
-  { key: 'discover',  label: 'Discover',  color: theme.cyan,        subtleColor: theme.cyanSubtle,    role: 'discover',    configKey: 'max_triagers', track: 'product' },
-  { key: 'shape',     label: 'Shape',     color: theme.pink,        subtleColor: theme.pinkSubtle,    role: 'shape',       configKey: 'max_triagers', track: 'product' },
   { key: 'plan',      label: 'Plan',      color: theme.purple,      subtleColor: theme.purpleSubtle,  role: 'planner',     configKey: 'max_planners', track: 'junction' },
   { key: 'implement', label: 'Implement', color: theme.accent,      subtleColor: theme.accentSubtle,  role: 'implementer', configKey: 'max_workers',  track: 'engineering' },
   { key: 'review',    label: 'Review',    color: theme.orange,      subtleColor: theme.orangeSubtle,  role: 'reviewer',    configKey: 'max_reviewers', track: 'engineering' },
   { key: 'hitl',      label: 'Needs Human', color: theme.red,       subtleColor: theme.redSubtle,     role: null,           configKey: null,           track: 'engineering' },
   { key: 'merged',    label: 'Merged',    color: theme.green,       subtleColor: theme.greenSubtle,   role: null,           configKey: null,           track: 'engineering' },
 ]
-
-/** Stages that form the product discovery track (branching path from triage). */
-export const PRODUCT_TRACK_KEYS = new Set(
-  PIPELINE_STAGES.filter(s => s.track === 'product').map(s => s.key)
-)
 
 /**
  * Pencil cursor for the annotation canvas in the Report Issue modal.
@@ -78,8 +71,6 @@ export const ANNOTATION_PENCIL_CURSOR = "url('data:image/svg+xml,%3Csvg xmlns=%2
  */
 export const ANNOTATION_COLORS = [
   { key: 'triage',    label: 'Triage',    color: theme.yellow },
-  { key: 'discover',  label: 'Discover',  color: theme.cyan },
-  { key: 'shape',     label: 'Shape',     color: theme.cyan },
   { key: 'plan',      label: 'Plan',      color: theme.purple },
   { key: 'implement', label: 'Implement', color: theme.accent },
   { key: 'review',    label: 'Review',    color: theme.orange },
@@ -146,8 +137,6 @@ export const WORKER_COUNT_MAX = 10
  */
 export const PIPELINE_LOOPS = [
   { key: 'triage',    label: 'Triage',    color: theme.yellow,      dimColor: theme.yellowSubtle,  configKey: 'max_triagers' },
-  { key: 'discover',  label: 'Discover',  color: theme.cyan,        dimColor: theme.cyanSubtle,    configKey: 'max_triagers' },
-  { key: 'shape',     label: 'Shape',     color: theme.pink,        dimColor: theme.pinkSubtle,    configKey: 'max_triagers' },
   { key: 'plan',      label: 'Plan',      color: theme.purple,      dimColor: theme.purpleSubtle,  configKey: 'max_planners' },
   { key: 'implement', label: 'Implement', color: theme.accent,      dimColor: theme.accentSubtle,  configKey: 'max_workers' },
   { key: 'review',    label: 'Review',    color: theme.orange,      dimColor: theme.orangeSubtle,  configKey: 'max_reviewers' },
@@ -262,7 +251,21 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'auto_tighten', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry', 'convergence_oscillation'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'auto_tighten', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry', 'convergence_oscillation', 'gate_health', 'issue_refinement', 'pr_red_repair', 'erosion_metrics', 'adr_drift_resolver'])
+
+/**
+ * Preset options for the per-loop watchdog-timeout override (#9503).
+ * Unlike interval presets, one set covers every editable worker — the
+ * watchdog is a uniform hang-safety bound, not a domain-specific cadence.
+ * Spans loop_watchdog_default_seconds (2h) and loop_watchdog_llm_seconds (4h).
+ */
+export const WATCHDOG_TIMEOUT_PRESETS = [
+  { label: '30m', seconds: 1800 },
+  { label: '1h', seconds: 3600 },
+  { label: '2h', seconds: 7200 },
+  { label: '4h', seconds: 14400 },
+  { label: '8h', seconds: 28800 },
+]
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -289,6 +292,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   skill_prompt_eval: 604800,
   fake_coverage_auditor: 604800,
   adr_touchpoint_auditor: 14400,
+  adr_drift_resolver: 3600,
   adr_conformance: 86400,
   auto_tighten: 86400,
   memory_backlog: 86400,
@@ -305,6 +309,10 @@ export const SYSTEM_WORKER_INTERVALS = {
   epic_monitor: 1800,
   github_cache: 30,
   runs_gc: 3600,
+  gate_health: 604800,
+  pr_red_repair: 300,
+  erosion_metrics: 14400,
+  issue_refinement: 86400,
   label_drift_watcher: 600,
   triage_retry: 86400,
   convergence_oscillation: 3600,
@@ -356,6 +364,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'skill_prompt_eval', label: 'Skill Prompt Eval', description: 'Runs the full adversarial skill corpus weekly and files drift + weak-case issues.', color: theme.blue, group: 'learning', tags: ['quality'] },
   { key: 'fake_coverage_auditor', label: 'Fake Coverage Auditor', description: 'Flags un-cassetted fake adapter methods and un-exercised test helpers.', color: theme.accent, group: 'learning', tags: ['quality'] },
   { key: 'adr_touchpoint_auditor', label: 'ADR Touchpoint Auditor', description: 'Scans recently-merged PRs for ADR drift — cited src/ modules changed without the ADR being updated. Replaces the synchronous touchpoint gate. See ADR-0056.', color: theme.purple, group: 'governance', tags: ['audit', 'drift'] },
+  { key: 'adr_drift_resolver', label: 'ADR Drift Resolver', description: 'Triage-before-escalate for the auditor\'s ADR-drift rollups: one LLM call classifies each as consistent (auto-close), real/over/dead-citation drift (relabel hydraflow-find with an ADR-edit brief), or low-confidence (HITL). Never auto-closes anything but a confident consistent verdict. See #9976.', color: theme.purple, group: 'governance', tags: ['audit', 'drift'] },
   { key: 'adr_conformance', label: 'ADR Conformance', description: 'Evaluates every Accepted ADR\'s `Enforced by:` checks and files/updates remediation issues on drift. See ADR-0100.', color: theme.purple, group: 'governance', tags: ['audit', 'compliance'] },
   { key: 'auto_tighten', label: 'Auto-Tighten Ratchet', description: 'Ingests CI coverage, confirms stable tightening gains, attributes them to a merged PR, and opens an automated PR raising the coverage floor. Never loosens.', color: theme.green, group: 'repo_health', tags: ['quality', 'ratchet'] },
   { key: 'memory_backlog', label: 'Memory Backlog', description: 'Files hydraflow-find issues for pending entries in docs/wiki/memory-feedback/.', color: theme.purple, group: 'learning', tags: ['knowledge'] },
@@ -384,6 +393,10 @@ export const BACKGROUND_WORKERS = [
   { key: 'epic_monitor', label: 'Epic Monitor', description: 'Detects stale epics and refreshes progress cache so the dashboard shows accurate sub-issue rollups.', color: theme.textMuted, system: true, group: 'operations', tags: ['lifecycle'] },
   { key: 'github_cache', label: 'GitHub Cache', description: 'Single-poller cache for GitHub data; serves all dashboard + loop consumers from one shared snapshot to avoid rate-limit fan-out.', color: theme.textMuted, system: true, group: 'operations', tags: ['infra'] },
   { key: 'runs_gc', label: 'Runs GC', description: 'Purges expired pipeline run artifacts per TTL and size-cap config; keeps the runs store from growing unbounded.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['hygiene'] },
+  { key: 'gate_health', label: 'Gate Health', description: 'Weekly read-only CI-gate auditor: pass-rate distributions, blame-correlation, missing failure artifacts, stale quarantines. Files evidence issues; never mutates gates.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['hygiene'] },
+  { key: 'pr_red_repair', label: 'PR Red Repair', description: 'Detects settled-red open PRs and bounded-reruns infra-flake CI (cancelled runs, zero-failed-step jobs, failed setup steps, vanished logs). Escalates via rollup issue once the rerun budget is exhausted. Phase 1 of #10027 — real-red auto-agent dispatch is Phase 2.', color: theme.orange, group: 'repo_health', tags: ['recovery', 'quality'] },
+  { key: 'erosion_metrics', label: 'Erosion Metrics', description: 'v1: runs the change-spread and concept-scatter sensors over commits merged since the last tick; files above-baseline drift as hydraflow-find issues for human triage (Pattern B — never opens a fix PR). See #10107, epic #10104.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },
+  { key: 'issue_refinement', label: 'Issue Refinement', description: 'Backlog-wide duplicate detection, priority scoring, and a rolling operator digest issue. Auto-closes confirmed duplicates and relabels safe priority deltas.', color: theme.orange, group: 'repo_health', tags: ['hygiene'] },
 ]
 
 /**

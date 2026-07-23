@@ -29,7 +29,7 @@ _BOUNDED_INT_FIELDS = [
     ("max_review_fix_attempts", 0, 5, 2),
     ("max_pre_quality_review_attempts", 0, 5, 3),
     ("min_review_findings", 0, 20, 3),
-    ("min_plan_words", 50, 2000, 200),
+    ("min_plan_words", 20, 2000, 60),
     ("max_merge_conflict_fix_attempts", 0, 5, 3),
     ("max_new_files_warning", 1, 20, 5),
     ("rc_cadence_hours", 1, 168, 4),
@@ -451,7 +451,7 @@ class TestHydraFlowConfigMinPlanWords:
             workspace_base=tmp_path / "wt",
             state_file=tmp_path / "s.json",
         )
-        assert cfg.min_plan_words == 200
+        assert cfg.min_plan_words == 60
 
     def test_min_plan_words_env_var_override(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1161,6 +1161,26 @@ class TestLabelValidation:
             state_file=tmp_path / "s.json",
         )
         assert "human-required" in cfg.all_pipeline_labels
+
+    def test_in_progress_label_default(self, tmp_path: Path) -> None:
+        """in_progress_label should default to ['hydraflow-in-progress'] (#10168)."""
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.in_progress_label == ["hydraflow-in-progress"]
+
+    def test_in_progress_label_in_all_pipeline_labels(self, tmp_path: Path) -> None:
+        """The build-claim marker must be in all_pipeline_labels so the
+        ready→review swap (and any escalation swap) clears it — an issue can
+        never get stuck claimed (#10168, ADR-0002)."""
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert "hydraflow-in-progress" in cfg.all_pipeline_labels
 
 
 class TestTimeoutConfigFields:

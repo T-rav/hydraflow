@@ -78,3 +78,98 @@ def parse_test_adequacy_result(transcript: str) -> tuple[bool, str, list[str]]:
                 gaps.append(stripped)
 
     return passed, summary, gaps
+
+
+def finder_asserted_adequate(transcript: str) -> bool:
+    """Return ``True`` only when the finder emitted an explicit ``OK`` marker.
+
+    This is the independent-verifier trigger predicate (#9546). It is
+    deliberately stricter than :func:`parse_test_adequacy_result`: a
+    transcript with **no** marker default-passes the finder (fail-soft for
+    empty/garbled transcripts) but must **not** trigger the verifier —
+    otherwise every scenario and fake-LLM path that relies on the no-marker
+    default-pass would grow an unexpected second dispatch.
+    """
+    return (
+        re.search(r"TEST_ADEQUACY_RESULT:\s*OK", transcript, re.IGNORECASE) is not None
+    )
+
+
+def build_test_adequacy_verifier_prompt(
+    *, issue_number: int, issue_title: str, diff: str, **_kwargs: object
+) -> str:
+    """Build the independent second-opinion prompt for the verifier pass.
+
+    The verifier is framed as an independent reviewer: it never sees the
+    finder's verdict (so it cannot rubber-stamp it) and is instructed to
+    default to OVERRIDE when it cannot positively confirm coverage.
+    """
+    return f"""You are the INDEPENDENT Test Adequacy Verifier for issue #{issue_number}: {issue_title}.
+
+A prior automated pass assessed the test coverage of this diff. You have NOT been
+shown its verdict, and you must not assume it was correct. Re-derive the adequacy
+judgment yourself, from the diff alone.
+
+## Diff
+
+```diff
+{diff}
+```
+
+## Instructions
+
+- For each changed or added production function/method/class, independently confirm
+  that at least one non-tautological test exercises the new/changed behaviour
+  (a test that would fail if the production change were reverted or broken).
+- Check edge cases: empty inputs, None values, boundary conditions, error paths.
+- Ignore test-file changes when assessing adequacy — focus on whether production
+  code is tested.
+- Do NOT modify any files. This is a read-only assessment.
+- If you cannot positively confirm that each changed production symbol is exercised
+  by a meaningful test, you MUST report OVERRIDE. When unsure, OVERRIDE.
+
+## Required Output
+
+If you independently confirm coverage is adequate:
+TEST_ADEQUACY_VERIFIER_RESULT: CONCUR
+SUMMARY: <one-line justification>
+
+If coverage is not confirmed adequate:
+TEST_ADEQUACY_VERIFIER_RESULT: OVERRIDE
+SUMMARY: <comma-separated list of gap categories>
+GAPS:
+- <production_file:function — what test is missing>
+"""
+
+
+def parse_test_adequacy_verifier_result(
+    transcript: str,
+) -> tuple[bool, str, list[str]]:
+    """Parse the verifier transcript into ``(confirmed, summary, gaps)``.
+
+    ``CONCUR`` → confirmed=True; ``OVERRIDE`` → confirmed=False. A missing
+    marker returns confirmed=True (fail-soft, mirroring
+    :func:`parse_test_adequacy_result`'s default-pass) — the caller applies
+    the ``fail_closed`` policy for degraded verifier runs.
+    """
+    status_match = re.search(
+        r"TEST_ADEQUACY_VERIFIER_RESULT:\s*(CONCUR|OVERRIDE)",
+        transcript,
+        re.IGNORECASE,
+    )
+    if not status_match:
+        return True, "No explicit verifier result marker", []
+
+    confirmed = status_match.group(1).upper() == "CONCUR"
+    summary_match = re.search(r"SUMMARY:\s*(.+)", transcript, re.IGNORECASE)
+    summary = summary_match.group(1).strip() if summary_match else ""
+
+    gaps: list[str] = []
+    gaps_match = re.search(r"GAPS:\s*\n((?:\s*-\s*.+\n?)+)", transcript, re.IGNORECASE)
+    if gaps_match:
+        for line in gaps_match.group(1).splitlines():
+            stripped = line.strip().lstrip("- ").strip()
+            if stripped:
+                gaps.append(stripped)
+
+    return confirmed, summary, gaps

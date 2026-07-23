@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from queue_strategy import QueueStrategy
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from events import EventBus
@@ -31,6 +33,29 @@ class TestControlStatusMaxTriagers:
         data = json.loads(response.body)
         assert "config" in data
         assert data["config"]["max_triagers"] == config.max_triagers
+
+
+class TestControlStatusQueueStrategy:
+    @pytest.mark.asyncio
+    async def test_control_status_exposes_the_active_queue_strategy(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        # The dashboard reads config.queue_strategy from here to show which
+        # algorithm is picking work (#10067); without it the badge is blind.
+        config.queue_strategy = QueueStrategy.WEIGHTED_MIX
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        get_control_status = find_endpoint(router, "/api/control/status")
+        assert get_control_status is not None
+
+        data = json.loads((await get_control_status()).body)
+
+        assert data["config"]["queue_strategy"] == "weighted_mix"
+        assert data["config"]["queue_weight_p1"] == config.queue_weight_p1
+        assert data["config"]["queue_weight_p2"] == config.queue_weight_p2
+        assert (
+            data["config"]["queue_weight_unprioritised"]
+            == config.queue_weight_unprioritised
+        )
 
 
 class TestControlStatusAppVersion:
@@ -74,6 +99,58 @@ class TestControlStatusAppVersion:
         data = json.loads(response.body)
         assert data["config"]["latest_version"] == "0.9.2"
         assert data["config"]["update_available"] is True
+
+
+class TestControlStatusBootShaCommitsBehind:
+    @pytest.mark.asyncio
+    async def test_status_includes_boot_sha_and_commits_behind(
+        self, config, event_bus: EventBus, state, tmp_path: Path, monkeypatch
+    ) -> None:
+        """GET /api/control/status projects the in-memory boot SHA and a
+        cheap commits-behind count for at-a-glance staleness observability."""
+        monkeypatch.setattr(
+            "dashboard_routes._control_routes.get_boot_sha",
+            lambda: "abc1234deadbeef",
+        )
+        monkeypatch.setattr(
+            "dashboard_routes._control_routes.get_commits_behind",
+            lambda: 5,
+        )
+
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+
+        get_control_status = find_endpoint(router, "/api/control/status")
+
+        assert get_control_status is not None
+        response = await get_control_status()
+        data = json.loads(response.body)
+        assert data["config"]["boot_sha"] == "abc1234deadbeef"
+        assert data["config"]["commits_behind"] == 5
+
+    @pytest.mark.asyncio
+    async def test_status_tolerates_unavailable_git(
+        self, config, event_bus: EventBus, state, tmp_path: Path, monkeypatch
+    ) -> None:
+        """When the git reads fail, the fields are null and the endpoint still
+        responds (never hangs or raises)."""
+        monkeypatch.setattr(
+            "dashboard_routes._control_routes.get_boot_sha",
+            lambda: None,
+        )
+        monkeypatch.setattr(
+            "dashboard_routes._control_routes.get_commits_behind",
+            lambda: None,
+        )
+
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+
+        get_control_status = find_endpoint(router, "/api/control/status")
+
+        assert get_control_status is not None
+        response = await get_control_status()
+        data = json.loads(response.body)
+        assert data["config"]["boot_sha"] is None
+        assert data["config"]["commits_behind"] is None
 
 
 class TestPatchConfigUnknownField:
@@ -600,6 +677,147 @@ class TestBgWorkerIntervalEndpoint:
             assert isinstance(bounds, tuple), f"{name} bounds should be a tuple"
             assert len(bounds) == 2, f"{name} bounds should have 2 elements"
             assert bounds[0] < bounds[1], f"{name} min should be less than max"
+
+
+# ---------------------------------------------------------------------------
+# /api/control/bg-worker/watchdog-timeout endpoint (#9503)
+# Mirrors TestBgWorkerIntervalEndpoint above.
+# ---------------------------------------------------------------------------
+
+
+class TestBgWorkerWatchdogTimeoutEndpoint:
+    @pytest.fixture
+    def _endpoint(self, config, event_bus, state, tmp_path):
+        """Return ``(endpoint, mock_orch)`` for watchdog-timeout endpoint tests."""
+        mock_orch = MagicMock()
+        mock_orch.set_bg_worker_timeout = MagicMock()
+        mock_orch.registered_bg_loop_names.return_value = {
+            "pr_unsticker",
+            "repo_wiki",
+        }
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        ep = find_endpoint(router, "/api/control/bg-worker/watchdog-timeout")
+        assert ep is not None
+        return ep, mock_orch
+
+    def test_watchdog_timeout_route_is_registered(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        paths = {route.path for route in router.routes if hasattr(route, "path")}
+        assert "/api/control/bg-worker/watchdog-timeout" in paths
+
+    @pytest.mark.asyncio
+    async def test_watchdog_timeout_update_succeeds(self, _endpoint) -> None:
+        endpoint, mock_orch = _endpoint
+        response = await endpoint(
+            {"name": "pr_unsticker", "watchdog_timeout_seconds": 5400}
+        )
+        data = json.loads(response.body)
+        assert response.status_code == 200
+        assert data["status"] == "ok"
+        assert data["name"] == "pr_unsticker"
+        assert data["watchdog_timeout_seconds"] == 5400
+        mock_orch.set_bg_worker_timeout.assert_called_once_with("pr_unsticker", 5400)
+
+    @pytest.mark.asyncio
+    async def test_watchdog_timeout_rejects_below_minimum(self, _endpoint) -> None:
+        endpoint, _ = _endpoint
+        response = await endpoint(
+            {"name": "pr_unsticker", "watchdog_timeout_seconds": 10}
+        )
+        data = json.loads(response.body)
+        assert response.status_code == 422
+        assert "between 60 and 43200" in data["error"]
+
+    @pytest.mark.asyncio
+    async def test_watchdog_timeout_rejects_above_maximum(self, _endpoint) -> None:
+        endpoint, _ = _endpoint
+        response = await endpoint(
+            {"name": "pr_unsticker", "watchdog_timeout_seconds": 100000}
+        )
+        data = json.loads(response.body)
+        assert response.status_code == 422
+        assert "between 60 and 43200" in data["error"]
+
+    @pytest.mark.asyncio
+    async def test_watchdog_timeout_rejects_non_loop_worker(self, _endpoint) -> None:
+        endpoint, _ = _endpoint
+        response = await endpoint({"name": "triage", "watchdog_timeout_seconds": 3600})
+        data = json.loads(response.body)
+        assert response.status_code == 400
+        assert "not editable" in data["error"]
+
+    @pytest.mark.asyncio
+    async def test_watchdog_timeout_rejects_principles_audit(self, _endpoint) -> None:
+        """principles_audit's cycle bound bypasses the override entirely (#9639) —
+        shipping this knob for it would be a silent no-op, so it must stay
+        excluded even though a loop instance is registered for it."""
+        endpoint, mock_orch = _endpoint
+        mock_orch.registered_bg_loop_names.return_value = {"principles_audit"}
+        response = await endpoint(
+            {"name": "principles_audit", "watchdog_timeout_seconds": 3600}
+        )
+        data = json.loads(response.body)
+        assert response.status_code == 400
+        assert "not editable" in data["error"]
+
+    @pytest.mark.asyncio
+    async def test_watchdog_timeout_rejects_missing_name(self, _endpoint) -> None:
+        endpoint, _ = _endpoint
+        response = await endpoint({"watchdog_timeout_seconds": 3600})
+        data = json.loads(response.body)
+        assert response.status_code == 400
+        assert "required" in data["error"]
+
+    @pytest.mark.asyncio
+    async def test_watchdog_timeout_rejects_missing_timeout(self, _endpoint) -> None:
+        endpoint, _ = _endpoint
+        response = await endpoint({"name": "pr_unsticker"})
+        data = json.loads(response.body)
+        assert response.status_code == 400
+        assert "required" in data["error"]
+
+    @pytest.mark.asyncio
+    async def test_watchdog_timeout_rejects_non_integer(self, _endpoint) -> None:
+        endpoint, _ = _endpoint
+        response = await endpoint(
+            {"name": "pr_unsticker", "watchdog_timeout_seconds": "abc"}
+        )
+        data = json.loads(response.body)
+        assert response.status_code == 400
+        assert "integer" in data["error"]
+
+    @pytest.mark.asyncio
+    async def test_watchdog_timeout_rejects_without_orchestrator(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(router, "/api/control/bg-worker/watchdog-timeout")
+        assert endpoint is not None
+
+        response = await endpoint(
+            {"name": "pr_unsticker", "watchdog_timeout_seconds": 3600}
+        )
+        data = json.loads(response.body)
+        assert response.status_code == 400
+        assert data["error"] == "no orchestrator"
+
+    def test_watchdog_timeout_bounds_importable_from_module(self) -> None:
+        """Mirrors test_interval_bounds_importable_from_module."""
+        from dashboard_routes._common import (
+            _WATCHDOG_TIMEOUT_BOUNDS,
+            _WATCHDOG_TIMEOUT_EXCLUDED_WORKERS,
+        )
+
+        assert isinstance(_WATCHDOG_TIMEOUT_BOUNDS, tuple)
+        assert len(_WATCHDOG_TIMEOUT_BOUNDS) == 2
+        lo, hi = _WATCHDOG_TIMEOUT_BOUNDS
+        assert lo < hi
+        assert isinstance(_WATCHDOG_TIMEOUT_EXCLUDED_WORKERS, frozenset)
+        assert "principles_audit" in _WATCHDOG_TIMEOUT_EXCLUDED_WORKERS
 
 
 # ---------------------------------------------------------------------------

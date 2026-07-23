@@ -59,6 +59,9 @@ def _make_loop(
     from dependabot_merge_loop import DependabotMergeLoop
 
     deps = make_bg_loop_deps(tmp_path, dependabot_merge_interval=60)
+    # #9889 heal class 2 (update-branch) defaults OFF here: this file pins
+    # the ARCH-staleness heal contracts in isolation.
+    object.__setattr__(deps.config, "dependabot_update_branch_max_attempts", 0)
 
     cache = MagicMock()
     cache.get_open_prs.return_value = open_prs

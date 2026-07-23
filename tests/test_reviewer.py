@@ -1294,7 +1294,7 @@ def test_terminate_kills_active_processes(config, event_bus):
     mock_proc.pid = 12345
     runner._active_procs.add(mock_proc)
 
-    with patch("runner_utils.os.killpg") as mock_killpg:
+    with patch("process_group.os.killpg") as mock_killpg:
         runner.terminate()
 
     mock_killpg.assert_called_once()
@@ -1306,7 +1306,9 @@ def test_terminate_handles_process_lookup_error(config, event_bus):
     mock_proc.pid = 12345
     runner._active_procs.add(mock_proc)
 
-    with patch("runner_utils.os.killpg", side_effect=ProcessLookupError) as mock_killpg:
+    with patch(
+        "process_group.os.killpg", side_effect=ProcessLookupError
+    ) as mock_killpg:
         runner.terminate()  # Should not raise
     mock_killpg.assert_called_once()
 
@@ -1528,6 +1530,67 @@ async def test_fix_ci_publishes_ci_check_events(
     statuses = [e.data["status"] for e in ci_events]
     assert ReviewerStatus.FIXING.value in statuses
     assert ReviewerStatus.FIX_DONE.value in statuses
+
+
+# ---------------------------------------------------------------------------
+# fix_ci — code scanning alerts threading (lower-level wiring coverage)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fix_ci_threads_code_scanning_alerts_into_prompt(
+    config, event_bus, pr_info, task, tmp_path
+) -> None:
+    """fix_ci() must thread code_scanning_alerts through to the fix prompt.
+
+    Drives fix_ci() directly (not through ReviewPhase's gated approve path)
+    with a synthetic alert set and asserts the alert content actually
+    reaches the prompt handed to the agent execution — not merely that
+    fix_ci was awaited. This restores explicit alerts->fix_ci wiring
+    coverage after the convergence gate made the old
+    "APPROVE with open alerts reaches fix_ci" integration path structurally
+    unreachable (see tests/test_review_phase_ci.py::test_alerts_passed_to_ci_fix).
+    """
+    runner = _make_runner(config, event_bus)
+    transcript = "VERDICT: APPROVE\nSUMMARY: Fixed CI and alerts"
+    alerts = [
+        CodeScanningAlert(
+            severity="error",
+            security_severity="critical",
+            path="src/auth.py",
+            start_line=10,
+            rule="py/hardcoded-credentials",
+            message="Hardcoded password",
+        )
+    ]
+
+    mock_execute = AsyncMock(return_value=transcript)
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", mock_execute),
+        patch.object(
+            runner, "_get_changed_files", AsyncMock(return_value=["src/auth.py"])
+        ),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", AsyncMock(return_value="")),
+        patch.object(runner, "_save_transcript"),
+    ):
+        result = await runner.fix_ci(
+            pr_info,
+            task,
+            tmp_path,
+            "Failed checks: CodeQL",
+            attempt=1,
+            code_scanning_alerts=alerts,
+        )
+
+    assert result.verdict == ReviewVerdict.APPROVE
+    mock_execute.assert_awaited_once()
+    prompt_arg = mock_execute.call_args.args[1]
+    assert "## Code Scanning Alerts" in prompt_arg
+    assert "src/auth.py:10" in prompt_arg
+    assert "py/hardcoded-credentials" in prompt_arg
 
 
 # ---------------------------------------------------------------------------

@@ -35,16 +35,20 @@ from ._diagnostic import DiagnosticStateMixin
 from ._disturbance import DisturbanceStateMixin
 from ._driver import DriverStateMixin
 from ._epic import EpicStateMixin
+from ._erosion_metrics import ErosionMetricsStateMixin
 from ._fake_coverage import FakeCoverageStateMixin
 from ._flake_tracker import FlakeTrackerStateMixin
+from ._gc import StateGCMixin
 from ._hitl import HITLStateMixin
 from ._human_steering import HumanSteeringStateMixin
 from ._issue import IssueStateMixin
+from ._issue_refinement import IssueRefinementStateMixin
 from ._lifetime import LifetimeStatsMixin
 from ._live_corpus_replay import LiveCorpusReplayStateMixin
 from ._log_ingest import LogIngestStateMixin
 from ._memory_backlog import MemoryBacklogStateMixin
 from ._onboarding import OnboardingStateMixin
+from ._pr_red_repair import PrRedRepairStateMixin
 from ._principles_audit import PrinciplesAuditStateMixin
 from ._rc_budget import RCBudgetStateMixin
 from ._report import ReportStateMixin
@@ -112,13 +116,17 @@ class StateTracker(
     AutoAgentStateMixin,
     DetectorCalibrationStateMixin,
     SandboxFailureFixerStateMixin,
+    PrRedRepairStateMixin,
     AdrAuditStateMixin,
     AdversarialStateMixin,
+    StateGCMixin,
     TriageRetryStateMixin,
     DisturbanceStateMixin,
     ConvergenceStateMixin,
     HumanSteeringStateMixin,
     DriverStateMixin,
+    IssueRefinementStateMixin,
+    ErosionMetricsStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 

@@ -1,0 +1,27 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# find_open_resolving_pr locates the open PR (if any) whose body carries a
+# `Fixes/Closes/Resolves #N` link to the given issue (`gh pr list --state
+# open --json number,body`, scanned client-side). Used by the label/dispatch
+# reconciliation path (#10260) so a stale hitl-escalation/diagnose-failed
+# label never re-triggers a new auto-agent attempt once a linked PR is
+# already open. The dispatcher seeds a matching open PR so the lookup hits,
+# not the None absence sentinel.
+adapter: github
+interaction: find_open_resolving_pr
+recorded_at: '2026-07-22T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: find_open_resolving_pr
+  args:
+  - '42'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '888
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

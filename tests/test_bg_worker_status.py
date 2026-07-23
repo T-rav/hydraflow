@@ -560,6 +560,20 @@ class TestBackgroundWorkerStatusIntervalFields:
         assert data["interval_seconds"] == 3600
         assert data["next_run"] == "2026-02-20T11:30:00+00:00"
 
+    def test_default_watchdog_timeout_field_is_none(self) -> None:
+        status = BackgroundWorkerStatus(name="test", label="Test")
+        assert status.watchdog_timeout_seconds is None
+
+    def test_watchdog_timeout_field_serializes(self) -> None:
+        status = BackgroundWorkerStatus(
+            name="repo_wiki",
+            label="Repo Wiki",
+            status=BGWorkerHealth.OK,
+            watchdog_timeout_seconds=3600,
+        )
+        data = status.model_dump()
+        assert data["watchdog_timeout_seconds"] == 3600
+
 
 class TestSystemWorkersEndpointIntervals:
     def _make_router(self, config, event_bus, tmp_path, orch=None):
@@ -708,6 +722,57 @@ class TestSystemWorkersEndpointIntervals:
 
         ms = next(w for w in data["workers"] if w["name"] == "pr_unsticker")
         assert ms["next_run"] is None  # no last_run yet
+
+    @pytest.mark.asyncio
+    async def test_registered_loops_report_their_watchdog_timeout(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """Mirrors test_registry_loops_report_their_interval for the watchdog
+        override (#9503) — a loop-backed worker must report a live watchdog
+        bound, not leave the System tab blind to it."""
+        from orchestrator import HydraFlowOrchestrator
+
+        orch = HydraFlowOrchestrator(config, event_bus=event_bus)
+        router = self._make_router(config, event_bus, tmp_path, orch=orch)
+        endpoint = self._find_endpoint(router, "/api/system/workers")
+        response = await endpoint()
+        data = json.loads(response.body)
+
+        by_name = {w["name"]: w for w in data["workers"]}
+        ms = by_name["pr_unsticker"]
+        assert ms["watchdog_timeout_seconds"] == config.loop_watchdog_default_seconds
+
+    @pytest.mark.asyncio
+    async def test_non_loop_workers_have_no_watchdog_timeout(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        from orchestrator import HydraFlowOrchestrator
+
+        orch = HydraFlowOrchestrator(config, event_bus=event_bus)
+        router = self._make_router(config, event_bus, tmp_path, orch=orch)
+        endpoint = self._find_endpoint(router, "/api/system/workers")
+        response = await endpoint()
+        data = json.loads(response.body)
+
+        # triage is a pipeline phase, not a BaseBackgroundLoop — no watchdog cycle.
+        triage = next(w for w in data["workers"] if w["name"] == "triage")
+        assert triage["watchdog_timeout_seconds"] is None
+
+    @pytest.mark.asyncio
+    async def test_watchdog_timeout_reflects_operator_override(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        from orchestrator import HydraFlowOrchestrator
+
+        orch = HydraFlowOrchestrator(config, event_bus=event_bus)
+        orch.set_bg_worker_timeout("pr_unsticker", 5400)
+        router = self._make_router(config, event_bus, tmp_path, orch=orch)
+        endpoint = self._find_endpoint(router, "/api/system/workers")
+        response = await endpoint()
+        data = json.loads(response.body)
+
+        ms = next(w for w in data["workers"] if w["name"] == "pr_unsticker")
+        assert ms["watchdog_timeout_seconds"] == 5400
 
 
 class TestBgWorkerIntervalEndpoint:

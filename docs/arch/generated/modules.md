@@ -15,6 +15,7 @@ graph LR
     src_dashboard_routes["src.dashboard_routes"]
     src_disturbance["src.disturbance"]
     src_disturbance_detectors["src.disturbance.detectors"]
+    src_erosion["src.erosion"]
     src_mockworld["src.mockworld"]
     src_mockworld_fakes["src.mockworld.fakes"]
     src_observability["src.observability"]
@@ -26,15 +27,16 @@ graph LR
     src_sentry["src.sentry"]
     src_state["src.state"]
     src_telemetry["src.telemetry"]
-    src -- "4" --> src_arch
+    src -- "6" --> src_arch
     src -- "14" --> src_auto_tighten
-    src -- "26" --> src_contracts
+    src -- "30" --> src_contracts
     src -- "4" --> src_dashboard_routes
     src -- "5" --> src_disturbance
+    src -- "9" --> src_erosion
     src -- "1" --> src_observability
-    src -- "13" --> src_preflight
+    src -- "16" --> src_preflight
     src -- "1" --> src_review_phase
-    src -- "54" --> src_state
+    src -- "57" --> src_state
     src -- "7" --> src_telemetry
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
@@ -44,6 +46,7 @@ graph LR
     src_dashboard_routes -- "2" --> src_state
     src_disturbance_detectors -- "1" --> src_arch
     src_disturbance_detectors -- "5" --> src_disturbance
+    src_erosion -- "3" --> src_arch
     src_mockworld_fakes -- "31" --> src_mockworld
     src_mockworld_fakes -- "1" --> src_telemetry
     src_preflight -- "1" --> src_runners

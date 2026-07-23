@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -13,6 +12,12 @@ from base_background_loop import LoopDeps
 from config import HydraFlowConfig
 from events import EventBus
 from rc_budget_loop import RCBudgetLoop
+
+
+def _gh_cache() -> MagicMock:
+    cache = MagicMock()
+    cache.get_rc_workflow_runs = AsyncMock(return_value=[])
+    return cache
 
 
 def _deps(stop: asyncio.Event, enabled: bool = True) -> LoopDeps:
@@ -46,6 +51,7 @@ def _loop(env) -> RCBudgetLoop:
         pr_manager=pr,
         dedup=dedup,
         deps=_deps(asyncio.Event()),
+        github_cache=_gh_cache(),
     )
 
 
@@ -211,25 +217,46 @@ async def test_escalation_fires_after_three_attempts(loop_env) -> None:
 
 
 async def test_reconcile_closed_escalations_clears_dedup(loop_env, monkeypatch) -> None:
+    """Closed `rc-duration-stuck` escalations clear their dedup key + counter.
+
+    The read routes through ``PRPort.list_closed_issues_by_label`` (shared
+    ``EscalationReconciler``) — never a raw ``gh`` subprocess (#9932). The
+    ``create_subprocess_exec`` guard fails the test if the reconcile path
+    escapes the MockWorld air-gap. ``_reconcile_closed_escalations`` also
+    reconciles closed first-tier ``rc-duration-regression`` issues
+    (#10215) — seed that label's read as empty so this test stays scoped
+    to the escalation tier only.
+    """
     cfg, state, pr, dedup = loop_env
     dedup.get.return_value = {"rc_budget:median", "rc_budget:spike"}
     loop = _loop(loop_env)
 
-    class _P:
-        returncode = 0
+    async def fake_list_closed(label: str, **_kwargs: object) -> list[dict]:
+        if label == "rc-duration-stuck":
+            return [
+                {
+                    "number": 9700,
+                    "title": (
+                        "HITL: RC gate duration regression (median) "
+                        "unresolved after 3 attempts"
+                    ),
+                    "body": "",
+                    "updated_at": "",
+                }
+            ]
+        return []
 
-        async def communicate(self):
-            return (
-                b'[{"title": "HITL: RC gate duration regression (median) '
-                b'unresolved after 3 attempts"}]',
-                b"",
-            )
+    pr.list_closed_issues_by_label = AsyncMock(side_effect=fake_list_closed)
 
-    async def fake_subproc(*args, **kwargs):
-        return _P()
+    def _no_subprocess(*_args, **_kwargs):
+        raise AssertionError("reconcile must route through the PRPort, not raw gh")
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _no_subprocess)
+
     await loop._reconcile_closed_escalations()
+
+    pr.list_closed_issues_by_label.assert_any_await("rc-duration-stuck", limit=100)
+    pr.list_closed_issues_by_label.assert_any_await("rc-duration-regression", limit=100)
     dedup.set_all.assert_called_once()
     remaining = dedup.set_all.call_args.args[0]
     assert "rc_budget:median" not in remaining
@@ -237,36 +264,217 @@ async def test_reconcile_closed_escalations_clears_dedup(loop_env, monkeypatch) 
     state.clear_rc_budget_attempts.assert_called_once_with("median")
 
 
+async def test_reconcile_closed_regressions_clears_dedup_without_resetting_attempts(
+    loop_env, monkeypatch
+) -> None:
+    """Closing a first-tier `rc-duration-regression` issue must clear its
+    dedup key so the NEXT signal can re-enter the attempts ladder — but
+    must NOT reset the attempts counter itself. Only the terminal
+    `rc-duration-stuck` escalation-close resets attempts (spec §3.2); a
+    human closing attempt #1 must leave attempts at 1 so a 2nd firing
+    reaches attempt #2, then a 3rd reaches escalation. Resetting attempts
+    here would make the 3-attempt escalation ladder in the module
+    docstring structurally unreachable (#10215).
+    """
+    cfg, state, pr, dedup = loop_env
+    dedup.get.return_value = {"rc_budget:median", "rc_budget:spike"}
+    loop = _loop(loop_env)
+
+    pr.list_closed_issues_by_label.return_value = [
+        {
+            "number": 9200,
+            "title": "RC gate duration regression: 2729s vs 7s (median)",
+            "body": "",
+            "labels": [],
+        }
+    ]
+
+    def _no_subprocess(*_args, **_kwargs):
+        raise AssertionError("reconcile must route through the PRPort, not raw gh")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _no_subprocess)
+
+    await loop._reconcile_closed_regressions()
+
+    pr.list_closed_issues_by_label.assert_awaited_once_with(
+        "rc-duration-regression", limit=100
+    )
+    dedup.set_all.assert_called_once()
+    remaining = dedup.set_all.call_args.args[0]
+    assert "rc_budget:median" not in remaining
+    assert "rc_budget:spike" in remaining
+    state.clear_rc_budget_attempts.assert_not_called()
+
+
+async def test_reconcile_closed_regressions_retains_key_on_bot_close(
+    loop_env, monkeypatch
+) -> None:
+    """A programmatically-closed (bot-marker-stamped) regression issue must
+    NOT clear its dedup key — the subject is still detected at HEAD, so
+    clearing would immediately refile a duplicate (the #9437 guard,
+    mirrored one tier down from ``EscalationReconciler``)."""
+    cfg, state, pr, dedup = loop_env
+    dedup.get.return_value = {"rc_budget:median"}
+    loop = _loop(loop_env)
+
+    pr.list_closed_issues_by_label.return_value = [
+        {
+            "number": 9200,
+            "title": "RC gate duration regression: 2729s vs 7s (median)",
+            "body": "",
+            "labels": [{"name": "hydraflow-auto-resolved"}],
+        }
+    ]
+
+    monkeypatch.setattr(
+        asyncio,
+        "create_subprocess_exec",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no raw gh")),
+    )
+
+    await loop._reconcile_closed_regressions()
+
+    dedup.set_all.assert_not_called()
+
+
+async def test_reconcile_closed_regressions_skips_unparseable_titles(
+    loop_env,
+) -> None:
+    """An operator-created issue that happens to carry the
+    `rc-duration-regression` label but doesn't match our title shape is
+    left untouched — never crashes, never clears a key."""
+    cfg, state, pr, dedup = loop_env
+    dedup.get.return_value = {"rc_budget:median"}
+    loop = _loop(loop_env)
+
+    pr.list_closed_issues_by_label.return_value = [
+        {"number": 1, "title": "Investigate slow RC gate", "body": "", "labels": []}
+    ]
+
+    await loop._reconcile_closed_regressions()
+
+    dedup.set_all.assert_not_called()
+
+
+async def test_reconcile_closed_regressions_ignores_untracked_subject(
+    loop_env,
+) -> None:
+    """A closed `rc-duration-regression` issue whose subject has no
+    matching dedup key (already cleared, or from a stale/foreign issue)
+    is a no-op — nothing to clear, no spurious `set_all` write."""
+    cfg, state, pr, dedup = loop_env
+    dedup.get.return_value = {"rc_budget:spike"}
+    loop = _loop(loop_env)
+
+    pr.list_closed_issues_by_label.return_value = [
+        {
+            "number": 5,
+            "title": "RC gate duration regression: 900s vs 300s (median)",
+            "body": "",
+            "labels": [],
+        }
+    ]
+
+    await loop._reconcile_closed_regressions()
+
+    dedup.set_all.assert_not_called()
+
+
+async def test_fetch_recent_runs_nonzero_returns_empty(
+    loop_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """gh run list exit!=0 (never raised by the shared helper) → []."""
+    from execution import SimpleResult
+
+    loop = _loop(loop_env)
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(stdout="", stderr="boom", returncode=1)
+
+    monkeypatch.setattr("rc_budget_loop.run_subprocess_result", fake_result)
+
+    assert await loop._fetch_recent_runs() == []
+
+
+async def test_fetch_recent_runs_timeout_returns_empty(
+    loop_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A gh timeout (SubprocessTimeoutError) is caught locally as []."""
+    from subprocess_util import SubprocessTimeoutError
+
+    loop = _loop(loop_env)
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> object:
+        raise SubprocessTimeoutError("timed out")
+
+    monkeypatch.setattr("rc_budget_loop.run_subprocess_result", fake_result)
+
+    assert await loop._fetch_recent_runs() == []
+
+
+async def test_fetch_recent_runs_excludes_cancelled_runs(loop_env) -> None:
+    """A run GH-Actions-cancelled at its own timeout is not real duration
+    data — including it misclassifies a hang as a wall-clock regression
+    (#10215)."""
+    loop = _loop(loop_env)
+    loop._github_cache.get_rc_workflow_runs = AsyncMock(
+        return_value=[
+            {
+                "id": 1,
+                "url": "u1",
+                "status": "completed",
+                "conclusion": "cancelled",
+                "created_at": "2026-07-22T02:16:51Z",
+                "run_started_at": "2026-07-22T01:31:51Z",
+                "updated_at": "2026-07-22T02:16:51Z",
+            },
+            {
+                "id": 2,
+                "url": "u2",
+                "status": "completed",
+                "conclusion": "success",
+                "created_at": "2026-07-21T23:21:55Z",
+                "run_started_at": "2026-07-21T23:21:50Z",
+                "updated_at": "2026-07-21T23:21:55Z",
+            },
+        ]
+    )
+    runs = await loop._fetch_recent_runs()
+    assert [r["databaseId"] for r in runs] == [2]
+
+
 async def test_fetch_job_breakdown_sorts_and_caps_slowest_jobs(
     loop_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    cfg, state, pr, dedup = loop_env
     loop = _loop(loop_env)
-    jobs = [
-        {
-            "name": f"job-{idx}",
-            "startedAt": "2026-04-20T00:00:00Z",
-            "completedAt": f"2026-04-20T00:{idx:02d}:00Z",
-        }
-        for idx in range(1, 13)
-    ]
-
-    class _Proc:
-        returncode = 0
-
-        async def communicate(self):
-            return (json.dumps({"jobs": jobs}).encode(), b"")
+    pr.get_workflow_run_jobs = AsyncMock(
+        return_value=[
+            {
+                "name": f"job-{idx}",
+                "conclusion": "success",
+                "started_at": "2026-04-20T00:00:00Z",
+                "completed_at": f"2026-04-20T00:{idx:02d}:00Z",
+                "steps": [],
+            }
+            for idx in range(1, 13)
+        ]
+    )
 
     async def fake_subproc(*args, **kwargs):
-        assert args[:4] == ("gh", "run", "view", "123")
-        return _Proc()
+        raise AssertionError("job breakdown must read the PRPort, not gh run view")
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    # #10060 moved residual spawns to the bounded helper — poison it too so
+    # the breakdown provably reads the PRPort, not any subprocess path.
+    monkeypatch.setattr("rc_budget_loop.run_subprocess_result", fake_subproc)
 
     result = await loop._fetch_job_breakdown({"databaseId": 123})
 
     assert [job["name"] for job in result[:3]] == ["job-12", "job-11", "job-10"]
     assert len(result) == 10
     assert result[0]["duration_s"] == 720
+    pr.get_workflow_run_jobs.assert_awaited_once_with(123)
 
 
 async def test_fetch_junit_tests_parses_and_caps_slowest_tests(
@@ -274,24 +482,20 @@ async def test_fetch_junit_tests_parses_and_caps_slowest_tests(
 ) -> None:
     loop = _loop(loop_env)
 
-    class _Proc:
-        returncode = 0
+    from execution import SimpleResult
 
-        async def communicate(self):
-            return (b"", b"")
-
-    async def fake_subproc(*args, **kwargs):
-        assert args[:4] == ("gh", "run", "download", "123")
-        out_dir = Path(args[args.index("--dir") + 1])
+    async def fake_result(*cmd: str, **_kwargs: object) -> SimpleResult:
+        assert cmd[:4] == ("gh", "run", "download", "123")
+        out_dir = Path(cmd[cmd.index("--dir") + 1])
         out_dir.mkdir(parents=True, exist_ok=True)
         cases = "\n".join(
             f'<testcase classname="pkg.TestSuite" name="test_{idx}" time="{idx / 10}" />'
             for idx in range(1, 13)
         )
         (out_dir / "junit.xml").write_text(f"<testsuite>{cases}</testsuite>")
-        return _Proc()
+        return SimpleResult(stdout="", stderr="", returncode=0)
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    monkeypatch.setattr("rc_budget_loop.run_subprocess_result", fake_result)
 
     result = await loop._fetch_junit_tests({"databaseId": 123})
 
@@ -349,7 +553,14 @@ async def test_kill_switch_short_circuits_run(loop_env) -> None:
         status_cb=lambda *a, **k: None,
         enabled_cb=lambda name: name != "rc_budget",
     )
-    loop = RCBudgetLoop(config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=deps)
+    loop = RCBudgetLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=deps,
+        github_cache=_gh_cache(),
+    )
     # Belt + braces: a guarded _do_work must not be entered by the dispatcher.
     loop._fetch_recent_runs = AsyncMock(side_effect=AssertionError("must not run"))
 
@@ -406,7 +617,14 @@ async def test_kill_switch_short_circuits_do_work(loop_env) -> None:
         status_cb=lambda *a, **k: None,
         enabled_cb=lambda name: name != "rc_budget",
     )
-    loop = RCBudgetLoop(config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=deps)
+    loop = RCBudgetLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        deps=deps,
+        github_cache=_gh_cache(),
+    )
     loop._reconcile_closed_escalations = AsyncMock(return_value=None)
     loop._fetch_recent_runs = AsyncMock(
         side_effect=AssertionError("must not run when disabled")

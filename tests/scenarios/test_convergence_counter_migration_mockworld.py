@@ -14,6 +14,11 @@ Rationale: Tasks 1-3 (committed on phase2c) migrated the per-issue counters
 for auto_agent, sandbox_fix, and quality_fix stages out of bespoke StateData
 dicts into the shared ConvergenceLedger. This test is the integration proof
 that the live loop code (not just the mixin unit tests) uses the new path.
+
+TestAutoAgentAttemptsLandInLedger below (#9685, deferred from the 2c
+convergence review) closes the coverage gap for the third migrated counter:
+``auto_agent``, bumped by AutoAgentPreflightLoop._process_one() via
+``state.bump_auto_agent_attempts()`` at auto_agent_preflight_loop.py.
 """
 
 from __future__ import annotations
@@ -23,6 +28,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from auto_agent_preflight_loop import AutoAgentPreflightLoop
+from preflight.agent import PreflightSpawn
 from sandbox_failure_fixer_loop import SandboxFailureFixerLoop
 from state import StateTracker
 from tests.helpers import make_bg_loop_deps
@@ -30,6 +37,7 @@ from tests.helpers import make_bg_loop_deps
 pytestmark = pytest.mark.scenario
 
 PR_NUMBER = 42
+AUTO_AGENT_ISSUE_NUMBER = 7
 
 
 def _make_loop_with_real_tracker(
@@ -119,4 +127,111 @@ class TestSandboxFixCounterLandsInLedger:
         assert ledger.stage_state["sandbox_fix"].attempts >= 1, (
             f"expected sandbox_fix.attempts >= 1, got "
             f"{ledger.stage_state.get('sandbox_fix')}"
+        )
+
+
+def _make_auto_agent_loop_with_real_tracker(tmp_path, *, prs, audit):
+    """Build an AutoAgentPreflightLoop wired to a real StateTracker.
+
+    Mirrors ``_make_loop`` from tests/scenarios/test_auto_agent_preflight.py
+    but substitutes the MagicMock state with a real StateTracker backed by a
+    temp-dir state.json, so ``bump_auto_agent_attempts`` writes through the
+    production accessor into a real ConvergenceLedger instead of a mock call
+    record.
+    """
+    tracker = StateTracker(state_file=tmp_path / "state.json")
+    deps = make_bg_loop_deps(tmp_path, enabled=True)
+    loop = AutoAgentPreflightLoop(
+        config=deps.config,
+        state=tracker,
+        pr_manager=prs,
+        wiki_store=None,
+        audit_store=audit,
+        deps=deps.loop_deps,
+    )
+    return loop, tracker
+
+
+def _stub_spawn(loop, output: str, *, cost: float = 1.0, crashed: bool = False):
+    async def _spawn(prompt: str, worktree_path: str) -> PreflightSpawn:
+        return PreflightSpawn(
+            process=None,
+            output_text=output,
+            cost_usd=cost,
+            tokens=100,
+            crashed=crashed,
+        )
+
+    loop._build_spawn_fn = lambda issue: _spawn
+
+
+class TestAutoAgentAttemptsLandInLedger:
+    """Full _do_work() drive: bump reaches the real ledger via real loop code.
+
+    Closes the #9685 (2c) gap in the Phase 2c counter-migration coverage —
+    this file previously proved ``sandbox_fix`` lands in the ledger via a
+    real StateTracker, but the third migrated counter (``auto_agent``,
+    bumped by AutoAgentPreflightLoop._process_one() before it spawns the
+    preflight agent) had no equivalent MockWorld-style integration scenario.
+    """
+
+    @pytest.mark.asyncio
+    async def test_do_work_increments_auto_agent_stage_in_ledger(
+        self, tmp_path
+    ) -> None:
+        """After one _do_work() cycle the ledger records auto_agent.attempts >= 1.
+
+        Non-vacuity probe: the 'ledger is not None' assert carries a message
+        that names the exact wiring regression so a future failure is
+        immediately actionable.
+        """
+        pr_port = AsyncMock()
+        pr_port.list_closed_issues_by_label = AsyncMock(return_value=[])
+        pr_port.list_issues_by_label = AsyncMock(
+            return_value=[
+                {
+                    "number": AUTO_AGENT_ISSUE_NUMBER,
+                    "body": "x",
+                    "labels": [
+                        {"name": "hitl-escalation"},
+                        {"name": "flaky-test-stuck"},
+                    ],
+                },
+            ]
+        )
+        audit = MagicMock()
+        audit.append = MagicMock()
+        audit.entries_for_issue = MagicMock(return_value=[])
+
+        loop, tracker = _make_auto_agent_loop_with_real_tracker(
+            tmp_path, prs=pr_port, audit=audit
+        )
+        _stub_spawn(
+            loop,
+            "<status>resolved</status><pr_url>https://x/pr/1</pr_url>"
+            "<diagnosis>fixed</diagnosis>",
+        )
+
+        result = await loop._do_work()
+
+        assert result is not None
+        assert result.get("status") == "ok", (
+            f"_do_work returned unexpected status: {result}"
+        )
+        assert result.get("result_status") == "resolved", (
+            f"_do_work returned unexpected result_status: {result}"
+        )
+
+        # --- non-vacuity probe ---
+        ledger = tracker.get_convergence_ledger(AUTO_AGENT_ISSUE_NUMBER)
+        assert ledger is not None, (
+            "no ledger after _do_work — "
+            "bump_auto_agent_attempts did not reach the ledger "
+            "(Phase 2c counter migration wiring regression)"
+        )
+
+        # --- integration assertion: counter flowed through real code ---
+        assert ledger.stage_state["auto_agent"].attempts >= 1, (
+            f"expected auto_agent.attempts >= 1, got "
+            f"{ledger.stage_state.get('auto_agent')}"
         )

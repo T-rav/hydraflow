@@ -50,6 +50,14 @@ SETTINGS: dict[str, SettingSpec] = {
     "max_reviewers": SettingSpec("Concurrency", live=True, order=3),
     "max_hitl_workers": SettingSpec("Concurrency", live=True, order=4),
     "batch_size": SettingSpec("Concurrency", live=True, order=5),
+    # --- Work Queue (stage-queue ordering, #10037) -----------------------
+    # Live: IssueStore re-reads these on every dequeue, so a change takes
+    # effect on the next phase tick without a restart.
+    "queue_strategy": SettingSpec("Work Queue", live=True, order=0),
+    "queue_weight_p1": SettingSpec("Work Queue", live=True, order=1),
+    "queue_weight_p2": SettingSpec("Work Queue", live=True, order=2),
+    "queue_weight_unprioritised": SettingSpec("Work Queue", live=True, order=3),
+    "queue_starvation_threshold_hours": SettingSpec("Work Queue", live=True, order=4),
     # --- Models ----------------------------------------------------------
     "model": SettingSpec("Models", live=True, order=0),
     "planner_model": SettingSpec("Models", live=True, order=1),
@@ -65,10 +73,31 @@ SETTINGS: dict[str, SettingSpec] = {
     "test_adequacy_coverage_timeout_secs": SettingSpec(
         "CI & Quality", live=True, order=7
     ),
+    # Independent test-adequacy verifier (#9546). Live: AgentRunner._run_skill
+    # re-reads all three via getattr(config, ...) on every skill dispatch.
+    "test_adequacy_verifier_enabled": SettingSpec("CI & Quality", live=True, order=20),
+    "test_adequacy_verifier_fail_closed": SettingSpec(
+        "CI & Quality", live=True, order=21
+    ),
+    "test_adequacy_verifier_model": SettingSpec("Models", live=True, order=4),
+    # Live: auto_pr re-reads both via trace_collector.get_active_config()
+    # on every gate run (#10013), so a toggle applies to the next bot PR.
+    "auto_pr_preflight_gate_enabled": SettingSpec("CI & Quality", live=True, order=8),
+    "auto_pr_preflight_stage_timeout_s": SettingSpec(
+        "CI & Quality", live=True, order=9
+    ),
+    # Live: ImplementPhase reads both off its shared HydraFlowConfig
+    # reference on every PR-open (#10101), so a toggle applies to the next
+    # implementer PR without a restart.
+    "pr_base_freshness_guard_enabled": SettingSpec("CI & Quality", live=True, order=10),
+    "pr_base_max_age_days": SettingSpec("CI & Quality", live=True, order=11),
     # --- Scheduling ------------------------------------------------------
     "poll_interval": SettingSpec("Scheduling", live=True, order=0),
     "pr_unstick_interval": SettingSpec("Scheduling", live=True, order=1),
     "pr_unstick_batch_size": SettingSpec("Scheduling", live=True, order=2),
+    # Restart-required: each loop reads the stagger window once, at the top
+    # of its run() task (#9814).
+    "loop_startup_stagger_s": SettingSpec("Scheduling", live=False, order=3),
     # --- PR Unsticker ----------------------------------------------------
     "unstick_auto_merge": SettingSpec("PR Unsticker", live=True, order=0),
     "unstick_all_causes": SettingSpec("PR Unsticker", live=True, order=1),
@@ -78,9 +107,40 @@ SETTINGS: dict[str, SettingSpec] = {
     "staging_branch": SettingSpec("Branching & Release", live=False, order=1),
     "main_branch": SettingSpec("Branching & Release", live=False, order=2),
     "rc_cadence_hours": SettingSpec("Branching & Release", live=True, order=3),
+    # Live: StagingBisectLoop reads the cap from config at the start of every
+    # bisect run (#9580 — was PATCH-mutable-in-principle but operator-invisible).
+    "staging_bisect_runtime_cap_seconds": SettingSpec(
+        "Branching & Release", live=True, order=4
+    ),
     # --- Reliability -----------------------------------------------------
     "gh_circuit_breaker_enabled": SettingSpec("Reliability", live=True, order=0),
     "merge_policy_enabled": SettingSpec("Reliability", live=True, order=1),
+    "stale_code_alert_threshold": SettingSpec("Reliability", live=True, order=2),
+    # Live: GitHubDataCache.get_issues_by_label re-reads the bound on every
+    # call (#9814), so a change applies to the next cached read.
+    "github_cache_issue_list_ttl_s": SettingSpec("Reliability", live=True, order=3),
+    # --- Event-Loop Watchdog (thread-level freeze detector, #9552) --------
+    # enabled gates thread startup (captured at orchestrator start) → restart
+    # badge; the other two are re-read by the watchdog thread on every poll /
+    # at trip time (the builder threads them through as live callables).
+    # hard_restart defaults False (notify-default, restart-opt-in) — flipping
+    # it is the operator's explicit consent to supervisor-driven restarts.
+    "event_loop_watchdog_enabled": SettingSpec(
+        "Event-Loop Watchdog", live=False, order=0
+    ),
+    "event_loop_watchdog_stall_seconds": SettingSpec(
+        "Event-Loop Watchdog", live=True, order=1
+    ),
+    "event_loop_watchdog_hard_restart": SettingSpec(
+        "Event-Loop Watchdog", live=True, order=2
+    ),
+    # --- Branch GC (stale agent-branch reconciler, #10011) ----------------
+    # Live: StaleIssueLoop re-reads these each tick, no restart needed.
+    # delete_enabled defaults False (report/comment-only) since deletion is
+    # destructive — this is the knob the operator flips to opt in.
+    "branch_gc_stale_days": SettingSpec("Branch GC", live=True, order=0),
+    "branch_gc_min_delete_age_days": SettingSpec("Branch GC", live=True, order=1),
+    "branch_gc_delete_enabled": SettingSpec("Branch GC", live=True, order=2),
     # --- Memory ----------------------------------------------------------
     "memory_auto_approve": SettingSpec("Memory", live=True, order=0),
     # --- Paths -----------------------------------------------------------
@@ -109,6 +169,28 @@ SETTINGS: dict[str, SettingSpec] = {
     "term_proposer_provider": SettingSpec("Model Routing", live=True, order=60),
     "term_proposer_model": SettingSpec("Model Routing", live=True, order=61),
     "background_model": SettingSpec("Models", live=True, order=3),
+    # --- Issue Refinement (backlog dedup + priority scoring, #9957) ----------
+    "issue_refinement_enabled": SettingSpec("Issue Refinement", live=True, order=0),
+    "issue_refinement_pair_budget": SettingSpec("Issue Refinement", live=True, order=1),
+    "issue_refinement_priority_budget": SettingSpec(
+        "Issue Refinement", live=True, order=2
+    ),
+    "issue_refinement_model": SettingSpec("Issue Refinement", live=True, order=3),
+    # --- Trust Fleet (heavy-make subprocess caps, #9555) ------------------
+    # Live: each loop re-reads the cap from the live config at the start of
+    # every heavy `make` invocation, and PATCH /api/control/config mutates
+    # that same config instance in-place — an in-flight subprocess keeps its
+    # original bound (correct semantics), the next one picks up the change.
+    "skill_prompt_eval_adversarial_timeout_seconds": SettingSpec(
+        "Trust Fleet", live=True, order=0
+    ),
+    "principles_audit_timeout_seconds": SettingSpec("Trust Fleet", live=True, order=1),
+    # --- Prompt Refinement (skill-prompt self-refinement, #9724) ----------
+    "skill_prompt_refine_enabled": SettingSpec("Prompt Refinement", live=True, order=0),
+    "skill_prompt_refine_max_weekly": SettingSpec(
+        "Prompt Refinement", live=True, order=1
+    ),
+    "skill_prompt_refine_model": SettingSpec("Prompt Refinement", live=True, order=2),
 }
 
 

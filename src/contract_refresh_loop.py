@@ -20,7 +20,8 @@ Tick body (Tasks 15 + 16 + 20 wired; Tasks 17/18/19 still pending):
    per-adapter slugs, labels ``contract-refresh`` + ``auto-merge``,
    ``auto_merge=True``, ``raise_on_failure=False``.
 5. Post-refresh replay gate (Task 16): invoke ``make trust-contracts``
-   via :func:`subprocess.run`. Pass → clean exit. Fail → the fresh
+   via :func:`subprocess_util.run_subprocess_result` (#9554/#10028 bounded
+   helper). Pass → clean exit. Fail → the fresh
    cassettes have outrun the fakes; file a ``hydraflow-find`` +
    ``fake-drift`` companion issue via ``PRManager.create_issue`` so the
    factory dispatches a fake-repair implementer. Success of the PR's
@@ -75,6 +76,7 @@ from contract_recording import (
 from dedup_store import DedupStore
 from models import WorkCycleResult  # noqa: TCH001
 from rollup_issue_manager import RollupIssueManager
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -105,6 +107,18 @@ class AdapterPlan:
     name: str  # "github" | "git" | "docker" | "claude"
     cassette_dir_relpath: str  # under repo_root
 
+
+# Committed claude-stream samples that expand the StreamParser contract
+# corpus (tests/trust/contracts/test_fake_llm_contract.py parametrizes over
+# every *.jsonl in the directory) beyond the single fixed prompt
+# ``record_claude_stream`` actually sends. These are permanent
+# hand-authored fixtures — no recorder tick will ever regenerate them — so
+# diffing must not flag their permanent absence from the recording as
+# "deleted". Without this, the claude adapter's fleet report always has a
+# non-empty ``deleted_cassettes`` bucket, so it never has a clean tick and
+# its ContractRefreshLoop attempt counter (Task 18) climbs forever without
+# ever resetting (issue #10220).
+_CLAUDE_IGNORE_DELETED: frozenset[str] = frozenset({"stream_001_list_primes.jsonl"})
 
 ADAPTER_PLANS: tuple[AdapterPlan, ...] = (
     AdapterPlan(
@@ -177,6 +191,24 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             state=self._state,
             namespace="contract_refresh",
             labels=["hydraflow-find", "fake-drift"],
+        )
+
+    def _escalation_rollup(self) -> RollupIssueManager:
+        """One rolling ``fake-repair-stuck`` escalation per adapter (#10015).
+
+        Subjects are adapter names under a namespace SEPARATE from
+        ``contract_refresh`` (which tracks the ``fake_drift`` rollup), so
+        the per-tick ``resolve_all_except`` sweep can close every recovered
+        adapter's escalation without touching the fake-drift issue.
+        Previously escalations were bare ``create_issue`` calls: a clean
+        tick cleared the attempt counter and dedup but left the
+        hitl-escalation issue open forever (the #9867 dead-letter shape).
+        """
+        return RollupIssueManager(
+            pr=self._prs,
+            state=self._state,
+            namespace="contract_refresh_escalations",
+            labels=["hitl-escalation", "fake-repair-stuck"],
         )
 
     # ------------------------------------------------------------------
@@ -483,8 +515,12 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         ``_REPLAY_GATE_TIMEOUT_SECONDS`` (5 min). The earlier
         synchronous implementation called ``subprocess.run`` from the
         async ``_do_work`` path, freezing the event loop for the whole
-        duration. Use ``asyncio.create_subprocess_exec`` so other
-        loops keep ticking while the replay gate runs.
+        duration. Routes through the shared bounded helper
+        (:func:`subprocess_util.run_subprocess_result`, #9554/#10028) so
+        other loops keep ticking while the replay gate runs, and the
+        spawn inherits process-group registration + reap (#9911/#10019)
+        for free — on top of the group-kill-on-timeout already wired
+        here (#9579).
 
         Task 20 wraps the call in
         :func:`trace_collector.emit_loop_subprocess_trace` so the
@@ -493,25 +529,20 @@ class ContractRefreshLoop(BaseBackgroundLoop):
 
         Hard timeout defends the orchestrator: a hung recording
         cassette must not stall the entire async event loop. On
-        ``TimeoutError`` we synthesize a non-zero CompletedProcess so
-        the caller routes the timeout through the fake-drift
-        companion path (returncode=124, the bash timeout convention).
+        ``SubprocessTimeoutError`` we synthesize a non-zero
+        CompletedProcess so the caller routes the timeout through the
+        fake-drift companion path (returncode=124, the bash timeout
+        convention).
         """
         cmd = ["make", "trust-contracts"]
         t0 = time.perf_counter()
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(self._config.repo_root),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(), timeout=_REPLAY_GATE_TIMEOUT_SECONDS
+            gated = await run_subprocess_result(
+                *cmd,
+                cwd=self._config.repo_root,
+                timeout=_REPLAY_GATE_TIMEOUT_SECONDS,
             )
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
+        except SubprocessTimeoutError:
             logger.warning(
                 "Replay gate timed out after %ss; treating as failure",
                 _REPLAY_GATE_TIMEOUT_SECONDS,
@@ -531,13 +562,11 @@ class ContractRefreshLoop(BaseBackgroundLoop):
                 stderr_excerpt=timeout_proc.stderr,
             )
             return timeout_proc
-        stdout_txt = (stdout_b or b"").decode(errors="replace")
-        stderr_txt = (stderr_b or b"").decode(errors="replace")
         result = subprocess.CompletedProcess(
             args=cmd,
-            returncode=proc.returncode if proc.returncode is not None else -1,
-            stdout=stdout_txt,
-            stderr=stderr_txt,
+            returncode=gated.returncode,
+            stdout=gated.stdout,
+            stderr=gated.stderr,
         )
         duration_ms = int((time.perf_counter() - t0) * 1000)
         trace_collector.emit_loop_subprocess_trace(
@@ -545,7 +574,7 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             command=cmd,
             exit_code=result.returncode,
             duration_ms=duration_ms,
-            stderr_excerpt=stderr_txt.strip() or None,
+            stderr_excerpt=gated.stderr.strip() or None,
         )
         return result
 
@@ -622,12 +651,12 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         ``config.max_fake_repair_attempts``. The HITL operator uses the
         adapter name in the label + title to jump straight to the stuck
         fake.
+
+        #10015: tracked per adapter via :meth:`_escalation_rollup` so the
+        adapter's next clean tick auto-closes the issue. The title is
+        STABLE (rollup contract) — the attempt count lives in the body.
         """
-        labels = ["hitl-escalation", "fake-repair-stuck", f"adapter-{adapter}"]
-        title = (
-            f"Contract refresh stuck: {adapter} has drifted "
-            f"{attempts} consecutive ticks"
-        )
+        title = f"Contract refresh stuck: {adapter} fake repair not converging"
         body = (
             f"`ContractRefreshLoop` has detected drift on the **{adapter}** "
             f"adapter for {attempts} consecutive ticks without the drift "
@@ -639,14 +668,15 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             f"repair the fake in `src/mockworld/fakes/` or adjust the "
             f"cassette normalizers.\n\n"
             f"This issue dedups on the adapter name — the next clean tick "
-            f"for `{adapter}` will clear both the attempt counter and the "
-            f"escalation dedup entry, so a future stuck streak can "
-            f"re-escalate."
+            f"for `{adapter}` clears the attempt counter and the escalation "
+            f"dedup entry and auto-closes this issue (#10015), so a future "
+            f"stuck streak escalates fresh."
         )
-        return await self._prs.create_issue(
+        return await self._escalation_rollup().ensure(
+            adapter,
             title=title,
             body=body,
-            labels=labels,
+            extra_labels=[f"adapter-{adapter}"],
         )
 
     async def _maybe_escalate(self, drifted_adapters: set[str]) -> dict[str, int]:
@@ -817,7 +847,11 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         tmp_root.mkdir(parents=True, exist_ok=True)
         recordings = await self._record_all(tmp_root)
 
-        fleet: FleetDriftReport = detect_fleet_drift(recordings, self._config.repo_root)
+        fleet: FleetDriftReport = detect_fleet_drift(
+            recordings,
+            self._config.repo_root,
+            ignore_deleted_names={"claude": _CLAUDE_IGNORE_DELETED},
+        )
 
         # Task 18 — update attempt counters on EVERY tick, before any
         # short-circuits, so dedup-suppressed drift still counts toward
@@ -825,6 +859,21 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         # per-adapter escalation dedup.
         drifted_adapters: set[str] = {r.adapter for r in fleet.reports}
         self._update_attempt_counters(drifted_adapters)
+
+        # #10015 — auto-close open fake-repair-stuck escalations for every
+        # adapter NOT drifting this tick, mirroring the attempt-counter reset
+        # semantics directly above (a no-signal recorder already resets the
+        # counter, so it closes the escalation too; a genuine re-occurrence
+        # re-escalates fresh once the streak rebuilds). No-op when nothing
+        # is tracked.
+        await self._escalation_rollup().resolve_all_except(
+            drifted_adapters,
+            comment=(
+                "This adapter is no longer drifting — the fake is back in "
+                "sync with its committed cassettes; auto-closing (#10015). "
+                "A future stuck streak escalates fresh."
+            ),
+        )
 
         if not fleet.has_drift:
             return await self._on_clean_tick()

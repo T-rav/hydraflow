@@ -189,6 +189,20 @@ def validate_plan(
         if word_count < min_words:
             errors.append(f"Plan has {word_count} words, minimum is {min_words}")
 
+    # --- Hard character budget (#9955) ---
+    # Effective budget never exceeds the implement boundary: anything past
+    # max_impl_plan_chars is TRUNCATED before the implementer sees it, so
+    # detail beyond the budget is paid-for-then-discarded information loss.
+    max_chars = min(config.max_plan_chars, config.max_impl_plan_chars)
+    if len(plan) > max_chars:
+        errors.append(
+            f"Plan is {len(plan)} chars, budget is {max_chars} — condense to "
+            "the execution-brief shape (intent / approach / touched areas / "
+            "task-granularity steps / checkable acceptance criteria). "
+            "Line-by-line detail is re-derived in-context by the implementer; "
+            "past the budget it is truncated and wasted."
+        )
+
     # --- [NEEDS CLARIFICATION] marker count ---
     clarification_markers = re.findall(
         r"\[NEEDS CLARIFICATION(?::\s*[^\]]+)?\]", plan, re.IGNORECASE

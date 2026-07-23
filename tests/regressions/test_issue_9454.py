@@ -48,17 +48,30 @@ _REPO = Path(__file__).resolve().parent.parent.parent
 # false-positive against the ``assert communicate_count`` guard below. The
 # fleet-wide AST scan in ``test_issue_9508.py`` is the authoritative source of
 # truth and correctly does not flag it.
-_UNHARDENED_COMMUNICATE_MODULES = [
-    "src/corpus_learning_loop.py",
-    "src/memory_backlog_loop.py",
-    "src/adr_touchpoint_auditor_loop.py",
-    "src/rc_budget_loop.py",
-    "src/skill_prompt_eval_loop.py",
-    "src/principles_audit_loop.py",
-    "src/fake_coverage_auditor_loop.py",
-    "src/flake_tracker_loop.py",
-    "src/staging_bisect_loop.py",
-]
+#
+# ``corpus_learning_loop.py`` left the list with #9932: its remaining raw
+# ``gh`` reconcile read moved behind the PRPort (shared EscalationReconciler),
+# so the module no longer spawns subprocesses at all — same shape as the
+# ``wiki_rot_detector_loop.py`` exclusion above.
+#
+# ``memory_backlog_loop.py``/``adr_touchpoint_auditor_loop.py``/
+# ``rc_budget_loop.py``/``skill_prompt_eval_loop.py``/
+# ``principles_audit_loop.py``/``fake_coverage_auditor_loop.py``/
+# ``flake_tracker_loop.py`` left the list with #9554/#10028: every raw
+# ``asyncio.create_subprocess_exec`` + ``proc.communicate()`` site in these
+# modules migrated onto the shared bounded helper
+# (``subprocess_util.run_subprocess``/``run_subprocess_result``, which owns
+# its own internal, already-hardened ``communicate()`` inside
+# ``execution.HostRunner.run_simple``) — same false-positive shape as the
+# two exclusions above: no direct ``proc.communicate()`` remains to flag.
+# ``staging_bisect_loop.py`` left the list with #9577: ``_run_git``'s
+# cooperative kill-switch cancellation is now expressed through the shared
+# helper (``run_simple(cancel_check=...)``, whose internal ``communicate()``
+# inside ``execution.HostRunner._communicate_bounded`` is bounded), so the
+# module no longer calls ``proc.communicate()`` directly — same
+# false-positive shape as the exclusions above. The fleet-wide AST scan in
+# ``test_issue_9508.py`` remains the authoritative source of truth.
+_UNHARDENED_COMMUNICATE_MODULES: list[str] = []
 
 # A ``communicate()`` call is considered *bounded* when it is a direct argument
 # to one of these. ``wait_for`` is the canonical fix; ``create_task`` is the
