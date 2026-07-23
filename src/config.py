@@ -425,6 +425,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_LOOP_ANOMALY_TICK_ERROR_MIN_SAMPLE",
         3,
     ),
+    (
+        "loop_anomaly_hitl_low_severity_count",
+        "HYDRAFLOW_LOOP_ANOMALY_HITL_LOW_SEVERITY_COUNT",
+        3,
+    ),
     ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 3600),
     ("contract_refresh_interval", "HYDRAFLOW_CONTRACT_REFRESH_INTERVAL", 604800),
     ("max_fake_repair_attempts", "HYDRAFLOW_MAX_FAKE_REPAIR_ATTEMPTS", 3),
@@ -4015,6 +4020,20 @@ class HydraFlowConfig(BaseModel):
         description=(
             "TrustFleetSanityLoop: current-day cost breach when > this × "
             "30-day median (spec §12.1; reads §4.11 cost endpoint, tolerates absence)."
+        ),
+    )
+    loop_anomaly_hitl_low_severity_count: int = Field(
+        default=3,
+        ge=1,
+        le=1000,
+        description=(
+            "TrustFleetSanityLoop: files ONE fleet alert when the open HITL "
+            "queue holds at least this many low-severity items — issues whose "
+            "diagnosed severity is P4/Housekeeping OR that carry a housekeeping "
+            "label (e.g. hydraflow-memory-backlog). A backstop for the pipeline "
+            "over-escalating auto-filed housekeeping into human-judgment forks "
+            "(#10310). Conservatively defaulted to 3 so a single mis-scoped "
+            "item never pages a human."
         ),
     )
 

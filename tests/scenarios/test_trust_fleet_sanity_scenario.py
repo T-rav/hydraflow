@@ -32,6 +32,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from events import EventBus, EventType, HydraFlowEvent
+from models import Severity
 from tests.scenarios.fakes.mock_world import MockWorld
 from tests.scenarios.helpers.loop_port_seeding import seed_ports as _seed_ports
 
@@ -295,3 +296,76 @@ class TestTrustFleetSanityBreachScenario:
         assert "repair_ratio" in issue.title
         assert "hitl-escalation" in issue.labels
         assert "trust-loop-anomaly" in issue.labels
+
+    async def test_hitl_composition_breach_files_escalation(self, tmp_path) -> None:
+        """HITL queue full of memory-backlog housekeeping items -> fleet alert.
+
+        Three open ``hitl-escalation`` issues that also carry the
+        ``hydraflow-memory-backlog`` housekeeping label meet the default
+        threshold of 3, so the loop files exactly one ``hitl_composition``
+        escalation flagging the pipeline as over-escalating low-severity work
+        into HITL (#10310). Exercises the full loop -> PRPort path end-to-end
+        through MockWorld, including the ``list_issues_by_label`` queries.
+        """
+        world = MockWorld(tmp_path)
+
+        for number in (5101, 5102, 5103):
+            world.github.add_issue(
+                number=number,
+                title=f"HITL: mis-scoped housekeeping item {number}",
+                body="A P4 memory-backlog item that should not sit in HITL.",
+                labels=["hitl-escalation", "hydraflow-memory-backlog"],
+            )
+
+        state = MagicMock()
+        state.get_worker_heartbeats.return_value = {}
+        state.get_trust_fleet_sanity_attempts.return_value = 0
+        state.inc_trust_fleet_sanity_attempts.return_value = 1
+        state.get_trust_fleet_sanity_last_seen_counts.return_value = {}
+        state.get_diagnosis_severity.return_value = None  # driven by the label
+
+        _seed_ports(
+            world,
+            trust_fleet_sanity_state=state,
+            event_bus=EventBus(),
+        )
+
+        stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
+
+        assert stats["trust_fleet_sanity"]["status"] == "ok", stats
+        assert stats["trust_fleet_sanity"].get("filed", 0) == 1, stats
+
+        titles = [issue.title for issue in world.github._issues.values()]
+        assert any("hitl_composition" in t and "fleet" in t for t in titles), titles
+
+    async def test_no_hitl_composition_when_queue_is_real_work(self, tmp_path) -> None:
+        """HITL queue holding genuine (non-housekeeping) work -> no fleet alert."""
+        world = MockWorld(tmp_path)
+
+        for number in (5201, 5202, 5203):
+            world.github.add_issue(
+                number=number,
+                title=f"HITL: genuine blocking bug {number}",
+                body="Real P1 work legitimately escalated to a human.",
+                labels=["hitl-escalation"],
+            )
+
+        state = MagicMock()
+        state.get_worker_heartbeats.return_value = {}
+        state.get_trust_fleet_sanity_attempts.return_value = 0
+        state.inc_trust_fleet_sanity_attempts.return_value = 1
+        state.get_trust_fleet_sanity_last_seen_counts.return_value = {}
+        state.get_diagnosis_severity.return_value = Severity.P1_BLOCKING
+
+        _seed_ports(
+            world,
+            trust_fleet_sanity_state=state,
+            event_bus=EventBus(),
+        )
+
+        stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
+
+        assert stats["trust_fleet_sanity"]["status"] == "ok", stats
+        assert stats["trust_fleet_sanity"].get("filed", 0) == 0, stats
+        titles = [issue.title for issue in world.github._issues.values()]
+        assert not any("hitl_composition" in t for t in titles), titles

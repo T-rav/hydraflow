@@ -13,6 +13,7 @@ import pytest
 from base_background_loop import LoopDeps
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
+from models import Severity
 from trust_fleet_sanity_loop import (
     _DAY_SECONDS,
     TrustFleetSanityLoop,
@@ -271,6 +272,100 @@ async def test_do_work_cost_spike_skipped_when_reader_absent(loop_env) -> None:
     loop._load_cost_reader = MagicMock(return_value=None)
     stats = await loop._do_work()
     assert stats["anomalies"] == 0
+    pr.create_issue.assert_not_awaited()
+
+
+def _hitl_issue(number: int) -> dict[str, object]:
+    return {"number": number, "title": "t", "body": "", "updated_at": ""}
+
+
+async def test_do_work_files_hitl_composition_when_p4_dominates(loop_env) -> None:
+    """Open HITL queue full of P4 items -> one fleet hitl_composition escalation."""
+    cfg, state, bg_workers, pr, dedup, bus = loop_env
+
+    async def fake_load(since):  # noqa: ARG001
+        return []
+
+    bus.load_events_since = fake_load  # type: ignore[method-assign]
+
+    hitl_open = [_hitl_issue(n) for n in (201, 202, 203)]
+
+    async def by_label(label):
+        return hitl_open if label == "hitl-escalation" else []
+
+    pr.list_issues_by_label = AsyncMock(side_effect=by_label)
+    state.get_diagnosis_severity.return_value = Severity.P4_HOUSEKEEPING
+
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    loop._load_cost_reader = MagicMock(return_value=None)
+    loop._find_open_escalation = AsyncMock(return_value=0)
+
+    stats = await loop._do_work()
+    assert stats["filed"] == 1, stats
+    title = pr.create_issue.await_args.args[0]
+    assert "fleet" in title
+    assert "hitl_composition" in title
+    labels = pr.create_issue.await_args.args[2]
+    assert "hitl-escalation" in labels
+    assert "trust-loop-anomaly" in labels
+
+
+async def test_do_work_hitl_composition_counts_housekeeping_labels(loop_env) -> None:
+    """Memory-backlog-labeled HITL items count even without a diagnosed severity."""
+    cfg, state, bg_workers, pr, dedup, bus = loop_env
+
+    async def fake_load(since):  # noqa: ARG001
+        return []
+
+    bus.load_events_since = fake_load  # type: ignore[method-assign]
+
+    hitl_open = [_hitl_issue(n) for n in (401, 402, 403)]
+
+    async def by_label(label):
+        if label == "hitl-escalation":
+            return hitl_open
+        if label == "hydraflow-memory-backlog":
+            return hitl_open  # all three carry the housekeeping label
+        return []
+
+    pr.list_issues_by_label = AsyncMock(side_effect=by_label)
+    state.get_diagnosis_severity.return_value = None  # severity unknown
+
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    loop._load_cost_reader = MagicMock(return_value=None)
+    loop._find_open_escalation = AsyncMock(return_value=0)
+
+    stats = await loop._do_work()
+    assert stats["filed"] == 1, stats
+    assert "hitl_composition" in pr.create_issue.await_args.args[0]
+
+
+async def test_do_work_no_hitl_composition_when_real_work(loop_env) -> None:
+    """HITL queue holding genuine P1 work -> no hitl_composition escalation."""
+    cfg, state, bg_workers, pr, dedup, bus = loop_env
+
+    async def fake_load(since):  # noqa: ARG001
+        return []
+
+    bus.load_events_since = fake_load  # type: ignore[method-assign]
+
+    hitl_open = [_hitl_issue(n) for n in (301, 302, 303)]
+
+    async def by_label(label):
+        return hitl_open if label == "hitl-escalation" else []
+
+    pr.list_issues_by_label = AsyncMock(side_effect=by_label)
+    state.get_diagnosis_severity.return_value = Severity.P1_BLOCKING
+
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    loop._load_cost_reader = MagicMock(return_value=None)
+    loop._find_open_escalation = AsyncMock(return_value=0)
+
+    stats = await loop._do_work()
+    assert stats["filed"] == 0, stats
     pr.create_issue.assert_not_awaited()
 
 

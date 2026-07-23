@@ -29,12 +29,13 @@ from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from exception_classify import reraise_on_credit_or_bug
-from models import WorkCycleResult
+from models import Severity, WorkCycleResult
 from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 from trust_fleet_anomaly_detectors import (
     REPAIRED_SUCCESS_KEYS,
     TRUST_LOOP_WORKERS,
     detect_cost_spike,
+    detect_hitl_composition,
     detect_issues_per_hour,
     detect_repair_ratio,
     detect_staleness,
@@ -97,7 +98,7 @@ Response JSON:
   "anomalies_recent": [
     {
       "kind": "issues_per_hour" | "repair_ratio" | "tick_error_ratio"
-            | "staleness" | "cost_spike",
+            | "staleness" | "cost_spike" | "hitl_composition",
       "worker": "<string>",
       "filed_at": "<iso8601>",
       "issue_number": <int>,
@@ -139,7 +140,19 @@ _ANOMALY_KINDS: tuple[str, ...] = (
     "tick_error_ratio",
     "staleness",
     "cost_spike",
+    "hitl_composition",
 )
+
+# Label marking the human-in-the-loop queue. Matches the literal used by the
+# reconcile pass and by every producer loop (auto_agent_preflight, diagnostic,
+# corpus_learning, …) when escalating to a human. The HITL-composition signal
+# (#10310) scans open issues carrying this label.
+_HITL_QUEUE_LABEL = "hitl-escalation"
+
+# Synthetic worker name for the fleet-wide HITL-composition anomaly. The signal
+# is not attributable to a single loop, so it reuses the per-worker escalation
+# machinery (title/dedup/reconcile) under a stable pseudo-worker.
+_FLEET_WORKER = "fleet"
 
 _TITLE_RE = re.compile(
     r"HITL: trust-loop anomaly — (?P<worker>[\w_]+) (?P<kind>[\w_]+)$",
@@ -320,43 +333,29 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                     per_worker_breaches.append(("cost_spike", details))
 
             for kind, det in per_worker_breaches:
-                key = f"trust_fleet_sanity:{kind}:{worker}"
-                if key in dedup:
-                    continue
-                attempts = self._state.inc_trust_fleet_sanity_attempts(
-                    f"{kind}:{worker}",
-                )
-                if attempts >= _MAX_ATTEMPTS:
-                    issue_no = await self._file_anomaly(worker, kind, det)
-                    if issue_no == 0:
-                        # create_issue's documented 0-sentinel: the gh call
-                        # failed. Don't record a phantom anomaly or add the
-                        # dedup key — that would suppress re-filing forever
-                        # without a real issue. Retry next cycle.
-                        logger.warning(
-                            "trust_fleet_sanity: create_issue returned 0 "
-                            "(sentinel) for %s/%s; skipping, will retry next "
-                            "cycle",
-                            worker,
-                            kind,
-                        )
-                        continue
-                    anomalies.append(
-                        {
-                            "worker": worker,
-                            "kind": kind,
-                            "issue_number": issue_no,
-                            "details": det,
-                        }
-                    )
+                if await self._escalate_breach(
+                    worker, kind, det, dedup=dedup, anomalies=anomalies
+                ):
                     filed += 1
-                    # Only add to dedup AFTER the escalation fires — otherwise
-                    # raising ``_MAX_ATTEMPTS`` breaks the retry window because
-                    # every breach is added to dedup on first detection and
-                    # ``inc_trust_fleet_sanity_attempts`` never increments again
-                    # until reconcile-on-close clears the key.
-                    dedup.add(key)
-                    self._dedup.set_all(dedup)
+
+        # Fleet-wide HITL-composition signal (#10310): flag when the open HITL
+        # queue is dominated by low-severity / housekeeping items — a signal
+        # the pipeline is over-escalating auto-filed work into human-judgment
+        # forks. Not per-worker, so it reuses the escalation machinery under a
+        # synthetic ``fleet`` worker.
+        hitl_items = await self._collect_hitl_items()
+        hitl_breached, hitl_det = detect_hitl_composition(
+            hitl_items,
+            threshold=cfg.loop_anomaly_hitl_low_severity_count,
+        )
+        if hitl_breached and await self._escalate_breach(
+            _FLEET_WORKER,
+            "hitl_composition",
+            hitl_det,
+            dedup=dedup,
+            anomalies=anomalies,
+        ):
+            filed += 1
 
         self._state.set_trust_fleet_sanity_last_run(now.isoformat())
         self._emit_trace(t0, anomalies=len(anomalies))
@@ -366,6 +365,124 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
             "workers_scanned": len(seen_workers),
             "filed": filed,
         }
+
+    async def _escalate_breach(
+        self,
+        worker: str,
+        kind: str,
+        details: dict[str, Any],
+        *,
+        dedup: set[str],
+        anomalies: list[dict[str, Any]],
+    ) -> bool:
+        """One-attempt-then-dedup escalation shared by the per-worker and
+        fleet-wide (HITL-composition) breach paths. Returns ``True`` iff a new
+        escalation issue was filed this cycle.
+        """
+        key = f"trust_fleet_sanity:{kind}:{worker}"
+        if key in dedup:
+            return False
+        attempts = self._state.inc_trust_fleet_sanity_attempts(f"{kind}:{worker}")
+        if attempts < _MAX_ATTEMPTS:
+            return False
+        issue_no = await self._file_anomaly(worker, kind, details)
+        if issue_no == 0:
+            # create_issue's documented 0-sentinel: the gh call failed. Don't
+            # record a phantom anomaly or add the dedup key — that would
+            # suppress re-filing forever without a real issue. Retry next cycle.
+            logger.warning(
+                "trust_fleet_sanity: create_issue returned 0 (sentinel) for "
+                "%s/%s; skipping, will retry next cycle",
+                worker,
+                kind,
+            )
+            return False
+        anomalies.append(
+            {
+                "worker": worker,
+                "kind": kind,
+                "issue_number": issue_no,
+                "details": details,
+            }
+        )
+        # Only add to dedup AFTER the escalation fires — otherwise raising
+        # ``_MAX_ATTEMPTS`` breaks the retry window because every breach is
+        # added to dedup on first detection and
+        # ``inc_trust_fleet_sanity_attempts`` never increments again until
+        # reconcile-on-close clears the key.
+        dedup.add(key)
+        self._dedup.set_all(dedup)
+        return True
+
+    async def _collect_hitl_items(self) -> list[dict[str, Any]]:
+        """Open HITL-queue issues normalized for ``detect_hitl_composition``.
+
+        Each item is ``{"number": int, "severity": str | None, "housekeeping":
+        bool}``. ``severity`` is the diagnosed :class:`Severity` value persisted
+        in state (e.g. ``"P4"``); ``housekeeping`` is ``True`` when the issue
+        carries a configured housekeeping label (memory-backlog etc.). Routed
+        through the PRPort (``list_issues_by_label``) so it stays air-gap-safe in
+        MockWorld/sandbox. Any degradation returns ``[]`` — the signal must
+        never crash the sanity cycle (#10310).
+        """
+        hitl_numbers = self._issue_numbers(
+            await self._list_issues_by_label_safe(_HITL_QUEUE_LABEL)
+        )
+        if not hitl_numbers:
+            return []
+        housekeeping: set[int] = set()
+        for label in self._housekeeping_labels():
+            housekeeping.update(
+                self._issue_numbers(await self._list_issues_by_label_safe(label))
+            )
+        items: list[dict[str, Any]] = []
+        for number in hitl_numbers:
+            severity = self._state.get_diagnosis_severity(number)
+            items.append(
+                {
+                    "number": number,
+                    "severity": severity.value
+                    if isinstance(severity, Severity)
+                    else None,
+                    "housekeeping": number in housekeeping,
+                }
+            )
+        return items
+
+    async def _list_issues_by_label_safe(self, label: str) -> list[Any]:
+        """``PRPort.list_issues_by_label`` with fail-soft degradation to ``[]``.
+
+        A non-list return (e.g. a test double) is coerced to ``[]`` so the
+        HITL-composition signal never mis-reads a mock as queue content.
+        """
+        try:
+            issues = await self._pr.list_issues_by_label(label)
+        except (OSError, ValueError, RuntimeError) as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.debug("list_issues_by_label(%s) failed", label, exc_info=True)
+            return []
+        return issues if isinstance(issues, list) else []
+
+    @staticmethod
+    def _issue_numbers(issues: list[Any]) -> list[int]:
+        """Extract non-zero integer issue numbers from GitHubIssueSummary dicts."""
+        out: list[int] = []
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            try:
+                number = int(issue.get("number", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if number:
+                out.append(number)
+        return out
+
+    def _housekeeping_labels(self) -> list[str]:
+        """Labels marking an auto-filed item as low-value regardless of its
+        diagnosed severity (memory-backlog family, ADR-0049)."""
+        cfg = self._config
+        return [*cfg.memory_backlog_label, *cfg.memory_backlog_stuck_label]
 
     async def _find_open_escalation(self, worker: str, kind: str) -> int:
         """Open issue/epic already covering this anomaly, or 0 (#9855).

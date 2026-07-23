@@ -19,7 +19,17 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from models import Severity
+
 logger = logging.getLogger("hydraflow.trust_fleet_anomaly_detectors")
+
+
+# Diagnosed-severity values (``Severity.value``) that count as "low-severity"
+# for the HITL-composition signal (#10310). P4/Housekeeping is the canonical
+# mis-scope: auto-filed housekeeping that should never have reached a human
+# judgment fork. Kept as a frozenset so a future PR can widen it (e.g. add
+# P3 wiring) via config without touching the detector.
+LOW_SEVERITY_VALUES: frozenset[str] = frozenset({Severity.P4_HOUSEKEEPING.value})
 
 
 # Spec §12.2 — exactly the nine trust loops watched by the sanity loop.
@@ -268,4 +278,58 @@ def detect_cost_spike(
         "median_usd": median,
         "ratio": ratio,
         "threshold": threshold,
+    }
+
+
+def detect_hitl_composition(
+    hitl_items: list[dict[str, Any]],
+    *,
+    threshold: int,
+    low_severities: frozenset[str] = LOW_SEVERITY_VALUES,
+) -> tuple[bool, dict[str, Any]]:
+    """Flag when the open HITL queue is dominated by low-severity items (#10310).
+
+    A fleet-wide (not per-worker) signal: when the human-in-the-loop queue
+    fills with P4/housekeeping items, the pipeline is *mis-scoping* auto-filed
+    issues into human-judgment forks — over-escalating low-value work a human
+    should never have to triage (#10292). This is the backstop for the next
+    unforeseen mis-scope class beyond the targeted memory-backlog fix.
+
+    Each item is a normalized dict::
+
+        {"number": int, "severity": str | None, "housekeeping": bool}
+
+    An item counts as *low-severity* when its diagnosed severity value is in
+    *low_severities* (P4/Housekeeping) OR it carries a housekeeping label
+    (``housekeeping=True``, e.g. ``hydraflow-memory-backlog``). Breach when the
+    low-severity count is ``>= threshold`` (``>=`` per sibling-plan lock). An
+    empty queue returns ``insufficient_data`` — a fresh/quiet queue must never
+    escalate.
+    """
+    total = len(hitl_items)
+    if total == 0:
+        return False, {
+            "status": "insufficient_data",
+            "total": 0,
+            "low_severity": 0,
+            "threshold": threshold,
+        }
+    low_numbers: list[int] = []
+    for item in hitl_items:
+        severity = item.get("severity")
+        is_low = (isinstance(severity, str) and severity in low_severities) or bool(
+            item.get("housekeeping")
+        )
+        if is_low:
+            number = item.get("number")
+            if isinstance(number, int):
+                low_numbers.append(number)
+    low = len(low_numbers)
+    breached = low >= threshold
+    return breached, {
+        "total": total,
+        "low_severity": low,
+        "fraction": round(low / total, 3),
+        "threshold": threshold,
+        "issues": sorted(low_numbers),
     }
