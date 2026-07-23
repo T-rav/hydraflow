@@ -68,6 +68,10 @@ def _make_loop(
     prs.list_issues_by_label = AsyncMock(return_value=[])
     prs.post_comment = AsyncMock()
     prs.swap_pipeline_labels = AsyncMock()
+    prs.add_labels = AsyncMock()
+    # #10262: escalation consults find_open_pr_for_branch before re-arming the
+    # hitl labels. Default to "no open resolving PR" so escalation proceeds.
+    prs.find_open_pr_for_branch = AsyncMock(return_value=None)
 
     state = MagicMock()
     state.get_escalation_context = MagicMock(return_value=_make_context())
