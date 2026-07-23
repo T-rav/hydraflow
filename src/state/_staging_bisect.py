@@ -78,6 +78,22 @@ class StagingBisectStateMixin:
             self._data.last_observed_promotion_pr = int(pr_number)
             self.save()
 
+    # --- last_successful_promotion_at (G1 #10353 promotion-health signal) ---
+
+    def get_last_successful_promotion_at(self) -> str:
+        """ISO-8601 timestamp of the most recent successful promotion, or "".
+
+        Written on the loop's own green promotion AND on an observed
+        out-of-band ``main`` advance; read by the promotion-health error-signal
+        to compute ``days_since_last_successful_promotion``.
+        """
+        return self._data.last_successful_promotion_at
+
+    def set_last_successful_promotion_at(self, iso_timestamp: str) -> None:
+        """Record when ``main`` last advanced via a successful promotion."""
+        self._data.last_successful_promotion_at = iso_timestamp
+        self.save()
+
     # --- last_rc_red_sha + rc_cycle_id ---
 
     def get_last_rc_red_sha(self) -> str:

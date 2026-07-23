@@ -700,6 +700,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_RC_OBSERVED_ADVANCE_CLOSE_ENABLED",
         True,
     ),
+    (
+        "rc_promotion_health_enabled",
+        "HYDRAFLOW_RC_PROMOTION_HEALTH_ENABLED",
+        True,
+    ),
     ("otel_enabled", "HYDRAFLOW_OTEL_ENABLED", False),
     (
         "shadow_corpus_coverage_pruning_enabled",
@@ -2967,6 +2972,21 @@ class HydraFlowConfig(BaseModel):
             "it OFF because the observed-advance sweep reads merged PRs via a raw "
             "`gh pr list` that bypasses FakeGitHub and would hang the air-gapped "
             "network (same class as evidence_pack / approval_records)."
+        ),
+    )
+    rc_promotion_health_enabled: bool = Field(
+        default=True,
+        description=(
+            "G1 (#10353): when true, StagingPromotionLoop emits the promotion "
+            "error-signal — the `main..staging` commit gap + "
+            "days_since_last_successful_promotion + consecutive_rc_failures — in "
+            "its BACKGROUND_WORKER_STATUS telemetry each tick, so promotion "
+            "health is measurable, not implied. Default ON (read-only "
+            "observability). Kill-switch: the sandbox turns it OFF because the "
+            "gap read spawns a raw `gh api compare` that bypasses FakeGitHub and "
+            "would hang the air-gapped network (same class as evidence_pack / "
+            "rc_observed_advance_close). The two other signals are state-only and "
+            "always surface."
         ),
     )
     staging_promotion_interval: int = Field(

@@ -119,13 +119,15 @@ SANDBOX_SEAMS: dict[str, str] = {
     # loop no sandbox scenario exercises, so the whole loop is config-disabled
     # below rather than seeding those reads.
     "flake_tracker_loop": "config_disable",
-    # StagingPromotionLoop's two raw-gh reads bypass FakeGitHub and hang the
+    # StagingPromotionLoop's raw-gh reads bypass FakeGitHub and hang the
     # air-gapped network (#10353): ``_list_merged_promotion_prs`` (`gh pr list`,
-    # reached by the evidence reconcile AND the G1 observed-main-advance sweep)
-    # and ``_staging_ci_is_green`` (`gh run list`, reached only by the G1
-    # auto-recut path). All three feature flags that reach them are pinned OFF
-    # in ``_apply_sandbox_config_overrides`` (evidence_pack_enabled,
-    # rc_observed_advance_close_enabled, rc_auto_recut_enabled), so no spawn is
+    # reached by the evidence reconcile AND the G1 observed-main-advance sweep),
+    # ``_staging_head_check_conclusions`` (`gh api .../check-runs`, reached only by
+    # the G1 named-gate auto-recut sensor), and ``_main_staging_gap`` (`gh api
+    # compare`, reached only by the G1 promotion-health signal). Every feature
+    # flag that reaches them is pinned OFF in ``_apply_sandbox_config_overrides``
+    # (evidence_pack_enabled, rc_observed_advance_close_enabled,
+    # rc_auto_recut_enabled, rc_promotion_health_enabled), so no spawn is
     # reachable — the sandbox still exercises the cut→monitor→merge path (s82).
     "staging_promotion_loop": "config_disable",
 }
@@ -182,22 +184,27 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # spawn and air-gaps the new xdist-audit read).
     object.__setattr__(config, "flake_tracker_loop_enabled", False)
     # StagingPromotionLoop's raw-gh reads (#10309/#10353): once a scenario seeds
-    # ``staging_enabled`` the loop's every tick can reach two ``gh`` subprocesses
-    # that bypass FakeGitHub — ``_list_merged_promotion_prs`` (`gh pr list`) and
-    # ``_staging_ci_is_green`` (`gh run list`). Three flags gate every path to
-    # them; pin all three OFF so the ``staging_promotion_loop`` config_disable
+    # ``staging_enabled`` the loop's every tick can reach ``gh`` subprocesses that
+    # bypass FakeGitHub — ``_list_merged_promotion_prs`` (`gh pr list`),
+    # ``_staging_head_check_conclusions`` (`gh api .../check-runs`), and
+    # ``_main_staging_gap`` (`gh api compare`). Four flags gate every path to
+    # them; pin all four OFF so the ``staging_promotion_loop`` config_disable
     # seam is TRUE (no reachable spawn), while the sandbox still exercises the
     # cut→monitor→merge promotion path itself (s82):
     #   - evidence_pack_enabled: the CH-4 reconcile sweep + pack compiler.
     #   - rc_observed_advance_close_enabled (G1): the observed-main-advance
     #     tracker-close sweep — the OTHER caller of _list_merged_promotion_prs,
     #     not gated by evidence_pack_enabled.
-    #   - rc_auto_recut_enabled (G1): the only caller of _staging_ci_is_green
-    #     (already default-OFF; pinned here so the seam is not merely aspirational).
-    # All three have their own unit tests.
+    #   - rc_auto_recut_enabled (G1): the only caller of the named-gate sensor
+    #     (_staging_head_check_conclusions) — already default-OFF; pinned here so
+    #     the seam is not merely aspirational.
+    #   - rc_promotion_health_enabled (G1): the only caller of _main_staging_gap
+    #     (the compare read); the health signal's two other fields are state-only.
+    # All four have their own unit tests.
     object.__setattr__(config, "evidence_pack_enabled", False)
     object.__setattr__(config, "rc_observed_advance_close_enabled", False)
     object.__setattr__(config, "rc_auto_recut_enabled", False)
+    object.__setattr__(config, "rc_promotion_health_enabled", False)
 
 
 def apply_seed_config_overrides(config: HydraFlowConfig, seed: MockWorldSeed) -> None:

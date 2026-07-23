@@ -2263,6 +2263,12 @@ class StateData(BaseModel):
     # first observation so a fresh deploy against pre-existing merged RCs never
     # false-closes an open tracker.
     last_observed_promotion_pr: int = 0
+    # G1 (#10353): ISO-8601 timestamp of the most recent SUCCESSFUL staging→main
+    # promotion — this loop's own merge OR an observed out-of-band main advance.
+    # Feeds the promotion-health error-signal (days_since_last_successful_promotion)
+    # surfaced in StagingPromotionLoop's BACKGROUND_WORKER_STATUS telemetry so
+    # promotion staleness is measurable, not implied. "" = never yet observed.
+    last_successful_promotion_at: str = ""
     auto_reverts_in_cycle: int = 0
     auto_reverts_successful: int = 0
     flake_reruns_total: int = 0
