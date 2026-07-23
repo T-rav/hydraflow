@@ -348,6 +348,25 @@ def _skip_regression_reason(root: Path, merge_base: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def _has_regression_delta(paths: list[str]) -> bool:
+    """True when any changed path lives under ``tests/regressions/``."""
+    return any(path.startswith("tests/regressions/") for path in paths)
+
+
+def _product_paths(paths: list[str]) -> list[str]:
+    """Changed paths that are non-test product source (the P10.6 fix-delta set).
+
+    Excludes tests, docs, CI workflow, and UI test files — the same filter the
+    per-PR gate uses to decide whether a regression test is even applicable.
+    """
+    return [
+        path
+        for path in paths
+        if not path.startswith(("tests/", "docs/", ".github/"))
+        and not _UI_TEST_RE.match(path)
+    ]
+
+
 def _evaluate_pr_regression_delta(root: Path, merge_base: str) -> Finding:
     """Judge the PR's own diff for regression coverage (P10.6 core)."""
     try:
@@ -362,16 +381,11 @@ def _evaluate_pr_regression_delta(root: Path, merge_base: str) -> Finding:
     except (subprocess.TimeoutExpired, OSError):
         return finding("P10.6", Status.NA, "git diff failed")
     paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    if any(path.startswith("tests/regressions/") for path in paths):
+    if _has_regression_delta(paths):
         return finding(
             "P10.6", Status.PASS, "fix PR carries a tests/regressions/ delta"
         )
-    product = [
-        path
-        for path in paths
-        if not path.startswith(("tests/", "docs/", ".github/"))
-        and not _UI_TEST_RE.match(path)
-    ]
+    product = _product_paths(paths)
     if not product:
         # No product code changed — the PR only touches CI/workflow (.github/),
         # docs, and/or tests. A Python/UI regression test is not applicable to a
@@ -445,6 +459,133 @@ def _fix_prs_carry_regression_delta(ctx: CheckContext) -> Finding:
             "survives into the squash body)",
         )
     return _evaluate_pr_regression_delta(ctx.root, merge_base)
+
+
+# GitHub's issue-closing keywords (close/closes/closed, fix/fixes/fixed,
+# resolve/resolves/resolved) followed by ``#<number>``. A `fix:` conventional
+# prefix does not match — the ``:``/`` `` between the word and ``#`` breaks it.
+_CLOSE_KEYWORD_RE = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b",
+    re.IGNORECASE,
+)
+_CLOSE_SCAN_COUNT = 100
+
+
+def _closing_issue_refs(body: str) -> set[int]:
+    """Issue numbers this commit message declares it closes."""
+    return {int(m) for m in _CLOSE_KEYWORD_RE.findall(body)}
+
+
+def _recent_commits_with_bodies(root: Path, count: int) -> list[tuple[str, str]] | None:
+    """The last *count* non-merge commits as ``(sha, full_message)`` pairs."""
+    sep_record = "\x1e"
+    sep_field = "\x1f"
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "log",
+                "--no-merges",
+                "-n",
+                str(count),
+                f"--format={sep_record}%H{sep_field}%B",
+            ],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    commits: list[tuple[str, str]] = []
+    for record in result.stdout.split(sep_record):
+        if sep_field not in record:
+            continue
+        sha, body = record.split(sep_field, 1)
+        commits.append((sha.strip(), body))
+    return commits
+
+
+def _commit_paths(root: Path, sha: str) -> list[str]:
+    """Files touched by *sha* — for a squash merge, the whole PR delta."""
+    try:
+        result = subprocess.run(
+            ["git", "show", "--name-only", "--format=", sha],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+@register("P10.7")
+def _closed_issues_carry_fix_delta(ctx: CheckContext) -> Finding:
+    """Detector: an issue closed with no fix delta is a suspected false-close.
+
+    The #10223 regression-rot audit found 42/64 closed issues where no fix
+    actually landed — the "done" signal fired without any change that could
+    have fixed the bug. This history-scan detector reuses P10.6's fix-delta
+    classification (``tests/regressions/`` OR non-test product source, with the
+    same ``Skip-Regression:`` opt-out) and applies it at the *issue-close*
+    trigger: a ``Closes #N`` commit whose own diff carries neither is flagged
+    for re-triage.
+
+    Like P10.3 this scans MERGED history, so it cannot blame the PR under test
+    and is telemetry — it reports WARN but never fails PR CI (per-PR
+    enforcement is P10.6; the controller that refuses the close lives at the
+    orchestration close path, tracked as the #10354 follow-up).
+    """
+    if not (ctx.root / ".git").exists():
+        return finding("P10.7", Status.NA, "not a git repo")
+    commits = _recent_commits_with_bodies(ctx.root, _CLOSE_SCAN_COUNT)
+    if commits is None:
+        return finding("P10.7", Status.NA, "git log failed")
+    scanned = 0
+    flagged: list[str] = []
+    for sha, body in commits:
+        issues = _closing_issue_refs(body)
+        if not issues:
+            continue
+        scanned += 1
+        if _SKIP_REGRESSION_RE.search(body):
+            continue  # explicit, greppable justification — legitimate close
+        paths = _commit_paths(ctx.root, sha)
+        if _has_regression_delta(paths) or _product_paths(paths):
+            continue  # a real fix delta landed
+        for number in sorted(issues):
+            flagged.append(f"#{number} ({sha[:7]})")
+    if scanned == 0:
+        return finding(
+            "P10.7",
+            Status.PASS,
+            f"no Closes-#N commits in the last {_CLOSE_SCAN_COUNT} — nothing to audit",
+        )
+    if not flagged:
+        return finding(
+            "P10.7",
+            Status.PASS,
+            f"all {scanned} issue-close(s) in the last {_CLOSE_SCAN_COUNT} commits "
+            "carried a source or regression fix delta",
+        )
+    sample = ", ".join(flagged[:5])
+    return finding(
+        "P10.7",
+        Status.WARN,
+        f"{len(flagged)} issue-close(s) carried no non-test source and no "
+        f"tests/regressions/ delta — the #10223 false-close signature: {sample}. "
+        "Re-triage/re-open, or add a `Skip-Regression: <why>` trailer when the "
+        "fix legitimately lives elsewhere. Telemetry only (#10354): scans MERGED "
+        "history, never fails PR CI (per-PR enforcement is P10.6).",
+    )
 
 
 @register("P10.4")

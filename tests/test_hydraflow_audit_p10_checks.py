@@ -248,3 +248,96 @@ def test_many_multi_assert_tests_warn(tmp_path: Path) -> None:
     )
     _write(tmp_path / "tests" / "test_a.py", body)
     assert _run("P10.5", _ctx(tmp_path)).status is Status.WARN
+
+
+# --- P10.7 (close-verification detector, #10354) --------------------------
+
+
+def _git_commit_msg(
+    tmp_path: Path, msg_lines: list[str], files: dict[str, str]
+) -> None:
+    """Commit with a multi-paragraph message (each ``-m`` becomes a paragraph)."""
+    for rel, content in files.items():
+        _write(tmp_path / rel, content)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, env=_git_env())
+    args = ["git", "commit", "-q"]
+    for line in msg_lines:
+        args += ["-m", line]
+    subprocess.run(args, cwd=tmp_path, check=True, env=_git_env())
+
+
+def test_close_with_source_delta_not_flagged(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _git_commit(tmp_path, "feat: seed", {"README.md": "x\n"})
+    _git_commit(
+        tmp_path, "fix: real bug (Closes #123)", {"src/a.py": "def f(): return 1\n"}
+    )
+    result = _run("P10.7", _ctx(tmp_path))
+    assert result.status is Status.PASS
+    assert "#123" not in (result.message or "")
+
+
+def test_close_with_regression_delta_not_flagged(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _git_commit(tmp_path, "feat: seed", {"README.md": "x\n"})
+    _git_commit(
+        tmp_path,
+        "fix: covered (Closes #124)",
+        {"tests/regressions/test_issue_124.py": "def test_x(): pass\n"},
+    )
+    assert _run("P10.7", _ctx(tmp_path)).status is Status.PASS
+
+
+def test_close_without_source_or_regression_delta_is_flagged(tmp_path: Path) -> None:
+    """The #10223 false-close signature: an issue closed by a commit whose diff
+    carries no non-test source AND no tests/regressions/ delta."""
+    _git_init(tmp_path)
+    _git_commit(tmp_path, "feat: seed", {"README.md": "x\n"})
+    _git_commit_msg(
+        tmp_path,
+        ["chore: tidy up", "Closes #125"],
+        {"docs/note.md": "nothing fixed here\n"},
+    )
+    result = _run("P10.7", _ctx(tmp_path))
+    assert result.status is Status.WARN
+    assert "#125" in (result.message or "")
+
+
+def test_test_only_close_is_flagged(tmp_path: Path) -> None:
+    """A close whose only delta is a non-regression test (an xfail pin with no
+    fix) is still a false close."""
+    _git_init(tmp_path)
+    _git_commit(tmp_path, "feat: seed", {"README.md": "x\n"})
+    _git_commit_msg(
+        tmp_path,
+        ["test: pin behaviour", "Fixes #126"],
+        {"tests/test_pin.py": "def test_x(): pass\n"},
+    )
+    result = _run("P10.7", _ctx(tmp_path))
+    assert result.status is Status.WARN
+    assert "#126" in (result.message or "")
+
+
+def test_skip_regression_trailer_exempts_a_close(tmp_path: Path) -> None:
+    """A legitimate close whose fix lives elsewhere opts out with the same
+    greppable trailer P10.6 honours."""
+    _git_init(tmp_path)
+    _git_commit(tmp_path, "feat: seed", {"README.md": "x\n"})
+    _git_commit_msg(
+        tmp_path,
+        ["docs: clarify (Resolves #127)", "Skip-Regression: fix shipped in #900"],
+        {"docs/note.md": "clarification\n"},
+    )
+    assert _run("P10.7", _ctx(tmp_path)).status is Status.PASS
+
+
+def test_no_close_commits_passes(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _git_commit(tmp_path, "feat: no issue reference", {"src/a.py": "def f(): pass\n"})
+    result = _run("P10.7", _ctx(tmp_path))
+    assert result.status is Status.PASS
+    assert "nothing to audit" in (result.message or "")
+
+
+def test_p10_7_na_outside_git(tmp_path: Path) -> None:
+    assert _run("P10.7", _ctx(tmp_path)).status is Status.NA
