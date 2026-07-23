@@ -21,6 +21,7 @@ from ci_sentinels import ci_timeout
 from config import HydraFlowConfig
 from events import EventBus, EventType
 from evidence_pack import GAP_REPRO_MANIFEST, RECORD_TYPE_EVIDENCE_PACK
+from execution import SimpleResult
 from models import PRInfo
 from repro_manifest import MANIFEST_HEADING, MANIFEST_SCHEMA, extract_manifest_block
 from staging_promotion_loop import StagingPromotionLoop
@@ -46,22 +47,27 @@ def _fake_evidence_compiler(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 def _fake_merged_pr_listing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the loop's raw-gh boundary off the network for every test with
     benign empty responses: no merged PRs (CH-4 reconcile + G1 observed-advance
-    sweeps no-op), no staging check-runs (named-gate sensor NOT green), unknown
-    gap (promotion-health gap read returns None). Tests that exercise a specific
-    read install their own ``run_subprocess`` fake on top (``_install_gh_fake``)."""
+    sweeps no-op, via the RAISING ``run_subprocess``), no staging check-runs
+    (named-gate sensor NOT green) and unknown gap (promotion-health gap None) via
+    the NON-RAISING ``run_subprocess_result``. Tests that exercise a specific read
+    install their own fakes on top (``_install_gh_fake``)."""
 
-    async def _default(*cmd: str, **_kwargs: object) -> str:
+    async def _default_run(*cmd: str, **_kwargs: object) -> str:
         if cmd[:3] == ("gh", "pr", "list"):
             return "[]"
+        raise AssertionError(f"unexpected run_subprocess command: {cmd}")
+
+    async def _default_result(*cmd: str, **_kwargs: object) -> SimpleResult:
         if cmd[:2] == ("gh", "api"):
             path = cmd[2] if len(cmd) > 2 else ""
             if "/check-runs" in path:
-                return json.dumps({"check_runs": []})
+                return SimpleResult(stdout=json.dumps({"check_runs": []}), returncode=0)
             if "/compare/" in path:
-                return ""
-        raise AssertionError(f"unexpected gh command: {cmd}")
+                return SimpleResult(stdout="", returncode=0)
+        raise AssertionError(f"unexpected run_subprocess_result command: {cmd}")
 
-    monkeypatch.setattr(subprocess_util, "run_subprocess", _default)
+    monkeypatch.setattr(subprocess_util, "run_subprocess", _default_run)
+    monkeypatch.setattr(subprocess_util, "run_subprocess_result", _default_result)
 
 
 def _make_cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> HydraFlowConfig:
@@ -1640,6 +1646,8 @@ def _install_gh_fake(
     - ``gh api compare`` (``main..staging`` gap, ``_main_staging_gap``)
 
     Overrides the module autouse ``_fake_merged_pr_listing`` (last setattr wins).
+    ``gh pr list`` goes through the RAISING ``run_subprocess``; the check-runs and
+    compare reads go through the NON-RAISING ``run_subprocess_result``.
     *staging_gates* maps ``check-name -> conclusion``; *gap* is the compare
     ``ahead_by`` (``None`` => empty body, so the gap reads back as unknown).
     """
@@ -1652,18 +1660,26 @@ def _install_gh_fake(
         for name, conclusion in (staging_gates or {}).items()
     ]
 
-    async def _fake(*cmd: str, **_kwargs: object) -> str:
+    async def _run(*cmd: str, **_kwargs: object) -> str:
         if cmd[:3] == ("gh", "pr", "list"):
             return json.dumps(merged_prs or [])
+        raise AssertionError(f"unexpected run_subprocess command: {cmd}")
+
+    async def _result(*cmd: str, **_kwargs: object) -> SimpleResult:
         if cmd[:2] == ("gh", "api"):
             path = cmd[2] if len(cmd) > 2 else ""
             if "/check-runs" in path:
-                return json.dumps({"check_runs": check_runs})
+                return SimpleResult(
+                    stdout=json.dumps({"check_runs": check_runs}), returncode=0
+                )
             if "/compare/" in path:
-                return "" if gap is None else str(gap)
-        raise AssertionError(f"unexpected gh command: {cmd}")
+                return SimpleResult(
+                    stdout="" if gap is None else str(gap), returncode=0
+                )
+        raise AssertionError(f"unexpected run_subprocess_result command: {cmd}")
 
-    monkeypatch.setattr(subprocess_util, "run_subprocess", _fake)
+    monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+    monkeypatch.setattr(subprocess_util, "run_subprocess_result", _result)
 
 
 class TestObservedMainAdvanceClosesTrackers:
@@ -1894,6 +1910,24 @@ class TestStagingCiGreenSensor:
         assert await loop._staging_ci_is_green() is False
 
     @pytest.mark.asyncio
+    async def test_check_runs_read_failure_is_fail_closed_no_raise(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The non-raising check-runs read returns a non-zero rc (gh failure / the
+        # loop-health air-gap) → no conclusions → every required gate absent →
+        # sensor fail-closes (False) without raising.
+        loop, _prs = _make_loop(tmp_path, monkeypatch)
+        _write_canonical(tmp_path, self.REQUIRED)
+
+        async def _result(*cmd: str, **_kwargs: object) -> SimpleResult:
+            if cmd[:2] == ("gh", "api") and "/check-runs" in cmd[2]:
+                return SimpleResult(stdout="", stderr="air-gapped", returncode=1)
+            raise AssertionError(f"unexpected gh command: {cmd}")
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess_result", _result)
+        assert await loop._staging_ci_is_green() is False
+
+    @pytest.mark.asyncio
     async def test_rerun_latest_conclusion_wins(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1902,27 +1936,30 @@ class TestStagingCiGreenSensor:
         loop, _prs = _make_loop(tmp_path, monkeypatch)
         _write_canonical(tmp_path, ["Tests"])
 
-        async def _fake(*cmd: str, **_kwargs: object) -> str:
+        async def _result(*cmd: str, **_kwargs: object) -> SimpleResult:
             if cmd[:2] == ("gh", "api") and "/check-runs" in cmd[2]:
-                return json.dumps(
-                    {
-                        "check_runs": [
-                            {
-                                "name": "Tests",
-                                "conclusion": "failure",
-                                "started_at": "2026-07-23T00:00:00Z",
-                            },
-                            {
-                                "name": "Tests",
-                                "conclusion": "success",
-                                "started_at": "2026-07-23T01:00:00Z",
-                            },
-                        ]
-                    }
+                return SimpleResult(
+                    stdout=json.dumps(
+                        {
+                            "check_runs": [
+                                {
+                                    "name": "Tests",
+                                    "conclusion": "failure",
+                                    "started_at": "2026-07-23T00:00:00Z",
+                                },
+                                {
+                                    "name": "Tests",
+                                    "conclusion": "success",
+                                    "started_at": "2026-07-23T01:00:00Z",
+                                },
+                            ]
+                        }
+                    ),
+                    returncode=0,
                 )
             raise AssertionError(f"unexpected gh command: {cmd}")
 
-        monkeypatch.setattr(subprocess_util, "run_subprocess", _fake)
+        monkeypatch.setattr(subprocess_util, "run_subprocess_result", _result)
         assert await loop._staging_ci_is_green() is True
 
 
@@ -2078,14 +2115,18 @@ class TestPromotionHealthSignal:
         loop, _prs, state = self._stateful_loop(tmp_path, monkeypatch)
         state.increment_consecutive_rc_failures()
 
-        async def _fake(*cmd: str, **_kwargs: object) -> str:
+        async def _run(*cmd: str, **_kwargs: object) -> str:
             if cmd[:3] == ("gh", "pr", "list"):
                 return "[]"
+            raise AssertionError(f"unexpected run_subprocess command: {cmd}")
+
+        async def _result(*cmd: str, **_kwargs: object) -> SimpleResult:
             if cmd[:2] == ("gh", "api") and "/compare/" in cmd[2]:
                 raise AssertionError("compare must NOT be read when health flag off")
-            raise AssertionError(f"unexpected gh command: {cmd}")
+            raise AssertionError(f"unexpected run_subprocess_result command: {cmd}")
 
-        monkeypatch.setattr(subprocess_util, "run_subprocess", _fake)
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+        monkeypatch.setattr(subprocess_util, "run_subprocess_result", _result)
         result = await loop._do_work()
         health = result["promotion_health"]
         assert health["main_staging_gap"] is None
@@ -2101,39 +2142,29 @@ class TestPromotionHealthSignal:
         assert "promotion_health" not in result
 
     @pytest.mark.asyncio
-    async def test_gap_read_failure_is_fail_open(
+    async def test_gap_read_failure_degrades_to_none_does_not_raise(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # A telemetry read must NEVER take down the tick. The non-raising
+        # run_subprocess_result returns a non-zero rc (e.g. the MockWorld
+        # loop-health harness's air-gap, or a gh 404) → the gap degrades to
+        # None and `_do_work` completes normally.
         loop, _prs, _state = self._stateful_loop(tmp_path, monkeypatch)
 
-        async def _fake(*cmd: str, **_kwargs: object) -> str:
+        async def _run(*cmd: str, **_kwargs: object) -> str:
             if cmd[:3] == ("gh", "pr", "list"):
                 return "[]"
-            if cmd[:2] == ("gh", "api") and "/compare/" in cmd[2]:
-                raise RuntimeError("gh boom")
-            raise AssertionError(f"unexpected gh command: {cmd}")
+            raise AssertionError(f"unexpected run_subprocess command: {cmd}")
 
-        monkeypatch.setattr(subprocess_util, "run_subprocess", _fake)
-        # A gap-read failure must not break the tick — the gap reads None.
-        result = await loop._do_work()
+        async def _result(*cmd: str, **_kwargs: object) -> SimpleResult:
+            if cmd[:2] == ("gh", "api") and "/compare/" in cmd[2]:
+                return SimpleResult(stdout="", stderr="air-gapped", returncode=1)
+            raise AssertionError(f"unexpected run_subprocess_result command: {cmd}")
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+        monkeypatch.setattr(subprocess_util, "run_subprocess_result", _result)
+        result = await loop._do_work()  # must not raise
         assert result["promotion_health"]["main_staging_gap"] is None
-
-    @pytest.mark.asyncio
-    async def test_credit_exhaustion_in_gap_read_propagates(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        loop, _prs, _state = self._stateful_loop(tmp_path, monkeypatch)
-
-        async def _fake(*cmd: str, **_kwargs: object) -> str:
-            if cmd[:3] == ("gh", "pr", "list"):
-                return "[]"
-            if cmd[:2] == ("gh", "api") and "/compare/" in cmd[2]:
-                raise CreditExhaustedError("no credit")
-            raise AssertionError(f"unexpected gh command: {cmd}")
-
-        monkeypatch.setattr(subprocess_util, "run_subprocess", _fake)
-        with pytest.raises(CreditExhaustedError):
-            await loop._do_work()
 
     @pytest.mark.asyncio
     async def test_last_successful_promotion_recorded_on_promoted(

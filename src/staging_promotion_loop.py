@@ -759,8 +759,13 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         PRPort method reads a commit's named check conclusions. When a check
         reran (multiple runs for one name on the same commit) the most recent by
         ``started_at`` wins, so a stale earlier run never masks the live verdict.
+
+        BEST-EFFORT: uses the NON-RAISING
+        :func:`subprocess_util.run_subprocess_result` and degrades to ``{}`` on a
+        non-zero exit — the caller (:meth:`_staging_ci_is_green`) then finds every
+        required gate absent and fail-closes (no recut), never raising.
         """
-        raw = await subprocess_util.run_subprocess(
+        result = await subprocess_util.run_subprocess_result(
             "gh",
             "api",
             (
@@ -770,7 +775,15 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             ),
             timeout=_GH_TIMEOUT_SECONDS,
         )
-        data = json.loads(raw or "{}")
+        if result.returncode != 0:
+            logger.debug(
+                "Auto-recut sensor: staging HEAD check-runs read unavailable "
+                "(rc=%d): %s",
+                result.returncode,
+                (result.stderr or "").strip(),
+            )
+            return {}
+        data = json.loads(result.stdout or "{}")
         runs = data.get("check_runs") if isinstance(data, dict) else None
         if not isinstance(runs, list):
             return {}
@@ -811,20 +824,31 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         gap: int | None = None
         if self._config.rc_promotion_health_enabled:
             gap = await self._main_staging_gap()
+        # Coerce to JSON-safe types: a health signal must never emit an
+        # un-serializable value (nor crash). ``consecutive`` is an int in prod;
+        # None-guarded so a non-int state stub degrades rather than propagating.
+        consecutive = self._state.get_consecutive_rc_failures()
         return {
             "main_staging_gap": gap,
             "days_since_last_successful_promotion": (
                 self._days_since_last_successful_promotion()
             ),
-            "consecutive_rc_failures": self._state.get_consecutive_rc_failures(),
+            "consecutive_rc_failures": (
+                consecutive if isinstance(consecutive, int) else None
+            ),
         }
 
     def _days_since_last_successful_promotion(self) -> float | None:
-        """Fractional days since the last successful promotion, or ``None``."""
+        """Fractional days since the last successful promotion, or ``None``.
+
+        Best-effort: a non-str stamp (an empty state, or a stub that returns a
+        non-string) degrades to ``None`` rather than raising ``TypeError`` out of
+        the telemetry read.
+        """
         if self._state is None:
             return None
         stamp = self._state.get_last_successful_promotion_at()
-        if not stamp:
+        if not isinstance(stamp, str) or not stamp:
             return None
         try:
             when = datetime.fromisoformat(stamp)
@@ -837,34 +861,34 @@ class StagingPromotionLoop(BaseBackgroundLoop):
     async def _main_staging_gap(self) -> int | None:
         """Commits on ``staging`` not yet on ``main`` (``ahead_by``), or ``None``.
 
-        Raw ``gh api compare`` at the 30s tier — read-only, fail-open: any probe
-        failure returns ``None`` (the gap is reported unknown, the tick is
-        unaffected). Gated by ``rc_promotion_health_enabled`` (its only caller
-        pins it OFF in the sandbox air-gap).
+        BEST-EFFORT telemetry read: a health/observability sensor must never
+        take down the loop tick, so this uses the NON-RAISING
+        :func:`subprocess_util.run_subprocess_result` and degrades to ``None``
+        (gap unknown) on any non-zero exit or unparseable output — it never
+        raises out of ``_promotion_health`` / ``_do_work``. Gated by
+        ``rc_promotion_health_enabled`` (its only caller pins it OFF in the
+        sandbox air-gap; the MockWorld loop-health harness air-gaps subprocess
+        with an rc=1 result — degraded here, not a crash).
         """
-        try:
-            raw = await subprocess_util.run_subprocess(
-                "gh",
-                "api",
-                (
-                    f"repos/{self._config.repo}/compare/"
-                    f"{self._config.main_branch}...{self._config.staging_branch}"
-                ),
-                "--jq",
-                ".ahead_by",
-                timeout=_GH_TIMEOUT_SECONDS,
-            )
-        except Exception as exc:
-            # Credit-exhaustion / likely-bug signals must propagate, not be
-            # swallowed by the fail-open guard (dark-factory §2.2).
-            reraise_on_credit_or_bug(exc)
-            logger.warning(
-                "Promotion-health: main..staging gap read failed: %s",
-                exc_detail(exc),
-                exc_info=True,
+        result = await subprocess_util.run_subprocess_result(
+            "gh",
+            "api",
+            (
+                f"repos/{self._config.repo}/compare/"
+                f"{self._config.main_branch}...{self._config.staging_branch}"
+            ),
+            "--jq",
+            ".ahead_by",
+            timeout=_GH_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            logger.debug(
+                "Promotion-health: main..staging gap read unavailable (rc=%d): %s",
+                result.returncode,
+                (result.stderr or "").strip(),
             )
             return None
-        text = (raw or "").strip()
+        text = (result.stdout or "").strip()
         try:
             return int(text)
         except ValueError:
