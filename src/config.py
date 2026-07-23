@@ -237,6 +237,17 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_EROSION_METRICS_MAX_ISSUES_PER_TICK",
         3,
     ),
+    ("escape_ledger_interval", "HYDRAFLOW_ESCAPE_LEDGER_INTERVAL", 14400),
+    (
+        "escape_ledger_max_issues_per_tick",
+        "HYDRAFLOW_ESCAPE_LEDGER_MAX_ISSUES_PER_TICK",
+        3,
+    ),
+    (
+        "escape_ledger_encoding_age_days",
+        "HYDRAFLOW_ESCAPE_LEDGER_ENCODING_AGE_DAYS",
+        14,
+    ),
     ("adr_drift_resolver_interval", "HYDRAFLOW_ADR_DRIFT_RESOLVER_INTERVAL", 3600),
     (
         "adr_drift_resolver_max_triage_per_tick",
@@ -825,6 +836,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "erosion_metrics_loop_enabled",
         "HYDRAFLOW_EROSION_METRICS_LOOP_ENABLED",
+        True,
+    ),
+    (
+        "escape_ledger_loop_enabled",
+        "HYDRAFLOW_ESCAPE_LEDGER_LOOP_ENABLED",
         True,
     ),
     (
@@ -1782,6 +1798,37 @@ class HydraFlowConfig(BaseModel):
             "(#10107). Overflow candidates beyond the cap for that tick's "
             "commit range are not carried over — a rate limit on filing "
             "volume, not a durable backlog."
+        ),
+    )
+    escape_ledger_interval: int = Field(
+        default=14400,
+        ge=900,
+        le=604800,
+        description=(
+            "EscapeLedgerLoop cycle interval in seconds (#10367: post-merge "
+            "escape detection + erosion trend surfaces; v1 provisional "
+            "cadence, default 4h)"
+        ),
+    )
+    escape_ledger_max_issues_per_tick: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Finding-rate budget: max HITL/hydraflow-find issues "
+            "EscapeLedgerLoop files in one tick for low-confidence or "
+            "aging-unencoded escapes (#10367). Ledger RECORDING is never "
+            "capped — only issue filing, so the instrument does not over-file."
+        ),
+    )
+    escape_ledger_encoding_age_days: int = Field(
+        default=14,
+        ge=1,
+        le=90,
+        description=(
+            "How long an escape may stay `encoded_as: none-yet` before "
+            "EscapeLedgerLoop surfaces it for human triage (#10367). Every "
+            "escape should terminate in an encoding (test/lesson/detector/ADR)."
         ),
     )
     adr_drift_resolver_interval: int = Field(
@@ -4695,6 +4742,15 @@ class HydraFlowConfig(BaseModel):
             "Defaults ON but conservative — the sensors' own baseline/"
             "threshold defaults keep it quiet until an operator snapshots "
             "a real repo-specific baseline."
+        ),
+    )
+    escape_ledger_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for EscapeLedgerLoop (#10367: post-merge "
+            "escape ledger + erosion trend surfaces, read-only ADR-0029 "
+            "Pattern B). Records escapes and renders trend reports; the "
+            "finding-rate budget bounds any issue filing."
         ),
     )
     adr_drift_resolver_loop_enabled: bool = Field(

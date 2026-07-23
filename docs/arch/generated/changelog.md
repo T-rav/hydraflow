@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `db16faf` — feat(hygiene): close-verification controller — reopen+retriage false auto-close, default-off (#10358) (#10364) (#10364) *(2026-07-23)*
+- `e612920` — docs(adr): evaluate deterministic-simulation fault injection on sandbox compose (#10361) (#10362) (#10362) *(2026-07-23)*
 - `0b341ec` — feat(audit): close-verification — flag issues closed without a fix delta (#10354) (#10356) (#10356) *(2026-07-23)*
 - `df6f0a6` — docs(adr): reconcile 5 ADR citations drifted by #10238 (#10247) (#10347) (#10347) *(2026-07-23)*
 - `8e68c92` — test(arch): grandfather ratchet for new-loop-vs-workstream + correct #10027 doc (#10318) (#10346) (#10346) *(2026-07-23)*
@@ -573,7 +575,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `ed4a4c0` — fix(staging-bisect): close 2 dark-factory gaps (G3+G7) (#8420) (#8420) *(2026-04-24)*
 - `a5f32b6` — chore: remove Dolt state backend, files-only persistence (#8419) (#8419) *(2026-04-24)*
 - `9ee5fe8` — docs: consolidate per-repo wiki at docs/wiki/ (#8418) (#8418) *(2026-04-24)*
-- `163c2f0` — trust-arch-hardening: lights-off trust fleet (spec + 11 plans + 194 beads) (#8390) (#8390) *(2026-04-24)*
 
 
 <!-- arch:generated -->

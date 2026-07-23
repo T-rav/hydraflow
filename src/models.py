@@ -2343,6 +2343,10 @@ class StateData(BaseModel):
     # back-analysis) on the first tick, mirroring log_ingest_cursor's
     # prime-on-first-tick convention.
     erosion_last_processed_sha: str = Field(default="")
+    # EscapeLedgerLoop (#10367) — base-branch HEAD SHA the escape detector last
+    # finished analyzing. Empty = never run; primed to current HEAD (no
+    # back-analysis) on the first tick, mirroring erosion_last_processed_sha.
+    escape_ledger_last_processed_sha: str = Field(default="")
     last_updated: str | None = None
 
 

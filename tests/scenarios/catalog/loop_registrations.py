@@ -126,6 +126,50 @@ def _build_erosion_metrics(ports: dict[str, Any], config: Any, deps: Any) -> Any
     )
 
 
+def _build_escape_ledger(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build EscapeLedgerLoop for scenarios (#10367).
+
+    Mirrors ``_build_erosion_metrics``: ``state`` defaults to a MagicMock
+    whose last-processed-SHA cursor is a clean-slate in-memory string (the
+    first tick primes the baseline, matching production's fresh-install
+    behavior), and ``dedup`` defaults to a clean-slate MagicMock. The loop's
+    escape detection (``commits_for_range``) and erosion trend datapoints run
+    against ``config.repo_root`` on disk, not through the ``github`` port, so
+    scenarios exercising detection need a real git repo fixture there — see
+    ``tests/scenarios/test_escape_ledger_scenario.py``.
+    """
+    from escape_ledger_loop import EscapeLedgerLoop  # noqa: PLC0415
+
+    state = ports.get("escape_ledger_state")
+    if state is None:
+        state = MagicMock()
+        cursor: dict[str, str] = {"sha": ""}
+
+        def _get_sha() -> str:
+            return cursor["sha"]
+
+        def _set_sha(sha: str) -> None:
+            cursor["sha"] = sha
+
+        state.get_escape_ledger_last_processed_sha.side_effect = _get_sha
+        state.set_escape_ledger_last_processed_sha.side_effect = _set_sha
+        ports["escape_ledger_state"] = state
+
+    dedup = ports.get("escape_ledger_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["escape_ledger_dedup"] = dedup
+
+    return EscapeLedgerLoop(
+        config=config,
+        pr_manager=ports["github"],
+        state=state,
+        dedup=dedup,
+        deps=deps,
+    )
+
+
 def _build_issue_refinement(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build IssueRefinementLoop for scenarios (#9957).
 
@@ -2007,6 +2051,7 @@ _BUILDERS: dict[str, Any] = {
     "gate_health": _build_gate_health,
     "pr_red_repair": _build_pr_red_repair,
     "erosion_metrics": _build_erosion_metrics,
+    "escape_ledger": _build_escape_ledger,
     "issue_refinement": _build_issue_refinement,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,

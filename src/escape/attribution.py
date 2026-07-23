@@ -1,0 +1,96 @@
+"""Pure mechanical attribution helpers for the escape ledger (#10367).
+
+Mechanical-first, decided in the spec: revert parsing, ``fixes #N`` chains,
+regression-pin references, and (future) blame intersection. Each helper is a
+pure function over text/paths — no git, no I/O — so the detector and the
+caretaker loop compose them against synthetic inputs in unit tests.
+Agent-assisted research (Sentry rows) and HITL labelling for low-confidence
+rows happen in the loop layer; this module only does the deterministic parse.
+"""
+
+from __future__ import annotations
+
+import re
+
+# "This reverts commit <sha>." — the body line `git revert` writes. Also the
+# `Revert "<subject>"` subject form (captured separately, no sha there).
+_REVERTS_COMMIT_RE = re.compile(r"This reverts commit ([0-9a-f]{7,40})")
+_REVERT_SUBJECT_RE = re.compile(r'^Revert\s+"')
+
+# `fixes #123` / `closes #123` / `resolves #123` (GitHub's closing keywords),
+# case-insensitive, hash-prefixed issue/PR number.
+_FIXES_RE = re.compile(
+    r"\b(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\b"
+    r"\s+#(\d+)",
+    re.IGNORECASE,
+)
+
+# A bare `#123` cross-reference (weaker than a closing keyword).
+_HASH_REF_RE = re.compile(r"(?<![\w/])#(\d+)\b")
+
+# A hex sha reference of 7-40 chars, word-bounded.
+_SHA_REF_RE = re.compile(r"\b([0-9a-f]{7,40})\b")
+
+# Conventional-commit / free-text hotfix framing.
+_HOTFIX_RE = re.compile(r"\bhot[\s-]?fix\b", re.IGNORECASE)
+
+# Repo policy path for a regression pin (P10.6). A NEW file here is the
+# mechanical regression-pin signal.
+_REGRESSION_DIR = "tests/regressions/"
+
+
+def parse_reverted_sha(text: str) -> str | None:
+    """Return the sha a revert commit reverts, or ``None`` when not a revert."""
+    match = _REVERTS_COMMIT_RE.search(text)
+    return match.group(1) if match else None
+
+
+def is_revert(subject: str, body: str) -> bool:
+    """True when *subject*/*body* look like a `git revert` commit."""
+    return bool(_REVERT_SUBJECT_RE.match(subject.strip())) or (
+        parse_reverted_sha(body) is not None
+    )
+
+
+def is_hotfix(subject: str, body: str) -> bool:
+    """True when the commit frames itself as a hotfix."""
+    return bool(_HOTFIX_RE.search(subject) or _HOTFIX_RE.search(body))
+
+
+def extract_fixes_refs(text: str) -> list[int]:
+    """Return issue/PR numbers named by a GitHub closing keyword, in order."""
+    seen: list[int] = []
+    for match in _FIXES_RE.finditer(text):
+        num = int(match.group(1))
+        if num not in seen:
+            seen.append(num)
+    return seen
+
+
+def extract_hash_refs(text: str) -> list[int]:
+    """Return every ``#N`` cross-reference in *text*, order-preserving, deduped."""
+    seen: list[int] = []
+    for match in _HASH_REF_RE.finditer(text):
+        num = int(match.group(1))
+        if num not in seen:
+            seen.append(num)
+    return seen
+
+
+def extract_referenced_shas(text: str, *, exclude: str = "") -> list[str]:
+    """Return hex-sha references in *text*, excluding *exclude* (self-ref)."""
+    seen: list[str] = []
+    for match in _SHA_REF_RE.finditer(text):
+        sha = match.group(1)
+        if exclude and (
+            sha == exclude or exclude.startswith(sha) or sha.startswith(exclude)
+        ):
+            continue
+        if sha not in seen:
+            seen.append(sha)
+    return seen
+
+
+def adds_regression_pin(added_paths: tuple[str, ...]) -> bool:
+    """True when this commit adds a NEW file under ``tests/regressions/``."""
+    return any(p.startswith(_REGRESSION_DIR) for p in added_paths)

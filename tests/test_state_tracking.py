@@ -188,6 +188,8 @@ class TestInitialization:
             "refinement_open_proposals",
             # ErosionMetricsLoop (#10107, epic #10104) — last-processed-SHA cursor.
             "erosion_last_processed_sha",
+            # EscapeLedgerLoop (#10367) — escape-detection last-processed-SHA cursor.
+            "escape_ledger_last_processed_sha",
         }
         assert set(d.keys()) == expected_keys
 
