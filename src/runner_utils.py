@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, cast
 
 import process_group
 from activity_parser import ActivityParser, get_activity_parser
+from agent_rate_backoff import classify_agent_outcome, get_agent_rate_backoff
 from events import EventBus, EventType, HydraFlowEvent
 from execution import SubprocessRunner, get_default_runner
 from models import TranscriptEventData, TranscriptLinePayload
@@ -171,6 +172,25 @@ def _post_stream_result(
         if config.credit_prose_scan
         else stderr_text
     )
+
+    # Record the run's outcome for the rate-aware agent backoff (#10289). A
+    # truncated mid-run failure (rc != 0 with no terminal result frame) is the
+    # depleted-rate-window signature — distinct from credit exhaustion (a lone
+    # probe on the same auth succeeds) — and repeated occurrences throttle
+    # spawning. Auth failures already raised above and are excluded; credit
+    # exhaustion is classified but deliberately does NOT feed the rate backoff.
+    # Conservatively defaulted: the engine is disabled unless explicitly wired,
+    # so this call is inert by default and can never wedge the pipeline.
+    if not early_killed:
+        get_agent_rate_backoff().record_outcome(
+            classify_agent_outcome(
+                returncode=returncode,
+                has_result_frame=bool(result_text),
+                output_text=combined,
+                early_killed=early_killed,
+            )
+        )
+
     if not early_killed and is_credit_exhaustion(combined):
         resume_at = parse_credit_resume_time(combined)
         raise CreditExhaustedError("API credit limit reached", resume_at=resume_at)
@@ -314,6 +334,11 @@ async def stream_claude_process(
     env = make_clean_env(config.gh_token)
     runner = config.runner or get_default_runner()
     cmd_to_run, stdin_mode = _route_prompt_to_cmd(cmd, prompt)
+
+    # Rate-aware backpressure (#10289): if repeated mid-run failures have
+    # engaged the backoff, delay this spawn instead of hammering a depleted
+    # rate window. Inert (no delay) unless the engine is explicitly enabled.
+    await get_agent_rate_backoff().wait_if_throttled()
 
     proc = await runner.create_streaming_process(
         cmd_to_run,
