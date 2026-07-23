@@ -116,3 +116,141 @@ def test_no_phantom_assignments(real_repo_root: Path):
             "\n".join(msg)
             + "\n\nFix: rename the YAML entry to match the live class name, or remove it."
         )
+
+
+# ---------------------------------------------------------------------------
+# workstream-fixes-over-loops ratchet (#10294 rule, #10318 enforcement)
+#
+# The `workstream-fixes-over-loops` memory rule (promoted in #10294, see
+# docs/wiki/memory-feedback/feedback-workstream-fixes-over-loops.md) says:
+# prefer fixing the workstream — an existing pipeline PHASE/step or a new
+# intake/classifier on an existing loop — over minting another standalone
+# caretaker loop. A new loop is not the default unit of automation.
+#
+# `test_new_loops_justify_workstream_alternative` gives that rule teeth as a
+# SHRINK-ONLY ratchet, mirroring the disturbance-dampener block-new gate
+# (tests/test_disturbance_ratchet.py): every standalone loop present when the
+# ratchet was introduced is grandfathered below; a loop added afterwards must
+# either be a workstream fix (zero new loops) or be registered in
+# `_JUSTIFIED_NEW_LOOPS` with a one-line reason naming the host that was
+# considered and rejected. The baseline only shrinks — removing a loop means
+# pruning it from `_GRANDFATHERED_LOOPS` in the same change.
+# ---------------------------------------------------------------------------
+
+# Standalone `BaseBackgroundLoop` subclasses that pre-date this ratchet. They
+# are accepted as-is (not retro-audited against the rule) but are frozen: no
+# NEW loop may join this set — new loops go through the gate below.
+_GRANDFATHERED_LOOPS: frozenset[str] = frozenset(
+    {
+        "ADRReviewerLoop",
+        "AdrConformanceLoop",
+        "AdrDriftResolverLoop",
+        "AdrTouchpointAuditorLoop",
+        "AutoAgentPreflightLoop",
+        "AutoTightenLoop",
+        "BranchProtectionAuditorLoop",
+        "CIMonitorLoop",
+        "ContractRefreshLoop",
+        "ConvergenceOscillationLoop",
+        "CorpusLearningLoop",
+        "CostBudgetWatcherLoop",
+        "DependabotMergeLoop",
+        "DetectorCalibrationLoop",
+        "DiagnosticLoop",
+        "DiagramLoop",
+        "DisturbanceDampenerLoop",
+        "EdgeProposerLoop",
+        "EntryEvidenceLoop",
+        "EpicMonitorLoop",
+        "EpicSweeperLoop",
+        "ErosionMetricsLoop",
+        "FakeCoverageAuditorLoop",
+        "FitnessScorecardLoop",
+        "FlakeTrackerLoop",
+        "GateActivatorLoop",
+        "GateHealthLoop",
+        "GitHubCacheLoop",
+        "HealthMonitorLoop",
+        "HumanSteeringLoop",
+        "IssueRefinementLoop",
+        "LabelDriftWatcherLoop",
+        "LiveCorpusReplayLoop",
+        "LogIngestLoop",
+        "MemoryBacklogLoop",
+        "MergeStateWatcherLoop",
+        "PRUnstickerLoop",
+        # PrRedRepairLoop: documented historical violation of the #10027
+        # "zero new loops" operator steer. It was specced as an intake on
+        # PRUnstickerLoop's existing CI-fix dispatch but shipped (#10124 /
+        # #10157) as a full standalone loop. Grandfathered per #10318
+        # (Option A): kept working and honestly recorded rather than ripped
+        # out. See feedback-workstream-fixes-over-loops.md.
+        "PrRedRepairLoop",
+        "PricingRefreshLoop",
+        "PrinciplesAuditLoop",
+        "RCBudgetLoop",
+        "RepoWikiLoop",
+        "ReportIssueLoop",
+        "RetrospectiveLoop",
+        "RunsGCLoop",
+        "SandboxFailureFixerLoop",
+        "SecurityPatchLoop",
+        "SentryLoop",
+        "SkillPromptEvalLoop",
+        "StagingBisectLoop",
+        "StagingPromotionLoop",
+        "StaleIssueGCLoop",
+        "StaleIssueLoop",
+        "TermProposerLoop",
+        "TermPrunerLoop",
+        "TriageRetryLoop",
+        "TrustFleetSanityLoop",
+        "WikiRotDetectorLoop",
+        "WorkspaceGCLoop",
+    }
+)
+
+# Loops added AFTER this ratchet that are legitimately standalone. Each entry
+# must name, in one line, the workstream host (phase/step or existing-loop
+# intake) that was considered and why it could not own the behaviour — the
+# same "name the intended HOST explicitly" discipline the memory doc asks for.
+# Empty is the healthy default: the first choice is always a workstream fix.
+_JUSTIFIED_NEW_LOOPS: dict[str, str] = {}
+
+
+def test_new_loops_justify_workstream_alternative(real_repo_root: Path):
+    """Shrink-only ratchet enforcing workstream-fixes-over-loops (#10294/#10318).
+
+    A new standalone loop must justify why a workstream fix (an existing
+    pipeline phase/step or an intake on an existing loop) could not host it,
+    instead of minting another caretaker loop. Everything present when the
+    ratchet landed is grandfathered in ``_GRANDFATHERED_LOOPS``; anything
+    added later must be a workstream fix (no new loop) or be registered in
+    ``_JUSTIFIED_NEW_LOOPS``. The baseline only shrinks.
+    """
+    discovered = {info.name for info in extract_loops(real_repo_root / "src")}
+
+    allowed = _GRANDFATHERED_LOOPS | set(_JUSTIFIED_NEW_LOOPS)
+    unjustified_new = discovered - allowed
+    if unjustified_new:
+        pytest.fail(
+            f"{len(unjustified_new)} new standalone loop(s) added without a "
+            "workstream-alternative justification:\n  "
+            + "\n  ".join(sorted(unjustified_new))
+            + "\n\nPrefer a workstream fix over a new loop (see "
+            "docs/wiki/memory-feedback/feedback-workstream-fixes-over-loops.md): "
+            "can an existing PHASE own it as a step/gate, or an existing loop "
+            "own it as a new intake/classifier? If it is genuinely standalone "
+            "cross-cutting cadence work with no natural host, add it to "
+            "`_JUSTIFIED_NEW_LOOPS` in this file with a one-line reason naming "
+            "the host you considered and rejected."
+        )
+
+    stale = _GRANDFATHERED_LOOPS - discovered
+    if stale:
+        pytest.fail(
+            f"{len(stale)} grandfathered loop(s) no longer exist in code:\n  "
+            + "\n  ".join(sorted(stale))
+            + "\n\nThe ratchet only shrinks — prune these from "
+            "`_GRANDFATHERED_LOOPS` in this file so the baseline stays honest."
+        )
