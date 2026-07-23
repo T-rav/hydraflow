@@ -257,6 +257,95 @@ def test_fleet_payload_schema_matches_lock(config) -> None:
     assert loop["repair_attempts_total"] == 3
 
 
+class _FakeBisectLoop:
+    """Minimal stand-in exposing the read-only ``stall_state`` accessor (#10240)."""
+
+    def __init__(self, snapshot: dict[str, object]) -> None:
+        self._snapshot = snapshot
+
+    def stall_state(self) -> dict[str, object]:
+        return self._snapshot
+
+
+def test_read_fleet_surfaces_staging_bisect_stall_state(config) -> None:
+    """/api/trust/fleet drill-down carries the staging_bisect stall-state (#10240).
+
+    When ``bg_workers.get_loop("staging_bisect")`` yields a loop exposing
+    ``stall_state()``, the staging_bisect row gains a ``stall_state`` field
+    describing WHAT the loop was doing (phase / elapsed / last command).
+    """
+    bus = MagicMock()
+    bus.load_events_since = AsyncMock(return_value=[])
+    fake_loop = _FakeBisectLoop(
+        {
+            "phase": "bisecting",
+            "phase_since": "2026-04-22T10:00:00+00:00",
+            "elapsed_s": 42,
+            "last_command": "git bisect run make -C /r bisect-probe",
+        }
+    )
+    bg = MagicMock()
+    bg.worker_enabled.return_value = True
+    bg.get_interval.return_value = 600
+    bg.get_loop.side_effect = lambda name: (
+        fake_loop if name == "staging_bisect" else None
+    )
+    state = MagicMock()
+    state.get_worker_heartbeats.return_value = {
+        "staging_bisect": "2026-04-22T10:05:00+00:00",
+        "rc_budget": "2026-04-22T10:05:00+00:00",
+    }
+    import asyncio
+
+    result = asyncio.run(
+        _read_fleet(
+            config,
+            event_bus=bus,
+            bg_workers=bg,
+            state=state,
+            range_td=timedelta(days=7),
+            anomaly_reader=lambda repo: [],
+        )
+    )
+    rows = {r["worker_name"]: r for r in result["loops"]}
+    stall = rows["staging_bisect"]["stall_state"]
+    assert stall["phase"] == "bisecting"
+    assert stall["elapsed_s"] == 42
+    assert stall["last_command"].startswith("git bisect")
+    # Additive & scoped: other loops carry no stall_state field.
+    assert "stall_state" not in rows["rc_budget"]
+
+
+def test_read_fleet_stall_state_absent_when_loop_unavailable(config) -> None:
+    """A bg_workers without ``get_loop`` (or a non-dict snapshot) must not break
+    the payload — the staging_bisect row simply omits ``stall_state`` (#10240)."""
+    bus = MagicMock()
+    bus.load_events_since = AsyncMock(return_value=[])
+    # Plain MagicMock: get_loop(...) returns a MagicMock whose stall_state()
+    # returns a MagicMock (not a dict) — must be guarded out, not serialized.
+    bg = MagicMock()
+    bg.worker_enabled.return_value = True
+    bg.get_interval.return_value = 600
+    state = MagicMock()
+    state.get_worker_heartbeats.return_value = {
+        "staging_bisect": "2026-04-22T10:05:00+00:00",
+    }
+    import asyncio
+
+    result = asyncio.run(
+        _read_fleet(
+            config,
+            event_bus=bus,
+            bg_workers=bg,
+            state=state,
+            range_td=timedelta(days=7),
+            anomaly_reader=lambda repo: [],
+        )
+    )
+    rows = {r["worker_name"]: r for r in result["loops"]}
+    assert "stall_state" not in rows["staging_bisect"]
+
+
 def test_anomaly_reader_is_cached(config, monkeypatch) -> None:
     """Subsequent calls within 60s reuse the cached anomaly list."""
     calls: list[int] = []

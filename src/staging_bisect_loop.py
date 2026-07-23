@@ -95,9 +95,77 @@ class StagingBisectLoop(BaseBackgroundLoop):
         # Pending watchdog state — set after an auto-revert is filed.
         # None when no watchdog active.
         self._pending_watchdog: dict[str, Any] | None = None
+        # Lightweight stall-state diagnostics (#10240). Surfaced read-only via
+        # ``stall_state()`` into the Trust Fleet drill-down so an operator (or
+        # the next autonomous agent) can see WHAT the loop was doing when
+        # ``TrustFleetSanityLoop`` fires a staleness anomaly — a legitimately
+        # long bisect / watchdog vs a genuine hang. Pure diagnostics: never
+        # gate scheduling or remediation on these fields.
+        # Wall-clock start of the in-flight bisect pipeline; ``None`` when not
+        # bisecting.
+        self._bisect_started_ts: float | None = None
+        # Last subprocess argv issued (space-joined), for the drill-down.
+        self._last_subprocess_cmd: str | None = None
 
     def _get_default_interval(self) -> int:
         return self._config.staging_bisect_interval
+
+    def _record_subprocess_cmd(self, cmd: list[str]) -> None:
+        """Record the last subprocess argv for stall-state diagnostics (#10240)."""
+        self._last_subprocess_cmd = " ".join(cmd)
+
+    def stall_state(self) -> dict[str, Any]:
+        """Read-only snapshot of the loop's current phase (#10240).
+
+        Surfaced into ``/api/trust/fleet`` so the Trust Fleet drill-down can
+        report WHAT ``staging_bisect`` was doing when it went stale. Phase is
+        one of:
+
+        - ``idle``                — no red to process; between ticks.
+        - ``bisecting``           — running the bisect → attribute → revert
+          pipeline over the RC-red range (may legitimately run for the
+          configured runtime cap).
+        - ``watchdog_pending_rc`` — an auto-revert was filed; watching the
+          next RC outcome for up to 8h (spec §4.3 step 8).
+
+        Also carries the ISO-8601 phase start, elapsed seconds in that phase,
+        the last subprocess command issued, and — when a watchdog is pending —
+        its deadline and remaining seconds. Never mutates loop state.
+        """
+        import time  # noqa: PLC0415
+        from datetime import UTC, datetime  # noqa: PLC0415
+
+        now = time.time()
+        if self._bisect_started_ts is not None:
+            phase = "bisecting"
+            since: float | None = self._bisect_started_ts
+        elif self._pending_watchdog is not None:
+            phase = "watchdog_pending_rc"
+            started = self._pending_watchdog.get("started_ts")
+            since = started if isinstance(started, (int, float)) else None
+        else:
+            phase = "idle"
+            since = None
+
+        snapshot: dict[str, Any] = {
+            "phase": phase,
+            "phase_since": (
+                datetime.fromtimestamp(since, tz=UTC).isoformat()
+                if since is not None
+                else None
+            ),
+            "elapsed_s": max(0, int(now - since)) if since is not None else 0,
+            "last_command": self._last_subprocess_cmd,
+        }
+        wd = self._pending_watchdog
+        if wd is not None:
+            deadline = wd.get("deadline_ts")
+            if isinstance(deadline, (int, float)):
+                snapshot["watchdog_deadline"] = datetime.fromtimestamp(
+                    deadline, tz=UTC
+                ).isoformat()
+                snapshot["watchdog_remaining_s"] = max(0, int(deadline - now))
+        return snapshot
 
     async def _do_work(self) -> dict[str, Any] | None:  # noqa: PLR0911
         # Kill-switch via the System-tab toggle — operators need a live
@@ -173,6 +241,7 @@ class StagingBisectLoop(BaseBackgroundLoop):
         logger.info("Running bisect-probe against %s", rc_sha)
         timeout_s = self._config.staging_bisect_runtime_cap_seconds
         cmd = ["make", "bisect-probe"]
+        self._record_subprocess_cmd(cmd)
         t0 = time.perf_counter()
         exit_code: int | None = None
         stderr_excerpt: str | None = None
@@ -233,10 +302,25 @@ class StagingBisectLoop(BaseBackgroundLoop):
             stderr_excerpt=stderr_excerpt,
         )
 
-    async def _run_full_bisect_pipeline(  # noqa: PLR0911
+    async def _run_full_bisect_pipeline(
         self, red_sha: str, probe_output: str
     ) -> dict[str, Any]:
         """End-to-end pipeline: bisect → attribute → guardrail → revert → retry."""
+        import time  # noqa: PLC0415
+
+        # Mark the loop as actively bisecting for the stall-state drill-down
+        # (#10240). Cleared in the ``finally`` regardless of which branch
+        # returns; if a watchdog is scheduled, the read-time phase then
+        # derives from ``_pending_watchdog`` instead.
+        self._bisect_started_ts = time.time()
+        try:
+            return await self._run_full_bisect_pipeline_inner(red_sha, probe_output)
+        finally:
+            self._bisect_started_ts = None
+
+    async def _run_full_bisect_pipeline_inner(  # noqa: PLR0911
+        self, red_sha: str, probe_output: str
+    ) -> dict[str, Any]:
         import time  # noqa: PLC0415
 
         green_sha = self._state.get_last_green_rc_sha()
@@ -369,6 +453,10 @@ class StagingBisectLoop(BaseBackgroundLoop):
             "red_sha_at_revert": red_sha,
             "rc_cycle_at_revert": self._state.get_rc_cycle_id(),
             "deadline_ts": time.time() + watchdog_wall_seconds,
+            # Stall-state diagnostics (#10240): anchor the watchdog phase's
+            # elapsed-time so the Trust Fleet drill-down can report how long
+            # the loop has been watching this RC.
+            "started_ts": time.time(),
         }
 
         return {
@@ -478,6 +566,7 @@ class StagingBisectLoop(BaseBackgroundLoop):
         """
         import asyncio  # noqa: PLC0415
 
+        self._record_subprocess_cmd(cmd)
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=cwd,
@@ -572,6 +661,7 @@ class StagingBisectLoop(BaseBackgroundLoop):
         """Run a ``gh`` command and return stdout. Overridable in tests."""
         import asyncio  # noqa: PLC0415
 
+        self._record_subprocess_cmd(cmd)
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=self._config.repo_root,

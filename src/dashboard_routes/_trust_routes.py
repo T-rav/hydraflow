@@ -216,6 +216,44 @@ def _tally_events(events: list[Any]) -> dict[str, dict[str, Any]]:
     return out
 
 
+# Loops that expose a per-loop stall-state drill-down via ``get_loop(name)``
+# on the BGWorkerManager (#10240). Scoped to ``staging_bisect`` — the loop
+# whose long bisect / 8h watchdog can look identical to a hang from the
+# heartbeat alone. Add other loops here once they grow a ``stall_state()``
+# accessor (the extension point noted in the PR).
+_STALL_STATE_WORKERS: frozenset[str] = frozenset({"staging_bisect"})
+
+
+def _read_stall_state(bg_workers: Any, worker: str) -> dict[str, Any] | None:
+    """Best-effort read of a loop's ``stall_state()`` diagnostics (#10240).
+
+    Returns a JSON-safe dict, or ``None`` when the loop is unreachable or does
+    not expose a well-formed snapshot. Defensive by design: a MagicMock or a
+    partially-wired ``BGWorkerManager`` (e.g. ``bg_workers=None`` during
+    startup recovery) must never break the fleet payload — the field is simply
+    omitted. Guards on ``isinstance(..., dict)`` so a truthy MagicMock cannot
+    smuggle a non-serializable object into the response.
+    """
+    getter = getattr(bg_workers, "get_loop", None)
+    if not callable(getter):
+        return None
+    try:
+        loop = getter(worker)
+    except Exception:  # noqa: BLE001
+        return None
+    accessor = getattr(loop, "stall_state", None)
+    if not callable(accessor):
+        return None
+    try:
+        snapshot = accessor()
+    except Exception:  # noqa: BLE001
+        logger.debug("stall_state() failed for %s", worker, exc_info=True)
+        return None
+    if not isinstance(snapshot, dict):
+        return None
+    return {str(k): v for k, v in snapshot.items()}
+
+
 def _empty_loop_row() -> dict[str, Any]:
     return {
         "ticks_total": 0,
@@ -299,19 +337,25 @@ async def _read_fleet(
         except Exception:  # noqa: BLE001
             interval_s = 0
         cost_row = per_loop_cost.get(worker) or {}
-        loops.append(
-            {
-                "worker_name": worker,
-                "enabled": enabled,
-                "interval_s": interval_s,
-                "last_tick_at": heartbeats.get(worker) or None,
-                "cost_usd": float(cost_row.get("cost_usd", 0.0) or 0.0),
-                "tokens_in": int(cost_row.get("tokens_in", 0) or 0),
-                "tokens_out": int(cost_row.get("tokens_out", 0) or 0),
-                "llm_calls": int(cost_row.get("llm_calls", 0) or 0),
-                **row,
-            }
-        )
+        loop_row: dict[str, Any] = {
+            "worker_name": worker,
+            "enabled": enabled,
+            "interval_s": interval_s,
+            "last_tick_at": heartbeats.get(worker) or None,
+            "cost_usd": float(cost_row.get("cost_usd", 0.0) or 0.0),
+            "tokens_in": int(cost_row.get("tokens_in", 0) or 0),
+            "tokens_out": int(cost_row.get("tokens_out", 0) or 0),
+            "llm_calls": int(cost_row.get("llm_calls", 0) or 0),
+            **row,
+        }
+        # Additive per-loop stall-state drill-down (#10240). Only attached for
+        # loops that expose it and only when a well-formed snapshot is read —
+        # never breaks the existing payload shape for other loops.
+        if worker in _STALL_STATE_WORKERS:
+            stall = _read_stall_state(bg_workers, worker)
+            if stall is not None:
+                loop_row["stall_state"] = stall
+        loops.append(loop_row)
 
     anomalies = _cached_anomalies(config, anomaly_reader)
     escape_closure = _compute_escape_closure(config, since=since, until=now)

@@ -82,6 +82,14 @@ Response JSON:
         "cassettes_refreshed": <int>,     # contract_refresh
         "principles_regressions": <int>,  # principles_audit
         ...
+      },
+      "stall_state": {                    # optional (#10240); staging_bisect only today.
+        "phase": "idle"|"bisecting"|"watchdog_pending_rc",  # what the loop is doing
+        "phase_since": "<iso8601>"|null,  # when the current phase began
+        "elapsed_s": <int>,               # seconds in the current phase
+        "last_command": "<str>"|null,     # last subprocess argv issued
+        "watchdog_deadline": "<iso8601>", # present only while watchdog_pending_rc
+        "watchdog_remaining_s": <int>     # present only while watchdog_pending_rc
       }
     },
     ...
