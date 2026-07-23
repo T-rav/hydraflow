@@ -52,6 +52,58 @@ def _make_loop(
     return loop, prs, state
 
 
+class TestStallState:
+    """Read-only stall-state diagnostics surfaced to the Trust Fleet (#10240)."""
+
+    def test_stall_state_idle_by_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs, _state = _make_loop(tmp_path, monkeypatch)
+        snap = loop.stall_state()  # type: ignore[attr-defined]
+        assert snap["phase"] == "idle"
+        assert snap["elapsed_s"] == 0
+        assert snap["phase_since"] is None
+        assert snap["last_command"] is None
+
+    def test_stall_state_reports_bisecting(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import time
+
+        loop, _prs, _state = _make_loop(tmp_path, monkeypatch)
+        loop._bisect_started_ts = time.time() - 5  # type: ignore[attr-defined]
+        snap = loop.stall_state()  # type: ignore[attr-defined]
+        assert snap["phase"] == "bisecting"
+        assert snap["elapsed_s"] >= 5
+        assert snap["phase_since"] is not None
+
+    def test_stall_state_reports_watchdog_pending(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import time
+
+        loop, _prs, _state = _make_loop(tmp_path, monkeypatch)
+        now = time.time()
+        loop._pending_watchdog = {  # type: ignore[attr-defined]
+            "red_sha_at_revert": "red",
+            "rc_cycle_at_revert": 1,
+            "deadline_ts": now + 8 * 3600,
+            "started_ts": now - 120,
+        }
+        snap = loop.stall_state()  # type: ignore[attr-defined]
+        assert snap["phase"] == "watchdog_pending_rc"
+        assert snap["elapsed_s"] >= 120
+        assert snap["watchdog_remaining_s"] <= 8 * 3600
+        assert snap["watchdog_deadline"] is not None
+
+    def test_stall_state_records_last_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs, _state = _make_loop(tmp_path, monkeypatch)
+        loop._record_subprocess_cmd(["git", "bisect", "run"])  # type: ignore[attr-defined]
+        assert loop.stall_state()["last_command"] == "git bisect run"  # type: ignore[attr-defined]
+
+
 class TestSkeleton:
     @pytest.mark.asyncio
     async def test_do_work_returns_noop_when_no_red_sha(

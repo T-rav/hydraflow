@@ -129,6 +129,15 @@ class BGWorkerManager:
         """
         return set(self._bg_loop_registry)
 
+    def get_loop(self, name: str) -> BaseBackgroundLoop | None:
+        """Return the registered loop instance for *name*, or ``None``.
+
+        Read-only accessor used by the Trust Fleet drill-down to reach a
+        loop's own diagnostics surface (e.g. ``StagingBisectLoop.stall_state``,
+        #10240) without threading each loop into the route separately.
+        """
+        return self._bg_loop_registry.get(name)
+
     def cycle_timeout(self, name: str) -> int:
         """Effective per-cycle watchdog bound for *name* (#9556 semantics).
 
