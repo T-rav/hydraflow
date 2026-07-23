@@ -126,6 +126,32 @@ def _build_erosion_metrics(ports: dict[str, Any], config: Any, deps: Any) -> Any
     )
 
 
+def _build_fail_open_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build FailOpenMonitorLoop for scenarios (#10371).
+
+    ``dedup`` defaults to a clean-slate MagicMock (no prior filed breach
+    fingerprints), mirroring the ErosionMetricsLoop builder. The loop reads the
+    fail-open ledger from ``config.diagnostics_dir`` on disk (written by the
+    PostVerifyAdvisor), not through the ``github`` port, so scenarios exercising
+    the breach path seed that ledger file directly — see
+    ``tests/scenarios/test_fail_open_monitor_scenario.py``.
+    """
+    from fail_open_monitor_loop import FailOpenMonitorLoop
+
+    dedup = ports.get("fail_open_monitor_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["fail_open_monitor_dedup"] = dedup
+
+    return FailOpenMonitorLoop(
+        config=config,
+        pr_manager=ports["github"],
+        dedup=dedup,
+        deps=deps,
+    )
+
+
 def _build_issue_refinement(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build IssueRefinementLoop for scenarios (#9957).
 
@@ -2007,6 +2033,7 @@ _BUILDERS: dict[str, Any] = {
     "gate_health": _build_gate_health,
     "pr_red_repair": _build_pr_red_repair,
     "erosion_metrics": _build_erosion_metrics,
+    "fail_open_monitor": _build_fail_open_monitor,
     "issue_refinement": _build_issue_refinement,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,

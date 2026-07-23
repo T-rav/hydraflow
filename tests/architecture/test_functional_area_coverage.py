@@ -215,7 +215,17 @@ _GRANDFATHERED_LOOPS: frozenset[str] = frozenset(
 # intake) that was considered and why it could not own the behaviour — the
 # same "name the intended HOST explicitly" discipline the memory doc asks for.
 # Empty is the healthy default: the first choice is always a workstream fix.
-_JUSTIFIED_NEW_LOOPS: dict[str, str] = {}
+_JUSTIFIED_NEW_LOOPS: dict[str, str] = {
+    # #10371: considered hosting the fail-open RATE monitor as a step in the
+    # review phase's post-verify path (where the per-event ledger IS written)
+    # and as an intake on DetectorCalibrationLoop. Rejected both: the Shewhart
+    # control limit is a function of the WHOLE ledger across all PRs/surfaces —
+    # no single PR's review phase can see the cross-PR rate — and
+    # DetectorCalibrationLoop mines hitl-escalation issues, a different data
+    # source. A per-tick rate monitor over the diagnostics ledger is genuinely
+    # standalone cross-cutting cadence work with no natural phase/loop host.
+    "FailOpenMonitorLoop": "cross-PR fail-open rate control limit; no phase sees it",
+}
 
 
 def test_new_loops_justify_workstream_alternative(real_repo_root: Path):

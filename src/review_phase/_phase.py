@@ -1556,12 +1556,28 @@ class ReviewPhase:
             / str(log_key)
             / "advisor_session.jsonl"
         )
+        # #10371 judge-independence budget + fail-visible dispatch. The ledger
+        # + dashboard alarm are always live; the two flags gate the merge-
+        # outcome-changing behaviours (opt-in until validated). Independence
+        # resolution reads the configured cross-family judge model.
+        from judge_independence import (
+            independent_judge_model,
+            ledger_path_for,
+        )
+
         advisor = PostVerifyAdvisor(
             runner=self._post_verify_runner,
             surface_config=surface_cfg,
             log_path=log_path,
             pr_number=log_key,
             authority_override=authority,
+            ledger_path=ledger_path_for(self._config),
+            event_bus=self._bus,
+            judge_independence_enabled=self._config.judge_independence_enabled,
+            self_mod_fail_closed_enabled=(
+                self._config.judge_self_mod_fail_closed_enabled
+            ),
+            independent_model=independent_judge_model(self._config),
         )
         # Human-on-the-loop continuous steering (ADR-0099 #4): the advisor
         # reviews the same issue as the executor, so live operator guidance

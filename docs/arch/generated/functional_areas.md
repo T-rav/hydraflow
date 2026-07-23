@@ -55,6 +55,7 @@ flowchart LR
         trust_fleet_ContractRefreshLoop([ContractRefreshLoop])
         trust_fleet_CorpusLearningLoop([CorpusLearningLoop])
         trust_fleet_ErosionMetricsLoop([ErosionMetricsLoop])
+        trust_fleet_FailOpenMonitorLoop([FailOpenMonitorLoop])
         trust_fleet_FakeCoverageAuditorLoop([FakeCoverageAuditorLoop])
         trust_fleet_FlakeTrackerLoop([FlakeTrackerLoop])
         trust_fleet_LiveCorpusReplayLoop([LiveCorpusReplayLoop])
@@ -170,6 +171,7 @@ The trust-architecture hardening fleet (ADR-0045) — RC promotion gate, staging
 - `ContractRefreshLoop` — `src.contract_refresh_loop`
 - `CorpusLearningLoop` — `src.corpus_learning_loop`
 - `ErosionMetricsLoop` — `src.erosion_metrics_loop`
+- `FailOpenMonitorLoop` — `src.fail_open_monitor_loop`
 - `FakeCoverageAuditorLoop` — `src.fake_coverage_auditor_loop`
 - `FlakeTrackerLoop` — `src.flake_tracker_loop`
 - `LiveCorpusReplayLoop` — `src.live_corpus_replay_loop`

@@ -634,8 +634,17 @@ class TestVisualGate:
 
         await phase.check_visual_gate(pr, issue, result, worker_id=0)
 
-        phase._bus.publish.assert_awaited_once()
-        event_data = phase._bus.publish.call_args.args[0].data
+        # The gate emits its telemetry event. A degraded post-verify advisor may
+        # also emit a fail-open SYSTEM_ALERT (#10371 fail-visible dispatch), so
+        # locate the gate-telemetry event among the published events rather than
+        # asserting a single publish.
+        gate_events = [
+            call.args[0].data
+            for call in phase._bus.publish.call_args_list
+            if "runtime_seconds" in getattr(call.args[0], "data", {})
+        ]
+        assert len(gate_events) == 1
+        event_data = gate_events[0]
         assert "runtime_seconds" in event_data
         assert "verdict" in event_data
         assert "retries" in event_data

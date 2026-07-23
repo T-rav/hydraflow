@@ -237,6 +237,12 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_EROSION_METRICS_MAX_ISSUES_PER_TICK",
         3,
     ),
+    ("fail_open_monitor_interval", "HYDRAFLOW_FAIL_OPEN_MONITOR_INTERVAL", 14400),
+    (
+        "fail_open_monitor_max_issues_per_tick",
+        "HYDRAFLOW_FAIL_OPEN_MONITOR_MAX_ISSUES_PER_TICK",
+        2,
+    ),
     ("adr_drift_resolver_interval", "HYDRAFLOW_ADR_DRIFT_RESOLVER_INTERVAL", 3600),
     (
         "adr_drift_resolver_max_triage_per_tick",
@@ -473,6 +479,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
+    ("judge_independent_model", "HYDRAFLOW_JUDGE_INDEPENDENT_MODEL", ""),
     (
         "security_patch_severity_threshold",
         "HYDRAFLOW_SECURITY_PATCH_SEVERITY_THRESHOLD",
@@ -821,6 +828,21 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "pr_red_repair_dispatch_enabled",
         "HYDRAFLOW_PR_RED_REPAIR_DISPATCH_ENABLED",
         True,
+    ),
+    (
+        "fail_open_monitor_loop_enabled",
+        "HYDRAFLOW_FAIL_OPEN_MONITOR_LOOP_ENABLED",
+        True,
+    ),
+    (
+        "judge_independence_enabled",
+        "HYDRAFLOW_JUDGE_INDEPENDENCE_ENABLED",
+        False,
+    ),
+    (
+        "judge_self_mod_fail_closed_enabled",
+        "HYDRAFLOW_JUDGE_SELF_MOD_FAIL_CLOSED",
+        False,
     ),
     (
         "erosion_metrics_loop_enabled",
@@ -1181,6 +1203,38 @@ class HydraFlowConfig(BaseModel):
             "Treat a degraded verifier run (empty transcript / infra failure) "
             "as an OVERRIDE instead of keeping the finder's OK (fail-soft is "
             "the default)"
+        ),
+    )
+
+    # Judge-independence budget + fail-visible dispatch (#10371). The ledger
+    # and dashboard alarm are always live; these dials gate the merge-outcome-
+    # changing behaviours (opt-in until validated) and configure the second
+    # model family that satisfies the independence budget.
+    judge_independence_enabled: bool = Field(
+        default=False,
+        description=(
+            "Route classed (structural/security/migration/self-mod) changes' "
+            "post-verify verdict to an independent model family (#10371). "
+            "Merge-outcome-changing, so opt-in; the fail-open ledger + alarm "
+            "stay live regardless of this flag."
+        ),
+    )
+    judge_self_mod_fail_closed_enabled: bool = Field(
+        default=False,
+        description=(
+            "Fail-CLOSED for the self-modification class (#10371): a fail-open "
+            "or a missing independent verdict on the factory's own instruments "
+            "(gauntlet/gates/detectors/merge policy/this policy) STOPs the "
+            "merge and escalates to HITL instead of passing. Opt-in."
+        ),
+    )
+    judge_independent_model: str = Field(
+        default="",
+        description=(
+            "Model from a family OUTSIDE the implementing roster that satisfies "
+            "the judge-independence budget (#10371). Empty = no second family "
+            "configured → degraded mode (same-family verdict, ledgered). A model "
+            "whose family is inside the roster does not count as independent."
         ),
     )
 
@@ -1782,6 +1836,25 @@ class HydraFlowConfig(BaseModel):
             "(#10107). Overflow candidates beyond the cap for that tick's "
             "commit range are not carried over — a rate limit on filing "
             "volume, not a durable backlog."
+        ),
+    )
+    fail_open_monitor_interval: int = Field(
+        default=14400,
+        ge=900,
+        le=604800,
+        description=(
+            "FailOpenMonitorLoop cycle interval in seconds (#10371: watches the "
+            "fail-open ledger's rate against a Shewhart control limit and files "
+            "a hydraflow-find above-limit; default 4h)."
+        ),
+    )
+    fail_open_monitor_max_issues_per_tick: int = Field(
+        default=2,
+        ge=1,
+        le=20,
+        description=(
+            "Max hydraflow-find issues FailOpenMonitorLoop files in one tick "
+            "(#10371). A rate limit on filing volume, not a durable backlog."
         ),
     )
     adr_drift_resolver_interval: int = Field(
@@ -4695,6 +4768,15 @@ class HydraFlowConfig(BaseModel):
             "Defaults ON but conservative — the sensors' own baseline/"
             "threshold defaults keep it quiet until an operator snapshots "
             "a real repo-specific baseline."
+        ),
+    )
+    fail_open_monitor_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for FailOpenMonitorLoop (#10371: fail-open "
+            "ledger rate → Shewhart control limit → hydraflow-find). Defaults "
+            "ON but conservative — a control limit needs several days of ledger "
+            "history before it can fire, so the loop is quiet until then."
         ),
     )
     adr_drift_resolver_loop_enabled: bool = Field(

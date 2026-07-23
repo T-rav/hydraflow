@@ -251,7 +251,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'auto_tighten', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry', 'convergence_oscillation', 'gate_health', 'issue_refinement', 'pr_red_repair', 'erosion_metrics', 'adr_drift_resolver'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'auto_tighten', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry', 'convergence_oscillation', 'gate_health', 'issue_refinement', 'pr_red_repair', 'erosion_metrics', 'fail_open_monitor', 'adr_drift_resolver'])
 
 /**
  * Preset options for the per-loop watchdog-timeout override (#9503).
@@ -312,6 +312,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   gate_health: 604800,
   pr_red_repair: 300,
   erosion_metrics: 14400,
+  fail_open_monitor: 14400,
   issue_refinement: 86400,
   label_drift_watcher: 600,
   triage_retry: 86400,
@@ -396,6 +397,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'gate_health', label: 'Gate Health', description: 'Weekly read-only CI-gate auditor: pass-rate distributions, blame-correlation, missing failure artifacts, stale quarantines. Files evidence issues; never mutates gates.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['hygiene'] },
   { key: 'pr_red_repair', label: 'PR Red Repair', description: 'Detects settled-red open PRs and bounded-reruns infra-flake CI (cancelled runs, zero-failed-step jobs, failed setup steps, vanished logs). Escalates via rollup issue once the rerun budget is exhausted. Phase 1 of #10027 — real-red auto-agent dispatch is Phase 2.', color: theme.orange, group: 'repo_health', tags: ['recovery', 'quality'] },
   { key: 'erosion_metrics', label: 'Erosion Metrics', description: 'v1: runs the change-spread and concept-scatter sensors over commits merged since the last tick; files above-baseline drift as hydraflow-find issues for human triage (Pattern B — never opens a fix PR). See #10107, epic #10104.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },
+  { key: 'fail_open_monitor', label: 'Fail-Open Monitor', description: 'Watches the judge fail-open ledger; applies a Shewhart control limit to the daily fail-open rate and files a hydraflow-find above-limit (Pattern B — never opens a fix PR). Part of the judge-independence budget + fail-visible dispatch (#10371).', color: theme.textMuted, system: true, group: 'repo_health', tags: ['quality', 'evidence'] },
   { key: 'issue_refinement', label: 'Issue Refinement', description: 'Backlog-wide duplicate detection, priority scoring, and a rolling operator digest issue. Auto-closes confirmed duplicates and relabels safe priority deltas.', color: theme.orange, group: 'repo_health', tags: ['hygiene'] },
 ]
 
