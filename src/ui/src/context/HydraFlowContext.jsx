@@ -576,13 +576,21 @@ export function reducer(state, action) {
       }
 
     case 'epic_update': {
+      // The EPICS action stores full EpicDetail dumps from /api/epics; this WS
+      // event only carries an EpicProgress payload. MERGE it onto the existing
+      // epic (in place) so detail-only fields (merged_children, active_children,
+      // queued_children, children, readiness) survive until the next fetchEpics
+      // poll, while progress fields (e.g. child_issues) update.
       const progress = action.data?.progress
       if (!progress) return addEvent(state, action)
       const epicNum = progress.epic_number
-      const existingEpics = state.epics.filter(e => e.epic_number !== epicNum)
+      const known = state.epics.some(e => e.epic_number === epicNum)
+      const epics = known
+        ? state.epics.map(e => (e.epic_number === epicNum ? { ...e, ...progress } : e))
+        : [...state.epics, progress]
       return {
         ...addEvent(state, action),
-        epics: [...existingEpics, progress],
+        epics,
       }
     }
 
