@@ -518,12 +518,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             )
             return JSONResponse({"status": "started"})
 
-        # Legacy single-repo/test wiring (no registry): create+run the host orch.
+        # Legacy single-repo/test wiring (no registry): run the host orch.
         orch = ctx.get_orchestrator()
         if orch and orch.running:
             return JSONResponse({"error": "already running"}, status_code=409)
-
-        from orchestrator import HydraFlowOrchestrator
 
         # Remove pipeline workers from the disabled set
         existing_disabled = ctx.state.get_disabled_workers()
@@ -532,14 +530,25 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         if cleaned != existing_disabled:
             ctx.state.set_disabled_workers(cleaned)
 
-        new_orch = HydraFlowOrchestrator(
-            ctx.config,
-            event_bus=ctx.event_bus,
-            state=ctx.state,
-            pipeline_enabled=False,
-        )
-        ctx.set_orchestrator(new_orch)
-        ctx.set_run_task(asyncio.create_task(new_orch.run()))
+        # REUSE an already-wired orchestrator when one is set (e.g. MockWorld's
+        # air-gapped fake-wired orch, or an orch a prior Start left stopped)
+        # instead of discarding it for a fresh HydraFlowOrchestrator built with
+        # REAL Docker/gh services. In the browser-scenario harness that swap
+        # replaced the fake-wired orch with one running ~60 real background
+        # loops in-process, wedging the shared event loop (the 2715s RC hang,
+        # #10253/#10215). Only construct one when none exists (the legacy
+        # production-less path); never replace a live wiring.
+        if orch is None:
+            from orchestrator import HydraFlowOrchestrator
+
+            orch = HydraFlowOrchestrator(
+                ctx.config,
+                event_bus=ctx.event_bus,
+                state=ctx.state,
+                pipeline_enabled=False,
+            )
+            ctx.set_orchestrator(orch)
+        ctx.set_run_task(asyncio.create_task(orch.run()))
         await ctx.event_bus.publish(
             HydraFlowEvent(
                 type=EventType.ORCHESTRATOR_STATUS,
