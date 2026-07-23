@@ -939,9 +939,12 @@ async def main() -> None:
     # can never reach the restart/escalate path. None when
     # seed.registered_workers is empty — HealthMonitorLoop._bg_workers stays
     # unset, unchanged from pre-#10086 behavior.
+    #
+    # NOTE: this manager is BUILT here but WIRED onto the health monitor only
+    # after the orchestrator is constructed (see below, #10315) — the
+    # orchestrator's ``__init__`` re-calls ``set_bg_workers`` and would clobber
+    # a seeded wiring done here.
     bg_workers = materialize_registered_workers(state, config, seed)
-    if bg_workers is not None:
-        svc.health_monitor_loop.set_bg_workers(bg_workers)
 
     # Air-gap the persistent-error self-repair actuator's repo-existence probe
     # (#10140). ``HealthMonitorLoop._repo_probe`` delegates to an injected
@@ -1093,6 +1096,23 @@ async def main() -> None:
         state=state,
         services=svc,
     )
+
+    # Wire the seeded registered-worker set onto the health monitor's stall
+    # sweep AFTER constructing the orchestrator (#10315). The orchestrator's
+    # ``__init__`` builds its OWN BGWorkerManager from the REAL loop registry
+    # and re-calls ``svc.health_monitor_loop.set_bg_workers(...)``
+    # (orchestrator.py) — doing this wiring before the orchestrator existed
+    # (as #10086 originally did) silently loses it, because that call replaces
+    # the lightweight ``SeededRegisteredLoop`` (interval 5s,
+    # ``_run_started_at=None``, no ``restart_cb`` → escalates on the first
+    # stale sweep) with the real ``workspace_gc`` loop (interval 1800s, a
+    # boot-time ``_run_started_at`` that holds the sweep's young-task window
+    # open for the entire scenario, and a wired ``restart_cb``) — so the
+    # seeded stall never escalates. Re-applying it here makes the seeded
+    # manager the one the sweep actually reads. No-op when
+    # ``seed.registered_workers`` is empty (every other scenario).
+    if bg_workers is not None:
+        svc.health_monitor_loop.set_bg_workers(bg_workers)
 
     dashboard = HydraFlowDashboard(
         config=config,
