@@ -350,6 +350,31 @@ export function findWorkerTranscript(workers, prs, stageKey, issueNumber, repo =
   return workers[key]?.transcript || []
 }
 
+/**
+ * Derive an epic's factory execution state for the panel badge (#10299).
+ *
+ * The persisted `status` only distinguishes active|completed|stale|blocked
+ * (plus the client-only ready|releasing|released), so an `active` epic renders
+ * the same green badge whether or not the factory is actually working on it —
+ * misleading when 0 children are running or queued. This refines the default
+ * `active` status into a real execution state, derived from the worker/queue
+ * occupancy already carried on the epic payload:
+ *   - `running` — ≥1 child currently held by a worker (`active_children`)
+ *   - `queued`  — no child running, but ≥1 awaiting dispatch (`queued_children`)
+ *   - `paused`  — open children remain but none are running or queued (parked)
+ *   - `idle`    — nothing open, running, or queued
+ * Terminal / client-only statuses (completed, blocked, stale, ready,
+ * releasing, released) pass through unchanged.
+ */
+export function deriveEpicExecutionState(epic) {
+  const status = epic?.status
+  if (status && status !== 'active') return status
+  if ((epic?.active_children || 0) > 0) return 'running'
+  if ((epic?.queued_children || 0) > 0) return 'queued'
+  if ((epic?.in_progress || 0) > 0) return 'paused'
+  return 'idle'
+}
+
 function EpicChildRow({ child }) {
   const dotColor = child.is_completed ? theme.green : child.is_failed ? theme.red : theme.textMuted
   return (
@@ -376,7 +401,8 @@ function EpicRow({ epic, config }) {
   const [loading, setLoading] = useState(false)
 
   const pct = epic.percent_complete || 0
-  const statusStyle = epicStatusStyles[epic.status] || epicStatusStyles.active
+  const execState = deriveEpicExecutionState(epic)
+  const statusStyle = epicStatusStyles[execState] || epicStatusStyles.paused
   const repo = config?.repo || ''
   const epicUrl = repo ? `https://github.com/${repo}/issues/${epic.epic_number}` : ''
 
@@ -419,7 +445,7 @@ function EpicRow({ epic, config }) {
         )}
         <span style={epicPanelStyles.epicTitle}>{epic.title}</span>
         {epic.auto_decomposed && <span style={epicPanelStyles.autoBadge}>auto</span>}
-        <span style={statusStyle}>{epic.status}</span>
+        <span style={statusStyle} data-testid={`epic-badge-${epic.epic_number}`}>{execState}</span>
       </div>
       <div style={epicPanelStyles.barTrack}>
         {epic.completed > 0 && (
@@ -1050,10 +1076,20 @@ const epicStatusBase = {
 }
 
 const epicStatusStyles = {
+  // Execution states derived from worker/queue occupancy (deriveEpicExecutionState, #10299)
   active: { ...epicStatusBase, color: theme.green, background: theme.greenSubtle },
+  running: { ...epicStatusBase, color: theme.green, background: theme.greenSubtle },
+  queued: { ...epicStatusBase, color: theme.yellow, background: theme.yellowSubtle },
+  paused: { ...epicStatusBase, color: theme.textMuted, background: theme.mutedSubtle },
+  idle: { ...epicStatusBase, color: theme.textMuted, background: theme.mutedSubtle },
+  // Terminal statuses
   completed: { ...epicStatusBase, color: theme.textMuted, background: theme.mutedSubtle },
   stale: { ...epicStatusBase, color: theme.yellow, background: theme.yellowSubtle },
   blocked: { ...epicStatusBase, color: theme.red, background: theme.redSubtle },
+  // Client-only release lifecycle statuses (no more silent fallback to active green)
+  ready: { ...epicStatusBase, color: theme.cyan, background: theme.cyanSubtle },
+  releasing: { ...epicStatusBase, color: theme.purple, background: theme.purpleSubtle },
+  released: { ...epicStatusBase, color: theme.green, background: theme.greenSubtle },
 }
 
 
